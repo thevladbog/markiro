@@ -11,6 +11,8 @@
 !apps/api/**
 !apps/admin/
 !apps/admin/**
+!apps/kiosk/
+!apps/kiosk/**
 !packages/
 !packages/db/
 !packages/db/**

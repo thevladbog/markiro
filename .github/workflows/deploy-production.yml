@@ -294,6 +294,7 @@ jobs:
       YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
       YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
       YC_LOAD_BALANCER_ADDRESS: ${{ vars.YC_LOAD_BALANCER_ADDRESS }}
       MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}

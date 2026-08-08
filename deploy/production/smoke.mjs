@@ -3,6 +3,7 @@ import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
+import { validateProductionDomains } from "./production-domain.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
 const CSP =
@@ -96,11 +97,47 @@ export const ROUTE_CHECKS = Object.freeze([
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
 
-export function productionBaseUrl(environment) {
-  const port = environment.MARKIRO_HTTPS_PORT;
-  const authority =
-    port && port !== "443" ? `${environment.MARKIRO_DOMAIN}:${port}` : environment.MARKIRO_DOMAIN;
+export const KIOSK_ROUTE_CHECKS = Object.freeze([
+  Object.freeze(["GET", "/", "kiosk-shell"]),
+  Object.freeze(["GET", "/assets/${assetName}", "asset"]),
+  Object.freeze(["GET", "/manifest.webmanifest", "manifest"]),
+  Object.freeze(["GET", "/sw.js", "service-worker"]),
+  Object.freeze(["GET", "/api/kiosk/bootstrap", "kiosk-proxy"]),
+  Object.freeze(["GET", "/api", "not-found"]),
+  Object.freeze(["HEAD", "/api", "not-found"]),
+  Object.freeze(["GET", "/api/auth/get-session", "not-found"]),
+  Object.freeze(["GET", "/station", "not-found"]),
+  Object.freeze(["HEAD", "/station", "not-found"]),
+  Object.freeze(["GET", "/station/bootstrap", "not-found"]),
+  Object.freeze(["GET", "/kiosk", "not-found"]),
+  Object.freeze(["HEAD", "/kiosk", "not-found"]),
+  Object.freeze(["GET", "/docs", "not-found"]),
+  Object.freeze(["POST", "/unknown", "not-found"]),
+]);
+
+function productionBaseUrl(domain, port) {
+  const authority = port && port !== "443" ? `${domain}:${port}` : domain;
   return `https://${authority}`;
+}
+
+export function productionBaseUrls(environment) {
+  const { domain, kioskDomain } = validateProductionDomains(
+    environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_KIOSK_DOMAIN,
+  );
+  const isLocalPair =
+    (environment.MARKIRO_EDGE_MODE || "direct") === "direct" &&
+    domain === "localhost" &&
+    kioskDomain === "kiosk.localhost";
+  if (domain === "localhost" && !isLocalPair) throw new Error("MARKIRO_DOMAIN is invalid");
+  if (kioskDomain === "kiosk.localhost" && !isLocalPair)
+    throw new Error("MARKIRO_KIOSK_DOMAIN is invalid");
+  const port =
+    environment.MARKIRO_EDGE_MODE === "behind-alb" ? undefined : environment.MARKIRO_HTTPS_PORT;
+  return {
+    admin: productionBaseUrl(domain, port),
+    kiosk: productionBaseUrl(kioskDomain, port),
+  };
 }
 
 function dockerRunner(environment, timeoutMs) {
@@ -169,6 +206,42 @@ function shellSignature(html) {
   return title && modulePath?.startsWith("/assets/") ? { title, modulePath } : null;
 }
 
+function sameOriginPath(value, baseUrl, label) {
+  if (typeof value !== "string" || value.startsWith("//")) throw new Error(`${label} is invalid`);
+  const url = new URL(value, baseUrl);
+  if (url.origin !== new URL(baseUrl).origin || url.search || url.hash)
+    throw new Error(`${label} is not same-origin`);
+  return url.pathname;
+}
+
+function kioskShellSignature(html, baseUrl) {
+  const signature = shellSignature(html);
+  const manifestHref = [...html.matchAll(/<link\b([^>]*)>/gi)]
+    .map((match) => match[1])
+    .find((attributes) => /\brel\s*=\s*["'][^"']*\bmanifest\b[^"']*["']/i.test(attributes))
+    ?.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+  const registrationSource = [...html.matchAll(/<script\b([^>]*)>/gi)]
+    .map((match) => match[1])
+    .find((attributes) => /\bid\s*=\s*["']vite-plugin-pwa:register-sw["']/i.test(attributes))
+    ?.match(/\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
+  if (
+    signature?.title !== "Маркиро — Киоск" ||
+    !manifestHref ||
+    !registrationSource ||
+    !/<div\b[^>]*\bid\s*=\s*["']root["'][^>]*>/i.test(html)
+  )
+    return null;
+  return {
+    ...signature,
+    manifestPath: sameOriginPath(manifestHref, baseUrl, "kiosk manifest link"),
+    registrationPath: sameOriginPath(
+      registrationSource,
+      baseUrl,
+      "kiosk service-worker registration",
+    ),
+  };
+}
+
 function assertNoExternalOrigins(html, baseUrl) {
   const assertUrl = (value) => {
     if (value.startsWith("//")) throw new Error("built index contains an external origin");
@@ -183,6 +256,64 @@ function assertNoExternalOrigins(html, baseUrl) {
   for (const match of html.matchAll(/\bsrcset\s*=\s*["']([^"']+)["']/gi)) {
     for (const source of match[1].split(",")) assertUrl(source.trim().split(/\s+/, 1)[0]);
   }
+}
+
+function parseManifest(body, baseUrl) {
+  let manifest;
+  try {
+    manifest = JSON.parse(body);
+  } catch {
+    throw new Error("kiosk manifest is not valid JSON");
+  }
+  if (
+    manifest === null ||
+    typeof manifest !== "object" ||
+    Array.isArray(manifest) ||
+    typeof manifest.name !== "string" ||
+    !manifest.name.trim() ||
+    typeof manifest.short_name !== "string" ||
+    !manifest.short_name.trim() ||
+    manifest.id !== "/" ||
+    manifest.start_url !== "/" ||
+    manifest.scope !== "/" ||
+    !["fullscreen", "standalone", "minimal-ui"].includes(manifest.display) ||
+    !Array.isArray(manifest.icons) ||
+    manifest.icons.length === 0
+  )
+    throw new Error("kiosk manifest is not root-scoped and installable");
+  for (const icon of manifest.icons) {
+    if (
+      icon === null ||
+      typeof icon !== "object" ||
+      Array.isArray(icon) ||
+      typeof icon.sizes !== "string" ||
+      !/^\d+x\d+$/.test(icon.sizes) ||
+      typeof icon.type !== "string" ||
+      !icon.type.startsWith("image/")
+    )
+      throw new Error("kiosk manifest icon is invalid");
+    sameOriginPath(icon.src, baseUrl, "kiosk manifest icon");
+  }
+  return manifest;
+}
+
+function serviceWorkerPath(registration, baseUrl) {
+  const match = registration.match(/\bserviceWorker\.register\(\s*["']([^"']+)["']/);
+  const scope = registration.match(/\bscope\s*:\s*["']([^"']+)["']/)?.[1];
+  if (!match || scope !== "/") throw new Error("kiosk service worker is not root-scoped");
+  return sameOriginPath(match[1], baseUrl, "kiosk service worker");
+}
+
+function assertServiceWorker(body) {
+  const compact = body.replace(/\s+/g, "");
+  if (!compact.includes("precacheAndRoute(") || !compact.includes("NavigationRoute("))
+    throw new Error("kiosk service worker does not provide the offline shell");
+  if (!compact.includes("denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]"))
+    throw new Error("kiosk service worker navigation fallback includes reserved paths");
+  if ((body.match(/\bregisterRoute\(/g) || []).length !== 1)
+    throw new Error("kiosk service worker has unexpected runtime caching");
+  if (/\burl\s*:\s*["'][^"']*\/api\//i.test(body))
+    throw new Error("kiosk service worker precaches an API path");
 }
 
 function scriptElements(html) {
@@ -401,6 +532,69 @@ function assertRoute(check, response, body, signature) {
     throw new Error("unknown POST must be a non-HTML 404");
 }
 
+function assertKioskRoute(check, response, body, signature, manifest, baseUrl) {
+  const [method, path, kind] = check;
+  const candidateSignature = kioskShellSignature(body, baseUrl);
+  const isShell = Boolean(
+    candidateSignature &&
+    candidateSignature.title === signature.title &&
+    candidateSignature.modulePath === signature.modulePath,
+  );
+  if (kind !== "kiosk-shell" && isShell) throw new Error(`${path} returned the kiosk shell`);
+  if (kind === "kiosk-shell") {
+    if (
+      response.status !== 200 ||
+      !/text\/html/i.test(response.headers.get("content-type") || "") ||
+      !isShell
+    )
+      throw new Error("kiosk root did not return the built kiosk shell");
+    if (response.headers.get("cache-control") !== "no-cache")
+      throw new Error("kiosk root must be no-cache");
+  }
+  if (
+    kind === "asset" &&
+    (response.status !== 200 ||
+      response.headers.get("cache-control") !== "public, max-age=31536000, immutable")
+  )
+    throw new Error("kiosk asset cache contract failed");
+  if (
+    kind === "manifest" &&
+    (response.status !== 200 ||
+      !/(?:application\/manifest\+json|application\/json)/i.test(
+        response.headers.get("content-type") || "",
+      ) ||
+      manifest === null)
+  )
+    throw new Error("kiosk manifest response is invalid");
+  if (kind === "service-worker") {
+    if (
+      response.status !== 200 ||
+      !/(?:application|text)\/javascript/i.test(response.headers.get("content-type") || "")
+    )
+      throw new Error("kiosk service worker response is invalid");
+    assertServiceWorker(body);
+  }
+  if (kind === "kiosk-proxy") {
+    if (
+      ![200, 401, 403].includes(response.status) ||
+      !/application\/json/i.test(response.headers.get("content-type") || "")
+    )
+      throw new Error("kiosk bootstrap did not return an upstream JSON response");
+    try {
+      JSON.parse(body);
+    } catch {
+      throw new Error("kiosk bootstrap did not return valid JSON");
+    }
+  }
+  if (
+    kind === "not-found" &&
+    (response.status !== 404 ||
+      /<html/i.test(body) ||
+      /text\/html/i.test(response.headers.get("content-type") || ""))
+  )
+    throw new Error(`${method} ${path} must be a non-HTML 404 on the kiosk authority`);
+}
+
 async function runDocker(docker, args, commandTimeoutMs) {
   try {
     const result = docker.run("docker", args);
@@ -558,8 +752,8 @@ async function runtimeSmoke(environment, docker, client, baseUrl, options) {
   if (restoreError) throw restoreError;
 }
 
-export async function runPublicSmoke(options, client = requestClient()) {
-  const baseUrl = options.baseUrl.replace(/\/$/, "");
+async function runAdminSmoke(options, client) {
+  const baseUrl = options.adminBaseUrl.replace(/\/$/, "");
   const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
   if (
     options.expectedReleaseSha &&
@@ -593,10 +787,81 @@ export async function runPublicSmoke(options, client = requestClient()) {
     assertRoute(check, response, body, signature);
     if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
   }
+  return {
+    releaseSha: root.headers.get("x-markiro-release-sha"),
+    signature,
+  };
+}
+
+async function runKioskSmoke(options, client, admin) {
+  const baseUrl = options.kioskBaseUrl.replace(/\/$/, "");
+  const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
+  if (
+    options.expectedReleaseSha &&
+    root.headers.get("x-markiro-release-sha") !== options.expectedReleaseSha
+  )
+    throw new Error("live release identity does not match the expected release");
+  const rootHtml = await getText(root);
+  assertHeaders(root, new URL(baseUrl).protocol === "https:");
+  const signature = kioskShellSignature(rootHtml, baseUrl);
+  if (root.status !== 200 || !signature)
+    throw new Error("kiosk root did not return the built kiosk shell");
+  if (
+    signature.title === admin.signature.title &&
+    signature.modulePath === admin.signature.modulePath
+  )
+    throw new Error("kiosk root returned the admin shell");
+  assertNoExternalOrigins(rootHtml, baseUrl);
+  if (signature.manifestPath !== "/manifest.webmanifest")
+    throw new Error("kiosk shell does not use the root manifest");
+
+  const registrationResponse = await publicRequest(
+    client,
+    new URL(signature.registrationPath, baseUrl),
+    { method: "GET" },
+  );
+  const registration = await getText(registrationResponse);
+  assertHeaders(registrationResponse, new URL(baseUrl).protocol === "https:");
+  if (
+    registrationResponse.status !== 200 ||
+    !/(?:application|text)\/javascript/i.test(
+      registrationResponse.headers.get("content-type") || "",
+    )
+  )
+    throw new Error("kiosk service-worker registration is unavailable");
+  const discoveredServiceWorkerPath = serviceWorkerPath(registration, baseUrl);
+  const serviceWorkerContract = KIOSK_ROUTE_CHECKS.find(([, , kind]) => kind === "service-worker");
+  if (discoveredServiceWorkerPath !== serviceWorkerContract[1])
+    throw new Error("kiosk service-worker artifact does not match the built registration");
+
+  let manifest = null;
+  for (const check of KIOSK_ROUTE_CHECKS) {
+    const [method, contractPath, kind] = check;
+    const path = contractPath.replace(
+      "${assetName}",
+      options.kioskAssetName || signature.modulePath.slice("/assets/".length),
+    );
+    const response =
+      contractPath === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
+    const body = contractPath === "/" ? rootHtml : await getText(response);
+    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    if (kind === "manifest") manifest = parseManifest(body, baseUrl);
+    assertKioskRoute(check, response, body, signature, manifest, baseUrl);
+  }
+  return { releaseSha: root.headers.get("x-markiro-release-sha") };
+}
+
+export async function runPublicSmoke(options, client = requestClient()) {
+  const admin = await runAdminSmoke(options, client);
+  const kiosk = await runKioskSmoke(options, client, admin);
+  if (!options.expectedReleaseSha && (admin.releaseSha || kiosk.releaseSha)) {
+    if (!admin.releaseSha || admin.releaseSha !== kiosk.releaseSha)
+      throw new Error("live authorities do not serve the same release");
+  }
 }
 
 /**
- * @param {{baseUrl: string, assetName?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
+ * @param {{adminBaseUrl: string, kioskBaseUrl: string, assetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
  * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
  * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
  */
@@ -612,13 +877,19 @@ export async function runSmoke(options, client = requestClient(), docker) {
   };
   const dockerClient = docker || dockerRunner(environment, runtimeOptions.commandTimeoutMs);
   await runPublicSmoke(options, client);
-  const baseUrl = options.baseUrl.replace(/\/$/, "");
+  const baseUrl = options.adminBaseUrl.replace(/\/$/, "");
   await runtimeSmoke(environment, dockerClient, client, baseUrl, runtimeOptions);
 }
 
 if (isMainModule(import.meta.url)) {
   try {
-    await runSmoke({ baseUrl: productionBaseUrl(process.env), environment: process.env });
+    const { admin, kiosk } = productionBaseUrls(process.env);
+    await runSmoke({
+      adminBaseUrl: admin,
+      kioskBaseUrl: kiosk,
+      expectedReleaseSha: process.env.MARKIRO_IMAGE_TAG,
+      environment: process.env,
+    });
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

@@ -4,8 +4,10 @@ import test from "node:test";
 import { dnsOptionsFromEnvironment, verifyDnsConvergence, verifyDnsOnce } from "../verify-dns.mjs";
 
 const domain = "app.markiro.example";
+const kioskDomain = "kiosk.markiro.example";
 
 function digOutput({
+  domainName = domain,
   status = "NOERROR",
   flags = ["qr", "aa"],
   answers = [],
@@ -17,8 +19,12 @@ function digOutput({
   return [
     `;; ->>HEADER<<- opcode: QUERY, status: ${status}, id: 1234`,
     `;; flags: ${flags.join(" ")}; QUERY: ${queryCount}, ANSWER: ${answerCount}, AUTHORITY: ${authorityCount}, ADDITIONAL: 0`,
-    ...answers.map(({ type, value, owner = `${domain}.` }) => `${owner} 60 IN ${type} ${value}`),
-    ...authority.map(({ type, value, owner = `${domain}.` }) => `${owner} 60 IN ${type} ${value}`),
+    ...answers.map(
+      ({ type, value, owner = `${domainName}.` }) => `${owner} 60 IN ${type} ${value}`,
+    ),
+    ...authority.map(
+      ({ type, value, owner = `${domainName}.` }) => `${owner} 60 IN ${type} ${value}`,
+    ),
     "",
   ].join("\n");
 }
@@ -673,12 +679,24 @@ test("retries the complete verification within a bounded convergence budget", as
       answers: [{ type: "A", value: "203.0.113.10" }],
     }),
     digOutput({ flags: ["qr", "rd", "ra"], authority: [soa] }),
+    digOutput({
+      domainName: kioskDomain,
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ domainName: kioskDomain, authority: [soa] }),
+    digOutput({
+      domainName: kioskDomain,
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ domainName: kioskDomain, flags: ["qr", "rd", "ra"], authority: [soa] }),
   ];
   const sleeps = [];
 
   const result = await verifyDnsConvergence(
     {
-      domain,
+      adminDomain: domain,
+      kioskDomain,
       authoritativeServer: "ns1.example.test",
       publicResolvers: ["resolver.example.test"],
       approvedA: ["203.0.113.10"],
@@ -693,20 +711,28 @@ test("retries the complete verification within a bounded convergence budget", as
   );
 
   assert.deepEqual(sleeps, [7]);
-  assert.deepEqual(result, { attempt: 2 });
+  assert.deepEqual(result, {
+    answers: {
+      [domain]: ["203.0.113.10"],
+      [kioskDomain]: ["203.0.113.10"],
+    },
+    attempt: 2,
+  });
 });
 
 test("parses explicit A, AAAA, authoritative, and public-resolver operator inputs", () => {
   assert.deepEqual(
     dnsOptionsFromEnvironment({
       MARKIRO_DOMAIN: domain,
+      MARKIRO_KIOSK_DOMAIN: kioskDomain,
       MARKIRO_AUTHORITATIVE_DNS_SERVER: "ns1.example.test",
       MARKIRO_PUBLIC_DNS_RESOLVERS: "resolver-one.example.test,resolver-two.example.test",
       MARKIRO_APPROVED_DNS_A: "203.0.113.10,203.0.113.11",
       MARKIRO_APPROVED_DNS_AAAA: "none",
     }),
     {
-      domain,
+      adminDomain: domain,
+      kioskDomain,
       authoritativeServer: "ns1.example.test",
       publicResolvers: ["resolver-one.example.test", "resolver-two.example.test"],
       approvedA: ["203.0.113.10", "203.0.113.11"],
@@ -718,6 +744,7 @@ test("parses explicit A, AAAA, authoritative, and public-resolver operator input
 test("fails closed on missing resolvers, empty address sets, and unsafe server tokens", () => {
   const baseline = {
     MARKIRO_DOMAIN: domain,
+    MARKIRO_KIOSK_DOMAIN: kioskDomain,
     MARKIRO_AUTHORITATIVE_DNS_SERVER: "ns1.example.test",
     MARKIRO_PUBLIC_DNS_RESOLVERS: "resolver.example.test",
     MARKIRO_APPROVED_DNS_A: "203.0.113.10",
@@ -749,6 +776,18 @@ test("fails closed on missing resolvers, empty address sets, and unsafe server t
     () => dnsOptionsFromEnvironment({ ...baseline, MARKIRO_DOMAIN: "https://example.test" }),
     /MARKIRO_DOMAIN is invalid/,
   );
+  assert.throws(
+    () =>
+      dnsOptionsFromEnvironment({
+        ...baseline,
+        MARKIRO_KIOSK_DOMAIN: "https://kiosk.example.test",
+      }),
+    /MARKIRO_KIOSK_DOMAIN is invalid/,
+  );
+  assert.throws(
+    () => dnsOptionsFromEnvironment({ ...baseline, MARKIRO_KIOSK_DOMAIN: domain }),
+    /production domains must be distinct/,
+  );
 });
 
 test("reports the sanitized last cause when the bounded convergence budget is exhausted", async () => {
@@ -762,7 +801,8 @@ test("reports the sanitized last cause when the bounded convergence budget is ex
   await assert.rejects(
     verifyDnsConvergence(
       {
-        domain,
+        adminDomain: domain,
+        kioskDomain,
         authoritativeServer: "ns1.example.test",
         publicResolvers: ["resolver.example.test"],
         approvedA: ["203.0.113.10"],

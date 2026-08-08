@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const expectedCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
@@ -17,6 +18,38 @@ const commerceMlProxyTimeouts = Object.freeze({
   read_timeout: "5m",
   write_timeout: "5m",
 });
+const adminHost = "admin.example.test";
+const kioskHost = "kiosk.example.test";
+const kioskReservedPatterns = Object.freeze([
+  "/api",
+  "/api/auth/*",
+  "/api/*",
+  "/1c_exchange",
+  "/station",
+  "/station/*",
+  "/kiosk",
+  "/kiosk/*",
+  "/health*",
+  "/openapi.json",
+  "/docs*",
+]);
+const kioskForbiddenPaths = Object.freeze([
+  "/api",
+  "/api/auth/session",
+  "/api/admin/tenants",
+  "/1c_exchange",
+  "/station",
+  "/station/bootstrap",
+  "/kiosk",
+  "/kiosk/bootstrap",
+  "/health",
+  "/health/ready",
+  "/healthful",
+  "/openapi.json",
+  "/docs",
+  "/docs/swagger-ui.css",
+  "/docs-old",
+]);
 
 function caddyPathMatches(pattern, path) {
   return pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
@@ -25,6 +58,460 @@ function caddyPathMatches(pattern, path) {
 function nestedObjects(value) {
   if (value === null || typeof value !== "object") return [];
   return [value, ...Object.values(value).flatMap(nestedObjects)];
+}
+
+async function adaptCaddy(source) {
+  const directory = await mkdtemp(join(tmpdir(), "markiro-caddy-contract-"));
+  const caddyfile = join(directory, "Caddyfile");
+  await writeFile(caddyfile, source);
+  try {
+    return JSON.parse(
+      execFileSync(
+        "docker",
+        [
+          "run",
+          "--rm",
+          "-v",
+          `${caddyfile}:/etc/caddy/Caddyfile:ro`,
+          "-e",
+          `MARKIRO_DOMAIN=${adminHost}`,
+          "-e",
+          `MARKIRO_KIOSK_DOMAIN=${kioskHost}`,
+          "-e",
+          "ACME_EMAIL=ops@example.test",
+          "-e",
+          "MARKIRO_RELEASE_SHA=contract-sha",
+          "caddy:2.11.4-alpine",
+          "caddy",
+          "adapt",
+          "--config",
+          "/etc/caddy/Caddyfile",
+        ],
+        { encoding: "utf8" },
+      ),
+    );
+  } finally {
+    await rm(directory, { recursive: true });
+  }
+}
+
+function hostRoutes(adapted, host) {
+  const servers = Object.values(adapted.apps?.http?.servers ?? {});
+  return servers
+    .flatMap((server) => server.routes ?? [])
+    .filter((route) => route.match?.some((matcher) => matcher.host?.includes(host)));
+}
+
+function applicationRoutes(adapted) {
+  return Object.values(adapted.apps?.http?.servers ?? {})
+    .flatMap((server) => server.routes ?? [])
+    .filter((route) =>
+      nestedObjects(route.handle).some(
+        (candidate) => candidate.handler === "vars" && typeof candidate.root === "string",
+      ),
+    );
+}
+
+function applicationRoute(adapted, host) {
+  const routes = hostRoutes(adapted, host).filter((route) =>
+    nestedObjects(route.handle).some(
+      (candidate) => candidate.handler === "vars" && typeof candidate.root === "string",
+    ),
+  );
+  assert.equal(routes.length, 1, `${host} must have exactly one application route`);
+  return routes[0];
+}
+
+function proxyRoutes(route) {
+  return nestedObjects(route)
+    .filter((candidate) => Array.isArray(candidate.match))
+    .map((candidate) => ({
+      paths: candidate.match.flatMap((matcher) => matcher.path ?? []),
+      proxies: nestedObjects(candidate.handle).filter(
+        (handler) => handler.handler === "reverse_proxy",
+      ),
+      rewrites: nestedObjects(candidate.handle).filter((handler) => handler.handler === "rewrite"),
+    }))
+    .filter(({ paths, proxies }) => paths.length > 0 && proxies.length > 0);
+}
+
+function kioskOrderedRouteTable(route) {
+  const tables = nestedObjects(route).filter(
+    (candidate) =>
+      Array.isArray(candidate.routes) &&
+      candidate.routes.some((entry) =>
+        entry.match?.some((matcher) => matcher.path?.includes("/api/kiosk/*")),
+      ),
+  );
+  assert.equal(tables.length, 1, "kiosk must have exactly one ordered application route table");
+  return tables[0].routes;
+}
+
+function adaptedRouteMatches(route, { method, path }) {
+  if (!Array.isArray(route.match)) return true;
+  return route.match.some(
+    (matcher) =>
+      (!Array.isArray(matcher.method) || matcher.method.includes(method)) &&
+      (!Array.isArray(matcher.path) ||
+        matcher.path.some((pattern) => caddyPathMatches(pattern, path))),
+  );
+}
+
+function selectedAdaptedRoute(routeTable, request) {
+  const route = routeTable.find((candidate) => adaptedRouteMatches(candidate, request));
+  assert.ok(route, `${request.method} ${request.path} must select a terminal kiosk route`);
+  return route;
+}
+
+function assertOnlyPlain404(route, request) {
+  const objects = nestedObjects(route);
+  assert.deepEqual(
+    objects.filter((candidate) => candidate.handler === "static_response"),
+    [{ handler: "static_response", status_code: 404 }],
+    `${request.method} ${request.path} must terminate at a plain 404`,
+  );
+  for (const forbiddenHandler of ["vars", "rewrite", "file_server", "reverse_proxy"]) {
+    assert.ok(
+      objects.every((candidate) => candidate.handler !== forbiddenHandler),
+      `${request.method} ${request.path} must not reach ${forbiddenHandler}`,
+    );
+  }
+  assert.ok(
+    objects.every((candidate) => candidate.file === undefined),
+    `${request.method} ${request.path} must not reach try_files`,
+  );
+}
+
+function assertKioskRoutingBoundary(route) {
+  const routeTable = kioskOrderedRouteTable(route);
+  const reservedRoutes = routeTable.filter((candidate) =>
+    nestedObjects(candidate).some(
+      (value) => value.handler === "static_response" && value.status_code === 404,
+    ),
+  );
+  assert.equal(reservedRoutes.length, 2, "kiosk must have reserved and final 404 routes");
+  assert.deepEqual(
+    reservedRoutes[0].match?.flatMap((matcher) => matcher.path ?? []),
+    kioskReservedPatterns,
+    "kiosk must explicitly reserve every non-PWA namespace",
+  );
+
+  for (const path of kioskForbiddenPaths) {
+    for (const method of ["GET", "HEAD"]) {
+      const request = { method, path };
+      assertOnlyPlain404(selectedAdaptedRoute(routeTable, request), request);
+    }
+  }
+
+  for (const method of ["GET", "HEAD", "POST"]) {
+    const request = { method, path: "/api/kiosk/bootstrap" };
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.deepEqual(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "rewrite"),
+      [{ handler: "rewrite", strip_path_prefix: "/api" }],
+      `${method} /api/kiosk/* must strip exactly /api before proxying`,
+    );
+    assert.equal(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "reverse_proxy").length,
+      1,
+      `${method} /api/kiosk/* must reach exactly one proxy`,
+    );
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) =>
+          candidate.handler !== "file_server" && candidate.handler !== "static_response",
+      ),
+      `${method} /api/kiosk/* must win before static and 404 handlers`,
+    );
+  }
+
+  for (const method of ["GET", "HEAD"]) {
+    const request = { method, path: "/pickup/complete" };
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.ok(
+      nestedObjects(selected).some((candidate) => candidate.handler === "file_server"),
+      `${method} client-side kiosk deep links must retain the SPA fallback`,
+    );
+    assert.ok(
+      nestedObjects(selected).some((candidate) =>
+        candidate.file?.try_files?.includes("/index.html"),
+      ),
+      `${method} client-side kiosk deep links must try index.html`,
+    );
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) =>
+          candidate.handler !== "reverse_proxy" && candidate.handler !== "static_response",
+      ),
+      `${method} client-side kiosk deep links must remain static-only`,
+    );
+  }
+}
+
+function assertPlainFallback(route, host) {
+  const routeTable = nestedObjects(route).find(
+    (candidate) =>
+      Array.isArray(candidate.routes) &&
+      candidate.routes.some((entry) =>
+        nestedObjects(entry).some((value) => value.handler === "reverse_proxy"),
+      ) &&
+      candidate.routes
+        .at(-1)
+        ?.handle?.some(
+          (handler) => handler.handler === "static_response" && handler.status_code === 404,
+        ),
+  )?.routes;
+  assert.ok(routeTable, `${host} must have an ordered route table`);
+  const fallback = routeTable
+    .at(-1)
+    .handle.filter((candidate) => candidate.handler === "static_response");
+  assert.deepEqual(fallback, [{ handler: "static_response", status_code: 404 }]);
+}
+
+function normalizeAdminRoute(route) {
+  const normalized = structuredClone(route);
+  for (const proxy of nestedObjects(normalized).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  )) {
+    const requestHeaders = proxy.headers?.request;
+    const setHeaders = requestHeaders?.set;
+    if (setHeaders) delete setHeaders["X-Forwarded-Proto"];
+    if (setHeaders && Object.keys(setHeaders).length === 0) delete requestHeaders.set;
+    if (requestHeaders && Object.keys(requestHeaders).length === 0) delete proxy.headers.request;
+    if (proxy.headers && Object.keys(proxy.headers).length === 0) delete proxy.headers;
+  }
+  return normalized;
+}
+
+function assertAuthorityContract(adapted, { alb }) {
+  const approvedHosts = [adminHost, kioskHost];
+  const applications = applicationRoutes(adapted);
+  assert.equal(applications.length, approvedHosts.length);
+  for (const route of applications) {
+    assert.equal(route.match?.length, 1, "every application route must have one Host matcher");
+    assert.deepEqual(
+      Object.keys(route.match[0]),
+      ["host"],
+      "application routes must be selected only by Host",
+    );
+    assert.equal(route.match[0].host?.length, 1, "every application route must name one Host");
+    assert.ok(
+      approvedHosts.includes(route.match[0].host[0]),
+      `unapproved application Host ${route.match[0].host[0]}`,
+    );
+  }
+  const hosts = [
+    ...new Set(
+      nestedObjects(adapted)
+        .filter((candidate) => Array.isArray(candidate.host))
+        .flatMap((candidate) => candidate.host),
+    ),
+  ].sort();
+  assert.deepEqual(hosts, [adminHost, kioskHost]);
+
+  const admin = applicationRoute(adapted, adminHost);
+  const kiosk = applicationRoute(adapted, kioskHost);
+  for (const [host, route, expectedRoot] of [
+    [adminHost, admin, "/srv/admin"],
+    [kioskHost, kiosk, "/srv/kiosk"],
+  ]) {
+    const roots = nestedObjects(route)
+      .filter((candidate) => candidate.handler === "vars" && typeof candidate.root === "string")
+      .map((candidate) => candidate.root);
+    assert.deepEqual(roots, [expectedRoot], `${host} must use only ${expectedRoot}`);
+
+    const headerSets = nestedObjects(route)
+      .filter((candidate) => candidate.handler === "headers")
+      .map((candidate) => candidate.response?.set ?? {});
+    assert.ok(
+      headerSets.some(
+        (headers) =>
+          headers["X-Markiro-Release-Sha"]?.[0] === "contract-sha" &&
+          headers["Content-Security-Policy"]?.[0] === expectedCsp &&
+          headers["Strict-Transport-Security"]?.[0] === "max-age=63072000; includeSubDomains" &&
+          headers["X-Content-Type-Options"]?.[0] === "nosniff" &&
+          headers["X-Frame-Options"]?.[0] === "SAMEORIGIN" &&
+          headers["Referrer-Policy"]?.[0] === "strict-origin-when-cross-origin",
+      ),
+      `${host} must emit the common security and release headers`,
+    );
+    assert.ok(
+      headerSets.some(
+        (headers) => headers["Cache-Control"]?.[0] === "public, max-age=31536000, immutable",
+      ),
+      `${host} must emit immutable asset caching`,
+    );
+    assert.ok(
+      headerSets.some((headers) => headers["Cache-Control"]?.[0] === "no-cache"),
+      `${host} must disable SPA document caching`,
+    );
+    const methods = nestedObjects(route)
+      .filter((candidate) => Array.isArray(candidate.method))
+      .map((candidate) => candidate.method);
+    assert.deepEqual(methods, [["GET", "HEAD"]], `${host} must not serve the SPA for mutations`);
+    assertPlainFallback(route, host);
+  }
+
+  const expectedAdminPaths = [
+    ["/api/auth/*"],
+    ["/api/*"],
+    ["/1c_exchange"],
+    ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
+  ];
+  const adminProxies = proxyRoutes(admin);
+  const adminReverseProxies = nestedObjects(admin).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  assert.equal(adminReverseProxies.length, 4);
+  assert.deepEqual(
+    adminProxies.map(({ paths }) => paths),
+    expectedAdminPaths,
+  );
+  assert.ok(adminProxies.every(({ proxies }) => proxies.length === 1));
+
+  const kioskProxies = proxyRoutes(kiosk);
+  const kioskReverseProxies = nestedObjects(kiosk).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  assert.equal(kioskReverseProxies.length, 1, "kiosk must have exactly one reverse proxy");
+  assert.deepEqual(
+    kioskProxies.map(({ paths }) => paths),
+    [["/api/kiosk/*"]],
+  );
+  assert.deepEqual(kioskProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
+  assertKioskRoutingBoundary(kiosk);
+  for (const proxy of [...adminReverseProxies, ...kioskReverseProxies]) {
+    const forwardedProto = proxy.headers?.request?.set?.["X-Forwarded-Proto"];
+    if (alb) assert.deepEqual(forwardedProto, ["https"]);
+    else assert.equal(forwardedProto, undefined);
+  }
+
+  return {
+    adminRoute: normalizeAdminRoute(admin),
+    adminPaths: adminProxies.map(({ paths }) => paths),
+    adminTransports: adminProxies.map(({ proxies }) => proxies[0].transport),
+  };
+}
+
+function dockerfileInstructions(dockerfile) {
+  for (const physicalLine of dockerfile.split(/\r?\n/)) {
+    const parserDirective = physicalLine.match(/^\s*#\s*([a-z][a-z0-9_-]*)\s*=\s*(\S+)\s*$/i);
+    if (!parserDirective) break;
+    if (parserDirective[1].toLowerCase() === "escape" && parserDirective[2] !== "\\") {
+      assert.fail(
+        "non-default Dockerfile escape directives are unsupported by the runtime contract",
+      );
+    }
+  }
+
+  const instructions = [];
+  let logicalLine = "";
+
+  for (const physicalLine of dockerfile.split(/\r?\n/)) {
+    const trimmed = physicalLine.trim();
+    if (logicalLine === "" && (trimmed === "" || trimmed.startsWith("#"))) continue;
+
+    const continued = /\\\s*$/.test(physicalLine);
+    const part = physicalLine.replace(/\\\s*$/, "").trim();
+    logicalLine = logicalLine === "" ? part : `${logicalLine} ${part}`;
+    if (continued) continue;
+
+    const match = logicalLine.match(/^([a-z]+)\s+(.+?)\s*$/i);
+    assert.ok(match, `unsupported Dockerfile instruction: ${logicalLine}`);
+    if (/(?:^|\s)<<-?(?:["'][^"']+["']|\S+)/.test(match[2])) {
+      assert.fail("Dockerfile heredoc instructions are unsupported by the runtime contract");
+    }
+    instructions.push({ name: match[1].toUpperCase(), arguments: match[2] });
+    logicalLine = "";
+  }
+
+  assert.equal(logicalLine, "", "Dockerfile must not end with an unterminated continuation");
+  return instructions;
+}
+
+function dockerfileStageInstructions(dockerfile, stageName) {
+  const instructions = dockerfileInstructions(dockerfile);
+  const stageIndex = instructions.findIndex(
+    (instruction) =>
+      instruction.name === "FROM" &&
+      new RegExp(`\\s+AS\\s+${stageName}$`, "i").test(instruction.arguments),
+  );
+  assert.notEqual(stageIndex, -1, `Dockerfile stage ${stageName} must exist`);
+
+  const nextStageOffset = instructions
+    .slice(stageIndex + 1)
+    .findIndex((instruction) => instruction.name === "FROM");
+  const end = nextStageOffset === -1 ? instructions.length : stageIndex + 1 + nextStageOffset;
+  return instructions.slice(stageIndex + 1, end);
+}
+
+function assertEdgeImageContract(dockerfile, dockerignore) {
+  const install = dockerfile.indexOf("RUN pnpm install --frozen-lockfile");
+  const adminManifest = dockerfile.indexOf("COPY apps/admin/package.json");
+  const kioskManifest = dockerfile.indexOf("COPY apps/kiosk/package.json");
+  const adminSource = dockerfile.indexOf("COPY apps/admin ./apps/admin");
+  const kioskSource = dockerfile.indexOf("COPY apps/kiosk ./apps/kiosk");
+  const build = dockerfile.indexOf(
+    "RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...",
+  );
+  assert.ok(adminManifest >= 0 && adminManifest < install);
+  assert.ok(kioskManifest >= 0 && kioskManifest < install);
+  assert.ok(adminSource > install && adminSource < build);
+  assert.ok(kioskSource > install && kioskSource < build);
+  assert.ok(build > install);
+
+  const runtimeInstructions = dockerfileStageInstructions(dockerfile, "runtime");
+  const runtime = runtimeInstructions
+    .map((instruction) => `${instruction.name} ${instruction.arguments}`)
+    .join("\n");
+  assert.match(runtime, /COPY --from=build \/workspace\/apps\/admin\/dist \/srv\/admin/);
+  assert.match(runtime, /COPY --from=build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/);
+  assert.match(runtime, /addgroup -S -g 10001 markiro/);
+  assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
+  assert.match(runtime, /USER 10001:10001/);
+  assert.doesNotMatch(runtime, /node|pnpm/);
+  const runtimeCopies = runtimeInstructions
+    .filter((instruction) => instruction.name === "COPY")
+    .map((instruction) => instruction.arguments);
+  assert.deepEqual(runtimeCopies, [
+    "deploy/production/Caddyfile /etc/caddy/Caddyfile.direct",
+    "deploy/production/Caddyfile.alb /etc/caddy/Caddyfile.alb",
+    "deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint",
+    "--from=build /workspace/apps/admin/dist /srv/admin",
+    "--from=build /workspace/apps/kiosk/dist /srv/kiosk",
+  ]);
+  const buildCopies = runtimeCopies
+    .filter((copy) => copy.startsWith("--from=build "))
+    .map((copy) => copy.slice("--from=build ".length));
+  assert.deepEqual(buildCopies, [
+    "/workspace/apps/admin/dist /srv/admin",
+    "/workspace/apps/kiosk/dist /srv/kiosk",
+  ]);
+
+  for (const buildInput of [
+    "!apps/",
+    "!apps/admin/",
+    "!apps/admin/**",
+    "!apps/kiosk/",
+    "!apps/kiosk/**",
+    "!packages/",
+    "!packages/ui/",
+    "!packages/ui/**",
+    "!deploy/",
+    "!deploy/production/",
+    "!deploy/production/Caddyfile",
+  ]) {
+    assert.ok(dockerignore.includes(buildInput), `${buildInput} must be included`);
+  }
+  assert.match(dockerignore, /^\*\*\/node_modules$/m);
+  assert.match(dockerignore, /^dist\/$/m);
+  assert.match(dockerignore, /^\*\*\/dist\/$/m);
+}
+
+function mutate(source, search, replacement) {
+  const changed = source.replace(search, replacement);
+  assert.notEqual(changed, source, `mutation must replace ${String(search)}`);
+  return changed;
 }
 
 test("device proxy matcher accepts exact and nested health/docs boundaries only", async () => {
@@ -71,10 +558,10 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
     (match) => match[1],
   );
 
-  assert.equal(reverseProxies.length, 4);
+  assert.equal(reverseProxies.length, 5);
   assert.equal(
     reverseProxies.filter((block) => /import standard_api_transport/.test(block)).length,
-    3,
+    4,
   );
   assert.equal(
     reverseProxies.filter((block) => /import commerce_ml_transport/.test(block)).length,
@@ -96,78 +583,41 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
   }
 });
 
-test("Caddy adapt emits the exact API route table and finite proxy transports", () => {
-  const caddyfile = resolve("deploy/production/Caddyfile");
-  const adapted = JSON.parse(
-    execFileSync(
-      "docker",
-      [
-        "run",
-        "--rm",
-        "-v",
-        `${caddyfile}:/etc/caddy/Caddyfile:ro`,
-        "-e",
-        "MARKIRO_DOMAIN=localhost",
-        "-e",
-        "ACME_EMAIL=ops@example.test",
-        "caddy:2.11.4-alpine",
-        "caddy",
-        "adapt",
-        "--config",
-        "/etc/caddy/Caddyfile",
-      ],
-      { encoding: "utf8" },
-    ),
-  );
-  const apiRoutes = nestedObjects(adapted)
-    .filter((candidate) => Array.isArray(candidate.match))
-    .map((candidate) => ({
-      paths: candidate.match.flatMap((matcher) => matcher.path ?? []),
-      proxies: nestedObjects(candidate.handle).filter(
-        (handler) => handler.handler === "reverse_proxy",
-      ),
-    }))
-    .filter(({ paths, proxies }) => paths.length > 0 && proxies.length > 0);
+test("direct and ALB Caddy adapters isolate the admin and kiosk authorities", async () => {
+  const [directSource, albSource] = await Promise.all([
+    readFile("deploy/production/Caddyfile", "utf8"),
+    readFile("deploy/production/Caddyfile.alb", "utf8"),
+  ]);
+  const direct = assertAuthorityContract(await adaptCaddy(directSource), { alb: false });
+  const alb = assertAuthorityContract(await adaptCaddy(albSource), { alb: true });
 
-  assert.deepEqual(
-    apiRoutes.map(({ paths }) => paths),
-    [
-      ["/api/auth/*"],
-      ["/api/*"],
-      ["/1c_exchange"],
-      ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
-    ],
-  );
-  assert.deepEqual(
-    apiRoutes.map(({ proxies }) => proxies[0].transport),
-    [
-      {
-        protocol: "http",
-        read_timeout: 60_000_000_000,
-        response_header_timeout: 30_000_000_000,
-        write_timeout: 60_000_000_000,
-      },
-      {
-        protocol: "http",
-        read_timeout: 60_000_000_000,
-        response_header_timeout: 30_000_000_000,
-        write_timeout: 60_000_000_000,
-      },
-      {
-        protocol: "http",
-        read_timeout: 300_000_000_000,
-        response_header_timeout: 300_000_000_000,
-        write_timeout: 300_000_000_000,
-      },
-      {
-        protocol: "http",
-        read_timeout: 60_000_000_000,
-        response_header_timeout: 30_000_000_000,
-        write_timeout: 60_000_000_000,
-      },
-    ],
-  );
-  assert.ok(apiRoutes.every(({ proxies }) => proxies.length === 1));
+  assert.deepEqual(direct, alb);
+  assert.deepEqual(direct.adminTransports, [
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 300_000_000_000,
+      response_header_timeout: 300_000_000_000,
+      write_timeout: 300_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
+  ]);
 });
 
 test("production edge preserves its image and routing contract", async () => {
@@ -177,62 +627,16 @@ test("production edge preserves its image and routing contract", async () => {
 
   assert.match(dockerfile, /FROM node:24\.19\.0-bookworm-slim AS build/);
   assert.match(dockerfile, /FROM caddy:2\.11\.4-alpine AS runtime/);
-  assert.match(dockerfile, /turbo build --filter @markiro\/admin\.\.\./);
-  assert.match(dockerfile, /COPY --from=build \/workspace\/apps\/admin\/dist \/srv/);
-  assert.match(dockerfile, /addgroup -S -g 10001 markiro/);
-  assert.match(dockerfile, /setcap -r \/usr\/bin\/caddy/);
-  assert.match(dockerfile, /USER 10001:10001/);
-  const runtime = dockerfile.split("FROM caddy:2.11.4-alpine AS runtime")[1];
-  assert.doesNotMatch(runtime, /node|pnpm/);
-  assert.doesNotMatch(
-    runtime,
-    /COPY(?:\s+--[^\s]+)*\s+[^\s]*workspace\/apps\/(?!admin\/dist\s+\/srv)/,
-  );
-
-  for (const buildInput of [
-    "!apps/",
-    "!apps/admin/",
-    "!apps/admin/**",
-    "!packages/",
-    "!packages/ui/",
-    "!packages/ui/**",
-    "!deploy/",
-    "!deploy/production/",
-    "!deploy/production/Caddyfile",
-  ]) {
-    assert.ok(dockerignore.includes(buildInput), `${buildInput} must be included`);
-  }
-  assert.match(dockerignore, /^\*\*\/node_modules$/m);
-  assert.match(dockerignore, /^dist\/$/m);
-  assert.match(dockerignore, /^\*\*\/dist\/$/m);
-
-  const ordered = [
-    "@apiAuth path /api/auth/*",
-    "handle @apiAuth",
-    "handle_path /api/*",
-    "@commerceMl path /1c_exchange",
-    "handle @commerceMl",
-    "@device path /station/* /kiosk/* /health /health/* /openapi.json /docs /docs/*",
-    "handle @device",
-    "@assets path /assets/*",
-    "handle @assets",
-    "@spa method GET HEAD",
-    "handle @spa",
-    "respond 404",
-  ];
-  let cursor = -1;
-  for (const token of ordered) {
-    const next = caddy.indexOf(token);
-    assert.ok(next > cursor, `${token} must appear in route order`);
-    cursor = next;
-  }
+  assertEdgeImageContract(dockerfile, dockerignore);
   assert.match(caddy, /reverse_proxy api:3000/);
   assert.match(caddy, /http_port 8080/);
   assert.match(caddy, /https_port 8443/);
   assert.match(caddy, /auto_https disable_redirects/);
   assert.match(caddy, /redir https:\/\/\{\$MARKIRO_DOMAIN\}\{uri\} permanent/);
+  assert.match(caddy, /redir https:\/\/\{\$MARKIRO_KIOSK_DOMAIN\}\{uri\} permanent/);
   assert.doesNotMatch(caddy, /redir https:\/\/\{\$MARKIRO_DOMAIN\}:8443/);
-  assert.match(caddy, /root \* \/srv/);
+  assert.match(caddy, /root \* \/srv\/admin/);
+  assert.match(caddy, /root \* \/srv\/kiosk/);
   assert.match(caddy, /try_files \{path\} \/index\.html/);
   assert.doesNotMatch(caddy, /request_body|max_size|rate_limit/);
 
@@ -247,6 +651,195 @@ test("production edge preserves its image and routing contract", async () => {
   assert.match(caddy, /Cache-Control "no-cache"/);
 });
 
+test("edge image mutations cannot omit or merge frontend build outputs", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const mutations = [
+    mutate(dockerfile, " --filter @markiro/kiosk...", ""),
+    dockerfile.replaceAll("/srv/admin", "/srv").replaceAll("/srv/kiosk", "/srv"),
+    mutate(dockerfile, "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n", ""),
+  ];
+  assert.notEqual(mutations[1], dockerfile, "shared-root mutation must change the Dockerfile");
+
+  for (const mutation of mutations) {
+    assert.throws(() => assertEdgeImageContract(mutation, dockerignore));
+  }
+});
+
+test("edge runtime rejects source COPY instructions even when frontend outputs remain", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const marker = "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n";
+  const sourceCopies = [
+    mutate(dockerfile, marker, `${marker}COPY apps/kiosk /srv/source\n`),
+    mutate(dockerfile, marker, `${marker}copy apps/kiosk /srv/source\n`),
+  ];
+
+  for (const sourceCopy of sourceCopies) {
+    assert.throws(() => assertEdgeImageContract(sourceCopy, dockerignore));
+  }
+});
+
+test("edge runtime COPY allowlist stops at the next Dockerfile stage", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const laterStage = `${dockerfile}\nFROM scratch AS metadata\nCOPY apps/kiosk /metadata/source\n`;
+
+  assert.doesNotThrow(() => assertEdgeImageContract(laterStage, dockerignore));
+});
+
+test("edge runtime COPY parser ignores FROM text inside a continued RUN", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const spoofedBoundary = mutate(
+    dockerfile,
+    "EXPOSE 8080 8443\n",
+    "RUN printf '%s\\n' \\\nFROM scratch AS metadata\ncopy apps/kiosk /srv/source\nEXPOSE 8080 8443\n",
+  );
+
+  assert.throws(
+    () => assertEdgeImageContract(spoofedBoundary, dockerignore),
+    /apps\/kiosk \/srv\/source/,
+  );
+});
+
+test("edge runtime COPY parser rejects non-default escape directives", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const nonDefaultEscape = `# escape=\`\n${dockerfile}`;
+  const spoofedBoundary = mutate(
+    nonDefaultEscape,
+    "EXPOSE 8080 8443\n",
+    "RUN printf '%s\\n' `\nFROM scratch AS metadata\ncopy apps/kiosk /srv/source\nEXPOSE 8080 8443\n",
+  );
+
+  assert.throws(
+    () => assertEdgeImageContract(spoofedBoundary, dockerignore),
+    /non-default Dockerfile escape directives are unsupported/,
+  );
+});
+
+test("edge runtime COPY parser rejects unsupported heredoc instructions", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const spoofedBoundary = mutate(
+    dockerfile,
+    "EXPOSE 8080 8443\n",
+    "RUN <<EOF\nFROM scratch AS metadata\nEOF\ncopy apps/kiosk /srv/source\nEXPOSE 8080 8443\n",
+  );
+
+  assert.throws(
+    () => assertEdgeImageContract(spoofedBoundary, dockerignore),
+    /heredoc instructions are unsupported/,
+  );
+});
+
+test("Caddy contracts reject cross-host and overbroad kiosk mutations", async () => {
+  for (const [file, alb] of [
+    ["deploy/production/Caddyfile", false],
+    ["deploy/production/Caddyfile.alb", true],
+  ]) {
+    const source = await readFile(file, "utf8");
+    const swappedRoots = mutate(source, "/srv/admin", "/srv/root-swap")
+      .replace("/srv/kiosk", "/srv/admin")
+      .replace("/srv/root-swap", "/srv/kiosk");
+    const mutations = [
+      swappedRoots,
+      mutate(source, "{$MARKIRO_KIOSK_DOMAIN}", "*.{$MARKIRO_KIOSK_DOMAIN}"),
+      mutate(source, "@kioskApi path /api/kiosk/*", "@kioskApi path /api/*"),
+      mutate(source, /^\s*uri strip_prefix \/api\n/m, ""),
+      mutate(source, "@kioskSpa method GET HEAD", "@kioskSpa method GET HEAD POST"),
+    ];
+
+    for (const mutation of mutations) {
+      await assert.rejects(async () => {
+        assertAuthorityContract(await adaptCaddy(mutation), { alb });
+      });
+    }
+  }
+});
+
+test("Caddy contracts reject an application route without an exact Host", async () => {
+  for (const [file, alb] of [
+    ["deploy/production/Caddyfile", false],
+    ["deploy/production/Caddyfile.alb", true],
+  ]) {
+    const source = await readFile(file, "utf8");
+    const catchAllAddress = alb ? ":8080 {" : ":8443 {";
+    const catchAll = `${source}\n${catchAllAddress}\n\timport common_headers\n\timport kiosk_routes\n}\n`;
+    assert.notEqual(catchAll, source);
+
+    await assert.rejects(async () => {
+      assertAuthorityContract(await adaptCaddy(catchAll), { alb });
+    });
+  }
+});
+
+test("Caddy contracts reject an unconditional kiosk reverse proxy", async () => {
+  for (const [file, alb] of [
+    ["deploy/production/Caddyfile", false],
+    ["deploy/production/Caddyfile.alb", true],
+  ]) {
+    const source = await readFile(file, "utf8");
+    const forwardedProto = alb ? "\t\t\t\theader_up X-Forwarded-Proto https\n" : "";
+    const unconditionalProxy = mutate(
+      source,
+      "(kiosk_routes) {\n\troot * /srv/kiosk\n\troute {",
+      `(kiosk_routes) {\n\troot * /srv/kiosk\n\troute {\n\t\thandle {\n\t\t\treverse_proxy api:3000 {\n${forwardedProto}\t\t\t\timport standard_api_transport\n\t\t\t}\n\t\t}`,
+    );
+
+    await assert.rejects(async () => {
+      assertAuthorityContract(await adaptCaddy(unconditionalProxy), { alb });
+    });
+  }
+});
+
+test("Caddy contracts reject reserved kiosk namespace routing mutations", async () => {
+  for (const file of ["deploy/production/Caddyfile", "deploy/production/Caddyfile.alb"]) {
+    const source = await readFile(file, "utf8");
+    const reservedLine = `\t\t@kioskReserved path ${kioskReservedPatterns.join(" ")}`;
+    assert.ok(source.includes(reservedLine), `${file} must contain the reserved matcher`);
+
+    for (const pattern of kioskReservedPatterns) {
+      const missingNamespace = mutate(
+        source,
+        reservedLine,
+        `\t\t@kioskReserved path ${kioskReservedPatterns
+          .filter((candidate) => candidate !== pattern)
+          .join(" ")}`,
+      );
+      await assert.rejects(async () => {
+        assertKioskRoutingBoundary(applicationRoute(await adaptCaddy(missingNamespace), kioskHost));
+      });
+    }
+
+    const reservedBlock = `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\trespond 404\n\t\t}`;
+    for (const replacement of [
+      `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\troot * /srv/kiosk\n\t\t\tfile_server\n\t\t}`,
+      `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\ttry_files {path} /index.html\n\t\t\tfile_server\n\t\t}`,
+      `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\treverse_proxy api:3000\n\t\t}`,
+    ]) {
+      const non404ReservedRoute = mutate(source, reservedBlock, replacement);
+      await assert.rejects(async () => {
+        assertKioskRoutingBoundary(
+          applicationRoute(await adaptCaddy(non404ReservedRoute), kioskHost),
+        );
+      });
+    }
+
+    const apiBlock = source.match(/\t\t@kioskApi path[\s\S]*?\n\t\t}\n\n/)?.[0];
+    assert.ok(apiBlock, `${file} must contain the kiosk API handler before reserved paths`);
+    const reordered = mutate(
+      source,
+      `${apiBlock}${reservedBlock}\n\n`,
+      `${reservedBlock}\n\n${apiBlock}`,
+    );
+    await assert.rejects(async () => {
+      assertKioskRoutingBoundary(applicationRoute(await adaptCaddy(reordered), kioskHost));
+    });
+  }
+});
+
 test("ALB mode keeps route parity but owns no certificate", async () => {
   const direct = await readFile("deploy/production/Caddyfile", "utf8");
   const alb = await readFile("deploy/production/Caddyfile.alb", "utf8");
@@ -257,11 +850,15 @@ test("ALB mode keeps route parity but owns no certificate", async () => {
     "@device path /station/* /kiosk/* /health /health/* /openapi.json /docs /docs/*",
     "@assets path /assets/*",
     "@spa method GET HEAD",
+    "@kioskApi path /api/kiosk/*",
+    "@kioskAssets path /assets/*",
+    "@kioskSpa method GET HEAD",
   ]) {
     assert.ok(direct.includes(marker));
     assert.ok(alb.includes(marker));
   }
   assert.match(alb, /http:\/\/\{\$MARKIRO_DOMAIN\}:8080/);
+  assert.match(alb, /http:\/\/\{\$MARKIRO_KIOSK_DOMAIN\}:8080/);
   assert.doesNotMatch(alb, /https:\/\/|ACME_EMAIL|redir https/);
   assert.match(alb, /header_up X-Forwarded-Proto https/);
   for (const caddy of [direct, alb]) {

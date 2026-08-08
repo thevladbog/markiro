@@ -6,13 +6,21 @@ real cloud IDs, domain control, notification destination, secret payloads, and
 explicit apply authority. Store evidence IDs only in the protected operational
 system.
 
+Set `MARKIRO_KIOSK_DOMAIN=kiosk.markiro.app` beside `MARKIRO_DOMAIN` in each
+protected environment that carries `MARKIRO_DOMAIN`. The
+desktop Tauri kiosk remains outside this web/TLS gate. This procedure gates only
+the browser kiosk PWA served by the protected ingress.
+
 ## Complete the eleven gates
 
 <!-- runbook-contract:go-live-gate-01-plan-drift -->
 
 1. **Protected plan and drift.** Generate a current-main saved plan through
-   `production-infrastructure`. Confirm no unexpected drift, replacement,
-   deletion, or state migration exists. Approve only that plan.
+   `production-infrastructure`. With `public_dns_enabled=false`, expect exactly
+   one additional kiosk certificate and
+   one additional kiosk certificate validation record, with no replacement and
+   no deletion of existing ingress or durable resources. Confirm no other
+   unexpected drift or state migration exists. Approve only that plan.
 
 <!-- runbook-contract:go-live-gate-02-durable-protection -->
 
@@ -22,30 +30,34 @@ system.
 
 <!-- runbook-contract:go-live-gate-03-certificate -->
 
-3. **Certificate.** Confirm the existing DNS zone is delegated and Certificate
-   Manager validation records are present. Verify the certificate is active for
-   the exact production domain while `public_dns_enabled=false`.
+3. **Certificates.** Confirm the existing DNS zone is delegated and both
+   Certificate Manager validation records are present. Verify
+   issued status for both certificates. Confirm their exact admin and kiosk
+   domains while `public_dns_enabled=false`.
 
 <!-- runbook-contract:go-live-gate-04-alb-sws-arl -->
 
 4. **Ingress protection before the first application release.** Verify the
-   reserved ALB address, HTTPS listener, active Certificate Manager certificate,
-   Smart Web Security (SWS) profile, and attached Advanced Rate Limiter (ARL)
-   profile use the reviewed hostname and private back-end configuration. Confirm
-   both the global and per-IP ARL rules. The reviewed transition plan may contain
-   approved WAF destroy actions for WAF resources managed by the prior
-   configuration. Reject any WAF create, update, or unchanged actions. After the
-   approved removals are applied, confirm that no WAF resources remain in the
-   configuration, state, or a fresh plan. Do **not** require a `HEALTHY` back end
-   yet: the first app release has not started the edge listener. Keep the app VM
-   private.
+   reserved ALB address, HTTPS listener, both active Certificate Manager
+   certificates, Smart Web Security (SWS) profile, and attached Advanced Rate
+   Limiter (ARL) profile use the reviewed hostname and private back-end
+   configuration. Confirm both the global and per-IP ARL rules. The reviewed
+   transition plan may contain approved WAF destroy actions for WAF resources
+   managed by the prior configuration. Reject the plan if it contains any
+   WAF create, update, or unchanged actions.
+   After the approved removals are applied, confirm that no WAF resources remain in
+   the configuration, state, or a fresh plan. Do **not** require a
+   `HEALTHY` back end yet: the first app release has not started the edge listener.
+   Keep the app VM private.
 
 <!-- runbook-contract:go-live-gate-05-alert-specs -->
 
 5. **Monitoring alerts.** Create every alert manually from
-   `module.observability.alert_specs`. The provider has no alert mutation.
-   Verify exact alert IDs, notification-channel ID, query, threshold, and
-   evaluation window in the protected configuration.
+   `module.observability.alert_specs`. The provider has no alert mutation. For
+   `certificate_risk`, update the console alert from the two-certificate artifact
+   while retaining the existing `certificate_risk` alert ID. Verify
+   exact alert IDs, notification-channel ID, query, threshold, and evaluation
+   window in the protected configuration.
 
 <!-- runbook-contract:go-live-gate-06-backup-restore -->
 
@@ -63,7 +75,9 @@ system.
    readiness sequence. Do not claim real SMTP delivery or S3 access from this
    pre-first materialization check. Verify those operations only after the
    candidate-bound path is available, without exposing object URLs or
-   credentials.
+   credentials. Perform a sanitized comparison that reveals neither the Lockbox
+   payload nor its values and records only that `KIOSK_ORIGIN=https://kiosk.markiro.app`
+   is present exactly once and matches the protected kiosk domain.
 
 <!-- runbook-contract:go-live-gate-08-release-manifest -->
 
@@ -81,10 +95,12 @@ system.
    order is: transfer the immutable candidate bundle; materialize runtime
    secrets; run candidate-bound preflight; start the private edge; probe
    `http://127.0.0.1:8080/health/ready` on the app VM with the production
-   `Host` header; wait for ALB back-end `HEALTHY`; then probe the reserved ALB
-   address via `curl --resolve <production-domain>:443:<reserved-alb-ip>`.
-   This preserves TLS SNI and the production hostname without creating public
-   DNS. The rehearsal deterministically stops after the candidate is running and
+   `Host` header; wait for ALB back-end `HEALTHY`; then privately probe the same
+   reserved ALB address via both
+   `curl --resolve <admin-domain>:443:<reserved-alb-ip>` and
+   `curl --resolve <kiosk-domain>:443:<reserved-alb-ip>`. These probes preserve
+   TLS SNI and both production authorities without creating public DNS. The
+   rehearsal deterministically stops after the candidate is running and
    before finalize; it must stop both candidate services and record the candidate
    failed because it has no previous healthy release. Retain the bounded
    `markiro-rollback-rehearsal-<release-sha>-attempt-<rehearsal-run-attempt>`
@@ -135,8 +151,10 @@ system.
    with `enable_public_dns=true`. This must enter the separately protected
    `production-public-dns` environment before the protected infrastructure
    plan is created with `public_dns_enabled=true`.
-3. Review the new sanitized plan. Confirm it changes only the approved
-   application A record and retains all durable-resource protections.
+3. Review the new sanitized plan. Confirm the one approved apply
+   publishes both approved A records, one for the exact admin domain and one for
+   the exact kiosk domain, to the same reserved ALB address and retains all
+   durable-resource protections.
 4. Approve the protected saved-plan apply through
    `production-infrastructure`. Do not run local Terraform apply and do not
    use automatic approval.
@@ -157,8 +175,10 @@ dns_apply_run_id=<successful-approved-dns-apply-run-id>
 The workflow authenticates the successful DNS-apply run and artifact digest,
 runs the real `deploy/production/verify-dns.mjs` implementation against the
 protected authoritative server, public resolvers, and exact approved A/AAAA
-sets, then uploads an immutable convergence receipt. Record its successful
-workflow run ID as `<successful-dns-convergence-run-id>`.
+sets for both domains, then uploads an immutable two-domain convergence receipt.
+It must bind the exact distinct admin and kiosk names to independently sorted,
+nonempty answer sets containing the same approved ALB address. Record its
+successful workflow run ID as `<successful-dns-convergence-run-id>`.
 
 2. Only after that verifier succeeds, obtain approval for the dedicated
    `production-public-smoke` environment.
@@ -178,15 +198,16 @@ dns_verifier_run_id=<successful-dns-convergence-run-id>
    rejects an alternate-ref dispatch, serializes with production deployment,
    verifies that the release is still current `main`, authenticates the exact
    finalized first-release, DNS-apply, and DNS-convergence artifacts and their
-   ordering, and only then runs the full public route smoke through
-   `https://MARKIRO_DOMAIN`. It checks the live release header and rechecks
+   ordering, and only then runs the full public route smoke through both
+   `https://MARKIRO_DOMAIN` and `https://MARKIRO_KIOSK_DOMAIN`. It checks the live
+   release header on both authorities and rechecks
    current `main` immediately before and after the smoke. It
    never prepares, migrates, starts, finalizes, rolls back, or redeploys the
    application. Do not dispatch `deployment_phase=repeat` merely to obtain this
    smoke.
-4. The receipt proves only TLS, routes, security headers, readiness,
-   documentation, proxy behavior, and the exact live release identity exercised
-   by this smoke. SWS/ARL and alert-delivery confirmation remain separate
+4. The two-domain post-DNS smoke receipt proves only TLS, routes, security headers, readiness,
+   documentation, proxy behavior, and the exact live release
+   identity exercised by this smoke. SWS/ARL and alert-delivery confirmation remain separate
    protected gate records; attach those real records to the go-live change and
    never infer them from the smoke receipt. This is the post-cutover public
    smoke and is not part of the pre-DNS first-deployment workflow.

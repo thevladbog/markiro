@@ -1,6 +1,6 @@
 import { parseReleaseManifest } from "../production/release-manifest.mjs";
-import { validateProductionDomain } from "../production/production-domain.mjs";
-import { productionBaseUrl, runPublicSmoke } from "../production/smoke.mjs";
+import { validateProductionDomains } from "../production/production-domain.mjs";
+import { productionBaseUrls, runPublicSmoke } from "../production/smoke.mjs";
 import { spawn } from "node:child_process";
 import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -254,6 +254,72 @@ function assertExpectedReleaseHeader(headers, expectedReleaseSha) {
     throw new Error("live release identity does not match the expected release");
 }
 
+function parseCurlResponse(output) {
+  try {
+    const marker = "\nMARKIRO_HTTP_STATUS:";
+    const markerAt = output.lastIndexOf(marker);
+    const statusText = output.slice(markerAt + marker.length).trim();
+    if (markerAt < 0 || !/^\d{3}$/.test(statusText)) throw new Error();
+    const payload = output.slice(0, markerAt);
+    const crlfBoundary = payload.indexOf("\r\n\r\n");
+    const lfBoundary = payload.indexOf("\n\n");
+    const boundary = crlfBoundary >= 0 ? crlfBoundary : lfBoundary;
+    const separatorLength = crlfBoundary >= 0 ? 4 : 2;
+    if (boundary < 0) throw new Error();
+    const headerLines = payload.slice(0, boundary).split(/\r?\n/);
+    const statusLine = headerLines.shift() || "";
+    const headerStatus = statusLine.match(/^HTTP\/\d(?:\.\d)? (\d{3})(?: |$)/)?.[1];
+    if (headerStatus !== statusText) throw new Error();
+    const headers = new Headers();
+    for (const line of headerLines) {
+      const separator = line.indexOf(":");
+      if (separator <= 0) throw new Error();
+      headers.append(line.slice(0, separator).trim(), line.slice(separator + 1).trim());
+    }
+    return {
+      status: Number(statusText),
+      headers,
+      text: async () => payload.slice(boundary + separatorLength),
+    };
+  } catch {
+    throw new Error("pre-DNS smoke response is invalid");
+  }
+}
+
+function resolvedCurlClient(system, authorities, address) {
+  const allowedHosts = new Set([authorities.admin.hostname, authorities.kiosk.hostname]);
+  return {
+    async request(value, init = {}) {
+      const url = new URL(value);
+      if (url.protocol !== "https:" || !allowedHosts.has(url.hostname) || url.port)
+        throw new Error("pre-DNS smoke URL is invalid");
+      const args = [
+        "--silent",
+        "--show-error",
+        "--max-time",
+        "30",
+        "--max-filesize",
+        "4194304",
+        "--dump-header",
+        "-",
+        "--output",
+        "-",
+        "--write-out",
+        "\nMARKIRO_HTTP_STATUS:%{http_code}\n",
+        "--resolve",
+        `${url.hostname}:443:${address}`,
+        "--request",
+        init.method || "GET",
+      ];
+      for (const [name, value] of Object.entries(init.headers || {}))
+        args.push("--header", `${name}: ${value}`);
+      if (init.body !== undefined) args.push("--data-binary", String(init.body));
+      args.push(url.href);
+      return parseCurlResponse(await system.run("curl", args));
+    },
+  };
+}
+
 function parseCandidate(output) {
   try {
     const candidate = JSON.parse(output);
@@ -285,7 +351,8 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
     run,
     sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
     monotonicNow: () => performance.now(),
-    smoke: ({ baseUrl, expectedReleaseSha }) => runPublicSmoke({ baseUrl, expectedReleaseSha }),
+    smoke: ({ adminBaseUrl, kioskBaseUrl, expectedReleaseSha }) =>
+      runPublicSmoke({ adminBaseUrl, kioskBaseUrl, expectedReleaseSha }),
     ...supplied,
   };
   const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH", environment);
@@ -295,7 +362,10 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   const rollbackRehearsal = environment.MARKIRO_ROLLBACK_REHEARSAL === "1";
   if (rollbackRehearsal && phase !== "first")
     throw new Error("rollback rehearsal requires a first deployment");
-  const domain = validateProductionDomain(environment.MARKIRO_DOMAIN);
+  const { domain, kioskDomain } = validateProductionDomains(
+    environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_KIOSK_DOMAIN,
+  );
   const manifestText = await system.readFile(manifestPath, "utf8");
   const manifest = parseReleaseManifest(manifestText, expectedRunId);
   if (manifest.commit !== expectedCommit || process.cwd() === "/")
@@ -394,6 +464,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
           "MARKIRO_COMPOSE_PROJECT=markiro-production",
           `MARKIRO_DOMAIN=${domain}`,
+          `MARKIRO_KIOSK_DOMAIN=${kioskDomain}`,
           "MARKIRO_EDGE_MODE=behind-alb",
           `MARKIRO_REQUIRE_PREVIOUS_HEALTHY=${phase === "repeat" ? "1" : "0"}`,
           `MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=${phase === "first" ? "1" : "0"}`,
@@ -506,30 +577,32 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             "http://127.0.0.1:8080/health/ready",
           ]);
           assertExpectedReleaseHeader(localHeaders, manifest.commit);
-          const albHeaders = await system.run("curl", [
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--max-time",
-            "30",
-            "--dump-header",
-            "-",
-            "--output",
-            "/dev/null",
-            "--resolve",
-            `${domain}:443:${address}`,
-            `https://${domain}/health/ready`,
-          ]);
-          assertExpectedReleaseHeader(albHeaders, manifest.commit);
+          const authorities = {
+            admin: new URL(`https://${domain}`),
+            kiosk: new URL(`https://${kioskDomain}`),
+          };
+          await runPublicSmoke(
+            {
+              adminBaseUrl: authorities.admin.href,
+              kioskBaseUrl: authorities.kiosk.href,
+              expectedReleaseSha: manifest.commit,
+            },
+            resolvedCurlClient(system, authorities, address),
+          );
         },
-        smoke: () =>
-          system.smoke({
-            baseUrl: productionBaseUrl({
-              MARKIRO_DOMAIN: domain,
-              MARKIRO_HTTPS_PORT: environment.MARKIRO_HTTPS_PORT,
-            }),
+        smoke: () => {
+          const baseUrls = productionBaseUrls({
+            MARKIRO_DOMAIN: domain,
+            MARKIRO_KIOSK_DOMAIN: kioskDomain,
+            MARKIRO_EDGE_MODE: "behind-alb",
+            MARKIRO_HTTPS_PORT: environment.MARKIRO_HTTPS_PORT,
+          });
+          return system.smoke({
+            adminBaseUrl: baseUrls.admin,
+            kioskBaseUrl: baseUrls.kiosk,
             expectedReleaseSha: manifest.commit,
-          }),
+          });
+        },
         async finalize(candidate) {
           const healthy = JSON.parse(await remoteStage("finalize", candidate));
           await activateRelease();

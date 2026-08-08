@@ -7,6 +7,12 @@ const RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567";
 const OTHER_SHA = "f".repeat(40);
 const DNS_APPLY_DIGEST = `sha256:${"c".repeat(64)}`;
 const CONVERGENCE_DIGEST = `sha256:${"d".repeat(64)}`;
+const ADMIN_DOMAIN = "admin.markiro.example";
+const KIOSK_DOMAIN = "kiosk.markiro.example";
+const ANSWERS = {
+  [ADMIN_DOMAIN]: ["203.0.113.10"],
+  [KIOSK_DOMAIN]: ["203.0.113.10"],
+};
 const FINALIZED_VALUE = {
   deploymentPhase: "first",
   deploymentRunId: "123456789",
@@ -15,19 +21,22 @@ const FINALIZED_VALUE = {
   releaseSha: RELEASE_SHA,
 };
 const DNS_APPLY_VALUE = {
+  adminDomain: ADMIN_DOMAIN,
+  answers: ANSWERS,
   appliedAt: "2026-08-05T12:30:00.000Z",
   dnsApplyRunId: "234567891",
+  kioskDomain: KIOSK_DOMAIN,
   publicDnsEnabled: true,
   releaseSha: RELEASE_SHA,
 };
 const CONVERGENCE_VALUE = {
+  adminDomain: ADMIN_DOMAIN,
+  answers: ANSWERS,
   appliedAt: DNS_APPLY_VALUE.appliedAt,
-  approvedA: ["203.0.113.10"],
-  approvedAaaa: [],
   authoritativeServer: "ns1.example.test",
   dnsApplyArtifactDigest: DNS_APPLY_DIGEST,
   dnsApplyRunId: "234567891",
-  domain: "markiro.example",
+  kioskDomain: KIOSK_DOMAIN,
   publicResolvers: ["resolver-one.example.test", "resolver-two.example.test"],
   releaseSha: RELEASE_SHA,
   verificationAttempt: 3,
@@ -40,8 +49,8 @@ function fixture() {
   const calls = [];
   const values = {
     finalized: { ...FINALIZED_VALUE },
-    dnsApply: { ...DNS_APPLY_VALUE },
-    convergence: { ...CONVERGENCE_VALUE },
+    dnsApply: structuredClone(DNS_APPLY_VALUE),
+    convergence: structuredClone(CONVERGENCE_VALUE),
   };
   const times = [new Date("2026-08-05T13:30:00.000Z"), new Date("2026-08-05T13:31:00.000Z")];
   const mainShas = [RELEASE_SHA, RELEASE_SHA];
@@ -65,7 +74,8 @@ function fixture() {
     },
   };
   const environment = {
-    MARKIRO_DOMAIN: "markiro.example",
+    MARKIRO_DOMAIN: ADMIN_DOMAIN,
+    MARKIRO_KIOSK_DOMAIN: KIOSK_DOMAIN,
     RELEASE_SHA,
     RELEASE_RUN_ID: "987654321",
     DEPLOYMENT_RUN_ID: "123456789",
@@ -93,12 +103,21 @@ test("post-DNS mode binds the exact ordered evidence chain to current main and t
 
   assert.deepEqual(calls, [
     ["current main", RELEASE_SHA],
-    ["public smoke", { baseUrl: "https://markiro.example", expectedReleaseSha: RELEASE_SHA }],
+    [
+      "public smoke",
+      {
+        adminBaseUrl: `https://${ADMIN_DOMAIN}`,
+        expectedReleaseSha: RELEASE_SHA,
+        kioskBaseUrl: `https://${KIOSK_DOMAIN}`,
+      },
+    ],
     ["current main", RELEASE_SHA],
     [
       "write receipt",
       "/runner/post-dns-smoke.json",
       {
+        adminDomain: ADMIN_DOMAIN,
+        answers: ANSWERS,
         appliedAt: "2026-08-05T12:30:00.000Z",
         deploymentRunId: "123456789",
         dnsApplyArtifactDigest: DNS_APPLY_DIGEST,
@@ -106,6 +125,7 @@ test("post-DNS mode binds the exact ordered evidence chain to current main and t
         dnsConvergenceArtifactDigest: CONVERGENCE_DIGEST,
         dnsVerifierRunId: "345678912",
         finalizedAt: "2026-08-05T12:00:00.000Z",
+        kioskDomain: KIOSK_DOMAIN,
         releaseRunId: "987654321",
         releaseSha: RELEASE_SHA,
         smokeAt: "2026-08-05T13:31:00.000Z",
@@ -116,6 +136,23 @@ test("post-DNS mode binds the exact ordered evidence chain to current main and t
     ],
   ]);
   assert.equal(receipt.releaseSha, RELEASE_SHA);
+});
+
+test("post-DNS mode invokes the production dual-host smoke interface exactly once", async () => {
+  const { dependencies, environment } = fixture();
+  const smokeCalls = [];
+  dependencies.smoke = async (options) => {
+    assert.deepEqual(options, {
+      adminBaseUrl: `https://${ADMIN_DOMAIN}`,
+      expectedReleaseSha: RELEASE_SHA,
+      kioskBaseUrl: `https://${KIOSK_DOMAIN}`,
+    });
+    smokeCalls.push(options);
+  };
+
+  await runPostDnsSmoke(environment, dependencies);
+
+  assert.equal(smokeCalls.length, 1);
 });
 
 test("post-DNS mode rejects alternate dispatch refs and SHAs before public requests", async () => {
@@ -155,7 +192,14 @@ test("post-DNS mode rejects an advancing main after smoke and never writes a rec
 
   assert.deepEqual(calls, [
     ["current main", RELEASE_SHA],
-    ["public smoke", { baseUrl: "https://markiro.example", expectedReleaseSha: RELEASE_SHA }],
+    [
+      "public smoke",
+      {
+        adminBaseUrl: `https://${ADMIN_DOMAIN}`,
+        expectedReleaseSha: RELEASE_SHA,
+        kioskBaseUrl: `https://${KIOSK_DOMAIN}`,
+      },
+    ],
     ["current main", OTHER_SHA],
   ]);
 });
@@ -167,4 +211,31 @@ test("post-DNS mode rejects mismatched authenticated convergence provenance befo
   await assert.rejects(runPostDnsSmoke(environment, dependencies), /post-DNS smoke evidence/);
 
   assert.deepEqual(calls, []);
+});
+
+test("post-DNS mode rejects incomplete, extra, split, duplicate, or swapped domain evidence before public requests", async () => {
+  const mutations = [
+    (values) => delete values.dnsApply.answers[KIOSK_DOMAIN],
+    (values) => (values.dnsApply.answers["extra.markiro.example"] = ["203.0.113.10"]),
+    (values) => (values.dnsApply.answers[KIOSK_DOMAIN] = []),
+    (values) => (values.dnsApply.answers[KIOSK_DOMAIN] = ["203.0.113.11", "203.0.113.10"]),
+    (values) => (values.dnsApply.answers[KIOSK_DOMAIN] = ["203.0.113.10", "203.0.113.10"]),
+    (values) => (values.dnsApply.answers[KIOSK_DOMAIN] = ["203.0.113.11"]),
+    (values) => (values.dnsApply.kioskDomain = values.dnsApply.adminDomain),
+    (values) => {
+      [values.convergence.adminDomain, values.convergence.kioskDomain] = [
+        values.convergence.kioskDomain,
+        values.convergence.adminDomain,
+      ];
+    },
+    (values) => (values.convergence.answers[KIOSK_DOMAIN] = ["203.0.113.11"]),
+  ];
+
+  for (const mutate of mutations) {
+    const { calls, dependencies, environment, values } = fixture();
+    mutate(values);
+
+    await assert.rejects(runPostDnsSmoke(environment, dependencies), /post-DNS smoke evidence/);
+    assert.deepEqual(calls, []);
+  }
 });

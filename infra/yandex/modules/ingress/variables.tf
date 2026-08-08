@@ -45,6 +45,22 @@ variable "domain" {
   }
 }
 
+variable "kiosk_domain" {
+  description = "Exact kiosk authority served by the protected ingress."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.kiosk_domain))
+    error_message = "kiosk_domain must be a lowercase fully-qualified domain name."
+  }
+
+  validation {
+    condition     = var.kiosk_domain != var.domain
+    error_message = "kiosk_domain must differ from domain."
+  }
+}
+
 variable "dns_zone_id" {
   description = "Cloud DNS zone ID that owns the certificate validation and gated application records."
   type        = string

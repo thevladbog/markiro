@@ -8,6 +8,7 @@ terraform {
 }
 
 locals {
+  certificate_risk_query = "series_min(\"certificate.days_until_expiration\"{folderId=\"${var.folder_id}\", service=\"certificate-manager\", certificate=\"${var.certificate_ids[0]}|${var.certificate_ids[1]}\"})"
   lockbox_data_events = [
     "yandex.cloud.audit.lockbox.GetPayload",
     "yandex.cloud.audit.lockbox.GetPayloadEx",
@@ -167,7 +168,7 @@ locals {
       category                = "certificate_risk"
       title                   = "Certificate expiry risk"
       metric                  = "certificate.days_until_expiration"
-      query                   = "\"certificate.days_until_expiration\"{folderId=\"${var.folder_id}\", service=\"certificate-manager\", certificate=\"${var.certificate_id}\"}"
+      query                   = local.certificate_risk_query
       comparison              = "LESS_THAN"
       warning_threshold       = 30
       alarm_threshold         = 14

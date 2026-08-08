@@ -186,6 +186,7 @@ jobs:
       TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
+      TF_VAR_kiosk_domain: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
       TF_VAR_observability_phase: ${{ github.event_name == 'workflow_dispatch' && inputs.observability_phase || 'protected' }}
       TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
@@ -472,6 +473,7 @@ jobs:
       TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
+      TF_VAR_kiosk_domain: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}
       TF_VAR_observability_phase: ${{ inputs.observability_phase }}
       TF_VAR_notification_channel_id: ${{ vars.YC_NOTIFICATION_CHANNEL_ID }}
@@ -717,6 +719,41 @@ jobs:
             unset ALERT_SPECS_COMMIT_SHA ALERT_SPECS_EVIDENCE_SHA256 ALERT_SPECS_GITHUB_RUN_ATTEMPT
             unset ALERT_SPECS_GITHUB_RUN_ID ALERT_SPECS_OBSERVABILITY_PHASE ALERT_SPECS_PLAN_SHA256
           fi
+          if [[ "$expected_public_dns" == true ]]; then
+            dns_values_path="$RUNNER_TEMP/public-dns-values.json"
+            test ! -e "$dns_values_path"
+            jq -s -e \
+              --arg admin_domain "$TF_VAR_domain" \
+              --arg kiosk_domain "$TF_VAR_kiosk_domain" '
+              [.[] | select(.type == "outputs")] as $records |
+              select(($records | length) == 1) |
+              $records[0].outputs as $outputs |
+              $outputs.admin_domain as $admin |
+              $outputs.kiosk_domain as $kiosk |
+              $outputs.approved_a_records as $approved |
+              def valid_ipv4:
+                type == "string" and
+                test("^(?:0|[1-9][0-9]{0,2})(?:\\.(?:0|[1-9][0-9]{0,2})){3}$") and
+                (split(".") | all(.[]; (tonumber >= 0 and tonumber <= 255)));
+              select(($admin | keys | sort) == ["sensitive", "type", "value"]) |
+              select(($kiosk | keys | sort) == ["sensitive", "type", "value"]) |
+              select(($approved | keys | sort) == ["sensitive", "type", "value"]) |
+              select($admin.sensitive == false and $admin.type == "string" and $admin.value == $admin_domain) |
+              select($kiosk.sensitive == false and $kiosk.type == "string" and $kiosk.value == $kiosk_domain) |
+              select($admin.value != $kiosk.value) |
+              select($approved.type == ["tuple", ["string"]]) |
+              select($approved.sensitive == false and ($approved.value | type) == "array") |
+              ($approved.value | sort) as $answers |
+              select(($answers | length) > 0 and ($answers | unique) == $answers) |
+              select(all($answers[]; valid_ipv4)) |
+              {
+                adminDomain: $admin.value,
+                answers: {($admin.value): $answers, ($kiosk.value): $answers},
+                kioskDomain: $kiosk.value
+              }
+            ' "$terraform_apply_stream" > "$dns_values_path"
+            chmod 600 "$dns_values_path"
+          fi
           rm -f "$terraform_apply_stream" "$terraform_apply_stderr"
       - name: Upload exact first-phase alert specifications
         if: inputs.observability_phase == 'first' && inputs.postgres_provisioning_phase == 'none'
@@ -731,14 +768,18 @@ jobs:
         run: |
           set -euo pipefail
           receipt_path="$RUNNER_TEMP/public-dns-apply.json"
+          values_path="$RUNNER_TEMP/public-dns-values.json"
           test ! -e "$receipt_path"
+          test -s "$values_path"
+          test ! -L "$values_path"
           umask 077
           applied_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           jq -n \
+            --slurpfile values "$values_path" \
             --arg applied_at "$applied_at" \
             --arg dns_apply_run_id "$GITHUB_RUN_ID" \
             --arg release_sha "$TARGET_SHA" \
-            '{appliedAt: $applied_at, dnsApplyRunId: $dns_apply_run_id, publicDnsEnabled: true, releaseSha: $release_sha}' \
+            '{adminDomain: $values[0].adminDomain, answers: $values[0].answers, appliedAt: $applied_at, dnsApplyRunId: $dns_apply_run_id, kioskDomain: $values[0].kioskDomain, publicDnsEnabled: true, releaseSha: $release_sha}' \
             > "$receipt_path"
           chmod 600 "$receipt_path"
       - name: Upload exact public DNS apply evidence
@@ -756,4 +797,5 @@ jobs:
           rm -rf -- "${RUNNER_TEMP:?}/yandex-infrastructure-plan"
           rm -rf -- "${RUNNER_TEMP:?}/yandex-production-terraform-data"
           rm -rf -- "${RUNNER_TEMP:?}/yandex-alert-specs"
+          rm -f -- "${RUNNER_TEMP:?}/public-dns-values.json"
           rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"

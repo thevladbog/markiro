@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
 import { runPreflight } from "./preflight.mjs";
-import { productionBaseUrl, runSmoke } from "./smoke.mjs";
+import { productionBaseUrls, runSmoke } from "./smoke.mjs";
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
@@ -110,7 +110,10 @@ function edgeReadinessProbe(environment) {
       url: "http://127.0.0.1:8080/health/live",
       headers: { host: environment.MARKIRO_DOMAIN },
     };
-  return { url: new URL("/health/live", productionBaseUrl(environment)).href, headers: undefined };
+  return {
+    url: new URL("/health/live", productionBaseUrls(environment).admin).href,
+    headers: undefined,
+  };
 }
 
 async function latestHealthyRelease(directory) {
@@ -798,10 +801,15 @@ export async function deployRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.service,
     );
-    const baseUrl = productionBaseUrl(environment);
+    const baseUrls = productionBaseUrls(environment);
     await waitForEdgeTls(dependencies, options);
     try {
-      await dependencies.runSmoke({ environment, baseUrl });
+      await dependencies.runSmoke({
+        environment,
+        adminBaseUrl: baseUrls.admin,
+        kioskBaseUrl: baseUrls.kiosk,
+        expectedReleaseSha: tag,
+      });
     } catch {
       throw new Error("Public smoke failed");
     }

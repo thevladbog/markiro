@@ -21,6 +21,7 @@ jobs:
       MARKIRO_API_IMAGE_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       MARKIRO_EDGE_IMAGE_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       MARKIRO_DOMAIN: localhost
+      MARKIRO_KIOSK_DOMAIN: kiosk.localhost
       MARKIRO_HTTP_PORT: "18080"
       MARKIRO_HTTPS_PORT: "18443"
       ACME_EMAIL: ci@markiro.local
@@ -74,7 +75,7 @@ jobs:
             printf '%s\n' "BETTER_AUTH_SECRET=$better_auth_secret"
             printf '%s\n' "BETTER_AUTH_URL=https://localhost:18443"
             printf '%s\n' "ADMIN_ORIGIN=https://localhost:18443"
-            printf '%s\n' "KIOSK_ORIGIN=https://localhost:18443"
+            printf '%s\n' "KIOSK_ORIGIN=https://kiosk.localhost:18443"
             printf '%s\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"
             printf '%s\n' "SMTP_HOST=mailpit"
             printf '%s\n' "SMTP_PORT=1025"

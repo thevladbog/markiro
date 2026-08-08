@@ -21,7 +21,8 @@ database_disk_size_gb     = 50
 state_bucket_name         = "replace-with-bootstrap-state-bucket-name"
 media_bucket_name         = "replace-with-private-media-bucket-name"
 audit_bucket_name         = "replace-with-private-audit-bucket-name"
-domain                    = "markiro.example.ru"
+domain                    = "admin.markiro.example.ru"
+kiosk_domain              = "kiosk.markiro.example.ru"
 dns_zone_id               = "replace-with-cloud-dns-zone-id"
 public_dns_enabled        = false
 # First provisioning deliberately omits notification_channel_id and alert_ids,

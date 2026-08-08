@@ -58,10 +58,10 @@ export const pwaOptions = {
     // server. A stale `GET /kiosk/bootstrap` is just as bad: the staleness
     // gates read its `generatedAt`, and a cached response freezes it.
     // Hence no runtime caching at all, and the SPA navigation fallback is
-    // denied for /api/ so an API request can never be answered with
-    // index.html.
+    // denied for the API and other server-reserved namespaces so those
+    // requests can never be answered with index.html.
     runtimeCaching: [],
-    navigateFallbackDenylist: [/^\/api\//],
+    navigateFallbackDenylist: [/^\/(?:api|station|kiosk)(?:\/|$)/],
   },
 } satisfies Partial<VitePWAOptions>;
 

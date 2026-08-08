@@ -129,6 +129,17 @@ function terraformOutputBlock(source, name) {
   assert.fail(`unterminated output ${name}`);
 }
 
+function terraformDeclarationCount(source, kind, type) {
+  return [...source.matchAll(new RegExp(`${kind}\\s+"${type}"\\s+"[^"]+"\\s*\\{`, "g"))].length;
+}
+
+function terraformListItems(source) {
+  return source
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function terraformNestedBlocks(source, name) {
   const blocks = [];
   const declaration = new RegExp(`\\b${name}\\s*\\{`, "g");
@@ -1059,14 +1070,58 @@ async function privateNetworkAndComputeSources() {
 }
 
 function assertProtectedIngress({
+  compute,
   ingress,
   ingressOutputs,
   ingressVariables,
   production,
   productionOutputs,
+  productionTfvars,
   productionVariables,
 }) {
   const allIngress = [ingress, ingressOutputs, ingressVariables].join("\n");
+
+  for (const [type, expected] of [
+    ["yandex_vpc_address", 1],
+    ["yandex_cm_certificate", 2],
+    ["yandex_dns_recordset", 4],
+    ["yandex_alb_backend_group", 1],
+    ["yandex_sws_advanced_rate_limiter_profile", 1],
+    ["yandex_sws_security_profile", 1],
+    ["yandex_alb_http_router", 1],
+    ["yandex_alb_virtual_host", 1],
+    ["yandex_alb_load_balancer", 1],
+  ]) {
+    assert.equal(
+      terraformDeclarationCount(ingress, "resource", type),
+      expected,
+      `protected ingress must keep exactly ${expected} ${type} resource(s)`,
+    );
+  }
+  assert.equal(
+    terraformDeclarationCount(compute, "resource", "yandex_alb_target_group"),
+    1,
+    "protected ingress must keep exactly one application target group",
+  );
+
+  for (const variables of [ingressVariables, productionVariables]) {
+    const adminDomainPattern = /condition\s*=\s*can\(regex\("([^"]+)",\s*var\.domain\)\)/.exec(
+      variables,
+    )?.[1];
+    const kioskDomainPattern =
+      /condition\s*=\s*can\(regex\("([^"]+)",\s*var\.kiosk_domain\)\)/.exec(variables)?.[1];
+    assert.ok(adminDomainPattern, "domain must retain its lowercase-FQDN validation");
+    assert.equal(
+      kioskDomainPattern,
+      adminDomainPattern,
+      "kiosk_domain must use the same lowercase-FQDN validation as domain",
+    );
+    assert.equal(
+      [...variables.matchAll(/var\.kiosk_domain\s*!=\s*var\.domain/g)].length,
+      1,
+      "kiosk_domain must reject the admin domain",
+    );
+  }
 
   const publicAddress = terraformResourceBlock(ingress, "yandex_vpc_address", "markiro");
   assert.match(publicAddress, /external_ipv4_address\s*\{/);
@@ -1092,18 +1147,56 @@ function assertProtectedIngress({
     /data\s+"yandex_cm_certificate"\s+"issued"\s*\{[\s\S]*?certificate_id\s*=\s*yandex_cm_certificate\.markiro\.id[\s\S]*?wait_validation\s*=\s*true[\s\S]*?depends_on\s*=\s*\[yandex_dns_recordset\.certificate_validation\]/,
   );
 
+  const kioskCertificate = terraformResourceBlock(ingress, "yandex_cm_certificate", "kiosk");
+  assert.match(kioskCertificate, /domains\s*=\s*\[var\.kiosk_domain\]/);
+  assert.match(
+    kioskCertificate,
+    /managed\s*\{[\s\S]*?challenge_type\s*=\s*"DNS_CNAME"[\s\S]*?challenge_count\s*=\s*1/,
+  );
+  const kioskCertificateValidation = terraformResourceBlock(
+    ingress,
+    "yandex_dns_recordset",
+    "kiosk_certificate_validation",
+  );
+  assert.match(kioskCertificateValidation, /count\s*=\s*1/);
+  assert.match(
+    kioskCertificateValidation,
+    /yandex_cm_certificate\.kiosk\.challenges\[count\.index\]/,
+  );
+  assert.doesNotMatch(kioskCertificateValidation, /for_each/);
+  assert.match(
+    ingress,
+    /data\s+"yandex_cm_certificate"\s+"kiosk_issued"\s*\{[\s\S]*?certificate_id\s*=\s*yandex_cm_certificate\.kiosk\.id[\s\S]*?wait_validation\s*=\s*true[\s\S]*?depends_on\s*=\s*\[yandex_dns_recordset\.kiosk_certificate_validation\]/,
+  );
+  assert.equal(
+    terraformDeclarationCount(ingress, "data", "yandex_cm_certificate"),
+    2,
+    "each authority must have one issued-certificate data source",
+  );
+
   const backendGroup = terraformResourceBlock(ingress, "yandex_alb_backend_group", "app");
   assert.match(backendGroup, /target_group_ids\s*=\s*\[var\.app_target_group_id\]/);
   assert.match(backendGroup, /port\s*=\s*8080/);
   assert.match(backendGroup, /path\s*=\s*"\/health\/ready"/);
   assert.match(backendGroup, /host\s*=\s*var\.domain/);
   assert.doesNotMatch(backendGroup, /path\s*=\s*"\/health"|\/api(?:\W|$)|port\s*=\s*443/);
+  assert.equal(
+    terraformNestedBlocks(backendGroup, "healthcheck").length,
+    1,
+    "the shared backend must keep exactly one readiness health check",
+  );
 
   const router = terraformResourceBlock(ingress, "yandex_alb_http_router", "markiro");
   assert.match(router, /name\s*=\s*"markiro-production"/);
 
   const virtualHost = terraformResourceBlock(ingress, "yandex_alb_virtual_host", "markiro");
-  assert.match(virtualHost, /authority\s*=\s*\[var\.domain\]/);
+  const authorities = /authority\s*=\s*\[([\s\S]*?)\]/.exec(virtualHost)?.[1];
+  assert.ok(authorities, "the shared virtual host must declare explicit authorities");
+  assert.deepEqual(
+    terraformListItems(authorities),
+    ["var.domain", "var.kiosk_domain"],
+    "the shared virtual host must serve exactly the admin and kiosk authorities",
+  );
   assert.match(virtualHost, /backend_group_id\s*=\s*yandex_alb_backend_group\.app\.id/);
   assert.match(
     virtualHost,
@@ -1113,9 +1206,23 @@ function assertProtectedIngress({
 
   const loadBalancer = terraformResourceBlock(ingress, "yandex_alb_load_balancer", "markiro");
   assert.match(loadBalancer, /ports\s*=\s*\[80\][\s\S]*?http_to_https\s*=\s*true/);
+  const certificateIds = /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[([\s\S]*?)\]/.exec(
+    loadBalancer,
+  )?.[1];
+  assert.ok(certificateIds, "the HTTPS listener must declare certificate IDs");
+  assert.deepEqual(
+    terraformListItems(certificateIds),
+    ["data.yandex_cm_certificate.issued.id", "data.yandex_cm_certificate.kiosk_issued.id"],
+    "the one HTTPS listener must present exactly both issued certificates",
+  );
   assert.match(
     loadBalancer,
-    /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[data\.yandex_cm_certificate\.issued\.id\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+    /ports\s*=\s*\[443\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+  );
+  assert.equal(
+    terraformNestedBlocks(loadBalancer, "listener").length,
+    2,
+    "the shared ALB must keep exactly the HTTP redirect and HTTPS listeners",
   );
   assert.match(
     loadBalancer,
@@ -1168,10 +1275,20 @@ function assertProtectedIngress({
   assert.doesNotMatch(securityProfile, /smart_protection\s*\{/);
   assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
 
-  const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", "application");
-  assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
-  assert.match(publicDns, /type\s*=\s*"A"/);
-  assert.doesNotMatch(publicDns, /AAAA/);
+  for (const [name, hostname] of [
+    ["application", "var.domain"],
+    ["kiosk_application", "var.kiosk_domain"],
+  ]) {
+    const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", name);
+    assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
+    assert.match(publicDns, new RegExp(`name\\s*=\\s*${hostname.replace(".", "\\.")}`));
+    assert.match(publicDns, /type\s*=\s*"A"/);
+    assert.match(
+      publicDns,
+      /data\s*=\s*\[yandex_vpc_address\.markiro\.external_ipv4_address\.0\.address\]/,
+    );
+    assert.doesNotMatch(publicDns, /AAAA/);
+  }
   assert.match(ingressVariables, /variable\s+"public_dns_enabled"\s*\{[\s\S]*?default\s*=\s*false/);
   for (const variable of ["global_rate_limit", "per_ip_rate_limit"]) {
     assert.match(
@@ -1192,6 +1309,10 @@ function assertProtectedIngress({
     "reserved_ipv4_address",
     "certificate_id",
     "certificate_status",
+    "kiosk_certificate_id",
+    "kiosk_certificate_status",
+    "admin_domain",
+    "kiosk_domain",
     "load_balancer_id",
     "load_balancer_address",
     "backend_group_id",
@@ -1206,9 +1327,46 @@ function assertProtectedIngress({
     assert.doesNotMatch(outputs, /output\s+"waf_profile_id"\s*\{/);
   }
 
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "approved_a_records"),
+    /value\s*=\s*\[yandex_vpc_address\.markiro\.external_ipv4_address\.0\.address\]/,
+  );
+  assert.match(terraformOutputBlock(ingressOutputs, "admin_domain"), /value\s*=\s*var\.domain/);
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "kiosk_domain"),
+    /value\s*=\s*var\.kiosk_domain/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "certificate_id"),
+    /value\s*=\s*data\.yandex_cm_certificate\.issued\.id/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "certificate_status"),
+    /value\s*=\s*data\.yandex_cm_certificate\.issued\.status/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "kiosk_certificate_id"),
+    /value\s*=\s*data\.yandex_cm_certificate\.kiosk_issued\.id/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "kiosk_certificate_status"),
+    /value\s*=\s*data\.yandex_cm_certificate\.kiosk_issued\.status/,
+  );
+  for (const output of [
+    "certificate_id",
+    "certificate_status",
+    "kiosk_certificate_id",
+    "kiosk_certificate_status",
+    "admin_domain",
+    "kiosk_domain",
+  ]) {
+    assert.doesNotMatch(terraformOutputBlock(ingressOutputs, output), /sensitive\s*=\s*true/);
+  }
+
   assert.match(production, /module\s+"ingress"\s*\{/);
   for (const variable of [
     "domain",
+    "kiosk_domain",
     "dns_zone_id",
     "public_dns_enabled",
     "global_rate_limit",
@@ -1216,32 +1374,59 @@ function assertProtectedIngress({
   ]) {
     assert.match(productionVariables, new RegExp(`variable\\s+"${variable}"\\s*\\{`));
   }
+  assert.equal(
+    [...production.matchAll(/^\s*kiosk_domain\s*=\s*var\.kiosk_domain\s*$/gm)].length,
+    1,
+    "production must wire kiosk_domain only to the existing ingress module",
+  );
+  assert.match(productionTfvars, /^domain\s*=\s*"admin\.markiro\.example\.ru"$/m);
+  assert.match(productionTfvars, /^kiosk_domain\s*=\s*"kiosk\.markiro\.example\.ru"$/m);
+  assert.match(productionTfvars, /^public_dns_enabled\s*=\s*false$/m);
+  for (const [name, value] of [
+    ["certificate_id", "module.ingress.certificate_id"],
+    ["certificate_status", "module.ingress.certificate_status"],
+    ["kiosk_certificate_id", "module.ingress.kiosk_certificate_id"],
+    ["kiosk_certificate_status", "module.ingress.kiosk_certificate_status"],
+    ["admin_domain", "module.ingress.admin_domain"],
+    ["kiosk_domain", "module.ingress.kiosk_domain"],
+  ]) {
+    assert.match(
+      terraformOutputBlock(productionOutputs, name),
+      new RegExp(`value\\s*=\\s*${value.replaceAll(".", "\\.")}`),
+    );
+  }
   assert.doesNotMatch(allIngress, /(?:api|backend)[_-]?(?:url|address).*443/i);
 }
 
 async function protectedIngressSources() {
   const [
+    compute,
     ingress,
     ingressOutputs,
     ingressVariables,
     production,
     productionOutputs,
+    productionTfvars,
     productionVariables,
   ] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/main.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/outputs.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/variables.tf"),
     readRepositoryFile("infra/yandex/production/main.tf"),
     readRepositoryFile("infra/yandex/production/outputs.tf"),
+    readRepositoryFile("infra/yandex/production/terraform.tfvars.example"),
     readRepositoryFile("infra/yandex/production/variables.tf"),
   ]);
 
   return {
+    compute,
     ingress,
     ingressOutputs,
     ingressVariables,
     production,
     productionOutputs,
+    productionTfvars,
     productionVariables,
   };
 }
@@ -1497,6 +1682,8 @@ const requiredObservabilityAlerts = [
   "deployment_failure",
   "runner_overrun",
 ];
+const certificateRiskQuery =
+  'series_min("certificate.days_until_expiration"{folderId="${var.folder_id}", service="certificate-manager", certificate="${var.certificate_ids[0]}|${var.certificate_ids[1]}"})';
 
 function assertProtectedObservability({
   bootstrap,
@@ -1632,14 +1819,42 @@ function assertProtectedObservability({
     assert.match(variables, /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/);
   }
 
+  assert.equal(requiredObservabilityAlerts.length, 16);
+  assert.equal(
+    [...observability.matchAll(/^\s+category\s*=\s*"[^"]+"$/gm)].length,
+    16,
+    "observability must keep exactly 16 alert categories",
+  );
+  assert.doesNotMatch(observability, /certificate_risk_kiosk/);
+  assert.match(observabilityVariables, /variable\s+"certificate_ids"\s*\{/);
+  assert.match(observabilityVariables, /type\s*=\s*list\(string\)/);
+  assert.match(observabilityVariables, /length\(var\.certificate_ids\)\s*==\s*2/);
+  assert.match(
+    observabilityVariables,
+    /alltrue\(\[for certificate_id in var\.certificate_ids : length\(trimspace\(certificate_id\)\) > 0\]\)/,
+  );
+  assert.match(observabilityVariables, /length\(toset\(var\.certificate_ids\)\)\s*==\s*2/);
+  assert.doesNotMatch(observabilityVariables, /variable\s+"certificate_id"\s*\{/);
+
+  const encodedCertificateQuery = observability.match(
+    /^\s*certificate_risk_query\s*=\s*"(.+)"$/m,
+  )?.[1];
+  assert.ok(encodedCertificateQuery, "certificate risk query must be defined once as a local");
+  assert.equal(encodedCertificateQuery.replaceAll('\\"', '"'), certificateRiskQuery);
+
   for (const category of requiredObservabilityAlerts) {
     const spec = terraformObjectEntry(observability, category);
     assert.match(spec, new RegExp(`category\\s*=\\s*"${category}"`));
     assert.match(spec, /metric\s*=\s*"[^\n]+"/);
-    assert.match(spec, /query\s*=\s*"[^\n]+"/);
     const encodedQuery = spec.match(/query\s*=\s*"(.+)"$/m)?.[1];
-    assert.ok(encodedQuery, `${category} must expose a parseable Monitoring query`);
-    const query = encodedQuery.replaceAll('\\"', '"');
+    const query =
+      category === "certificate_risk" ? certificateRiskQuery : encodedQuery?.replaceAll('\\"', '"');
+    if (category === "certificate_risk") {
+      assert.match(spec, /query\s*=\s*local\.certificate_risk_query/);
+    } else {
+      assert.ok(encodedQuery, `${category} must expose a parseable Monitoring query`);
+    }
+    assert.ok(query, `${category} must expose a parseable Monitoring query`);
     const selectors = [...query.matchAll(/(?:"[^"]+"|[A-Za-z][A-Za-z0-9._-]*)\{/g)];
     assert.ok(selectors.length > 0, `${category} must contain a metric selector`);
     assert.doesNotMatch(
@@ -1674,6 +1889,13 @@ function assertProtectedObservability({
     assert.match(spec, /alarm_threshold\s*=\s*0\.5\b/);
   }
 
+  const certificateRisk = terraformObjectEntry(observability, "certificate_risk");
+  assert.match(certificateRisk, /comparison\s*=\s*"LESS_THAN"/);
+  assert.match(certificateRisk, /warning_threshold\s*=\s*30\b/);
+  assert.match(certificateRisk, /alarm_threshold\s*=\s*14\b/);
+  assert.match(certificateRisk, /evaluation_window\s*=\s*"1h"/);
+  assert.match(certificateRisk, /notification_channel_id\s*=\s*var\.notification_channel_id/);
+
   const dashboard = terraformResourceBlock(
     observability,
     "yandex_monitoring_dashboard",
@@ -1699,6 +1921,11 @@ function assertProtectedObservability({
   assert.match(production, /module\s+"observability"\s*\{/);
   assert.match(production, /notification_channel_id\s*=\s*var\.notification_channel_id/);
   assert.match(production, /alert_ids\s*=\s*var\.alert_ids/);
+  assert.match(
+    production,
+    /certificate_ids\s*=\s*\[\s*module\.ingress\.certificate_id,\s*module\.ingress\.kiosk_certificate_id,?\s*\]/,
+  );
+  assert.doesNotMatch(production, /^\s*certificate_id\s*=\s*module\.ingress\.certificate_id$/m);
   assert.match(production, /audit_bucket_name\s*=\s*module\.object_storage\.audit_bucket_name/);
   assert.match(production, /media_bucket_name\s*=\s*module\.object_storage\.media_bucket_name/);
   assert.equal(
@@ -1813,6 +2040,57 @@ function workflowCommands(job) {
     .join("\n");
 }
 
+function publicDnsApplyFilter(applyStep) {
+  const startMarker = '--arg kiosk_domain "$TF_VAR_kiosk_domain" \'';
+  const start = applyStep.run.indexOf(startMarker);
+  assert.ok(start >= 0, "public DNS extractor must bind the protected kiosk domain");
+  const filterStart = start + startMarker.length;
+  const end = applyStep.run.indexOf(
+    '\' "$terraform_apply_stream" > "$dns_values_path"',
+    filterStart,
+  );
+  assert.ok(end > filterStart, "public DNS extractor must consume the authenticated apply stream");
+  return applyStep.run.slice(filterStart, end).trim();
+}
+
+function runPublicDnsApplyFilter(filter, records, approvedType = ["tuple", ["string"]]) {
+  const adminDomain = "admin.markiro.example";
+  const kioskDomain = "kiosk.markiro.example";
+  const events = records.map((record) =>
+    record === "outputs"
+      ? {
+          type: "outputs",
+          outputs: {
+            admin_domain: { sensitive: false, type: "string", value: adminDomain },
+            kiosk_domain: { sensitive: false, type: "string", value: kioskDomain },
+            approved_a_records: {
+              sensitive: false,
+              type: approvedType,
+              value: ["203.0.113.10"],
+            },
+          },
+        }
+      : record,
+  );
+  return JSON.parse(
+    execFileSync(
+      "jq",
+      [
+        "-s",
+        "-e",
+        "--arg",
+        "admin_domain",
+        adminDomain,
+        "--arg",
+        "kiosk_domain",
+        kioskDomain,
+        filter,
+      ],
+      { encoding: "utf8", input: `${events.map(JSON.stringify).join("\n")}\n` },
+    ),
+  );
+}
+
 function mutateWorkflowSource(source, mutate) {
   const workflow = yaml.load(source, { schema: yaml.JSON_SCHEMA });
   mutate(workflow);
@@ -1871,6 +2149,10 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.deepEqual(apply.permissions, { contents: "read", "id-token": "write" });
   assert.equal(plan.environment, "production-infrastructure");
   assert.equal(apply.environment, "production-infrastructure");
+  assert.equal(plan.env.TF_VAR_domain, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(plan.env.TF_VAR_kiosk_domain, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
+  assert.equal(apply.env.TF_VAR_domain, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(apply.env.TF_VAR_kiosk_domain, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
   assert.equal(dnsApproval.environment, "production-public-dns");
   assert.equal(postgresOwnerApproval.environment, "production-postgres-owner");
   assert.deepEqual(postgresOwnerApproval.permissions, { contents: "read" });
@@ -2009,6 +2291,17 @@ function assertProtectedInfrastructureWorkflow(source) {
       'rm -rf -- "${RUNNER_TEMP:?}/yandex-alert-specs"',
     ],
   );
+  assert.deepEqual(
+    finalApplyCleanupStep.run
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line.startsWith("rm -f --")),
+    [
+      'rm -f -- "${RUNNER_TEMP:?}/public-dns-values.json"',
+      'rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"',
+    ],
+    "public DNS values and receipt cleanup must remain exact and unconditional",
+  );
   assert.doesNotMatch(finalApplyCleanupStep.run, /\bunset\b/);
   assert.match(applyStep.run, /unset [^\n]*TF_DATA_DIR/);
   assert.match(applyStep.run, /rm -rf -- "\$\{RUNNER_TEMP:\?\}\/yandex-production-terraform-data"/);
@@ -2138,6 +2431,61 @@ ${applyObservabilityCase}
   assert.doesNotMatch(applyCommands, /cat "\$terraform_apply_(?:stream|stderr)"/);
   assert.doesNotMatch(applyCommands, /terraform[^\n]*apply[^\n]*\$plan_path"\s*$/m);
 
+  const publicDnsFilter = publicDnsApplyFilter(applyStep);
+  assert.deepEqual(runPublicDnsApplyFilter(publicDnsFilter, ["outputs"]), {
+    adminDomain: "admin.markiro.example",
+    answers: {
+      "admin.markiro.example": ["203.0.113.10"],
+      "kiosk.markiro.example": ["203.0.113.10"],
+    },
+    kioskDomain: "kiosk.markiro.example",
+  });
+  assert.throws(
+    () => runPublicDnsApplyFilter(publicDnsFilter, ["outputs", "outputs"]),
+    "public DNS evidence must contain exactly one Terraform outputs event",
+  );
+  assert.throws(
+    () => runPublicDnsApplyFilter(publicDnsFilter, ["outputs"], "string"),
+    "approved A records must have the exact Terraform tuple-of-string type",
+  );
+  assert.throws(() => {
+    const event = {
+      type: "outputs",
+      outputs: {
+        admin_domain: {
+          sensitive: false,
+          type: "string",
+          value: "admin.markiro.example",
+        },
+        kiosk_domain: {
+          sensitive: false,
+          type: "string",
+          value: "kiosk.markiro.example",
+        },
+        approved_a_records: {
+          sensitive: false,
+          type: ["tuple", ["string"]],
+          value: ["999.999.999.999"],
+        },
+      },
+    };
+    execFileSync(
+      "jq",
+      [
+        "-s",
+        "-e",
+        "--arg",
+        "admin_domain",
+        "admin.markiro.example",
+        "--arg",
+        "kiosk_domain",
+        "kiosk.markiro.example",
+        publicDnsFilter,
+      ],
+      { encoding: "utf8", input: `${JSON.stringify(event)}\n` },
+    );
+  }, "public DNS evidence must reject IPv4 octets outside 0..255");
+
   const alertUploadStep = apply.steps.find(
     (step) => step.name === "Upload exact first-phase alert specifications",
   );
@@ -2148,6 +2496,15 @@ ${applyObservabilityCase}
   );
   assert.equal(alertUploadStep.with.path, "${{ runner.temp }}/yandex-alert-specs/alert-specs.json");
   assert.equal(alertUploadStep.with["if-no-files-found"], "error");
+
+  const dnsApplyReceiptStep = apply.steps.find(
+    (step) => step.name === "Record exact public DNS apply evidence",
+  );
+  assert.ok(dnsApplyReceiptStep);
+  assert.equal(dnsApplyReceiptStep.if, "inputs.enable_public_dns == true");
+  for (const field of ["adminDomain", "answers", "kioskDomain"]) {
+    assert.match(dnsApplyReceiptStep.run, new RegExp(field));
+  }
 
   const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
   assert.doesNotMatch(allCommands, /pull_request_target/);
@@ -2228,6 +2585,24 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
       "missing environment",
       source.replace("environment: production-infrastructure", "environment: unprotected", 1),
     ],
+    [
+      "missing apply environment",
+      mutateWorkflowSource(source, (workflow) => {
+        delete workflow.jobs.apply.environment;
+      }),
+    ],
+    [
+      "missing plan kiosk domain",
+      mutateWorkflowSource(source, (workflow) => {
+        delete workflow.jobs.plan.env.TF_VAR_kiosk_domain;
+      }),
+    ],
+    [
+      "apply kiosk domain substituted with admin domain",
+      mutateWorkflowSource(source, (workflow) => {
+        workflow.jobs.apply.env.TF_VAR_kiosk_domain = "${{ vars.MARKIRO_DOMAIN }}";
+      }),
+    ],
     ["stale commit", source.replace('[[ "$target_sha" == "$dispatch_sha" ]]\n', "")],
     ["unmasked HMAC", source.replace('echo "::add-mask::$aws_secret_access_key"\n', "")],
     ["DNS default true", source.replace("default: false", "default: true")],
@@ -2280,6 +2655,25 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
       source.replace(
         'terraform -chdir=infra/yandex/production apply -json -input=false "$plan_path" > "$terraform_apply_stream" 2> "$terraform_apply_stderr"',
         'terraform -chdir=infra/yandex/production apply -input=false "$plan_path"',
+      ),
+    ],
+    [
+      "public DNS extractor accepts multiple outputs events",
+      source.replace("select(($records | length) == 1) |", "select(($records | length) >= 1) |"),
+    ],
+    [
+      "public DNS extractor omits the approved output type",
+      source.replace('select($approved.type == ["tuple", ["string"]]) |\n', ""),
+    ],
+    [
+      "public DNS extractor accepts out-of-range IPv4 octets",
+      source.replace("(tonumber >= 0 and tonumber <= 255)", "true"),
+    ],
+    [
+      "public DNS extractor maps a different kiosk answer set",
+      source.replace(
+        "answers: {($admin.value): $answers, ($kiosk.value): $answers}",
+        'answers: {($admin.value): $answers, ($kiosk.value): ["203.0.113.11"]}',
       ),
     ],
     [
@@ -2378,6 +2772,14 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
         );
         if (step) step.if = "success()";
       }),
+    ],
+    [
+      "missing public DNS extracted-values cleanup",
+      source.replace('rm -f -- "${RUNNER_TEMP:?}/public-dns-values.json"\n', ""),
+    ],
+    [
+      "missing public DNS receipt cleanup",
+      source.replace('rm -f -- "${RUNNER_TEMP:?}/public-dns-apply.json"\n', ""),
     ],
   ]);
 
@@ -2855,7 +3257,11 @@ test("production managed PostgreSQL and object storage protect durable data", as
   assertProtectedManagedData(await managedDataSources());
 });
 
-test("production ingress provides HTTPS-only protected routing through the private app target", async () => {
+test("protected ingress serves the admin and kiosk authorities through one private app edge", async () => {
+  assertProtectedIngress(await protectedIngressSources());
+});
+
+test("production root wires both ingress hostnames while keeping public DNS disabled", async () => {
   assertProtectedIngress(await protectedIngressSources());
 });
 
@@ -2955,9 +3361,163 @@ test("observability contract rejects missing categories, unsafe retention, audit
     'notification_channel_id = "other-channel"',
   );
   assert.throws(() => assertProtectedObservability(wrongChannel));
+
+  const oneCertificate = await observabilitySources();
+  oneCertificate.production = oneCertificate.production.replace(
+    /^\s*module\.ingress\.kiosk_certificate_id,?\s*$/m,
+    "",
+  );
+  assert.throws(() => assertProtectedObservability(oneCertificate), /certificate_ids/);
+
+  const duplicateCertificates = await observabilitySources();
+  duplicateCertificates.production = duplicateCertificates.production.replace(
+    "module.ingress.kiosk_certificate_id",
+    "module.ingress.certificate_id",
+  );
+  assert.throws(() => assertProtectedObservability(duplicateCertificates), /certificate_ids/);
+
+  const oneCertificateAccepted = await observabilitySources();
+  oneCertificateAccepted.observabilityVariables =
+    oneCertificateAccepted.observabilityVariables.replace(
+      /length\(var\.certificate_ids\)\s*==\s*2\s*&&\s*/,
+      "",
+    );
+  assert.throws(() => assertProtectedObservability(oneCertificateAccepted), /certificate_ids/);
+
+  const duplicateCertificatesAccepted = await observabilitySources();
+  duplicateCertificatesAccepted.observabilityVariables =
+    duplicateCertificatesAccepted.observabilityVariables.replace(
+      /\s*&&\s*length\(toset\(var\.certificate_ids\)\)\s*==\s*2/,
+      "",
+    );
+  assert.throws(
+    () => assertProtectedObservability(duplicateCertificatesAccepted),
+    /certificate_ids/,
+  );
+
+  const latestExpiringCertificate = await observabilitySources();
+  latestExpiringCertificate.observability = latestExpiringCertificate.observability.replace(
+    "series_min(",
+    "series_max(",
+  );
+  assert.throws(() => assertProtectedObservability(latestExpiringCertificate));
+
+  const unwrappedCertificateSelector = await observabilitySources();
+  unwrappedCertificateSelector.observability = unwrappedCertificateSelector.observability.replace(
+    /series_min\((\\"certificate\.days_until_expiration\\"\{[^\n]+\})\)/,
+    "$1",
+  );
+  assert.throws(() => assertProtectedObservability(unwrappedCertificateSelector));
+
+  const kioskOnlyAlert = await observabilitySources();
+  kioskOnlyAlert.observability = kioskOnlyAlert.observability.replace(
+    /\n    runner_overrun\s*=\s*\{/,
+    `
+    certificate_risk_kiosk = {
+      category                = "certificate_risk_kiosk"
+      title                   = "Kiosk certificate expiry risk"
+      metric                  = "certificate.days_until_expiration"
+      query                   = local.certificate_risk_query
+      comparison              = "LESS_THAN"
+      warning_threshold       = 30
+      alarm_threshold         = 14
+      evaluation_window       = "1h"
+      notification_channel_id = var.notification_channel_id
+    }
+    runner_overrun = {`,
+  );
+  assert.throws(() => assertProtectedObservability(kioskOnlyAlert), /16 alert categories/);
 });
 
-test("production ingress contract rejects bypasses, computed certificate keys, fractional rates, and unsafe defaults", async () => {
+test("ingress mutations reject bypasses, duplicate edges, unsafe certificates, and unsafe defaults", async () => {
+  for (const variables of ["ingressVariables", "productionVariables"]) {
+    const equalDomainsAccepted = await protectedIngressSources();
+    equalDomainsAccepted[variables] = equalDomainsAccepted[variables].replace(
+      "var.kiosk_domain != var.domain",
+      "true",
+    );
+    assert.throws(
+      () => assertProtectedIngress(equalDomainsAccepted),
+      /kiosk_domain must reject the admin domain/,
+    );
+  }
+
+  const combinedReplacementCertificate = await protectedIngressSources();
+  combinedReplacementCertificate.ingress = replaceTerraformResource(
+    combinedReplacementCertificate.ingress,
+    "yandex_cm_certificate",
+    "markiro",
+    (block) =>
+      block.replace("domains   = [var.domain]", "domains   = [var.domain, var.kiosk_domain]"),
+  );
+  assert.throws(() => assertProtectedIngress(combinedReplacementCertificate));
+
+  const ungatedKioskRecord = await protectedIngressSources();
+  ungatedKioskRecord.ingress = replaceTerraformResource(
+    ungatedKioskRecord.ingress,
+    "yandex_dns_recordset",
+    "kiosk_application",
+    (block) => block.replace("count = var.public_dns_enabled ? 1 : 0", "count = 1"),
+  );
+  assert.throws(() => assertProtectedIngress(ungatedKioskRecord));
+
+  for (const [type, name] of [
+    ["yandex_vpc_address", "markiro"],
+    ["yandex_alb_backend_group", "app"],
+    ["yandex_alb_load_balancer", "markiro"],
+  ]) {
+    const duplicateEdge = await protectedIngressSources();
+    duplicateEdge.ingress += terraformResourceBlock(duplicateEdge.ingress, type, name).replace(
+      `"${name}"`,
+      `"duplicate_${name}"`,
+    );
+    assert.throws(
+      () => assertProtectedIngress(duplicateEdge),
+      /protected ingress must keep exactly/,
+    );
+  }
+
+  const duplicateTargetGroup = await protectedIngressSources();
+  duplicateTargetGroup.compute += terraformResourceBlock(
+    duplicateTargetGroup.compute,
+    "yandex_alb_target_group",
+    "app",
+  ).replace('"app"', '"duplicate_app"');
+  assert.throws(
+    () => assertProtectedIngress(duplicateTargetGroup),
+    /exactly one application target group/,
+  );
+
+  const wildcardAuthority = await protectedIngressSources();
+  wildcardAuthority.ingress = replaceTerraformResource(
+    wildcardAuthority.ingress,
+    "yandex_alb_virtual_host",
+    "markiro",
+    (block) =>
+      block.replace("authority      = [var.domain, var.kiosk_domain]", 'authority      = ["*"]'),
+  );
+  assert.throws(
+    () => assertProtectedIngress(wildcardAuthority),
+    /exactly the admin and kiosk authorities/,
+  );
+
+  for (const certificateId of [
+    "data.yandex_cm_certificate.issued.id",
+    "data.yandex_cm_certificate.kiosk_issued.id",
+  ]) {
+    const missingIssuedCertificate = await protectedIngressSources();
+    missingIssuedCertificate.ingress = replaceTerraformResource(
+      missingIssuedCertificate.ingress,
+      "yandex_alb_load_balancer",
+      "markiro",
+      (block) => block.replace(new RegExp(`\\s*${certificateId.replaceAll(".", "\\.")},?`), ""),
+    );
+    assert.throws(
+      () => assertProtectedIngress(missingIssuedCertificate),
+      /exactly both issued certificates/,
+    );
+  }
+
   const missingSws = await protectedIngressSources();
   missingSws.ingress = replaceTerraformResource(
     missingSws.ingress,

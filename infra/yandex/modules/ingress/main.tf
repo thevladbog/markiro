@@ -47,6 +47,35 @@ data "yandex_cm_certificate" "issued" {
   depends_on = [yandex_dns_recordset.certificate_validation]
 }
 
+resource "yandex_cm_certificate" "kiosk" {
+  name      = "markiro-production-kiosk-tls"
+  folder_id = var.folder_id
+  domains   = [var.kiosk_domain]
+  labels    = var.labels
+
+  managed {
+    challenge_type  = "DNS_CNAME"
+    challenge_count = 1
+  }
+}
+
+resource "yandex_dns_recordset" "kiosk_certificate_validation" {
+  count = 1
+
+  zone_id = var.dns_zone_id
+  name    = yandex_cm_certificate.kiosk.challenges[count.index].dns_name
+  type    = yandex_cm_certificate.kiosk.challenges[count.index].dns_type
+  ttl     = 300
+  data    = [yandex_cm_certificate.kiosk.challenges[count.index].dns_value]
+}
+
+data "yandex_cm_certificate" "kiosk_issued" {
+  certificate_id  = yandex_cm_certificate.kiosk.id
+  wait_validation = true
+
+  depends_on = [yandex_dns_recordset.kiosk_certificate_validation]
+}
+
 resource "yandex_alb_backend_group" "app" {
   name      = "markiro-production-app"
   folder_id = var.folder_id
@@ -125,7 +154,7 @@ resource "yandex_alb_http_router" "markiro" {
 resource "yandex_alb_virtual_host" "markiro" {
   name           = "markiro-production"
   http_router_id = yandex_alb_http_router.markiro.id
-  authority      = [var.domain]
+  authority      = [var.domain, var.kiosk_domain]
 
   route_options {
     security_profile_id = yandex_sws_security_profile.markiro.id
@@ -191,7 +220,10 @@ resource "yandex_alb_load_balancer" "markiro" {
 
     tls {
       default_handler {
-        certificate_ids = [data.yandex_cm_certificate.issued.id]
+        certificate_ids = [
+          data.yandex_cm_certificate.issued.id,
+          data.yandex_cm_certificate.kiosk_issued.id,
+        ]
 
         http_handler {
           http_router_id = yandex_alb_http_router.markiro.id
@@ -210,6 +242,16 @@ resource "yandex_dns_recordset" "application" {
 
   zone_id = var.dns_zone_id
   name    = var.domain
+  type    = "A"
+  ttl     = 300
+  data    = [yandex_vpc_address.markiro.external_ipv4_address.0.address]
+}
+
+resource "yandex_dns_recordset" "kiosk_application" {
+  count = var.public_dns_enabled ? 1 : 0
+
+  zone_id = var.dns_zone_id
+  name    = var.kiosk_domain
   type    = "A"
   ttl     = 300
   data    = [yandex_vpc_address.markiro.external_ipv4_address.0.address]

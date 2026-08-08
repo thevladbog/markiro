@@ -21,13 +21,8 @@
 	}
 }
 
-http://{$MARKIRO_DOMAIN}:8080 {
-	redir https://{$MARKIRO_DOMAIN}{uri} permanent
-}
-
-https://{$MARKIRO_DOMAIN}:8443 {
+(common_headers) {
 	encode zstd gzip
-	root * /srv
 
 	header {
 		-Server
@@ -38,7 +33,10 @@ https://{$MARKIRO_DOMAIN}:8443 {
 		Referrer-Policy strict-origin-when-cross-origin
 		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'"
 	}
+}
 
+(admin_routes) {
+	root * /srv/admin
 	route {
 		@apiAuth path /api/auth/*
 		handle @apiAuth {
@@ -82,4 +80,55 @@ https://{$MARKIRO_DOMAIN}:8443 {
 
 		respond 404
 	}
+}
+
+(kiosk_routes) {
+	root * /srv/kiosk
+	route {
+		@kioskApi path /api/kiosk/*
+		handle @kioskApi {
+			uri strip_prefix /api
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@kioskReserved path /api /api/auth/* /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /health* /openapi.json /docs*
+		handle @kioskReserved {
+			respond 404
+		}
+
+		@kioskAssets path /assets/*
+		handle @kioskAssets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		@kioskSpa method GET HEAD
+		handle @kioskSpa {
+			header Cache-Control "no-cache"
+			try_files {path} /index.html
+			file_server
+		}
+
+		respond 404
+	}
+}
+
+http://{$MARKIRO_DOMAIN}:8080 {
+	redir https://{$MARKIRO_DOMAIN}{uri} permanent
+}
+
+http://{$MARKIRO_KIOSK_DOMAIN}:8080 {
+	redir https://{$MARKIRO_KIOSK_DOMAIN}{uri} permanent
+}
+
+https://{$MARKIRO_DOMAIN}:8443 {
+	import common_headers
+	import admin_routes
+}
+
+https://{$MARKIRO_KIOSK_DOMAIN}:8443 {
+	import common_headers
+	import kiosk_routes
 }

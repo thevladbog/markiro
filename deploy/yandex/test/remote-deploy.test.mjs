@@ -355,6 +355,108 @@ function response(body, ok = true) {
   };
 }
 
+const smokeCsp =
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const adminShell =
+  '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
+const kioskShell =
+  '<html lang="ru"><head><title>Маркиро — Киоск</title><script type="module" src="/assets/kiosk.js"></script><link rel="manifest" href="/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/registerSW.js" defer></script></head><body><div id="root"></div></body></html>';
+
+function curlSmokeResponse(value, releaseSha = COMMIT) {
+  const url = new URL(value);
+  const kiosk = url.hostname === "kiosk.markiro.example";
+  const headers = {
+    "content-security-policy": smokeCsp,
+    "strict-transport-security": "max-age=63072000; includeSubDomains",
+    "x-content-type-options": "nosniff",
+    "x-frame-options": "SAMEORIGIN",
+    "referrer-policy": "strict-origin-when-cross-origin",
+  };
+  let status = 200;
+  let body = "{}";
+  headers["content-type"] = "application/json";
+
+  if (url.pathname === "/") {
+    body = kiosk ? kioskShell : adminShell;
+    headers["content-type"] = "text/html";
+    headers["cache-control"] = "no-cache";
+    headers["x-markiro-release-sha"] = releaseSha;
+  } else if (url.pathname === "/team/deep-link" && !kiosk) {
+    body = adminShell;
+    headers["content-type"] = "text/html";
+    headers["cache-control"] = "no-cache";
+  } else if (url.pathname === "/assets/main.js" && !kiosk) {
+    body = "console.log('admin')";
+    headers["content-type"] = "application/javascript";
+    headers["cache-control"] = "public, max-age=31536000, immutable";
+  } else if (url.pathname === "/assets/kiosk.js" && kiosk) {
+    body = "console.log('kiosk')";
+    headers["content-type"] = "application/javascript";
+    headers["cache-control"] = "public, max-age=31536000, immutable";
+  } else if (url.pathname === "/manifest.webmanifest" && kiosk) {
+    body = JSON.stringify({
+      id: "/",
+      name: "Маркиро — Киоск",
+      short_name: "Киоск",
+      start_url: "/",
+      scope: "/",
+      display: "fullscreen",
+      icons: [{ src: "/icon-192.png", sizes: "192x192", type: "image/png" }],
+    });
+    headers["content-type"] = "application/manifest+json";
+  } else if (url.pathname === "/registerSW.js" && kiosk) {
+    body = "navigator.serviceWorker.register('/sw.js', { scope: '/' })";
+    headers["content-type"] = "application/javascript";
+  } else if (url.pathname === "/sw.js" && kiosk) {
+    body =
+      'precacheAndRoute([{url:"index.html",revision:"1"}],{});registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]}));';
+    headers["content-type"] = "application/javascript";
+  } else if (url.pathname === "/docs" && !kiosk) {
+    body =
+      '<html><script src="/docs/scalar.js"></script><script src="/docs/bootstrap.js"></script></html>';
+    headers["content-type"] = "text/html";
+  } else if (url.pathname === "/docs/scalar.js" && !kiosk) {
+    body = "window.Scalar={createApiReference:()=>{}}";
+    headers["content-type"] = "application/javascript";
+  } else if (url.pathname === "/docs/bootstrap.js" && !kiosk) {
+    body =
+      'Scalar.createApiReference("#app", {url:"/openapi.json",telemetry:false,withDefaultFonts:false,hideClientButton:true,hideTestRequestButton:true,showDeveloperTools:"never",agent:{disabled:true},mcp:{disabled:true}});';
+    headers["content-type"] = "application/javascript";
+  } else if (url.pathname === "/1c_exchange" && !kiosk) {
+    body = "failure\n";
+    headers["content-type"] = "text/plain";
+  } else if (
+    kiosk &&
+    [
+      "/api",
+      "/api/auth/get-session",
+      "/station",
+      "/station/bootstrap",
+      "/kiosk",
+      "/docs",
+      "/unknown",
+    ].includes(url.pathname)
+  ) {
+    status = 404;
+    body = "not found";
+    headers["content-type"] = "text/plain";
+  } else if (url.pathname === "/unknown") {
+    status = 404;
+    body = "not found";
+    headers["content-type"] = "text/plain";
+  } else if (url.pathname.includes("ready")) {
+    body = '{"status":"degraded"}';
+  } else {
+    body = '{"status":"ok"}';
+  }
+
+  const reason = status === 404 ? "Not Found" : "OK";
+  const serializedHeaders = Object.entries(headers)
+    .map(([name, value]) => `${name}: ${value}`)
+    .join("\r\n");
+  return `HTTP/1.1 ${status} ${reason}\r\n${serializedHeaders}\r\n\r\n${body}\nMARKIRO_HTTP_STATUS:${status}\n`;
+}
+
 function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
   const events = [];
   const commands = [];
@@ -372,6 +474,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     YC_BACKEND_GROUP_ID: "ds7backend",
     YC_TARGET_GROUP_ID: "ds7target",
     MARKIRO_DOMAIN: "markiro.example",
+    MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_DEPLOYMENT_PHASE: candidate.previousTag === null ? "first" : "repeat",
     YC_LOAD_BALANCER_ADDRESS: "203.0.113.42",
     APP_SSH_HOST_KEYS_B64: Buffer.from(`${ED25519_KEY}\n${RSA_KEY}`).toString("base64"),
@@ -478,12 +581,15 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
         assert.deepEqual(JSON.parse(JSON.parse(options.input).commandInput), candidate);
         return `${JSON.stringify({ ...candidate, state: "failed" })}\n`;
       }
+      if (command === "curl") return curlSmokeResponse(args.at(-1));
       if (args.includes("--dump-header"))
         return `HTTP/1.1 200 OK\r\nx-markiro-release-sha: ${COMMIT}\r\n\r\n`;
       return "";
     },
-    async smoke({ expectedReleaseSha }) {
+    async smoke({ adminBaseUrl, kioskBaseUrl, expectedReleaseSha }) {
       events.push("external smoke");
+      assert.equal(adminBaseUrl, "https://markiro.example");
+      assert.equal(kioskBaseUrl, "https://kiosk.markiro.example");
       assert.equal(expectedReleaseSha, COMMIT);
       if (failAt === "external smoke") throw new Error("external smoke failed");
     },
@@ -525,6 +631,7 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
     `MARKIRO_EDGE_IMAGE_DIGEST=sha256:${"b".repeat(64)}`,
     "MARKIRO_COMPOSE_PROJECT=markiro-production",
     "MARKIRO_DOMAIN=markiro.example",
+    "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.example",
     "MARKIRO_EDGE_MODE=behind-alb",
     "MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1",
     "MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=0",
@@ -547,6 +654,13 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
   assert.ok(events.indexOf("activate release pointer") > events.indexOf("remote finalize"));
 });
 
+test("repeat ALB smoke ignores an ambient direct-mode HTTPS port", async () => {
+  const { environment, system } = cliFixture();
+  environment.MARKIRO_HTTPS_PORT = "18443";
+
+  await runRemoteDeployment(environment, system);
+});
+
 test("actual remote prepare argv satisfies the real app-side preflight environment boundary", async () => {
   const { commands, environment, system } = cliFixture();
 
@@ -567,6 +681,7 @@ test("actual remote prepare argv satisfies the real app-side preflight environme
 
   const preflight = await runPreflight(remoteEnvironment, {
     mode: async () => 0o600,
+    readText: async () => "KIOSK_ORIGIN=https://kiosk.markiro.example\n",
     composeQuiet: async (value) => {
       composeEnvironment = value;
     },
@@ -577,11 +692,13 @@ test("actual remote prepare argv satisfies the real app-side preflight environme
     apiImageDigest: `sha256:${"a".repeat(64)}`,
     edgeImageDigest: `sha256:${"b".repeat(64)}`,
     domain: "markiro.example",
+    kioskDomain: "kiosk.markiro.example",
     acmeEmail: undefined,
     envFile: "/etc/markiro/production.env",
     edgeMode: "behind-alb",
   });
   assert.equal(composeEnvironment.MARKIRO_DOMAIN, "markiro.example");
+  assert.equal(composeEnvironment.MARKIRO_KIOSK_DOMAIN, "kiosk.markiro.example");
 });
 
 test("runner rejects a malformed production domain before transferring the release", async () => {
@@ -593,7 +710,7 @@ test("runner rejects a malformed production domain before transferring the relea
   assert.equal(events.includes("transfer immutable bundle"), false);
 });
 
-test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus the reserved ALB address", async () => {
+test("first deployment probes both authorities through one reserved ALB address before DNS", async () => {
   const { commands, environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
 
   await runRemoteDeployment(environment, system);
@@ -601,9 +718,8 @@ test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus t
   const localProbe = commands.find(
     ({ command, args }) => command === "ssh" && args.includes("http://127.0.0.1:8080/health/ready"),
   );
-  const albProbe = commands.find(
-    ({ command, args }) =>
-      command === "curl" && args.includes("https://markiro.example/health/ready"),
+  const albProbes = commands.filter(
+    ({ command, args }) => command === "curl" && args.includes("--resolve"),
   );
   const prepare = commands.find(
     ({ command, args }) => command === "ssh" && args.includes("prepare"),
@@ -611,12 +727,50 @@ test("real CLI adapter keeps first deployment pre-DNS and probes loopback plus t
   assert.ok(localProbe);
   assert.ok(localProbe.args.includes("Host: markiro.example"));
   assert.ok(localProbe.args.includes("--dump-header"));
-  assert.ok(albProbe);
-  assert.ok(albProbe.args.includes("markiro.example:443:203.0.113.42"));
-  assert.ok(albProbe.args.includes("--dump-header"));
+  assert.ok(
+    albProbes.some(
+      ({ args }) =>
+        args.includes("markiro.example:443:203.0.113.42") &&
+        args.includes("https://markiro.example/health/ready"),
+    ),
+  );
+  for (const path of [
+    "/",
+    "/manifest.webmanifest",
+    "/sw.js",
+    "/api/kiosk/bootstrap",
+    "/api",
+    "/api/auth/get-session",
+    "/station",
+    "/station/bootstrap",
+    "/kiosk",
+    "/docs",
+  ]) {
+    assert.ok(
+      albProbes.some(
+        ({ args }) =>
+          args.includes("kiosk.markiro.example:443:203.0.113.42") &&
+          args.includes(`https://kiosk.markiro.example${path}`),
+      ),
+      `missing kiosk pre-DNS probe for ${path}`,
+    );
+  }
+  for (const { args } of albProbes) {
+    assert.ok(args.includes("--max-time"));
+    assert.ok(args.includes("--dump-header"));
+  }
   assert.ok(prepare.args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=0"));
   assert.ok(prepare.args.includes("MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=1"));
   assert.equal(events.includes("external smoke"), false);
+});
+
+test("runner rejects a malformed kiosk domain before transferring the release", async () => {
+  const { environment, events, system } = cliFixture();
+  environment.MARKIRO_KIOSK_DOMAIN = "https://kiosk.markiro.example/path";
+
+  await assert.rejects(runRemoteDeployment(environment, system), /MARKIRO_KIOSK_DOMAIN is invalid/);
+
+  assert.equal(events.includes("transfer immutable bundle"), false);
 });
 
 test("first-deployment rollback rehearsal never activates the candidate release pointer", async () => {
@@ -671,24 +825,27 @@ test("activation failure rolls containers back and preserves the previous live p
   assert.equal(activeRelease(), CANDIDATE.previousTag);
 });
 
-test("first deployment rejects a stale 200 release header before finalization", async () => {
-  const { environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
-  const run = system.run;
-  system.run = async (command, args, options) => {
-    if (args.includes("--dump-header"))
-      return `HTTP/1.1 200 OK\r\nx-markiro-release-sha: ${"f".repeat(40)}\r\n\r\n`;
-    return run(command, args, options);
-  };
+for (const authority of ["markiro.example", "kiosk.markiro.example"]) {
+  test(`first deployment rejects a stale ${authority} release before finalization`, async () => {
+    const { environment, events, system } = cliFixture({ candidate: FIRST_CANDIDATE });
+    const run = system.run;
+    system.run = async (command, args, options) => {
+      const output = await run(command, args, options);
+      if (command === "curl" && args.at(-1) === `https://${authority}/`)
+        return output.replace(COMMIT, "f".repeat(40));
+      return output;
+    };
 
-  await assert.rejects(
-    runRemoteDeployment(environment, system),
-    /live release identity does not match the expected release/,
-  );
+    await assert.rejects(
+      runRemoteDeployment(environment, system),
+      /live release identity does not match the expected release/,
+    );
 
-  assert.equal(events.includes("remote finalize"), false);
-  assert.equal(events.includes("remote rollback"), true);
-  assert.equal(events.includes("activate release pointer"), false);
-});
+    assert.equal(events.includes("remote finalize"), false);
+    assert.equal(events.includes("remote rollback"), true);
+    assert.equal(events.includes("activate release pointer"), false);
+  });
+}
 
 test("real CLI adapter rejects a noncanonical authenticated host-key bundle before writing trust", async () => {
   const { environment, events, system } = cliFixture();
@@ -713,7 +870,31 @@ test("real CLI adapter rolls back remotely when runner external smoke fails", as
     ({ command, args }) => command === "ssh" && args.includes("rollback"),
   );
   assert.ok(rollback.args.includes("MARKIRO_DOMAIN=markiro.example"));
+  assert.ok(rollback.args.includes("MARKIRO_KIOSK_DOMAIN=kiosk.markiro.example"));
 });
+
+for (const failedAuthority of ["admin", "kiosk"]) {
+  test(`${failedAuthority} external authority failure rolls back without finalizing`, async () => {
+    const { environment, events, system } = cliFixture();
+    system.smoke = async ({ adminBaseUrl, kioskBaseUrl, expectedReleaseSha }) => {
+      assert.equal(adminBaseUrl, "https://markiro.example");
+      assert.equal(kioskBaseUrl, "https://kiosk.markiro.example");
+      assert.equal(expectedReleaseSha, COMMIT);
+      events.push(`${failedAuthority} authority failed`);
+      throw new Error(`${failedAuthority} authority failed`);
+    };
+
+    await assert.rejects(
+      runRemoteDeployment(environment, system),
+      new RegExp(`${failedAuthority} authority failed`),
+    );
+
+    assert.ok(
+      events.indexOf("remote rollback") > events.indexOf(`${failedAuthority} authority failed`),
+    );
+    assert.equal(events.includes("remote finalize"), false);
+  });
+}
 
 for (const failAt of ["ALB healthy", "remote finalize"]) {
   test(`real CLI adapter terminalizes a first deployment after ${failAt} failure`, async () => {

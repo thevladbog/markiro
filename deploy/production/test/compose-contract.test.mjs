@@ -20,6 +20,7 @@ function renderCompose(files) {
         env: {
           ...process.env,
           MARKIRO_DOMAIN: "localhost",
+          MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
           MARKIRO_ENV_FILE: ".env.production.example",
           MARKIRO_IMAGE_TAG: "a".repeat(40),
           MARKIRO_API_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
@@ -63,6 +64,19 @@ test("production edge receives the immutable release SHA used by its public iden
   );
 });
 
+test("production edge requires separate admin and kiosk production domains", async () => {
+  const model = loadYaml(await readFile(productionCompose, "utf8"));
+
+  assert.equal(
+    model.services.edge.environment.MARKIRO_DOMAIN,
+    "${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}",
+  );
+  assert.equal(
+    model.services.edge.environment.MARKIRO_KIOSK_DOMAIN,
+    "${MARKIRO_KIOSK_DOMAIN:?MARKIRO_KIOSK_DOMAIN is required}",
+  );
+});
+
 test("merged CI Compose config preserves production restart policies", () => {
   const configured = execFileSync(
     "docker",
@@ -84,6 +98,7 @@ test("merged CI Compose config preserves production restart policies", () => {
         ...process.env,
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
         MARKIRO_ENV_FILE: envExample,
         MARKIRO_IMAGE_TAG: "contract-test",
         MARKIRO_API_IMAGE_DIGEST: apiDigest,
@@ -218,6 +233,7 @@ test("merged CI Compose uses local SHA-tagged images while validating dummy base
         ...process.env,
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
         MARKIRO_ENV_FILE: envExample,
         MARKIRO_IMAGE_TAG: "0123456789abcdef0123456789abcdef01234567",
         MARKIRO_API_IMAGE_DIGEST: apiDigest,
