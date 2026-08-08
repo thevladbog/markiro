@@ -664,6 +664,22 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     );
   }
 
+  const terraformAuditScopeViewer = terraformResourceBlock(
+    iam,
+    "yandex_lockbox_secret_iam_member",
+    "terraform_audit_scope_viewer",
+  );
+  assert.match(
+    terraformAuditScopeViewer,
+    /for_each\s*=\s*\{\s*registry\s*=\s*var\.registry_secret_id\s*runner_registration\s*=\s*var\.runner_registration_secret_id\s*runtime\s*=\s*var\.runtime_secret_id,?\s*\}/,
+  );
+  assert.match(terraformAuditScopeViewer, /secret_id\s*=\s*each\.value/);
+  assert.match(terraformAuditScopeViewer, /role\s*=\s*"lockbox\.viewer"/);
+  assert.match(
+    terraformAuditScopeViewer,
+    /member\s*=\s*"serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"/,
+  );
+
   assert.doesNotMatch(
     iam,
     /role\s*=\s*"(?:admin|editor)"/,

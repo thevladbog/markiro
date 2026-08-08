@@ -183,7 +183,7 @@ function assertIntegratedGraph(sources) {
   ];
   assert.deepEqual(
     allResources(iam, "yandex_lockbox_secret_iam_member").sort(),
-    expectedSecretReaders.map(([name]) => name).sort(),
+    [...expectedSecretReaders.map(([name]) => name), "terraform_audit_scope_viewer"].sort(),
   );
   for (const [name, secret, account] of expectedSecretReaders) {
     const grant = resourceBlock(iam, "yandex_lockbox_secret_iam_member", name);
@@ -191,6 +191,21 @@ function assertIntegratedGraph(sources) {
     assert.match(grant, /role\s*=\s*"lockbox\.payloadViewer"/);
     assert.match(grant, new RegExp(`yandex_iam_service_account\\.${account}\\.id`));
   }
+  const terraformAuditScopeViewer = resourceBlock(
+    iam,
+    "yandex_lockbox_secret_iam_member",
+    "terraform_audit_scope_viewer",
+  );
+  assert.match(
+    terraformAuditScopeViewer,
+    /for_each\s*=\s*\{\s*registry\s*=\s*var\.registry_secret_id\s*runner_registration\s*=\s*var\.runner_registration_secret_id\s*runtime\s*=\s*var\.runtime_secret_id,?\s*\}/,
+  );
+  assert.match(terraformAuditScopeViewer, /secret_id\s*=\s*each\.value/);
+  assert.match(terraformAuditScopeViewer, /role\s*=\s*"lockbox\.viewer"/);
+  assert.match(
+    terraformAuditScopeViewer,
+    /member\s*=\s*"serviceAccount:\$\{yandex_iam_service_account\.terraform\.id\}"/,
+  );
   assert.match(bootstrap, /registry_secret_id\s*=\s*yandex_lockbox_secret\.registry\.id/);
   const auditedSecrets = production;
   assert.match(
