@@ -68,8 +68,10 @@ The remaining background treatment is deliberately sparse:
 - one clipped, low-opacity representative marking-code string near the bottom;
 - a dynamic local date in the lower metadata row;
 - the metadata label `MARKIRO / TENANT ADMIN`;
-- no large DataMatrix, tilted square, crosshair, scan line, photo, gradient, or looping decorative
-  animation.
+- no large DataMatrix, tilted square, crosshair, scan line, photo, color or background gradient, or
+  looping decorative animation. The sole gradient exception is the diagonal grid-opacity mask,
+  `mask-image: linear-gradient(135deg, transparent 3%, black 34%, black 100%)`; it must not add
+  color or background shading.
 
 The representative code is decorative and must be hidden from assistive technology. It must not
 contain a real customer code, secret, identifier, or data loaded from the server. The date is

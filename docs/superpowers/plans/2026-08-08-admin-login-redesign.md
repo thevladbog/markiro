@@ -15,7 +15,7 @@
 - Use only local IBM Plex fonts, existing Markiro tokens, and exact approved logo vectors.
 - Add no dependency, CDN, remote image, forgot-password flow, social login, SSO, passkey, remember-me option, fake customer data, or operational metric.
 - Desktop split is approximately 43/57; below 768 px, omit the decorative brand panel and keep the form full-width within 20 px side padding.
-- Brand background contains only the 24 px grid, representative code string, local date, and lower metadata; no DataMatrix, large square, crosshair, scan line, gradient, photo, or decorative animation.
+- Brand background contains only the 24 px grid, representative code string, local date, and lower metadata; no DataMatrix, large square, crosshair, scan line, color or background gradient, photo, or decorative animation. The sole gradient exception is the grid-opacity mask: `mask-image: linear-gradient(135deg, transparent 3%, black 34%, black 100%)`.
 - Pending submission shows the existing rotating spinner with no visible button text and a translated visually hidden accessible label.
 - Preserve RU/EN, `light`/`dark`/`system`, keyboard operation, native autocomplete, visible focus, and WCAG AA contrast.
 - Report automated DOM checks separately from browser layout acceptance.
@@ -302,7 +302,7 @@ The `picture` owns the single accessible image role; both CSS-selected source im
 
 - [ ] **Step 6: Implement the approved page-local CSS**
 
-Create `login.css` with the exact structural values below, then add token-based hover/focus rules for the two header buttons and password button:
+Create `login.css` with the exact structural values below, then add token-based hover/focus rules for the two header buttons and password button. The sole permitted gradient declaration is the diagonal `mask-image: linear-gradient(135deg, transparent 3%, black 34%, black 100%)` grid-opacity fade; do not add color or background gradients.
 
 ```css
 .mk-login-page {
