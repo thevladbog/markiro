@@ -108,10 +108,15 @@ variable "postgres_cluster_id" {
   nullable    = false
 }
 
-variable "certificate_id" {
-  description = "Certificate Manager certificate ID used by expiry metric selectors."
-  type        = string
+variable "certificate_ids" {
+  description = "Ordered admin and kiosk Certificate Manager certificate IDs used by the shared expiry metric selector."
+  type        = list(string)
   nullable    = false
+
+  validation {
+    condition     = length(var.certificate_ids) == 2 && alltrue([for certificate_id in var.certificate_ids : length(trimspace(certificate_id)) > 0]) && length(toset(var.certificate_ids)) == 2
+    error_message = "certificate_ids must contain exactly two distinct, nonblank certificate IDs."
+  }
 }
 
 variable "notification_channel_id" {

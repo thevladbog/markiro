@@ -37,6 +37,8 @@ const binding = Object.freeze({
   observability_phase: "first",
   plan_sha256: "4".repeat(64),
 });
+const certificateRiskQuery =
+  'series_min("certificate.days_until_expiration"{folderId="folder-id", service="certificate-manager", certificate="admin-certificate-id|kiosk-certificate-id"})';
 
 function spec(category, overrides = {}) {
   return {
@@ -54,7 +56,21 @@ function spec(category, overrides = {}) {
 }
 
 function alertSpecs() {
-  return Object.fromEntries(categories.map((category) => [category, spec(category)]));
+  return Object.fromEntries(
+    categories.map((category) => [
+      category,
+      category === "certificate_risk"
+        ? spec(category, {
+            metric: "certificate.days_until_expiration",
+            query: certificateRiskQuery,
+            comparison: "LESS_THAN",
+            warning_threshold: 30,
+            alarm_threshold: 14,
+            evaluation_window: "1h",
+          })
+        : spec(category),
+    ]),
+  );
 }
 
 function applyRecords(specs = alertSpecs()) {
@@ -112,6 +128,17 @@ test("extracts only the strict 16 alert specs and evidence bindings from apply J
     "readiness_required_unavailable",
   );
   assert.equal(artifact.alert_specs.vm_memory.notification_channel_id, null);
+  assert.deepEqual(artifact.alert_specs.certificate_risk, {
+    alarm_threshold: 14,
+    category: "certificate_risk",
+    comparison: "LESS_THAN",
+    evaluation_window: "1h",
+    metric: "certificate.days_until_expiration",
+    notification_channel_id: null,
+    query: certificateRiskQuery,
+    title: "Alert certificate_risk",
+    warning_threshold: 30,
+  });
   assert.equal(artifact.commit_sha, "1".repeat(40));
   assert.equal(artifact.evidence_sha256, "2".repeat(64));
   assert.equal(artifact.plan_sha256, "4".repeat(64));
@@ -152,6 +179,17 @@ test("rejects missing, extra, mismatched, or unsafe alert specifications", () =>
   for (const specs of [
     missing,
     { ...complete, extra_alert: spec("extra_alert") },
+    {
+      ...complete,
+      certificate_risk_kiosk: spec("certificate_risk_kiosk", {
+        metric: "certificate.days_until_expiration",
+        query: certificateRiskQuery,
+        comparison: "LESS_THAN",
+        warning_threshold: 30,
+        alarm_threshold: 14,
+        evaluation_window: "1h",
+      }),
+    },
     { ...complete, vm_cpu: spec("wrong_category") },
     { ...complete, vm_disk: spec("vm_disk", { notification_channel_id: "fake-channel" }) },
     { ...complete, alb_5xx: spec("alb_5xx", { unexpected: "field" }) },

@@ -137,7 +137,10 @@ module "observability" {
   app_instance_id         = module.compute.app_instance_id
   runner_instance_id      = module.compute.runner_instance_id
   postgres_cluster_id     = module.postgres.cluster_id
-  certificate_id          = module.ingress.certificate_id
+  certificate_ids = [
+    module.ingress.certificate_id,
+    module.ingress.kiosk_certificate_id,
+  ]
   observability_phase     = var.observability_phase
   notification_channel_id = var.notification_channel_id
   alert_ids               = var.alert_ids

@@ -1682,6 +1682,8 @@ const requiredObservabilityAlerts = [
   "deployment_failure",
   "runner_overrun",
 ];
+const certificateRiskQuery =
+  'series_min("certificate.days_until_expiration"{folderId="${var.folder_id}", service="certificate-manager", certificate="${var.certificate_ids[0]}|${var.certificate_ids[1]}"})';
 
 function assertProtectedObservability({
   bootstrap,
@@ -1817,14 +1819,42 @@ function assertProtectedObservability({
     assert.match(variables, /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/);
   }
 
+  assert.equal(requiredObservabilityAlerts.length, 16);
+  assert.equal(
+    [...observability.matchAll(/^\s+category\s*=\s*"[^"]+"$/gm)].length,
+    16,
+    "observability must keep exactly 16 alert categories",
+  );
+  assert.doesNotMatch(observability, /certificate_risk_kiosk/);
+  assert.match(observabilityVariables, /variable\s+"certificate_ids"\s*\{/);
+  assert.match(observabilityVariables, /type\s*=\s*list\(string\)/);
+  assert.match(observabilityVariables, /length\(var\.certificate_ids\)\s*==\s*2/);
+  assert.match(
+    observabilityVariables,
+    /alltrue\(\[for certificate_id in var\.certificate_ids : length\(trimspace\(certificate_id\)\) > 0\]\)/,
+  );
+  assert.match(observabilityVariables, /length\(toset\(var\.certificate_ids\)\)\s*==\s*2/);
+  assert.doesNotMatch(observabilityVariables, /variable\s+"certificate_id"\s*\{/);
+
+  const encodedCertificateQuery = observability.match(
+    /^\s*certificate_risk_query\s*=\s*"(.+)"$/m,
+  )?.[1];
+  assert.ok(encodedCertificateQuery, "certificate risk query must be defined once as a local");
+  assert.equal(encodedCertificateQuery.replaceAll('\\"', '"'), certificateRiskQuery);
+
   for (const category of requiredObservabilityAlerts) {
     const spec = terraformObjectEntry(observability, category);
     assert.match(spec, new RegExp(`category\\s*=\\s*"${category}"`));
     assert.match(spec, /metric\s*=\s*"[^\n]+"/);
-    assert.match(spec, /query\s*=\s*"[^\n]+"/);
     const encodedQuery = spec.match(/query\s*=\s*"(.+)"$/m)?.[1];
-    assert.ok(encodedQuery, `${category} must expose a parseable Monitoring query`);
-    const query = encodedQuery.replaceAll('\\"', '"');
+    const query =
+      category === "certificate_risk" ? certificateRiskQuery : encodedQuery?.replaceAll('\\"', '"');
+    if (category === "certificate_risk") {
+      assert.match(spec, /query\s*=\s*local\.certificate_risk_query/);
+    } else {
+      assert.ok(encodedQuery, `${category} must expose a parseable Monitoring query`);
+    }
+    assert.ok(query, `${category} must expose a parseable Monitoring query`);
     const selectors = [...query.matchAll(/(?:"[^"]+"|[A-Za-z][A-Za-z0-9._-]*)\{/g)];
     assert.ok(selectors.length > 0, `${category} must contain a metric selector`);
     assert.doesNotMatch(
@@ -1859,6 +1889,13 @@ function assertProtectedObservability({
     assert.match(spec, /alarm_threshold\s*=\s*0\.5\b/);
   }
 
+  const certificateRisk = terraformObjectEntry(observability, "certificate_risk");
+  assert.match(certificateRisk, /comparison\s*=\s*"LESS_THAN"/);
+  assert.match(certificateRisk, /warning_threshold\s*=\s*30\b/);
+  assert.match(certificateRisk, /alarm_threshold\s*=\s*14\b/);
+  assert.match(certificateRisk, /evaluation_window\s*=\s*"1h"/);
+  assert.match(certificateRisk, /notification_channel_id\s*=\s*var\.notification_channel_id/);
+
   const dashboard = terraformResourceBlock(
     observability,
     "yandex_monitoring_dashboard",
@@ -1884,6 +1921,11 @@ function assertProtectedObservability({
   assert.match(production, /module\s+"observability"\s*\{/);
   assert.match(production, /notification_channel_id\s*=\s*var\.notification_channel_id/);
   assert.match(production, /alert_ids\s*=\s*var\.alert_ids/);
+  assert.match(
+    production,
+    /certificate_ids\s*=\s*\[\s*module\.ingress\.certificate_id,\s*module\.ingress\.kiosk_certificate_id,?\s*\]/,
+  );
+  assert.doesNotMatch(production, /^\s*certificate_id\s*=\s*module\.ingress\.certificate_id$/m);
   assert.match(production, /audit_bucket_name\s*=\s*module\.object_storage\.audit_bucket_name/);
   assert.match(production, /media_bucket_name\s*=\s*module\.object_storage\.media_bucket_name/);
   assert.equal(
@@ -3144,6 +3186,72 @@ test("observability contract rejects missing categories, unsafe retention, audit
     'notification_channel_id = "other-channel"',
   );
   assert.throws(() => assertProtectedObservability(wrongChannel));
+
+  const oneCertificate = await observabilitySources();
+  oneCertificate.production = oneCertificate.production.replace(
+    /^\s*module\.ingress\.kiosk_certificate_id,?\s*$/m,
+    "",
+  );
+  assert.throws(() => assertProtectedObservability(oneCertificate), /certificate_ids/);
+
+  const duplicateCertificates = await observabilitySources();
+  duplicateCertificates.production = duplicateCertificates.production.replace(
+    "module.ingress.kiosk_certificate_id",
+    "module.ingress.certificate_id",
+  );
+  assert.throws(() => assertProtectedObservability(duplicateCertificates), /certificate_ids/);
+
+  const oneCertificateAccepted = await observabilitySources();
+  oneCertificateAccepted.observabilityVariables =
+    oneCertificateAccepted.observabilityVariables.replace(
+      /length\(var\.certificate_ids\)\s*==\s*2\s*&&\s*/,
+      "",
+    );
+  assert.throws(() => assertProtectedObservability(oneCertificateAccepted), /certificate_ids/);
+
+  const duplicateCertificatesAccepted = await observabilitySources();
+  duplicateCertificatesAccepted.observabilityVariables =
+    duplicateCertificatesAccepted.observabilityVariables.replace(
+      /\s*&&\s*length\(toset\(var\.certificate_ids\)\)\s*==\s*2/,
+      "",
+    );
+  assert.throws(
+    () => assertProtectedObservability(duplicateCertificatesAccepted),
+    /certificate_ids/,
+  );
+
+  const latestExpiringCertificate = await observabilitySources();
+  latestExpiringCertificate.observability = latestExpiringCertificate.observability.replace(
+    "series_min(",
+    "series_max(",
+  );
+  assert.throws(() => assertProtectedObservability(latestExpiringCertificate));
+
+  const unwrappedCertificateSelector = await observabilitySources();
+  unwrappedCertificateSelector.observability = unwrappedCertificateSelector.observability.replace(
+    /series_min\((\\"certificate\.days_until_expiration\\"\{[^\n]+\})\)/,
+    "$1",
+  );
+  assert.throws(() => assertProtectedObservability(unwrappedCertificateSelector));
+
+  const kioskOnlyAlert = await observabilitySources();
+  kioskOnlyAlert.observability = kioskOnlyAlert.observability.replace(
+    /\n    runner_overrun\s*=\s*\{/,
+    `
+    certificate_risk_kiosk = {
+      category                = "certificate_risk_kiosk"
+      title                   = "Kiosk certificate expiry risk"
+      metric                  = "certificate.days_until_expiration"
+      query                   = local.certificate_risk_query
+      comparison              = "LESS_THAN"
+      warning_threshold       = 30
+      alarm_threshold         = 14
+      evaluation_window       = "1h"
+      notification_channel_id = var.notification_channel_id
+    }
+    runner_overrun = {`,
+  );
+  assert.throws(() => assertProtectedObservability(kioskOnlyAlert), /16 alert categories/);
 });
 
 test("ingress mutations reject bypasses, duplicate edges, unsafe certificates, and unsafe defaults", async () => {
