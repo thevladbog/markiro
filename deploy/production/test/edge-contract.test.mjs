@@ -72,6 +72,16 @@ function hostRoutes(adapted, host) {
     .filter((route) => route.match?.some((matcher) => matcher.host?.includes(host)));
 }
 
+function applicationRoutes(adapted) {
+  return Object.values(adapted.apps?.http?.servers ?? {})
+    .flatMap((server) => server.routes ?? [])
+    .filter((route) =>
+      nestedObjects(route.handle).some(
+        (candidate) => candidate.handler === "vars" && typeof candidate.root === "string",
+      ),
+    );
+}
+
 function applicationRoute(adapted, host) {
   const routes = hostRoutes(adapted, host).filter((route) =>
     nestedObjects(route.handle).some(
@@ -126,6 +136,22 @@ function normalizeAdminRoute(route) {
 }
 
 function assertAuthorityContract(adapted, { alb }) {
+  const approvedHosts = [adminHost, kioskHost];
+  const applications = applicationRoutes(adapted);
+  assert.equal(applications.length, approvedHosts.length);
+  for (const route of applications) {
+    assert.equal(route.match?.length, 1, "every application route must have one Host matcher");
+    assert.deepEqual(
+      Object.keys(route.match[0]),
+      ["host"],
+      "application routes must be selected only by Host",
+    );
+    assert.equal(route.match[0].host?.length, 1, "every application route must name one Host");
+    assert.ok(
+      approvedHosts.includes(route.match[0].host[0]),
+      `unapproved application Host ${route.match[0].host[0]}`,
+    );
+  }
   const hosts = [
     ...new Set(
       nestedObjects(adapted)
@@ -185,6 +211,10 @@ function assertAuthorityContract(adapted, { alb }) {
     ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
   ];
   const adminProxies = proxyRoutes(admin);
+  const adminReverseProxies = nestedObjects(admin).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  assert.equal(adminReverseProxies.length, 4);
   assert.deepEqual(
     adminProxies.map(({ paths }) => paths),
     expectedAdminPaths,
@@ -192,6 +222,10 @@ function assertAuthorityContract(adapted, { alb }) {
   assert.ok(adminProxies.every(({ proxies }) => proxies.length === 1));
 
   const kioskProxies = proxyRoutes(kiosk);
+  const kioskReverseProxies = nestedObjects(kiosk).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  assert.equal(kioskReverseProxies.length, 1, "kiosk must have exactly one reverse proxy");
   assert.deepEqual(
     kioskProxies.map(({ paths }) => paths),
     [["/api/kiosk/*"]],
@@ -213,7 +247,7 @@ function assertAuthorityContract(adapted, { alb }) {
   ]) {
     assert.ok(!kioskMatcherPaths.includes(forbidden), `${kioskHost} must not match ${forbidden}`);
   }
-  for (const proxy of [...adminProxies, ...kioskProxies].flatMap(({ proxies }) => proxies)) {
+  for (const proxy of [...adminReverseProxies, ...kioskReverseProxies]) {
     const forwardedProto = proxy.headers?.request?.set?.["X-Forwarded-Proto"];
     if (alb) assert.deepEqual(forwardedProto, ["https"]);
     else assert.equal(forwardedProto, undefined);
@@ -248,6 +282,14 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
   assert.doesNotMatch(runtime, /node|pnpm/);
+  const runtimeCopies = [...runtime.matchAll(/^COPY (.+)$/gm)].map((match) => match[1]);
+  assert.deepEqual(runtimeCopies, [
+    "deploy/production/Caddyfile /etc/caddy/Caddyfile.direct",
+    "deploy/production/Caddyfile.alb /etc/caddy/Caddyfile.alb",
+    "deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint",
+    "--from=build /workspace/apps/admin/dist /srv/admin",
+    "--from=build /workspace/apps/kiosk/dist /srv/kiosk",
+  ]);
   const buildCopies = [...runtime.matchAll(/^COPY --from=build (.+)$/gm)].map((match) => match[1]);
   assert.deepEqual(buildCopies, [
     "/workspace/apps/admin/dist /srv/admin",
@@ -432,6 +474,18 @@ test("edge image mutations cannot omit or merge frontend build outputs", async (
   }
 });
 
+test("edge runtime rejects source COPY instructions even when frontend outputs remain", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const sourceCopy = mutate(
+    dockerfile,
+    "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n",
+    "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\nCOPY apps/kiosk /srv/source\n",
+  );
+
+  assert.throws(() => assertEdgeImageContract(sourceCopy, dockerignore));
+});
+
 test("Caddy contracts reject cross-host and overbroad kiosk mutations", async () => {
   for (const [file, alb] of [
     ["deploy/production/Caddyfile", false],
@@ -454,6 +508,41 @@ test("Caddy contracts reject cross-host and overbroad kiosk mutations", async ()
         assertAuthorityContract(await adaptCaddy(mutation), { alb });
       });
     }
+  }
+});
+
+test("Caddy contracts reject an application route without an exact Host", async () => {
+  for (const [file, alb] of [
+    ["deploy/production/Caddyfile", false],
+    ["deploy/production/Caddyfile.alb", true],
+  ]) {
+    const source = await readFile(file, "utf8");
+    const catchAllAddress = alb ? ":8080 {" : ":8443 {";
+    const catchAll = `${source}\n${catchAllAddress}\n\timport common_headers\n\timport kiosk_routes\n}\n`;
+    assert.notEqual(catchAll, source);
+
+    await assert.rejects(async () => {
+      assertAuthorityContract(await adaptCaddy(catchAll), { alb });
+    });
+  }
+});
+
+test("Caddy contracts reject an unconditional kiosk reverse proxy", async () => {
+  for (const [file, alb] of [
+    ["deploy/production/Caddyfile", false],
+    ["deploy/production/Caddyfile.alb", true],
+  ]) {
+    const source = await readFile(file, "utf8");
+    const forwardedProto = alb ? "\t\t\t\theader_up X-Forwarded-Proto https\n" : "";
+    const unconditionalProxy = mutate(
+      source,
+      "(kiosk_routes) {\n\troot * /srv/kiosk\n\troute {",
+      `(kiosk_routes) {\n\troot * /srv/kiosk\n\troute {\n\t\thandle {\n\t\t\treverse_proxy api:3000 {\n${forwardedProto}\t\t\t\timport standard_api_transport\n\t\t\t}\n\t\t}`,
+    );
+
+    await assert.rejects(async () => {
+      assertAuthorityContract(await adaptCaddy(unconditionalProxy), { alb });
+    });
   }
 });
 
