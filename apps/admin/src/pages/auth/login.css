@@ -1,0 +1,215 @@
+.mk-login-page {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: minmax(280px, 43%) minmax(0, 57%);
+  overflow-x: hidden;
+  background: var(--surface-page);
+}
+
+.mk-login-page__brand {
+  position: relative;
+  isolation: isolate;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: clamp(24px, 3vw, 48px);
+  overflow: hidden;
+  background: var(--surface-inverse);
+  color: var(--fg-on-inverse);
+}
+
+.mk-login-page__grid {
+  position: absolute;
+  z-index: -2;
+  inset: 0;
+  opacity: 0.12;
+  color: currentColor;
+  background-image:
+    linear-gradient(currentColor 1px, transparent 1px),
+    linear-gradient(90deg, currentColor 1px, transparent 1px);
+  background-size: 24px 24px;
+  mask-image: linear-gradient(135deg, transparent 3%, black 34%, black 100%);
+}
+
+.mk-login-page__code {
+  position: absolute;
+  z-index: -1;
+  left: -18px;
+  bottom: 76px;
+  width: 160%;
+  overflow: hidden;
+  opacity: 0.14;
+  font: var(--text-code);
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  transform: rotate(-4deg);
+}
+
+.mk-login-page__brand-logo,
+.mk-login-page__mobile-logo {
+  display: block;
+}
+
+.mk-login-page__logo-on-light,
+.mk-login-page__logo-on-dark {
+  display: block;
+  width: 140px;
+  height: auto;
+}
+
+.mk-login-page__brand-copy h2 {
+  max-width: 10ch;
+  margin: 0;
+  font: 700 clamp(40px, 5vw, 68px) / 0.95 var(--font-ui);
+  letter-spacing: -0.065em;
+  text-wrap: balance;
+}
+
+.mk-login-page__brand-copy p {
+  max-width: 34ch;
+  margin: 24px 0 0;
+  color: color-mix(in srgb, currentColor 68%, transparent);
+  font: var(--text-body);
+}
+
+.mk-login-page__brand-meta,
+.mk-login-page__footer {
+  font: var(--text-meta);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.06em;
+}
+
+.mk-login-page__brand-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  color: color-mix(in srgb, currentColor 52%, transparent);
+}
+
+.mk-login-page__login {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.mk-login-page__header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6) var(--sp-7);
+}
+
+.mk-login-page__header button,
+.mk-login-page__password-toggle {
+  min-height: var(--control-sm);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--fg-3);
+  font: var(--text-meta);
+  cursor: pointer;
+}
+
+.mk-login-page__header button:hover,
+.mk-login-page__password-toggle:hover {
+  color: var(--fg-1);
+}
+
+.mk-login-page__header button:focus-visible,
+.mk-login-page__password-toggle:focus-visible,
+.mk-login-page a:focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: var(--focus-ring-offset);
+}
+
+.mk-login-page__main {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-7);
+}
+
+.mk-login-page__form {
+  width: min(100%, 360px);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-login-page__form h1 {
+  margin: 0;
+  font: 700 38px/1 var(--font-ui);
+  letter-spacing: -0.055em;
+}
+
+.mk-login-page__eyebrow {
+  margin-bottom: -4px;
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.mk-login-page__instruction,
+.mk-login-page__help {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.mk-login-page__instruction {
+  margin-bottom: var(--sp-2);
+}
+
+.mk-login-page__help a {
+  margin: 0;
+  color: var(--fg-1);
+  text-underline-offset: 3px;
+}
+
+.mk-login-page__footer {
+  padding: var(--sp-5) var(--sp-7);
+  color: var(--fg-3);
+}
+
+.mk-login-page__mobile-logo {
+  display: none;
+}
+
+[data-theme="light"] .mk-login-page__brand .mk-login-page__logo-on-light,
+[data-theme="dark"] .mk-login-page__brand .mk-login-page__logo-on-dark,
+[data-theme="light"] .mk-login-page__mobile-logo .mk-login-page__logo-on-dark,
+[data-theme="dark"] .mk-login-page__mobile-logo .mk-login-page__logo-on-light {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .mk-login-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-login-page__brand {
+    display: none;
+  }
+
+  .mk-login-page__header {
+    justify-content: flex-end;
+    padding: var(--sp-5);
+  }
+
+  .mk-login-page__mobile-logo {
+    display: block;
+    width: 104px;
+    margin-right: auto;
+  }
+
+  .mk-login-page__main {
+    place-items: start center;
+    padding: var(--sp-8) var(--sp-5) var(--sp-6);
+  }
+
+  .mk-login-page__footer {
+    padding: var(--sp-5);
+  }
+}

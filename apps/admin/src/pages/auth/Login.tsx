@@ -9,7 +9,7 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
 import { errorProp } from "../../lib/form-error.js";
-import { AuthLayout } from "./AuthLayout.js";
+import { LoginShell } from "./LoginShell.js";
 
 const loginSchema = z.object({
   email: z.email(),
@@ -41,12 +41,11 @@ export function LoginPage() {
   });
 
   return (
-    <AuthLayout title={t("auth.login.title")}>
-      <form
-        onSubmit={(event) => void onSubmit(event)}
-        noValidate
-        style={{ display: "flex", flexDirection: "column", gap: 16 }}
-      >
+    <LoginShell>
+      <form className="mk-login-page__form" onSubmit={(event) => void onSubmit(event)} noValidate>
+        <span className="mk-login-page__eyebrow">{t("auth.login.eyebrow")}</span>
+        <h1>{t("auth.login.title")}</h1>
+        <p className="mk-login-page__instruction">{t("auth.login.instruction")}</p>
         {submitError && <Alert tone="error">{submitError}</Alert>}
         <Input
           type="email"
@@ -65,10 +64,10 @@ export function LoginPage() {
         <Button type="submit" loading={isSubmitting} fullWidth>
           {t("auth.login.submit")}
         </Button>
-        <p style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
+        <p className="mk-login-page__help">
           {t("auth.login.noAccount")} <Link to="/register">{t("auth.login.registerLink")}</Link>
         </p>
       </form>
-    </AuthLayout>
+    </LoginShell>
   );
 }

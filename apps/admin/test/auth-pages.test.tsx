@@ -4,11 +4,14 @@ import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { ThemeProvider } from "@markiro/ui";
+
 import {
   AuthClientProvider,
   type AuthClientLike,
   type OrganizationSummary,
 } from "../src/auth/client.js";
+import i18n from "../src/i18n/index.js";
 import { CreateOrgPage } from "../src/pages/auth/CreateOrg.js";
 import { ActivateOwnerPage } from "../src/pages/auth/ActivateOwner.js";
 import { LoginPage } from "../src/pages/auth/Login.js";
@@ -16,8 +19,11 @@ import { RegisterPage } from "../src/pages/auth/Register.js";
 import { ResetPasswordPage } from "../src/pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "../src/pages/auth/SelectOrg.js";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  localStorage.clear();
+  vi.useRealTimers();
+  await i18n.changeLanguage("ru");
   vi.unstubAllGlobals();
 });
 
@@ -50,15 +56,17 @@ function renderRouted(
   });
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <AuthClientProvider client={client}>
-          <Routes>
-            <Route path={routePath} element={element} />
-            <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
-            <Route path="/login" element={<div>LOGIN_PAGE</div>} />
-          </Routes>
-        </AuthClientProvider>
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <AuthClientProvider client={client}>
+            <Routes>
+              <Route path={routePath} element={element} />
+              <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
+              <Route path="/login" element={<div>LOGIN_PAGE</div>} />
+            </Routes>
+          </AuthClientProvider>
+        </MemoryRouter>
+      </ThemeProvider>
     </QueryClientProvider>,
   );
   return { ...view, queryClient };
@@ -163,12 +171,51 @@ describe("ActivateOwnerPage", () => {
 describe("LoginPage", () => {
   it("renders labels from the RU dictionary", () => {
     renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
-    expect(screen.getByText("Вход")).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1, name: "Войти" })).toBeDefined();
     expect(screen.getByLabelText("Электронная почта")).toBeDefined();
     expect(screen.getByLabelText("Пароль")).toBeDefined();
     expect(screen.getByRole("button", { name: "Войти" })).toBeDefined();
     expect(screen.getByText("Доступ выдаёт администратор организации.")).toBeDefined();
     expect(screen.getByRole("link", { name: "Как получить доступ" })).toBeDefined();
+  });
+
+  it("renders the approved Markiro login shell and local date", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T09:00:00+03:00"));
+
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+
+    expect(screen.getByRole("img", { name: "Маркиро" })).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1, name: "Войти" })).toBeDefined();
+    expect(screen.getByText("Производство видно целиком.")).toBeDefined();
+    expect(screen.getByText("Смены, коды и агрегация — в одном рабочем кабинете.")).toBeDefined();
+    const date = screen.getByText("08.08.2026").closest("time");
+    expect(date).not.toBeNull();
+    expect(date?.getAttribute("datetime")).toBe("2026-08-08");
+    expect(date?.textContent).toBe("08.08.2026");
+    expect(screen.getByRole("main")).toBeDefined();
+  });
+
+  it("changes language from the public login header", async () => {
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Переключить язык" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign in" })).toBeDefined();
+    expect(screen.getByText("See production as a whole.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Switch language" })).toBeDefined();
+  });
+
+  it("cycles the persisted theme preference", async () => {
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+    const themeButton = screen.getByRole("button", { name: /Переключить тему/ });
+
+    expect(themeButton.textContent).toBe("Системная тема");
+    fireEvent.click(themeButton);
+
+    await waitFor(() => expect(themeButton.textContent).toBe("Светлая тема"));
+    expect(localStorage.getItem("markiro.theme")).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("submits credentials through the injected auth client and navigates home", async () => {
