@@ -217,6 +217,14 @@ resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_postg
   member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
 }
 
+# Long-running Compute operations are folder resources even when the mutation
+# itself is authorized by the runner VM's resource-scoped compute.editor grant.
+resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_compute_operation_auditor" {
+  folder_id = var.folder_id
+  role      = "compute.auditor"
+  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
+}
+
 resource "yandex_resourcemanager_folder_iam_member" "app_monitoring_editor" {
   folder_id = var.folder_id
   role      = "monitoring.editor"
