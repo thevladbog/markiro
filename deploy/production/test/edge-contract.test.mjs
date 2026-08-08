@@ -261,6 +261,16 @@ function assertAuthorityContract(adapted, { alb }) {
 }
 
 function dockerfileInstructions(dockerfile) {
+  for (const physicalLine of dockerfile.split(/\r?\n/)) {
+    const parserDirective = physicalLine.match(/^\s*#\s*([a-z][a-z0-9_-]*)\s*=\s*(\S+)\s*$/i);
+    if (!parserDirective) break;
+    if (parserDirective[1].toLowerCase() === "escape" && parserDirective[2] !== "\\") {
+      assert.fail(
+        "non-default Dockerfile escape directives are unsupported by the runtime contract",
+      );
+    }
+  }
+
   const instructions = [];
   let logicalLine = "";
 
@@ -557,6 +567,22 @@ test("edge runtime COPY parser ignores FROM text inside a continued RUN", async 
   assert.throws(
     () => assertEdgeImageContract(spoofedBoundary, dockerignore),
     /apps\/kiosk \/srv\/source/,
+  );
+});
+
+test("edge runtime COPY parser rejects non-default escape directives", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const nonDefaultEscape = `# escape=\`\n${dockerfile}`;
+  const spoofedBoundary = mutate(
+    nonDefaultEscape,
+    "EXPOSE 8080 8443\n",
+    "RUN printf '%s\\n' `\nFROM scratch AS metadata\ncopy apps/kiosk /srv/source\nEXPOSE 8080 8443\n",
+  );
+
+  assert.throws(
+    () => assertEdgeImageContract(spoofedBoundary, dockerignore),
+    /non-default Dockerfile escape directives are unsupported/,
   );
 });
 
