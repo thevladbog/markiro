@@ -244,14 +244,23 @@ export function parseAuthenticatedHostKeys(encodedKeys) {
   return canonicalHostKeyPair(text.split("\n"));
 }
 
-export async function startRunner(dependencies) {
+export async function startRunner(dependencies, { expectedDeploymentId } = {}) {
   requireDependencies(dependencies);
+  if (expectedDeploymentId !== undefined && expectedDeploymentId !== dependencies.deploymentId)
+    throw new Error("invalid runner controller dependencies");
   const status = await dependencies.yandex.getInstanceStatus(dependencies.instanceId);
   if (status !== "STOPPED") throw new Error("runner VM must be STOPPED");
 
   const runners = await dependencies.github.listRunners();
   if (!Array.isArray(runners)) throw new Error("invalid GitHub runner response");
-  if (deploymentRunners(runners).length !== 0)
+  const registered = deploymentRunners(runners);
+  const expectedLabel = expectedDeploymentId
+    ? deploymentRunnerLabel(expectedDeploymentId)
+    : undefined;
+  if (
+    registered.length > (expectedLabel ? 1 : 0) ||
+    registered.some((runner) => !expectedLabel || !labelsOf(runner).includes(expectedLabel))
+  )
     throw new Error("registered deployment runner already exists");
 
   await dependencies.yandex.startInstance(dependencies.instanceId);
@@ -259,7 +268,7 @@ export async function startRunner(dependencies) {
 
 export async function prepareAndStartRunner(dependencies) {
   const registration = await createJitRegistration(dependencies);
-  await startRunner(dependencies);
+  await startRunner(dependencies, { expectedDeploymentId: registration.deploymentId });
   return registration;
 }
 

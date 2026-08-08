@@ -79,6 +79,50 @@ test("controller rejects mismatched JIT responses and never writes metadata", as
   assert.equal(writes, 0);
 });
 
+test("controller starts the VM when GitHub already lists its newly generated offline JIT runner", async () => {
+  const calls = [];
+  const label = deploymentRunnerLabel(DEPLOYMENT_ID);
+  const generatedRunner = {
+    id: 71,
+    name: `markiro-${DEPLOYMENT_ID}`,
+    status: "offline",
+    busy: false,
+    labels: ["self-hosted", "linux", label].map((name) => ({ name })),
+  };
+  const dependencies = {
+    deploymentId: DEPLOYMENT_ID,
+    instanceId: INSTANCE_ID,
+    github: {
+      async generateJitConfig() {
+        calls.push("generate");
+        return { runner: generatedRunner, encoded_jit_config: "one-use-encoded-config" };
+      },
+      async listRunners() {
+        calls.push("list");
+        return [generatedRunner];
+      },
+      async deleteRunner() {},
+    },
+    yandex: {
+      async updateMetadata() {
+        calls.push("metadata");
+      },
+      async getInstanceStatus() {
+        calls.push("status");
+        return "STOPPED";
+      },
+      async startInstance() {
+        calls.push("start");
+      },
+      async stopInstance() {},
+    },
+  };
+
+  await runnerControl.prepareAndStartRunner(dependencies);
+
+  assert.deepEqual(calls, ["generate", "metadata", "status", "list", "start"]);
+});
+
 const CONTROLLER_GATE_ENVIRONMENT = {
   MARKIRO_DEPLOYMENT_PHASE: "repeat",
   YC_APP_INSTANCE_ID: "fv4app123",
@@ -802,6 +846,22 @@ test("startRunner rejects an unrelated or stale deployment runner", async () => 
   await assert.rejects(startRunner(dependencies), /registered deployment runner already exists/);
 
   assert.equal(calls.includes(`start:${INSTANCE_ID}`), false);
+});
+
+test("startRunner JIT allowance remains fail-closed for foreign or duplicate deployment runners", async () => {
+  const foreign = {
+    ...jitRunner(),
+    labels: [{ name: "markiro-deployment-other" }],
+  };
+  for (const runners of [[foreign], [jitRunner(71), jitRunner(72)]]) {
+    const { dependencies, calls } = fixture({ runners: [runners] });
+
+    await assert.rejects(
+      startRunner(dependencies, { expectedDeploymentId: DEPLOYMENT_ID }),
+      /registered deployment runner already exists/,
+    );
+    assert.equal(calls.includes(`start:${INSTANCE_ID}`), false);
+  }
 });
 
 test("waitForRunner waits for RUNNING and one idle online runner with the exact JIT label", async () => {
