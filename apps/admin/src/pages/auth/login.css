@@ -84,7 +84,7 @@
   display: flex;
   justify-content: space-between;
   gap: var(--sp-4);
-  color: color-mix(in srgb, currentColor 52%, transparent);
+  color: color-mix(in srgb, currentColor 60%, transparent);
 }
 
 .mk-login-page__login {
@@ -117,6 +117,10 @@
   color: var(--fg-1) !important;
 }
 
+.mk-login-page__header .mk-login-page__header-control:active {
+  transform: translateY(1px);
+}
+
 .mk-login-page__header .mk-login-page__header-control:focus-visible,
 .mk-login-page__password-toggle:focus-visible,
 .mk-login-page a:focus-visible {
@@ -142,6 +146,10 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
+}
+
+.mk-login-page__form .mk-input:not(.mk-input--error):not(:focus-within) {
+  border-color: var(--fg-3) !important;
 }
 
 .mk-login-page__form h1 {
@@ -173,6 +181,11 @@
   margin: 0;
   color: var(--fg-1);
   text-underline-offset: 3px;
+  transition: opacity 120ms;
+}
+
+.mk-login-page__help a:active {
+  opacity: 0.68;
 }
 
 .mk-login-page__footer {

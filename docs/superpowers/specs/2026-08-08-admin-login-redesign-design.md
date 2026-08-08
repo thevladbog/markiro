@@ -2,8 +2,9 @@
 
 ## Status
 
-The visual direction was approved during the 2026-08-08 review. This written specification is
-ready for final user review before implementation planning.
+Implemented. The visual direction was approved during the 2026-08-08 review, and this
+specification reflects the completed implementation plus final-review fixes. Browser visual
+acceptance remains a separate validation gate.
 
 ## Context
 

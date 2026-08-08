@@ -199,11 +199,13 @@ describe("LoginPage", () => {
   it("changes language from the public login header", async () => {
     renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
 
+    expect(document.documentElement.lang).toBe("ru");
     fireEvent.click(screen.getByRole("button", { name: "Переключить язык" }));
 
     expect(await screen.findByRole("heading", { level: 1, name: "Sign in" })).toBeDefined();
     expect(screen.getByText("See production as a whole.")).toBeDefined();
     expect(screen.getByRole("button", { name: "Switch language" })).toBeDefined();
+    expect(document.documentElement.lang).toBe("en");
   });
 
   it("cycles the persisted theme preference", async () => {
@@ -277,7 +279,7 @@ describe("LoginPage", () => {
     expect(container.querySelector(".mk-spin")).toBeNull();
   });
 
-  it("keeps credentials after a failed sign-in", async () => {
+  it("shows the server error and keeps credentials after a failed sign-in", async () => {
     const client = createFakeAuthClient({
       signIn: {
         email: vi.fn(async () => ({ data: null, error: { message: "Invalid credentials" } })),
@@ -295,21 +297,30 @@ describe("LoginPage", () => {
     expect(password.value).toBe("hunter2!");
   });
 
-  it("shows the server error message when sign-in fails", async () => {
-    const client = createFakeAuthClient({
-      signIn: {
-        email: vi.fn(async () => ({ data: null, error: { message: "Invalid credentials" } })),
-      },
-    });
+  it("blocks invalid credentials and keeps both errors associated with their fields", async () => {
+    const client = createFakeAuthClient();
     renderRouted(client, "/login", <LoginPage />);
+    const email = screen.getByLabelText("Электронная почта") as HTMLInputElement;
+    const password = screen.getByLabelText("Пароль") as HTMLInputElement;
 
-    fireEvent.change(screen.getByLabelText("Электронная почта"), {
-      target: { value: "user@example.com" },
-    });
-    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "hunter2!" } });
+    fireEvent.change(email, { target: { value: "not-an-email" } });
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
 
-    expect(await screen.findByText("Invalid credentials")).toBeDefined();
+    await waitFor(() => {
+      expect(email.getAttribute("aria-invalid")).toBe("true");
+      expect(password.getAttribute("aria-invalid")).toBe("true");
+    });
+    expect(client.signIn.email).not.toHaveBeenCalled();
+
+    const emailErrorId = email.getAttribute("aria-describedby");
+    const passwordErrorId = password.getAttribute("aria-describedby");
+    expect(emailErrorId).not.toBeNull();
+    expect(passwordErrorId).not.toBeNull();
+    const emailError = emailErrorId === null ? null : document.getElementById(emailErrorId);
+    const passwordError =
+      passwordErrorId === null ? null : document.getElementById(passwordErrorId);
+    expect(emailError?.textContent?.trim()).toBeTruthy();
+    expect(passwordError?.textContent?.trim()).toBeTruthy();
   });
 });
 
