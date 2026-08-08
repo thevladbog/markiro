@@ -94,6 +94,8 @@ function validateAlertSpecs(specs) {
       !["GREATER_THAN", "LESS_THAN"].includes(spec.comparison) ||
       !Number.isFinite(spec.warning_threshold) ||
       !Number.isFinite(spec.alarm_threshold) ||
+      (spec.comparison === "GREATER_THAN" && spec.alarm_threshold <= spec.warning_threshold) ||
+      (spec.comparison === "LESS_THAN" && spec.alarm_threshold >= spec.warning_threshold) ||
       typeof spec.evaluation_window !== "string" ||
       !/^[1-9][0-9]*[smhd]$/.test(spec.evaluation_window) ||
       spec.notification_channel_id !== null ||
