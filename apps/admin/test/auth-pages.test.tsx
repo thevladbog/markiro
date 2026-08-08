@@ -1,14 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ThemeProvider } from "@markiro/ui";
 
 import {
   AuthClientProvider,
   type AuthClientLike,
   type OrganizationSummary,
 } from "../src/auth/client.js";
+import i18n from "../src/i18n/index.js";
 import { CreateOrgPage } from "../src/pages/auth/CreateOrg.js";
 import { ActivateOwnerPage } from "../src/pages/auth/ActivateOwner.js";
 import { LoginPage } from "../src/pages/auth/Login.js";
@@ -16,8 +19,11 @@ import { RegisterPage } from "../src/pages/auth/Register.js";
 import { ResetPasswordPage } from "../src/pages/auth/ResetPassword.js";
 import { SelectOrgPage } from "../src/pages/auth/SelectOrg.js";
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  localStorage.clear();
+  vi.useRealTimers();
+  await i18n.changeLanguage("ru");
   vi.unstubAllGlobals();
 });
 
@@ -50,15 +56,17 @@ function renderRouted(
   });
   const view = render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <AuthClientProvider client={client}>
-          <Routes>
-            <Route path={routePath} element={element} />
-            <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
-            <Route path="/login" element={<div>LOGIN_PAGE</div>} />
-          </Routes>
-        </AuthClientProvider>
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[initialPath]}>
+          <AuthClientProvider client={client}>
+            <Routes>
+              <Route path={routePath} element={element} />
+              <Route path="/" element={<div>SHELL_PLACEHOLDER</div>} />
+              <Route path="/login" element={<div>LOGIN_PAGE</div>} />
+            </Routes>
+          </AuthClientProvider>
+        </MemoryRouter>
+      </ThemeProvider>
     </QueryClientProvider>,
   );
   return { ...view, queryClient };
@@ -163,12 +171,60 @@ describe("ActivateOwnerPage", () => {
 describe("LoginPage", () => {
   it("renders labels from the RU dictionary", () => {
     renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
-    expect(screen.getByText("Вход")).toBeDefined();
+    expect(screen.getByRole("heading", { level: 1, name: "Войти" })).toBeDefined();
     expect(screen.getByLabelText("Электронная почта")).toBeDefined();
     expect(screen.getByLabelText("Пароль")).toBeDefined();
     expect(screen.getByRole("button", { name: "Войти" })).toBeDefined();
     expect(screen.getByText("Доступ выдаёт администратор организации.")).toBeDefined();
     expect(screen.getByRole("link", { name: "Как получить доступ" })).toBeDefined();
+  });
+
+  it("renders the approved Markiro login shell and local date", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-08T09:00:00+03:00"));
+
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+
+    expect(screen.getAllByRole("img", { name: "Маркиро" })).toHaveLength(2);
+    const mobileLogo = document.querySelector(".mk-login-page__mobile-logo");
+    expect(mobileLogo?.getAttribute("role")).toBe("img");
+    expect(mobileLogo?.getAttribute("aria-label")).toBe("Маркиро");
+    expect(mobileLogo?.hasAttribute("aria-hidden")).toBe(false);
+    expect(Array.from(mobileLogo?.querySelectorAll("img") ?? []).map((image) => image.alt)).toEqual(
+      ["", ""],
+    );
+    expect(screen.getByRole("heading", { level: 1, name: "Войти" })).toBeDefined();
+    expect(screen.getByText("Производство видно целиком.")).toBeDefined();
+    expect(screen.getByText("Смены, коды и агрегация — в одном рабочем кабинете.")).toBeDefined();
+    const date = screen.getByText("08.08.2026").closest("time");
+    expect(date).not.toBeNull();
+    expect(date?.getAttribute("datetime")).toBe("2026-08-08");
+    expect(date?.textContent).toBe("08.08.2026");
+    expect(screen.getByRole("main")).toBeDefined();
+  });
+
+  it("changes language from the public login header", async () => {
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+
+    expect(document.documentElement.lang).toBe("ru");
+    fireEvent.click(screen.getByRole("button", { name: "Переключить язык" }));
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Sign in" })).toBeDefined();
+    expect(screen.getByText("See production as a whole.")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Switch language" })).toBeDefined();
+    expect(document.documentElement.lang).toBe("en");
+  });
+
+  it("cycles the persisted theme preference", async () => {
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+    const themeButton = screen.getByRole("button", { name: /Переключить тему/ });
+
+    expect(themeButton.textContent).toBe("Системная тема");
+    fireEvent.click(themeButton);
+
+    await waitFor(() => expect(themeButton.textContent).toBe("Светлая тема"));
+    expect(localStorage.getItem("markiro.theme")).toBe("light");
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 
   it("submits credentials through the injected auth client and navigates home", async () => {
@@ -190,13 +246,27 @@ describe("LoginPage", () => {
     await screen.findByText("SHELL_PLACEHOLDER");
   });
 
-  it("shows the server error message when sign-in fails", async () => {
-    const client = createFakeAuthClient({
-      signIn: {
-        email: vi.fn(async () => ({ data: null, error: { message: "Invalid credentials" } })),
-      },
+  it("toggles password visibility without changing its value", () => {
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+    const password = screen.getByLabelText("Пароль") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "hunter2!" } });
+
+    expect(password.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Показать пароль" }));
+    expect(password.type).toBe("text");
+    expect(password.value).toBe("hunter2!");
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть пароль" }));
+    expect(password.type).toBe("password");
+  });
+
+  it("shows only the spinner while one sign-in request is pending", async () => {
+    let resolveSignIn!: (value: { data: object; error: null }) => void;
+    const pending = new Promise<{ data: object; error: null }>((resolve) => {
+      resolveSignIn = resolve;
     });
-    renderRouted(client, "/login", <LoginPage />);
+    const signIn = vi.fn(() => pending);
+    const client = createFakeAuthClient({ signIn: { email: signIn } });
+    const { container } = renderRouted(client, "/login", <LoginPage />);
 
     fireEvent.change(screen.getByLabelText("Электронная почта"), {
       target: { value: "user@example.com" },
@@ -204,7 +274,60 @@ describe("LoginPage", () => {
     fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "hunter2!" } });
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
 
-    expect(await screen.findByText("Invalid credentials")).toBeDefined();
+    const pendingButton = await screen.findByRole("button", { name: "Выполняется вход" });
+    expect(pendingButton.hasAttribute("disabled")).toBe(true);
+    expect(within(pendingButton).queryByText("Войти")).toBeNull();
+    expect(pendingButton.querySelector(".mk-spin")).not.toBeNull();
+    fireEvent.click(pendingButton);
+    expect(signIn).toHaveBeenCalledTimes(1);
+
+    resolveSignIn({ data: {}, error: null });
+    await screen.findByText("SHELL_PLACEHOLDER");
+    expect(container.querySelector(".mk-spin")).toBeNull();
+  });
+
+  it("shows the server error and keeps credentials after a failed sign-in", async () => {
+    const client = createFakeAuthClient({
+      signIn: {
+        email: vi.fn(async () => ({ data: null, error: { message: "Invalid credentials" } })),
+      },
+    });
+    renderRouted(client, "/login", <LoginPage />);
+    const email = screen.getByLabelText("Электронная почта") as HTMLInputElement;
+    const password = screen.getByLabelText("Пароль") as HTMLInputElement;
+    fireEvent.change(email, { target: { value: "user@example.com" } });
+    fireEvent.change(password, { target: { value: "hunter2!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Invalid credentials");
+    expect(email.value).toBe("user@example.com");
+    expect(password.value).toBe("hunter2!");
+  });
+
+  it("blocks invalid credentials and keeps both errors associated with their fields", async () => {
+    const client = createFakeAuthClient();
+    renderRouted(client, "/login", <LoginPage />);
+    const email = screen.getByLabelText("Электронная почта") as HTMLInputElement;
+    const password = screen.getByLabelText("Пароль") as HTMLInputElement;
+
+    fireEvent.change(email, { target: { value: "not-an-email" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    await waitFor(() => {
+      expect(email.getAttribute("aria-invalid")).toBe("true");
+      expect(password.getAttribute("aria-invalid")).toBe("true");
+    });
+    expect(client.signIn.email).not.toHaveBeenCalled();
+
+    const emailErrorId = email.getAttribute("aria-describedby");
+    const passwordErrorId = password.getAttribute("aria-describedby");
+    expect(emailErrorId).not.toBeNull();
+    expect(passwordErrorId).not.toBeNull();
+    const emailError = emailErrorId === null ? null : document.getElementById(emailErrorId);
+    const passwordError =
+      passwordErrorId === null ? null : document.getElementById(passwordErrorId);
+    expect(emailError?.textContent?.trim()).toBeTruthy();
+    expect(passwordError?.textContent?.trim()).toBeTruthy();
   });
 });
 

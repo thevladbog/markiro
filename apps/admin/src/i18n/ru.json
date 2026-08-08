@@ -17,13 +17,29 @@
   },
   "auth": {
     "login": {
-      "title": "Вход",
+      "title": "Войти",
       "emailLabel": "Электронная почта",
       "passwordLabel": "Пароль",
+      "showPassword": "Показать",
+      "hidePassword": "Скрыть",
+      "showPasswordLabel": "Показать пароль",
+      "hidePasswordLabel": "Скрыть пароль",
+      "submitting": "Выполняется вход",
       "submit": "Войти",
       "noAccount": "Доступ выдаёт администратор организации.",
       "registerLink": "Как получить доступ",
-      "genericError": "Не удалось войти. Проверьте почту и пароль."
+      "genericError": "Не удалось войти. Проверьте почту и пароль.",
+      "brandHeading": "Производство видно целиком.",
+      "brandBody": "Смены, коды и агрегация — в одном рабочем кабинете.",
+      "eyebrow": "Кабинет организации",
+      "instruction": "Используйте рабочую электронную почту и пароль.",
+      "protectedCabinet": "Защищённый кабинет · Markiro",
+      "toggleLanguage": "Переключить язык",
+      "toggleTheme": "Переключить тему. Сейчас: {{theme}}",
+      "themeSystem": "Системная тема",
+      "themeLight": "Светлая тема",
+      "themeDark": "Тёмная тема",
+      "logoAlt": "Маркиро"
     },
     "register": {
       "title": "Регистрация",

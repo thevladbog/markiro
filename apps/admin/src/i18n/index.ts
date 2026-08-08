@@ -9,6 +9,13 @@ export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 
 const isTestEnv = import.meta.env.MODE === "test";
 
+function syncDocumentLanguage(language: string) {
+  if (typeof document === "undefined") return;
+  document.documentElement.lang = language.startsWith("en") ? "en" : "ru";
+}
+
+i18n.on("languageChanged", syncDocumentLanguage);
+
 // A missing dictionary key should fail tests loudly instead of silently
 // rendering the raw key -- see the task brief's "missing-key = test
 // failure" requirement. Built as a conditionally-spread options object

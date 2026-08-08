@@ -9,7 +9,7 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
 import { errorProp } from "../../lib/form-error.js";
-import { AuthLayout } from "./AuthLayout.js";
+import { LoginShell } from "./LoginShell.js";
 
 const loginSchema = z.object({
   email: z.email(),
@@ -23,6 +23,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const {
     register,
@@ -41,12 +42,11 @@ export function LoginPage() {
   });
 
   return (
-    <AuthLayout title={t("auth.login.title")}>
-      <form
-        onSubmit={(event) => void onSubmit(event)}
-        noValidate
-        style={{ display: "flex", flexDirection: "column", gap: 16 }}
-      >
+    <LoginShell>
+      <form className="mk-login-page__form" onSubmit={(event) => void onSubmit(event)} noValidate>
+        <span className="mk-login-page__eyebrow">{t("auth.login.eyebrow")}</span>
+        <h1>{t("auth.login.title")}</h1>
+        <p className="mk-login-page__instruction">{t("auth.login.instruction")}</p>
         {submitError && <Alert tone="error">{submitError}</Alert>}
         <Input
           type="email"
@@ -56,19 +56,36 @@ export function LoginPage() {
           {...register("email")}
         />
         <Input
-          type="password"
+          type={passwordVisible ? "text" : "password"}
           autoComplete="current-password"
           label={t("auth.login.passwordLabel")}
+          suffix={
+            // eslint-disable-next-line no-restricted-syntax -- compact text control belongs inside Input.suffix.
+            <button
+              className="mk-login-page__password-toggle"
+              type="button"
+              aria-label={t(
+                passwordVisible ? "auth.login.hidePasswordLabel" : "auth.login.showPasswordLabel",
+              )}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+            >
+              {t(passwordVisible ? "auth.login.hidePassword" : "auth.login.showPassword")}
+            </button>
+          }
           {...errorProp(errors.password?.message)}
           {...register("password")}
         />
         <Button type="submit" loading={isSubmitting} fullWidth>
-          {t("auth.login.submit")}
+          {isSubmitting ? (
+            <span className="mk-visually-hidden">{t("auth.login.submitting")}</span>
+          ) : (
+            t("auth.login.submit")
+          )}
         </Button>
-        <p style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
+        <p className="mk-login-page__help">
           {t("auth.login.noAccount")} <Link to="/register">{t("auth.login.registerLink")}</Link>
         </p>
       </form>
-    </AuthLayout>
+    </LoginShell>
   );
 }
