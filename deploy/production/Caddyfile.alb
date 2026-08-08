@@ -96,6 +96,11 @@
 			}
 		}
 
+		@kioskReserved path /api/auth/* /api/* /1c_exchange /station/* /kiosk/* /health* /openapi.json /docs*
+		handle @kioskReserved {
+			respond 404
+		}
+
 		@kioskAssets path /assets/*
 		handle @kioskAssets {
 			header Cache-Control "public, max-age=31536000, immutable"

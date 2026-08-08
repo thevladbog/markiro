@@ -20,6 +20,30 @@ const commerceMlProxyTimeouts = Object.freeze({
 });
 const adminHost = "admin.example.test";
 const kioskHost = "kiosk.example.test";
+const kioskReservedPatterns = Object.freeze([
+  "/api/auth/*",
+  "/api/*",
+  "/1c_exchange",
+  "/station/*",
+  "/kiosk/*",
+  "/health*",
+  "/openapi.json",
+  "/docs*",
+]);
+const kioskForbiddenPaths = Object.freeze([
+  "/api/auth/session",
+  "/api/admin/tenants",
+  "/1c_exchange",
+  "/station/bootstrap",
+  "/kiosk/bootstrap",
+  "/health",
+  "/health/ready",
+  "/healthful",
+  "/openapi.json",
+  "/docs",
+  "/docs/swagger-ui.css",
+  "/docs-old",
+]);
 
 function caddyPathMatches(pattern, path) {
   return pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
@@ -105,18 +129,136 @@ function proxyRoutes(route) {
     .filter(({ paths, proxies }) => paths.length > 0 && proxies.length > 0);
 }
 
+function kioskOrderedRouteTable(route) {
+  const tables = nestedObjects(route).filter(
+    (candidate) =>
+      Array.isArray(candidate.routes) &&
+      candidate.routes.some((entry) =>
+        entry.match?.some((matcher) => matcher.path?.includes("/api/kiosk/*")),
+      ),
+  );
+  assert.equal(tables.length, 1, "kiosk must have exactly one ordered application route table");
+  return tables[0].routes;
+}
+
+function adaptedRouteMatches(route, { method, path }) {
+  if (!Array.isArray(route.match)) return true;
+  return route.match.some(
+    (matcher) =>
+      (!Array.isArray(matcher.method) || matcher.method.includes(method)) &&
+      (!Array.isArray(matcher.path) ||
+        matcher.path.some((pattern) => caddyPathMatches(pattern, path))),
+  );
+}
+
+function selectedAdaptedRoute(routeTable, request) {
+  const route = routeTable.find((candidate) => adaptedRouteMatches(candidate, request));
+  assert.ok(route, `${request.method} ${request.path} must select a terminal kiosk route`);
+  return route;
+}
+
+function assertOnlyPlain404(route, request) {
+  const objects = nestedObjects(route);
+  assert.deepEqual(
+    objects.filter((candidate) => candidate.handler === "static_response"),
+    [{ handler: "static_response", status_code: 404 }],
+    `${request.method} ${request.path} must terminate at a plain 404`,
+  );
+  for (const forbiddenHandler of ["vars", "rewrite", "file_server", "reverse_proxy"]) {
+    assert.ok(
+      objects.every((candidate) => candidate.handler !== forbiddenHandler),
+      `${request.method} ${request.path} must not reach ${forbiddenHandler}`,
+    );
+  }
+  assert.ok(
+    objects.every((candidate) => candidate.file === undefined),
+    `${request.method} ${request.path} must not reach try_files`,
+  );
+}
+
+function assertKioskRoutingBoundary(route) {
+  const routeTable = kioskOrderedRouteTable(route);
+  const reservedRoutes = routeTable.filter((candidate) =>
+    nestedObjects(candidate).some(
+      (value) => value.handler === "static_response" && value.status_code === 404,
+    ),
+  );
+  assert.equal(reservedRoutes.length, 2, "kiosk must have reserved and final 404 routes");
+  assert.deepEqual(
+    reservedRoutes[0].match?.flatMap((matcher) => matcher.path ?? []),
+    kioskReservedPatterns,
+    "kiosk must explicitly reserve every non-PWA namespace",
+  );
+
+  for (const path of kioskForbiddenPaths) {
+    for (const method of ["GET", "HEAD"]) {
+      const request = { method, path };
+      assertOnlyPlain404(selectedAdaptedRoute(routeTable, request), request);
+    }
+  }
+
+  for (const method of ["GET", "HEAD", "POST"]) {
+    const request = { method, path: "/api/kiosk/bootstrap" };
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.deepEqual(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "rewrite"),
+      [{ handler: "rewrite", strip_path_prefix: "/api" }],
+      `${method} /api/kiosk/* must strip exactly /api before proxying`,
+    );
+    assert.equal(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "reverse_proxy").length,
+      1,
+      `${method} /api/kiosk/* must reach exactly one proxy`,
+    );
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) =>
+          candidate.handler !== "file_server" && candidate.handler !== "static_response",
+      ),
+      `${method} /api/kiosk/* must win before static and 404 handlers`,
+    );
+  }
+
+  for (const method of ["GET", "HEAD"]) {
+    const request = { method, path: "/pickup/complete" };
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.ok(
+      nestedObjects(selected).some((candidate) => candidate.handler === "file_server"),
+      `${method} client-side kiosk deep links must retain the SPA fallback`,
+    );
+    assert.ok(
+      nestedObjects(selected).some((candidate) =>
+        candidate.file?.try_files?.includes("/index.html"),
+      ),
+      `${method} client-side kiosk deep links must try index.html`,
+    );
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) =>
+          candidate.handler !== "reverse_proxy" && candidate.handler !== "static_response",
+      ),
+      `${method} client-side kiosk deep links must remain static-only`,
+    );
+  }
+}
+
 function assertPlainFallback(route, host) {
   const routeTable = nestedObjects(route).find(
     (candidate) =>
       Array.isArray(candidate.routes) &&
       candidate.routes.some((entry) =>
         nestedObjects(entry).some((value) => value.handler === "reverse_proxy"),
-      ),
+      ) &&
+      candidate.routes
+        .at(-1)
+        ?.handle?.some(
+          (handler) => handler.handler === "static_response" && handler.status_code === 404,
+        ),
   )?.routes;
   assert.ok(routeTable, `${host} must have an ordered route table`);
-  const fallback = nestedObjects(routeTable.at(-1)).filter(
-    (candidate) => candidate.handler === "static_response",
-  );
+  const fallback = routeTable
+    .at(-1)
+    .handle.filter((candidate) => candidate.handler === "static_response");
   assert.deepEqual(fallback, [{ handler: "static_response", status_code: 404 }]);
 }
 
@@ -231,22 +373,7 @@ function assertAuthorityContract(adapted, { alb }) {
     [["/api/kiosk/*"]],
   );
   assert.deepEqual(kioskProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
-  const kioskMatcherPaths = nestedObjects(kiosk)
-    .filter((candidate) => Array.isArray(candidate.path))
-    .flatMap((candidate) => candidate.path);
-  for (const forbidden of [
-    "/api/auth/*",
-    "/api/*",
-    "/1c_exchange",
-    "/station/*",
-    "/health",
-    "/health/*",
-    "/openapi.json",
-    "/docs",
-    "/docs/*",
-  ]) {
-    assert.ok(!kioskMatcherPaths.includes(forbidden), `${kioskHost} must not match ${forbidden}`);
-  }
+  assertKioskRoutingBoundary(kiosk);
   for (const proxy of [...adminReverseProxies, ...kioskReverseProxies]) {
     const forwardedProto = proxy.headers?.request?.set?.["X-Forwarded-Proto"];
     if (alb) assert.deepEqual(forwardedProto, ["https"]);
@@ -657,6 +784,52 @@ test("Caddy contracts reject an unconditional kiosk reverse proxy", async () => 
 
     await assert.rejects(async () => {
       assertAuthorityContract(await adaptCaddy(unconditionalProxy), { alb });
+    });
+  }
+});
+
+test("Caddy contracts reject reserved kiosk namespace routing mutations", async () => {
+  for (const file of ["deploy/production/Caddyfile", "deploy/production/Caddyfile.alb"]) {
+    const source = await readFile(file, "utf8");
+    const reservedLine = `\t\t@kioskReserved path ${kioskReservedPatterns.join(" ")}`;
+    assert.ok(source.includes(reservedLine), `${file} must contain the reserved matcher`);
+
+    for (const pattern of kioskReservedPatterns) {
+      const missingNamespace = mutate(
+        source,
+        reservedLine,
+        `\t\t@kioskReserved path ${kioskReservedPatterns
+          .filter((candidate) => candidate !== pattern)
+          .join(" ")}`,
+      );
+      await assert.rejects(async () => {
+        assertKioskRoutingBoundary(applicationRoute(await adaptCaddy(missingNamespace), kioskHost));
+      });
+    }
+
+    const reservedBlock = `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\trespond 404\n\t\t}`;
+    for (const replacement of [
+      `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\troot * /srv/kiosk\n\t\t\tfile_server\n\t\t}`,
+      `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\ttry_files {path} /index.html\n\t\t\tfile_server\n\t\t}`,
+      `${reservedLine}\n\t\thandle @kioskReserved {\n\t\t\treverse_proxy api:3000\n\t\t}`,
+    ]) {
+      const non404ReservedRoute = mutate(source, reservedBlock, replacement);
+      await assert.rejects(async () => {
+        assertKioskRoutingBoundary(
+          applicationRoute(await adaptCaddy(non404ReservedRoute), kioskHost),
+        );
+      });
+    }
+
+    const apiBlock = source.match(/\t\t@kioskApi path[\s\S]*?\n\t\t}\n\n/)?.[0];
+    assert.ok(apiBlock, `${file} must contain the kiosk API handler before reserved paths`);
+    const reordered = mutate(
+      source,
+      `${apiBlock}${reservedBlock}\n\n`,
+      `${reservedBlock}\n\n${apiBlock}`,
+    );
+    await assert.rejects(async () => {
+      assertKioskRoutingBoundary(applicationRoute(await adaptCaddy(reordered), kioskHost));
     });
   }
 });
