@@ -116,6 +116,20 @@ resource "yandex_lockbox_secret_iam_member" "terraform_state_backend" {
   member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
+# Audit Trails validates every selected Lockbox resource scope as the creator.
+# Terraform needs metadata visibility only; payload access remains restricted.
+resource "yandex_lockbox_secret_iam_member" "terraform_audit_scope_viewer" {
+  for_each = {
+    registry            = var.registry_secret_id
+    runner_registration = var.runner_registration_secret_id
+    runtime             = var.runtime_secret_id
+  }
+
+  secret_id = each.value
+  role      = "lockbox.viewer"
+  member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
+}
+
 resource "yandex_lockbox_secret_iam_member" "runner_registry" {
   secret_id = var.registry_secret_id
   role      = "lockbox.payloadViewer"
