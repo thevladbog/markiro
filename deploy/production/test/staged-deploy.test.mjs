@@ -18,6 +18,7 @@ const ENVIRONMENT = {
   MARKIRO_EDGE_IMAGE_DIGEST: EDGE_DIGEST,
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
+  MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
 };
 
 function legacyFileName(record) {
@@ -101,6 +102,9 @@ test("prepare stops after local API and edge readiness with an exclusive pending
 
   assert.equal(candidate.state, "pending");
   assert.equal(candidate.previousTag, PREVIOUS_TAG);
+  assert.ok(
+    calls.every(({ environment }) => environment.MARKIRO_KIOSK_DOMAIN === "kiosk.markiro.example"),
+  );
   assert.deepEqual(
     calls
       .filter(({ args }) => args.includes("run") || args.includes("up"))

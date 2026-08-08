@@ -17,6 +17,7 @@ const environment = {
   MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
+  MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
   MARKIRO_HTTPS_PORT: "443",
   ACME_EMAIL: "ops@example.test",
   DATABASE_URL: "postgres://private:password@database/markiro",
@@ -208,16 +209,16 @@ test(
   },
 );
 
-test("passes the configured non-standard HTTPS port to public smoke", async () => {
+test("passes both configured authorities and the immutable tag to public smoke", async () => {
   const { dependencies, releaseDirectory } = await fixture();
-  let smokeBaseUrl;
+  let smokeOptions;
   let readinessUrl;
   dependencies.probeEdgeTls = async ({ url }) => {
     readinessUrl = url;
     return { status: 200 };
   };
-  dependencies.runSmoke = async ({ baseUrl }) => {
-    smokeBaseUrl = baseUrl;
+  dependencies.runSmoke = async (options) => {
+    smokeOptions = options;
   };
 
   await deployRelease(
@@ -229,7 +230,9 @@ test("passes the configured non-standard HTTPS port to public smoke", async () =
     dependencies,
   );
 
-  assert.equal(smokeBaseUrl, "https://app.markiro.example:18443");
+  assert.equal(smokeOptions.adminBaseUrl, "https://app.markiro.example:18443");
+  assert.equal(smokeOptions.kioskBaseUrl, "https://kiosk.markiro.example:18443");
+  assert.equal(smokeOptions.expectedReleaseSha, tag);
   assert.equal(readinessUrl, "https://app.markiro.example:18443/health/live");
 });
 
