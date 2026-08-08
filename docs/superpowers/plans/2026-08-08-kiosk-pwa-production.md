@@ -451,13 +451,29 @@ yandex_dns_recordset.certificate_validation
 data.yandex_cm_certificate.issued
 ```
 
-Add parallel `.kiosk`, `.kiosk_certificate_validation`, and `.kiosk_issued` blocks. Configure the listener as:
+Add parallel `.kiosk`, `.kiosk_certificate_validation`, and `.kiosk_issued` blocks. Configure the HTTPS listener TLS block as:
 
 ```hcl
-certificate_ids = [
-  data.yandex_cm_certificate.issued.id,
-  data.yandex_cm_certificate.kiosk_issued.id,
-]
+default_handler {
+  certificate_ids = [data.yandex_cm_certificate.issued.id]
+
+  http_handler {
+    http_router_id = yandex_alb_http_router.markiro.id
+  }
+}
+
+sni_handler {
+  name         = "kiosk"
+  server_names = [var.kiosk_domain]
+
+  handler {
+    certificate_ids = [data.yandex_cm_certificate.kiosk_issued.id]
+
+    http_handler {
+      http_router_id = yandex_alb_http_router.markiro.id
+    }
+  }
+}
 ```
 
 Change only the existing virtual host authority and add the second gated application record. Do not duplicate the virtual host or security chain.
