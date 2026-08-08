@@ -136,7 +136,7 @@ runcmd:
     - -ceu
     - |
         set -o pipefail
-        install -d -m 0755 /usr/local/lib/markiro /opt/actions-runner /var/lib/markiro
+        install -d -m 0755 /usr/local/lib/markiro /opt/markiro /opt/actions-runner /var/lib/markiro
         install -d -m 0750 -o root -g markiro-monitor /etc/markiro-monitor
         chown root:markiro-monitor /etc/markiro-monitor/monitoring.conf
         chmod 0640 /etc/markiro-monitor/monitoring.conf

@@ -2944,6 +2944,13 @@ function assertRunnerBootstrapFailsObservable(cloudInit) {
     "all runner bootstrap steps must share one fail-fast shell",
   );
   assert.match(document.runcmd[0][2], /^set -o pipefail\n/);
+  const nodeDirectoryProvisioning = document.runcmd[0][2].match(/^install -d -m 0755 .+$/m)?.[0];
+  assert.match(nodeDirectoryProvisioning ?? "", /(?:^|\s)\/opt\/markiro(?:\s|$)/);
+  assert.ok(
+    document.runcmd[0][2].indexOf(nodeDirectoryProvisioning) <
+      document.runcmd[0][2].indexOf('tar -xJf "$${archive}" -C /opt/markiro'),
+    "the Node extraction directory must exist before tar runs",
+  );
   assert.equal(
     document.runcmd[0][2].trimEnd().split("\n").at(-1),
     "touch /var/lib/markiro/markiro-runner-bootstrap-complete",
@@ -2985,6 +2992,11 @@ test("runner bootstrap fails observable and powers off only after the success ma
     "condition: true",
   );
   assert.throws(() => assertRunnerBootstrapFailsObservable(unconditionalCondition));
+  const missingNodeDirectory = cloudInit.replace(
+    " /opt/markiro /opt/actions-runner",
+    " /opt/actions-runner",
+  );
+  assert.throws(() => assertRunnerBootstrapFailsObservable(missingNodeDirectory));
 });
 
 test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
