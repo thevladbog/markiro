@@ -223,7 +223,7 @@ function canonicalHostKeyPair(keys) {
 export function parseSerialHostKeys(serialOutput) {
   if (typeof serialOutput !== "string") throw new Error("authenticated SSH host keys are invalid");
   const markerLines = serialOutput
-    .split("\n")
+    .split(/\r?\n/u)
     .filter((line) => line.includes("MARKIRO_SSH_HOST_KEY"));
   const keys = markerLines.map((line) => {
     const match = line.match(

@@ -676,6 +676,15 @@ test("serial host-key parser requires the exact V1 pair and canonicalizes algori
   );
 });
 
+test("serial host-key parser accepts authenticated Yandex CRLF output", () => {
+  const output = ["ordinary boot output", marker(RSA_KEY), marker(ED25519_KEY), ""].join("\r\n");
+
+  assert.equal(
+    Buffer.from(parseSerialHostKeys(output), "base64").toString("utf8"),
+    `${ED25519_KEY}\n${RSA_KEY}`,
+  );
+});
+
 for (const [name, output] of [
   ["missing markers", "boot complete"],
   [
