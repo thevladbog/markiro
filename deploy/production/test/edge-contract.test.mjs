@@ -260,6 +260,25 @@ function assertAuthorityContract(adapted, { alb }) {
   };
 }
 
+function dockerfileStage(dockerfile, stageName) {
+  const stageHeaders = [...dockerfile.matchAll(/^\s*FROM\s+(.+?)\s*$/gim)];
+  const stageIndex = stageHeaders.findIndex((header) =>
+    new RegExp(`\\s+AS\\s+${stageName}$`, "i").test(header[1]),
+  );
+  assert.notEqual(stageIndex, -1, `Dockerfile stage ${stageName} must exist`);
+
+  const header = stageHeaders[stageIndex];
+  const nextHeader = stageHeaders[stageIndex + 1];
+  return dockerfile.slice(header.index + header[0].length, nextHeader?.index ?? dockerfile.length);
+}
+
+function dockerfileInstructions(stage) {
+  return stage.split(/\r?\n/).flatMap((line) => {
+    const match = line.match(/^\s*([a-z]+)\s+(.+?)\s*$/i);
+    return match ? [{ name: match[1].toUpperCase(), arguments: match[2] }] : [];
+  });
+}
+
 function assertEdgeImageContract(dockerfile, dockerignore) {
   const install = dockerfile.indexOf("RUN pnpm install --frozen-lockfile");
   const adminManifest = dockerfile.indexOf("COPY apps/admin/package.json");
@@ -275,14 +294,16 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.ok(kioskSource > install && kioskSource < build);
   assert.ok(build > install);
 
-  const runtime = dockerfile.split("FROM caddy:2.11.4-alpine AS runtime")[1] ?? "";
+  const runtime = dockerfileStage(dockerfile, "runtime");
   assert.match(runtime, /COPY --from=build \/workspace\/apps\/admin\/dist \/srv\/admin/);
   assert.match(runtime, /COPY --from=build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/);
   assert.match(runtime, /addgroup -S -g 10001 markiro/);
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
   assert.doesNotMatch(runtime, /node|pnpm/);
-  const runtimeCopies = [...runtime.matchAll(/^COPY (.+)$/gm)].map((match) => match[1]);
+  const runtimeCopies = dockerfileInstructions(runtime)
+    .filter((instruction) => instruction.name === "COPY")
+    .map((instruction) => instruction.arguments);
   assert.deepEqual(runtimeCopies, [
     "deploy/production/Caddyfile /etc/caddy/Caddyfile.direct",
     "deploy/production/Caddyfile.alb /etc/caddy/Caddyfile.alb",
@@ -290,7 +311,9 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "--from=build /workspace/apps/admin/dist /srv/admin",
     "--from=build /workspace/apps/kiosk/dist /srv/kiosk",
   ]);
-  const buildCopies = [...runtime.matchAll(/^COPY --from=build (.+)$/gm)].map((match) => match[1]);
+  const buildCopies = runtimeCopies
+    .filter((copy) => copy.startsWith("--from=build "))
+    .map((copy) => copy.slice("--from=build ".length));
   assert.deepEqual(buildCopies, [
     "/workspace/apps/admin/dist /srv/admin",
     "/workspace/apps/kiosk/dist /srv/kiosk",
@@ -477,13 +500,23 @@ test("edge image mutations cannot omit or merge frontend build outputs", async (
 test("edge runtime rejects source COPY instructions even when frontend outputs remain", async () => {
   const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
   const dockerignore = await readFile(".dockerignore", "utf8");
-  const sourceCopy = mutate(
-    dockerfile,
-    "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n",
-    "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\nCOPY apps/kiosk /srv/source\n",
-  );
+  const marker = "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n";
+  const sourceCopies = [
+    mutate(dockerfile, marker, `${marker}COPY apps/kiosk /srv/source\n`),
+    mutate(dockerfile, marker, `${marker}copy apps/kiosk /srv/source\n`),
+  ];
 
-  assert.throws(() => assertEdgeImageContract(sourceCopy, dockerignore));
+  for (const sourceCopy of sourceCopies) {
+    assert.throws(() => assertEdgeImageContract(sourceCopy, dockerignore));
+  }
+});
+
+test("edge runtime COPY allowlist stops at the next Dockerfile stage", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const laterStage = `${dockerfile}\nFROM scratch AS metadata\nCOPY apps/kiosk /metadata/source\n`;
+
+  assert.doesNotThrow(() => assertEdgeImageContract(laterStage, dockerignore));
 });
 
 test("Caddy contracts reject cross-host and overbroad kiosk mutations", async () => {
