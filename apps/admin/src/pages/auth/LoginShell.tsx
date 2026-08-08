@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { type Theme, useTheme } from "@markiro/ui";
+import { Button, type Theme, useTheme } from "@markiro/ui";
 
 import logoOnDark from "../../assets/markiro-logo-on-dark.svg";
 import logoOnLight from "../../assets/markiro-logo-on-light.svg";
@@ -75,20 +75,24 @@ export function LoginShell({ children }: { children: ReactNode }) {
             <img className="mk-login-page__logo-on-light" src={logoOnLight} alt="" />
             <img className="mk-login-page__logo-on-dark" src={logoOnDark} alt="" />
           </picture>
-          <button
-            type="button"
+          <Button
+            className="mk-login-page__header-control"
+            size="compact"
+            variant="secondary"
             onClick={() => void i18n.changeLanguage(nextLanguage)}
             aria-label={t("auth.login.toggleLanguage")}
           >
             {language.toUpperCase()}
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            className="mk-login-page__header-control"
+            size="compact"
+            variant="secondary"
             onClick={() => setTheme(NEXT_THEME[theme])}
             aria-label={t("auth.login.toggleTheme", { theme: themeLabel })}
           >
             {themeLabel}
-          </button>
+          </Button>
         </header>
         <main className="mk-login-page__main">{children}</main>
         <footer className="mk-login-page__footer">{t("auth.login.protectedCabinet")}</footer>
