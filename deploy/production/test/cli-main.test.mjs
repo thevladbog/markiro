@@ -55,6 +55,23 @@ test("a production CLI invoked by path executes its entrypoint instead of silent
   assert.match(result.stderr, /MARKIRO_DOMAIN is invalid/);
 });
 
+test("the preflight CLI fails closed when the kiosk domain is absent", () => {
+  const result = spawnSync(process.execPath, ["deploy/production/preflight.mjs"], {
+    cwd: process.cwd(),
+    encoding: "utf8",
+    env: {
+      MARKIRO_IMAGE_TAG: "0123456789abcdef0123456789abcdef01234567",
+      MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
+      MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
+      MARKIRO_DOMAIN: "app.markiro.example",
+      ACME_EMAIL: "ops@example.test",
+    },
+  });
+
+  assert.equal(result.status, 1);
+  assert.equal(result.stderr.trim(), "MARKIRO_KIOSK_DOMAIN is invalid");
+});
+
 test("a production CLI invoked through a symlink still executes its entrypoint", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "markiro cli main "));
   t.after(() => rm(directory, { recursive: true, force: true }));
