@@ -129,6 +129,17 @@ function terraformOutputBlock(source, name) {
   assert.fail(`unterminated output ${name}`);
 }
 
+function terraformDeclarationCount(source, kind, type) {
+  return [...source.matchAll(new RegExp(`${kind}\\s+"${type}"\\s+"[^"]+"\\s*\\{`, "g"))].length;
+}
+
+function terraformListItems(source) {
+  return source
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function terraformNestedBlocks(source, name) {
   const blocks = [];
   const declaration = new RegExp(`\\b${name}\\s*\\{`, "g");
@@ -1059,14 +1070,58 @@ async function privateNetworkAndComputeSources() {
 }
 
 function assertProtectedIngress({
+  compute,
   ingress,
   ingressOutputs,
   ingressVariables,
   production,
   productionOutputs,
+  productionTfvars,
   productionVariables,
 }) {
   const allIngress = [ingress, ingressOutputs, ingressVariables].join("\n");
+
+  for (const [type, expected] of [
+    ["yandex_vpc_address", 1],
+    ["yandex_cm_certificate", 2],
+    ["yandex_dns_recordset", 4],
+    ["yandex_alb_backend_group", 1],
+    ["yandex_sws_advanced_rate_limiter_profile", 1],
+    ["yandex_sws_security_profile", 1],
+    ["yandex_alb_http_router", 1],
+    ["yandex_alb_virtual_host", 1],
+    ["yandex_alb_load_balancer", 1],
+  ]) {
+    assert.equal(
+      terraformDeclarationCount(ingress, "resource", type),
+      expected,
+      `protected ingress must keep exactly ${expected} ${type} resource(s)`,
+    );
+  }
+  assert.equal(
+    terraformDeclarationCount(compute, "resource", "yandex_alb_target_group"),
+    1,
+    "protected ingress must keep exactly one application target group",
+  );
+
+  for (const variables of [ingressVariables, productionVariables]) {
+    const adminDomainPattern = /condition\s*=\s*can\(regex\("([^"]+)",\s*var\.domain\)\)/.exec(
+      variables,
+    )?.[1];
+    const kioskDomainPattern =
+      /condition\s*=\s*can\(regex\("([^"]+)",\s*var\.kiosk_domain\)\)/.exec(variables)?.[1];
+    assert.ok(adminDomainPattern, "domain must retain its lowercase-FQDN validation");
+    assert.equal(
+      kioskDomainPattern,
+      adminDomainPattern,
+      "kiosk_domain must use the same lowercase-FQDN validation as domain",
+    );
+    assert.equal(
+      [...variables.matchAll(/var\.kiosk_domain\s*!=\s*var\.domain/g)].length,
+      1,
+      "kiosk_domain must reject the admin domain",
+    );
+  }
 
   const publicAddress = terraformResourceBlock(ingress, "yandex_vpc_address", "markiro");
   assert.match(publicAddress, /external_ipv4_address\s*\{/);
@@ -1092,18 +1147,56 @@ function assertProtectedIngress({
     /data\s+"yandex_cm_certificate"\s+"issued"\s*\{[\s\S]*?certificate_id\s*=\s*yandex_cm_certificate\.markiro\.id[\s\S]*?wait_validation\s*=\s*true[\s\S]*?depends_on\s*=\s*\[yandex_dns_recordset\.certificate_validation\]/,
   );
 
+  const kioskCertificate = terraformResourceBlock(ingress, "yandex_cm_certificate", "kiosk");
+  assert.match(kioskCertificate, /domains\s*=\s*\[var\.kiosk_domain\]/);
+  assert.match(
+    kioskCertificate,
+    /managed\s*\{[\s\S]*?challenge_type\s*=\s*"DNS_CNAME"[\s\S]*?challenge_count\s*=\s*1/,
+  );
+  const kioskCertificateValidation = terraformResourceBlock(
+    ingress,
+    "yandex_dns_recordset",
+    "kiosk_certificate_validation",
+  );
+  assert.match(kioskCertificateValidation, /count\s*=\s*1/);
+  assert.match(
+    kioskCertificateValidation,
+    /yandex_cm_certificate\.kiosk\.challenges\[count\.index\]/,
+  );
+  assert.doesNotMatch(kioskCertificateValidation, /for_each/);
+  assert.match(
+    ingress,
+    /data\s+"yandex_cm_certificate"\s+"kiosk_issued"\s*\{[\s\S]*?certificate_id\s*=\s*yandex_cm_certificate\.kiosk\.id[\s\S]*?wait_validation\s*=\s*true[\s\S]*?depends_on\s*=\s*\[yandex_dns_recordset\.kiosk_certificate_validation\]/,
+  );
+  assert.equal(
+    terraformDeclarationCount(ingress, "data", "yandex_cm_certificate"),
+    2,
+    "each authority must have one issued-certificate data source",
+  );
+
   const backendGroup = terraformResourceBlock(ingress, "yandex_alb_backend_group", "app");
   assert.match(backendGroup, /target_group_ids\s*=\s*\[var\.app_target_group_id\]/);
   assert.match(backendGroup, /port\s*=\s*8080/);
   assert.match(backendGroup, /path\s*=\s*"\/health\/ready"/);
   assert.match(backendGroup, /host\s*=\s*var\.domain/);
   assert.doesNotMatch(backendGroup, /path\s*=\s*"\/health"|\/api(?:\W|$)|port\s*=\s*443/);
+  assert.equal(
+    terraformNestedBlocks(backendGroup, "healthcheck").length,
+    1,
+    "the shared backend must keep exactly one readiness health check",
+  );
 
   const router = terraformResourceBlock(ingress, "yandex_alb_http_router", "markiro");
   assert.match(router, /name\s*=\s*"markiro-production"/);
 
   const virtualHost = terraformResourceBlock(ingress, "yandex_alb_virtual_host", "markiro");
-  assert.match(virtualHost, /authority\s*=\s*\[var\.domain\]/);
+  const authorities = /authority\s*=\s*\[([\s\S]*?)\]/.exec(virtualHost)?.[1];
+  assert.ok(authorities, "the shared virtual host must declare explicit authorities");
+  assert.deepEqual(
+    terraformListItems(authorities),
+    ["var.domain", "var.kiosk_domain"],
+    "the shared virtual host must serve exactly the admin and kiosk authorities",
+  );
   assert.match(virtualHost, /backend_group_id\s*=\s*yandex_alb_backend_group\.app\.id/);
   assert.match(
     virtualHost,
@@ -1113,9 +1206,23 @@ function assertProtectedIngress({
 
   const loadBalancer = terraformResourceBlock(ingress, "yandex_alb_load_balancer", "markiro");
   assert.match(loadBalancer, /ports\s*=\s*\[80\][\s\S]*?http_to_https\s*=\s*true/);
+  const certificateIds = /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[([\s\S]*?)\]/.exec(
+    loadBalancer,
+  )?.[1];
+  assert.ok(certificateIds, "the HTTPS listener must declare certificate IDs");
+  assert.deepEqual(
+    terraformListItems(certificateIds),
+    ["data.yandex_cm_certificate.issued.id", "data.yandex_cm_certificate.kiosk_issued.id"],
+    "the one HTTPS listener must present exactly both issued certificates",
+  );
   assert.match(
     loadBalancer,
-    /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[data\.yandex_cm_certificate\.issued\.id\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+    /ports\s*=\s*\[443\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+  );
+  assert.equal(
+    terraformNestedBlocks(loadBalancer, "listener").length,
+    2,
+    "the shared ALB must keep exactly the HTTP redirect and HTTPS listeners",
   );
   assert.match(
     loadBalancer,
@@ -1168,10 +1275,20 @@ function assertProtectedIngress({
   assert.doesNotMatch(securityProfile, /smart_protection\s*\{/);
   assert.doesNotMatch(securityProfile, /analyze_request_body|size_limit/i);
 
-  const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", "application");
-  assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
-  assert.match(publicDns, /type\s*=\s*"A"/);
-  assert.doesNotMatch(publicDns, /AAAA/);
+  for (const [name, hostname] of [
+    ["application", "var.domain"],
+    ["kiosk_application", "var.kiosk_domain"],
+  ]) {
+    const publicDns = terraformResourceBlock(ingress, "yandex_dns_recordset", name);
+    assert.match(publicDns, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
+    assert.match(publicDns, new RegExp(`name\\s*=\\s*${hostname.replace(".", "\\.")}`));
+    assert.match(publicDns, /type\s*=\s*"A"/);
+    assert.match(
+      publicDns,
+      /data\s*=\s*\[yandex_vpc_address\.markiro\.external_ipv4_address\.0\.address\]/,
+    );
+    assert.doesNotMatch(publicDns, /AAAA/);
+  }
   assert.match(ingressVariables, /variable\s+"public_dns_enabled"\s*\{[\s\S]*?default\s*=\s*false/);
   for (const variable of ["global_rate_limit", "per_ip_rate_limit"]) {
     assert.match(
@@ -1192,6 +1309,10 @@ function assertProtectedIngress({
     "reserved_ipv4_address",
     "certificate_id",
     "certificate_status",
+    "kiosk_certificate_id",
+    "kiosk_certificate_status",
+    "admin_domain",
+    "kiosk_domain",
     "load_balancer_id",
     "load_balancer_address",
     "backend_group_id",
@@ -1206,9 +1327,46 @@ function assertProtectedIngress({
     assert.doesNotMatch(outputs, /output\s+"waf_profile_id"\s*\{/);
   }
 
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "approved_a_records"),
+    /value\s*=\s*\[yandex_vpc_address\.markiro\.external_ipv4_address\.0\.address\]/,
+  );
+  assert.match(terraformOutputBlock(ingressOutputs, "admin_domain"), /value\s*=\s*var\.domain/);
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "kiosk_domain"),
+    /value\s*=\s*var\.kiosk_domain/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "certificate_id"),
+    /value\s*=\s*data\.yandex_cm_certificate\.issued\.id/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "certificate_status"),
+    /value\s*=\s*data\.yandex_cm_certificate\.issued\.status/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "kiosk_certificate_id"),
+    /value\s*=\s*data\.yandex_cm_certificate\.kiosk_issued\.id/,
+  );
+  assert.match(
+    terraformOutputBlock(ingressOutputs, "kiosk_certificate_status"),
+    /value\s*=\s*data\.yandex_cm_certificate\.kiosk_issued\.status/,
+  );
+  for (const output of [
+    "certificate_id",
+    "certificate_status",
+    "kiosk_certificate_id",
+    "kiosk_certificate_status",
+    "admin_domain",
+    "kiosk_domain",
+  ]) {
+    assert.doesNotMatch(terraformOutputBlock(ingressOutputs, output), /sensitive\s*=\s*true/);
+  }
+
   assert.match(production, /module\s+"ingress"\s*\{/);
   for (const variable of [
     "domain",
+    "kiosk_domain",
     "dns_zone_id",
     "public_dns_enabled",
     "global_rate_limit",
@@ -1216,32 +1374,59 @@ function assertProtectedIngress({
   ]) {
     assert.match(productionVariables, new RegExp(`variable\\s+"${variable}"\\s*\\{`));
   }
+  assert.equal(
+    [...production.matchAll(/^\s*kiosk_domain\s*=\s*var\.kiosk_domain\s*$/gm)].length,
+    1,
+    "production must wire kiosk_domain only to the existing ingress module",
+  );
+  assert.match(productionTfvars, /^domain\s*=\s*"admin\.markiro\.example\.ru"$/m);
+  assert.match(productionTfvars, /^kiosk_domain\s*=\s*"kiosk\.markiro\.example\.ru"$/m);
+  assert.match(productionTfvars, /^public_dns_enabled\s*=\s*false$/m);
+  for (const [name, value] of [
+    ["certificate_id", "module.ingress.certificate_id"],
+    ["certificate_status", "module.ingress.certificate_status"],
+    ["kiosk_certificate_id", "module.ingress.kiosk_certificate_id"],
+    ["kiosk_certificate_status", "module.ingress.kiosk_certificate_status"],
+    ["admin_domain", "module.ingress.admin_domain"],
+    ["kiosk_domain", "module.ingress.kiosk_domain"],
+  ]) {
+    assert.match(
+      terraformOutputBlock(productionOutputs, name),
+      new RegExp(`value\\s*=\\s*${value.replaceAll(".", "\\.")}`),
+    );
+  }
   assert.doesNotMatch(allIngress, /(?:api|backend)[_-]?(?:url|address).*443/i);
 }
 
 async function protectedIngressSources() {
   const [
+    compute,
     ingress,
     ingressOutputs,
     ingressVariables,
     production,
     productionOutputs,
+    productionTfvars,
     productionVariables,
   ] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/main.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/outputs.tf"),
     readRepositoryFile("infra/yandex/modules/ingress/variables.tf"),
     readRepositoryFile("infra/yandex/production/main.tf"),
     readRepositoryFile("infra/yandex/production/outputs.tf"),
+    readRepositoryFile("infra/yandex/production/terraform.tfvars.example"),
     readRepositoryFile("infra/yandex/production/variables.tf"),
   ]);
 
   return {
+    compute,
     ingress,
     ingressOutputs,
     ingressVariables,
     production,
     productionOutputs,
+    productionTfvars,
     productionVariables,
   };
 }
@@ -2855,7 +3040,11 @@ test("production managed PostgreSQL and object storage protect durable data", as
   assertProtectedManagedData(await managedDataSources());
 });
 
-test("production ingress provides HTTPS-only protected routing through the private app target", async () => {
+test("protected ingress serves the admin and kiosk authorities through one private app edge", async () => {
+  assertProtectedIngress(await protectedIngressSources());
+});
+
+test("production root wires both ingress hostnames while keeping public DNS disabled", async () => {
   assertProtectedIngress(await protectedIngressSources());
 });
 
@@ -2957,7 +3146,95 @@ test("observability contract rejects missing categories, unsafe retention, audit
   assert.throws(() => assertProtectedObservability(wrongChannel));
 });
 
-test("production ingress contract rejects bypasses, computed certificate keys, fractional rates, and unsafe defaults", async () => {
+test("ingress mutations reject bypasses, duplicate edges, unsafe certificates, and unsafe defaults", async () => {
+  for (const variables of ["ingressVariables", "productionVariables"]) {
+    const equalDomainsAccepted = await protectedIngressSources();
+    equalDomainsAccepted[variables] = equalDomainsAccepted[variables].replace(
+      "var.kiosk_domain != var.domain",
+      "true",
+    );
+    assert.throws(
+      () => assertProtectedIngress(equalDomainsAccepted),
+      /kiosk_domain must reject the admin domain/,
+    );
+  }
+
+  const combinedReplacementCertificate = await protectedIngressSources();
+  combinedReplacementCertificate.ingress = replaceTerraformResource(
+    combinedReplacementCertificate.ingress,
+    "yandex_cm_certificate",
+    "markiro",
+    (block) =>
+      block.replace("domains   = [var.domain]", "domains   = [var.domain, var.kiosk_domain]"),
+  );
+  assert.throws(() => assertProtectedIngress(combinedReplacementCertificate));
+
+  const ungatedKioskRecord = await protectedIngressSources();
+  ungatedKioskRecord.ingress = replaceTerraformResource(
+    ungatedKioskRecord.ingress,
+    "yandex_dns_recordset",
+    "kiosk_application",
+    (block) => block.replace("count = var.public_dns_enabled ? 1 : 0", "count = 1"),
+  );
+  assert.throws(() => assertProtectedIngress(ungatedKioskRecord));
+
+  for (const [type, name] of [
+    ["yandex_vpc_address", "markiro"],
+    ["yandex_alb_backend_group", "app"],
+    ["yandex_alb_load_balancer", "markiro"],
+  ]) {
+    const duplicateEdge = await protectedIngressSources();
+    duplicateEdge.ingress += terraformResourceBlock(duplicateEdge.ingress, type, name).replace(
+      `"${name}"`,
+      `"duplicate_${name}"`,
+    );
+    assert.throws(
+      () => assertProtectedIngress(duplicateEdge),
+      /protected ingress must keep exactly/,
+    );
+  }
+
+  const duplicateTargetGroup = await protectedIngressSources();
+  duplicateTargetGroup.compute += terraformResourceBlock(
+    duplicateTargetGroup.compute,
+    "yandex_alb_target_group",
+    "app",
+  ).replace('"app"', '"duplicate_app"');
+  assert.throws(
+    () => assertProtectedIngress(duplicateTargetGroup),
+    /exactly one application target group/,
+  );
+
+  const wildcardAuthority = await protectedIngressSources();
+  wildcardAuthority.ingress = replaceTerraformResource(
+    wildcardAuthority.ingress,
+    "yandex_alb_virtual_host",
+    "markiro",
+    (block) =>
+      block.replace("authority      = [var.domain, var.kiosk_domain]", 'authority      = ["*"]'),
+  );
+  assert.throws(
+    () => assertProtectedIngress(wildcardAuthority),
+    /exactly the admin and kiosk authorities/,
+  );
+
+  for (const certificateId of [
+    "data.yandex_cm_certificate.issued.id",
+    "data.yandex_cm_certificate.kiosk_issued.id",
+  ]) {
+    const missingIssuedCertificate = await protectedIngressSources();
+    missingIssuedCertificate.ingress = replaceTerraformResource(
+      missingIssuedCertificate.ingress,
+      "yandex_alb_load_balancer",
+      "markiro",
+      (block) => block.replace(new RegExp(`\\s*${certificateId.replaceAll(".", "\\.")},?`), ""),
+    );
+    assert.throws(
+      () => assertProtectedIngress(missingIssuedCertificate),
+      /exactly both issued certificates/,
+    );
+  }
+
   const missingSws = await protectedIngressSources();
   missingSws.ingress = replaceTerraformResource(
     missingSws.ingress,

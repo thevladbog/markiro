@@ -104,6 +104,7 @@ module "ingress" {
   alb_security_group_id     = module.network.security_group_ids.alb
   app_target_group_id       = module.compute.app_target_group_id
   domain                    = var.domain
+  kiosk_domain              = var.kiosk_domain
   dns_zone_id               = var.dns_zone_id
   public_dns_enabled        = var.public_dns_enabled
   application_log_group_id  = module.observability.application_log_group_id

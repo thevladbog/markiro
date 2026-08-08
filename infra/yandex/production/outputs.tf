@@ -58,6 +58,26 @@ output "certificate_status" {
   value       = module.ingress.certificate_status
 }
 
+output "kiosk_certificate_id" {
+  description = "Certificate Manager ID for the kiosk HTTPS authority."
+  value       = module.ingress.kiosk_certificate_id
+}
+
+output "kiosk_certificate_status" {
+  description = "Current kiosk Certificate Manager issuance status."
+  value       = module.ingress.kiosk_certificate_status
+}
+
+output "admin_domain" {
+  description = "Exact admin authority served by the protected ingress."
+  value       = module.ingress.admin_domain
+}
+
+output "kiosk_domain" {
+  description = "Exact kiosk authority served by the protected ingress."
+  value       = module.ingress.kiosk_domain
+}
+
 output "load_balancer_id" {
   description = "Protected public application load balancer ID."
   value       = module.ingress.load_balancer_id

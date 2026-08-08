@@ -13,6 +13,26 @@ output "certificate_status" {
   value       = data.yandex_cm_certificate.issued.status
 }
 
+output "kiosk_certificate_id" {
+  description = "Certificate Manager ID presented for the kiosk authority."
+  value       = data.yandex_cm_certificate.kiosk_issued.id
+}
+
+output "kiosk_certificate_status" {
+  description = "Current kiosk Certificate Manager issuance status."
+  value       = data.yandex_cm_certificate.kiosk_issued.status
+}
+
+output "admin_domain" {
+  description = "Exact admin authority served by the protected ingress."
+  value       = var.domain
+}
+
+output "kiosk_domain" {
+  description = "Exact kiosk authority served by the protected ingress."
+  value       = var.kiosk_domain
+}
+
 output "load_balancer_id" {
   description = "Protected public application load balancer ID."
   value       = yandex_alb_load_balancer.markiro.id
