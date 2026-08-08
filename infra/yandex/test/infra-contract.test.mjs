@@ -3033,6 +3033,39 @@ test("runner bootstrap fails observable and powers off only after the success ma
   assert.throws(() => assertRunnerBootstrapFailsObservable(missingNodeDirectory));
 });
 
+test("runner JIT metadata cleanup accepts an unfinished Yandex operation", async () => {
+  const cloudInit = yaml.load(
+    await readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+  );
+  const runnerJit = cloudInit.write_files?.find(
+    (file) => file?.path === "/usr/local/lib/markiro/runner-jit",
+  )?.content;
+  assert.equal(typeof runnerJit, "string");
+  assert.doesNotThrow(() => execFileSync("/bin/bash", ["-n"], { input: runnerJit }));
+
+  const operationFilter = runnerJit.match(/jq -r '([^'\n]+)'/)?.[1];
+  assert.ok(operationFilter, "runner JIT must parse operation completion without jq -e");
+  for (const [payload, expected] of [
+    [{ done: false }, "false"],
+    [{ done: true }, "true"],
+  ]) {
+    assert.equal(
+      execFileSync("jq", ["-r", operationFilter], {
+        encoding: "utf8",
+        input: JSON.stringify(payload),
+      }).trim(),
+      expected,
+    );
+  }
+  for (const payload of [{}, { done: "false" }, { done: null }])
+    assert.throws(() =>
+      execFileSync("jq", ["-r", operationFilter], {
+        input: JSON.stringify(payload),
+        stdio: ["pipe", "ignore", "ignore"],
+      }),
+    );
+});
+
 test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
   const iam = await readRepositoryFile("infra/yandex/modules/iam/main.tf");
   const compute = await readRepositoryFile("infra/yandex/modules/compute/main.tf");
