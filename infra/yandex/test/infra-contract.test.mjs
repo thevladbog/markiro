@@ -1206,19 +1206,47 @@ function assertProtectedIngress({
 
   const loadBalancer = terraformResourceBlock(ingress, "yandex_alb_load_balancer", "markiro");
   assert.match(loadBalancer, /ports\s*=\s*\[80\][\s\S]*?http_to_https\s*=\s*true/);
-  const certificateIds = /ports\s*=\s*\[443\][\s\S]*?certificate_ids\s*=\s*\[([\s\S]*?)\]/.exec(
-    loadBalancer,
+  const httpsListener = terraformNestedBlocks(loadBalancer, "listener").find((listener) =>
+    /name\s*=\s*"https"/.test(listener),
+  );
+  assert.ok(httpsListener, "the shared ALB must keep its HTTPS listener");
+  const defaultHandlers = terraformNestedBlocks(httpsListener, "default_handler");
+  assert.equal(defaultHandlers.length, 1, "the HTTPS listener must keep one default handler");
+  const defaultCertificateIds = /certificate_ids\s*=\s*\[([\s\S]*?)\]/.exec(
+    defaultHandlers[0],
   )?.[1];
-  assert.ok(certificateIds, "the HTTPS listener must declare certificate IDs");
+  assert.ok(defaultCertificateIds, "the HTTPS default handler must declare its certificate ID");
   assert.deepEqual(
-    terraformListItems(certificateIds),
-    ["data.yandex_cm_certificate.issued.id", "data.yandex_cm_certificate.kiosk_issued.id"],
-    "the one HTTPS listener must present exactly both issued certificates",
+    terraformListItems(defaultCertificateIds),
+    ["data.yandex_cm_certificate.issued.id"],
+    "the HTTPS default handler must present only the admin certificate",
   );
-  assert.match(
-    loadBalancer,
-    /ports\s*=\s*\[443\][\s\S]*?http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/,
+  assert.match(defaultHandlers[0], /http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/);
+  const kioskSniHandlers = terraformNestedBlocks(httpsListener, "sni_handler");
+  assert.equal(
+    kioskSniHandlers.length,
+    1,
+    "the HTTPS listener must keep exactly one kiosk SNI handler",
   );
+  const kioskSniHandler = kioskSniHandlers[0];
+  assert.match(kioskSniHandler, /name\s*=\s*"kiosk"/);
+  const kioskServerNames = /server_names\s*=\s*\[([\s\S]*?)\]/.exec(kioskSniHandler)?.[1];
+  assert.ok(kioskServerNames, "the kiosk SNI handler must declare its server name");
+  assert.deepEqual(
+    terraformListItems(kioskServerNames),
+    ["var.kiosk_domain"],
+    "the kiosk SNI handler must match only the kiosk domain",
+  );
+  const kioskTlsHandlers = terraformNestedBlocks(kioskSniHandler, "handler");
+  assert.equal(kioskTlsHandlers.length, 1, "the kiosk SNI handler must keep one TLS handler");
+  const kioskCertificateIds = /certificate_ids\s*=\s*\[([\s\S]*?)\]/.exec(kioskTlsHandlers[0])?.[1];
+  assert.ok(kioskCertificateIds, "the kiosk TLS handler must declare its certificate ID");
+  assert.deepEqual(
+    terraformListItems(kioskCertificateIds),
+    ["data.yandex_cm_certificate.kiosk_issued.id"],
+    "the kiosk SNI handler must present only the kiosk certificate",
+  );
+  assert.match(kioskTlsHandlers[0], /http_router_id\s*=\s*yandex_alb_http_router\.markiro\.id/);
   assert.equal(
     terraformNestedBlocks(loadBalancer, "listener").length,
     2,
@@ -3514,9 +3542,21 @@ test("ingress mutations reject bypasses, duplicate edges, unsafe certificates, a
     );
     assert.throws(
       () => assertProtectedIngress(missingIssuedCertificate),
-      /exactly both issued certificates/,
+      /default handler.*certificate|admin certificate|kiosk (TLS handler|certificate)/,
     );
   }
+
+  const kioskSniMatchesAdminDomain = await protectedIngressSources();
+  kioskSniMatchesAdminDomain.ingress = replaceTerraformResource(
+    kioskSniMatchesAdminDomain.ingress,
+    "yandex_alb_load_balancer",
+    "markiro",
+    (block) => block.replace("server_names = [var.kiosk_domain]", "server_names = [var.domain]"),
+  );
+  assert.throws(
+    () => assertProtectedIngress(kioskSniMatchesAdminDomain),
+    /kiosk SNI handler must match only the kiosk domain/,
+  );
 
   const missingSws = await protectedIngressSources();
   missingSws.ingress = replaceTerraformResource(

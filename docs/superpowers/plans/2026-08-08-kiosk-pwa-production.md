@@ -412,7 +412,9 @@ Extend `assertProtectedIngress()` in `infra/yandex/test/infra-contract.test.mjs`
 - existing `yandex_cm_certificate.markiro` still owns only `var.domain`;
 - new `yandex_cm_certificate.kiosk` owns only `var.kiosk_domain`;
 - each certificate has its own `count = 1` DNS challenge record and issued data source with `wait_validation = true`;
-- the existing HTTPS listener contains exactly the two issued certificate IDs;
+- the existing HTTPS default handler contains the admin issued certificate and
+  its kiosk SNI handler contains the kiosk issued certificate with the same HTTP
+  router;
 - the existing virtual host authority is exactly `[var.domain, var.kiosk_domain]`;
 - the existing backend group, SWS profile, ARL profile, ALB, address, target group, and health check remain singular;
 - `yandex_dns_recordset.application` and `yandex_dns_recordset.kiosk_application` each use the same `var.public_dns_enabled ? 1 : 0` gate and the same reserved address;
@@ -449,13 +451,29 @@ yandex_dns_recordset.certificate_validation
 data.yandex_cm_certificate.issued
 ```
 
-Add parallel `.kiosk`, `.kiosk_certificate_validation`, and `.kiosk_issued` blocks. Configure the listener as:
+Add parallel `.kiosk`, `.kiosk_certificate_validation`, and `.kiosk_issued` blocks. Configure the HTTPS listener TLS block as:
 
 ```hcl
-certificate_ids = [
-  data.yandex_cm_certificate.issued.id,
-  data.yandex_cm_certificate.kiosk_issued.id,
-]
+default_handler {
+  certificate_ids = [data.yandex_cm_certificate.issued.id]
+
+  http_handler {
+    http_router_id = yandex_alb_http_router.markiro.id
+  }
+}
+
+sni_handler {
+  name         = "kiosk"
+  server_names = [var.kiosk_domain]
+
+  handler {
+    certificate_ids = [data.yandex_cm_certificate.kiosk_issued.id]
+
+    http_handler {
+      http_router_id = yandex_alb_http_router.markiro.id
+    }
+  }
+}
 ```
 
 Change only the existing virtual host authority and add the second gated application record. Do not duplicate the virtual host or security chain.

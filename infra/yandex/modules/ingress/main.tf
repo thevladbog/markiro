@@ -220,13 +220,23 @@ resource "yandex_alb_load_balancer" "markiro" {
 
     tls {
       default_handler {
-        certificate_ids = [
-          data.yandex_cm_certificate.issued.id,
-          data.yandex_cm_certificate.kiosk_issued.id,
-        ]
+        certificate_ids = [data.yandex_cm_certificate.issued.id]
 
         http_handler {
           http_router_id = yandex_alb_http_router.markiro.id
+        }
+      }
+
+      sni_handler {
+        name         = "kiosk"
+        server_names = [var.kiosk_domain]
+
+        handler {
+          certificate_ids = [data.yandex_cm_certificate.kiosk_issued.id]
+
+          http_handler {
+            http_router_id = yandex_alb_http_router.markiro.id
+          }
         }
       }
     }
