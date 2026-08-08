@@ -27,12 +27,12 @@ afterEach(async () => {
 describe("i18n", () => {
   it("renders Russian by default", () => {
     render(<Probe />);
-    expect(screen.getByText("Вход")).toBeDefined();
+    expect(screen.getByText("Войти")).toBeDefined();
   });
 
   it("switches to English on changeLanguage", async () => {
     render(<Probe />);
-    expect(screen.getByText("Вход")).toBeDefined();
+    expect(screen.getByText("Войти")).toBeDefined();
 
     await i18n.changeLanguage("en");
 
