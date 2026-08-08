@@ -39,6 +39,7 @@ jobs:
     environment: production-public-smoke
     env:
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       RELEASE_SHA: ${{ inputs.release_sha }}
       RELEASE_RUN_ID: ${{ inputs.release_run_id }}
       DEPLOYMENT_RUN_ID: ${{ inputs.deployment_run_id }}

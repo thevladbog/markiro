@@ -67,10 +67,26 @@ const forbiddenCommands = [
 ];
 const verifierInputs = [
   "MARKIRO_DOMAIN",
+  "MARKIRO_KIOSK_DOMAIN",
   "MARKIRO_AUTHORITATIVE_DNS_SERVER",
   "MARKIRO_PUBLIC_DNS_RESOLVERS",
   "MARKIRO_APPROVED_DNS_A",
   "MARKIRO_APPROVED_DNS_AAAA",
+];
+const dualHostGoLiveSemantics = [
+  "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.app",
+  "KIOSK_ORIGIN=https://kiosk.markiro.app",
+  "one additional kiosk certificate",
+  "one additional kiosk certificate validation record",
+  "issued status for both certificates",
+  "curl --resolve <admin-domain>:443:<reserved-alb-ip>",
+  "curl --resolve <kiosk-domain>:443:<reserved-alb-ip>",
+  "existing `certificate_risk` alert ID",
+  "two-certificate artifact",
+  "publishes both approved A records",
+  "two-domain convergence receipt",
+  "two-domain post-DNS smoke receipt",
+  "desktop Tauri kiosk remains outside this web/TLS gate",
 ];
 
 async function contents(relativePath) {
@@ -342,6 +358,13 @@ function assertRunbookContract({
   }
 
   const goLive = documents["docs/runbooks/yandex-first-go-live.md"];
+  for (const semantic of dualHostGoLiveSemantics)
+    assert.match(goLive, new RegExp(semantic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(goLive, /sanitized[\s\S]{0,180}KIOSK_ORIGIN=https:\/\/kiosk\.markiro\.app/i);
+  assert.match(
+    goLive,
+    /public_dns_enabled=false[\s\S]{0,260}no replacement[\s\S]{0,160}no deletion/i,
+  );
   assert.match(goLive, /rollback_rehearsal=true/);
   assert.match(goLive, /rollback_rehearsal=false/);
   assert.match(goLive, /automatic\s+`workflow_run` delivery always fixes this input to false/i);
@@ -399,7 +422,7 @@ function assertRunbookContract({
     [
       "deployment_phase=first",
       "http://127.0.0.1:8080/health/ready",
-      "curl --resolve <production-domain>:443:<reserved-alb-ip>",
+      "curl --resolve <admin-domain>:443:<reserved-alb-ip>",
       "<!-- runbook-contract:go-live-public-dns-apply -->",
       "production-public-smoke",
     ],
@@ -493,6 +516,14 @@ test("runbook contract rejects every unsafe command and missing DNS verifier inp
     const mutated = structuredClone(current);
     mutated.dnsWorkflow = mutated.dnsWorkflow.replaceAll(input, "REMOVED_INPUT");
     assert.throws(() => assertRunbookContract(mutated), input);
+  }
+
+  for (const semantic of dualHostGoLiveSemantics) {
+    const mutated = structuredClone(current);
+    mutated.documents["docs/runbooks/yandex-first-go-live.md"] = mutated.documents[
+      "docs/runbooks/yandex-first-go-live.md"
+    ].replaceAll(semantic, "REMOVED_DUAL_HOST_SEMANTIC");
+    assert.throws(() => assertRunbookContract(mutated), semantic);
   }
 
   for (const [runbook, procedures] of Object.entries(markerProcedures)) {

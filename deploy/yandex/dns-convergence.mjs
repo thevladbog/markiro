@@ -1,6 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import process from "node:process";
 
+import { validateProductionDomains } from "../production/production-domain.mjs";
 import { dnsOptionsFromEnvironment, verifyDnsConvergence } from "../production/verify-dns.mjs";
 import { isMainModule } from "./cli-main.mjs";
 
@@ -25,18 +27,45 @@ function parseTimestamp(value) {
   return timestamp;
 }
 
+function parseAnswers(value, adminDomain, kioskDomain) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+  if (Object.keys(value).sort().join(",") !== [adminDomain, kioskDomain].sort().join(","))
+    throw invalid();
+  for (const domain of [adminDomain, kioskDomain]) {
+    const answers = value[domain];
+    if (
+      !Array.isArray(answers) ||
+      answers.length === 0 ||
+      answers.some((answer) => typeof answer !== "string" || isIP(answer) === 0) ||
+      new Set(answers).size !== answers.length ||
+      answers.join(",") !== [...answers].sort().join(",")
+    )
+      throw invalid();
+  }
+  if (value[adminDomain].join(",") !== value[kioskDomain].join(",")) throw invalid();
+  return value;
+}
+
+function sameAnswers(left, right, adminDomain, kioskDomain) {
+  return [adminDomain, kioskDomain].every(
+    (domain) => left[domain].join(",") === right[domain].join(","),
+  );
+}
+
 function parseDnsApplyReceipt(text) {
   try {
     const value = JSON.parse(text);
     if (
       !value ||
       Object.keys(value).sort().join(",") !==
-        "appliedAt,dnsApplyRunId,publicDnsEnabled,releaseSha" ||
+        "adminDomain,answers,appliedAt,dnsApplyRunId,kioskDomain,publicDnsEnabled,releaseSha" ||
       value.publicDnsEnabled !== true ||
       !RUN_ID_PATTERN.test(value.dnsApplyRunId) ||
       !SHA_PATTERN.test(value.releaseSha)
     )
       throw invalid();
+    validateProductionDomains(value.adminDomain, value.kioskDomain);
+    parseAnswers(value.answers, value.adminDomain, value.kioskDomain);
     parseTimestamp(value.appliedAt);
     return value;
   } catch {
@@ -62,23 +91,43 @@ export async function runDnsConvergence(environment = process.env, supplied = {}
   const dnsApply = parseDnsApplyReceipt(
     await dependencies.readFile(required("DNS_APPLY_RECEIPT_PATH", environment, /.+/), "utf8"),
   );
-  if (dnsApply.releaseSha !== releaseSha || dnsApply.dnsApplyRunId !== dnsApplyRunId)
+  const dnsOptions = dnsOptionsFromEnvironment(environment);
+  const approvedAnswers = [...dnsOptions.approvedA, ...dnsOptions.approvedAaaa].sort();
+  const expectedAnswers = {
+    [dnsOptions.adminDomain]: [...approvedAnswers],
+    [dnsOptions.kioskDomain]: [...approvedAnswers],
+  };
+  if (
+    dnsApply.releaseSha !== releaseSha ||
+    dnsApply.dnsApplyRunId !== dnsApplyRunId ||
+    dnsApply.adminDomain !== dnsOptions.adminDomain ||
+    dnsApply.kioskDomain !== dnsOptions.kioskDomain ||
+    !sameAnswers(dnsApply.answers, expectedAnswers, dnsOptions.adminDomain, dnsOptions.kioskDomain)
+  )
     throw invalid();
 
-  const dnsOptions = dnsOptionsFromEnvironment(environment);
   const verification = await dependencies.verifyDns(dnsOptions);
   if (!Number.isSafeInteger(verification?.attempt) || verification.attempt < 1) throw invalid();
+  const verifiedAnswers = parseAnswers(
+    verification.answers,
+    dnsOptions.adminDomain,
+    dnsOptions.kioskDomain,
+  );
+  if (
+    !sameAnswers(verifiedAnswers, expectedAnswers, dnsOptions.adminDomain, dnsOptions.kioskDomain)
+  )
+    throw invalid();
   const verifiedAt = dependencies.now();
   if (verifiedAt <= parseTimestamp(dnsApply.appliedAt)) throw invalid();
 
   const receipt = {
+    adminDomain: dnsOptions.adminDomain,
+    answers: verifiedAnswers,
     appliedAt: dnsApply.appliedAt,
-    approvedA: dnsOptions.approvedA,
-    approvedAaaa: dnsOptions.approvedAaaa,
     authoritativeServer: dnsOptions.authoritativeServer,
     dnsApplyArtifactDigest,
     dnsApplyRunId,
-    domain: dnsOptions.domain,
+    kioskDomain: dnsOptions.kioskDomain,
     publicResolvers: dnsOptions.publicResolvers,
     releaseSha,
     verificationAttempt: verification.attempt,

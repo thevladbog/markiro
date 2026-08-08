@@ -3,6 +3,7 @@ import { isIP } from "node:net";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { validateProductionDomains } from "./production-domain.mjs";
 
 const DOMAIN_PATTERN =
   /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -177,10 +178,13 @@ function requireServer(value, name) {
 }
 
 export function dnsOptionsFromEnvironment(environment) {
-  if (!DOMAIN_PATTERN.test(environment.MARKIRO_DOMAIN ?? ""))
-    throw new Error("MARKIRO_DOMAIN is invalid");
+  const { domain, kioskDomain } = validateProductionDomains(
+    environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_KIOSK_DOMAIN,
+  );
   const options = {
-    domain: environment.MARKIRO_DOMAIN,
+    adminDomain: domain,
+    kioskDomain,
     authoritativeServer: requireServer(
       environment.MARKIRO_AUTHORITATIVE_DNS_SERVER,
       "MARKIRO_AUTHORITATIVE_DNS_SERVER",
@@ -263,11 +267,22 @@ export async function verifyDnsConvergence(options, supplied = {}) {
   };
   const attempts = options.verificationAttempts ?? 30;
   const intervalMs = options.verificationIntervalMs ?? 2_000;
+  const approvedAnswers = [
+    ...normalizeApproved(options.approvedA, "A"),
+    ...normalizeApproved(options.approvedAaaa, "AAAA"),
+  ].sort();
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      await verifyDnsOnce(options, dependencies);
-      return { attempt: attempt + 1 };
+      for (const domain of [options.adminDomain, options.kioskDomain])
+        await verifyDnsOnce({ ...options, domain }, dependencies);
+      return {
+        answers: {
+          [options.adminDomain]: [...approvedAnswers],
+          [options.kioskDomain]: [...approvedAnswers],
+        },
+        attempt: attempt + 1,
+      };
     } catch (error) {
       lastError = error;
     }

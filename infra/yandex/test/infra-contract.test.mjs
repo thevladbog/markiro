@@ -2098,6 +2098,10 @@ function assertProtectedInfrastructureWorkflow(source) {
   assert.deepEqual(apply.permissions, { contents: "read", "id-token": "write" });
   assert.equal(plan.environment, "production-infrastructure");
   assert.equal(apply.environment, "production-infrastructure");
+  assert.equal(plan.env.TF_VAR_domain, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(plan.env.TF_VAR_kiosk_domain, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
+  assert.equal(apply.env.TF_VAR_domain, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(apply.env.TF_VAR_kiosk_domain, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
   assert.equal(dnsApproval.environment, "production-public-dns");
   assert.equal(postgresOwnerApproval.environment, "production-postgres-owner");
   assert.deepEqual(postgresOwnerApproval.permissions, { contents: "read" });
@@ -2376,6 +2380,15 @@ ${applyObservabilityCase}
   assert.equal(alertUploadStep.with.path, "${{ runner.temp }}/yandex-alert-specs/alert-specs.json");
   assert.equal(alertUploadStep.with["if-no-files-found"], "error");
 
+  const dnsApplyReceiptStep = apply.steps.find(
+    (step) => step.name === "Record exact public DNS apply evidence",
+  );
+  assert.ok(dnsApplyReceiptStep);
+  assert.equal(dnsApplyReceiptStep.if, "inputs.enable_public_dns == true");
+  for (const field of ["adminDomain", "answers", "kioskDomain"]) {
+    assert.match(dnsApplyReceiptStep.run, new RegExp(field));
+  }
+
   const allCommands = [validateCommands, planCommands, applyCommands].join("\n");
   assert.doesNotMatch(allCommands, /pull_request_target/);
   assert.doesNotMatch(allCommands, /-auto-approve/);
@@ -2454,6 +2467,24 @@ test("infrastructure workflow contract rejects security-boundary mutations", asy
     [
       "missing environment",
       source.replace("environment: production-infrastructure", "environment: unprotected", 1),
+    ],
+    [
+      "missing apply environment",
+      mutateWorkflowSource(source, (workflow) => {
+        delete workflow.jobs.apply.environment;
+      }),
+    ],
+    [
+      "missing plan kiosk domain",
+      mutateWorkflowSource(source, (workflow) => {
+        delete workflow.jobs.plan.env.TF_VAR_kiosk_domain;
+      }),
+    ],
+    [
+      "apply kiosk domain substituted with admin domain",
+      mutateWorkflowSource(source, (workflow) => {
+        workflow.jobs.apply.env.TF_VAR_kiosk_domain = "${{ vars.MARKIRO_DOMAIN }}";
+      }),
     ],
     ["stale commit", source.replace('[[ "$target_sha" == "$dispatch_sha" ]]\n', "")],
     ["unmasked HMAC", source.replace('echo "::add-mask::$aws_secret_access_key"\n', "")],

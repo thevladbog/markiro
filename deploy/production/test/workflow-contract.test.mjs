@@ -54,7 +54,7 @@ const GENERATE_ENVIRONMENT =
     `  printf '%s\\n' "BETTER_AUTH_SECRET=$better_auth_secret"`,
     `  printf '%s\\n' "BETTER_AUTH_URL=https://localhost:18443"`,
     `  printf '%s\\n' "ADMIN_ORIGIN=https://localhost:18443"`,
-    `  printf '%s\\n' "KIOSK_ORIGIN=https://localhost:18443"`,
+    `  printf '%s\\n' "KIOSK_ORIGIN=https://kiosk.localhost:18443"`,
     `  printf '%s\\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"`,
     `  printf '%s\\n' "SMTP_HOST=mailpit"`,
     `  printf '%s\\n' "SMTP_PORT=1025"`,
@@ -81,6 +81,7 @@ const PRODUCTION_BUNDLE_ENV = {
   MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
   MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
   MARKIRO_DOMAIN: "localhost",
+  MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
   MARKIRO_HTTP_PORT: "18080",
   MARKIRO_HTTPS_PORT: "18443",
   ACME_EMAIL: "ci@markiro.local",
@@ -650,6 +651,8 @@ function assertProductionDeploymentWorkflow(
   assert.equal(workflow.jobs.controller.environment, "production-controller");
   assert.equal(workflow.jobs.deploy.environment, "production-deploy");
   assert.equal(workflow.jobs.cleanup.environment, "production-cleanup");
+  assert.equal(workflow.jobs.deploy.env.MARKIRO_DOMAIN, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(workflow.jobs.deploy.env.MARKIRO_KIOSK_DOMAIN, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
   assert.equal(
     new Set([
       workflow.jobs.controller.environment,
@@ -1211,6 +1214,8 @@ function assertPostDnsSmokeWorkflow(
   const job = workflow.jobs?.smoke;
   assert.equal(job.environment, "production-public-smoke");
   assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.env.MARKIRO_DOMAIN, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(job.env.MARKIRO_KIOSK_DOMAIN, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
   assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
     "Validate current main, finalized release, DNS apply, and convergence provenance",
     "Download exact finalized release evidence",
@@ -1249,6 +1254,9 @@ function assertPostDnsSmokeWorkflow(
   assert.match(deploymentSource, /deploymentRunId: \$deployment_run_id/);
   assert.match(infrastructureSource, /if: inputs\.enable_public_dns == true/);
   assert.match(infrastructureSource, /publicDnsEnabled: true/);
+  assert.match(infrastructureSource, /adminDomain:/);
+  assert.match(infrastructureSource, /kioskDomain:/);
+  assert.match(infrastructureSource, /answers:/);
   assert.match(
     infrastructureSource,
     /name: yandex-public-dns-apply-\$\{\{ inputs\.target_sha \}\}/,
@@ -1275,6 +1283,8 @@ function assertDnsConvergenceWorkflow(sourceText, infrastructureSource, scriptSo
   const job = workflow.jobs?.verify;
   assert.equal(job.environment, "production-dns-convergence");
   assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.env.MARKIRO_DOMAIN, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(job.env.MARKIRO_KIOSK_DOMAIN, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
   assert.deepEqual(job.steps.map((step) => step.name).filter(Boolean), [
     "Authenticate exact DNS apply and current main",
     "Download exact approved public DNS apply evidence",
@@ -1352,6 +1362,92 @@ test("post-DNS workflow contract rejects lost approval and redeployment mutation
     assert.throws(() =>
       assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, convergence, script),
     );
+  }
+});
+
+test("dual-host workflow contracts reject missing kiosk values, admin substitutions, and renamed protected environments", async () => {
+  const ci = await source(".github/workflows/ci.yml");
+  const release = await source(".github/workflows/release-images.yml");
+  const deployment = await source(".github/workflows/deploy-production.yml");
+  const remote = await source("deploy/yandex/remote-deploy.mjs");
+  const controller = await source("deploy/yandex/runner-control.mjs");
+  const infrastructure = await source(".github/workflows/yandex-infrastructure.yml");
+  const convergence = await source(".github/workflows/yandex-dns-convergence.yml");
+  const convergenceScript = await source("deploy/yandex/dns-convergence.mjs");
+  const postDns = await source(".github/workflows/yandex-post-dns-smoke.yml");
+  const postDnsScript = await source("deploy/yandex/post-dns-smoke.mjs");
+
+  for (const [label, sourceText, validate] of [
+    ["CI", ci, (mutated) => assertCiWorkflow(mutated)],
+    ["release", release, (mutated) => assertReleaseWorkflow(mutated, ci)],
+  ]) {
+    const missing = sourceText.replace(/^\s+MARKIRO_KIOSK_DOMAIN: kiosk\.localhost\n/m, "");
+    assert.notEqual(missing, sourceText, `${label} kiosk variable fixture must exist`);
+    assert.throws(() => validate(missing), `${label} missing kiosk variable`);
+
+    const substituted = sourceText.replace(
+      "MARKIRO_KIOSK_DOMAIN: kiosk.localhost",
+      "MARKIRO_KIOSK_DOMAIN: localhost",
+    );
+    assert.notEqual(substituted, sourceText, `${label} kiosk substitution fixture must exist`);
+    assert.throws(() => validate(substituted), `${label} admin-domain substitution`);
+  }
+
+  for (const [label, sourceText, validate] of [
+    [
+      "deployment",
+      deployment,
+      (mutated) => assertProductionDeploymentWorkflow(mutated, remote, controller),
+    ],
+    [
+      "convergence",
+      convergence,
+      (mutated) => assertDnsConvergenceWorkflow(mutated, infrastructure, convergenceScript),
+    ],
+    [
+      "post-DNS",
+      postDns,
+      (mutated) =>
+        assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, convergence, postDnsScript),
+    ],
+  ]) {
+    const missing = sourceText.replace(
+      /^\s+MARKIRO_KIOSK_DOMAIN: \$\{\{ vars\.MARKIRO_KIOSK_DOMAIN \}\}\n/m,
+      "",
+    );
+    assert.notEqual(missing, sourceText, `${label} kiosk variable fixture must exist`);
+    assert.throws(() => validate(missing), `${label} missing kiosk variable`);
+
+    const substituted = sourceText.replace(
+      "MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}",
+      "MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}",
+    );
+    assert.notEqual(substituted, sourceText, `${label} kiosk substitution fixture must exist`);
+    assert.throws(() => validate(substituted), `${label} admin-domain substitution`);
+  }
+
+  for (const [sourceText, search, replacement, validate] of [
+    [
+      deployment,
+      "environment: production-deploy",
+      "environment: production",
+      (mutated) => assertProductionDeploymentWorkflow(mutated, remote, controller),
+    ],
+    [
+      convergence,
+      "environment: production-dns-convergence",
+      "environment: production",
+      (mutated) => assertDnsConvergenceWorkflow(mutated, infrastructure, convergenceScript),
+    ],
+    [
+      postDns,
+      "environment: production-public-smoke",
+      "environment: production",
+      (mutated) =>
+        assertPostDnsSmokeWorkflow(mutated, deployment, infrastructure, convergence, postDnsScript),
+    ],
+  ]) {
+    assert.throws(() => validate(replaceExactlyOnce(sourceText, search, replacement, search)));
   }
 });
 

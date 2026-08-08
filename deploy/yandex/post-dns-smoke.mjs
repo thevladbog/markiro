@@ -1,7 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { isIP } from "node:net";
 import process from "node:process";
 
-import { validateProductionDomain } from "../production/production-domain.mjs";
+import { validateProductionDomains } from "../production/production-domain.mjs";
 import { runPublicSmoke } from "../production/smoke.mjs";
 import { isMainModule } from "./cli-main.mjs";
 
@@ -55,11 +56,46 @@ function parseFinalizedRelease(text) {
   );
 }
 
+function parseAnswers(value, adminDomain, kioskDomain) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw invalid();
+  if (Object.keys(value).sort().join(",") !== [adminDomain, kioskDomain].sort().join(","))
+    throw invalid();
+  for (const domain of [adminDomain, kioskDomain]) {
+    const answers = value[domain];
+    if (
+      !Array.isArray(answers) ||
+      answers.length === 0 ||
+      answers.some((answer) => typeof answer !== "string" || isIP(answer) === 0) ||
+      new Set(answers).size !== answers.length ||
+      answers.join(",") !== [...answers].sort().join(",")
+    )
+      throw invalid();
+  }
+  if (value[adminDomain].join(",") !== value[kioskDomain].join(",")) throw invalid();
+  return value;
+}
+
+function sameAnswers(left, right, adminDomain, kioskDomain) {
+  return [adminDomain, kioskDomain].every(
+    (domain) => left[domain].join(",") === right[domain].join(","),
+  );
+}
+
 function parseDnsApply(text) {
   return parseExact(
     text,
-    ["appliedAt", "dnsApplyRunId", "publicDnsEnabled", "releaseSha"],
+    [
+      "adminDomain",
+      "answers",
+      "appliedAt",
+      "dnsApplyRunId",
+      "kioskDomain",
+      "publicDnsEnabled",
+      "releaseSha",
+    ],
     (value) => {
+      validateProductionDomains(value.adminDomain, value.kioskDomain);
+      parseAnswers(value.answers, value.adminDomain, value.kioskDomain);
       if (
         value.publicDnsEnabled !== true ||
         !RUN_ID_PATTERN.test(value.dnsApplyRunId) ||
@@ -71,21 +107,17 @@ function parseDnsApply(text) {
   );
 }
 
-function isStringArray(value) {
-  return Array.isArray(value) && value.every((item) => typeof item === "string");
-}
-
 function parseConvergence(text) {
   return parseExact(
     text,
     [
       "appliedAt",
-      "approvedA",
-      "approvedAaaa",
+      "adminDomain",
+      "answers",
       "authoritativeServer",
       "dnsApplyArtifactDigest",
       "dnsApplyRunId",
-      "domain",
+      "kioskDomain",
       "publicResolvers",
       "releaseSha",
       "verificationAttempt",
@@ -94,11 +126,11 @@ function parseConvergence(text) {
       "verifierRunId",
     ],
     (value) => {
-      validateProductionDomain(value.domain);
+      validateProductionDomains(value.adminDomain, value.kioskDomain);
+      parseAnswers(value.answers, value.adminDomain, value.kioskDomain);
       if (
-        !isStringArray(value.approvedA) ||
-        !isStringArray(value.approvedAaaa) ||
-        !isStringArray(value.publicResolvers) ||
+        !Array.isArray(value.publicResolvers) ||
+        value.publicResolvers.some((resolver) => typeof resolver !== "string") ||
         value.publicResolvers.length === 0 ||
         typeof value.authoritativeServer !== "string" ||
         !DIGEST_PATTERN.test(value.dnsApplyArtifactDigest) ||
@@ -145,7 +177,10 @@ export async function runPostDnsSmoke(environment = process.env, supplied = {}) 
     now: () => new Date(),
     ...supplied,
   };
-  const domain = validateProductionDomain(environment.MARKIRO_DOMAIN);
+  const { domain, kioskDomain } = validateProductionDomains(
+    environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_KIOSK_DOMAIN,
+  );
   const releaseSha = required("RELEASE_SHA", environment, SHA_PATTERN);
   const releaseRunId = required("RELEASE_RUN_ID", environment, RUN_ID_PATTERN);
   const deploymentRunId = required("DEPLOYMENT_RUN_ID", environment, RUN_ID_PATTERN);
@@ -175,12 +210,16 @@ export async function runPostDnsSmoke(environment = process.env, supplied = {}) 
     finalized.deploymentRunId !== deploymentRunId ||
     dnsApply.releaseSha !== releaseSha ||
     dnsApply.dnsApplyRunId !== dnsApplyRunId ||
+    dnsApply.adminDomain !== domain ||
+    dnsApply.kioskDomain !== kioskDomain ||
     convergence.releaseSha !== releaseSha ||
     convergence.dnsApplyRunId !== dnsApplyRunId ||
     convergence.verifierRunId !== dnsVerifierRunId ||
     convergence.dnsApplyArtifactDigest !==
       required("DNS_APPLY_ARTIFACT_DIGEST", environment, DIGEST_PATTERN) ||
-    convergence.domain !== domain ||
+    convergence.adminDomain !== domain ||
+    convergence.kioskDomain !== kioskDomain ||
+    !sameAnswers(dnsApply.answers, convergence.answers, domain, kioskDomain) ||
     convergence.appliedAt !== dnsApply.appliedAt
   )
     throw invalid();
@@ -192,12 +231,18 @@ export async function runPostDnsSmoke(environment = process.env, supplied = {}) 
   if (!(finalizedAt < appliedAt && appliedAt < verifiedAt && verifiedAt < smokeStartedAt))
     throw invalid();
   if ((await dependencies.currentMainSha()) !== releaseSha) throw invalid();
-  await dependencies.smoke({ baseUrl: `https://${domain}`, expectedReleaseSha: releaseSha });
+  for (const smokeDomain of [domain, kioskDomain])
+    await dependencies.smoke({
+      baseUrl: `https://${smokeDomain}`,
+      expectedReleaseSha: releaseSha,
+    });
   if ((await dependencies.currentMainSha()) !== releaseSha) throw invalid();
   const smokeAt = dependencies.now();
   if (!(verifiedAt < smokeAt)) throw invalid();
 
   const receipt = {
+    adminDomain: domain,
+    answers: convergence.answers,
     appliedAt: dnsApply.appliedAt,
     deploymentRunId,
     dnsApplyArtifactDigest: convergence.dnsApplyArtifactDigest,
@@ -205,6 +250,7 @@ export async function runPostDnsSmoke(environment = process.env, supplied = {}) 
     dnsConvergenceArtifactDigest,
     dnsVerifierRunId,
     finalizedAt: finalized.finalizedAt,
+    kioskDomain,
     releaseRunId,
     releaseSha,
     smokeAt: smokeAt.toISOString(),
