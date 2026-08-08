@@ -80,6 +80,15 @@ function validateBinding(binding) {
     invalid();
 }
 
+function hasSafeMetricSelectors(query) {
+  const selectors = [...query.matchAll(/(?:"[^"]+"|[A-Za-z][A-Za-z0-9._-]*)\{/g)];
+  return (
+    selectors.length > 0 &&
+    selectors.every(([selector]) => selector.startsWith('"')) &&
+    [...query.matchAll(/folderId="[^"]+"/g)].length === selectors.length
+  );
+}
+
 function validateAlertSpecs(specs) {
   if (!hasExactKeys(specs, CATEGORIES)) invalid();
   const canonical = {};
@@ -102,6 +111,7 @@ function validateAlertSpecs(specs) {
       ![spec.title, spec.metric, spec.query].every(
         (value) => typeof value === "string" && value.length > 0,
       ) ||
+      !hasSafeMetricSelectors(spec.query) ||
       ("missing_data_behavior" in spec && !["ALARM", "OK"].includes(spec.missing_data_behavior)) ||
       ("producer" in spec && (typeof spec.producer !== "string" || spec.producer.length === 0))
     )

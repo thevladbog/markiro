@@ -1637,6 +1637,21 @@ function assertProtectedObservability({
     assert.match(spec, new RegExp(`category\\s*=\\s*"${category}"`));
     assert.match(spec, /metric\s*=\s*"[^\n]+"/);
     assert.match(spec, /query\s*=\s*"[^\n]+"/);
+    const encodedQuery = spec.match(/query\s*=\s*"(.+)"$/m)?.[1];
+    assert.ok(encodedQuery, `${category} must expose a parseable Monitoring query`);
+    const query = encodedQuery.replaceAll('\\"', '"');
+    const selectors = [...query.matchAll(/(?:"[^"]+"|[A-Za-z][A-Za-z0-9._-]*)\{/g)];
+    assert.ok(selectors.length > 0, `${category} must contain a metric selector`);
+    assert.doesNotMatch(
+      query,
+      /(?<!")\b[A-Za-z][A-Za-z0-9._-]*\{/,
+      `${category} must quote every metric selector name`,
+    );
+    assert.equal(
+      [...query.matchAll(/folderId="\$\{var\.folder_id\}"/g)].length,
+      selectors.length,
+      `${category} must scope every metric selector to the production folder`,
+    );
     assert.match(spec, /comparison\s*=\s*"(?:GREATER_THAN|LESS_THAN)"/);
     assert.match(spec, /warning_threshold\s*=\s*[0-9.]+/);
     assert.match(spec, /alarm_threshold\s*=\s*[0-9.]+/);

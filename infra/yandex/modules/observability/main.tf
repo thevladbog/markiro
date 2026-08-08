@@ -27,7 +27,7 @@ locals {
       category                = "alb_healthy_backend"
       title                   = "ALB healthy backend"
       metric                  = "markiro.alb.healthy_backends"
-      query                   = "markiro.alb.healthy_backends{service=\"custom\", load_balancer_id=\"${var.load_balancer_id}\", backend_group_id=\"${var.backend_group_id}\"}"
+      query                   = "\"markiro.alb.healthy_backends\"{folderId=\"${var.folder_id}\", service=\"custom\", load_balancer_id=\"${var.load_balancer_id}\", backend_group_id=\"${var.backend_group_id}\"}"
       comparison              = "LESS_THAN"
       warning_threshold       = 1
       alarm_threshold         = 0.5
@@ -40,7 +40,7 @@ locals {
       category                = "alb_5xx"
       title                   = "ALB 5xx rate"
       metric                  = "load_balancer.requests_count_per_second"
-      query                   = "load_balancer.requests_count_per_second{service=\"application-load-balancer\", load_balancer=\"markiro-production\", code=\"5*\"}"
+      query                   = "\"load_balancer.requests_count_per_second\"{folderId=\"${var.folder_id}\", service=\"application-load-balancer\", load_balancer=\"markiro-production\", code=\"5*\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 1
       alarm_threshold         = 5
@@ -51,7 +51,7 @@ locals {
       category                = "alb_latency"
       title                   = "ALB p99 latency"
       metric                  = "load_balancer.requests_latency_milliseconds"
-      query                   = "histogram_percentile(99, \"bin\", load_balancer.requests_latency_milliseconds{service=\"application-load-balancer\", load_balancer=\"markiro-production\"})"
+      query                   = "histogram_percentile(99, \"bin\", \"load_balancer.requests_latency_milliseconds\"{folderId=\"${var.folder_id}\", service=\"application-load-balancer\", load_balancer=\"markiro-production\"})"
       comparison              = "GREATER_THAN"
       warning_threshold       = 750
       alarm_threshold         = 1500
@@ -62,7 +62,7 @@ locals {
       category                = "sws_deny"
       title                   = "SWS deny rate"
       metric                  = "load_balancer.smart_web_security.requests_per_second"
-      query                   = "load_balancer.smart_web_security.requests_per_second{service=\"application-load-balancer\", security_profile=\"${var.security_profile_id}\", antirobot_verdict=\"deny\"}"
+      query                   = "\"load_balancer.smart_web_security.requests_per_second\"{folderId=\"${var.folder_id}\", service=\"application-load-balancer\", security_profile=\"${var.security_profile_id}\", antirobot_verdict=\"deny\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 5
       alarm_threshold         = 20
@@ -73,7 +73,7 @@ locals {
       category                = "sws_arl"
       title                   = "SWS ARL deny rate"
       metric                  = "load_balancer.smart_web_security.arl_requests_per_second"
-      query                   = "load_balancer.smart_web_security.arl_requests_per_second{service=\"application-load-balancer\", arl_profile=\"${var.rate_limiter_profile_id}\", arl_verdict=\"deny\"}"
+      query                   = "\"load_balancer.smart_web_security.arl_requests_per_second\"{folderId=\"${var.folder_id}\", service=\"application-load-balancer\", arl_profile=\"${var.rate_limiter_profile_id}\", arl_verdict=\"deny\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 10
       alarm_threshold         = 50
@@ -84,7 +84,7 @@ locals {
       category                = "vm_cpu"
       title                   = "VM CPU utilization"
       metric                  = "cpu_usage"
-      query                   = "cpu_usage{service=\"compute\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
+      query                   = "\"cpu_usage\"{folderId=\"${var.folder_id}\", service=\"compute\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 75
       alarm_threshold         = 90
@@ -95,7 +95,7 @@ locals {
       category                = "vm_memory"
       title                   = "VM memory utilization"
       metric                  = "sys.memory.used_percent"
-      query                   = "sys.memory.used_percent{service=\"custom\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
+      query                   = "\"sys.memory.used_percent\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 80
       alarm_threshold         = 90
@@ -108,7 +108,7 @@ locals {
       category                = "vm_disk"
       title                   = "VM disk utilization"
       metric                  = "sys.filesystem.used_percent"
-      query                   = "sys.filesystem.used_percent{service=\"custom\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
+      query                   = "\"sys.filesystem.used_percent\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 80
       alarm_threshold         = 90
@@ -121,7 +121,7 @@ locals {
       category                = "postgres_availability"
       title                   = "PostgreSQL availability"
       metric                  = "postgres-is_alive"
-      query                   = "postgres-is_alive{service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
+      query                   = "\"postgres-is_alive\"{folderId=\"${var.folder_id}\", service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
       comparison              = "LESS_THAN"
       warning_threshold       = 1
       alarm_threshold         = 0.5
@@ -132,7 +132,7 @@ locals {
       category                = "postgres_storage"
       title                   = "PostgreSQL storage utilization"
       metric                  = "disk.used_bytes/disk.total_bytes"
-      query                   = "100 * disk.used_bytes{service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"} / disk.total_bytes{service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
+      query                   = "100 * \"disk.used_bytes\"{folderId=\"${var.folder_id}\", service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"} / \"disk.total_bytes\"{folderId=\"${var.folder_id}\", service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 80
       alarm_threshold         = 90
@@ -143,7 +143,7 @@ locals {
       category                = "postgres_connections"
       title                   = "PostgreSQL connection utilization"
       metric                  = "postgres_total_connections/postgres_max_connections"
-      query                   = "100 * postgres_total_connections{service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"} / postgres_max_connections{service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
+      query                   = "100 * \"postgres_total_connections\"{folderId=\"${var.folder_id}\", service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"} / \"postgres_max_connections\"{folderId=\"${var.folder_id}\", service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 75
       alarm_threshold         = 90
@@ -154,7 +154,7 @@ locals {
       category                = "postgres_backup_age"
       title                   = "PostgreSQL backup age"
       metric                  = "markiro.postgres.backup_age_seconds"
-      query                   = "markiro.postgres.backup_age_seconds{service=\"custom\", resource_id=\"${var.postgres_cluster_id}\"}"
+      query                   = "\"markiro.postgres.backup_age_seconds\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.postgres_cluster_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 90000
       alarm_threshold         = 172800
@@ -167,7 +167,7 @@ locals {
       category                = "certificate_risk"
       title                   = "Certificate expiry risk"
       metric                  = "certificate.days_until_expiration"
-      query                   = "certificate.days_until_expiration{service=\"certificate-manager\", certificate=\"${var.certificate_id}\"}"
+      query                   = "\"certificate.days_until_expiration\"{folderId=\"${var.folder_id}\", service=\"certificate-manager\", certificate=\"${var.certificate_id}\"}"
       comparison              = "LESS_THAN"
       warning_threshold       = 30
       alarm_threshold         = 14
@@ -178,7 +178,7 @@ locals {
       category                = "readiness_required_unavailable"
       title                   = "Readiness required dependency unavailable"
       metric                  = "markiro.readiness.required_unavailable"
-      query                   = "markiro.readiness.required_unavailable{service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
+      query                   = "\"markiro.readiness.required_unavailable\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 0
       alarm_threshold         = 0.5
@@ -191,7 +191,7 @@ locals {
       category                = "deployment_failure"
       title                   = "Deployment failure"
       metric                  = "markiro.deployment.failure"
-      query                   = "markiro.deployment.failure{service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
+      query                   = "\"markiro.deployment.failure\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 0
       alarm_threshold         = 0.5
@@ -204,7 +204,7 @@ locals {
       category                = "runner_overrun"
       title                   = "Runner runtime overrun"
       metric                  = "markiro.runner.runtime_seconds"
-      query                   = "markiro.runner.runtime_seconds{service=\"custom\", resource_id=\"${var.runner_instance_id}\"}"
+      query                   = "\"markiro.runner.runtime_seconds\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.runner_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 3300
       alarm_threshold         = 3600

@@ -43,7 +43,7 @@ function spec(category, overrides = {}) {
     category,
     title: `Alert ${category}`,
     metric: `markiro.${category}`,
-    query: `markiro.${category}{service="custom"}`,
+    query: `"markiro.${category}"{folderId="folder-id", service="custom"}`,
     comparison: "GREATER_THAN",
     warning_threshold: 1,
     alarm_threshold: 2,
@@ -190,6 +190,28 @@ test("rejects alert threshold ordering that Yandex Monitoring cannot accept", ()
   ]) {
     assert.throws(
       () => extractAlertSpecsArtifact(ndjson(applyRecords(specs)), binding),
+      /alert specs artifact input is invalid/,
+    );
+  }
+});
+
+test("rejects Monitoring queries with unquoted or unscoped metric selectors", () => {
+  const complete = alertSpecs();
+  for (const query of [
+    'markiro.alb.healthy_backends{folderId="folder-id", service="custom"}',
+    '"markiro.alb.healthy_backends"{service="custom"}',
+  ]) {
+    assert.throws(
+      () =>
+        extractAlertSpecsArtifact(
+          ndjson(
+            applyRecords({
+              ...complete,
+              alb_healthy_backend: spec("alb_healthy_backend", { query }),
+            }),
+          ),
+          binding,
+        ),
       /alert specs artifact input is invalid/,
     );
   }
