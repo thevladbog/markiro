@@ -53,10 +53,10 @@
 
 - [ ] **Step 1: Write failing shell and preference tests**
 
-Import `ThemeProvider`, `i18n`, and `within`. Make the shared auth-page render helper provide the theme context without changing its routing behavior:
+Import `ThemeProvider` and `i18n`. Make the shared auth-page render helper provide the theme context without changing its routing behavior:
 
 ```tsx
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "@markiro/ui";
 import i18n from "../src/i18n/index.js";
 
@@ -590,6 +590,8 @@ git commit -m "feat(admin): add branded login shell"
 - [ ] **Step 1: Write failing password-toggle and pending tests**
 
 Add exact keys before rendering these tests so test-mode i18n still fails on accidental omissions:
+
+Also add `within` to the existing Testing Library import; Task 2 uses it to inspect only the submit button's visible children.
 
 ```json
 // ru.json
