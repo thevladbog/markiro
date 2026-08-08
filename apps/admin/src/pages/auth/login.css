@@ -117,7 +117,9 @@
   color: var(--fg-1) !important;
 }
 
-.mk-login-page__header .mk-login-page__header-control:active {
+.mk-login-page__header .mk-login-page__header-control:active,
+.mk-login-page__password-toggle:active,
+.mk-login-page__form > .mk-btn[type="submit"]:active:not(:disabled) {
   transform: translateY(1px);
 }
 
