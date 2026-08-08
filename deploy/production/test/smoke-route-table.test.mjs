@@ -27,7 +27,7 @@ const kioskManifest = JSON.stringify({
 const kioskRegistration =
   "if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js', { scope: '/' });";
 const kioskServiceWorker =
-  'precacheAndRoute([{url:"index.html",revision:"1"}],{});cleanupOutdatedCaches();registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/api\\//]}));';
+  'precacheAndRoute([{url:"index.html",revision:"1"}],{});cleanupOutdatedCaches();registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]}));';
 const docsShell =
   '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script ><script src="/docs/bootstrap.js"></script   ></body></html>';
 const docsBootstrap = `Scalar.createApiReference("#app", {
@@ -347,16 +347,49 @@ test("kiosk smoke rejects shell, origin, manifest, worker, and route-boundary mu
       "API-caching service worker",
       "/sw.js",
       response({
-        body: kioskServiceWorker.replace("denylist:[/^\\/api\\//]", "denylist:[]"),
+        body: kioskServiceWorker.replace(
+          "denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]",
+          "denylist:[]",
+        ),
         headers: { "content-type": "application/javascript" },
       }),
-      /fallback includes API paths/,
+      /fallback includes reserved paths/,
+    ],
+    [
+      "exact API navigation fallback",
+      "/sw.js",
+      response({
+        body: kioskServiceWorker.replace(
+          "denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]",
+          "denylist:[/^\\/api\\//]",
+        ),
+        headers: { "content-type": "application/javascript" },
+      }),
+      /fallback includes reserved paths/,
     ],
     [
       "admin HTML on a rejected route",
       "/api/auth/get-session",
       response({ status: 404, body: shell, headers: { "content-type": "text/html" } }),
       /non-HTML 404/,
+    ],
+    [
+      "kiosk shell on the bare API namespace",
+      "/api",
+      response({ status: 200, body: kioskShell, headers: { "content-type": "text/html" } }),
+      /returned the kiosk shell/,
+    ],
+    [
+      "admin shell on the bare station namespace",
+      "/station",
+      response({ status: 200, body: shell, headers: { "content-type": "text/html" } }),
+      /non-HTML 404/,
+    ],
+    [
+      "kiosk shell on the bare kiosk namespace",
+      "/kiosk",
+      response({ status: 200, body: kioskShell, headers: { "content-type": "text/html" } }),
+      /returned the kiosk shell/,
     ],
   ];
 
@@ -432,8 +465,14 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/manifest.webmanifest", "manifest"],
     ["GET", "/sw.js", "service-worker"],
     ["GET", "/api/kiosk/bootstrap", "kiosk-proxy"],
+    ["GET", "/api", "not-found"],
+    ["HEAD", "/api", "not-found"],
     ["GET", "/api/auth/get-session", "not-found"],
+    ["GET", "/station", "not-found"],
+    ["HEAD", "/station", "not-found"],
     ["GET", "/station/bootstrap", "not-found"],
+    ["GET", "/kiosk", "not-found"],
+    ["HEAD", "/kiosk", "not-found"],
     ["GET", "/docs", "not-found"],
     ["POST", "/unknown", "not-found"],
   ]);

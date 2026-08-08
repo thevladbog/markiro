@@ -81,14 +81,19 @@ describe("kiosk service worker", () => {
     expect(workbox.navigateFallback).toBe("index.html");
   });
 
-  it("never caches /api/ — not the navigation fallback, not at runtime", () => {
+  it("never serves reserved namespaces from the navigation fallback or runtime cache", () => {
     // The offline story is the IndexedDB snapshot. An HTTP cache in front of
     // POST /kiosk/orders would either replay a submission or hide one.
     expect(workbox.runtimeCaching).toEqual([]);
 
     const denylist = workbox.navigateFallbackDenylist;
+    expect(denylist.some((pattern) => pattern.test("/api"))).toBe(true);
     expect(denylist.some((pattern) => pattern.test("/api/kiosk/orders"))).toBe(true);
     expect(denylist.some((pattern) => pattern.test("/api/kiosk/bootstrap"))).toBe(true);
+    expect(denylist.some((pattern) => pattern.test("/station"))).toBe(true);
+    expect(denylist.some((pattern) => pattern.test("/station/bootstrap"))).toBe(true);
+    expect(denylist.some((pattern) => pattern.test("/kiosk"))).toBe(true);
+    expect(denylist.some((pattern) => pattern.test("/kiosk/bootstrap"))).toBe(true);
     expect(denylist.some((pattern) => pattern.test("/settings/scanner"))).toBe(false);
   });
 });

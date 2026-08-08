@@ -93,7 +93,7 @@
 			}
 		}
 
-		@kioskReserved path /api/auth/* /api/* /1c_exchange /station/* /kiosk/* /health* /openapi.json /docs*
+		@kioskReserved path /api /api/auth/* /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /health* /openapi.json /docs*
 		handle @kioskReserved {
 			respond 404
 		}

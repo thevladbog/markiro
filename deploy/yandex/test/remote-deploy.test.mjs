@@ -409,7 +409,7 @@ function curlSmokeResponse(value, releaseSha = COMMIT) {
     headers["content-type"] = "application/javascript";
   } else if (url.pathname === "/sw.js" && kiosk) {
     body =
-      'precacheAndRoute([{url:"index.html",revision:"1"}],{});registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/api\\//]}));';
+      'precacheAndRoute([{url:"index.html",revision:"1"}],{});registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]}));';
     headers["content-type"] = "application/javascript";
   } else if (url.pathname === "/docs" && !kiosk) {
     body =
@@ -427,7 +427,15 @@ function curlSmokeResponse(value, releaseSha = COMMIT) {
     headers["content-type"] = "text/plain";
   } else if (
     kiosk &&
-    ["/api/auth/get-session", "/station/bootstrap", "/docs", "/unknown"].includes(url.pathname)
+    [
+      "/api",
+      "/api/auth/get-session",
+      "/station",
+      "/station/bootstrap",
+      "/kiosk",
+      "/docs",
+      "/unknown",
+    ].includes(url.pathname)
   ) {
     status = 404;
     body = "not found";
@@ -731,8 +739,11 @@ test("first deployment probes both authorities through one reserved ALB address 
     "/manifest.webmanifest",
     "/sw.js",
     "/api/kiosk/bootstrap",
+    "/api",
     "/api/auth/get-session",
+    "/station",
     "/station/bootstrap",
+    "/kiosk",
     "/docs",
   ]) {
     assert.ok(

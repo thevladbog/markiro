@@ -103,8 +103,14 @@ export const KIOSK_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/manifest.webmanifest", "manifest"]),
   Object.freeze(["GET", "/sw.js", "service-worker"]),
   Object.freeze(["GET", "/api/kiosk/bootstrap", "kiosk-proxy"]),
+  Object.freeze(["GET", "/api", "not-found"]),
+  Object.freeze(["HEAD", "/api", "not-found"]),
   Object.freeze(["GET", "/api/auth/get-session", "not-found"]),
+  Object.freeze(["GET", "/station", "not-found"]),
+  Object.freeze(["HEAD", "/station", "not-found"]),
   Object.freeze(["GET", "/station/bootstrap", "not-found"]),
+  Object.freeze(["GET", "/kiosk", "not-found"]),
+  Object.freeze(["HEAD", "/kiosk", "not-found"]),
   Object.freeze(["GET", "/docs", "not-found"]),
   Object.freeze(["POST", "/unknown", "not-found"]),
 ]);
@@ -302,8 +308,8 @@ function assertServiceWorker(body) {
   const compact = body.replace(/\s+/g, "");
   if (!compact.includes("precacheAndRoute(") || !compact.includes("NavigationRoute("))
     throw new Error("kiosk service worker does not provide the offline shell");
-  if (!compact.includes("denylist:[/^\\/api\\//]"))
-    throw new Error("kiosk service worker navigation fallback includes API paths");
+  if (!compact.includes("denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]"))
+    throw new Error("kiosk service worker navigation fallback includes reserved paths");
   if ((body.match(/\bregisterRoute\(/g) || []).length !== 1)
     throw new Error("kiosk service worker has unexpected runtime caching");
   if (/\burl\s*:\s*["'][^"']*\/api\//i.test(body))

@@ -21,20 +21,26 @@ const commerceMlProxyTimeouts = Object.freeze({
 const adminHost = "admin.example.test";
 const kioskHost = "kiosk.example.test";
 const kioskReservedPatterns = Object.freeze([
+  "/api",
   "/api/auth/*",
   "/api/*",
   "/1c_exchange",
+  "/station",
   "/station/*",
+  "/kiosk",
   "/kiosk/*",
   "/health*",
   "/openapi.json",
   "/docs*",
 ]);
 const kioskForbiddenPaths = Object.freeze([
+  "/api",
   "/api/auth/session",
   "/api/admin/tenants",
   "/1c_exchange",
+  "/station",
   "/station/bootstrap",
+  "/kiosk",
   "/kiosk/bootstrap",
   "/health",
   "/health/ready",
