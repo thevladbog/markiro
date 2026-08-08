@@ -805,6 +805,18 @@ function assertRunnerControllerProviderGrants({ bootstrap, compute, controller, 
   assert.match(runnerEditor, /role\s*=\s*"compute\.editor"/);
   assert.match(runnerEditor, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
 
+  const operationAuditor = terraformResourceBlock(
+    iam,
+    "yandex_resourcemanager_folder_iam_member",
+    "deployment_controller_compute_operation_auditor",
+  );
+  assert.match(operationAuditor, /folder_id\s*=\s*var\.folder_id/);
+  assert.match(operationAuditor, /role\s*=\s*"compute\.auditor"/);
+  assert.match(
+    operationAuditor,
+    /serviceAccount:\$\{yandex_iam_service_account\.deployment_controller\.id\}/,
+  );
+
   const appViewer = terraformResourceBlock(
     compute,
     "yandex_compute_instance_iam_binding",
@@ -4148,7 +4160,7 @@ test("bootstrap contract rejects an incomplete or broadened production action-ro
   assert.throws(() => assertProtectedBootstrap(broadAlbGrant));
 });
 
-test("runner-controller provider-call contract rejects a missing app grant or unknown provider call", async () => {
+test("runner-controller provider-call contract rejects missing grants or an unknown provider call", async () => {
   const [bootstrap, compute, controller, iam] = await Promise.all([
     readRepositoryFile("infra/yandex/bootstrap/main.tf"),
     readRepositoryFile("infra/yandex/modules/compute/main.tf"),
@@ -4161,6 +4173,18 @@ test("runner-controller provider-call contract rejects a missing app grant or un
   );
   assert.throws(() =>
     assertRunnerControllerProviderGrants({ bootstrap, compute: missingViewer, controller, iam }),
+  );
+  const missingOperationAuditor = iam.replace(
+    /resource\s+"yandex_resourcemanager_folder_iam_member"\s+"deployment_controller_compute_operation_auditor"\s*\{[\s\S]*?\n\}/,
+    "",
+  );
+  assert.throws(() =>
+    assertRunnerControllerProviderGrants({
+      bootstrap,
+      compute,
+      controller,
+      iam: missingOperationAuditor,
+    }),
   );
   const unknownCall = `${controller}\nconst unsafe = \`https://compute.api.cloud.yandex.net/compute/v1/disks/\${diskId}\`;\n`;
   assert.throws(() =>
