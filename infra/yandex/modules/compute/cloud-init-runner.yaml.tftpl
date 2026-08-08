@@ -213,10 +213,11 @@ runcmd:
         systemctl is-active --quiet unified-agent.service
         systemctl enable markiro-runner.service
         printf '%s\n' 'MARKIRO_RUNNER_BOOTSTRAP_STAGE complete' > /dev/ttyS0
+        touch /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending
         touch /var/lib/markiro/markiro-runner-bootstrap-complete
 power_state:
   delay: now
   mode: poweroff
   message: Runner bootstrap complete; controller may start the one-use JIT runner.
   timeout: 30
-  condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete
+  condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete && test -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending && rm -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending

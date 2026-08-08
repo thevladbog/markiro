@@ -2932,7 +2932,7 @@ function assertRunnerBootstrapFailsObservable(cloudInit) {
   }
   assert.equal(
     document.power_state?.condition,
-    "test -f /var/lib/markiro/markiro-runner-bootstrap-complete",
+    "test -f /var/lib/markiro/markiro-runner-bootstrap-complete && test -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending && rm -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending",
   );
   assert.deepEqual(
     document.runcmd?.slice(0, 1).map((command) => command?.slice(0, 2)),
@@ -2956,6 +2956,11 @@ function assertRunnerBootstrapFailsObservable(cloudInit) {
     "touch /var/lib/markiro/markiro-runner-bootstrap-complete",
     "the success marker must be the final bootstrap operation",
   );
+  assert.equal(
+    document.runcmd[0][2].trimEnd().split("\n").at(-2),
+    "touch /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending",
+    "the one-shot shutdown marker must be armed immediately before completion",
+  );
   return document.runcmd[0];
 }
 
@@ -2964,6 +2969,7 @@ test("runner bootstrap fails observable and powers off only after the success ma
     "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
   );
   const [shell, flags] = assertRunnerBootstrapFailsObservable(cloudInit);
+  const localShell = process.platform === "darwin" ? "/bin/bash" : shell;
 
   const probeDirectory = await mkdtemp(path.join(tmpdir(), "markiro-runner-bootstrap-"));
   try {
@@ -2972,7 +2978,7 @@ test("runner bootstrap fails observable and powers off only after the success ma
       const steps = ["true", "true", "true"];
       steps[failedStep] = "false";
       assert.throws(() =>
-        execFileSync(shell, [flags, `set -o pipefail\n${steps.join("\n")}\ntouch ${marker}`], {
+        execFileSync(localShell, [flags, `set -o pipefail\n${steps.join("\n")}\ntouch ${marker}`], {
           stdio: "ignore",
         }),
       );
@@ -2982,13 +2988,31 @@ test("runner bootstrap fails observable and powers off only after the success ma
     await rm(probeDirectory, { force: true, recursive: true });
   }
 
+  const oneShotDirectory = await mkdtemp(path.join(tmpdir(), "markiro-runner-poweroff-"));
+  try {
+    const completionMarker = path.join(oneShotDirectory, "complete");
+    const shutdownMarker = path.join(oneShotDirectory, "shutdown-pending");
+    await writeFile(completionMarker, "");
+    await writeFile(shutdownMarker, "");
+    const oneShotCondition =
+      "test -f /var/lib/markiro/markiro-runner-bootstrap-complete && test -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending && rm -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending"
+        .replaceAll("/var/lib/markiro/markiro-runner-bootstrap-complete", completionMarker)
+        .replaceAll("/var/lib/markiro/markiro-runner-bootstrap-shutdown-pending", shutdownMarker);
+    execFileSync(localShell, ["-c", oneShotCondition], { stdio: "ignore" });
+    await readFile(completionMarker);
+    await assert.rejects(readFile(shutdownMarker), { code: "ENOENT" });
+    assert.throws(() => execFileSync(localShell, ["-c", oneShotCondition], { stdio: "ignore" }));
+  } finally {
+    await rm(oneShotDirectory, { force: true, recursive: true });
+  }
+
   const weakenedCondition = cloudInit.replace(
-    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete",
+    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete && test -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending && rm -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending",
     "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete || true",
   );
   assert.throws(() => assertRunnerBootstrapFailsObservable(weakenedCondition));
   const unconditionalCondition = cloudInit.replace(
-    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete",
+    "condition: test -f /var/lib/markiro/markiro-runner-bootstrap-complete && test -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending && rm -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending",
     "condition: true",
   );
   assert.throws(() => assertRunnerBootstrapFailsObservable(unconditionalCondition));
