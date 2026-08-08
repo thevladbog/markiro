@@ -260,23 +260,46 @@ function assertAuthorityContract(adapted, { alb }) {
   };
 }
 
-function dockerfileStage(dockerfile, stageName) {
-  const stageHeaders = [...dockerfile.matchAll(/^\s*FROM\s+(.+?)\s*$/gim)];
-  const stageIndex = stageHeaders.findIndex((header) =>
-    new RegExp(`\\s+AS\\s+${stageName}$`, "i").test(header[1]),
+function dockerfileInstructions(dockerfile) {
+  const instructions = [];
+  let logicalLine = "";
+
+  for (const physicalLine of dockerfile.split(/\r?\n/)) {
+    const trimmed = physicalLine.trim();
+    if (logicalLine === "" && (trimmed === "" || trimmed.startsWith("#"))) continue;
+
+    const continued = /\\\s*$/.test(physicalLine);
+    const part = physicalLine.replace(/\\\s*$/, "").trim();
+    logicalLine = logicalLine === "" ? part : `${logicalLine} ${part}`;
+    if (continued) continue;
+
+    const match = logicalLine.match(/^([a-z]+)\s+(.+?)\s*$/i);
+    assert.ok(match, `unsupported Dockerfile instruction: ${logicalLine}`);
+    if (/(?:^|\s)<<-?(?:["'][^"']+["']|\S+)/.test(match[2])) {
+      assert.fail("Dockerfile heredoc instructions are unsupported by the runtime contract");
+    }
+    instructions.push({ name: match[1].toUpperCase(), arguments: match[2] });
+    logicalLine = "";
+  }
+
+  assert.equal(logicalLine, "", "Dockerfile must not end with an unterminated continuation");
+  return instructions;
+}
+
+function dockerfileStageInstructions(dockerfile, stageName) {
+  const instructions = dockerfileInstructions(dockerfile);
+  const stageIndex = instructions.findIndex(
+    (instruction) =>
+      instruction.name === "FROM" &&
+      new RegExp(`\\s+AS\\s+${stageName}$`, "i").test(instruction.arguments),
   );
   assert.notEqual(stageIndex, -1, `Dockerfile stage ${stageName} must exist`);
 
-  const header = stageHeaders[stageIndex];
-  const nextHeader = stageHeaders[stageIndex + 1];
-  return dockerfile.slice(header.index + header[0].length, nextHeader?.index ?? dockerfile.length);
-}
-
-function dockerfileInstructions(stage) {
-  return stage.split(/\r?\n/).flatMap((line) => {
-    const match = line.match(/^\s*([a-z]+)\s+(.+?)\s*$/i);
-    return match ? [{ name: match[1].toUpperCase(), arguments: match[2] }] : [];
-  });
+  const nextStageOffset = instructions
+    .slice(stageIndex + 1)
+    .findIndex((instruction) => instruction.name === "FROM");
+  const end = nextStageOffset === -1 ? instructions.length : stageIndex + 1 + nextStageOffset;
+  return instructions.slice(stageIndex + 1, end);
 }
 
 function assertEdgeImageContract(dockerfile, dockerignore) {
@@ -294,14 +317,17 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.ok(kioskSource > install && kioskSource < build);
   assert.ok(build > install);
 
-  const runtime = dockerfileStage(dockerfile, "runtime");
+  const runtimeInstructions = dockerfileStageInstructions(dockerfile, "runtime");
+  const runtime = runtimeInstructions
+    .map((instruction) => `${instruction.name} ${instruction.arguments}`)
+    .join("\n");
   assert.match(runtime, /COPY --from=build \/workspace\/apps\/admin\/dist \/srv\/admin/);
   assert.match(runtime, /COPY --from=build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/);
   assert.match(runtime, /addgroup -S -g 10001 markiro/);
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
   assert.doesNotMatch(runtime, /node|pnpm/);
-  const runtimeCopies = dockerfileInstructions(runtime)
+  const runtimeCopies = runtimeInstructions
     .filter((instruction) => instruction.name === "COPY")
     .map((instruction) => instruction.arguments);
   assert.deepEqual(runtimeCopies, [
@@ -517,6 +543,36 @@ test("edge runtime COPY allowlist stops at the next Dockerfile stage", async () 
   const laterStage = `${dockerfile}\nFROM scratch AS metadata\nCOPY apps/kiosk /metadata/source\n`;
 
   assert.doesNotThrow(() => assertEdgeImageContract(laterStage, dockerignore));
+});
+
+test("edge runtime COPY parser ignores FROM text inside a continued RUN", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const spoofedBoundary = mutate(
+    dockerfile,
+    "EXPOSE 8080 8443\n",
+    "RUN printf '%s\\n' \\\nFROM scratch AS metadata\ncopy apps/kiosk /srv/source\nEXPOSE 8080 8443\n",
+  );
+
+  assert.throws(
+    () => assertEdgeImageContract(spoofedBoundary, dockerignore),
+    /apps\/kiosk \/srv\/source/,
+  );
+});
+
+test("edge runtime COPY parser rejects unsupported heredoc instructions", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  const dockerignore = await readFile(".dockerignore", "utf8");
+  const spoofedBoundary = mutate(
+    dockerfile,
+    "EXPOSE 8080 8443\n",
+    "RUN <<EOF\nFROM scratch AS metadata\nEOF\ncopy apps/kiosk /srv/source\nEXPOSE 8080 8443\n",
+  );
+
+  assert.throws(
+    () => assertEdgeImageContract(spoofedBoundary, dockerignore),
+    /heredoc instructions are unsupported/,
+  );
 });
 
 test("Caddy contracts reject cross-host and overbroad kiosk mutations", async () => {
