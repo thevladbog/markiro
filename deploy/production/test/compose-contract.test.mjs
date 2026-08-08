@@ -64,9 +64,13 @@ test("production edge receives the immutable release SHA used by its public iden
   );
 });
 
-test("production edge requires the kiosk production domain", async () => {
+test("production edge requires separate admin and kiosk production domains", async () => {
   const model = loadYaml(await readFile(productionCompose, "utf8"));
 
+  assert.equal(
+    model.services.edge.environment.MARKIRO_DOMAIN,
+    "${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}",
+  );
   assert.equal(
     model.services.edge.environment.MARKIRO_KIOSK_DOMAIN,
     "${MARKIRO_KIOSK_DOMAIN:?MARKIRO_KIOSK_DOMAIN is required}",
