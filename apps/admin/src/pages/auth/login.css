@@ -124,6 +124,13 @@
   outline-offset: var(--focus-ring-offset);
 }
 
+.mk-login-page__password-toggle {
+  flex-shrink: 0;
+  color: var(--fg-3);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 .mk-login-page__main {
   display: grid;
   place-items: center;

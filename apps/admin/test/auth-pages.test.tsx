@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -235,6 +235,64 @@ describe("LoginPage", () => {
       });
     });
     await screen.findByText("SHELL_PLACEHOLDER");
+  });
+
+  it("toggles password visibility without changing its value", () => {
+    renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
+    const password = screen.getByLabelText("Пароль") as HTMLInputElement;
+    fireEvent.change(password, { target: { value: "hunter2!" } });
+
+    expect(password.type).toBe("password");
+    fireEvent.click(screen.getByRole("button", { name: "Показать пароль" }));
+    expect(password.type).toBe("text");
+    expect(password.value).toBe("hunter2!");
+    fireEvent.click(screen.getByRole("button", { name: "Скрыть пароль" }));
+    expect(password.type).toBe("password");
+  });
+
+  it("shows only the spinner while one sign-in request is pending", async () => {
+    let resolveSignIn!: (value: { data: object; error: null }) => void;
+    const pending = new Promise<{ data: object; error: null }>((resolve) => {
+      resolveSignIn = resolve;
+    });
+    const signIn = vi.fn(() => pending);
+    const client = createFakeAuthClient({ signIn: { email: signIn } });
+    const { container } = renderRouted(client, "/login", <LoginPage />);
+
+    fireEvent.change(screen.getByLabelText("Электронная почта"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "hunter2!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    const pendingButton = await screen.findByRole("button", { name: "Выполняется вход" });
+    expect(pendingButton.hasAttribute("disabled")).toBe(true);
+    expect(within(pendingButton).queryByText("Войти")).toBeNull();
+    expect(pendingButton.querySelector(".mk-spin")).not.toBeNull();
+    fireEvent.click(pendingButton);
+    expect(signIn).toHaveBeenCalledTimes(1);
+
+    resolveSignIn({ data: {}, error: null });
+    await screen.findByText("SHELL_PLACEHOLDER");
+    expect(container.querySelector(".mk-spin")).toBeNull();
+  });
+
+  it("keeps credentials after a failed sign-in", async () => {
+    const client = createFakeAuthClient({
+      signIn: {
+        email: vi.fn(async () => ({ data: null, error: { message: "Invalid credentials" } })),
+      },
+    });
+    renderRouted(client, "/login", <LoginPage />);
+    const email = screen.getByLabelText("Электронная почта") as HTMLInputElement;
+    const password = screen.getByLabelText("Пароль") as HTMLInputElement;
+    fireEvent.change(email, { target: { value: "user@example.com" } });
+    fireEvent.change(password, { target: { value: "hunter2!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain("Invalid credentials");
+    expect(email.value).toBe("user@example.com");
+    expect(password.value).toBe("hunter2!");
   });
 
   it("shows the server error message when sign-in fails", async () => {

@@ -23,6 +23,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const {
     register,
@@ -55,14 +56,31 @@ export function LoginPage() {
           {...register("email")}
         />
         <Input
-          type="password"
+          type={passwordVisible ? "text" : "password"}
           autoComplete="current-password"
           label={t("auth.login.passwordLabel")}
+          suffix={
+            // eslint-disable-next-line no-restricted-syntax -- compact text control belongs inside Input.suffix.
+            <button
+              className="mk-login-page__password-toggle"
+              type="button"
+              aria-label={t(
+                passwordVisible ? "auth.login.hidePasswordLabel" : "auth.login.showPasswordLabel",
+              )}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+            >
+              {t(passwordVisible ? "auth.login.hidePassword" : "auth.login.showPassword")}
+            </button>
+          }
           {...errorProp(errors.password?.message)}
           {...register("password")}
         />
         <Button type="submit" loading={isSubmitting} fullWidth>
-          {t("auth.login.submit")}
+          {isSubmitting ? (
+            <span className="mk-visually-hidden">{t("auth.login.submitting")}</span>
+          ) : (
+            t("auth.login.submit")
+          )}
         </Button>
         <p className="mk-login-page__help">
           {t("auth.login.noAccount")} <Link to="/register">{t("auth.login.registerLink")}</Link>
