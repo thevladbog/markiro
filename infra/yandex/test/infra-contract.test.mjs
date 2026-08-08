@@ -2943,7 +2943,11 @@ function assertRunnerBootstrapFailsObservable(cloudInit) {
     1,
     "all runner bootstrap steps must share one fail-fast shell",
   );
-  assert.match(document.runcmd[0][2], /^set -o pipefail\n/);
+  assert.match(
+    document.runcmd[0][2],
+    /^set -o pipefail\nif test -f \/var\/lib\/markiro\/markiro-runner-bootstrap-complete; then\n  exit 0\nfi\n/,
+    "completed runner bootstrap must not execute again on a controller boot",
+  );
   const nodeDirectoryProvisioning = document.runcmd[0][2].match(/^install -d -m 0755 .+$/m)?.[0];
   assert.match(nodeDirectoryProvisioning ?? "", /(?:^|\s)\/opt\/markiro(?:\s|$)/);
   assert.ok(
@@ -2992,15 +2996,16 @@ test("runner bootstrap fails observable and powers off only after the success ma
   try {
     const completionMarker = path.join(oneShotDirectory, "complete");
     const shutdownMarker = path.join(oneShotDirectory, "shutdown-pending");
-    await writeFile(completionMarker, "");
-    await writeFile(shutdownMarker, "");
+    const bootstrapOnce = `set -o pipefail\nif test -f ${completionMarker}; then\n  exit 0\nfi\ntouch ${shutdownMarker}\ntouch ${completionMarker}`;
     const oneShotCondition =
       "test -f /var/lib/markiro/markiro-runner-bootstrap-complete && test -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending && rm -f /var/lib/markiro/markiro-runner-bootstrap-shutdown-pending"
         .replaceAll("/var/lib/markiro/markiro-runner-bootstrap-complete", completionMarker)
         .replaceAll("/var/lib/markiro/markiro-runner-bootstrap-shutdown-pending", shutdownMarker);
+    execFileSync(localShell, [flags, bootstrapOnce], { stdio: "ignore" });
     execFileSync(localShell, ["-c", oneShotCondition], { stdio: "ignore" });
     await readFile(completionMarker);
     await assert.rejects(readFile(shutdownMarker), { code: "ENOENT" });
+    execFileSync(localShell, [flags, bootstrapOnce], { stdio: "ignore" });
     assert.throws(() => execFileSync(localShell, ["-c", oneShotCondition], { stdio: "ignore" }));
   } finally {
     await rm(oneShotDirectory, { force: true, recursive: true });
@@ -3016,6 +3021,11 @@ test("runner bootstrap fails observable and powers off only after the success ma
     "condition: true",
   );
   assert.throws(() => assertRunnerBootstrapFailsObservable(unconditionalCondition));
+  const missingRepeatBootGuard = cloudInit.replace(
+    "        if test -f /var/lib/markiro/markiro-runner-bootstrap-complete; then\n          exit 0\n        fi\n",
+    "",
+  );
+  assert.throws(() => assertRunnerBootstrapFailsObservable(missingRepeatBootGuard));
   const missingNodeDirectory = cloudInit.replace(
     " /opt/markiro /opt/actions-runner",
     " /opt/actions-runner",
@@ -3307,14 +3317,14 @@ function assertOperationalApplicationLogDelivery({
     assert.match(cloudInit, /systemctl is-active --quiet unified-agent\.service/);
   }
 
+  const runnerCompletionMarker = "touch /var/lib/markiro/markiro-runner-bootstrap-complete";
   assert.ok(
-    runnerCloudInit.indexOf("check-config") <
-      runnerCloudInit.indexOf("markiro-runner-bootstrap-complete"),
+    runnerCloudInit.indexOf("check-config") < runnerCloudInit.indexOf(runnerCompletionMarker),
     "runner check-config must precede its completion marker",
   );
   assert.ok(
     runnerCloudInit.indexOf("systemctl is-active --quiet unified-agent.service") <
-      runnerCloudInit.indexOf("markiro-runner-bootstrap-complete"),
+      runnerCloudInit.indexOf(runnerCompletionMarker),
     "runner service verification must precede its completion marker",
   );
   assert.doesNotMatch(observability, /resource\s+"yandex_logging_group"\s+"application"/);
