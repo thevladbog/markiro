@@ -30,7 +30,7 @@ locals {
       query                   = "markiro.alb.healthy_backends{service=\"custom\", load_balancer_id=\"${var.load_balancer_id}\", backend_group_id=\"${var.backend_group_id}\"}"
       comparison              = "LESS_THAN"
       warning_threshold       = 1
-      alarm_threshold         = 1
+      alarm_threshold         = 0.5
       evaluation_window       = "2m"
       missing_data_behavior   = "ALARM"
       producer                = "app:markiro-monitoring-producer.timer"
@@ -124,7 +124,7 @@ locals {
       query                   = "postgres-is_alive{service=\"managed-postgresql\", resource_id=\"${var.postgres_cluster_id}\"}"
       comparison              = "LESS_THAN"
       warning_threshold       = 1
-      alarm_threshold         = 1
+      alarm_threshold         = 0.5
       evaluation_window       = "2m"
       notification_channel_id = var.notification_channel_id
     }
@@ -181,7 +181,7 @@ locals {
       query                   = "markiro.readiness.required_unavailable{service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 0
-      alarm_threshold         = 0
+      alarm_threshold         = 0.5
       evaluation_window       = "5m"
       missing_data_behavior   = "ALARM"
       producer                = "app:markiro-monitoring-producer.timer"
@@ -194,7 +194,7 @@ locals {
       query                   = "markiro.deployment.failure{service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 0
-      alarm_threshold         = 0
+      alarm_threshold         = 0.5
       evaluation_window       = "5m"
       missing_data_behavior   = "OK"
       producer                = "runner:remote-deploy.mjs"

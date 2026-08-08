@@ -168,6 +168,33 @@ test("rejects missing, extra, mismatched, or unsafe alert specifications", () =>
   }
 });
 
+test("rejects alert threshold ordering that Yandex Monitoring cannot accept", () => {
+  const complete = alertSpecs();
+  for (const specs of [
+    {
+      ...complete,
+      alb_healthy_backend: spec("alb_healthy_backend", {
+        comparison: "LESS_THAN",
+        warning_threshold: 1,
+        alarm_threshold: 1,
+      }),
+    },
+    {
+      ...complete,
+      deployment_failure: spec("deployment_failure", {
+        comparison: "GREATER_THAN",
+        warning_threshold: 0,
+        alarm_threshold: 0,
+      }),
+    },
+  ]) {
+    assert.throws(
+      () => extractAlertSpecsArtifact(ndjson(applyRecords(specs)), binding),
+      /alert specs artifact input is invalid/,
+    );
+  }
+});
+
 test("rejects malformed binding metadata and artifact extra fields", () => {
   for (const invalidBinding of [
     { ...binding, commit_sha: "short" },

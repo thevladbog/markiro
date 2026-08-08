@@ -1646,6 +1646,19 @@ function assertProtectedObservability({
     assert.match(productionVariables, new RegExp(`"${category}"`));
   }
 
+  for (const category of ["alb_healthy_backend", "postgres_availability"]) {
+    const spec = terraformObjectEntry(observability, category);
+    assert.match(spec, /comparison\s*=\s*"LESS_THAN"/);
+    assert.match(spec, /warning_threshold\s*=\s*1(?:\.0+)?\b/);
+    assert.match(spec, /alarm_threshold\s*=\s*0\.5\b/);
+  }
+  for (const category of ["readiness_required_unavailable", "deployment_failure"]) {
+    const spec = terraformObjectEntry(observability, category);
+    assert.match(spec, /comparison\s*=\s*"GREATER_THAN"/);
+    assert.match(spec, /warning_threshold\s*=\s*0(?:\.0+)?\b/);
+    assert.match(spec, /alarm_threshold\s*=\s*0\.5\b/);
+  }
+
   const dashboard = terraformResourceBlock(
     observability,
     "yandex_monitoring_dashboard",
