@@ -8,6 +8,16 @@ export const QUANTITATIVE_ENTITLEMENT_KEYS = [
 ] as const;
 export type QuantitativeEntitlementKey = (typeof QUANTITATIVE_ENTITLEMENT_KEYS)[number];
 
+export function subscriptionQuotaLockIdentity(
+  tenantId: string,
+  key: QuantitativeEntitlementKey,
+): { namespace: string; keyOrder: number } {
+  return {
+    namespace: `subscription-quota:${tenantId}`,
+    keyOrder: QUANTITATIVE_ENTITLEMENT_KEYS.indexOf(key) + 1,
+  };
+}
+
 export const FEATURE_ENTITLEMENT_KEYS = ["labelEditor", "publicApi", "pallets"] as const;
 export type FeatureEntitlementKey = (typeof FEATURE_ENTITLEMENT_KEYS)[number];
 

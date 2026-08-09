@@ -11,6 +11,7 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or } from "drizzle-
 import { schema, type Auth, type Db } from "@markiro/db";
 import type { AuthSetup } from "../../auth/auth.setup";
 import { AUTH, DB, DB_POOL } from "../../auth/auth.module";
+import { subscriptionQuotaLockIdentity } from "../../subscriptions/entitlements.types";
 import { MailJobsService, type MailPgClient } from "../mail/mail-jobs.service";
 import type { PublicInvitationDto, RegisterInvitationDto } from "./dto";
 
@@ -98,16 +99,18 @@ export class InvitationsService {
       throw new ForbiddenException("Signed-in account is not the invitation recipient");
     }
 
-    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, async () => {
-      const response = await this.auth.api.acceptInvitation({
-        body: { invitationId },
-        headers,
-        asResponse: true,
-      });
-      if (!response.ok) return response;
-      await this.finalizeAccepted(invitationId, session.user.id, invitation.email);
-      return response;
-    });
+    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, (client) =>
+      this.withInvitationAcceptanceQuotaLock(client, invitation.organizationId, async () => {
+        const response = await this.auth.api.acceptInvitation({
+          body: { invitationId },
+          headers,
+          asResponse: true,
+        });
+        if (!response.ok) return response;
+        await this.finalizeAccepted(invitationId, session.user.id, invitation.email);
+        return response;
+      }),
+    );
   }
 
   async reject(invitationId: string, headers: Headers): Promise<Response> {
@@ -138,18 +141,25 @@ export class InvitationsService {
         .select({
           organizationId: schema.invitation.organizationId,
           status: schema.invitation.status,
-          position: schema.tenantInvitationProfiles.position,
+          role: schema.invitation.role,
         })
         .from(schema.invitation)
-        .leftJoin(
-          schema.tenantInvitationProfiles,
-          eq(schema.tenantInvitationProfiles.invitationId, schema.invitation.id),
-        )
         .where(eq(schema.invitation.id, invitationId))
-        .limit(1);
-      if (!invitation || invitation.status !== "accepted") {
+        .limit(1)
+        .for("update");
+      if (!invitation || invitation.status !== "accepted" || !invitation.role) {
         throw new ConflictException("Invitation acceptance was not persisted");
       }
+      const [invitationProfile] = await tx
+        .select({ position: schema.tenantInvitationProfiles.position })
+        .from(schema.tenantInvitationProfiles)
+        .where(
+          and(
+            eq(schema.tenantInvitationProfiles.organizationId, invitation.organizationId),
+            eq(schema.tenantInvitationProfiles.invitationId, invitationId),
+          ),
+        )
+        .limit(1);
       const [member] = await tx
         .select({ id: schema.member.id })
         .from(schema.member)
@@ -166,7 +176,7 @@ export class InvitationsService {
         .from(schema.tenantMemberProfiles)
         .where(eq(schema.tenantMemberProfiles.memberId, member.id))
         .limit(1);
-      const position = invitation.position ?? existingTenantProfile?.position ?? null;
+      const position = invitationProfile?.position ?? existingTenantProfile?.position ?? null;
       const [user] = await tx
         .select({ name: schema.user.name })
         .from(schema.user)
@@ -202,6 +212,25 @@ export class InvitationsService {
         .update(schema.user)
         .set({ emailVerified: true, updatedAt: new Date() })
         .where(and(eq(schema.user.id, userId), eq(schema.user.email, email)));
+      const deliveries = await tx
+        .select({ id: schema.emailDeliveries.id })
+        .from(schema.emailDeliveries)
+        .where(
+          and(
+            eq(schema.emailDeliveries.tenantId, invitation.organizationId),
+            eq(schema.emailDeliveries.sourceId, invitationId),
+          ),
+        )
+        .orderBy(schema.emailDeliveries.id)
+        .for("update");
+      if (deliveries.length > 0) {
+        await tx.delete(schema.emailOutbox).where(
+          inArray(
+            schema.emailOutbox.deliveryId,
+            deliveries.map((delivery) => delivery.id),
+          ),
+        );
+      }
       await tx
         .update(schema.emailDeliveries)
         .set({
@@ -218,7 +247,7 @@ export class InvitationsService {
           and(
             eq(schema.emailDeliveries.tenantId, invitation.organizationId),
             eq(schema.emailDeliveries.sourceId, invitationId),
-            inArray(schema.emailDeliveries.status, ["queued", "retrying"]),
+            inArray(schema.emailDeliveries.status, ["queued", "sending", "retrying"]),
           ),
         );
       await tx
@@ -229,14 +258,29 @@ export class InvitationsService {
             eq(schema.tenantInvitationProfiles.invitationId, invitationId),
           ),
         );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: invitation.organizationId,
-        actorUserId: userId,
-        action: "team.invitation.accepted",
-        outcome: "success",
-        targetType: "invitation",
-        targetId: invitationId,
-      });
+      const [existingAudit] = await tx
+        .select({ id: schema.tenantAuditEvents.id })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, invitation.organizationId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.accepted"),
+            eq(schema.tenantAuditEvents.targetId, invitationId),
+          ),
+        )
+        .limit(1);
+      if (!existingAudit) {
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: invitation.organizationId,
+          actorUserId: userId,
+          action: "team.invitation.accepted",
+          outcome: "success",
+          targetType: "invitation",
+          targetId: invitationId,
+          before: { status: "pending", role: invitation.role },
+          after: { status: "accepted", role: invitation.role },
+        });
+      }
     });
   }
 
@@ -435,6 +479,30 @@ export class InvitationsService {
     const result = await this.mailJobs.withDeliveryLock(delivery.id, action);
     if (!result.acquired) throw new ConflictException({ code: "delivery_in_flight" });
     return result.value;
+  }
+
+  private async withInvitationAcceptanceQuotaLock<T>(
+    client: MailPgClient,
+    organizationId: string,
+    action: () => Promise<T>,
+  ): Promise<T> {
+    const lock = subscriptionQuotaLockIdentity(organizationId, "cabinetUsers");
+    let acquired = false;
+    try {
+      await client.query("SELECT pg_advisory_lock(hashtext($1), $2)", [
+        lock.namespace,
+        lock.keyOrder,
+      ]);
+      acquired = true;
+      return await action();
+    } finally {
+      if (acquired) {
+        await client.query("SELECT pg_advisory_unlock(hashtext($1), $2)", [
+          lock.namespace,
+          lock.keyOrder,
+        ]);
+      }
+    }
   }
 
   private async requirePending(invitationId: string) {

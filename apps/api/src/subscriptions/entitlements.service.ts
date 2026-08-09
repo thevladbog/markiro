@@ -17,6 +17,7 @@ import {
   type QuantitativeEntitlementKey,
   type SubscriptionEnforcementMode,
   type SubscriptionTransaction,
+  subscriptionQuotaLockIdentity,
 } from "./entitlements.types";
 
 export const SUBSCRIPTION_ENFORCEMENT_MODE = Symbol("SUBSCRIPTION_ENFORCEMENT_MODE");
@@ -194,12 +195,12 @@ export class EntitlementsService {
     key: QuantitativeEntitlementKey,
     action: () => Promise<T>,
   ): Promise<T> {
-    const keyOrder = QUANTITATIVE_ENTITLEMENT_KEYS.indexOf(key) + 1;
+    const lock = subscriptionQuotaLockIdentity(tenantId, key);
     // All quota locks use the same namespace and numeric key order. A caller
     // needing more than one must acquire them in QUANTITATIVE_ENTITLEMENT_KEYS
     // order, preventing line/station/kiosk/seat lock-order inversions.
     await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtext(${`subscription-quota:${tenantId}`}), ${keyOrder})`,
+      sql`select pg_advisory_xact_lock(hashtext(${lock.namespace}), ${lock.keyOrder})`,
     );
     return action();
   }

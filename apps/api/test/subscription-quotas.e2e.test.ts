@@ -119,6 +119,25 @@ describe.skipIf(!ready)("transactional subscription quotas", () => {
     throw new Error(`Timed out waiting for ${minimum} quota lock waiter(s)`);
   }
 
+  async function waitForExtendedLockWaiter(lockKey: string): Promise<void> {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const result = await setup.pool.query<{ count: number }>(
+        `select count(*)::int as count
+         from pg_locks
+         where locktype = 'advisory'
+           and database = (select oid from pg_database where datname = current_database())
+           and classid = ((hashtextextended($1, 0) >> 32) & 4294967295)::oid
+           and objid = (hashtextextended($1, 0) & 4294967295)::oid
+           and not granted`,
+        [lockKey],
+      );
+      if ((result.rows[0]?.count ?? 0) >= 1) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Timed out waiting for invitation acceptance barrier");
+  }
+
   it("serializes two simultaneous final line slots and reports the exact boundary", async () => {
     const { agent, tenantId } = await managedTenant({
       lines: 1,
@@ -440,6 +459,13 @@ describe.skipIf(!ready)("transactional subscription quotas", () => {
       ]),
     );
     expect((await app!.get(EntitlementsService).usage(tenantId)).cabinetUsers).toBe(2);
+    const memberships = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    expect(memberships.map((row) => row.userId).sort()).toEqual(
+      [owner!.userId, inviteeMember!.userId].sort(),
+    );
     await expect(
       db
         .select({
@@ -471,6 +497,211 @@ describe.skipIf(!ready)("transactional subscription quotas", () => {
       },
     ]);
   });
+
+  it("holds invitation capacity while Better Auth accepts and application state finalizes", async () => {
+    const { agent, tenantId } = await managedTenant({
+      lines: null,
+      stations: null,
+      kiosks: null,
+      cabinetUsers: 2,
+    });
+    const invitee = request.agent(app!.getHttpServer());
+    const inviteeTenantId = await signUpAndActivate(invitee);
+    const [inviteeMember] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, inviteeTenantId));
+    const [inviteeUser] = await db
+      .select({ email: schema.user.email })
+      .from(schema.user)
+      .where(eq(schema.user.id, inviteeMember!.userId));
+    const [owner] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    const pending = await agent
+      .post("/team/invitations")
+      .send({ email: inviteeUser!.email, role: "manager" })
+      .expect(201);
+    const invitationId = pending.body.id as string;
+    const [deliveryBefore] = await db
+      .select({ id: schema.emailDeliveries.id })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, invitationId));
+    if (
+      !deliveryBefore ||
+      !/^[a-zA-Z0-9_-]+$/.test(invitationId) ||
+      !/^[a-zA-Z0-9_-]+$/.test(tenantId) ||
+      !/^[a-zA-Z0-9_-]+$/.test(inviteeMember!.userId)
+    ) {
+      throw new Error("Unexpected invitation acceptance fixture identifiers");
+    }
+
+    const suffix = crypto.randomUUID().replaceAll("-", "_");
+    const lockKey = `invitation-acceptance-barrier:${suffix}`;
+    const functionName = `wait_for_invitation_acceptance_${suffix}`;
+    const triggerName = `wait_for_invitation_acceptance_${suffix}`;
+    const blocker = await setup.pool.connect();
+    let blockerHeld = false;
+    let accepted: request.Response | undefined;
+    let replacement: request.Response | undefined;
+    let replacementPhase: "waiting" | "settled" | undefined;
+    try {
+      await setup.pool.query(`
+        create function ${functionName}() returns trigger language plpgsql as $$
+        begin
+          perform pg_advisory_xact_lock(hashtextextended('${lockKey}', 0));
+          return new;
+        end
+        $$
+      `);
+      await setup.pool.query(`
+        create trigger ${triggerName}
+        before insert on member
+        for each row
+        when (
+          new.organization_id = '${tenantId}'
+          and new.user_id = '${inviteeMember!.userId}'
+        )
+        execute function ${functionName}()
+      `);
+      await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+      blockerHeld = true;
+      const acceptAttempt = invitee.post(`/invitations/${invitationId}/accept`).then((row) => row);
+      await waitForExtendedLockWaiter(lockKey);
+      await expect(
+        db
+          .select({ status: schema.invitation.status })
+          .from(schema.invitation)
+          .where(eq(schema.invitation.id, invitationId)),
+      ).resolves.toEqual([{ status: "accepted" }]);
+      await expect(
+        db
+          .select({ id: schema.member.id })
+          .from(schema.member)
+          .where(
+            and(
+              eq(schema.member.organizationId, tenantId),
+              eq(schema.member.userId, inviteeMember!.userId),
+            ),
+          ),
+      ).resolves.toEqual([]);
+
+      const replacementAttempt = agent
+        .post("/team/invitations")
+        .send({
+          email: `acceptance-race-${crypto.randomUUID()}@example.com`,
+          role: "manager",
+        })
+        .then((row) => row);
+      replacementPhase = await Promise.race([
+        waitForQuotaWaiters(tenantId, 4, 1).then(() => "waiting" as const),
+        replacementAttempt.then(() => "settled" as const),
+      ]);
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+      blockerHeld = false;
+      [accepted, replacement] = await Promise.all([acceptAttempt, replacementAttempt]);
+    } finally {
+      if (blockerHeld) {
+        await blocker
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [lockKey])
+          .catch(() => undefined);
+      }
+      blocker.release();
+      await setup.pool.query(`drop trigger if exists ${triggerName} on member`);
+      await setup.pool.query(`drop function if exists ${functionName}()`);
+    }
+
+    expect(replacementPhase).toBe("waiting");
+    expect(accepted?.status).toBe(200);
+    expect(replacement?.status).toBe(409);
+    expect(replacement?.body).toEqual({
+      code: "subscription_limit_reached",
+      entitlement: "cabinetUsers",
+      used: 2,
+      limit: 2,
+    });
+    expect((await app!.get(EntitlementsService).usage(tenantId)).cabinetUsers).toBe(2);
+    const memberships = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    expect(memberships.map((row) => row.userId).sort()).toEqual(
+      [owner!.userId, inviteeMember!.userId].sort(),
+    );
+    await expect(
+      db
+        .select({ status: schema.invitation.status })
+        .from(schema.invitation)
+        .where(eq(schema.invitation.id, invitationId)),
+    ).resolves.toEqual([{ status: "accepted" }]);
+    await expect(
+      db
+        .select({
+          status: schema.emailDeliveries.status,
+          encryptedPayload: schema.emailDeliveries.encryptedPayload,
+          payloadNonce: schema.emailDeliveries.payloadNonce,
+          payloadTag: schema.emailDeliveries.payloadTag,
+          attemptId: schema.emailDeliveries.attemptId,
+          attemptDeadline: schema.emailDeliveries.attemptDeadline,
+        })
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.id, deliveryBefore.id)),
+    ).resolves.toEqual([
+      {
+        status: "canceled",
+        encryptedPayload: null,
+        payloadNonce: null,
+        payloadTag: null,
+        attemptId: null,
+        attemptDeadline: null,
+      },
+    ]);
+    await expect(
+      db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveryBefore.id)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantInvitationProfiles)
+        .where(eq(schema.tenantInvitationProfiles.invitationId, invitationId)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select({
+          organizationId: schema.tenantAuditEvents.organizationId,
+          actorUserId: schema.tenantAuditEvents.actorUserId,
+          action: schema.tenantAuditEvents.action,
+          outcome: schema.tenantAuditEvents.outcome,
+          targetType: schema.tenantAuditEvents.targetType,
+          targetId: schema.tenantAuditEvents.targetId,
+          before: schema.tenantAuditEvents.before,
+          after: schema.tenantAuditEvents.after,
+        })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, tenantId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.accepted"),
+            eq(schema.tenantAuditEvents.targetId, invitationId),
+          ),
+        ),
+    ).resolves.toEqual([
+      {
+        organizationId: tenantId,
+        actorUserId: inviteeMember!.userId,
+        action: "team.invitation.accepted",
+        outcome: "success",
+        targetType: "invitation",
+        targetId: invitationId,
+        before: { status: "pending", role: "manager" },
+        after: { status: "accepted", role: "manager" },
+      },
+    ]);
+  }, 20_000);
 
   it("allows unlimited quotas, blocks over-limit downgrade usage, and rolls back a failed create", async () => {
     const unlimited = await managedTenant({
