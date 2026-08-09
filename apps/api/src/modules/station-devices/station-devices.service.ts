@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import {
   stationDeviceLifecycle,
   type CreateStationDeviceDto,
@@ -15,7 +16,10 @@ type StationDeviceWithLine = { device: StationDeviceRow; lineName: string | null
 
 @Injectable()
 export class StationDevicesService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   async list(tenantId: string): Promise<ListStationDevicesResponseDto> {
     const rows = await this.deviceQuery()
@@ -26,10 +30,15 @@ export class StationDevicesService {
 
   async create(tenantId: string, dto: CreateStationDeviceDto): Promise<StationDeviceDto> {
     const lineName = await this.lineName(tenantId, dto.lineId);
-    const [row] = await this.db
-      .insert(schema.stationDevices)
-      .values({ tenantId, name: dto.name, lineId: dto.lineId, apiKeyId: null })
-      .returning();
+    const row = await this.db.transaction((tx) =>
+      this.entitlements.withQuotaSlot(tx, tenantId, "stations", async () => {
+        const [created] = await tx
+          .insert(schema.stationDevices)
+          .values({ tenantId, name: dto.name, lineId: dto.lineId, apiKeyId: null })
+          .returning();
+        return created;
+      }),
+    );
     if (!row) throw new NotFoundException("Station device was not created");
     return this.toDto({ device: row, lineName });
   }
@@ -77,30 +86,32 @@ export class StationDevicesService {
     if (current.device.apiKeyId === null && current.device.revokedAt !== null) return;
 
     const revokedAt = new Date();
-    await this.db.transaction(async (tx) => {
-      const [revoked] = await tx
-        .update(schema.stationDevices)
-        .set({ apiKeyId: null, revokedAt })
-        .where(
-          and(
-            eq(schema.stationDevices.tenantId, tenantId),
-            eq(schema.stationDevices.id, id),
-            isNull(schema.stationDevices.revokedAt),
-          ),
-        )
-        .returning({ id: schema.stationDevices.id });
-      if (!revoked) return;
-      await tx
-        .update(schema.stationPairingCodes)
-        .set({ usedAt: revokedAt })
-        .where(
-          and(
-            eq(schema.stationPairingCodes.tenantId, tenantId),
-            eq(schema.stationPairingCodes.stationDeviceId, id),
-            isNull(schema.stationPairingCodes.usedAt),
-          ),
-        );
-    });
+    await this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, tenantId, "stations", async () => {
+        const [revoked] = await tx
+          .update(schema.stationDevices)
+          .set({ apiKeyId: null, revokedAt })
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, tenantId),
+              eq(schema.stationDevices.id, id),
+              isNull(schema.stationDevices.revokedAt),
+            ),
+          )
+          .returning({ id: schema.stationDevices.id });
+        if (!revoked) return;
+        await tx
+          .update(schema.stationPairingCodes)
+          .set({ usedAt: revokedAt })
+          .where(
+            and(
+              eq(schema.stationPairingCodes.tenantId, tenantId),
+              eq(schema.stationPairingCodes.stationDeviceId, id),
+              isNull(schema.stationPairingCodes.usedAt),
+            ),
+          );
+      }),
+    );
   }
 
   private deviceQuery() {

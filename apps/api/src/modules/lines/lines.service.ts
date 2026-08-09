@@ -8,11 +8,15 @@ import {
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type { CreateLineDto, LineDto, ListLinesResponseDto, UpdateLineDto } from "./dto";
 
 @Injectable()
 export class LinesService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   /** List all production lines for a tenant. */
   async listLines(tenantId: string): Promise<ListLinesResponseDto> {
@@ -39,10 +43,15 @@ export class LinesService {
 
   /** Create a production line. */
   async createLine(tenantId: string, data: CreateLineDto): Promise<LineDto> {
-    const [row] = await this.db
-      .insert(schema.lines)
-      .values({ tenantId, name: data.name })
-      .returning();
+    const row = await this.db.transaction((tx) =>
+      this.entitlements.withQuotaSlot(tx, tenantId, "lines", async () => {
+        const [created] = await tx
+          .insert(schema.lines)
+          .values({ tenantId, name: data.name })
+          .returning();
+        return created;
+      }),
+    );
 
     if (!row) {
       throw new InternalServerErrorException("Failed to create line");

@@ -118,6 +118,7 @@ const EnvSchema = z
     // already a bare origin -- keep it that way.
     ADMIN_ORIGIN: canonicalOriginSchema.default("http://localhost:5173"),
     SAAS_ADMIN_ORIGIN: canonicalOriginSchema,
+    SUBSCRIPTION_ENFORCEMENT_MODE: z.enum(["managed_only", "all"]).default("managed_only"),
     // Origin the pickup kiosk PWA (apps/kiosk) is served from, when it is
     // served from one at all. OPTIONAL, and deliberately WITHOUT a localhost
     // default, unlike ADMIN_ORIGIN:

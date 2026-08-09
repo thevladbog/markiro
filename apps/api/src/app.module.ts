@@ -41,6 +41,7 @@ import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
 import { PlatformTenantsModule } from "./modules/platform-tenants/platform-tenants.module";
 import type { PlatformAuth } from "@markiro/db";
+import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 
 @Module({})
 export class AppModule {
@@ -75,6 +76,7 @@ export class AppModule {
             ]
           : []),
         AuthorizationModule,
+        SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
         JobsModule.forRoot(setup.databaseUrl, env),
         OrgProfileModule,
         CounterpartiesModule,

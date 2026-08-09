@@ -11,6 +11,7 @@ import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or } from "drizzle-
 import { schema, type Auth, type Db } from "@markiro/db";
 import { AUTH, DB } from "../../auth/auth.module";
 import { MailJobsService } from "../mail/mail-jobs.service";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type { PublicInvitationDto, RegisterInvitationDto } from "./dto";
 
 @Injectable()
@@ -20,6 +21,7 @@ export class InvitationsService {
     @Inject(AUTH) private readonly auth: Auth,
     @Inject(DB) private readonly db: Db,
     private readonly mailJobs: MailJobsService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   async getPublic(invitationId: string): Promise<PublicInvitationDto> {
@@ -116,17 +118,21 @@ export class InvitationsService {
     if (userEmail.toLocaleLowerCase("en-US") !== invitation.email) {
       throw new ForbiddenException("Signed-in account is not the invitation recipient");
     }
-    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, async () => {
-      const response = await this.auth.api.rejectInvitation({
-        body: { invitationId },
-        headers,
-        asResponse: true,
-      });
-      if (response.ok) {
-        await this.cleanupRejected(invitationId, invitation.organizationId, session.user.id);
-      }
-      return response;
-    });
+    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, () =>
+      this.db.transaction((tx) =>
+        this.entitlements.withQuotaLock(tx, invitation.organizationId, "cabinetUsers", async () => {
+          const response = await this.auth.api.rejectInvitation({
+            body: { invitationId },
+            headers,
+            asResponse: true,
+          });
+          if (response.ok) {
+            await this.cleanupRejected(invitationId, invitation.organizationId, session.user.id);
+          }
+          return response;
+        }),
+      ),
+    );
   }
 
   async finalizeAccepted(invitationId: string, userId: string, email: string): Promise<void> {

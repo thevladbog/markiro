@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from "@nes
 import { and, eq, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { generateDeviceToken, hashDeviceToken } from "../../pickup/device-token";
 import type {
   CreateKioskDto,
@@ -23,7 +24,10 @@ export interface UpdateKioskResult {
 
 @Injectable()
 export class KiosksService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly entitlements: EntitlementsService,
+  ) {}
 
   async listKiosks(tenantId: string): Promise<ListKiosksResponseDto> {
     const rows = await this.db
@@ -39,16 +43,21 @@ export class KiosksService {
   }
 
   async createKiosk(tenantId: string, dto: CreateKioskDto): Promise<KioskDto> {
-    const [row] = await this.db
-      .insert(schema.kiosks)
-      .values({
-        tenantId,
-        name: dto.name,
-        location: dto.location ?? null,
-        dayLimitPerEmployee: dto.dayLimitPerEmployee,
-        showPrices: dto.showPrices,
-      })
-      .returning();
+    const row = await this.db.transaction((tx) =>
+      this.entitlements.withQuotaSlot(tx, tenantId, "kiosks", async () => {
+        const [created] = await tx
+          .insert(schema.kiosks)
+          .values({
+            tenantId,
+            name: dto.name,
+            location: dto.location ?? null,
+            dayLimitPerEmployee: dto.dayLimitPerEmployee,
+            showPrices: dto.showPrices,
+          })
+          .returning();
+        return created;
+      }),
+    );
     return this.toDto(row!, []);
   }
 
@@ -180,36 +189,43 @@ export class KiosksService {
     fields: Record<string, unknown>,
   ): Promise<{ row: KioskRow; previousStatus: "active" | "archived" }> {
     const retiredAt = new Date();
-    return this.db.transaction(async (tx) => {
-      const [current] = await tx
-        .select({ id: schema.kiosks.id, status: schema.kiosks.status })
-        .from(schema.kiosks)
-        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
-        .for("update");
-      if (!current) throw new NotFoundException();
+    return this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, tenantId, "kiosks", async () => {
+        const [current] = await tx
+          .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+          .from(schema.kiosks)
+          .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+          .for("update");
+        if (!current) throw new NotFoundException();
 
-      const statusChanged = current.status !== status;
-      const [row] = await tx
-        .update(schema.kiosks)
-        .set({ ...fields, status, ...(statusChanged ? { deviceTokenHash: null } : {}) })
-        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
-        .returning();
-      if (!row) throw new NotFoundException();
+        const statusChanged = current.status !== status;
+        const mutate = async () => {
+          const [row] = await tx
+            .update(schema.kiosks)
+            .set({ ...fields, status, ...(statusChanged ? { deviceTokenHash: null } : {}) })
+            .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+            .returning();
+          if (!row) throw new NotFoundException();
 
-      if (statusChanged) {
-        await tx
-          .update(schema.kioskPairingCodes)
-          .set({ usedAt: retiredAt })
-          .where(
-            and(
-              eq(schema.kioskPairingCodes.tenantId, tenantId),
-              eq(schema.kioskPairingCodes.kioskId, id),
-              isNull(schema.kioskPairingCodes.usedAt),
-            ),
-          );
-      }
-      return { row, previousStatus: current.status };
-    });
+          if (statusChanged) {
+            await tx
+              .update(schema.kioskPairingCodes)
+              .set({ usedAt: retiredAt })
+              .where(
+                and(
+                  eq(schema.kioskPairingCodes.tenantId, tenantId),
+                  eq(schema.kioskPairingCodes.kioskId, id),
+                  isNull(schema.kioskPairingCodes.usedAt),
+                ),
+              );
+          }
+          return { row, previousStatus: current.status };
+        };
+        return current.status === "archived" && status === "active"
+          ? this.entitlements.withQuotaSlot(tx, tenantId, "kiosks", mutate)
+          : mutate();
+      }),
+    );
   }
 
   /**
@@ -225,33 +241,40 @@ export class KiosksService {
     fields: Record<string, unknown> = {},
   ): Promise<KioskRow> {
     const retiredAt = new Date();
-    return this.db.transaction(async (tx) => {
-      const [current] = await tx
-        .select({ id: schema.kiosks.id })
-        .from(schema.kiosks)
-        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
-        .for("update");
-      if (!current) throw new NotFoundException();
+    return this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, tenantId, "kiosks", async () => {
+        const [current] = await tx
+          .select({ id: schema.kiosks.id, status: schema.kiosks.status })
+          .from(schema.kiosks)
+          .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+          .for("update");
+        if (!current) throw new NotFoundException();
 
-      const [row] = await tx
-        .update(schema.kiosks)
-        .set({ ...fields, status, deviceTokenHash: null })
-        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
-        .returning();
-      if (!row) throw new NotFoundException();
+        const mutate = async () => {
+          const [row] = await tx
+            .update(schema.kiosks)
+            .set({ ...fields, status, deviceTokenHash: null })
+            .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, id)))
+            .returning();
+          if (!row) throw new NotFoundException();
 
-      await tx
-        .update(schema.kioskPairingCodes)
-        .set({ usedAt: retiredAt })
-        .where(
-          and(
-            eq(schema.kioskPairingCodes.tenantId, tenantId),
-            eq(schema.kioskPairingCodes.kioskId, id),
-            isNull(schema.kioskPairingCodes.usedAt),
-          ),
-        );
-      return row;
-    });
+          await tx
+            .update(schema.kioskPairingCodes)
+            .set({ usedAt: retiredAt })
+            .where(
+              and(
+                eq(schema.kioskPairingCodes.tenantId, tenantId),
+                eq(schema.kioskPairingCodes.kioskId, id),
+                isNull(schema.kioskPairingCodes.usedAt),
+              ),
+            );
+          return row;
+        };
+        return current.status === "archived" && status === "active"
+          ? this.entitlements.withQuotaSlot(tx, tenantId, "kiosks", mutate)
+          : mutate();
+      }),
+    );
   }
 
   private async productIdsForOne(tenantId: string, kioskId: string): Promise<string[]> {

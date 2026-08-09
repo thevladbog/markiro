@@ -9,6 +9,7 @@ import { JournalService } from "../src/modules/integrations/journal.service";
 import { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
+import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -46,6 +47,7 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
       exchangeSessions,
       mailJobs,
       mailRetention,
+      {} as SubscriptionStatusJob,
     );
   });
 
