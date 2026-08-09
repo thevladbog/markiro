@@ -202,10 +202,13 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
   await new Promise((resolve, reject) => {
     const spawnChild = options.spawn ?? spawn;
     const timeoutMs = options.timeoutMs ?? 120_000;
+    const writeDiagnostic = options.writeDiagnostic ?? ((value) => process.stderr.write(value));
     let archive;
     let remote;
     let archiveCode;
     let remoteCode;
+    const remoteStderr = [];
+    let remoteStderrBytes = 0;
     let settled = false;
     let timer;
     const stop = (child) => {
@@ -218,7 +221,7 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
       archive?.stdout.destroy();
       stop(archive);
       stop(remote);
-      process.stderr.write(`MARKIRO_DEPLOY_FAILURE ${cause}\n`);
+      writeDiagnostic(`MARKIRO_DEPLOY_FAILURE ${cause}\n`);
       reject(new Error("private release transfer failed"));
     };
     const finish = () => {
@@ -242,7 +245,13 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
       return;
     }
     archive.stderr.on("data", () => undefined);
-    remote.stderr.on("data", () => undefined);
+    remote.stderr.on("data", (chunk) => {
+      if (remoteStderrBytes >= 8 * 1024) return;
+      const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      const bounded = value.subarray(0, 8 * 1024 - remoteStderrBytes);
+      remoteStderr.push(bounded);
+      remoteStderrBytes += bounded.length;
+    });
     timer = setTimeout(() => fail("transfer-timeout"), timeoutMs);
     archive.once("error", () => fail("archive-spawn"));
     remote.once("error", () => fail("ssh-spawn"));
@@ -253,7 +262,25 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
     });
     remote.once("close", (code) => {
       remoteCode = code;
-      if (code !== 0) return fail("ssh-exit");
+      if (code !== 0) {
+        const stderr = Buffer.concat(remoteStderr).toString("utf8");
+        const cause = /host key verification failed|remote host identification has changed/i.test(
+          stderr,
+        )
+          ? "ssh-host-key"
+          : /permission denied \(publickey\)|no supported authentication methods/i.test(stderr)
+            ? "ssh-auth"
+            : /connect to host|connection (?:timed out|refused)|network is unreachable|no route to host|could not resolve hostname/i.test(
+                  stderr,
+                )
+              ? "ssh-connect"
+              : /(?:^|\n)sudo:/i.test(stderr)
+                ? "remote-sudo"
+                : /(?:^|\n)tar:/i.test(stderr)
+                  ? "remote-tar"
+                  : "ssh-exit";
+        return fail(cause);
+      }
       finish();
     });
   });
