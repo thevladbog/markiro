@@ -238,6 +238,7 @@ export class PlatformCatalogService {
   ): Promise<CatalogVersionDto> {
     try {
       return await this.db.transaction(async (tx) => {
+        await this.lockVersion(tx, versionId);
         const found = await this.findVersion(itemRef, versionId, tx);
         if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
         if (found.version.status !== "published") {

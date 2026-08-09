@@ -5,7 +5,7 @@ import { Test } from "@nestjs/testing";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type PlatformRole } from "@markiro/db";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
@@ -164,20 +164,23 @@ describe.skipIf(!ready)("platform catalog", () => {
   }, 120_000);
 
   afterAll(async () => {
-    if (barriersInstalled) {
-      await setup.pool.query(
-        "DROP TRIGGER IF EXISTS platform_catalog_version_barrier ON catalog_item_versions",
-      );
-      await setup.pool.query(
-        "DROP TRIGGER IF EXISTS platform_catalog_item_barrier ON catalog_items",
-      );
-      await setup.pool.query(
-        "DROP TRIGGER IF EXISTS platform_catalog_setting_barrier ON platform_settings",
-      );
-      await setup.pool.query("DROP FUNCTION IF EXISTS wait_for_platform_catalog_test_barrier()");
-      await setup.pool.query("DROP TABLE IF EXISTS platform_catalog_test_barriers");
+    try {
+      if (barriersInstalled) {
+        await setup.pool.query(
+          "DROP TRIGGER IF EXISTS platform_catalog_version_barrier ON catalog_item_versions",
+        );
+        await setup.pool.query(
+          "DROP TRIGGER IF EXISTS platform_catalog_item_barrier ON catalog_items",
+        );
+        await setup.pool.query(
+          "DROP TRIGGER IF EXISTS platform_catalog_setting_barrier ON platform_settings",
+        );
+        await setup.pool.query("DROP FUNCTION IF EXISTS wait_for_platform_catalog_test_barrier()");
+        await setup.pool.query("DROP TABLE IF EXISTS platform_catalog_test_barriers");
+      }
+    } finally {
+      await app?.close();
     }
-    await app?.close();
   });
 
   function principal(userId = adminId): Parameters<PlatformCatalogService["createVersion"]>[0] {
@@ -237,10 +240,21 @@ describe.skipIf(!ready)("platform catalog", () => {
     );
     const client = await setup.pool.connect();
     await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+    let released = false;
     return async () => {
-      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
-      await setup.pool.query("DELETE FROM platform_catalog_test_barriers WHERE name = $1", [name]);
-      client.release();
+      if (released) return;
+      released = true;
+      try {
+        await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+      } finally {
+        try {
+          await setup.pool.query("DELETE FROM platform_catalog_test_barriers WHERE name = $1", [
+            name,
+          ]);
+        } finally {
+          client.release();
+        }
+      }
     };
   }
 
@@ -256,6 +270,21 @@ describe.skipIf(!ready)("platform catalog", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
     }
     throw new Error(`Timed out waiting for ${name} barrier`);
+  }
+
+  async function waitForBlockedCatalogVersionQuery(): Promise<void> {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      const result = await setup.pool.query<{ count: number }>(`
+        SELECT count(*)::int AS count
+        FROM pg_stat_activity
+        WHERE datname = current_database()
+          AND wait_event_type = 'Lock'
+          AND query LIKE '%catalog_item_versions%'
+      `);
+      if ((result.rows[0]?.count ?? 0) > 0) return;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error("Timed out waiting for a blocked catalog version query");
   }
 
   it("wires the catalog service to the shared platform audit provider through AppModule", () => {
@@ -409,21 +438,89 @@ describe.skipIf(!ready)("platform catalog", () => {
     await catalog.setDefaultDemo(principal(), { catalogVersionId: initial.id });
 
     const release = await holdBarrier("setting");
+    try {
+      const selecting = catalog.setDefaultDemo(principal(accountantId), {
+        catalogVersionId: candidate.id,
+      });
+      await waitForBarrier("setting");
+      const retiring = catalog.retire(principal(), candidate.catalogItemCode, candidate.id).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+      await release();
+      await selecting;
+      const error = await retiring;
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual({
+        code: "catalog_default_demo_in_use",
+      });
+    } finally {
+      await release();
+    }
+  });
+
+  it("keeps retire behind a selection that holds the candidate version before the setting", async () => {
+    const initial = await catalog.createVersion(
+      principal(),
+      `plan-inversion-initial-${randomUUID()}`,
+      basicPlan,
+    );
+    await catalog.publish(principal(), initial.catalogItemCode, initial.id);
+    const candidate = await catalog.createVersion(
+      principal(),
+      `plan-inversion-candidate-${randomUUID()}`,
+      basicPlan,
+    );
+    await catalog.publish(principal(), candidate.catalogItemCode, candidate.id);
+    await catalog.setDefaultDemo(principal(), { catalogVersionId: initial.id });
+
+    type CatalogInternals = {
+      lockDefaultDemoSetting(tx: unknown): Promise<unknown>;
+    };
+    const internals = catalog as unknown as CatalogInternals;
+    const original = internals.lockDefaultDemoSetting.bind(catalog);
+    let releaseSelection!: () => void;
+    const selectionCanContinue = new Promise<void>((resolve) => {
+      releaseSelection = resolve;
+    });
+    let selectionAtSetting!: () => void;
+    const selectionReachedSetting = new Promise<void>((resolve) => {
+      selectionAtSetting = resolve;
+    });
+    let firstSettingRead = true;
+    const settingSpy = vi
+      .spyOn(internals, "lockDefaultDemoSetting")
+      .mockImplementation(async (tx) => {
+        if (firstSettingRead) {
+          firstSettingRead = false;
+          selectionAtSetting();
+          await selectionCanContinue;
+        }
+        return original(tx);
+      });
+
     const selecting = catalog.setDefaultDemo(principal(accountantId), {
       catalogVersionId: candidate.id,
     });
-    await waitForBarrier("setting");
-    const retiring = catalog.retire(principal(), candidate.catalogItemCode, candidate.id).then(
-      () => null,
-      (reason: unknown) => reason,
-    );
-    await release();
-    await selecting;
-    const error = await retiring;
-    expect(error).toBeInstanceOf(ConflictException);
-    expect((error as ConflictException).getResponse()).toEqual({
-      code: "catalog_default_demo_in_use",
-    });
+    try {
+      await selectionReachedSetting;
+      const retiring = catalog.retire(principal(), candidate.catalogItemCode, candidate.id).then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+      await waitForBlockedCatalogVersionQuery();
+      releaseSelection();
+      await expect(selecting).resolves.toEqual({ catalogVersionId: candidate.id });
+      const error = await retiring;
+      expect(String(error)).not.toMatch(/40P01|deadlock/i);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual({
+        code: "catalog_default_demo_in_use",
+      });
+    } finally {
+      releaseSelection();
+      settingSpy.mockRestore();
+    }
   });
 
   it("does not create a new version after an archive has acquired the item lock", async () => {
@@ -433,26 +530,32 @@ describe.skipIf(!ready)("platform catalog", () => {
     await catalog.retire(principal(), code, published.id);
 
     const release = await holdBarrier("item");
-    const archiving = catalog.archive(principal(), code);
-    await waitForBarrier("item");
-    const creating = catalog.createVersion(principal(), code, basicPlan);
-    await release();
-    await archiving;
-    const error = await creating.then(
-      () => null,
-      (reason: unknown) => reason,
-    );
-    expect(error).toBeInstanceOf(ConflictException);
-    expect((error as ConflictException).getResponse()).toEqual({ code: "catalog_item_archived" });
-    const versions = await setup.db
-      .select({ status: schema.catalogItemVersions.status })
-      .from(schema.catalogItemVersions)
-      .innerJoin(
-        schema.catalogItems,
-        eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
-      )
-      .where(eq(schema.catalogItems.code, code));
-    expect(versions).toEqual([{ status: "retired" }]);
+    try {
+      const archiving = catalog.archive(principal(), code);
+      await waitForBarrier("item");
+      const creating = catalog.createVersion(principal(), code, basicPlan);
+      await release();
+      await archiving;
+      const error = await creating.then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toEqual({
+        code: "catalog_item_archived",
+      });
+      const versions = await setup.db
+        .select({ status: schema.catalogItemVersions.status })
+        .from(schema.catalogItemVersions)
+        .innerJoin(
+          schema.catalogItems,
+          eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
+        )
+        .where(eq(schema.catalogItems.code, code));
+      expect(versions).toEqual([{ status: "retired" }]);
+    } finally {
+      await release();
+    }
   });
 
   it("records the committed prior default for concurrent default changes", async () => {
@@ -477,25 +580,29 @@ describe.skipIf(!ready)("platform catalog", () => {
     await catalog.setDefaultDemo(principal(), { catalogVersionId: first.id });
 
     const release = await holdBarrier("setting");
-    const selectingSecond = catalog.setDefaultDemo(principal(), { catalogVersionId: second.id });
-    await waitForBarrier("setting");
-    const selectingThird = catalog.setDefaultDemo(principal(accountantId), {
-      catalogVersionId: third.id,
-    });
-    await release();
-    await Promise.all([selectingSecond, selectingThird]);
+    try {
+      const selectingSecond = catalog.setDefaultDemo(principal(), { catalogVersionId: second.id });
+      await waitForBarrier("setting");
+      const selectingThird = catalog.setDefaultDemo(principal(accountantId), {
+        catalogVersionId: third.id,
+      });
+      await release();
+      await Promise.all([selectingSecond, selectingThird]);
 
-    const rows = await setup.db
-      .select({
-        before: schema.platformAuditEvents.before,
-        after: schema.platformAuditEvents.after,
-      })
-      .from(schema.platformAuditEvents)
-      .where(eq(schema.platformAuditEvents.action, "catalog.default_demo.changed"))
-      .orderBy(desc(schema.platformAuditEvents.createdAt), desc(schema.platformAuditEvents.id));
-    const thirdChange = rows.find(
-      (row) => (row.after as { catalogVersionId?: string } | null)?.catalogVersionId === third.id,
-    );
-    expect(thirdChange?.before).toEqual({ catalogVersionId: second.id });
+      const rows = await setup.db
+        .select({
+          before: schema.platformAuditEvents.before,
+          after: schema.platformAuditEvents.after,
+        })
+        .from(schema.platformAuditEvents)
+        .where(eq(schema.platformAuditEvents.action, "catalog.default_demo.changed"))
+        .orderBy(desc(schema.platformAuditEvents.createdAt), desc(schema.platformAuditEvents.id));
+      const thirdChange = rows.find(
+        (row) => (row.after as { catalogVersionId?: string } | null)?.catalogVersionId === third.id,
+      );
+      expect(thirdChange?.before).toEqual({ catalogVersionId: second.id });
+    } finally {
+      await release();
+    }
   });
 });
