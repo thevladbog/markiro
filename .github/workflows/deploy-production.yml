@@ -12,13 +12,13 @@ on:
         required: true
         type: string
       deployment_phase:
-        description: First deployment only skips the pre-existing ALB-health gate and performs pre-DNS probes.
+        description: First deployment skips the pre-existing ALB-health gate and performs pre-DNS probes.
         required: true
         default: repeat
         type: choice
         options: [first, repeat]
       rollback_rehearsal:
-        description: Separately approved first-release rollback rehearsal; never enabled by automatic delivery.
+        description: Separately approved first-release rollback rehearsal.
         required: true
         default: false
         type: boolean
@@ -32,10 +32,6 @@ on:
         required: true
         default: none
         type: string
-  workflow_run:
-    workflows: [Publish production images]
-    types: [completed]
-    branches: [main]
 
 permissions: {}
 
@@ -44,34 +40,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  controller:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+  deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment: production-controller
+    timeout-minutes: 45
+    environment: production-deploy
     permissions:
       actions: read
       contents: read
       id-token: write
-    outputs:
-      deployment-id: ${{ steps.runner.outputs.deployment-id }}
-      app-host-keys-b64: ${{ steps.runner.outputs.app-host-keys-b64 }}
-      runner-id: ${{ steps.runner.outputs.runner-id }}
-      runner-label: ${{ steps.runner.outputs.runner-label }}
-      release-run-id: ${{ steps.release.outputs.release-run-id }}
-      release-sha: ${{ steps.release.outputs.release-sha }}
     env:
       YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
       YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
-      YC_RUNNER_REGISTRATION_SECRET_ID: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
-      YC_RUNNER_INSTANCE_ID: ${{ vars.YC_RUNNER_INSTANCE_ID }}
       YC_APP_INSTANCE_ID: ${{ vars.YC_APP_INSTANCE_ID }}
       YC_POSTGRES_CLUSTER_ID: ${{ vars.YC_POSTGRES_CLUSTER_ID }}
+      YC_REGISTRY_SECRET_ID: ${{ vars.YC_REGISTRY_SECRET_ID }}
       YC_LOAD_BALANCER_ID: ${{ vars.YC_LOAD_BALANCER_ID }}
       YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
       YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
-      MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
-      MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}
+      YC_LOAD_BALANCER_ADDRESS: ${{ vars.YC_LOAD_BALANCER_ADDRESS }}
+      MARKIRO_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
+      MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
+      MARKIRO_DEPLOYMENT_PHASE: ${{ inputs.deployment_phase }}
+      MARKIRO_ROLLBACK_REHEARSAL: ${{ inputs.rollback_rehearsal && '1' || '0' }}
+      YC_APP_DEPLOY_LOGIN: markiro-deploy
     steps:
       - name: Resolve exact trusted release identity
         id: release
@@ -80,40 +72,29 @@ jobs:
           DISPATCH_SHA: ${{ inputs.release_sha }}
           DISPATCH_PHASE: ${{ inputs.deployment_phase }}
           DISPATCH_REHEARSAL: ${{ inputs.rollback_rehearsal }}
-          REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id || 'none' }}
-          REHEARSAL_RUN_ATTEMPT: ${{ inputs.rehearsal_run_attempt || 'none' }}
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-          EVENT_SHA: ${{ github.event.workflow_run.head_sha }}
+          REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id }}
+          REHEARSAL_RUN_ATTEMPT: ${{ inputs.rehearsal_run_attempt }}
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == workflow_run ]]; then
-            [[ "$MARKIRO_DEPLOYMENT_PHASE" == repeat ]]
-            [[ "$MARKIRO_ROLLBACK_REHEARSAL" == 0 ]]
+          if [[ "$DISPATCH_REHEARSAL" == true ]]; then
+            [[ "$DISPATCH_PHASE" == first ]]
             [[ "$REHEARSAL_RUN_ID" == none ]]
             [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
-            release_run_id="$EVENT_RUN_ID"
-            release_sha="$EVENT_SHA"
+          elif [[ "$DISPATCH_PHASE" == first ]]; then
+            [[ "$REHEARSAL_RUN_ID" =~ ^[1-9][0-9]*$ ]]
+            [[ "$REHEARSAL_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
           else
-            if [[ "$DISPATCH_REHEARSAL" == true ]]; then
-              [[ "$DISPATCH_PHASE" == first ]]
-              [[ "$REHEARSAL_RUN_ID" == none ]]
-              [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
-            elif [[ "$DISPATCH_PHASE" == first ]]; then
-              [[ "$REHEARSAL_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-              [[ "$REHEARSAL_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-            else
-              [[ "$DISPATCH_PHASE" == repeat ]]
-              [[ "$REHEARSAL_RUN_ID" == none ]]
-              [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
-            fi
-            release_run_id="$DISPATCH_RUN_ID"
-            release_sha="$DISPATCH_SHA"
+            [[ "$DISPATCH_PHASE" == repeat ]]
+            [[ "$REHEARSAL_RUN_ID" == none ]]
+            [[ "$REHEARSAL_RUN_ATTEMPT" == none ]]
           fi
+          release_run_id="$DISPATCH_RUN_ID"
+          release_sha="$DISPATCH_SHA"
           [[ "$release_run_id" =~ ^[1-9][0-9]*$ ]]
           [[ "$release_sha" =~ ^[0-9a-f]{40}$ ]]
           run_path="$RUNNER_TEMP/release-run.json"
-          curl --fail --silent \
+          curl --fail --silent --show-error --max-time 30 \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GITHUB_TOKEN" \
             --header "X-GitHub-Api-Version: 2026-03-10" \
@@ -131,10 +112,10 @@ jobs:
             .head_sha == $sha and .conclusion == "success" and
             (.run_attempt | type == "number" and . >= 1 and floor == .)
           ' "$run_path" > /dev/null
-          rm -f "$run_path"
-          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch && "$DISPATCH_PHASE" == first && "$DISPATCH_REHEARSAL" == false ]]; then
+          rm -f -- "$run_path"
+          if [[ "$DISPATCH_PHASE" == first && "$DISPATCH_REHEARSAL" == false ]]; then
             rehearsal_run_path="$RUNNER_TEMP/rehearsal-run.json"
-            curl --fail --silent \
+            curl --fail --silent --show-error --max-time 30 \
               --header "Accept: application/vnd.github+json" \
               --header "Authorization: Bearer $GITHUB_TOKEN" \
               --header "X-GitHub-Api-Version: 2026-03-10" \
@@ -155,16 +136,16 @@ jobs:
                 .head_sha == $sha and .conclusion == "success" and
                 .run_attempt == ($rehearsal_run_attempt | tonumber)
               ' "$rehearsal_run_path" > /dev/null
-            rm -f "$rehearsal_run_path"
+            rm -f -- "$rehearsal_run_path"
           fi
           printf 'release-run-id=%s\nrelease-sha=%s\n' "$release_run_id" "$release_sha" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: ${{ steps.release.outputs.release-sha }}
           fetch-depth: 1
           persist-credentials: false
       - name: Download the exact trusted release manifest
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: markiro-release-manifest-${{ steps.release.outputs.release-sha }}
           path: ${{ runner.temp }}/release-manifest
@@ -172,30 +153,20 @@ jobs:
           repository: ${{ github.repository }}
           run-id: ${{ steps.release.outputs.release-run-id }}
       - name: Download prerequisite rollback rehearsal evidence
-        if: github.event_name == 'workflow_dispatch' && inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
         with:
           name: markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}
           path: ${{ runner.temp }}/rollback-rehearsal-prerequisite
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           run-id: ${{ inputs.rehearsal_run_id }}
-      - name: Download prerequisite cleanup receipt
-        if: github.event_name == 'workflow_dispatch' && inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: markiro-cleanup-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}
-          path: ${{ runner.temp }}/cleanup-prerequisite
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.rehearsal_run_id }}
-      - name: Validate manifest, infrastructure, backup, then start the one-use runner
-        id: runner
+      - name: Validate exact release and rollback prerequisite
         env:
           EXPECTED_RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
           EXPECTED_RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
-          REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id || 'none' }}
-          REHEARSAL_RUN_ATTEMPT: ${{ inputs.rehearsal_run_attempt || 'none' }}
+          REHEARSAL_RUN_ID: ${{ inputs.rehearsal_run_id }}
+          REHEARSAL_RUN_ATTEMPT: ${{ inputs.rehearsal_run_attempt }}
           RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
         run: |
           set -euo pipefail
@@ -203,7 +174,6 @@ jobs:
           [[ "$(git rev-parse HEAD)" == "$EXPECTED_RELEASE_SHA" ]]
           if [[ "$MARKIRO_DEPLOYMENT_PHASE" == first && "$MARKIRO_ROLLBACK_REHEARSAL" == 0 ]]; then
             rehearsal_path="$RUNNER_TEMP/rollback-rehearsal-prerequisite/rollback-rehearsal.json"
-            cleanup_path="$RUNNER_TEMP/cleanup-prerequisite/cleanup-receipt.json"
             jq -e \
               --argjson deployment_run_attempt "$REHEARSAL_RUN_ATTEMPT" \
               --arg deployment_run_id "$REHEARSAL_RUN_ID" \
@@ -220,28 +190,33 @@ jobs:
               .state == "rehearsed" and
               (.rehearsedAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.000Z$"))
             ' "$rehearsal_path" > /dev/null
-            jq -e \
-              --argjson deployment_run_attempt "$REHEARSAL_RUN_ATTEMPT" \
-              --arg deployment_run_id "$REHEARSAL_RUN_ID" \
-              --arg release_sha "$EXPECTED_RELEASE_SHA" '
-              type == "object" and
-              (keys | sort) == ["cleanupAt", "deploymentRunAttempt", "deploymentRunId", "releaseSha", "runnerDeregistered", "runnerVmStopped", "state"] and
-              .deploymentRunAttempt == $deployment_run_attempt and
-              .deploymentRunId == $deployment_run_id and .releaseSha == $release_sha and
-              .runnerDeregistered == true and .runnerVmStopped == true and .state == "clean" and
-              (.cleanupAt | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\\.000Z$"))
-            ' "$cleanup_path" > /dev/null
-            rehearsed_at="$(jq -er '.rehearsedAt' "$rehearsal_path")"
-            cleanup_at="$(jq -er '.cleanupAt' "$cleanup_path")"
-            [[ "$cleanup_at" == "$rehearsed_at" || "$cleanup_at" > "$rehearsed_at" ]]
           fi
-          github_oidc_response="$(curl --fail --silent --get \
+      - name: Authenticate and deploy the immutable bundle
+        env:
+          EXPECTED_RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
+          EXPECTED_RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
+          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
+          YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/markiro-deploy-key"
+          context_path="$RUNNER_TEMP/markiro-hosted-deploy-context.json"
+          test ! -e "$key_path"
+          test ! -e "$context_path"
+          trap 'rm -f -- "$key_path" "$context_path"' EXIT
+          printf '%s' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          if ! github_oidc_token="$(curl --fail --silent --show-error --max-time 30 --get \
             --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
             --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
-          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
-          echo "::add-mask::$github_oidc_token"
-          iam_response="$(curl --fail --silent \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL" | \
+            jq -er '.value | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::GitHub OIDC token request failed'
+            exit 1
+          fi
+          printf '::add-mask::%s\n' "$github_oidc_token"
+          if ! iam_token="$(curl --fail --silent --show-error --max-time 30 \
             --request POST \
             --header "Content-Type: application/x-www-form-urlencoded" \
             --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
@@ -249,75 +224,19 @@ jobs:
             --data-urlencode "audience=$YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID" \
             --data-urlencode "subject_token=$github_oidc_token" \
             --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
-          echo "::add-mask::$iam_token"
-          lockbox_path="$RUNNER_TEMP/runner-lockbox.json"
-          curl --fail --silent \
-            --header "Authorization: Bearer $iam_token" \
-            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_RUNNER_REGISTRATION_SECRET_ID/payload" \
-            --output "$lockbox_path"
-          jq -e '
-            (.entries | type == "array" and length == 1) and
-            .entries[0].key == "GITHUB_RUNNER_ADMIN_TOKEN" and
-            (.entries[0].textValue | type == "string" and length > 0)
-          ' "$lockbox_path" > /dev/null
-          github_runner_admin_token="$(jq -er '.entries[0].textValue' "$lockbox_path")"
-          echo "::add-mask::$github_runner_admin_token"
-          rm -f "$lockbox_path"
-          export YC_GATE_IAM_TOKEN="$iam_token" YC_IAM_TOKEN="$iam_token"
-          export GITHUB_RUNNER_ADMIN_TOKEN="$github_runner_admin_token"
-          export RUNNER_WAIT_DISCOVERY=1 RUNNER_OUTPUT_PATH="$GITHUB_OUTPUT"
-          node deploy/yandex/runner-control.mjs start
-          unset github_oidc_token github_runner_admin_token iam_token
-          unset YC_GATE_IAM_TOKEN YC_IAM_TOKEN GITHUB_RUNNER_ADMIN_TOKEN
-
-  deploy:
-    needs: controller
-    if: needs.controller.result == 'success'
-    runs-on: [self-hosted, linux, "${{ needs.controller.outputs.runner-label }}"]
-    timeout-minutes: 40
-    environment: production-deploy
-    permissions:
-      actions: read
-      contents: read
-      id-token: "none"
-    env:
-      EXPECTED_RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
-      EXPECTED_RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
-      YC_APP_INSTANCE_ID: ${{ vars.YC_APP_INSTANCE_ID }}
-      MARKIRO_FOLDER_ID: ${{ vars.YC_FOLDER_ID }}
-      YC_REGISTRY_SECRET_ID: ${{ vars.YC_REGISTRY_SECRET_ID }}
-      YC_OS_LOGIN: ${{ vars.YC_RUNNER_OS_LOGIN }}
-      YC_ORGANIZATION_ID: ${{ vars.YC_ORGANIZATION_ID }}
-      YC_LOAD_BALANCER_ID: ${{ vars.YC_LOAD_BALANCER_ID }}
-      YC_BACKEND_GROUP_ID: ${{ vars.YC_BACKEND_GROUP_ID }}
-      YC_TARGET_GROUP_ID: ${{ vars.YC_APP_TARGET_GROUP_ID }}
-      MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
-      MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
-      MARKIRO_DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
-      YC_LOAD_BALANCER_ADDRESS: ${{ vars.YC_LOAD_BALANCER_ADDRESS }}
-      MARKIRO_ROLLBACK_REHEARSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.rollback_rehearsal && '1' || '0' }}
-      APP_SSH_HOST_KEYS_B64: ${{ needs.controller.outputs.app-host-keys-b64 }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ needs.controller.outputs.release-sha }}
-          fetch-depth: 1
-          persist-credentials: false
-      - name: Download the exact trusted release manifest
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: markiro-release-manifest-${{ needs.controller.outputs.release-sha }}
-          path: ${{ runner.temp }}/release-manifest
-          github-token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          run-id: ${{ needs.controller.outputs.release-run-id }}
-      - name: Deploy the immutable private bundle by digest
-        env:
-          RELEASE_MANIFEST_PATH: ${{ runner.temp }}/release-manifest/release-manifest.json
-        run: |
-          set -euo pipefail
+            https://auth.yandex.cloud/oauth/token | \
+            jq -er '.access_token | select(type == "string" and length > 0)')"; then
+            printf '%s\n' '::error::Yandex workload identity token exchange failed'
+            exit 1
+          fi
+          printf '::add-mask::%s\n' "$iam_token"
+          export YC_IAM_TOKEN="$iam_token"
+          export HOSTED_DEPLOY_CONTEXT_PATH="$context_path"
+          node deploy/yandex/hosted-deploy-context.mjs resolve
+          export YC_APP_PRIVATE_ADDRESS="$(jq -er '.appPrivateAddress | select(type == "string" and length > 0)' "$context_path")"
+          export YC_APP_PUBLIC_ADDRESS="$(jq -er '.appPublicAddress | select(type == "string" and length > 0)' "$context_path")"
+          export APP_SSH_HOST_KEYS_B64="$(jq -er '.appHostKeysB64 | select(type == "string" and length > 0)' "$context_path")"
+          export YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH="$key_path"
           if [[ "$MARKIRO_ROLLBACK_REHEARSAL" == 1 ]]; then
             node deploy/yandex/remote-deploy.mjs run > "$RUNNER_TEMP/rollback-rehearsal-result.json"
             jq -e --arg release_sha "$EXPECTED_RELEASE_SHA" '
@@ -327,23 +246,23 @@ jobs:
           else
             node deploy/yandex/remote-deploy.mjs run
           fi
+          unset APP_SSH_HOST_KEYS_B64 HOSTED_DEPLOY_CONTEXT_PATH YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH
+          unset YC_APP_PRIVATE_ADDRESS YC_APP_PUBLIC_ADDRESS YC_IAM_TOKEN github_oidc_token iam_token
       - name: Record the exact finalized release
         if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'
         env:
-          RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
-          RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
-          DEPLOYMENT_PHASE: ${{ github.event_name == 'workflow_dispatch' && inputs.deployment_phase || 'repeat' }}
+          RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
+          RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
+          DEPLOYMENT_PHASE: ${{ inputs.deployment_phase }}
         run: |
           set -euo pipefail
           finalized_path="$RUNNER_TEMP/finalized-release.json"
           test ! -e "$finalized_path"
           umask 077
-          phase="$DEPLOYMENT_PHASE"
-          deployment_run_id="$GITHUB_RUN_ID"
           finalized_at="$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')"
           jq -n \
-            --arg phase "$phase" \
-            --arg deployment_run_id "$deployment_run_id" \
+            --arg phase "$DEPLOYMENT_PHASE" \
+            --arg deployment_run_id "$GITHUB_RUN_ID" \
             --arg finalized_at "$finalized_at" \
             --arg release_run_id "$RELEASE_RUN_ID" \
             --arg release_sha "$RELEASE_SHA" \
@@ -353,8 +272,8 @@ jobs:
       - name: Record authenticated bounded rollback rehearsal evidence
         if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
         env:
-          RELEASE_RUN_ID: ${{ needs.controller.outputs.release-run-id }}
-          RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
+          RELEASE_RUN_ID: ${{ steps.release.outputs.release-run-id }}
+          RELEASE_SHA: ${{ steps.release.outputs.release-sha }}
         run: |
           set -euo pipefail
           result_path="$RUNNER_TEMP/rollback-rehearsal-result.json"
@@ -388,117 +307,32 @@ jobs:
           chmod 600 "$evidence_path"
       - name: Upload finalized release evidence
         if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: markiro-finalized-release-${{ needs.controller.outputs.release-sha }}
+          name: markiro-finalized-release-${{ steps.release.outputs.release-sha }}
           path: ${{ runner.temp }}/finalized-release.json
           retention-days: 90
           if-no-files-found: error
       - name: Upload rollback rehearsal evidence
         if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
-          name: markiro-rollback-rehearsal-${{ needs.controller.outputs.release-sha }}-attempt-${{ github.run_attempt }}
+          name: markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rollback-rehearsal.json
           retention-days: 90
           if-no-files-found: error
-      - name: Remove local deployment material
+      - name: Remove local deployment credentials
         if: always()
         run: |
           set -euo pipefail
-          rm -rf -- "${RUNNER_TEMP:?}/release-manifest" "${RUNNER_TEMP:?}/markiro-os-login"
-          rm -f -- "${RUNNER_TEMP:?}/finalized-release.json" "${RUNNER_TEMP:?}/rollback-rehearsal-result.json" "${RUNNER_TEMP:?}/rollback-rehearsal.json"
-
-  cleanup:
-    needs: [controller, deploy]
-    if: always() && needs.controller.result != 'skipped'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: production-cleanup
-    permissions:
-      contents: read
-      id-token: write
-    env:
-      DEPLOYMENT_ID: ${{ needs.controller.outputs.deployment-id }}
-      RELEASE_SHA: ${{ needs.controller.outputs.release-sha }}
-      RUNNER_ID: ${{ needs.controller.outputs.runner-id }}
-      YC_OIDC_AUDIENCE: ${{ vars.YC_OIDC_AUDIENCE }}
-      YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}
-      YC_RUNNER_REGISTRATION_SECRET_ID: ${{ vars.YC_RUNNER_REGISTRATION_SECRET_ID }}
-      YC_RUNNER_INSTANCE_ID: ${{ vars.YC_RUNNER_INSTANCE_ID }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ needs.controller.outputs.release-sha || github.sha }}
-          fetch-depth: 1
-          persist-credentials: false
-      - name: Deregister any stale runner and stop the VM independently
-        run: |
-          set -euo pipefail
-          github_oidc_response="$(curl --fail --silent --get \
-            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            --data-urlencode "audience=$YC_OIDC_AUDIENCE" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL")"
-          github_oidc_token="$(jq -er '.value | select(type == "string" and length > 0)' <<<"$github_oidc_response")"
-          echo "::add-mask::$github_oidc_token"
-          iam_response="$(curl --fail --silent \
-            --request POST \
-            --header "Content-Type: application/x-www-form-urlencoded" \
-            --data-urlencode 'grant_type=urn:ietf:params:oauth:grant-type:token-exchange' \
-            --data-urlencode 'requested_token_type=urn:ietf:params:oauth:token-type:access_token' \
-            --data-urlencode "audience=$YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID" \
-            --data-urlencode "subject_token=$github_oidc_token" \
-            --data-urlencode 'subject_token_type=urn:ietf:params:oauth:token-type:id_token' \
-            https://auth.yandex.cloud/oauth/token)"
-          iam_token="$(jq -er '.access_token | select(type == "string" and length > 0)' <<<"$iam_response")"
-          echo "::add-mask::$iam_token"
-          lockbox_path="$RUNNER_TEMP/runner-lockbox.json"
-          curl --fail --silent \
-            --header "Authorization: Bearer $iam_token" \
-            "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_RUNNER_REGISTRATION_SECRET_ID/payload" \
-            --output "$lockbox_path"
-          jq -e '
-            (.entries | type == "array" and length == 1) and
-            .entries[0].key == "GITHUB_RUNNER_ADMIN_TOKEN" and
-            (.entries[0].textValue | type == "string" and length > 0)
-          ' "$lockbox_path" > /dev/null
-          github_runner_admin_token="$(jq -er '.entries[0].textValue' "$lockbox_path")"
-          echo "::add-mask::$github_runner_admin_token"
-          rm -f "$lockbox_path"
-          export YC_IAM_TOKEN="$iam_token" GITHUB_RUNNER_ADMIN_TOKEN="$github_runner_admin_token"
-          node deploy/yandex/runner-control.mjs cleanup
-          unset github_oidc_token github_runner_admin_token iam_token YC_IAM_TOKEN GITHUB_RUNNER_ADMIN_TOKEN
-      - name: Record authenticated bounded cleanup receipt
-        run: |
-          set -euo pipefail
-          cleanup_path="$RUNNER_TEMP/cleanup-receipt.json"
-          test ! -e "$cleanup_path"
-          [[ "$GITHUB_RUN_ID" =~ ^[1-9][0-9]*$ ]]
-          [[ "$GITHUB_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
-          release_identity="$RELEASE_SHA"
-          if [[ -z "$release_identity" ]]; then
-            release_identity=no-release
-          elif [[ ! "$release_identity" =~ ^[0-9a-f]{40}$ ]]; then
-            exit 1
-          fi
-          umask 077
-          jq -n \
-            --arg cleanup_at "$(date -u +'%Y-%m-%dT%H:%M:%S.000Z')" \
-            --argjson deployment_run_attempt "$GITHUB_RUN_ATTEMPT" \
-            --arg deployment_run_id "$GITHUB_RUN_ID" \
-            --arg release_sha "$release_identity" \
-            '{cleanupAt: $cleanup_at, deploymentRunAttempt: $deployment_run_attempt, deploymentRunId: $deployment_run_id, releaseSha: $release_sha, runnerDeregistered: true, runnerVmStopped: true, state: "clean"}' \
-            > "$cleanup_path"
-          chmod 600 "$cleanup_path"
-      - name: Upload cleanup receipt
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: markiro-cleanup-${{ needs.controller.outputs.release-sha || 'no-release' }}-attempt-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/cleanup-receipt.json
-          retention-days: 90
-          if-no-files-found: error
-      - name: Remove local cleanup material
-        if: always()
-        run: |
-          set -euo pipefail
-          rm -f -- "${RUNNER_TEMP:?}/cleanup-receipt.json" "${RUNNER_TEMP:?}/runner-lockbox.json"
+          rm -f -- \
+            "${RUNNER_TEMP:?}/markiro-deploy-key" \
+            "${RUNNER_TEMP:?}/markiro-hosted-deploy-context.json" \
+            "${RUNNER_TEMP:?}/finalized-release.json" \
+            "${RUNNER_TEMP:?}/rollback-rehearsal-result.json" \
+            "${RUNNER_TEMP:?}/rollback-rehearsal.json" \
+            "${RUNNER_TEMP:?}/release-run.json" \
+            "${RUNNER_TEMP:?}/rehearsal-run.json"
+          rm -rf -- \
+            "${RUNNER_TEMP:?}/release-manifest" \
+            "${RUNNER_TEMP:?}/rollback-rehearsal-prerequisite"
