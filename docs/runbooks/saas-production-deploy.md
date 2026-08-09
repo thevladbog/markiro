@@ -35,108 +35,48 @@ sanitized command failures rather than provider stderr.
   `0600`. Treat the records as protected operational data because they contain
   registry references and deployment history.
 
-## Protected workflow and private runner boundary
+## Protected hosted workflow and SSH boundary
 
 Normal production delivery uses `.github/workflows/deploy-production.yml`. It
-accepts only an explicit dispatch naming the exact successful release run ID
-and commit, or a successful `Publish production images` `workflow_run` from
-`main`. The independently protected `production-controller`, `production-deploy`,
-and `production-cleanup` environments approve the controller, one-use deploy
-job, and independent cleanup job. A pull request, tag-shaped
-image selector, mutable runner label, or a different release workflow is not a
+accepts only a manual dispatch from `main` naming the exact successful release
+run ID and 40-character commit. One GitHub-hosted `ubuntu-latest` job enters the
+protected `production-deploy` environment. A pull request, mutable image
+selector, automatic delivery event, or different release workflow is not a
 deployment source.
 
-Populate the bootstrap-created runner-registration Lockbox container out of
-band with exactly one text entry named `GITHUB_RUNNER_ADMIN_TOKEN`. Prefer a
-GitHub App installation token (a GitHub App user token is also supported). For
-the MVP only, a fine-grained PAT is an accepted fallback when it is restricted
-to the `thevladbog/markiro` repository and grants only repository
-`Administration: write`, which GitHub requires for repository JIT configuration
-and forced stale-runner deletion. Rotate it out of band. Do not copy this token
-into a GitHub repository or environment secret, Terraform, cloud-init, VM
-metadata, or a ticket. Only the GitHub-hosted deployment controller and cleanup
-job fetch it directly, mask it, retain it only in bounded `/run` or
-runner-temporary files at mode `0600`, and delete those files before shutdown.
-The self-hosted deploy job has `id-token: none` and can never fetch the
-runner-registration payload. Never enable provider or shell debugging around this flow.
+The job exchanges GitHub OIDC only as the deployment-controller service
+account. That identity reads the deploy-only registry Lockbox payload and the
+bounded app, ALB, and PostgreSQL preflight surfaces; it cannot read runtime or
+state payloads and cannot mutate Terraform infrastructure. The retained
+runner-registration Lockbox container must remain empty and unreadable.
 
-The exact `production-controller` and `production-cleanup` subjects both
-exchange only as the deployment-controller service account; the distinct
-`production-infrastructure` subject exchanges only as Terraform. The
-deployment controller alone reads the runner-registration Lockbox payload and
-can stop the exact runner VM even when the private job never starts. The
-deployment controller and runner VM service accounts have `compute.editor` on
-the runner VM itself, not the folder, so controller metadata updates and runner
-self-deletion stay instance-scoped. The runner also has `compute.viewer` and
-`compute.osAdminLogin` on the app VM. Yandex provider 0.215.0 has no
-load-balancer-resource IAM-binding resource, so read-only `alb.viewer` at folder
-scope is the documented provider limitation used only for the post-switch
-target-state gate.
-
-The private VM installs GitHub Actions runner `2.336.0` for Linux x64 only after
-verifying the official SHA-256
-`04cf0be1aff4c3ec3554466c39124ca250e3effd8873bb7e8d68535aa9505d5d`.
-It installs Yandex Cloud CLI `1.23.0` from the exact official versioned object
-`https://storage.yandexcloud.net/yandexcloud-yc/release/1.23.0/linux/amd64/yc`
-only after verifying SHA-256
-`3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9`,
-then requires `yc version --semantic` to equal `1.23.0`. Yandex's official
-installer currently selects a mutable stable version and performs a version
-check, but Yandex publishes no digest or signature beside this object. The
-recorded checksum was measured locally from the exact HTTPS object; it is a
-repository-controlled integrity pin, not a vendor-attested checksum.
-
-To upgrade `yc`, two reviewers must independently download the exact versioned
-official Linux AMD64 object, independently calculate and compare SHA-256, and
-review the reported semantic version. Update the version, object path, checksum,
-mutation contract, runbook, and task evidence in one protected change. Never
-substitute `release/stable`, `latest`, an unversioned archive, or an installer
-whose selected version is resolved at boot.
-
-On each controller-started boot it generates a new deployment ID, requests one
-JIT configuration with the matching `markiro-deployment-<id>` label, executes
-at most one job, removes registration material, and powers off. The deploy job
-exports a one-hour OS Login certificate for the runner service-account profile,
-uses only the app VM internal address, and transfers no SSH static key. Configure
-`YC_RUNNER_OS_LOGIN` and `YC_ORGANIZATION_ID` for that exact OS Login profile;
-there must be no public address on either VM.
+The app VM has one Terraform-managed reserved public address and a dedicated
+`markiro-deploy` account. Cloud-init permits only public-key authentication,
+disables password and root login, validates sshd before marking bootstrap
+complete, and exposes no application port publicly. The matching single-line
+public key is the protected `YC_APP_DEPLOY_SSH_PUBLIC_KEY` infrastructure
+variable. The private key is only the `YC_APP_DEPLOY_SSH_PRIVATE_KEY` secret in
+`production-deploy`; the job writes it to a runner-temporary mode-`0600` file
+and removes it on success or failure. Terraform, VM metadata, Lockbox, logs, and
+artifacts never receive the private key.
 
 The app VM emits only its OpenSSH public host keys as bounded
-`MARKIRO_SSH_HOST_KEY_V1` records on the serial console during cloud-init. The
-contract requires exactly one structurally valid `ssh-ed25519` record and one
-structurally valid `ssh-rsa` record; unknown, duplicated, additional,
-unversioned, malformed, and marker-like lines fail closed. The controller
-canonicalizes the pair in that algorithm order. Before starting delivery, it
-reads the output through the authenticated Yandex Compute `serialPortOutput` API
-using the already-gated short-lived IAM token. It passes only the canonical pair
-to the private runner, which revalidates it, writes an exact private
-`known_hosts` file for the app's internal IP, and requires
-`StrictHostKeyChecking=yes`. `accept-new`, empty trust stores, and Terraform- or
-workflow-managed SSH private keys are prohibited.
+`MARKIRO_SSH_HOST_KEY_V1` serial-console records. The hosted job reads those
+records through the authenticated Yandex Compute API, binds the canonical keys
+to the exact reserved public address, and requires
+`StrictHostKeyChecking=yes`. Empty trust stores and trust-on-first-use are
+prohibited.
 
-Before starting the runner, the controller validates the exact release run,
-manifest SHA/digests, app/runner state, fresh managed PostgreSQL backup, and
-current ALB target health. The transferred archive contains only
-`compose.production.yml`, `deploy/production`, and the validated immutable
-`release-manifest.json`, rooted at `/opt/markiro/releases/<commit>`. Runtime
-Lockbox refresh and production preflight precede digest pulls; migration
-precedes either service switch. Remote `prepare` leaves an append-only pending
-candidate only after the candidate API and edge both pass local readiness. The
-runner then checks ALB target health and performs the public smoke contract;
-only remote `finalize` may mark that exact pending tag and digest pair healthy.
-A migration failure switches nothing. Any post-switch local-readiness, ALB,
-external-smoke, or finalize failure invokes remote `rollback`, which validates
-the exact pending record, redeploys the exact previous healthy API and edge
-digest pair without another migration, and verifies both restored services
-locally before recording the candidate failed. Pending, healthy, and failed
-records are private, exclusive, and never overwritten. On the first deployment,
-where no previous healthy pair exists, rollback explicitly stops both candidate
-services before terminalizing the exact candidate failed. A stop failure does
-not prevent the failed record attempt and is surfaced alongside the primary
-deployment failure. The
-GitHub-hosted `cleanup` job runs with `always()`, deregisters a stale runner when
-present, and stops the VM independently. Cleanup failures are alerted without
-replacing the primary deployment failure.
+Before SSH delivery, the hosted job authenticates the exact release run and
+manifest, resolves both app addresses, confirms a fresh managed PostgreSQL
+backup, and checks the expected ALB state. The transferred archive still
+contains only the validated immutable bundle. Runtime Lockbox refresh and
+production preflight precede digest pulls; migration precedes either service
+switch. Remote `prepare`, `finalize`, and `rollback` retain the same
+digest-pinned, append-only release-record behavior. On first release the manual
+rollback rehearsal stops the candidate and uploads bounded evidence; the second
+manual dispatch authenticates that exact rehearsal before finalizing the same
+release. The single job removes all local key/context files with `always()`.
 
 ## Common setup and hard gates
 

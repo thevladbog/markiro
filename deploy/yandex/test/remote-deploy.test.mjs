@@ -23,6 +23,12 @@ const MANIFEST = JSON.stringify({
   edge: EDGE,
   workflowRunId: RUN_ID,
 });
+const PRIVATE_KEY = [
+  "-----BEGIN OPENSSH PRIVATE KEY-----",
+  "b3BlbnNzaC1rZXktdjEAAAAA",
+  "-----END OPENSSH PRIVATE KEY-----",
+  "",
+].join("\n");
 const CANDIDATE = {
   tag: COMMIT,
   previousTag: "f".repeat(40),
@@ -399,13 +405,17 @@ test("rollback cleanup failure is surfaced alongside the primary deployment fail
 test("deployment wrapper emits the exact success or failure metric without masking the primary error", async () => {
   for (const failure of [undefined, new Error("deploy failed")]) {
     const writes = [];
-    const environment = { MARKIRO_FOLDER_ID: "folder-1", YC_APP_INSTANCE_ID: "app-1" };
+    const environment = {
+      MARKIRO_FOLDER_ID: "folder-1",
+      YC_APP_INSTANCE_ID: "app-1",
+      YC_IAM_TOKEN: "iam-token",
+    };
     const reporting = {
       runDeployment: async () => {
         if (failure) throw failure;
         return "healthy";
       },
-      metadataIamToken: async () => "iam-token",
+      iamToken: async () => "iam-token",
       writeMetrics: async (request) => writes.push(request),
     };
     if (failure)
@@ -546,10 +556,13 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     RELEASE_MANIFEST_PATH: "/runner/release-manifest.json",
     EXPECTED_RELEASE_RUN_ID: RUN_ID,
     EXPECTED_RELEASE_SHA: COMMIT,
+    YC_IAM_TOKEN: "hosted-iam-token",
     YC_APP_INSTANCE_ID: "fv4app123",
+    YC_APP_PRIVATE_ADDRESS: "10.20.0.7",
+    YC_APP_PUBLIC_ADDRESS: "203.0.113.44",
+    YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+    YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner-temp/markiro-deploy-key",
     YC_REGISTRY_SECRET_ID: "e6qregistry123",
-    YC_OS_LOGIN: "deployer",
-    YC_ORGANIZATION_ID: "bpforganization",
     YC_LOAD_BALANCER_ID: "ds7loadbalancer",
     YC_BACKEND_GROUP_ID: "ds7backend",
     YC_TARGET_GROUP_ID: "ds7target",
@@ -564,11 +577,12 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     sleep: async (milliseconds) => {
       monotonicTime += milliseconds;
     },
-    async readFile() {
-      return MANIFEST;
+    async readFile(path) {
+      return path === environment.YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH ? PRIVATE_KEY : MANIFEST;
     },
-    async metadataIamToken() {
-      return "runner-iam-token";
+    async stat(path) {
+      assert.equal(path, environment.YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH);
+      return { isFile: () => true, mode: 0o100600, size: Buffer.byteLength(PRIVATE_KEY) };
     },
     async fetch(url) {
       if (String(url).includes("payload.lockbox"))
@@ -592,14 +606,18 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
       }
       return response({
         status: "RUNNING",
-        networkInterfaces: [{ primaryV4Address: { address: "10.20.0.7" } }],
+        networkInterfaces: [
+          {
+            primaryV4Address: {
+              address: "10.20.0.7",
+              oneToOneNat: { address: "203.0.113.44", ipVersion: "IPV4" },
+            },
+          },
+        ],
       });
     },
     async mkdtemp(prefix) {
-      return prefix.includes("os-login") ? "/tmp/os-login" : "/tmp/manifest";
-    },
-    async readdir() {
-      return ["id_ed25519", "id_ed25519-cert.pub"];
+      return prefix.includes("hosted-ssh") ? "/tmp/hosted-ssh" : "/tmp/manifest";
     },
     async copyFile() {
       events.push("copy manifest");
@@ -607,7 +625,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     async writeFile(path, value, options) {
       events.push("write known hosts");
       assert.equal(options.mode, 0o600);
-      assert.equal(value, `10.20.0.7 ${ED25519_KEY}\n10.20.0.7 ${RSA_KEY}\n`);
+      assert.equal(value, `203.0.113.44 ${ED25519_KEY}\n203.0.113.44 ${RSA_KEY}\n`);
     },
     async rm() {
       events.push("cleanup local material");
@@ -626,7 +644,7 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     },
     async run(command, args, options = {}) {
       commands.push({ command, args, options });
-      if (command === "yc") return "";
+      assert.notEqual(command, "yc");
       if (args.includes("markiro-runtime-env.service")) {
         events.push("runtime refresh");
         return "";
@@ -708,6 +726,18 @@ test("real CLI adapter stages remote prepare, ALB, runner smoke, and remote fina
         args.includes("prepare") &&
         args.includes("MARKIRO_REQUIRE_PREVIOUS_HEALTHY=1"),
     ),
+  );
+  const ssh = commands.find(({ command }) => command === "ssh");
+  assert.ok(ssh.args.includes("-i"));
+  assert.ok(ssh.args.includes("/runner-temp/markiro-deploy-key"));
+  assert.ok(ssh.args.includes("markiro-deploy@203.0.113.44"));
+  assert.equal(
+    ssh.args.some((value) => value.startsWith("CertificateFile=")),
+    false,
+  );
+  assert.equal(
+    commands.some(({ command }) => command === "yc"),
+    false,
   );
   const expectedRemoteEnvironment = [
     `MARKIRO_IMAGE_TAG=${COMMIT}`,
@@ -941,6 +971,77 @@ test("real CLI adapter rejects a noncanonical authenticated host-key bundle befo
 
   assert.equal(events.includes("write known hosts"), false);
   assert.equal(events.includes("transfer immutable bundle"), false);
+});
+
+test("hosted adapter rejects foreign public/private instance identity before SSH", async () => {
+  for (const [name, variable, value] of [
+    ["foreign private address", "YC_APP_PRIVATE_ADDRESS", "10.20.0.8"],
+    ["foreign public address", "YC_APP_PUBLIC_ADDRESS", "203.0.113.45"],
+    ["private public address", "YC_APP_PUBLIC_ADDRESS", "10.20.0.8"],
+  ]) {
+    const { commands, environment, events, system } = cliFixture();
+    environment[variable] = value;
+
+    await assert.rejects(
+      runRemoteDeployment(environment, system),
+      /application instance network identity is invalid|production infrastructure gate failed/,
+      name,
+    );
+    assert.equal(
+      commands.some(({ command }) => command === "ssh"),
+      false,
+    );
+    assert.equal(events.includes("transfer immutable bundle"), false);
+  }
+});
+
+test("hosted adapter accepts only the dedicated login and owner-only OpenSSH key", async () => {
+  const cases = [
+    ["foreign login", ({ environment }) => (environment.YC_APP_DEPLOY_LOGIN = "root")],
+    [
+      "missing key",
+      ({ system }) => (system.stat = async () => Promise.reject(new Error("ENOENT"))),
+    ],
+    [
+      "group-readable key",
+      ({ system }) =>
+        (system.stat = async () => ({
+          isFile: () => true,
+          mode: 0o100640,
+          size: Buffer.byteLength(PRIVATE_KEY),
+        })),
+    ],
+    [
+      "empty key",
+      ({ system }) =>
+        (system.stat = async () => ({
+          isFile: () => true,
+          mode: 0o100600,
+          size: 0,
+        })),
+    ],
+    [
+      "non-OpenSSH key",
+      ({ environment, system }) =>
+        (system.readFile = async (path) =>
+          path === environment.YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH ? "not-a-key\n" : MANIFEST),
+    ],
+  ];
+
+  for (const [name, mutate] of cases) {
+    const fixture = cliFixture();
+    mutate(fixture);
+    await assert.rejects(
+      runRemoteDeployment(fixture.environment, fixture.system),
+      /hosted SSH configuration is invalid/,
+      name,
+    );
+    assert.equal(
+      fixture.commands.some(({ command }) => command === "ssh"),
+      false,
+    );
+    assert.equal(fixture.events.includes("transfer immutable bundle"), false);
+  }
 });
 
 test("real CLI adapter rolls back remotely when runner external smoke fails", async () => {

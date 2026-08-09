@@ -96,12 +96,6 @@ variable "app_instance_id" {
   nullable    = false
 }
 
-variable "runner_instance_id" {
-  description = "Runner VM ID used by Compute and runner-overrun metric selectors."
-  type        = string
-  nullable    = false
-}
-
 variable "postgres_cluster_id" {
   description = "Managed PostgreSQL cluster ID used by database metric selectors."
   type        = string
@@ -154,9 +148,8 @@ variable "alert_ids" {
       "certificate_risk",
       "readiness_required_unavailable",
       "deployment_failure",
-      "runner_overrun",
-    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == 16
-    error_message = "alert_ids must be absent in first phase and otherwise contain exactly 16 unique, nonblank IDs for every required alert category."
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == 15
+    error_message = "alert_ids must be absent in first phase and otherwise contain exactly 15 unique, nonblank IDs for every required alert category."
   }
 }
 

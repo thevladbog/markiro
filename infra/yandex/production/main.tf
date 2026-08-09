@@ -10,20 +10,18 @@ check "workload_service_account_ids_are_distinct" {
   assert {
     condition = length(toset([
       var.app_service_account_id,
-      var.runner_service_account_id,
       var.deployment_controller_service_account_id,
       var.audit_service_account_id,
       var.terraform_service_account_id,
-      ])) == 5 && alltrue([
+      ])) == 4 && alltrue([
       for identity in [
         var.app_service_account_id,
-        var.runner_service_account_id,
         var.deployment_controller_service_account_id,
         var.audit_service_account_id,
         var.terraform_service_account_id,
       ] : length(trimspace(identity)) > 0
     ])
-    error_message = "app, runner, deployment controller, audit, and Terraform service account IDs must be nonblank and pairwise distinct."
+    error_message = "app, deployment controller, audit, and Terraform service account IDs must be nonblank and pairwise distinct."
   }
 }
 
@@ -39,13 +37,12 @@ resource "yandex_logging_group" "application" {
 module "network" {
   source = "../modules/network"
 
-  folder_id              = var.folder_id
-  zone                   = var.zone
-  alb_subnet_cidr        = var.alb_subnet_cidr
-  app_subnet_cidr        = var.app_subnet_cidr
-  data_subnet_cidr       = var.data_subnet_cidr
-  management_subnet_cidr = var.management_subnet_cidr
-  labels                 = local.labels
+  folder_id        = var.folder_id
+  zone             = var.zone
+  alb_subnet_cidr  = var.alb_subnet_cidr
+  app_subnet_cidr  = var.app_subnet_cidr
+  data_subnet_cidr = var.data_subnet_cidr
+  labels           = local.labels
 }
 
 module "compute" {
@@ -58,12 +55,10 @@ module "compute" {
   application_log_group_id                 = yandex_logging_group.application.id
   app_service_account_id                   = var.app_service_account_id
   runtime_secret_id                        = var.runtime_secret_id
-  runner_service_account_id                = var.runner_service_account_id
   deployment_controller_service_account_id = var.deployment_controller_service_account_id
+  app_deploy_ssh_public_key                = var.app_deploy_ssh_public_key
   app_subnet_id                            = module.network.app_subnet_id
-  management_subnet_id                     = module.network.management_subnet_id
   app_security_group_id                    = module.network.security_group_ids.app
-  runner_security_group_id                 = module.network.security_group_ids.runner
   labels                                   = local.labels
 }
 
@@ -128,14 +123,12 @@ module "observability" {
   lockbox_secret_ids = toset([
     var.runtime_secret_id,
     var.registry_secret_id,
-    var.runner_registration_secret_id,
   ])
   load_balancer_id        = module.ingress.load_balancer_id
   backend_group_id        = module.ingress.backend_group_id
   security_profile_id     = module.ingress.security_profile_id
   rate_limiter_profile_id = module.ingress.rate_limiter_profile_id
   app_instance_id         = module.compute.app_instance_id
-  runner_instance_id      = module.compute.runner_instance_id
   postgres_cluster_id     = module.postgres.cluster_id
   certificate_ids = [
     module.ingress.certificate_id,

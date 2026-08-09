@@ -5,7 +5,7 @@ variable "folder_id" {
 }
 
 variable "zone" {
-  description = "Availability zone for the application and runner instances."
+  description = "Availability zone for the application instance."
   type        = string
   nullable    = false
 }
@@ -50,16 +50,25 @@ variable "runtime_secret_id" {
   }
 }
 
-variable "runner_service_account_id" {
-  description = "Runtime service-account ID attached to the ephemeral runner instance."
+variable "deployment_controller_service_account_id" {
+  description = "Deployment-controller identity allowed to inspect the application VM."
   type        = string
   nullable    = false
 }
 
-variable "deployment_controller_service_account_id" {
-  description = "Deployment-controller identity allowed to start and stop only the runner VM."
+variable "app_deploy_ssh_public_key" {
+  description = "Exact Ed25519 public key for the dedicated deployment account."
   type        = string
   nullable    = false
+
+  validation {
+    condition = (
+      can(regex("^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$", var.app_deploy_ssh_public_key)) &&
+      !strcontains(var.app_deploy_ssh_public_key, "\n") &&
+      !strcontains(var.app_deploy_ssh_public_key, "\r")
+    )
+    error_message = "app_deploy_ssh_public_key must be one canonical ssh-ed25519 public key without options or comments."
+  }
 }
 
 variable "app_subnet_id" {
@@ -68,20 +77,8 @@ variable "app_subnet_id" {
   nullable    = false
 }
 
-variable "management_subnet_id" {
-  description = "Private management subnet ID used by the ephemeral runner."
-  type        = string
-  nullable    = false
-}
-
 variable "app_security_group_id" {
-  description = "Security group that accepts only ALB and runner traffic for the application."
-  type        = string
-  nullable    = false
-}
-
-variable "runner_security_group_id" {
-  description = "Security group for the ephemeral runner."
+  description = "Security group that accepts only ALB application traffic and key-authenticated deployment SSH."
   type        = string
   nullable    = false
 }

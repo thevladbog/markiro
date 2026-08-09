@@ -7,12 +7,11 @@ import { validateWorkloadIdentityIds } from "./validate-workload-identities.mjs"
 const REQUEST_TIMEOUT_MS = 5_000;
 const MAXIMUM_RESPONSE_BYTES = 64 * 1024;
 const MAXIMUM_DOCUMENT_BYTES = 128 * 1024;
-const ROLES = Object.freeze(["app", "audit", "controller", "runner", "terraform"]);
+const ROLES = Object.freeze(["app", "audit", "controller", "terraform"]);
 const EXPECTED_NAMES = Object.freeze({
   app: "markiro-production-app",
   audit: "markiro-production-audit",
   controller: "markiro-production-deployment-controller",
-  runner: "markiro-production-runner",
   terraform: "markiro-production-terraform",
 });
 
@@ -149,7 +148,6 @@ function environmentInputs() {
     app: process.env.TF_VAR_app_service_account_id,
     audit: process.env.TF_VAR_audit_service_account_id,
     controller: process.env.TF_VAR_deployment_controller_service_account_id,
-    runner: process.env.TF_VAR_runner_service_account_id,
     terraform: process.env.TF_VAR_terraform_service_account_id,
   };
   if (identities.terraform !== process.env.YC_TERRAFORM_SERVICE_ACCOUNT_ID) invalid();

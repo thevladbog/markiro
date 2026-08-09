@@ -81,14 +81,12 @@ module "iam" {
   github_repository                 = var.github_repository
   github_repository_owner_id        = var.github_repository_owner_id
   github_repository_id              = var.github_repository_id
-  github_controller_environment     = var.github_controller_environment
-  github_cleanup_environment        = var.github_cleanup_environment
+  github_deploy_environment         = var.github_deploy_environment
   github_infrastructure_environment = var.github_infrastructure_environment
   state_bucket_name                 = yandex_storage_bucket.state.bucket
   runtime_secret_id                 = yandex_lockbox_secret.runtime.id
   registry_secret_id                = yandex_lockbox_secret.registry.id
   state_backend_secret_id           = yandex_lockbox_secret.state_backend.id
-  runner_registration_secret_id     = yandex_lockbox_secret.runner_registration.id
   labels                            = local.labels
 }
 
@@ -119,12 +117,6 @@ resource "yandex_kms_symmetric_key_iam_member" "terraform_key_user" {
   symmetric_key_id = var.kms_key_id
   role             = "kms.keys.user"
   member           = "serviceAccount:${module.iam.service_account_ids.terraform}"
-}
-
-resource "yandex_kms_symmetric_key_iam_member" "deployment_controller_runner_key_user" {
-  symmetric_key_id = var.kms_key_id
-  role             = "kms.keys.user"
-  member           = "serviceAccount:${module.iam.service_account_ids.deployment_controller}"
 }
 
 resource "yandex_kms_symmetric_key_iam_member" "app_encrypter_decrypter" {

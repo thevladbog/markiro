@@ -1,6 +1,6 @@
 import process from "node:process";
 
-const REQUIRED_NAMES = Object.freeze(["app", "audit", "controller", "runner", "terraform"]);
+const REQUIRED_NAMES = Object.freeze(["app", "audit", "controller", "terraform"]);
 
 function invalid() {
   throw new Error("workload service-account IDs are invalid");
@@ -24,7 +24,6 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
     app: process.env.TF_VAR_app_service_account_id,
     audit: process.env.TF_VAR_audit_service_account_id,
     controller: process.env.TF_VAR_deployment_controller_service_account_id,
-    runner: process.env.TF_VAR_runner_service_account_id,
     terraform: process.env.YC_TERRAFORM_SERVICE_ACCOUNT_ID,
   });
 }

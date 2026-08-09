@@ -21,6 +21,11 @@ the browser kiosk PWA served by the protected ingress.
    one additional kiosk certificate validation record, with no replacement and
    no deletion of existing ingress or durable resources. Confirm no other
    unexpected drift or state migration exists. Approve only that plan.
+   For the separately reviewed hosted-delivery transition, additionally expect
+   the protected app public address, one app-VM replacement, the key-only SSH
+   rule/account, deletion of runner-only compute/IAM/network resources, and the
+   reduction to 15 alerts. Reject replacement or deletion of PostgreSQL, Object
+   Storage, KMS, ALB, certificates, the DNS zone, or audit storage.
 
 <!-- runbook-contract:go-live-gate-02-durable-protection -->
 
@@ -48,7 +53,8 @@ the browser kiosk PWA served by the protected ingress.
    After the approved removals are applied, confirm that no WAF resources remain in
    the configuration, state, or a fresh plan. Do **not** require a
    `HEALTHY` back end yet: the first app release has not started the edge listener.
-   Keep the app VM private.
+   Keep the application port private behind ALB; the reserved public address is
+   used only for key-only SSH by the protected hosted deployment.
 
 <!-- runbook-contract:go-live-gate-05-alert-specs -->
 
@@ -87,11 +93,11 @@ the browser kiosk PWA served by the protected ingress.
 
 <!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->
 
-9. **First deployment rehearsal, still without public DNS.** First dispatch the
-   protected **Deploy production** workflow manually with
+9. **First deployment rehearsal, still without public DNS.** First approve the
+   `production-deploy` environment and dispatch the protected **Deploy production** workflow manually with
    `deployment_phase=first`, `rollback_rehearsal=true`, and
-   `rehearsal_run_id=none`, `rehearsal_run_attempt=none`; automatic
-   `workflow_run` delivery always fixes this input to false. Its authoritative
+   `rehearsal_run_id=none`, `rehearsal_run_attempt=none`. Delivery is manual
+   only and must be manually dispatched from `main`. Its authoritative
    order is: transfer the immutable candidate bundle; materialize runtime
    secrets; run candidate-bound preflight; start the private edge; probe
    `http://127.0.0.1:8080/health/ready` on the app VM with the production
@@ -107,10 +113,8 @@ the browser kiosk PWA served by the protected ingress.
    artifact. The live
    `/opt/markiro/active-release` pointer remains absent (or unchanged if this
    check is being repeated); it never points at the failed rehearsal candidate.
-   Wait for the independent `production-cleanup` job to succeed and retain its
-   bounded `markiro-cleanup-<release-sha>-attempt-<rehearsal-run-attempt>`
-   artifact from the same workflow run attempt.
-   Confirm that the deployment runner registration is absent and the runner VM is stopped.
+   The single GitHub-hosted job removes its temporary mode-`0600` SSH key and
+   hosted context on both success and failure; there is no separate cleanup job.
    Record that run ID as `<successful-rollback-rehearsal-run-id>` and its current
    successful attempt as `<successful-rollback-rehearsal-run-attempt>`. A rerun
    keeps the run ID but changes the attempt; never reuse evidence from an older
@@ -118,10 +122,11 @@ the browser kiosk PWA served by the protected ingress.
    dispatch the same approved release again with `deployment_phase=first`,
    `rehearsal_run_id=<successful-rollback-rehearsal-run-id>`, and
    `rehearsal_run_attempt=<successful-rollback-rehearsal-run-attempt>`, and
-   `rollback_rehearsal=false` for the successful first deployment. The
-   controller authenticates that exact successful rehearsal run, SHA, workflow,
-   ref, inputs, rehearsal artifact, and cleanup receipt before starting a new
-   runner. A successful finalized first deployment creates
+   `rollback_rehearsal=false` for the successful first deployment. Both runs are
+   manually dispatched through the same `production-deploy` environment. The
+   hosted job authenticates the exact successful rehearsal run, same release SHA,
+   workflow, ref, inputs, run attempt, and rehearsal artifact before connecting
+   to the app VM. A successful finalized first deployment creates
    `/opt/markiro/active-release`; only after its authenticated finalized-release
    evidence exists, complete the secrets runbook's post-activation active-path
    verification against the exact successful SHA. A `deployment_phase=repeat`

@@ -11,25 +11,38 @@ independent approval is absent. Do not perform a live apply from CI.
 
 1. Open the protected change record. Store evidence IDs there, not in Git or
    chat.
-2. Sign in with the organization administrator that has OS Login enabled. Create
-   and record the distinct service-account OS Login profile required by the
-   deploy runner. Do not grant a static SSH key or public IP address.
-3. Use an encrypted workstation with terminal recording disabled. Start each
-   shell with `set -euo pipefail` and `umask 077`; never enable shell tracing.
-4. Confirm the exact IDs, domain ownership, KMS key, subnet ranges, bucket
-   names, notification destination, and protected GitHub environments:
-   `production-controller`, `production-deploy`, `production-cleanup`,
-   `production-infrastructure`, `production-public-dns`, and
-   `production-postgres-owner`. Restrict every environment to `main`, require
-   independent controller and cleanup reviewers, and never protect an unused
-   shared `production` environment.
-5. Install only the vendor-verified Terraform `1.15.8` release through the
-   approved workstation package process. Verify the vendor signature and
-   checksum before installation, then expose the executable as stable
-   `terraform` on the protected workstation `PATH`; do not use a temporary
-   review directory. Configure the reviewed Yandex provider mirror in a
-   protected Terraform CLI configuration file. Keep the file mode `0600` and
-   verify the provider lock for Linux amd64 and Darwin arm64 before proceeding.
+2. Sign in with the organization administrator and use an encrypted workstation
+   with terminal recording disabled. Never enable shell tracing. Generate the
+   dedicated deployment key in a clean child shell; typing `set -euo pipefail`
+   in the parent interactive terminal is not part of this procedure.
+
+```console
+zsh -f
+umask 077
+ssh-keygen -t ed25519 -a 100 -f ./markiro-production-deploy -C markiro-production-deploy
+ssh-keygen -lf ./markiro-production-deploy.pub
+```
+
+Compare the displayed public-key fingerprint with a second operator. Put
+only the single-line public key into the protected
+`YC_APP_DEPLOY_SSH_PUBLIC_KEY` variable of `production-infrastructure`.
+Put the private key into the `YC_APP_DEPLOY_SSH_PRIVATE_KEY` secret of
+`production-deploy`; never print it. Keep one encrypted offline recovery copy
+and record its fingerprint and custodian in the protected system. 3. For later non-interactive command blocks, start a clean child shell and use
+`set -euo pipefail` with `umask 077`; never change the error mode of the
+user's parent interactive terminal. 4. Confirm the exact IDs, domain ownership, KMS key, subnet ranges, bucket
+names, notification destination, and protected GitHub environments:
+`production-deploy`, `production-infrastructure`, `production-public-dns`,
+`production-postgres-owner`, `production-dns-convergence`, and
+`production-public-smoke`. Restrict every environment to `main`, require the
+appropriate reviewers, and never protect an unused shared `production`
+environment. 5. Install only the vendor-verified Terraform `1.15.8` release through the
+approved workstation package process. Verify the vendor signature and
+checksum before installation, then expose the executable as stable
+`terraform` on the protected workstation `PATH`; do not use a temporary
+review directory. Configure the reviewed Yandex provider mirror in a
+protected Terraform CLI configuration file. Keep the file mode `0600` and
+verify the provider lock for Linux amd64 and Darwin arm64 before proceeding.
 
 ```bash
 set -euo pipefail
@@ -128,15 +141,17 @@ The bootstrap root is applied only by the protected operator. It creates the
 service accounts and grants the exact service-specific roles needed by the
 workload-federated Terraform identity, plus the Audit Trails collection,
 destination logging, and KMS permissions. Terraform receives no primitive
-`editor` or `admin` role. The `production-controller` and `production-cleanup`
-GitHub OIDC subjects map only to the separate deployment-controller identity,
-which is limited to runner control and the read-only Compute, ALB, and PostgreSQL
-deployment gates. The `production-infrastructure` OIDC subject maps to the
-Terraform service account. Existing resource-scoped
-`iam.serviceAccounts.user` bindings authorize it to read the app, runner, and
-audit accounts; exact resource-scoped `viewer` bindings authorize only the
-controller and Terraform accounts. Together they allow the workflow to verify
-the five IDs, bootstrap names, folder, and `ACTIVE` status before production
-plans and applies without folder-wide IAM visibility. Record the resulting
-`deployment_controller` service-account ID and `audit_log_group_id` in the
-protected GitHub environment variables before any production plan.
+`editor` or `admin` role. The `production-deploy` GitHub OIDC subject maps only
+to the deployment-controller identity, which is limited to registry payload
+read access and the read-only Compute, ALB, and PostgreSQL deployment gates. The
+`production-infrastructure` OIDC subject maps to the Terraform service account.
+Existing resource-scoped `iam.serviceAccounts.user` bindings authorize it to
+read the app and audit accounts; exact resource-scoped `viewer` bindings
+authorize only the controller and Terraform accounts. Together they allow the
+workflow to verify the four workload IDs, bootstrap names, folder, and `ACTIVE`
+status before production plans and applies without folder-wide IAM visibility.
+Record the resulting `deployment_controller` service-account ID and
+`audit_log_group_id` in the protected GitHub environment variables before any
+production plan. The retained runner-registration Lockbox container is an empty
+inventory tombstone: it must have no current version or payload and no IAM
+reader.

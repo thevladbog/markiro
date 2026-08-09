@@ -12,8 +12,7 @@ locals {
   github_repository_name        = split("/", var.github_repository)[1]
   github_repository_subject     = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
   github_audience               = "https://github.com/${local.github_owner}"
-  github_controller_subject     = "repo:${local.github_repository_subject}:environment:${var.github_controller_environment}"
-  github_cleanup_subject        = "repo:${local.github_repository_subject}:environment:${var.github_cleanup_environment}"
+  github_deploy_subject         = "repo:${local.github_repository_subject}:environment:${var.github_deploy_environment}"
   github_infrastructure_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
 }
 
@@ -38,16 +37,9 @@ resource "yandex_iam_service_account" "app" {
   labels      = var.labels
 }
 
-resource "yandex_iam_service_account" "runner" {
-  name        = "markiro-production-runner"
-  description = "Ephemeral deployment runner identity."
-  folder_id   = var.folder_id
-  labels      = var.labels
-}
-
 resource "yandex_iam_service_account" "deployment_controller" {
   name        = "markiro-production-deployment-controller"
-  description = "GitHub deployment-controller identity limited to deployment gates and runner control."
+  description = "GitHub-hosted deployment identity limited to release gates and app discovery."
   folder_id   = var.folder_id
   labels      = var.labels
 }
@@ -80,16 +72,10 @@ resource "yandex_iam_workload_identity_oidc_federation_iam_binding" "terraform_u
   ]
 }
 
-resource "yandex_iam_workload_identity_federated_credential" "github_production_controller" {
+resource "yandex_iam_workload_identity_federated_credential" "github_deploy" {
   service_account_id  = yandex_iam_service_account.deployment_controller.id
   federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
-  external_subject_id = local.github_controller_subject
-}
-
-resource "yandex_iam_workload_identity_federated_credential" "github_production_cleanup" {
-  service_account_id  = yandex_iam_service_account.deployment_controller.id
-  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
-  external_subject_id = local.github_cleanup_subject
+  external_subject_id = local.github_deploy_subject
 }
 
 resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure" {
@@ -120,9 +106,8 @@ resource "yandex_lockbox_secret_iam_member" "terraform_state_backend" {
 # Terraform needs metadata visibility only; payload access remains restricted.
 resource "yandex_lockbox_secret_iam_member" "terraform_audit_scope_viewer" {
   for_each = {
-    registry            = var.registry_secret_id
-    runner_registration = var.runner_registration_secret_id
-    runtime             = var.runtime_secret_id
+    registry = var.registry_secret_id
+    runtime  = var.runtime_secret_id
   }
 
   secret_id = each.value
@@ -130,14 +115,8 @@ resource "yandex_lockbox_secret_iam_member" "terraform_audit_scope_viewer" {
   member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
-resource "yandex_lockbox_secret_iam_member" "runner_registry" {
+resource "yandex_lockbox_secret_iam_member" "deployment_controller_registry" {
   secret_id = var.registry_secret_id
-  role      = "lockbox.payloadViewer"
-  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
-}
-
-resource "yandex_lockbox_secret_iam_member" "deployment_controller_runner_registration" {
-  secret_id = var.runner_registration_secret_id
   role      = "lockbox.payloadViewer"
   member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
 }
@@ -181,9 +160,8 @@ resource "yandex_resourcemanager_folder_iam_member" "terraform_service_role" {
 
 resource "yandex_iam_service_account_iam_member" "terraform_service_account_user" {
   for_each = {
-    app    = yandex_iam_service_account.app.id
-    runner = yandex_iam_service_account.runner.id
-    audit  = yandex_iam_service_account.audit.id
+    app   = yandex_iam_service_account.app.id
+    audit = yandex_iam_service_account.audit.id
   }
 
   service_account_id = each.value
@@ -191,9 +169,9 @@ resource "yandex_iam_service_account_iam_member" "terraform_service_account_user
   member             = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
-# iam.serviceAccounts.user already authorizes ServiceAccount.Get for app,
-# runner, and audit. These resource-scoped viewer bindings complete the exact
-# five-identity provenance check without exposing every account in the folder.
+# iam.serviceAccounts.user already authorizes ServiceAccount.Get for app and
+# audit. These resource-scoped viewer bindings complete the exact four-workload-
+# identity provenance check without exposing every account in the folder.
 resource "yandex_iam_service_account_iam_member" "terraform_service_account_viewer" {
   for_each = {
     deployment_controller = yandex_iam_service_account.deployment_controller.id
@@ -217,8 +195,8 @@ resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_postg
   member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
 }
 
-# Long-running Compute operations are folder resources even when the mutation
-# itself is authorized by the runner VM's resource-scoped compute.editor grant.
+# Compute operation status is a folder resource even when the application VM
+# itself is exposed through a resource-scoped viewer grant.
 resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_compute_operation_auditor" {
   folder_id = var.folder_id
   role      = "compute.auditor"
@@ -247,33 +225,4 @@ resource "yandex_resourcemanager_folder_iam_member" "app_postgres_viewer" {
   folder_id = var.folder_id
   role      = "managed-postgresql.viewer"
   member    = "serviceAccount:${yandex_iam_service_account.app.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "runner_monitoring_editor" {
-  folder_id = var.folder_id
-  role      = "monitoring.editor"
-  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "runner_logging_writer" {
-  folder_id = var.folder_id
-  role      = "logging.writer"
-  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
-}
-
-# Standard-client OS Login requires the instance role plus a folder-level
-# resource-manager.auditor grant for the VM's containing resource boundary.
-resource "yandex_resourcemanager_folder_iam_member" "runner_os_login_auditor" {
-  folder_id = var.folder_id
-  role      = "resource-manager.auditor"
-  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
-}
-
-# Application Load Balancer does not expose a load-balancer-level IAM binding in
-# yandex-cloud/yandex 0.215.0. Folder scope is therefore the narrowest
-# provider-supported scope for the runner's read-only target-state permission.
-resource "yandex_resourcemanager_folder_iam_member" "runner_alb_viewer" {
-  folder_id = var.folder_id
-  role      = "alb.viewer"
-  member    = "serviceAccount:${yandex_iam_service_account.runner.id}"
 }

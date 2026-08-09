@@ -8,7 +8,7 @@ import { sanitizeJournal, writeBoundedSpool } from "../../../deploy/yandex/log-s
 const root = path.resolve(import.meta.dirname, "../../..");
 const source = (file) => readFile(path.join(root, file), "utf8");
 
-test("clean first-provisioning has no alert attestation, while protected plans require the exact 16 IDs", async () => {
+test("clean first-provisioning has no alert attestation, while protected plans require the exact 15 IDs", async () => {
   const [workflow, variables, observability] = await Promise.all([
     source(".github/workflows/yandex-infrastructure.yml"),
     source("infra/yandex/production/variables.tf"),
@@ -22,7 +22,7 @@ test("clean first-provisioning has no alert attestation, while protected plans r
   for (const file of [variables, observability]) {
     assert.match(file, /variable "observability_phase"/);
     assert.match(file, /var\.observability_phase == "first"/);
-    assert.match(file, /length\(toset\(values\(var\.alert_ids\)\)\) == 16/);
+    assert.match(file, /length\(toset\(values\(var\.alert_ids\)\)\) == 15/);
   }
 });
 
@@ -91,7 +91,7 @@ test("readiness uses the published edge authority and publishes a required-failu
   assert.match(observability, /markiro\.readiness\.required_unavailable/);
 });
 
-test("all workload identities are pairwise distinct before plan and in Terraform, including runner OS Login folder audit", async () => {
+test("all four workload identities are pairwise distinct before plan and in Terraform", async () => {
   const [workflow, variables, production, iam] = await Promise.all([
     source(".github/workflows/yandex-infrastructure.yml"),
     source("infra/yandex/production/variables.tf"),
@@ -102,6 +102,6 @@ test("all workload identities are pairwise distinct before plan and in Terraform
   assert.match(workflow, /YC_TERRAFORM_SERVICE_ACCOUNT_ID/);
   assert.match(variables, /variable "terraform_service_account_id"/);
   assert.match(production, /check "workload_service_account_ids_are_distinct"/);
-  assert.match(iam, /"resource-manager\.auditor"/);
-  assert.match(iam, /yandex_iam_service_account\.runner\.id/);
+  assert.match(iam, /yandex_iam_service_account\.deployment_controller\.id/);
+  assert.doesNotMatch(iam, /yandex_iam_service_account\.runner\.id|compute\.osAdminLogin/);
 });

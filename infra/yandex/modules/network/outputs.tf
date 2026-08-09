@@ -18,17 +18,11 @@ output "data_subnet_id" {
   value       = yandex_vpc_subnet.data.id
 }
 
-output "management_subnet_id" {
-  description = "ID of the private management subnet."
-  value       = yandex_vpc_subnet.management.id
-}
-
 output "security_group_ids" {
   description = "IDs of the production security groups."
   value = {
-    alb    = yandex_vpc_security_group.alb.id
-    app    = yandex_vpc_security_group.app.id
-    data   = yandex_vpc_security_group.data.id
-    runner = yandex_vpc_security_group.runner.id
+    alb  = yandex_vpc_security_group.alb.id
+    app  = yandex_vpc_security_group.app.id
+    data = yandex_vpc_security_group.data.id
   }
 }

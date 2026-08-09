@@ -63,16 +63,6 @@ resource "yandex_vpc_subnet" "data" {
   labels         = var.labels
 }
 
-resource "yandex_vpc_subnet" "management" {
-  name           = "markiro-production-management"
-  zone           = var.zone
-  network_id     = yandex_vpc_network.production.id
-  v4_cidr_blocks = [var.management_subnet_cidr]
-  route_table_id = yandex_vpc_route_table.private_egress.id
-  folder_id      = var.folder_id
-  labels         = var.labels
-}
-
 resource "yandex_vpc_security_group" "alb" {
   name       = "markiro-production-alb"
   network_id = yandex_vpc_network.production.id
@@ -117,11 +107,11 @@ resource "yandex_vpc_security_group" "app" {
   }
 
   ingress {
-    protocol          = "TCP"
-    description       = "Only the ephemeral runner may use OS Login SSH."
-    from_port         = 22
-    to_port           = 22
-    security_group_id = yandex_vpc_security_group.runner.id
+    protocol       = "TCP"
+    description    = "GitHub-hosted deployment reaches only key-authenticated SSH."
+    from_port      = 22
+    to_port        = 22
+    v4_cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
@@ -148,19 +138,6 @@ resource "yandex_vpc_security_group" "data" {
   egress {
     protocol       = "ANY"
     description    = "Data services use private egress for platform maintenance."
-    v4_cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
-resource "yandex_vpc_security_group" "runner" {
-  name       = "markiro-production-runner"
-  network_id = yandex_vpc_network.production.id
-  folder_id  = var.folder_id
-  labels     = var.labels
-
-  egress {
-    protocol       = "ANY"
-    description    = "The JIT runner uses NAT while it is explicitly started."
     v4_cidr_blocks = ["0.0.0.0/0"]
   }
 }

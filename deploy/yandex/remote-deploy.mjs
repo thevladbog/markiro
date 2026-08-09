@@ -2,13 +2,13 @@ import { parseReleaseManifest } from "../production/release-manifest.mjs";
 import { validateProductionDomains } from "../production/production-domain.mjs";
 import { productionBaseUrls, runPublicSmoke } from "../production/smoke.mjs";
 import { spawn } from "node:child_process";
-import { copyFile, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
-import { parseAuthenticatedHostKeys } from "./runner-control.mjs";
+import { authenticatedKnownHosts } from "./hosted-deploy-context.mjs";
 import { writeMetrics } from "./monitoring-producer.mjs";
 import { registryCredentials } from "./registry-auth.mjs";
 
@@ -286,21 +286,28 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
   });
 }
 
-async function metadataIamToken(fetchImpl = fetch) {
-  const response = await fetchImpl(
-    "http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token",
-    { headers: { "Metadata-Flavor": "Google" } },
-  );
-  if (!response.ok) throw new Error("runner identity request failed");
-  const payload = await response.json();
-  if (typeof payload.access_token !== "string" || payload.access_token.length === 0)
-    throw new Error("runner identity request failed");
-  return payload.access_token;
-}
-
-function authenticatedKnownHosts(encodedKeys, address) {
-  const keys = parseAuthenticatedHostKeys(encodedKeys);
-  return `${keys.map((key) => `${address} ${key}`).join("\n")}\n`;
+async function validateHostedPrivateKey(path, system) {
+  try {
+    const details = await system.stat(path);
+    if (
+      !details.isFile() ||
+      (details.mode & 0o777) !== 0o600 ||
+      !Number.isSafeInteger(details.size) ||
+      details.size < 70 ||
+      details.size > 16 * 1024
+    )
+      throw new Error();
+    const contents = await system.readFile(path, "utf8");
+    if (
+      Buffer.byteLength(contents, "utf8") !== details.size ||
+      !/^-----BEGIN OPENSSH PRIVATE KEY-----\n[A-Za-z0-9+/=\n]+\n-----END OPENSSH PRIVATE KEY-----\n?$/.test(
+        contents,
+      )
+    )
+      throw new Error();
+  } catch {
+    throw new Error("hosted SSH configuration is invalid");
+  }
 }
 
 function assertExpectedReleaseHeader(headers, expectedReleaseSha) {
@@ -399,10 +406,9 @@ function parseCandidate(output) {
 export async function runRemoteDeployment(environment = process.env, supplied = {}) {
   const system = {
     readFile,
-    metadataIamToken,
+    stat,
     fetch,
     mkdtemp,
-    readdir,
     copyFile,
     writeFile,
     rm,
@@ -430,7 +436,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   if (manifest.commit !== expectedCommit || process.cwd() === "/")
     throw new Error("invalid release manifest");
 
-  const token = await system.metadataIamToken(system.fetch);
+  const token = requiredEnvironment("YC_IAM_TOKEN", environment);
   const registrySecretId = requiredEnvironment("YC_REGISTRY_SECRET_ID", environment);
   const registryResponse = await system.fetch(
     `https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/${registrySecretId}/payload`,
@@ -443,59 +449,44 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   const registryPayload = await registryResponse.json();
   registryCredentials(registryPayload);
   const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID", environment);
-  const login = requiredEnvironment("YC_OS_LOGIN", environment);
-  const organizationId = requiredEnvironment("YC_ORGANIZATION_ID", environment);
+  const privateAddress = requiredEnvironment("YC_APP_PRIVATE_ADDRESS", environment);
+  const publicAddress = requiredEnvironment("YC_APP_PUBLIC_ADDRESS", environment);
+  const login = requiredEnvironment("YC_APP_DEPLOY_LOGIN", environment);
+  if (login !== "markiro-deploy") throw new Error("hosted SSH configuration is invalid");
+  const identity = requiredEnvironment("YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH", environment);
+  await validateHostedPrivateKey(identity, system);
   const instanceResponse = await system.fetch(
     `https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}`,
     { headers: { Authorization: `Bearer ${token}` } },
   );
   if (!instanceResponse.ok) throw new Error("application instance lookup failed");
   const instance = await instanceResponse.json();
-  const address = instance.networkInterfaces?.[0]?.primaryV4Address?.address;
-  if (typeof address !== "string" || instance.networkInterfaces?.[0]?.primaryV4Address?.oneToOneNat)
-    throw new Error("application instance is not private");
+  const interfaces = instance.networkInterfaces;
+  const primary = interfaces?.[0]?.primaryV4Address;
+  if (
+    instance.status !== "RUNNING" ||
+    !Array.isArray(interfaces) ||
+    interfaces.length !== 1 ||
+    primary?.address !== privateAddress ||
+    primary?.oneToOneNat?.address !== publicAddress
+  )
+    throw new Error("application instance network identity is invalid");
 
-  const credentialDirectory = await system.mkdtemp(join(tmpdir(), "markiro-os-login-"));
+  const credentialDirectory = await system.mkdtemp(join(tmpdir(), "markiro-hosted-ssh-"));
   const manifestDirectory = await system.mkdtemp(join(tmpdir(), "markiro-release-manifest-"));
   try {
-    await system.run(
-      "yc",
-      [
-        "compute",
-        "ssh",
-        "certificate",
-        "export",
-        "--id",
-        appInstanceId,
-        "--internal-address",
-        "--login",
-        login,
-        "--organization-id",
-        organizationId,
-        "--directory",
-        credentialDirectory,
-        "--no-user-output",
-      ],
-      { env: { ...process.env, YC_TOKEN: token } },
-    );
-    const credentialFiles = await system.readdir(credentialDirectory);
-    const identityName = credentialFiles.find(
-      (name) => !name.endsWith("-cert.pub") && !name.endsWith(".pub"),
-    );
-    if (!identityName || !credentialFiles.includes(`${identityName}-cert.pub`))
-      throw new Error("OS Login certificate export failed");
-    const identity = join(credentialDirectory, identityName);
     const knownHosts = join(credentialDirectory, "known_hosts");
     await system.writeFile(
       knownHosts,
-      authenticatedKnownHosts(requiredEnvironment("APP_SSH_HOST_KEYS_B64", environment), address),
+      authenticatedKnownHosts(
+        requiredEnvironment("APP_SSH_HOST_KEYS_B64", environment),
+        publicAddress,
+      ),
       { encoding: "utf8", mode: 0o600 },
     );
     const sshBase = [
       "-i",
       identity,
-      "-o",
-      `CertificateFile=${identity}-cert.pub`,
       "-o",
       `UserKnownHostsFile=${knownHosts}`,
       "-o",
@@ -508,7 +499,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
       "ServerAliveInterval=15",
       "-o",
       "ServerAliveCountMax=2",
-      `${login}@${address}`,
+      `${login}@${publicAddress}`,
     ];
     const apiDigest = digest(manifest.api, API_PREFIX);
     const edgeDigest = digest(manifest.edge, EDGE_PREFIX);
@@ -610,7 +601,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         async verifyAlb() {
           const targetStateUrl = `https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${requiredEnvironment("YC_LOAD_BALANCER_ID", environment)}/targetStates/${requiredEnvironment("YC_BACKEND_GROUP_ID", environment)}/${requiredEnvironment("YC_TARGET_GROUP_ID", environment)}`;
           await waitForAlbTarget({
-            expectedAddress: address,
+            expectedAddress: privateAddress,
             fetchTargetStates: async ({ signal }) => {
               const targets = await system.fetch(targetStateUrl, {
                 headers: { Authorization: `Bearer ${token}` },
@@ -695,7 +686,7 @@ export async function runRemoteDeploymentWithReporting(
   reporting = {},
 ) {
   const runDeployment = reporting.runDeployment ?? runRemoteDeployment;
-  const getToken = reporting.metadataIamToken ?? metadataIamToken;
+  const getToken = reporting.iamToken ?? (() => requiredEnvironment("YC_IAM_TOKEN", environment));
   const emit = reporting.writeMetrics ?? writeMetrics;
   const folderId = requiredEnvironment("MARKIRO_FOLDER_ID", environment);
   const appInstanceId = requiredEnvironment("YC_APP_INSTANCE_ID", environment);

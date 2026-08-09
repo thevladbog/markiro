@@ -34,8 +34,8 @@ output "state_backend_secret_id" {
   sensitive   = true
 }
 
-output "runner_registration_secret_id" {
-  description = "Empty runner-registration Lockbox container populated out of band."
+output "runner_registration_tombstone_secret_id" {
+  description = "Retired runner-registration Lockbox tombstone; it must remain empty and unused."
   value       = yandex_lockbox_secret.runner_registration.id
   sensitive   = true
 }
