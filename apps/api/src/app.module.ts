@@ -37,6 +37,8 @@ import { ProfileModule } from "./modules/profile/profile.module";
 import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/tenant-owner-activation.module";
 import { MailTransportService } from "./modules/mail/mail-transport.service";
 import { ObjectStorageService } from "./modules/storage/object-storage.service";
+import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
+import type { PlatformAuth } from "@markiro/db";
 
 @Module({})
 export class AppModule {
@@ -52,13 +54,20 @@ export class AppModule {
    * keeping liveness tests independent from external infrastructure.
    */
   static forRoot(
-    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & { databaseUrl: string; env?: Env },
+    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & {
+      platformAuth?: PlatformAuth;
+      databaseUrl: string;
+      env?: Env;
+    },
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
     return {
       module: AppModule,
       imports: [
         AuthModule.forRoot(setup),
+        ...(setup.platformAuth
+          ? [PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN)]
+          : []),
         AuthorizationModule,
         JobsModule.forRoot(setup.databaseUrl, env),
         OrgProfileModule,

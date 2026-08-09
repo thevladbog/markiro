@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   kioskAllowedOrigins,
   loadEnv,
+  platformAllowedOrigins,
   sessionAllowedOrigins,
   stationAllowedOrigins,
 } from "../src/env";
@@ -17,9 +18,35 @@ const BASE = {
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   BETTER_AUTH_SECRET: "0123456789abcdef0123",
   BETTER_AUTH_URL: "http://localhost:3000",
+  PLATFORM_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+  PLATFORM_AUTH_URL: "http://localhost:3000",
+  SAAS_ADMIN_ORIGIN: "https://saas.example.ru",
   ADMIN_ORIGIN: "https://admin.example.ru",
   PAIRING_CODE_PEPPER: "0123456789abcdef0123",
 } satisfies NodeJS.ProcessEnv;
+
+describe("platformAllowedOrigins", () => {
+  it("grants only the exact SaaS admin origin and never the customer admin origin", () => {
+    const env = loadEnv(BASE);
+    expect(platformAllowedOrigins(env)).toEqual(["https://saas.example.ru"]);
+    expect(sessionAllowedOrigins(env)).toEqual(["https://admin.example.ru"]);
+  });
+
+  it("canonicalizes the SaaS admin origin but rejects sibling and suffix origins", () => {
+    const env = loadEnv({
+      ...BASE,
+      SAAS_ADMIN_ORIGIN: "https://SAAS.Example.RU:8443/app?a=1#x",
+    });
+    expect(platformAllowedOrigins(env)).toEqual(["https://saas.example.ru:8443"]);
+    expect(platformAllowedOrigins(env)).not.toContain("https://other.example.ru:8443");
+    expect(platformAllowedOrigins(env)).not.toContain("https://saas.example.ru.evil.test:8443");
+  });
+
+  it("requires an independent platform secret of at least 32 characters", () => {
+    expect(() => loadEnv({ ...BASE, PLATFORM_AUTH_SECRET: "short" })).toThrow();
+    expect(() => loadEnv({ ...BASE, PLATFORM_AUTH_SECRET: undefined })).toThrow();
+  });
+});
 
 describe("kioskAllowedOrigins", () => {
   it("is just the admin origin when KIOSK_ORIGIN is unset", () => {

@@ -1,4 +1,13 @@
-import { boolean, index, pgEnum, pgTable, text, timestamp, unique } from "drizzle-orm/pg-core";
+import {
+  boolean,
+  index,
+  integer,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  unique,
+} from "drizzle-orm/pg-core";
 
 export const PLATFORM_ROLES = ["platform_admin", "support", "accountant"] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
@@ -77,6 +86,9 @@ export const platformTwoFactors = pgTable(
     id: text("id").primaryKey(),
     secret: text("secret").notNull(),
     backupCodes: text("backup_codes").notNull(),
+    verified: boolean("verified").notNull().default(true),
+    failedVerificationCount: integer("failed_verification_count").notNull().default(0),
+    lockedUntil: timestamp("locked_until", { withTimezone: true }),
     userId: text("user_id")
       .notNull()
       .references(() => platformUsers.id, { onDelete: "cascade" }),

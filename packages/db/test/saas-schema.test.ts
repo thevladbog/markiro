@@ -40,6 +40,19 @@ describe("SaaS catalog and subscription schema", () => {
     expect(userTargets).not.toContain("user");
   });
 
+  it("stores every two-factor state field required by the Better Auth plugin", () => {
+    expect(Object.keys(schema.platformTwoFactors)).toEqual(
+      expect.arrayContaining([
+        "secret",
+        "backupCodes",
+        "userId",
+        "verified",
+        "failedVerificationCount",
+        "lockedUntil",
+      ]),
+    );
+  });
+
   it("pins stable catalog identities and immutable numbered versions", () => {
     const itemConfig = getTableConfig(schema.catalogItems);
     expect(itemConfig.uniqueConstraints.map((item) => item.getName())).toContain(

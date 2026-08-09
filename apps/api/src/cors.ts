@@ -3,7 +3,13 @@ import type {
   CorsOptionsDelegate,
 } from "@nestjs/common/interfaces/external/cors-options.interface";
 import type { Request } from "express";
-import { kioskAllowedOrigins, sessionAllowedOrigins, stationAllowedOrigins, type Env } from "./env";
+import {
+  kioskAllowedOrigins,
+  platformAllowedOrigins,
+  sessionAllowedOrigins,
+  stationAllowedOrigins,
+  type Env,
+} from "./env";
 
 /**
  * True for the device-facing routes, and only those: `/kiosk/pair`,
@@ -20,6 +26,16 @@ import { kioskAllowedOrigins, sessionAllowedOrigins, stationAllowedOrigins, type
 function isKioskPath(path: string): boolean {
   const p = path.toLowerCase();
   return p === "/kiosk" || p.startsWith("/kiosk/");
+}
+
+function isPlatformPath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  return (
+    normalized === "/platform" ||
+    normalized.startsWith("/platform/") ||
+    normalized === "/api/platform-auth" ||
+    normalized.startsWith("/api/platform-auth/")
+  );
 }
 
 /** Exact method/path CORS surface used by the station webview. */
@@ -72,11 +88,13 @@ function isStationRequest(req: Request): boolean {
 export function corsDelegate(env: Env): CorsOptionsDelegate<Request> {
   const kiosk: CorsOptions = { origin: kioskAllowedOrigins(env), credentials: true };
   const station: CorsOptions = { origin: stationAllowedOrigins(env), credentials: true };
+  const platform: CorsOptions = { origin: platformAllowedOrigins(env), credentials: true };
   const session: CorsOptions = { origin: sessionAllowedOrigins(env), credentials: true };
   // `req.path` rather than `req.url`: the latter carries the query string,
   // which would break the prefix test on any `/kiosk/...?x=1` request.
   return (req, cb) => {
     if (isKioskPath(req.path)) return cb(null, kiosk);
+    if (isPlatformPath(req.path)) return cb(null, platform);
     if (isStationRequest(req)) return cb(null, station);
     return cb(null, session);
   };

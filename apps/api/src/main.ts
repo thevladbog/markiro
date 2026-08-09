@@ -9,17 +9,24 @@ import { corsDelegate } from "./cors";
 import { loadEnv } from "./env";
 import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
 import { mountOpenApiDocs } from "./openapi-docs";
+import { mountPlatformAuth, setupPlatformAuth } from "./platform-auth/platform-auth.setup";
 
 const logger = new Logger("bootstrap");
 
 async function bootstrap() {
   const env = loadEnv();
   const setup = setupAuth(env);
+  const platformSetup = setupPlatformAuth(env, setup.db);
 
   // Better Auth needs the raw request body, so the Nest body parser is
   // disabled and express.json() is installed AFTER the auth handler below.
   const app = await NestFactory.create(
-    AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env }),
+    AppModule.forRoot({
+      ...setup,
+      platformAuth: platformSetup.platformAuth,
+      databaseUrl: env.DATABASE_URL,
+      env,
+    }),
     { bodyParser: false },
   );
   // Enabled before mountAuth below so the CORS middleware (registered here
@@ -58,6 +65,7 @@ async function bootstrap() {
   }
 
   mountAuth(server, setup.auth);
+  mountPlatformAuth(server, platformSetup.platformAuth);
   // `/1c_exchange` is excluded here, not merely by relying on
   // `ensureContentType` (exchange.module.ts) to run first: see
   // `excludeExchangeRoute`'s own comment for why registration order alone

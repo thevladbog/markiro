@@ -40,6 +40,7 @@ describe("MailDeliveryService", () => {
       id: deliveryId,
       tenantId: "tenant-1",
       userId: null,
+      platformUserId: null,
       recipient: "admin@example.test",
       kind: "organization-invitation",
       sourceId: "invitation-1",
@@ -78,6 +79,38 @@ describe("MailDeliveryService", () => {
       },
     });
 
-    expect(writes[0]).toMatchObject({ tenantId: null, userId: "user-1" });
+    expect(writes[0]).toMatchObject({ tenantId: null, userId: "user-1", platformUserId: null });
+  });
+
+  it("stores platform activation mail under platform-user scope only", async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const tx = {
+      insert: vi.fn(() => ({
+        values: async (values: Record<string, unknown>) => {
+          writes.push(values);
+        },
+      })),
+    };
+    const service = new MailDeliveryService(
+      new MailCryptoService(Buffer.alloc(32, 5)),
+      () => "33333333-3333-4333-8333-333333333333",
+    );
+
+    await service.enqueue(tx as unknown as MailWriteTransaction, {
+      scope: { platformUserId: "platform-user-1" },
+      recipient: "platform@example.test",
+      template: {
+        kind: "platform-user-activation",
+        recipientName: "Платформа",
+        actionUrl: "https://saas.example/activate#token=secret",
+        expiresInMinutes: 60,
+      },
+    });
+
+    expect(writes[0]).toMatchObject({
+      tenantId: null,
+      userId: null,
+      platformUserId: "platform-user-1",
+    });
   });
 });

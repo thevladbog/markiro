@@ -35,13 +35,17 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     const legacyMigrations = join(temporaryRoot, "migrations");
     await cp(migrationsFolder, legacyMigrations, { recursive: true });
     await rm(join(legacyMigrations, "0030_saas_catalog_subscriptions.sql"));
+    await rm(join(legacyMigrations, "0031_platform_auth_runtime_fields.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
-      (entry) => entry.tag !== "0030_saas_catalog_subscriptions",
+      (entry) =>
+        entry.tag !== "0030_saas_catalog_subscriptions" &&
+        entry.tag !== "0031_platform_auth_runtime_fields",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
@@ -74,6 +78,47 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       ["existing-unmanaged"],
     );
     expect(result.rows[0]?.count).toBe(0);
+  });
+
+  it("applies Better Auth two-factor defaults required by the platform plugin", async () => {
+    const id = `two-factor-${randomUUID()}`;
+    await pool.query(
+      "INSERT INTO platform_two_factors (id, secret, backup_codes, user_id) VALUES ($1, 'encrypted-secret', 'encrypted-codes', 'migration-test-admin')",
+      [id],
+    );
+
+    const result = await pool.query(
+      "SELECT verified, failed_verification_count, locked_until FROM platform_two_factors WHERE id = $1",
+      [id],
+    );
+    expect(result.rows[0]).toEqual({
+      verified: true,
+      failed_verification_count: 0,
+      locked_until: null,
+    });
+  });
+
+  it("accepts only one platform, customer-user, or tenant delivery scope", async () => {
+    const platformDeliveryId = randomUUID();
+    await expect(
+      pool.query(
+        "INSERT INTO email_deliveries (id, platform_user_id, recipient, kind) VALUES ($1, 'migration-test-admin', 'platform@example.invalid', 'platform-user-activation')",
+        [platformDeliveryId],
+      ),
+    ).resolves.toBeDefined();
+
+    await expect(
+      pool.query(
+        "INSERT INTO email_deliveries (id, recipient, kind) VALUES ($1, 'missing@example.invalid', 'platform-user-activation')",
+        [randomUUID()],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        "INSERT INTO email_deliveries (id, tenant_id, platform_user_id, recipient, kind) VALUES ($1, 'existing-unmanaged', 'migration-test-admin', 'multiple@example.invalid', 'platform-user-activation')",
+        [randomUUID()],
+      ),
+    ).rejects.toThrow();
   });
 
   it("rejects update and deletion of a published catalog version", async () => {

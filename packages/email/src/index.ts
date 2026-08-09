@@ -10,11 +10,16 @@ import {
   TenantOwnerActivationEmail,
   type TenantOwnerActivationEmailProps,
 } from "./tenant-owner-activation.js";
+import {
+  PlatformUserActivationEmail,
+  type PlatformUserActivationEmailProps,
+} from "./emails/platform-user-activation.js";
 
 export type EmailTemplateInput =
   | ({ kind: "organization-invitation" } & OrganizationInvitationEmailProps)
   | ({ kind: "password-reset" } & PasswordResetEmailProps)
   | ({ kind: "tenant-owner-activation" } & TenantOwnerActivationEmailProps)
+  | ({ kind: "platform-user-activation" } & PlatformUserActivationEmailProps)
   | ({ kind: "email-verification" } & EmailVerificationEmailProps);
 
 export interface RenderedEmail {
@@ -74,6 +79,16 @@ function resolveTemplate(input: EmailTemplateInput): { subject: string; element:
         }),
       };
     }
+    case "platform-user-activation": {
+      return {
+        subject: "Доступ к платформе Маркиро",
+        element: createElement(PlatformUserActivationEmail, {
+          recipientName: input.recipientName,
+          actionUrl: input.actionUrl,
+          expiresInMinutes: input.expiresInMinutes,
+        }),
+      };
+    }
   }
 }
 
@@ -81,5 +96,6 @@ export type {
   EmailVerificationEmailProps,
   OrganizationInvitationEmailProps,
   PasswordResetEmailProps,
+  PlatformUserActivationEmailProps,
   TenantOwnerActivationEmailProps,
 };
