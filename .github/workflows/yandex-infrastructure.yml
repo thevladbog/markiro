@@ -173,7 +173,8 @@ jobs:
             "https://payload.lockbox.api.cloud.yandex.net/lockbox/v1/secrets/$YC_STATE_BACKEND_SECRET_ID/payload")"
           jq -e '
             (type == "object") and
-            ((keys | sort) == ["entries"]) and
+            ((keys | sort) == ["entries", "versionId"]) and
+            (.versionId | type == "string" and length > 0) and
             (.entries | type == "array" and length == 2) and
             ([.entries[].key] | sort) == ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] and
             all(.entries[];
