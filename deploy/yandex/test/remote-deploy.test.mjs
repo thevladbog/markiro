@@ -248,6 +248,22 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   );
 });
 
+test("direct stages use fresh transient units with explicit runtime environment ordering", async () => {
+  const fixture = systemFixture();
+  await runRemoteDeployment(environment(), fixture.system);
+
+  const stages = fixture.commands.filter(({ args }) => args.includes("/usr/bin/systemd-run"));
+  assert.equal(stages.length, 2);
+  for (const { args } of stages) {
+    assert.equal(
+      args.some((argument) => argument.startsWith("--unit=")),
+      false,
+    );
+    assert.ok(args.includes("--property=Requires=markiro-runtime-env.service"));
+    assert.ok(args.includes("--property=After=markiro-runtime-env.service"));
+  }
+});
+
 for (const [name, overrides] of [
   ["Yandex IAM", { YC_IAM_TOKEN: "must-not-be-required", GHCR_TOKEN: "" }],
   ["dedicated login", { YC_APP_DEPLOY_LOGIN: "root" }],
