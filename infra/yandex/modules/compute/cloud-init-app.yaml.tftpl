@@ -174,7 +174,7 @@ runcmd:
         printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE ssh' > /dev/ttyS0
         install -d -m 0755 /run/sshd
         /usr/sbin/sshd -t
-        systemctl reload ssh.service
+        systemctl restart ssh.service
         passwd -S markiro-deploy | awk '$2 == "L" { locked = 1 } END { exit locked ? 0 : 1 }'
         test "$(stat -c '%U:%G:%a' /home/markiro-deploy/.ssh)" = "markiro-deploy:markiro-deploy:700"
         test "$(stat -c '%U:%G:%a' /home/markiro-deploy/.ssh/authorized_keys)" = "markiro-deploy:markiro-deploy:600"

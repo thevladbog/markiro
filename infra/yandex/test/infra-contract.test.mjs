@@ -1045,7 +1045,7 @@ function assertHostedAppNetworkAndCompute({
   assert.equal(typeof bootstrap, "string");
   for (const command of [
     "/usr/sbin/sshd -t",
-    "systemctl reload ssh.service",
+    "systemctl restart ssh.service",
     "passwd -S markiro-deploy",
     "/home/markiro-deploy/.ssh",
     "/home/markiro-deploy/.ssh/authorized_keys",
@@ -1054,7 +1054,7 @@ function assertHostedAppNetworkAndCompute({
   const marker = "touch /var/lib/markiro/markiro-app-bootstrap-complete";
   assert.equal(bootstrap.trimEnd().split("\n").at(-1), marker);
   assert.ok(bootstrap.indexOf("/usr/sbin/sshd -t") < bootstrap.indexOf(marker));
-  assert.ok(bootstrap.indexOf("systemctl reload ssh.service") < bootstrap.indexOf(marker));
+  assert.ok(bootstrap.indexOf("systemctl restart ssh.service") < bootstrap.indexOf(marker));
 
   assert.match(computeOutputs, /output\s+"app_private_ip"\s*\{/);
   assert.match(computeOutputs, /output\s+"app_public_ip"\s*\{/);
@@ -3163,6 +3163,27 @@ test("application bootstrap fails closed and cloud-init changes replace the VM",
       [
         flags,
         `dpkg-query() { printf '%s\\n' 'install ok installed' 'install ok installed' 'config-files ok not-installed' 'install ok installed'; }\n${packageCheck}`,
+      ],
+      { stdio: "ignore" },
+    ),
+  );
+  const sshServiceCommand = script
+    .split("\n")
+    .find((line) => line.trimStart().startsWith("systemctl ") && line.includes("ssh.service"));
+  assert.equal(typeof sshServiceCommand, "string");
+  assert.doesNotThrow(() =>
+    execFileSync(
+      localShell,
+      [
+        flags,
+        `systemctl() {
+  case "$1 $2" in
+    "restart ssh.service"|"reload-or-restart ssh.service") return 0 ;;
+    "reload ssh.service") return 1 ;;
+    *) return 1 ;;
+  esac
+}
+${sshServiceCommand}`,
       ],
       { stdio: "ignore" },
     ),
