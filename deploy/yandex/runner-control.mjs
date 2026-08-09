@@ -4,11 +4,12 @@ import { isIPv4 } from "node:net";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
+import { parseSerialHostKeys } from "./hosted-deploy-context.mjs";
+
+export { parseAuthenticatedHostKeys } from "./hosted-deploy-context.mjs";
 
 const DEPLOYMENT_ID = /^[a-z0-9][a-z0-9-]{7,63}$/;
 const DEPLOYMENT_LABEL_PREFIX = "markiro-deployment-";
-const HOST_KEY_MARKER = "MARKIRO_SSH_HOST_KEY_V1";
-const HOST_KEY_ALGORITHMS = ["ssh-ed25519", "ssh-rsa"];
 const MAX_OPERATION_ID_BYTES = 256;
 
 function requireDependencies(dependencies) {
@@ -149,99 +150,6 @@ export async function waitForOperation(initialOperation, dependencies) {
     operation = validateOperation(await dependencies.getOperation(operationId), operationId);
   }
   return operation;
-}
-
-function decodeBase64(value) {
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 === 1)
-    throw new Error("authenticated SSH host keys are invalid");
-  const decoded = Buffer.from(value, "base64");
-  if (
-    decoded.length === 0 ||
-    decoded.toString("base64").replace(/=+$/, "") !== value.replace(/=+$/, "")
-  )
-    throw new Error("authenticated SSH host keys are invalid");
-  return decoded;
-}
-
-function readSshField(payload, cursor) {
-  if (cursor + 4 > payload.length) throw new Error("authenticated SSH host keys are invalid");
-  const length = payload.readUInt32BE(cursor);
-  const start = cursor + 4;
-  const end = start + length;
-  if (end > payload.length) throw new Error("authenticated SSH host keys are invalid");
-  return { bytes: payload.subarray(start, end), cursor: end };
-}
-
-function validMpint(value) {
-  return (
-    value.length > 0 &&
-    (value[0] & 0x80) === 0 &&
-    !(value.length > 1 && value[0] === 0 && (value[1] & 0x80) === 0)
-  );
-}
-
-function canonicalPublicKey(key) {
-  const parts = key.split(" ");
-  if (parts.length !== 2 || !HOST_KEY_ALGORITHMS.includes(parts[0]))
-    throw new Error("authenticated SSH host keys are invalid");
-  const algorithm = parts[0];
-  const payload = decodeBase64(parts[1]);
-  const name = readSshField(payload, 0);
-  if (name.bytes.toString("utf8") !== algorithm)
-    throw new Error("authenticated SSH host keys are invalid");
-  if (algorithm === "ssh-ed25519") {
-    const publicKey = readSshField(payload, name.cursor);
-    if (publicKey.bytes.length !== 32 || publicKey.cursor !== payload.length)
-      throw new Error("authenticated SSH host keys are invalid");
-  } else {
-    const exponent = readSshField(payload, name.cursor);
-    const modulus = readSshField(payload, exponent.cursor);
-    if (
-      !validMpint(exponent.bytes) ||
-      !validMpint(modulus.bytes) ||
-      modulus.cursor !== payload.length
-    )
-      throw new Error("authenticated SSH host keys are invalid");
-  }
-  return `${algorithm} ${payload.toString("base64")}`;
-}
-
-function canonicalHostKeyPair(keys) {
-  if (keys.length !== HOST_KEY_ALGORITHMS.length)
-    throw new Error("authenticated SSH host keys are invalid");
-  const canonical = keys.map(canonicalPublicKey);
-  const byAlgorithm = new Map(canonical.map((key) => [key.slice(0, key.indexOf(" ")), key]));
-  if (byAlgorithm.size !== HOST_KEY_ALGORITHMS.length)
-    throw new Error("authenticated SSH host keys are invalid");
-  return HOST_KEY_ALGORITHMS.map((algorithm) => {
-    const key = byAlgorithm.get(algorithm);
-    if (!key) throw new Error("authenticated SSH host keys are invalid");
-    return key;
-  });
-}
-
-export function parseSerialHostKeys(serialOutput) {
-  if (typeof serialOutput !== "string") throw new Error("authenticated SSH host keys are invalid");
-  const markerLines = serialOutput
-    .split(/\r?\n/u)
-    .filter((line) => line.includes("MARKIRO_SSH_HOST_KEY"));
-  const keys = markerLines.map((line) => {
-    const match = line.match(
-      new RegExp(`^${HOST_KEY_MARKER} (ssh-(?:ed25519|rsa) [A-Za-z0-9+/]+={0,2})$`),
-    );
-    if (!match) throw new Error("authenticated SSH host keys are invalid");
-    return match[1];
-  });
-  return Buffer.from(canonicalHostKeyPair(keys).join("\n"), "utf8").toString("base64");
-}
-
-export function parseAuthenticatedHostKeys(encodedKeys) {
-  if (typeof encodedKeys !== "string") throw new Error("authenticated SSH host keys are invalid");
-  const payload = decodeBase64(encodedKeys);
-  const text = payload.toString("utf8");
-  if (!Buffer.from(text, "utf8").equals(payload))
-    throw new Error("authenticated SSH host keys are invalid");
-  return canonicalHostKeyPair(text.split("\n"));
 }
 
 export async function startRunner(dependencies, { expectedDeploymentId } = {}) {

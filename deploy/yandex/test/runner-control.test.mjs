@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { parseSerialHostKeys } from "../hosted-deploy-context.mjs";
 import * as runnerControl from "../runner-control.mjs";
 
 const {
   createJitRegistration,
   deploymentRunnerLabel,
-  parseSerialHostKeys,
   selectCleanupRunners,
   startRunner,
   waitForRunnerCleanup,
