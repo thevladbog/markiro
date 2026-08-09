@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
@@ -17,11 +17,76 @@ const ready = Boolean(process.env.DATABASE_URL);
 describe.skipIf(!ready)("tenant owner provisioning", () => {
   const connection = createDb(process.env.DATABASE_URL!);
 
+  async function usePublishedDemo(durationDays = 14): Promise<string> {
+    const itemId = crypto.randomUUID();
+    const versionId = crypto.randomUUID();
+    await connection.db.insert(schema.catalogItems).values({
+      id: itemId,
+      code: `test-demo-${crypto.randomUUID()}`,
+      nameRu: "Демо",
+      nameEn: "Demo",
+      kind: "plan",
+    });
+    await connection.db.insert(schema.catalogItemVersions).values({
+      id: versionId,
+      catalogItemId: itemId,
+      kind: "plan",
+      version: 1,
+      nameRu: "Демо",
+      nameEn: "Demo",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "0.00",
+      vatIncluded: true,
+    });
+    await connection.db.insert(schema.planEntitlements).values({
+      catalogVersionId: versionId,
+      maxLines: 1,
+      maxStations: 1,
+      maxKiosks: 1,
+      maxCabinetUsers: 2,
+      demoDurationDays: durationDays,
+    });
+    await connection.db
+      .update(schema.catalogItemVersions)
+      .set({ status: "published", publishedAt: new Date() })
+      .where(eq(schema.catalogItemVersions.id, versionId));
+    await connection.db
+      .insert(schema.platformSettings)
+      .values({ key: "default", defaultDemoCatalogVersionId: versionId })
+      .onConflictDoUpdate({
+        target: schema.platformSettings.key,
+        set: { defaultDemoCatalogVersionId: versionId, updatedAt: new Date() },
+      });
+    return versionId;
+  }
+
   afterAll(async () => {
+    const deliveries = await connection.db
+      .select({ id: schema.emailDeliveries.id })
+      .from(schema.emailDeliveries)
+      .where(
+        or(
+          like(schema.emailDeliveries.recipient, "first-owner-%@example.com"),
+          like(schema.emailDeliveries.recipient, "renew-owner-%@example.com"),
+          like(schema.emailDeliveries.recipient, "locked-renew-%@example.com"),
+          like(schema.emailDeliveries.recipient, "unmanaged-owner-%@example.com"),
+        ),
+      );
+    if (deliveries.length > 0) {
+      await connection.db.delete(schema.emailOutbox).where(
+        inArray(
+          schema.emailOutbox.deliveryId,
+          deliveries.map((delivery) => delivery.id),
+        ),
+      );
+    }
     await connection.pool.end();
   });
 
   it("creates one tenant, owner, incomplete profile, and activation delivery when repeated", async () => {
+    const demoVersionId = await usePublishedDemo();
     const suffix = crypto.randomUUID();
     const email = `first-owner-${suffix}@example.com`;
     const tenantSlug = `first-tenant-${suffix}`;
@@ -105,6 +170,17 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select()
       .from(schema.tenantAuditEvents)
       .where(eq(schema.tenantAuditEvents.organizationId, first.tenantId));
+    const subscriptions = await connection.db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, first.tenantId));
+    const subscriptionEvents = await connection.db
+      .select({
+        kind: schema.subscriptionEvents.eventKind,
+        tenantId: schema.subscriptionEvents.tenantId,
+      })
+      .from(schema.subscriptionEvents)
+      .where(eq(schema.subscriptionEvents.tenantId, first.tenantId));
 
     expect(organizations).toHaveLength(1);
     expect(users).toHaveLength(1);
@@ -126,22 +202,22 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         targetId: first.memberId,
       }),
     ]);
-
-    await connection.db
-      .delete(schema.organization)
-      .where(eq(schema.organization.id, first.tenantId));
-    await connection.db.delete(schema.user).where(eq(schema.user.id, first.userId));
-    await connection.db
-      .delete(schema.verification)
-      .where(
-        eq(
-          schema.verification.value,
-          JSON.stringify({ userId: first.userId, tenantId: first.tenantId }),
-        ),
-      );
+    expect(subscriptions).toEqual([
+      expect.objectContaining({
+        tenantId: first.tenantId,
+        planVersionId: demoVersionId,
+        status: "pending_activation",
+        startsAt: null,
+        endsAt: null,
+      }),
+    ]);
+    expect(subscriptionEvents).toEqual([
+      expect.objectContaining({ kind: "demo.provisioned", tenantId: first.tenantId }),
+    ]);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {
+    await usePublishedDemo();
     const suffix = crypto.randomUUID();
     const email = `renew-owner-${suffix}@example.com`;
     const tenantSlug = `renew-tenant-${suffix}`;
@@ -195,14 +271,10 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         ),
       );
     expect(tokens).toEqual([{ identifier: activationIdentifier("new-activation-token") }]);
-
-    await connection.db
-      .delete(schema.organization)
-      .where(eq(schema.organization.id, first.tenantId));
-    await connection.db.delete(schema.user).where(eq(schema.user.id, first.userId));
   });
 
   it("rejects renewal while the mail worker owns the delivery lock", async () => {
+    await usePublishedDemo();
     const suffix = crypto.randomUUID();
     const email = `locked-renew-${suffix}@example.com`;
     const input = {
@@ -255,11 +327,76 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .from(schema.emailDeliveries)
       .where(eq(schema.emailDeliveries.id, first.deliveryId));
     expect(unchangedDelivery).toEqual({ status: "queued" });
+  });
 
+  it("fails before tenant writes without a default demo and allows only the explicit CLI compatibility path", async () => {
     await connection.db
-      .delete(schema.organization)
-      .where(eq(schema.organization.id, first.tenantId));
-    await connection.db.delete(schema.user).where(eq(schema.user.id, first.userId));
+      .delete(schema.platformSettings)
+      .where(eq(schema.platformSettings.key, "default"));
+    const suffix = crypto.randomUUID();
+    const input = {
+      email: `unmanaged-owner-${suffix}@example.com`,
+      tenantName: "Migration tenant",
+      tenantSlug: `unmanaged-${suffix}`,
+    };
+    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x75)));
+
+    await expect(
+      provisionTenantOwner({
+        db: connection.db,
+        mail,
+        adminOrigin: "https://cabinet.example.test",
+        input,
+      }),
+    ).rejects.toMatchObject({ response: { code: "default_demo_not_configured" } });
+    expect(
+      await connection.db
+        .select({ id: schema.organization.id })
+        .from(schema.organization)
+        .where(eq(schema.organization.slug, input.tenantSlug)),
+    ).toEqual([]);
+
+    const unmanaged = await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input,
+      allowUnmanagedWithoutDemo: true,
+    });
+    expect(
+      await connection.db
+        .select({ id: schema.tenantSubscriptions.id })
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, unmanaged.tenantId)),
+    ).toEqual([]);
+    const [audit] = await connection.db
+      .select({
+        action: schema.platformAuditEvents.action,
+        reason: schema.platformAuditEvents.reason,
+        tenantId: schema.platformAuditEvents.tenantId,
+      })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, unmanaged.tenantId));
+    expect(audit).toEqual({
+      action: "platform.tenant.created_unmanaged",
+      reason: "operator_allowed_unmanaged_without_default_demo",
+      tenantId: unmanaged.tenantId,
+    });
+
+    const renewed = await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input,
+      createToken: () => `renewed-${suffix}`,
+      renewActivation: true,
+    });
+    expect(renewed).toMatchObject({
+      tenantId: unmanaged.tenantId,
+      userId: unmanaged.userId,
+      memberId: unmanaged.memberId,
+    });
+    expect(renewed.deliveryId).not.toBe(unmanaged.deliveryId);
   });
 });
 
@@ -290,6 +427,31 @@ describe("tenant owner provisioning CLI arguments", () => {
         "zavod",
       ]),
     ).toEqual({ email: "owner@example.com", tenantName: "Завод", tenantSlug: "zavod" });
+  });
+
+  it("accepts only the exact valueless unmanaged migration switch", () => {
+    expect(
+      parseProvisionTenantOwnerArgs([
+        "--allow-unmanaged-without-demo",
+        "--email",
+        "owner@example.com",
+        "--tenant-name",
+        "Завод",
+        "--tenant-slug",
+        "zavod",
+      ]),
+    ).toEqual({ email: "owner@example.com", tenantName: "Завод", tenantSlug: "zavod" });
+    expect(() =>
+      parseProvisionTenantOwnerArgs([
+        "--allow-unmanaged-without-demo=true",
+        "--email",
+        "owner@example.com",
+        "--tenant-name",
+        "Завод",
+        "--tenant-slug",
+        "zavod",
+      ]),
+    ).toThrow(/unknown|malformed/i);
   });
 
   it("rejects password arguments instead of accepting or returning a secret", () => {

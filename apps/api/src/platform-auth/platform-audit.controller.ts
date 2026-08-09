@@ -49,10 +49,7 @@ export class PlatformAuditController {
         : sanitizeAuditMetadata;
     const roleFilter =
       request.platformPrincipal!.role === "support"
-        ? or(
-            like(schema.platformAuditEvents.action, "platform.tenant.%"),
-            like(schema.platformAuditEvents.action, "tenant.%"),
-          )
+        ? or(like(schema.platformAuditEvents.action, "platform.tenant.%"))
         : request.platformPrincipal!.role === "accountant"
           ? or(
               like(schema.platformAuditEvents.action, "payment.%"),

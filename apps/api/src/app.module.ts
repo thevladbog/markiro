@@ -39,6 +39,7 @@ import { MailTransportService } from "./modules/mail/mail-transport.service";
 import { ObjectStorageService } from "./modules/storage/object-storage.service";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
+import { PlatformTenantsModule } from "./modules/platform-tenants/platform-tenants.module";
 import type { PlatformAuth } from "@markiro/db";
 
 @Module({})
@@ -70,6 +71,7 @@ export class AppModule {
           ? [
               PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
               PlatformCatalogModule,
+              PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
             ]
           : []),
         AuthorizationModule,

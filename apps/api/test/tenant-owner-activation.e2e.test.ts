@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray, like, or } from "drizzle-orm";
 import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { afterAll, describe, expect, it } from "vitest";
 import { createDb, schema } from "@markiro/db";
@@ -21,11 +21,74 @@ describe.skipIf(!ready)("tenant owner activation", () => {
   const activation = new TenantOwnerActivationService(connection.db);
   const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x72)));
 
+  async function usePublishedDemo(durationDays: number): Promise<string> {
+    const itemId = randomUUID();
+    const versionId = randomUUID();
+    await connection.db.insert(schema.catalogItems).values({
+      id: itemId,
+      code: `activation-demo-${randomUUID()}`,
+      nameRu: "Демо активации",
+      nameEn: "Activation demo",
+      kind: "plan",
+    });
+    await connection.db.insert(schema.catalogItemVersions).values({
+      id: versionId,
+      catalogItemId: itemId,
+      kind: "plan",
+      version: 1,
+      nameRu: "Демо активации",
+      nameEn: "Activation demo",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "0.00",
+      vatIncluded: true,
+    });
+    await connection.db.insert(schema.planEntitlements).values({
+      catalogVersionId: versionId,
+      maxLines: 1,
+      maxStations: 1,
+      maxKiosks: 1,
+      maxCabinetUsers: 2,
+      demoDurationDays: durationDays,
+    });
+    await connection.db
+      .update(schema.catalogItemVersions)
+      .set({ status: "published", publishedAt: new Date() })
+      .where(eq(schema.catalogItemVersions.id, versionId));
+    await connection.db
+      .insert(schema.platformSettings)
+      .values({ key: "default", defaultDemoCatalogVersionId: versionId })
+      .onConflictDoUpdate({
+        target: schema.platformSettings.key,
+        set: { defaultDemoCatalogVersionId: versionId, updatedAt: new Date() },
+      });
+    return versionId;
+  }
+
   afterAll(async () => {
+    const deliveries = await connection.db
+      .select({ id: schema.emailDeliveries.id })
+      .from(schema.emailDeliveries)
+      .where(
+        or(
+          like(schema.emailDeliveries.recipient, "fresh-activation-%@example.com"),
+          like(schema.emailDeliveries.recipient, "existing-activation-%@example.com"),
+        ),
+      );
+    if (deliveries.length > 0) {
+      await connection.db.delete(schema.emailOutbox).where(
+        inArray(
+          schema.emailOutbox.deliveryId,
+          deliveries.map((delivery) => delivery.id),
+        ),
+      );
+    }
     await connection.pool.end();
   });
 
   it("verifies a fresh owner and creates a credential exactly once", async () => {
+    const demoVersionId = await usePublishedDemo(9);
     const token = `fresh-${randomUUID()}`;
     const email = `fresh-activation-${randomUUID()}@example.com`;
     const result = await provisionTenantOwner({
@@ -41,6 +104,13 @@ describe.skipIf(!ready)("tenant owner activation", () => {
     });
 
     await expect(activation.getStatus(token)).resolves.toEqual({ hasAccount: false });
+    const [pendingBeforeCompletion] = await connection.db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, result.tenantId));
+    expect(pendingBeforeCompletion).toEqual(
+      expect.objectContaining({ status: "pending_activation", startsAt: null, endsAt: null }),
+    );
     await activation.complete(token, { password: "fresh-password-123" });
 
     const [user] = await connection.db
@@ -60,13 +130,36 @@ describe.skipIf(!ready)("tenant owner activation", () => {
     ).resolves.toBe(true);
     await expect(activation.complete(token, { password: "another-password" })).rejects.toThrow();
 
-    await connection.db
-      .delete(schema.organization)
-      .where(eq(schema.organization.id, result.tenantId));
-    await connection.db.delete(schema.user).where(eq(schema.user.id, result.userId));
+    const [trial] = await connection.db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, result.tenantId));
+    expect(trial).toEqual(
+      expect.objectContaining({
+        planVersionId: demoVersionId,
+        status: "trial",
+        startsAt: expect.any(Date),
+        endsAt: expect.any(Date),
+      }),
+    );
+    expect(trial!.endsAt!.getTime() - trial!.startsAt!.getTime()).toBe(9 * 24 * 60 * 60 * 1_000);
+    const activationEvents = await connection.db
+      .select({
+        kind: schema.subscriptionEvents.eventKind,
+        effectiveAt: schema.subscriptionEvents.effectiveAt,
+      })
+      .from(schema.subscriptionEvents)
+      .where(
+        and(
+          eq(schema.subscriptionEvents.tenantId, result.tenantId),
+          eq(schema.subscriptionEvents.eventKind, "demo.activated"),
+        ),
+      );
+    expect(activationEvents).toEqual([{ kind: "demo.activated", effectiveAt: trial!.startsAt }]);
   });
 
   it("verifies an existing multi-tenant account without changing its credential", async () => {
+    await usePublishedDemo(14);
     const userId = randomUUID();
     const existingTenantId = randomUUID();
     const existingMemberId = randomUUID();
@@ -125,13 +218,10 @@ describe.skipIf(!ready)("tenant owner activation", () => {
       .where(eq(schema.user.id, userId));
     expect(account?.password).toBe(originalHash);
     expect(user?.emailVerified).toBe(true);
-
-    await connection.db
-      .delete(schema.organization)
-      .where(eq(schema.organization.id, result.tenantId));
-    await connection.db
-      .delete(schema.organization)
-      .where(eq(schema.organization.id, existingTenantId));
-    await connection.db.delete(schema.user).where(eq(schema.user.id, userId));
+    const [trial] = await connection.db
+      .select({ status: schema.tenantSubscriptions.status })
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, result.tenantId));
+    expect(trial).toEqual({ status: "trial" });
   });
 });
