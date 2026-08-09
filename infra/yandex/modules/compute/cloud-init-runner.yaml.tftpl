@@ -73,29 +73,28 @@ write_files:
         --header 'Metadata-Flavor: Google' \
         http://169.254.169.254/computeMetadata/v1/instance/service-accounts/default/token | \
         jq -er '.access_token | select(type == "string" and length > 0)')"
-      operation_id="$(curl --fail --silent --show-error \
+      curl --fail --silent --show-error \
         --request POST \
         --header "Authorization: Bearer $iam_token" \
         --header 'Content-Type: application/json' \
         --data '{"delete":["markiro-runner-jit"]}' \
         "https://compute.api.cloud.yandex.net/compute/v1/instances/$instance_id/updateMetadata" | \
-        jq -er '.id | select(type == "string" and length > 0)')"
+        jq -er '.id | select(type == "string" and length > 0)' > /dev/null
+      metadata_status=""
       for _ in $(seq 1 30); do
-        done_state="$(curl --fail --silent --show-error \
-          --header "Authorization: Bearer $iam_token" \
-          "https://operation.api.cloud.yandex.net/operations/$operation_id" | \
-          jq -r 'if (.done | type) == "boolean" then (.done | tostring) else error("invalid operation state") end')"
-        test "$done_state" = false || break
+        metadata_status="$(curl --silent --show-error \
+          --output /dev/null \
+          --write-out '%%{http_code}' \
+          --header 'Metadata-Flavor: Google' \
+          http://169.254.169.254/computeMetadata/v1/instance/attributes/markiro-runner-jit)"
+        if test "$metadata_status" = 404; then
+          break
+        fi
+        test "$metadata_status" = 200
         sleep 1
       done
-      test "$done_state" = true
+      test "$metadata_status" = 404
       unset iam_token
-      if curl --fail --silent \
-        --header 'Metadata-Flavor: Google' \
-        http://169.254.169.254/computeMetadata/v1/instance/attributes/markiro-runner-jit \
-        --output /dev/null; then
-        fail
-      fi
       trap - ERR
       exec /opt/actions-runner/run.sh --jitconfig "$jit_config"
 

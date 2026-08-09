@@ -3033,7 +3033,7 @@ test("runner bootstrap fails observable and powers off only after the success ma
   assert.throws(() => assertRunnerBootstrapFailsObservable(missingNodeDirectory));
 });
 
-test("runner JIT metadata cleanup accepts an unfinished Yandex operation", async () => {
+test("runner JIT confirms metadata cleanup without Operations API access", async () => {
   const cloudInit = yaml.load(
     await readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
   );
@@ -3042,28 +3042,46 @@ test("runner JIT metadata cleanup accepts an unfinished Yandex operation", async
   )?.content;
   assert.equal(typeof runnerJit, "string");
   assert.doesNotThrow(() => execFileSync("/bin/bash", ["-n"], { input: runnerJit }));
+  assert.doesNotMatch(runnerJit, /operation\.api\.cloud\.yandex\.net/);
+  assert.match(runnerJit, /--write-out '%%\{http_code\}'/);
 
-  const operationFilter = runnerJit.match(/jq -r '([^'\n]+)'/)?.[1];
-  assert.ok(operationFilter, "runner JIT must parse operation completion without jq -e");
-  for (const [payload, expected] of [
-    [{ done: false }, "false"],
-    [{ done: true }, "true"],
-  ]) {
-    assert.equal(
-      execFileSync("jq", ["-r", operationFilter], {
-        encoding: "utf8",
-        input: JSON.stringify(payload),
-      }).trim(),
-      expected,
+  const confirmation = runnerJit.match(
+    /metadata_status=""\nfor _ in \$\(seq 1 30\); do[\s\S]*?\ndone\ntest "\$metadata_status" = 404/,
+  )?.[0];
+  assert.ok(confirmation, "runner JIT must bound and verify the metadata 200-to-404 transition");
+
+  const probeDirectory = await mkdtemp(path.join(tmpdir(), "markiro-runner-metadata-"));
+  const statusesPath = path.join(probeDirectory, "statuses");
+  try {
+    await writeFile(
+      path.join(probeDirectory, "curl"),
+      '#!/usr/bin/env bash\nset -euo pipefail\nstatus="$(head -n 1 "$PROBE_STATUSES")"\ntail -n +2 "$PROBE_STATUSES" > "$PROBE_STATUSES.next"\nmv "$PROBE_STATUSES.next" "$PROBE_STATUSES"\ntest "$status" != EXIT\nprintf "%s" "$status"\n',
     );
+    await writeFile(path.join(probeDirectory, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+    execFileSync("/bin/chmod", ["0755", path.join(probeDirectory, "curl")]);
+    execFileSync("/bin/chmod", ["0755", path.join(probeDirectory, "sleep")]);
+    const runProbe = () => {
+      execFileSync("/bin/bash", ["-ceu", confirmation], {
+        env: {
+          ...process.env,
+          PATH: `${probeDirectory}:${process.env.PATH}`,
+          PROBE_STATUSES: statusesPath,
+        },
+        stdio: "ignore",
+      });
+    };
+
+    for (const statuses of [["404"], ["200", "404"]]) {
+      await writeFile(statusesPath, `${statuses.join("\n")}\n`);
+      assert.doesNotThrow(runProbe);
+    }
+    for (const statuses of [["403"], ["EXIT"], Array(30).fill("200")]) {
+      await writeFile(statusesPath, `${statuses.join("\n")}\n`);
+      assert.throws(runProbe);
+    }
+  } finally {
+    await rm(probeDirectory, { force: true, recursive: true });
   }
-  for (const payload of [{}, { done: "false" }, { done: null }])
-    assert.throws(() =>
-      execFileSync("jq", ["-r", operationFilter], {
-        input: JSON.stringify(payload),
-        stdio: ["pipe", "ignore", "ignore"],
-      }),
-    );
 });
 
 test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
