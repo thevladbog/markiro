@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import test from "node:test";
 
 import { runPreflight } from "../../production/preflight.mjs";
@@ -6,6 +8,7 @@ import {
   deployRelease,
   runRemoteDeployment,
   runRemoteDeploymentWithReporting,
+  streamArchive,
   waitForAlbTarget,
 } from "../remote-deploy.mjs";
 
@@ -29,6 +32,40 @@ const CANDIDATE = {
   createdAt: "2026-08-05T10:20:30.000Z",
 };
 const FIRST_CANDIDATE = { ...CANDIDATE, previousTag: null };
+
+test("release transfer terminates tar when SSH exits before consuming the archive", async () => {
+  const archive = Object.assign(new EventEmitter(), {
+    exitCode: null,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    killCalled: false,
+    kill() {
+      this.killCalled = true;
+      this.exitCode = null;
+      queueMicrotask(() => this.emit("close", null));
+      return true;
+    },
+  });
+  const remote = Object.assign(new EventEmitter(), {
+    exitCode: null,
+    stderr: new PassThrough(),
+    kill() {
+      return true;
+    },
+  });
+  const children = [archive, remote];
+
+  const transfer = streamArchive(["-cf", "-"], ["host", "tar"], {
+    spawn: () => children.shift(),
+    timeoutMs: 1_000,
+  });
+  remote.exitCode = 255;
+  remote.emit("close", 255);
+
+  await assert.rejects(transfer, /private release transfer failed/);
+  assert.equal(archive.killCalled, true);
+  assert.equal(archive.stdout.destroyed, true);
+});
 
 test("ALB target gate waits for the exact application target through transitional states", async () => {
   const responses = [
@@ -535,6 +572,10 @@ function cliFixture({ candidate = CANDIDATE, failAt } = {}) {
     async streamArchive(_tar, ssh) {
       events.push("transfer immutable bundle");
       assert.ok(ssh.includes("StrictHostKeyChecking=yes"));
+      assert.ok(ssh.includes("BatchMode=yes"));
+      assert.ok(ssh.includes("ConnectTimeout=15"));
+      assert.ok(ssh.includes("ServerAliveInterval=15"));
+      assert.ok(ssh.includes("ServerAliveCountMax=2"));
       assert.equal(
         ssh.some((value) => value.includes("accept-new")),
         false,
