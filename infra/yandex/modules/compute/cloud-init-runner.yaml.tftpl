@@ -83,7 +83,8 @@ write_files:
       for _ in $(seq 1 30); do
         done_state="$(curl --fail --silent --show-error \
           --header "Authorization: Bearer $iam_token" \
-          "https://operation.api.cloud.yandex.net/operations/$operation_id" | jq -er '.done')"
+          "https://operation.api.cloud.yandex.net/operations/$operation_id" | \
+          jq -r 'if (.done | type) == "boolean" then (.done | tostring) else error("invalid operation state") end')"
         test "$done_state" = false || break
         sleep 1
       done
