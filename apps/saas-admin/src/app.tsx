@@ -1,6 +1,6 @@
 import { lazy, Suspense } from "react";
 import { useTranslation } from "react-i18next";
-import { Navigate, Route, Routes } from "react-router";
+import { createRoutesFromElements, Navigate, Outlet, Route } from "react-router";
 
 import { Spinner } from "@markiro/ui";
 
@@ -23,6 +23,17 @@ const TwoFactor = lazy(() =>
 const CatalogPage = lazy(() =>
   import("./pages/catalog/CatalogPage.js").then((module) => ({ default: module.CatalogPage })),
 );
+const TenantsPage = lazy(() =>
+  import("./pages/tenants/TenantsPage.js").then((module) => ({ default: module.TenantsPage })),
+);
+const CreateTenantPanel = lazy(() =>
+  import("./pages/tenants/CreateTenantPanel.js").then((module) => ({
+    default: module.CreateTenantPanel,
+  })),
+);
+const TenantPage = lazy(() =>
+  import("./pages/tenants/TenantPage.js").then((module) => ({ default: module.TenantPage })),
+);
 
 function RouteLoading() {
   const { t } = useTranslation();
@@ -34,22 +45,29 @@ function RouteLoading() {
   );
 }
 
-export function AppRoutes() {
+function SuspenseBoundary() {
   return (
     <Suspense fallback={<RouteLoading />}>
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/activate" element={<ActivatePlatformUser />} />
-        <Route path="/two-factor" element={<TwoFactor />} />
-        <Route path="/recovery" element={<Recovery />} />
-        <Route element={<PlatformAuthBoundary />}>
-          <Route element={<AppShell />}>
-            <Route path="/catalog" element={<CatalogPage />} />
-            <Route index element={<Navigate to="/catalog" replace />} />
-          </Route>
-        </Route>
-        <Route path="*" element={<Navigate to="/catalog" replace />} />
-      </Routes>
+      <Outlet />
     </Suspense>
   );
 }
+
+export const appRoutes = createRoutesFromElements(
+  <Route element={<SuspenseBoundary />}>
+    <Route path="/login" element={<Login />} />
+    <Route path="/activate" element={<ActivatePlatformUser />} />
+    <Route path="/two-factor" element={<TwoFactor />} />
+    <Route path="/recovery" element={<Recovery />} />
+    <Route element={<PlatformAuthBoundary />}>
+      <Route element={<AppShell />}>
+        <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/tenants" element={<TenantsPage />} />
+        <Route path="/tenants/new" element={<CreateTenantPanel />} />
+        <Route path="/tenants/:tenantId" element={<TenantPage />} />
+        <Route index element={<Navigate to="/catalog" replace />} />
+      </Route>
+    </Route>
+    <Route path="*" element={<Navigate to="/catalog" replace />} />
+  </Route>,
+);

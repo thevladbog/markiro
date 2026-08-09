@@ -81,6 +81,7 @@
     "routeLoading": "Loading section",
     "skip": "Skip to content",
     "navigation": "Platform sections",
+    "tenants": "Tenants",
     "catalog": "Catalog",
     "language": "Interface language",
     "statusLabel": "Platform status",
@@ -194,5 +195,224 @@
     "defaultConflict": "The demo plan changed. Refresh the catalog.",
     "defaultError": "Could not select the demo plan.",
     "mutationStatus": "Version operation status"
+  },
+  "tenants": {
+    "title": "Tenants",
+    "create": "Create tenant",
+    "cancel": "Cancel",
+    "loading": "Loading tenants",
+    "loadError": "Could not load tenants.",
+    "noMatches": "No tenants match these filters",
+    "noPlan": "No plan assigned",
+    "unknownPlan": "Unknown plan",
+    "version": "Version {{version}}",
+    "columns": {
+      "tenant": "Tenant",
+      "status": "Status",
+      "plan": "Plan",
+      "endsAt": "Ends",
+      "price": "Price"
+    },
+    "filters": {
+      "label": "Tenant search and status",
+      "search": "Search",
+      "status": "Subscription status",
+      "all": "All statuses",
+      "result": "Shown: {{count}}"
+    },
+    "empty": {
+      "title": "No tenants yet",
+      "hint": "Create the first tenant and send owner activation."
+    },
+    "pagination": {
+      "label": "Tenant pages",
+      "previous": "Previous",
+      "next": "Next",
+      "page": "Page {{page}} of {{pageCount}}"
+    },
+    "status": {
+      "pending_activation": "Pending activation",
+      "scheduled": "Scheduled",
+      "trial": "Trial",
+      "active": "Active",
+      "expired": "Expired",
+      "superseded": "Superseded",
+      "cancelled": "Cancelled",
+      "unmanaged": "Unmanaged"
+    },
+    "addonStatus": {
+      "active": "Active",
+      "scheduled": "Scheduled",
+      "expired": "Expired",
+      "revoked": "Revoked"
+    },
+    "sources": {
+      "demo": "Demo provisioning",
+      "manual": "Manual assignment",
+      "paid_offer_line": "Paid offer"
+    },
+    "createForm": {
+      "title": "New tenant",
+      "ownerTitle": "Organization and first owner",
+      "demoNotice": "The demo starts only after owner activation. No password is created here and no activation link is shown.",
+      "name": "Name",
+      "slug": "Slug",
+      "email": "Owner email",
+      "submit": "Create and send activation",
+      "validation": {
+        "required": "This field is required",
+        "nameTooLong": "Use no more than 300 characters",
+        "slugTooLong": "Use no more than 128 characters",
+        "slug": "Use lowercase Latin letters, digits, and hyphens only",
+        "email": "Enter a valid address"
+      }
+    },
+    "unsaved": {
+      "title": "Unsaved changes",
+      "body": "Navigating away will discard the entered assignment and reason.",
+      "continue": "Continue editing",
+      "discard": "Discard changes"
+    },
+    "detail": {
+      "back": "Back to tenants",
+      "invalidTitle": "Tenant",
+      "invalidId": "Invalid tenant identifier",
+      "loadingTitle": "Tenant",
+      "loading": "Loading tenant data",
+      "loadErrorTitle": "Tenant",
+      "loadError": "Could not load tenant data.",
+      "createdPending": "Tenant created. Owner activation is pending; the demo has not started.",
+      "pendingActivation": "Owner activation pending",
+      "overviewTitle": "Overview",
+      "slug": "Slug",
+      "createdAt": "Created",
+      "activation": {
+        "title": "Owner activation",
+        "activated": "Owner activated",
+        "missing": "Owner or activation delivery not found",
+        "renew": "Send activation again",
+        "confirmTitle": "Renew owner activation",
+        "confirmBody": "The previous delivery will be cancelled and a new one created for:",
+        "confirm": "Confirm delivery",
+        "renewed": "New activation queued",
+        "status": {
+          "queued": "Email queued",
+          "sending": "Email sending",
+          "retrying": "Delivery will retry",
+          "failed": "Delivery failed",
+          "sent": "Email sent",
+          "canceled": "Delivery cancelled",
+          "missing": "Delivery not created"
+        }
+      },
+      "subscription": {
+        "title": "Current and scheduled plans",
+        "current": "Current plan",
+        "scheduled": "Next plan",
+        "none": "No assignment",
+        "source": "Source",
+        "startsAt": "Starts",
+        "endsAt": "Ends",
+        "price": "Version price"
+      },
+      "usageTitle": "Usage and limits",
+      "featuresTitle": "Features",
+      "addons": {
+        "active": "Active add-ons",
+        "scheduled": "Scheduled add-ons",
+        "empty": "No add-ons",
+        "quantity": "Quantity: {{quantity}}"
+      },
+      "historyTitle": "Subscription history",
+      "historyEmpty": "No events yet"
+    },
+    "usage": {
+      "lines": "Lines",
+      "stations": "Stations",
+      "kiosks": "Kiosks",
+      "cabinetUsers": "Cabinet users",
+      "unlimited": "unlimited",
+      "text": "{{used}} of {{limit}}",
+      "textOver": "{{used}} of {{limit}} · over by {{over}}",
+      "textUnlimited": "{{used}} · unlimited",
+      "over": "Over limit",
+      "within": "Within limit"
+    },
+    "features": {
+      "labelEditor": "Label editor",
+      "publicApi": "Public API",
+      "pallets": "Pallets",
+      "enabled": "enabled",
+      "disabled": "disabled"
+    },
+    "assignment": {
+      "title": "Direct assignment",
+      "loading": "Loading published versions",
+      "catalogError": "Could not load assignable versions.",
+      "kind": "Operation type",
+      "plan": "Plan",
+      "addon": "Add-on",
+      "planVersion": "Plan version",
+      "addonVersion": "Add-on version",
+      "selectVersion": "Select an exact published version",
+      "policy": "Activation",
+      "immediate": "Immediately",
+      "afterCurrent": "After current plan",
+      "quantity": "Quantity",
+      "endsAt": "End date",
+      "reason": "Reason",
+      "review": "Review assignment",
+      "success": "Assignment saved",
+      "accountantNotice": "Direct assignment is unavailable. Create a commercial offer and record payment.",
+      "toOffers": "Go to offers",
+      "validation": {
+        "reason": "Enter a reason for this change",
+        "reasonLong": "Use no more than 1000 characters",
+        "version": "Select a published version",
+        "quantity": "Enter an integer from 1 to 2147483647",
+        "date": "Enter a valid date",
+        "term": "The end date must be later than the start",
+        "afterCurrent": "This policy requires a current or scheduled plan"
+      },
+      "confirm": {
+        "title": "Confirm exact assignment",
+        "submit": "Assign exact version",
+        "quantity": "Quantity: {{quantity}}",
+        "quota": "{{name}}: {{value}}",
+        "feature": "{{name}}: {{value}}",
+        "resultingQuota": "{{name}} after change: {{value}}",
+        "resultingFeature": "{{name}} after change: enabled",
+        "reason": "Reason: {{reason}}"
+      }
+    },
+    "events": {
+      "demo.activated": "Demo activated",
+      "demo.provisioned": "Demo provisioned",
+      "plan.assigned": "Plan assigned",
+      "plan.scheduled": "Plan scheduled",
+      "plan.superseded": "Plan superseded",
+      "addon.activated": "Add-on activated",
+      "addon.scheduled": "Add-on scheduled",
+      "addon.revoked": "Add-on revoked"
+    },
+    "errors": {
+      "tenant_owner_email_conflict": "This email is already linked to another owner",
+      "tenant_email_conflict": "This email is already linked to another owner",
+      "tenant_first_owner_conflict": "The slug belongs to another owner",
+      "tenant_first_member_not_owner": "The tenant's first member is not an owner",
+      "default_demo_not_configured": "Select a published default demo plan before creating a tenant",
+      "activation_delivery_sending": "The previous email is still being sent",
+      "activation_delivery_changed": "Delivery state changed. Refresh the page.",
+      "owner_already_activated": "The owner is already activated",
+      "subscription_schedule_exists": "A successor plan is already scheduled",
+      "subscription_compatible_plan_required": "No compatible plan is available for this add-on",
+      "published_catalog_version_required": "The version is no longer available for assignment",
+      "effective_at_out_of_range": "The start date is outside the allowed range",
+      "subscription_term_out_of_range": "The subscription term is outside the allowed range",
+      "addon_exceeds_subscription_term": "The add-on cannot outlive its plan",
+      "create_failed": "Could not create the tenant",
+      "renew_failed": "Could not renew activation",
+      "assignment_failed": "Could not save the assignment"
+    }
   }
 }

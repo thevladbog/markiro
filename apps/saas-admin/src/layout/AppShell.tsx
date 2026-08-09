@@ -34,8 +34,16 @@ export function AppShell() {
           </div>
         </div>
         <nav className="app-nav" aria-label={t("shell.navigation")}>
+          <NavLink to="/tenants" className={({ isActive }) => (isActive ? "active" : undefined)}>
+            <span className="nav-index" aria-hidden="true">
+              01
+            </span>
+            {t("shell.tenants")}
+          </NavLink>
           <NavLink to="/catalog" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index">01</span>
+            <span className="nav-index" aria-hidden="true">
+              02
+            </span>
             {t("shell.catalog")}
           </NavLink>
         </nav>

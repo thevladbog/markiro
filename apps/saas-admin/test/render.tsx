@@ -1,12 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderResult } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { MemoryRouter } from "react-router";
+import { createMemoryRouter, RouterProvider } from "react-router";
 import { vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
-import { AppRoutes } from "../src/app.js";
+import { appRoutes } from "../src/app.js";
 import type { PlatformPrincipal } from "../src/auth/PlatformAuthBoundary.js";
 import {
   AuthClientProvider,
@@ -97,18 +97,17 @@ export function renderSaasApp({
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  const router = createMemoryRouter(appRoutes, { initialEntries: [initialEntry] });
   return {
     state,
     queryClient,
     ...render(
       <ThemeProvider defaultTheme="light">
         <QueryClientProvider client={queryClient}>
-          <MemoryRouter initialEntries={[initialEntry]}>
-            <AuthClientProvider client={client}>
-              <AppRoutes />
-              {extra}
-            </AuthClientProvider>
-          </MemoryRouter>
+          <AuthClientProvider client={client}>
+            <RouterProvider router={router} />
+            {extra}
+          </AuthClientProvider>
         </QueryClientProvider>
       </ThemeProvider>,
     ),
@@ -140,6 +139,22 @@ export const SUPPORT_ME = {
   userId: "user-1",
   role: "support",
   capabilities: ["tenants.read", "tenants.write", "catalog.read", "audit.read"],
+  twoFactorReady: true,
+} satisfies PlatformPrincipal;
+
+export const PLATFORM_ADMIN_ME = {
+  userId: "user-1",
+  role: "platform_admin",
+  capabilities: [
+    "tenants.read",
+    "tenants.write",
+    "catalog.read",
+    "catalog.write",
+    "billing.read",
+    "billing.write",
+    "platformTeam.write",
+    "audit.read",
+  ],
   twoFactorReady: true,
 } satisfies PlatformPrincipal;
 
@@ -314,4 +329,344 @@ export function installCatalogApi({
     defaultDemoId: () => demoId,
     patchCalls: () => structuredClone(patchCalls),
   };
+}
+
+export const TENANT_ID = "81111111-1111-4111-8111-111111111111";
+
+const SCHEDULED_PLAN = {
+  ...structuredClone(PUBLISHED_PLAN),
+  id: "91111111-1111-4111-8111-111111111111",
+  catalogItemId: "a1111111-1111-4111-8111-111111111111",
+  catalogItemCode: "plan-production",
+  version: 3,
+  nameRu: "Производственный",
+  nameEn: "Production",
+  unitPrice: "45000.00",
+  plan: {
+    maxLines: 10,
+    maxStations: 12,
+    maxKiosks: 4,
+    maxCabinetUsers: 20,
+    labelEditorEnabled: true,
+    publicApiEnabled: true,
+    palletsEnabled: true,
+    demoDurationDays: null,
+  },
+} satisfies CatalogVersionDto;
+
+export const TENANT_LIST_ITEM = {
+  id: TENANT_ID,
+  name: "Первый завод",
+  slug: "first-factory",
+  createdAt: "2026-08-09T08:00:00.000Z",
+  subscriptionStatus: "trial",
+  subscription: {
+    id: "b1111111-1111-4111-8111-111111111111",
+    status: "trial",
+    startsAt: "2026-08-10T08:00:00.000Z",
+    endsAt: "2026-08-24T08:00:00.000Z",
+    planVersion: {
+      id: PUBLISHED_PLAN.id,
+      version: 1,
+      nameRu: "Базовый",
+      nameEn: "Basic",
+      unitPrice: "15000.00",
+    },
+  },
+};
+
+export const TENANT_DETAIL = {
+  tenant: {
+    id: TENANT_ID,
+    name: "Первый завод",
+    slug: "first-factory",
+    createdAt: "2026-08-09T08:00:00.000Z",
+  },
+  subscriptionStatus: "trial",
+  ownerActivation: {
+    ownerUserId: "owner-user-1",
+    ownerEmail: "owner@example.com",
+    emailVerified: true,
+    deliveryId: "c1111111-1111-4111-8111-111111111111",
+    status: "sent",
+    createdAt: "2026-08-09T08:00:00.000Z",
+    updatedAt: "2026-08-09T08:01:00.000Z",
+    terminalAt: "2026-08-09T08:01:00.000Z",
+  },
+  currentSubscription: {
+    id: "b1111111-1111-4111-8111-111111111111",
+    tenantId: TENANT_ID,
+    planVersionId: PUBLISHED_PLAN.id,
+    status: "trial",
+    startsAt: "2026-08-10T08:00:00.000Z",
+    endsAt: "2026-08-24T08:00:00.000Z",
+    source: "demo",
+    createdByPlatformUserId: null,
+    createdAt: "2026-08-09T08:00:00.000Z",
+    updatedAt: "2026-08-10T08:00:00.000Z",
+    planVersion: {
+      id: PUBLISHED_PLAN.id,
+      catalogItemId: PUBLISHED_PLAN.catalogItemId,
+      catalogItemCode: "plan-basic",
+      kind: "plan",
+      version: 1,
+      status: "published",
+      nameRu: "Базовый",
+      nameEn: "Basic",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "15000.00",
+      vatRateBps: 2000,
+      vatIncluded: true,
+      entitlements: {
+        catalogVersionId: PUBLISHED_PLAN.id,
+        catalogKind: "plan",
+        maxLines: 2,
+        maxStations: 3,
+        maxKiosks: 1,
+        maxCabinetUsers: 5,
+        labelEditorEnabled: true,
+        publicApiEnabled: false,
+        palletsEnabled: false,
+        demoDurationDays: 14,
+      },
+    },
+  },
+  scheduledSubscription: {
+    id: "d1111111-1111-4111-8111-111111111111",
+    tenantId: TENANT_ID,
+    planVersionId: SCHEDULED_PLAN.id,
+    status: "scheduled",
+    startsAt: "2026-08-24T08:00:00.000Z",
+    endsAt: null,
+    source: "manual",
+    createdByPlatformUserId: "user-1",
+    createdAt: "2026-08-11T08:00:00.000Z",
+    updatedAt: "2026-08-11T08:00:00.000Z",
+    planVersion: {
+      id: SCHEDULED_PLAN.id,
+      catalogItemId: SCHEDULED_PLAN.catalogItemId,
+      catalogItemCode: "plan-production",
+      kind: "plan",
+      version: 3,
+      status: "published",
+      nameRu: "Производственный",
+      nameEn: "Production",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "45000.00",
+      vatRateBps: 2000,
+      vatIncluded: true,
+      entitlements: {
+        catalogVersionId: SCHEDULED_PLAN.id,
+        catalogKind: "plan",
+        maxLines: 10,
+        maxStations: 12,
+        maxKiosks: 4,
+        maxCabinetUsers: 20,
+        labelEditorEnabled: true,
+        publicApiEnabled: true,
+        palletsEnabled: true,
+        demoDurationDays: null,
+      },
+    },
+  },
+  activeAddons: [
+    {
+      id: "e1111111-1111-4111-8111-111111111111",
+      subscriptionId: "b1111111-1111-4111-8111-111111111111",
+      addonVersionId: ADDON.id,
+      quantity: 1,
+      startsAt: "2026-08-11T08:00:00.000Z",
+      endsAt: "2026-08-24T08:00:00.000Z",
+      status: "active",
+      source: "manual",
+      addonVersion: {
+        id: ADDON.id,
+        catalogItemId: ADDON.catalogItemId,
+        catalogItemCode: "addon-station",
+        kind: "addon",
+        version: 1,
+        status: "published",
+        nameRu: "Дополнительная станция",
+        nameEn: "Extra station",
+        unit: "station",
+        billingMode: "recurring",
+        billingPeriod: "month",
+        unitPrice: "2500.00",
+        vatRateBps: 2000,
+        vatIncluded: true,
+        effects: [{ entitlementKey: "stations", quotaIncrement: 1, featureEnabled: false }],
+      },
+    },
+  ],
+  scheduledAddons: [
+    {
+      id: "f1111111-1111-4111-8111-111111111111",
+      subscriptionId: "d1111111-1111-4111-8111-111111111111",
+      addonVersionId: ADDON.id,
+      quantity: 2,
+      startsAt: "2026-08-24T08:00:00.000Z",
+      endsAt: null,
+      status: "scheduled",
+      source: "manual",
+      addonVersion: {
+        id: ADDON.id,
+        catalogItemId: ADDON.catalogItemId,
+        catalogItemCode: "addon-station",
+        kind: "addon",
+        version: 1,
+        status: "published",
+        nameRu: "Дополнительная станция",
+        nameEn: "Extra station",
+        unit: "station",
+        billingMode: "recurring",
+        billingPeriod: "month",
+        unitPrice: "2500.00",
+        vatRateBps: 2000,
+        vatIncluded: true,
+        effects: [{ entitlementKey: "stations", quotaIncrement: 1, featureEnabled: false }],
+      },
+    },
+  ],
+  usage: { cabinetUsers: 5, kiosks: 1, lines: 3, stations: 5 },
+  events: [
+    {
+      id: "12111111-1111-4111-8111-111111111111",
+      subscriptionId: "d1111111-1111-4111-8111-111111111111",
+      eventKind: "plan.scheduled",
+      effectiveAt: "2026-08-24T08:00:00.000Z",
+      source: "platform_manual",
+      reason: "Согласованный переход",
+      before: { status: "trial" },
+      after: { status: "scheduled" },
+      createdAt: "2026-08-11T08:00:00.000Z",
+    },
+    {
+      id: "13111111-1111-4111-8111-111111111111",
+      subscriptionId: "b1111111-1111-4111-8111-111111111111",
+      eventKind: "demo.activated",
+      effectiveAt: "2026-08-10T08:00:00.000Z",
+      source: "tenant_owner_activation",
+      reason: null,
+      before: { status: "pending_activation" },
+      after: { status: "trial" },
+      createdAt: "2026-08-10T08:00:00.000Z",
+    },
+  ],
+};
+
+interface TenantMutationCall {
+  method: string;
+  path: string;
+  body: unknown;
+}
+
+export function installTenantApi({
+  me = PLATFORM_ADMIN_ME,
+  items = [TENANT_LIST_ITEM],
+  detail = TENANT_DETAIL,
+  listStatus = 200,
+  createResponses = [],
+  renewStatus = 200,
+  assignmentStatus = 201,
+}: {
+  me?: PlatformPrincipal;
+  items?: Array<Record<string, unknown>>;
+  detail?: Record<string, unknown>;
+  listStatus?: number;
+  createResponses?: Array<{ status: number; code?: string }>;
+  renewStatus?: number;
+  assignmentStatus?: number;
+} = {}) {
+  const mutationCalls: TenantMutationCall[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      const method = init.method ?? "GET";
+      if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (url.includes("/api/platform/tenants?") && method === "GET") {
+        return listStatus === 200
+          ? jsonResponse(200, { items, page: 1, limit: 50, total: items.length })
+          : jsonResponse(listStatus, { code: "tenant_list_unavailable" });
+      }
+      if (url.endsWith("/api/platform/tenants") && method === "POST") {
+        const body = JSON.parse(String(init.body));
+        mutationCalls.push({ method, path: url, body });
+        const response = createResponses.shift() ?? { status: 201 };
+        if (response.status !== 201) {
+          return jsonResponse(response.status, { code: response.code ?? "tenant_conflict" });
+        }
+        return jsonResponse(201, {
+          tenantId: TENANT_ID,
+          userId: "owner-user-1",
+          memberId: "member-1",
+          deliveryId: "c1111111-1111-4111-8111-111111111111",
+        });
+      }
+      if (url.endsWith(`/api/platform/tenants/${TENANT_ID}`) && method === "GET") {
+        return jsonResponse(200, detail);
+      }
+      if (
+        url.endsWith(`/api/platform/tenants/${TENANT_ID}/owner-activation/renew`) &&
+        method === "POST"
+      ) {
+        mutationCalls.push({ method, path: url, body: JSON.parse(String(init.body)) });
+        return renewStatus === 200
+          ? jsonResponse(200, { deliveryId: "14111111-1111-4111-8111-111111111111" })
+          : jsonResponse(renewStatus, { code: "activation_delivery_sending" });
+      }
+      if (
+        (url.endsWith(`/api/platform/tenants/${TENANT_ID}/subscription/plan`) ||
+          url.endsWith(`/api/platform/tenants/${TENANT_ID}/subscription/addons`)) &&
+        method === "POST"
+      ) {
+        const body = JSON.parse(String(init.body));
+        mutationCalls.push({ method, path: url, body });
+        if (assignmentStatus !== 201) {
+          return jsonResponse(assignmentStatus, { code: "subscription_schedule_exists" });
+        }
+        const startsAt =
+          body.activationPolicy === "after_current"
+            ? "2026-08-24T08:00:00.000Z"
+            : "2026-08-12T08:00:00.000Z";
+        if (url.endsWith("/subscription/plan")) {
+          return jsonResponse(201, {
+            id: "15111111-1111-4111-8111-111111111111",
+            tenantId: TENANT_ID,
+            planVersionId: body.catalogVersionId,
+            status: body.activationPolicy === "after_current" ? "scheduled" : "active",
+            startsAt,
+            endsAt: body.endsAt ?? null,
+            source: "manual",
+          });
+        }
+        return jsonResponse(201, {
+          id: "15111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          subscriptionId:
+            body.activationPolicy === "after_current"
+              ? "d1111111-1111-4111-8111-111111111111"
+              : "b1111111-1111-4111-8111-111111111111",
+          addonVersionId: body.catalogVersionId,
+          quantity: body.quantity,
+          startsAt,
+          endsAt: body.endsAt ?? null,
+          status: body.activationPolicy === "after_current" ? "scheduled" : "active",
+          source: "manual",
+        });
+      }
+      if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
+        return jsonResponse(200, { items: [PUBLISHED_PLAN, SCHEDULED_PLAN, ADDON] });
+      }
+      if (url.endsWith("/api/platform/settings/demo-plan") && method === "GET") {
+        return jsonResponse(200, { catalogVersionId: PUBLISHED_PLAN.id });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }),
+  );
+  return { mutationCalls: () => structuredClone(mutationCalls) };
 }
