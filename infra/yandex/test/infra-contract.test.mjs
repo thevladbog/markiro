@@ -437,13 +437,21 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
 
   const actionRoles = terraformStringMap(iam, "terraform_production_action_roles");
   assert.deepEqual(actionRoles, expectedProductionActionRoles);
-  const resourceTypes = [
+  const allProductionResourceTypes = [
     ...new Set(
       productionResources.flatMap((source) =>
         [...source.matchAll(/^resource\s+"([^"]+)"\s+"[^"]+"\s*\{/gm)].map((match) => match[1]),
       ),
     ),
   ].sort();
+  assert.deepEqual(
+    allProductionResourceTypes.filter((resourceType) => resourceType.startsWith("terraform_")),
+    ["terraform_data"],
+    "only the app cloud-init replacement trigger may use a local Terraform resource",
+  );
+  const resourceTypes = allProductionResourceTypes.filter(
+    (resourceType) => !resourceType.startsWith("terraform_"),
+  );
   assert.deepEqual(resourceTypes, Object.keys(productionResourceActionRoles).sort());
   for (const resourceType of resourceTypes) {
     for (const action of productionResourceActionRoles[resourceType])
@@ -2968,6 +2976,121 @@ function assertRunnerBootstrapFailsObservable(cloudInit) {
   return document.runcmd[0];
 }
 
+function assertAppBootstrapFailsClosed(cloudInit, compute) {
+  const document = yaml.load(cloudInit);
+  assert.ok(document && typeof document === "object" && !Array.isArray(document));
+  assert.deepEqual(
+    document.runcmd?.slice(0, 1).map((command) => command?.slice(0, 2)),
+    [["/usr/bin/bash", "-ceu"]],
+  );
+  assert.equal(
+    document.runcmd?.length,
+    1,
+    "all app bootstrap steps must share one fail-fast shell",
+  );
+  const script = document.runcmd[0][2];
+  assert.match(
+    script,
+    /^set -o pipefail\nif test -f \/var\/lib\/markiro\/markiro-app-bootstrap-complete; then\n  exit 0\nfi\n/,
+  );
+  assert.match(
+    script,
+    /test "\$\(dpkg-query -W -f='\$\$\{Status\}\\n' ca-certificates curl iptables xz-utils \| grep -c '\^install ok installed\$'\)" -eq 4/,
+    "app bootstrap must revalidate package-stage prerequisites",
+  );
+  for (const stage of [
+    "prerequisites",
+    "container-runtime",
+    "node",
+    "unified-agent",
+    "host-keys",
+    "systemd",
+    "complete",
+  ])
+    assert.match(script, new RegExp(`MARKIRO_APP_BOOTSTRAP_STAGE ${stage}`));
+  assert.equal(
+    script.trimEnd().split("\n").at(-1),
+    "touch /var/lib/markiro/markiro-app-bootstrap-complete",
+    "the app success marker must be the final bootstrap operation",
+  );
+  assert.match(compute, /locals\s*\{[\s\S]*?app_cloud_init\s*=\s*templatefile\(/);
+  assert.match(
+    compute,
+    /resource\s+"terraform_data"\s+"app_cloud_init"\s*\{[\s\S]*?input\s*=\s*sha256\(local\.app_cloud_init\)/,
+  );
+  const app = terraformResourceBlock(compute, "yandex_compute_instance", "app");
+  assert.match(app, /user-data\s*=\s*local\.app_cloud_init/);
+  assert.match(
+    app,
+    /lifecycle\s*\{[\s\S]*?replace_triggered_by\s*=\s*\[terraform_data\.app_cloud_init\]/,
+    "cloud-init changes must replace the app VM instead of updating inert metadata",
+  );
+  return document.runcmd[0];
+}
+
+test("application bootstrap fails closed and cloud-init changes replace the VM", async () => {
+  const [cloudInit, compute] = await Promise.all([
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+  ]);
+  const [shell, flags, script] = assertAppBootstrapFailsClosed(cloudInit, compute);
+  const localShell = process.platform === "darwin" ? "/bin/bash" : shell;
+  const packageCheck = script.split("\n").find((line) => line.includes("dpkg-query -W"));
+  assert.ok(packageCheck);
+  assert.doesNotThrow(() =>
+    execFileSync(
+      localShell,
+      [
+        flags,
+        `dpkg-query() { printf '%s\\n' 'install ok installed' 'install ok installed' 'install ok installed' 'install ok installed'; }\n${packageCheck}`,
+      ],
+      { stdio: "ignore" },
+    ),
+  );
+  assert.throws(() =>
+    execFileSync(
+      localShell,
+      [
+        flags,
+        `dpkg-query() { printf '%s\\n' 'install ok installed' 'install ok installed' 'config-files ok not-installed' 'install ok installed'; }\n${packageCheck}`,
+      ],
+      { stdio: "ignore" },
+    ),
+  );
+  const probeDirectory = await mkdtemp(path.join(tmpdir(), "markiro-app-bootstrap-"));
+  try {
+    for (const failedStep of [0, 1, 2]) {
+      const marker = path.join(probeDirectory, `complete-${failedStep}`);
+      const steps = ["true", "true", "true"];
+      steps[failedStep] = "false";
+      assert.throws(() =>
+        execFileSync(localShell, [flags, `set -o pipefail\n${steps.join("\n")}\ntouch ${marker}`], {
+          stdio: "ignore",
+        }),
+      );
+      await assert.rejects(readFile(marker), { code: "ENOENT" });
+    }
+  } finally {
+    await rm(probeDirectory, { force: true, recursive: true });
+  }
+
+  assert.throws(() =>
+    assertAppBootstrapFailsClosed(
+      cloudInit.replace(
+        "test \"$(dpkg-query -W -f='$${Status}\\n' ca-certificates curl iptables xz-utils | grep -c '^install ok installed$')\" -eq 4",
+        "true",
+      ),
+      compute,
+    ),
+  );
+  assert.throws(() =>
+    assertAppBootstrapFailsClosed(
+      cloudInit,
+      compute.replace("replace_triggered_by = [terraform_data.app_cloud_init]", ""),
+    ),
+  );
+});
+
 test("runner bootstrap fails observable and powers off only after the success marker", async () => {
   const cloudInit = await readRepositoryFile(
     "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
@@ -4209,9 +4332,14 @@ test("production compute resource profiles allow exact attributes in any order",
 });
 
 function assertRuntimeNodeProvisioning(cloudInit) {
-  const nodeBlock = cloudInit.match(
-    /NODE_VERSION=24\.11\.1[\s\S]*?(?=\n  - \|\n      set -eu\n      UA_VERSION)/,
-  )?.[0];
+  const document = yaml.load(cloudInit);
+  const script = document?.runcmd?.[0]?.[2];
+  const nodeBlock =
+    typeof script === "string"
+      ? script.match(
+          /NODE_VERSION=24\.11\.1[\s\S]*?(?=\n\s*printf '%s\\n' 'MARKIRO_APP_BOOTSTRAP_STAGE unified-agent')/,
+        )?.[0]
+      : undefined;
   assert.ok(nodeBlock, "Node provisioning block is required");
   assert.match(
     nodeBlock,

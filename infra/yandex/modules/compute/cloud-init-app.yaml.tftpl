@@ -133,68 +133,84 @@ write_files:
     content: |
       MARKIRO_FOLDER_ID=${folder_id}
 runcmd:
-  - install -d -m 0755 /opt/markiro /usr/local/lib/markiro
-  - install -d -m 0700 /etc/markiro
-  - install -d -m 0750 -o root -g markiro-monitor /etc/markiro-monitor
-  - install -d -m 0700 /var/lib/markiro/monitoring /run/markiro-registry-auth
-  - chown root:root /etc/markiro /etc/markiro/runtime-secret-id
-  - chmod 0700 /etc/markiro
-  - chmod 0600 /etc/markiro/runtime-secret-id /etc/markiro/compose-contract.env
-  - chown root:markiro-monitor /etc/markiro-monitor/monitoring.conf
-  - chmod 0640 /etc/markiro-monitor/monitoring.conf
-  - /usr/local/lib/markiro/install-container-runtime
-  - |
-      set -eu
-      NODE_VERSION=24.11.1
-      NODE_ARCH=x64
-      NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8
-      test "$(uname -m)" = "x86_64"
-      test "$(dpkg --print-architecture)" = "amd64"
-      node_archive="node-v$${NODE_VERSION}-linux-$${NODE_ARCH}.tar.xz"
-      node_root="/opt/markiro/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}"
-      node_workdir="$(mktemp -d)"
-      trap 'rm -rf "$${node_workdir}"' EXIT
-      curl --fail --location --proto '=https' --tlsv1.2 --output "$${node_workdir}/$${node_archive}" "https://nodejs.org/dist/v$${NODE_VERSION}/$${node_archive}"
-      printf '%s  %s\n' "$${NODE_SHA256}" "$${node_workdir}/$${node_archive}" | sha256sum --check --status
-      tar -xJf "$${node_workdir}/$${node_archive}" -C "$${node_workdir}"
-      mv "$${node_workdir}/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}" "$${node_root}"
-      ln -sfn "$${node_root}/bin/node" /usr/bin/node
-      test "$(/usr/bin/node --version)" = "v$${NODE_VERSION}"
-  - |
-      set -eu
-      UA_VERSION=26.07.11
-      UA_SHA256=30e216b61b44eecb443942b986e44c0d83c0548a1bc6dbebb134067d678e2dc7
-      package=/tmp/yandex-unified-agent.deb
-      curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
-        "https://storage.yandexcloud.net/yc-unified-agent/releases/$${UA_VERSION}/deb/ubuntu-24.04-noble/yandex-unified-agent_$${UA_VERSION}_amd64.deb" \
-        --output "$${package}"
-      printf '%s  %s\n' "$${UA_SHA256}" "$${package}" | sha256sum --check --status
-      dpkg -i "$${package}"
-      rm -f "$${package}"
-      test "$(dpkg-query -W -f='$${Version}' yandex-unified-agent)" = "$${UA_VERSION}"
-      install -d -m 2750 -o root -g unified_agent /var/log/markiro
-      install -d -m 0750 -o unified_agent -g unified_agent /var/lib/yandex/unified_agent/markiro
-      touch /var/log/markiro/observability.log
-      chown root:unified_agent /var/log/markiro/observability.log
-      chmod 0640 /var/log/markiro/observability.log
-      chown root:unified_agent /etc/yandex/unified_agent/conf.d/markiro-logs.yml
-      chmod 0640 /etc/yandex/unified_agent/conf.d/markiro-logs.yml
-      runuser --user unified_agent -- test -r /var/log/markiro/observability.log
-      runuser --user unified_agent -- /usr/bin/unified_agent --config /etc/yandex/unified_agent/config.yml check-config > /dev/null
-  - |
-      set -eu
-      for host_key in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
-        test -s "$${host_key}"
-        read -r key_type key_value _ < "$${host_key}"
-        printf 'MARKIRO_SSH_HOST_KEY_V1 %s %s\n' "$${key_type}" "$${key_value}" > /dev/ttyS0
-      done
-  - systemctl daemon-reload
-  - systemctl enable --now docker.service
-  - /usr/bin/node /usr/local/lib/markiro/container-runtime.mjs
-  - systemctl enable --now unified-agent.service
-  - systemctl is-active --quiet unified-agent.service
-  - systemctl enable markiro-runtime-env.service
-  - systemctl enable --now markiro-readiness-observer.timer
-  - systemctl enable --now markiro-monitoring-producer.timer
-  - systemctl enable --now markiro-log-sanitizer.timer
-  - touch /var/lib/markiro/markiro-app-bootstrap-complete
+  - - /usr/bin/bash
+    - -ceu
+    - |
+        set -o pipefail
+        if test -f /var/lib/markiro/markiro-app-bootstrap-complete; then
+          exit 0
+        fi
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE prerequisites' > /dev/ttyS0
+        test "$(dpkg-query -W -f='$${Status}\n' ca-certificates curl iptables xz-utils | grep -c '^install ok installed$')" -eq 4
+        install -d -m 0755 /opt/markiro /usr/local/lib/markiro /var/lib/markiro
+        install -d -m 0700 /etc/markiro
+        install -d -m 0750 -o root -g markiro-monitor /etc/markiro-monitor
+        install -d -m 0700 /var/lib/markiro/monitoring /run/markiro-registry-auth
+        chown root:root /etc/markiro /etc/markiro/runtime-secret-id
+        chmod 0700 /etc/markiro
+        chmod 0600 /etc/markiro/runtime-secret-id /etc/markiro/compose-contract.env
+        chown root:markiro-monitor /etc/markiro-monitor/monitoring.conf
+        chmod 0640 /etc/markiro-monitor/monitoring.conf
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE container-runtime' > /dev/ttyS0
+        /usr/local/lib/markiro/install-container-runtime
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE node' > /dev/ttyS0
+        NODE_VERSION=24.11.1
+        NODE_ARCH=x64
+        NODE_SHA256=60e3b0a8500819514aca603487c254298cd776de0698d3cd08f11dba5b8289a8
+        test "$(uname -m)" = "x86_64"
+        test "$(dpkg --print-architecture)" = "amd64"
+        node_archive="node-v$${NODE_VERSION}-linux-$${NODE_ARCH}.tar.xz"
+        node_root="/opt/markiro/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}"
+        node_workdir="$(mktemp -d)"
+        trap 'rm -rf "$${node_workdir}"' EXIT
+        curl --fail --location --proto '=https' --tlsv1.2 --output "$${node_workdir}/$${node_archive}" "https://nodejs.org/dist/v$${NODE_VERSION}/$${node_archive}"
+        printf '%s  %s\n' "$${NODE_SHA256}" "$${node_workdir}/$${node_archive}" | sha256sum --check --status
+        tar -xJf "$${node_workdir}/$${node_archive}" -C "$${node_workdir}"
+        mv "$${node_workdir}/node-v$${NODE_VERSION}-linux-$${NODE_ARCH}" "$${node_root}"
+        ln -sfn "$${node_root}/bin/node" /usr/bin/node
+        test "$(/usr/bin/node --version)" = "v$${NODE_VERSION}"
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE unified-agent' > /dev/ttyS0
+        UA_VERSION=26.07.11
+        UA_SHA256=30e216b61b44eecb443942b986e44c0d83c0548a1bc6dbebb134067d678e2dc7
+        package=/tmp/yandex-unified-agent.deb
+        curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+          "https://storage.yandexcloud.net/yc-unified-agent/releases/$${UA_VERSION}/deb/ubuntu-24.04-noble/yandex-unified-agent_$${UA_VERSION}_amd64.deb" \
+          --output "$${package}"
+        printf '%s  %s\n' "$${UA_SHA256}" "$${package}" | sha256sum --check --status
+        dpkg -i "$${package}"
+        rm -f "$${package}"
+        test "$(dpkg-query -W -f='$${Version}' yandex-unified-agent)" = "$${UA_VERSION}"
+        install -d -m 2750 -o root -g unified_agent /var/log/markiro
+        install -d -m 0750 -o unified_agent -g unified_agent /var/lib/yandex/unified_agent/markiro
+        touch /var/log/markiro/observability.log
+        chown root:unified_agent /var/log/markiro/observability.log
+        chmod 0640 /var/log/markiro/observability.log
+        chown root:unified_agent /etc/yandex/unified_agent/conf.d/markiro-logs.yml
+        chmod 0640 /etc/yandex/unified_agent/conf.d/markiro-logs.yml
+        runuser --user unified_agent -- test -r /var/log/markiro/observability.log
+        runuser --user unified_agent -- /usr/bin/unified_agent --config /etc/yandex/unified_agent/config.yml check-config > /dev/null
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE host-keys' > /dev/ttyS0
+        for host_key in /etc/ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_rsa_key.pub; do
+          test -s "$${host_key}"
+          read -r key_type key_value _ < "$${host_key}"
+          printf 'MARKIRO_SSH_HOST_KEY_V1 %s %s\n' "$${key_type}" "$${key_value}" > /dev/ttyS0
+        done
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE systemd' > /dev/ttyS0
+        systemctl daemon-reload
+        systemctl enable --now docker.service
+        /usr/bin/node /usr/local/lib/markiro/container-runtime.mjs
+        systemctl enable --now unified-agent.service
+        systemctl is-active --quiet unified-agent.service
+        systemctl enable markiro-runtime-env.service
+        systemctl enable --now markiro-readiness-observer.timer
+        systemctl enable --now markiro-monitoring-producer.timer
+        systemctl enable --now markiro-log-sanitizer.timer
+
+        printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE complete' > /dev/ttyS0
+        touch /var/lib/markiro/markiro-app-bootstrap-complete
