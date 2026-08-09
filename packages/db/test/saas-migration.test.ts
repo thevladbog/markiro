@@ -365,4 +365,52 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       pool.query("DELETE FROM platform_audit_events WHERE id = $1", [auditId]),
     ).rejects.toThrow();
   });
+
+  it("keeps ordered-service facts append-only", async () => {
+    const tenantId = `service-facts-tenant-${randomUUID()}`;
+    const catalogItemId = randomUUID();
+    const versionId = randomUUID();
+    const offerId = randomUUID();
+    const lineId = randomUUID();
+    const paymentId = randomUUID();
+    const orderedServiceId = randomUUID();
+    await pool.query(
+      "INSERT INTO organization (id, name, slug, created_at) VALUES ($1, 'Service facts tenant', $2, now())",
+      [tenantId, tenantId],
+    );
+    await pool.query(
+      "INSERT INTO catalog_items (id, code, name_ru, name_en, kind) VALUES ($1, $2, 'Обучение', 'Training', 'service')",
+      [catalogItemId, `service-facts-${catalogItemId}`],
+    );
+    await pool.query(
+      "INSERT INTO catalog_item_versions (id, catalog_item_id, kind, version, status, name_ru, name_en, unit, billing_mode, unit_price, vat_included, published_at) VALUES ($1, $2, 'service', 1, 'published', 'Обучение', 'Training', 'service', 'one_time', '100.00', true, now())",
+      [versionId, catalogItemId],
+    );
+    await pool.query(
+      "INSERT INTO commercial_offers (id, tenant_id, family_id, revision, status, total) VALUES ($1, $2, $1, 1, 'draft', '100.00')",
+      [offerId, tenantId],
+    );
+    await pool.query(
+      "INSERT INTO commercial_offer_lines (id, tenant_id, offer_id, position, kind, catalog_version_id, name_ru, name_en, quantity, unit, catalog_unit_price, agreed_unit_price, vat_included, line_total) VALUES ($1, $2, $3, 1, 'service', $4, 'Обучение', 'Training', 1, 'service', '100.00', '100.00', true, '100.00')",
+      [lineId, tenantId, offerId, versionId],
+    );
+    await pool.query("UPDATE commercial_offers SET status = 'published' WHERE id = $1", [offerId]);
+    await pool.query(
+      "INSERT INTO payments (id, tenant_id, offer_id, paid_at, amount, bank_reference, platform_user_id, idempotency_key) VALUES ($1, $2, $3, now(), '100.00', 'bank-service-1', 'migration-test-admin', $4)",
+      [paymentId, tenantId, offerId, `service-payment-${paymentId}`],
+    );
+    await pool.query(
+      "INSERT INTO ordered_services (id, tenant_id, offer_line_id, payment_id, catalog_version_id, name_ru, name_en, quantity, unit, ordered_at) VALUES ($1, $2, $3, $4, $5, 'Обучение', 'Training', 1, 'service', now())",
+      [orderedServiceId, tenantId, lineId, paymentId, versionId],
+    );
+
+    await expect(
+      pool.query("UPDATE ordered_services SET status = 'in_progress' WHERE id = $1", [
+        orderedServiceId,
+      ]),
+    ).rejects.toThrow();
+    await expect(
+      pool.query("DELETE FROM ordered_services WHERE id = $1", [orderedServiceId]),
+    ).rejects.toThrow();
+  });
 });
