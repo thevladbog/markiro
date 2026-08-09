@@ -227,6 +227,12 @@ export const SERVICE = {
   service: {},
 } satisfies CatalogVersionDto;
 
+interface CatalogPatchCall {
+  method: "PATCH";
+  path: string;
+  body: unknown;
+}
+
 export function installCatalogApi({
   me = ACCOUNTANT_ME,
   items = [DRAFT_PLAN, PUBLISHED_PLAN, ADDON, SERVICE],
@@ -244,6 +250,7 @@ export function installCatalogApi({
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
   let demoId = defaultDemoId;
+  const patchCalls: CatalogPatchCall[] = [];
 
   vi.stubGlobal(
     "fetch",
@@ -286,11 +293,12 @@ export function installCatalogApi({
         );
       }
       if (match && init.method === "PATCH") {
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        patchCalls.push({ method: "PATCH", path: url, body });
         const status = saveStatuses.shift() ?? 200;
         if (status !== 200) {
           return jsonResponse(status, { code: "catalog_version_conflict" });
         }
-        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         catalog = catalog.map((item) => (item.id === match[2] ? { ...item, ...body } : item));
         return jsonResponse(
           200,
@@ -301,5 +309,9 @@ export function installCatalogApi({
     }),
   );
 
-  return { items: () => catalog, defaultDemoId: () => demoId };
+  return {
+    items: () => catalog,
+    defaultDemoId: () => demoId,
+    patchCalls: () => structuredClone(patchCalls),
+  };
 }

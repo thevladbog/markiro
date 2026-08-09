@@ -143,6 +143,7 @@ describe("commercial catalog", () => {
     expect(
       await screen.findByText("Введите целое число от 1 до 2147483647 или оставьте поле пустым"),
     ).toBeDefined();
+    expect(api.patchCalls()).toEqual([]);
     expect(api.items()[0]?.plan?.maxLines).toBe(2);
 
     await user.clear(lines);
@@ -150,6 +151,28 @@ describe("commercial catalog", () => {
     await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
 
     expect(await screen.findByText("Черновик сохранён")).toBeDefined();
+    expect(api.patchCalls()).toEqual([
+      {
+        method: "PATCH",
+        path: "/api/platform/catalog/items/plan-basic/versions/11111111-1111-4111-8111-111111111111",
+        body: {
+          nameRu: "Базовый",
+          nameEn: "Basic",
+          unit: "month",
+          unitPrice: "15000.00",
+          plan: {
+            maxLines: 2147483647,
+            maxStations: 3,
+            maxKiosks: 1,
+            maxCabinetUsers: 5,
+            demoDurationDays: 14,
+            labelEditorEnabled: true,
+            publicApiEnabled: false,
+            palletsEnabled: false,
+          },
+        },
+      },
+    ]);
     expect(api.items()[0]?.plan?.maxLines).toBe(2147483647);
   });
 
@@ -169,6 +192,7 @@ describe("commercial catalog", () => {
     await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
 
     expect(await screen.findByText("Введите целое число от 1 до 2147483647")).toBeDefined();
+    expect(api.patchCalls()).toEqual([]);
     expect(api.items()[0]?.addon?.effects).toEqual([{ key: "stations", quotaIncrement: 1 }]);
 
     await user.clear(increment);
@@ -176,6 +200,19 @@ describe("commercial catalog", () => {
     await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
 
     expect(await screen.findByText("Черновик сохранён")).toBeDefined();
+    expect(api.patchCalls()).toEqual([
+      {
+        method: "PATCH",
+        path: "/api/platform/catalog/items/addon-station/versions/41111111-1111-4111-8111-111111111111",
+        body: {
+          nameRu: "Дополнительная станция",
+          nameEn: "Extra station",
+          unit: "station",
+          unitPrice: "2500.00",
+          addon: { effects: [{ key: "stations", quotaIncrement: 2147483647 }] },
+        },
+      },
+    ]);
     expect(api.items()[0]?.addon?.effects).toEqual([
       { key: "stations", quotaIncrement: 2147483647 },
     ]);
