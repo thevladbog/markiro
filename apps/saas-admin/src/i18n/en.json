@@ -227,6 +227,10 @@
       "title": "No tenants yet",
       "hint": "Create the first tenant and send owner activation."
     },
+    "filteredEmpty": {
+      "title": "No tenants with the selected status",
+      "hint": "Choose another status to continue searching"
+    },
     "pagination": {
       "label": "Tenant pages",
       "previous": "Previous",

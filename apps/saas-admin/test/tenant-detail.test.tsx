@@ -138,6 +138,7 @@ describe("tenant subscription detail", () => {
       path: `/api/platform/tenants/${TENANT_ID}/subscription/addons`,
       body: {
         catalogVersionId: ADDON.id,
+        expectedSubscriptionId: "b1111111-1111-4111-8111-111111111111",
         quantity: 2,
         activationPolicy: "immediate",
         reason: "Две дополнительные станции",
@@ -173,6 +174,7 @@ describe("tenant subscription detail", () => {
     expect(api.mutationCalls()[0]).toMatchObject({
       body: {
         catalogVersionId: ADDON.id,
+        expectedSubscriptionId: "d1111111-1111-4111-8111-111111111111",
         activationPolicy: "after_current",
         quantity: 2,
       },

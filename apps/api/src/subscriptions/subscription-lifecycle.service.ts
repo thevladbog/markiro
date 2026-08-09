@@ -134,6 +134,10 @@ export class SubscriptionLifecycleService {
       const current = expiredCurrent ? undefined : lockedTimeline.current;
       const existingScheduled = lockedTimeline.scheduled;
 
+      if (input.activationPolicy === "after_current" && !current) {
+        throw new ConflictException({ code: "subscription_timeline_changed" });
+      }
+
       const before = current ? subscriptionSnapshot(current) : null;
       let startsAt: Date;
       let status: "active" | "scheduled";
@@ -326,13 +330,15 @@ export class SubscriptionLifecycleService {
       const timeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
       const target =
         input.activationPolicy === "after_current" ? timeline.scheduled : timeline.current;
+      if (!target || target.id !== input.expectedSubscriptionId) {
+        throw new ConflictException({ code: "subscription_addon_timeline_changed" });
+      }
       if (
-        !target ||
-        (input.activationPolicy === "immediate" &&
-          (target.status === "pending_activation" ||
-            target.startsAt === null ||
-            target.startsAt > operationAt ||
-            (target.endsAt !== null && target.endsAt <= operationAt)))
+        input.activationPolicy === "immediate" &&
+        (target.status === "pending_activation" ||
+          target.startsAt === null ||
+          target.startsAt > operationAt ||
+          (target.endsAt !== null && target.endsAt <= operationAt))
       ) {
         throw new ConflictException({ code: "subscription_compatible_plan_required" });
       }

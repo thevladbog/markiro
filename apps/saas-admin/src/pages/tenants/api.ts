@@ -262,6 +262,7 @@ export const assignPlanInputSchema = z.object({
 export type AssignPlanInput = z.infer<typeof assignPlanInputSchema>;
 
 export const assignAddonInputSchema = assignPlanInputSchema.extend({
+  expectedSubscriptionId: z.uuid(),
   quantity: z.number().int().min(1).max(POSTGRES_INTEGER_MAX),
 });
 export type AssignAddonInput = z.infer<typeof assignAddonInputSchema>;

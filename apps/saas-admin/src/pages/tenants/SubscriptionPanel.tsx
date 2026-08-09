@@ -516,7 +516,11 @@ export function SubscriptionPanel({
           id: targetSubscription.id,
           planVersion: targetSubscription.planVersion,
         },
-        addonInput: { ...common, quantity },
+        addonInput: {
+          ...common,
+          expectedSubscriptionId: targetSubscription.id,
+          quantity,
+        },
       });
     }
   });

@@ -209,10 +209,18 @@ export function TenantsPage() {
       ) : tenants.data.items.length === 0 ? (
         <Card padding={0}>
           <EmptyState
-            title={t("tenants.empty.title")}
-            hint={t("tenants.empty.hint")}
+            title={t(
+              status === "all" && tenants.data.total === 0
+                ? "tenants.empty.title"
+                : "tenants.filteredEmpty.title",
+            )}
+            hint={t(
+              status === "all" && tenants.data.total === 0
+                ? "tenants.empty.hint"
+                : "tenants.filteredEmpty.hint",
+            )}
             action={
-              canCreate ? (
+              status === "all" && tenants.data.total === 0 && canCreate ? (
                 <Button onClick={() => void navigate("/tenants/new")}>{t("tenants.create")}</Button>
               ) : null
             }

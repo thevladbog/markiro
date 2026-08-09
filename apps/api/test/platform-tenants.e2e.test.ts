@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import express from "express";
-import type { INestApplication } from "@nestjs/common";
+import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { createDb, schema, type PlatformRole } from "@markiro/db";
@@ -320,6 +320,23 @@ describe.skipIf(!ready)("platform tenant management", () => {
     return createdTenantId;
   }
 
+  async function requireSubscriptionId(
+    targetTenantId: string,
+    status: "active" | "scheduled",
+  ): Promise<string> {
+    const [subscription] = await setup.db
+      .select({ id: schema.tenantSubscriptions.id })
+      .from(schema.tenantSubscriptions)
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, targetTenantId),
+          eq(schema.tenantSubscriptions.status, status),
+        ),
+      );
+    if (!subscription) throw new Error(`Expected ${status} subscription for ${targetTenantId}`);
+    return subscription.id;
+  }
+
   async function waitForDatabaseLock(applicationName: string): Promise<void> {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
@@ -552,6 +569,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${tenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: assigned.body.id,
         quantity: 2,
         activationPolicy: "immediate",
         reason: "temporary line expansion",
@@ -569,6 +587,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${tenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: scheduled.id,
         quantity: 1,
         activationPolicy: "after_current",
         reason: "expand the scheduled successor",
@@ -586,6 +605,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${tenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: assigned.body.id,
         quantity: 1,
         activationPolicy: "immediate",
         reason: "accountant bypass",
@@ -596,6 +616,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${tenantId}/subscription/addons`)
       .send({
         catalogVersionId: draftAddonId,
+        expectedSubscriptionId: assigned.body.id,
         quantity: 1,
         activationPolicy: "immediate",
         reason: "draft must not grant access",
@@ -655,6 +676,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${otherTenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: randomUUID(),
         quantity: 1,
         activationPolicy: "immediate",
         reason: "must not use another tenant subscription",
@@ -899,6 +921,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${boundaryTenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: await requireSubscriptionId(boundaryTenantId, "active"),
         quantity: 1,
         activationPolicy: "immediate",
         effectiveAt: new Date(now - 120_000).toISOString(),
@@ -959,6 +982,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
         .post(`/platform/tenants/${boundaryTenantId}/subscription/addons`)
         .send({
           catalogVersionId: addonVersionId,
+          expectedSubscriptionId: await requireSubscriptionId(boundaryTenantId, "active"),
           quantity: 1,
           activationPolicy: "immediate",
           effectiveAt: new Date(parent.startsAt.getTime() - 60_000).toISOString(),
@@ -1015,6 +1039,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${boundaryTenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: await requireSubscriptionId(boundaryTenantId, "active"),
         quantity: 1,
         activationPolicy: "immediate",
         reason: "parent start boundary is required",
@@ -1066,6 +1091,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .post(`/platform/tenants/${clockSkewTenantId}/subscription/addons`)
       .send({
         catalogVersionId: addonVersionId,
+        expectedSubscriptionId: await requireSubscriptionId(clockSkewTenantId, "active"),
         quantity: 1,
         activationPolicy: "immediate",
         effectiveAt: futureAddonStart.toISOString(),
@@ -1078,6 +1104,221 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(new Date(addon.body.startsAt).getTime()).toBeGreaterThanOrEqual(addonRequestStartedAt);
     expect(new Date(addon.body.startsAt).getTime()).toBeLessThanOrEqual(addonCompletedAt);
   });
+
+  it("requires a confirmed subscription id for every add-on assignment", async () => {
+    const contractTenantId = await createActiveTenant("addon-parent-contract");
+
+    await admin
+      .post(`/platform/tenants/${contractTenantId}/subscription/addons`)
+      .send({
+        catalogVersionId: addonVersionId,
+        quantity: 1,
+        activationPolicy: "immediate",
+        reason: "missing parent precondition must fail validation",
+      })
+      .expect(400);
+
+    expect(
+      await setup.db
+        .select({ id: schema.subscriptionAddons.id })
+        .from(schema.subscriptionAddons)
+        .where(eq(schema.subscriptionAddons.tenantId, contractTenantId)),
+    ).toEqual([]);
+  });
+
+  it("rejects an add-on when the locked parent differs from the confirmed subscription", async () => {
+    const replacementTenantId = await createActiveTenant("addon-parent-replacement");
+    const scheduled = await admin
+      .post(`/platform/tenants/${replacementTenantId}/subscription/plan`)
+      .send({
+        catalogVersionId: scheduledPlanOneId,
+        activationPolicy: "after_current",
+        reason: "prepare replaceable successor",
+      })
+      .expect(201);
+    const expectedSubscriptionId = (scheduled.body as { id: string }).id;
+    const replacementSubscriptionId = randomUUID();
+    const beforeAddons = await setup.db
+      .select({ id: schema.subscriptionAddons.id })
+      .from(schema.subscriptionAddons)
+      .where(eq(schema.subscriptionAddons.tenantId, replacementTenantId));
+    const beforeEvents = await setup.db
+      .select({ id: schema.subscriptionEvents.id })
+      .from(schema.subscriptionEvents)
+      .where(eq(schema.subscriptionEvents.tenantId, replacementTenantId));
+    const beforeAudits = await setup.db
+      .select({ id: schema.platformAuditEvents.id })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, replacementTenantId));
+
+    const applicationName = `task6-addon-parent-${randomUUID()}`;
+    const assignmentUrl = new URL(env.DATABASE_URL);
+    assignmentUrl.searchParams.set("application_name", applicationName);
+    const assignmentConnection = createDb(assignmentUrl.toString());
+    const service = new SubscriptionLifecycleService(
+      assignmentConnection.db,
+      new PlatformAuditService(),
+    );
+    const actor: PlatformPrincipal = {
+      userId: adminId,
+      role: "platform_admin",
+      capabilities: platformCapabilitiesForRole("platform_admin"),
+      twoFactorReady: true,
+    };
+    const blocker = await setup.pool.connect();
+    let blockerOpen = false;
+    let outcome: PromiseSettledResult<unknown> | undefined;
+    try {
+      await blocker.query("begin");
+      blockerOpen = true;
+      await blocker.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `tenant-subscription:${replacementTenantId}`,
+      ]);
+      const assignmentAttempt = service.assignAddon(actor, replacementTenantId, {
+        catalogVersionId: addonVersionId,
+        expectedSubscriptionId,
+        quantity: 1,
+        activationPolicy: "after_current",
+        reason: "must remain pinned to confirmed successor",
+      });
+      await waitForDatabaseLock(applicationName);
+      await blocker.query(
+        "update tenant_subscriptions set status = 'cancelled', updated_at = now() where tenant_id = $1 and id = $2 and status = 'scheduled'",
+        [replacementTenantId, expectedSubscriptionId],
+      );
+      await blocker.query(
+        "insert into tenant_subscriptions (id, tenant_id, plan_version_id, status, starts_at, ends_at, source, created_by_platform_user_id) values ($1, $2, $3, 'scheduled', $4, $5, 'manual', $6)",
+        [
+          replacementSubscriptionId,
+          replacementTenantId,
+          scheduledPlanTwoId,
+          scheduled.body.startsAt,
+          scheduled.body.endsAt,
+          adminId,
+        ],
+      );
+      await blocker.query("commit");
+      blockerOpen = false;
+      outcome = (await Promise.allSettled([assignmentAttempt]))[0];
+    } finally {
+      if (blockerOpen) await blocker.query("rollback");
+      blocker.release();
+      await assignmentConnection.pool.end();
+    }
+
+    expect(outcome?.status).toBe("rejected");
+    if (outcome?.status !== "rejected") throw new Error("Expected parent replacement conflict");
+    expect(outcome.reason).toBeInstanceOf(ConflictException);
+    expect((outcome.reason as ConflictException).getResponse()).toEqual({
+      code: "subscription_addon_timeline_changed",
+    });
+    expect(
+      await setup.db
+        .select({ id: schema.subscriptionAddons.id })
+        .from(schema.subscriptionAddons)
+        .where(eq(schema.subscriptionAddons.tenantId, replacementTenantId)),
+    ).toEqual(beforeAddons);
+    expect(
+      await setup.db
+        .select({ id: schema.subscriptionEvents.id })
+        .from(schema.subscriptionEvents)
+        .where(eq(schema.subscriptionEvents.tenantId, replacementTenantId)),
+    ).toEqual(beforeEvents);
+    expect(
+      await setup.db
+        .select({ id: schema.platformAuditEvents.id })
+        .from(schema.platformAuditEvents)
+        .where(eq(schema.platformAuditEvents.tenantId, replacementTenantId)),
+    ).toEqual(beforeAudits);
+    expect(await requireSubscriptionId(replacementTenantId, "scheduled")).toBe(
+      replacementSubscriptionId,
+    );
+  }, 30_000);
+
+  it("rejects after-current plan assignment when the locked current term expired", async () => {
+    const expiryTenantId = await createActiveTenant("after-current-expiry-race");
+    const currentSubscriptionId = await requireSubscriptionId(expiryTenantId, "active");
+    const beforeSubscriptions = await setup.db
+      .select({ id: schema.tenantSubscriptions.id, status: schema.tenantSubscriptions.status })
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, expiryTenantId));
+    const beforeEvents = await setup.db
+      .select({ id: schema.subscriptionEvents.id })
+      .from(schema.subscriptionEvents)
+      .where(eq(schema.subscriptionEvents.tenantId, expiryTenantId));
+    const beforeAudits = await setup.db
+      .select({ id: schema.platformAuditEvents.id })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, expiryTenantId));
+
+    const applicationName = `task6-plan-expiry-${randomUUID()}`;
+    const assignmentUrl = new URL(env.DATABASE_URL);
+    assignmentUrl.searchParams.set("application_name", applicationName);
+    const assignmentConnection = createDb(assignmentUrl.toString());
+    const service = new SubscriptionLifecycleService(
+      assignmentConnection.db,
+      new PlatformAuditService(),
+    );
+    const actor: PlatformPrincipal = {
+      userId: adminId,
+      role: "platform_admin",
+      capabilities: platformCapabilitiesForRole("platform_admin"),
+      twoFactorReady: true,
+    };
+    const blocker = await setup.pool.connect();
+    let blockerOpen = false;
+    let outcome: PromiseSettledResult<unknown> | undefined;
+    try {
+      await blocker.query("begin");
+      blockerOpen = true;
+      await blocker.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `tenant-subscription:${expiryTenantId}`,
+      ]);
+      const assignmentAttempt = service.assignPlan(actor, expiryTenantId, {
+        catalogVersionId: scheduledPlanOneId,
+        activationPolicy: "after_current",
+        reason: "must not become immediate after lock wait",
+      });
+      await waitForDatabaseLock(applicationName);
+      await blocker.query(
+        "update tenant_subscriptions set starts_at = now() - interval '2 minutes', ends_at = now() - interval '1 minute', updated_at = now() where tenant_id = $1 and id = $2 and status = 'active'",
+        [expiryTenantId, currentSubscriptionId],
+      );
+      await blocker.query("commit");
+      blockerOpen = false;
+      outcome = (await Promise.allSettled([assignmentAttempt]))[0];
+    } finally {
+      if (blockerOpen) await blocker.query("rollback");
+      blocker.release();
+      await assignmentConnection.pool.end();
+    }
+
+    expect(outcome?.status).toBe("rejected");
+    if (outcome?.status !== "rejected")
+      throw new Error("Expected transaction-time expiry conflict");
+    expect(outcome.reason).toBeInstanceOf(ConflictException);
+    expect((outcome.reason as ConflictException).getResponse()).toEqual({
+      code: "subscription_timeline_changed",
+    });
+    expect(
+      await setup.db
+        .select({ id: schema.tenantSubscriptions.id, status: schema.tenantSubscriptions.status })
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, expiryTenantId)),
+    ).toEqual(beforeSubscriptions);
+    expect(
+      await setup.db
+        .select({ id: schema.subscriptionEvents.id })
+        .from(schema.subscriptionEvents)
+        .where(eq(schema.subscriptionEvents.tenantId, expiryTenantId)),
+    ).toEqual(beforeEvents);
+    expect(
+      await setup.db
+        .select({ id: schema.platformAuditEvents.id })
+        .from(schema.platformAuditEvents)
+        .where(eq(schema.platformAuditEvents.tenantId, expiryTenantId)),
+    ).toEqual(beforeAudits);
+  }, 30_000);
 
   it("captures a direct assignment timestamp only after entering the tenant timeline", async () => {
     const timestampTenantId = await createActiveTenant("assignment-time-boundary");

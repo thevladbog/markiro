@@ -89,6 +89,26 @@ describe("platform tenants", () => {
     ).toBe(true);
   });
 
+  it("keeps onboarding only for a globally empty list and explains a filtered zero result", async () => {
+    installTenantApi({ me: SUPPORT_ME, items: [], total: 0 });
+    renderSaasApp({ initialEntry: "/tenants" });
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Тенантов пока нет")).toBeDefined();
+    expect(
+      screen.getByText("Создайте первый тенант и отправьте владельцу письмо активации."),
+    ).toBeDefined();
+
+    await user.selectOptions(screen.getByLabelText("Статус подписки"), "active");
+
+    expect(await screen.findByText("Нет тенантов с выбранным статусом")).toBeDefined();
+    expect(screen.getByText("Выберите другой статус, чтобы продолжить поиск")).toBeDefined();
+    expect(screen.queryByText("Тенантов пока нет")).toBeNull();
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("status=active")),
+    ).toBe(true);
+  });
+
   it("gives the horizontally scrollable tenant table a keyboard focus target and name", async () => {
     installTenantApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/tenants" });

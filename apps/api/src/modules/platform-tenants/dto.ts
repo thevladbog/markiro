@@ -62,6 +62,7 @@ export type AssignPlanDto = z.infer<typeof assignPlanSchema>;
 export const assignAddonSchema = z
   .object({
     catalogVersionId: z.uuid(),
+    expectedSubscriptionId: z.uuid(),
     quantity: z.number().int().min(1).max(2_147_483_647),
     activationPolicy: z.enum(["immediate", "after_current"]),
     effectiveAt: timestampSchema.optional(),
