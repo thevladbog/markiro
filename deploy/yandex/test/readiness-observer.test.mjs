@@ -77,7 +77,10 @@ test("treats timeout, malformed JSON, and raw failures as required-unavailable w
 
 test("fails closed when the production Host authority is absent", async () => {
   assert.deepEqual(
-    await observeReadiness({ fetch: async () => response({ status: "ok", checks: {} }) }),
+    await observeReadiness({
+      domain: null,
+      fetch: async () => response({ status: "ok", checks: {} }),
+    }),
     {
       category: "required_unavailable",
       exitCode: 1,
