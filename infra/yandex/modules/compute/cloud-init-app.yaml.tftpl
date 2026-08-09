@@ -172,6 +172,7 @@ runcmd:
         chmod 0640 /etc/markiro-monitor/monitoring.conf
 
         printf '%s\n' 'MARKIRO_APP_BOOTSTRAP_STAGE ssh' > /dev/ttyS0
+        install -d -m 0755 /run/sshd
         /usr/sbin/sshd -t
         systemctl reload ssh.service
         passwd -S markiro-deploy | awk '$2 == "L" { locked = 1 } END { exit locked ? 0 : 1 }'

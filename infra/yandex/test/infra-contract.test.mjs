@@ -3098,6 +3098,16 @@ function assertAppBootstrapFailsClosed(cloudInit, compute) {
     /test "\$\(dpkg-query -W -f='\$\$\{Status\}\\n' ca-certificates curl iptables xz-utils \| grep -c '\^install ok installed\$'\)" -eq 4/,
     "app bootstrap must revalidate package-stage prerequisites",
   );
+  const sshRuntimeDirectory = "install -d -m 0755 /run/sshd";
+  assert.match(
+    script,
+    new RegExp(`^${sshRuntimeDirectory.replaceAll("/", "\\/")}$`, "m"),
+    "app bootstrap must create the OpenSSH runtime directory",
+  );
+  assert.ok(
+    script.indexOf(sshRuntimeDirectory) < script.indexOf("/usr/sbin/sshd -t"),
+    "the OpenSSH runtime directory must exist before sshd validates its configuration",
+  );
   for (const stage of [
     "prerequisites",
     "container-runtime",
