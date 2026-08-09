@@ -129,6 +129,58 @@ describe("commercial catalog", () => {
     expect(addonApi.items()[0]?.addon?.effects).toEqual([{ key: "stations", quotaIncrement: 1 }]);
   });
 
+  it("blocks plan quotas above the PostgreSQL integer limit and accepts the exact boundary", async () => {
+    const api = installCatalogApi({ items: [DRAFT_PLAN] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+    const lines = screen.getByLabelText("Линии");
+    await user.clear(lines);
+    await user.type(lines, "2147483648");
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+
+    expect(
+      await screen.findByText("Введите целое число от 1 до 2147483647 или оставьте поле пустым"),
+    ).toBeDefined();
+    expect(api.items()[0]?.plan?.maxLines).toBe(2);
+
+    await user.clear(lines);
+    await user.type(lines, "2147483647");
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+
+    expect(await screen.findByText("Черновик сохранён")).toBeDefined();
+    expect(api.items()[0]?.plan?.maxLines).toBe(2147483647);
+  });
+
+  it("blocks add-on increments above the PostgreSQL integer limit and accepts the boundary", async () => {
+    const draftAddon: CatalogVersionDto = { ...structuredClone(ADDON), status: "draft" };
+    const api = installCatalogApi({ items: [draftAddon] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
+    await user.click(
+      screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }),
+    );
+    const increment = screen.getByLabelText("Прибавка к квоте 1");
+    await user.clear(increment);
+    await user.type(increment, "2147483648");
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+
+    expect(await screen.findByText("Введите целое число от 1 до 2147483647")).toBeDefined();
+    expect(api.items()[0]?.addon?.effects).toEqual([{ key: "stations", quotaIncrement: 1 }]);
+
+    await user.clear(increment);
+    await user.type(increment, "2147483647");
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+
+    expect(await screen.findByText("Черновик сохранён")).toBeDefined();
+    expect(api.items()[0]?.addon?.effects).toEqual([
+      { key: "stations", quotaIncrement: 2147483647 },
+    ]);
+  });
+
   it("replaces stale save success with a localized conflict in the live status", async () => {
     installCatalogApi({ items: [DRAFT_PLAN], saveStatuses: [200, 409] });
     renderSaasApp();

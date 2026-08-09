@@ -56,9 +56,24 @@ const QUOTA_EFFECT_KEYS = new Set<AddonEffect["key"]>([
 
 const MONEY_PATTERN = /^\d{1,12}\.\d{2}$/;
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/;
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
 
 function isSafePositiveInteger(value: string): boolean {
-  return POSITIVE_INTEGER_PATTERN.test(value) && Number.isSafeInteger(Number(value));
+  const numericValue = Number(value);
+  return (
+    POSITIVE_INTEGER_PATTERN.test(value) &&
+    Number.isSafeInteger(numericValue) &&
+    numericValue <= POSTGRES_INTEGER_MAX
+  );
+}
+
+function positiveIntegerIssue(value: string, emptyAllowed: boolean): string | null {
+  if (emptyAllowed && value === "") return null;
+  if (isSafePositiveInteger(value)) return null;
+  if (POSITIVE_INTEGER_PATTERN.test(value) && Number(value) > POSTGRES_INTEGER_MAX) {
+    return emptyAllowed ? "integer32OrEmpty" : "integer32";
+  }
+  return emptyAllowed ? "positiveOrEmpty" : "positive";
 }
 
 const catalogFormSchema = z
@@ -99,8 +114,9 @@ const catalogFormSchema = z
         "demoDurationDays",
       ] as const) {
         const value = values[field];
-        if (value !== "" && !isSafePositiveInteger(value)) {
-          context.addIssue({ code: "custom", path: [field], message: "positiveOrEmpty" });
+        const issue = positiveIntegerIssue(value, true);
+        if (issue) {
+          context.addIssue({ code: "custom", path: [field], message: issue });
         }
       }
     }
@@ -118,11 +134,12 @@ const catalogFormSchema = z
           });
         }
         seen.add(effect.key);
-        if (QUOTA_EFFECT_KEYS.has(effect.key) && !isSafePositiveInteger(effect.value)) {
+        const issue = positiveIntegerIssue(effect.value, false);
+        if (QUOTA_EFFECT_KEYS.has(effect.key) && issue) {
           context.addIssue({
             code: "custom",
             path: ["addonEffects", index, "value"],
-            message: "positive",
+            message: issue,
           });
         }
       });

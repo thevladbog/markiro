@@ -145,6 +145,8 @@
       "money": "Enter an amount in 0.00 format",
       "positiveOrEmpty": "Enter a positive integer or leave the field empty",
       "positive": "Enter a positive integer",
+      "integer32OrEmpty": "Enter an integer from 1 to 2147483647 or leave the field empty",
+      "integer32": "Enter an integer from 1 to 2147483647",
       "effectRequired": "Add at least one effect",
       "effectDuplicate": "Each effect type can be added only once"
     },

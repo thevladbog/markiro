@@ -1,4 +1,4 @@
-import { cleanup, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -30,7 +30,7 @@ describe("platform authentication", () => {
         return jsonResponse(200, { twoFactorEnrollmentRequired: true });
       }),
     );
-    renderSaasApp({ initialEntry: "/activate", state: authState() });
+    const activation = renderSaasApp({ initialEntry: "/activate", state: authState() });
 
     await waitFor(() => expect(window.location.hash).toBe(""));
     expect(window.location.pathname).toBe("/activate");
@@ -49,6 +49,25 @@ describe("platform authentication", () => {
         body: { token: activationToken, password: "correct horse battery staple" },
       },
     ]);
+
+    activation.unmount();
+    renderSaasApp({ initialEntry: "/activate", state: authState() });
+    await user.type(await screen.findByLabelText("Новый пароль"), "second submission password");
+    await user.type(screen.getByLabelText("Повторите пароль"), "second submission password");
+    const retryButton = await screen.findByRole("button", { name: "Активировать доступ" });
+    const retryForm = retryButton.closest("form");
+    expect((retryButton as HTMLButtonElement).disabled).toBe(true);
+    expect(retryForm).not.toBeNull();
+    if (!retryForm) throw new Error("Activation form was not rendered");
+    fireEvent.submit(retryForm);
+
+    expect(
+      await screen.findByText(
+        "Активация недоступна. Запросите новую ссылку у администратора платформы.",
+      ),
+    ).toBeDefined();
+    expect(window.location.hash).toBe("");
+    expect(requests).toHaveLength(1);
   });
 
   it("routes a password sign-in that needs 2FA to the TOTP challenge", async () => {
