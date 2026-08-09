@@ -7,7 +7,7 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { schema, type Db, type PlatformRole } from "@markiro/db";
 import { z } from "zod";
@@ -184,7 +184,12 @@ export class PlatformActivationService {
       const deliveries = await tx
         .select({ id: schema.emailDeliveries.id, status: schema.emailDeliveries.status })
         .from(schema.emailDeliveries)
-        .where(eq(schema.emailDeliveries.sourceId, sourceId))
+        .where(
+          and(
+            eq(schema.emailDeliveries.sourceId, sourceId),
+            eq(schema.emailDeliveries.platformUserId, input.userId),
+          ),
+        )
         .orderBy(desc(schema.emailDeliveries.createdAt), desc(schema.emailDeliveries.id));
       for (const delivery of deliveries) {
         const lock = await tx.execute(
@@ -273,33 +278,79 @@ export class PlatformActivationService {
     input: { password: string },
   ): Promise<{ twoFactorEnrollmentRequired: true }> {
     if (token.length < 16 || token.length > 512) {
+      await this.db.transaction((tx) =>
+        this.recordCompletionDenial(tx, {
+          targetId: null,
+          reason: "malformed_token",
+          before: null,
+        }),
+      );
       throw new NotFoundException({ code: "activation_unavailable" });
     }
     const password = passwordSchema.parse(input.password);
     const identifier = activationIdentifier(token);
-    await this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`platform-activation:${identifier}`}, 0))`,
       );
-      const [verification] = await tx
-        .select({ value: schema.platformVerifications.value })
+      const [initialVerification] = await tx
+        .select({
+          value: schema.platformVerifications.value,
+          expiresAt: schema.platformVerifications.expiresAt,
+        })
         .from(schema.platformVerifications)
-        .where(
-          and(
-            eq(schema.platformVerifications.identifier, identifier),
-            gt(schema.platformVerifications.expiresAt, this.now()),
-          ),
-        )
+        .where(eq(schema.platformVerifications.identifier, identifier))
         .limit(1);
-      if (!verification) throw new NotFoundException({ code: "activation_unavailable" });
-      const userId = parseActivationSubject(verification.value);
+      const initialUserId = initialVerification
+        ? parseActivationSubject(initialVerification.value)
+        : null;
+      if (!initialVerification || initialVerification.expiresAt <= this.now() || !initialUserId) {
+        await this.recordCompletionDenial(tx, {
+          targetId: initialUserId,
+          reason: "activation_unavailable",
+          before: null,
+        });
+        return { kind: "denied", code: "activation_unavailable" } as const;
+      }
+
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`platform-user:${initialUserId}`}, 0))`,
+      );
+      const [verification] = await tx
+        .select({
+          value: schema.platformVerifications.value,
+          expiresAt: schema.platformVerifications.expiresAt,
+        })
+        .from(schema.platformVerifications)
+        .where(eq(schema.platformVerifications.identifier, identifier))
+        .limit(1);
+      const reloadedUserId = verification ? parseActivationSubject(verification.value) : null;
+      if (
+        !verification ||
+        verification.expiresAt <= this.now() ||
+        reloadedUserId !== initialUserId
+      ) {
+        await this.recordCompletionDenial(tx, {
+          targetId: initialUserId,
+          reason: "activation_unavailable",
+          before: null,
+        });
+        return { kind: "denied", code: "activation_unavailable" } as const;
+      }
+
+      const userId = initialUserId;
       const [user] = await tx
         .select({ status: schema.platformUsers.status })
         .from(schema.platformUsers)
         .where(eq(schema.platformUsers.id, userId))
         .limit(1);
       if (!user || user.status !== "invited") {
-        throw new NotFoundException({ code: "activation_unavailable" });
+        await this.recordCompletionDenial(tx, {
+          targetId: userId,
+          reason: "platform_user_not_invited",
+          before: user ? { status: user.status } : null,
+        });
+        return { kind: "denied", code: "activation_unavailable" } as const;
       }
       const [account] = await tx
         .select({ id: schema.platformAccounts.id, password: schema.platformAccounts.password })
@@ -311,8 +362,33 @@ export class PlatformActivationService {
           ),
         )
         .limit(1);
-      if (account?.password) throw new BadRequestException({ code: "existing_credential" });
+      if (account?.password) {
+        await this.recordCompletionDenial(tx, {
+          targetId: userId,
+          reason: "existing_credential",
+          before: { status: user.status },
+        });
+        return { kind: "denied", code: "existing_credential" } as const;
+      }
       const passwordHash = await hashCredentialPassword(password);
+      const activated = await tx
+        .update(schema.platformUsers)
+        .set({
+          status: "active",
+          emailVerified: true,
+          twoFactorEnabled: false,
+          updatedAt: this.now(),
+        })
+        .where(and(eq(schema.platformUsers.id, userId), eq(schema.platformUsers.status, "invited")))
+        .returning({ id: schema.platformUsers.id });
+      if (activated.length !== 1) {
+        await this.recordCompletionDenial(tx, {
+          targetId: userId,
+          reason: "platform_user_not_invited",
+          before: { status: user.status },
+        });
+        return { kind: "denied", code: "activation_unavailable" } as const;
+      }
       if (account) {
         await tx
           .update(schema.platformAccounts)
@@ -330,15 +406,6 @@ export class PlatformActivationService {
         });
       }
       await tx
-        .update(schema.platformUsers)
-        .set({
-          status: "active",
-          emailVerified: true,
-          twoFactorEnabled: false,
-          updatedAt: this.now(),
-        })
-        .where(eq(schema.platformUsers.id, userId));
-      await tx
         .delete(schema.platformVerifications)
         .where(eq(schema.platformVerifications.identifier, identifier));
       await this.audit.record(tx, {
@@ -354,8 +421,34 @@ export class PlatformActivationService {
         after: { status: "active", twoFactorEnrollmentRequired: true },
         requestId: null,
       });
+      return { kind: "success" } as const;
     });
+    if (result.kind === "denied") {
+      if (result.code === "existing_credential") {
+        throw new BadRequestException({ code: result.code });
+      }
+      throw new NotFoundException({ code: "activation_unavailable" });
+    }
     return { twoFactorEnrollmentRequired: true };
+  }
+
+  private async recordCompletionDenial(
+    tx: Parameters<Parameters<Db["transaction"]>[0]>[0],
+    input: { targetId: string | null; reason: string; before: unknown },
+  ): Promise<void> {
+    await this.audit.record(tx, {
+      actorPlatformUserId: null,
+      actorRole: null,
+      action: "platform.activation.denied",
+      outcome: "denied",
+      tenantId: null,
+      targetType: "platform_user",
+      targetId: input.targetId,
+      reason: input.reason,
+      before: input.before,
+      after: null,
+      requestId: null,
+    });
   }
 
   private async issueInTransaction(
@@ -401,12 +494,12 @@ function activationSourceId(userId: string): string {
   return `platform-activation:${userId}`;
 }
 
-function parseActivationSubject(value: string): string {
+function parseActivationSubject(value: string): string | null {
   try {
     const parsed = JSON.parse(value) as { userId?: unknown };
     if (typeof parsed.userId === "string") return parsed.userId;
   } catch {
     // The public error intentionally matches an unknown or expired token.
   }
-  throw new NotFoundException({ code: "activation_unavailable" });
+  return null;
 }

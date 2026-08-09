@@ -1,8 +1,9 @@
-import { ForbiddenException, type ExecutionContext } from "@nestjs/common";
+import { ForbiddenException, SetMetadata, type ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import { schema, type PlatformRole } from "@markiro/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  PLATFORM_ACCESS_POLICY,
   RequirePlatformCapabilities,
   type PlatformCapability,
 } from "../src/platform-auth/platform-access-policy";
@@ -17,10 +18,14 @@ class PlatformPolicyController {
 
   @RequirePlatformCapabilities("billing.write")
   recordPayment(): void {}
+
+  @SetMetadata(PLATFORM_ACCESS_POLICY, { mode: "public-token" })
+  completeActivation(): void {}
 }
 
 interface FakeRequest {
   headers: Record<string, string>;
+  path?: string;
   authKind?: "session" | "station";
   platformPrincipal?: unknown;
 }
@@ -36,6 +41,7 @@ function contextFor(request: FakeRequest, handler: () => void): ExecutionContext
 const unclassifiedHandler = PlatformPolicyController.prototype.unclassified;
 const createTenantHandler = PlatformPolicyController.prototype.createTenant;
 const recordPaymentHandler = PlatformPolicyController.prototype.recordPayment;
+const completeActivationHandler = PlatformPolicyController.prototype.completeActivation;
 
 function platformSession(userId: string) {
   return {
@@ -141,6 +147,27 @@ describe("PlatformAuthGuard", () => {
       reason: "missing_policy",
       required: [],
     });
+  });
+
+  it("does not apply the platform guard to non-platform routes", async () => {
+    await expect(
+      guard.canActivate(contextFor({ headers: {}, path: "/health" }, unclassifiedHandler)),
+    ).resolves.toBe(true);
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(auth.api.getSession).not.toHaveBeenCalled();
+  });
+
+  it("allows an explicitly classified public token route without a session", async () => {
+    await expect(
+      guard.canActivate(
+        contextFor(
+          { headers: {}, path: "/platform/activation/complete" },
+          completeActivationHandler,
+        ),
+      ),
+    ).resolves.toBe(true);
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(auth.api.getSession).not.toHaveBeenCalled();
   });
 
   it("rejects a customer session without consulting the platform session namespace", async () => {

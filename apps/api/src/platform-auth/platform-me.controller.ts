@@ -1,9 +1,8 @@
-import { Controller, Get, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Req } from "@nestjs/common";
 import { RequirePlatformCapabilities } from "./platform-access-policy";
-import { PlatformAuthGuard, type RequestWithPlatformPrincipal } from "./platform-auth.guard";
+import type { RequestWithPlatformPrincipal } from "./platform-auth.guard";
 
 @Controller("platform")
-@UseGuards(PlatformAuthGuard)
 export class PlatformMeController {
   @Get("me")
   @RequirePlatformCapabilities()

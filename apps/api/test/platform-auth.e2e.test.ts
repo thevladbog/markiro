@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import express from "express";
-import { type INestApplication } from "@nestjs/common";
+import { Controller, Get, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { schema } from "@markiro/db";
 import { eq } from "drizzle-orm";
@@ -16,6 +16,14 @@ import {
   type PlatformAuthSetup,
 } from "../src/platform-auth/platform-auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
+
+@Controller("platform/unclassified-test")
+class UnclassifiedPlatformController {
+  @Get()
+  read() {
+    return { exposed: true };
+  }
+}
 
 const ready = Boolean(
   process.env.DATABASE_URL &&
@@ -86,6 +94,7 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
           env,
         }),
       ],
+      controllers: [UnclassifiedPlatformController],
     }).compile();
 
     app = ref.createNestApplication({ bodyParser: false });
@@ -139,6 +148,40 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
       .get("/platform/me")
       .set("Cookie", customerCookie)
       .expect(401);
+  });
+
+  it("rejects an unclassified platform controller through the module boundary", async () => {
+    await request(app!.getHttpServer()).get("/platform/unclassified-test").expect(403);
+  });
+
+  it("keeps token activation explicitly public while auditing an unavailable token", async () => {
+    const response = await request(app!.getHttpServer())
+      .post("/platform/activation/complete")
+      .send({
+        token: randomBytes(24).toString("base64url"),
+        password: randomBytes(24).toString("base64url"),
+      })
+      .expect(404);
+    expect(response.headers["set-cookie"]).toBeUndefined();
+
+    const [denial] = await setup.db
+      .select({
+        action: schema.platformAuditEvents.action,
+        outcome: schema.platformAuditEvents.outcome,
+        reason: schema.platformAuditEvents.reason,
+        before: schema.platformAuditEvents.before,
+        after: schema.platformAuditEvents.after,
+      })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.action, "platform.activation.denied"))
+      .orderBy(schema.platformAuditEvents.createdAt);
+    expect(denial).toEqual({
+      action: "platform.activation.denied",
+      outcome: "denied",
+      reason: "activation_unavailable",
+      before: null,
+      after: null,
+    });
   });
 
   it("requires verified platform TOTP before returning the platform principal", async () => {
@@ -242,6 +285,13 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
         tenantId,
         targetType: "tenant",
         targetId: tenantId,
+        after: {
+          status: "active",
+          amount: "support-must-not-see-amount",
+          price: "support-must-not-see-price",
+          offer: { name: "support-must-not-see-offer" },
+          payment: { state: "support-must-not-see-payment" },
+        },
       },
       {
         actorPlatformUserId: platformUserId,
@@ -277,6 +327,10 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
         item.action.startsWith("platform.tenant."),
       ),
     ).toBe(true);
+    const supportTenantEvent = support.body.items.find(
+      (item: { targetId: string }) => item.targetId === tenantId,
+    );
+    expect(supportTenantEvent.after).toEqual({ status: "active" });
 
     await setup.db
       .update(schema.platformUsers)
@@ -302,6 +356,21 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
       .update(schema.platformUsers)
       .set({ role: "platform_admin" })
       .where(eq(schema.platformUsers.id, platformUserId));
+    const administratorTenant = await request(app!.getHttpServer())
+      .get(`/platform/audit?action=platform.tenant.created&tenantId=${tenantId}&limit=10`)
+      .set("Cookie", platformCookie)
+      .expect(200);
+    expect(administratorTenant.body.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          targetId: tenantId,
+          after: expect.objectContaining({
+            amount: "support-must-not-see-amount",
+            price: "support-must-not-see-price",
+          }),
+        }),
+      ]),
+    );
     const administrator = await request(app!.getHttpServer())
       .get("/platform/audit?action=platform.team.role_changed&limit=10")
       .set("Cookie", platformCookie)

@@ -1,6 +1,7 @@
 import { Body, Controller, Post } from "@nestjs/common";
 import { z } from "zod";
 import { ZodValidationPipe } from "../zod.pipe";
+import { AllowPublicPlatformToken } from "./platform-access-policy";
 import { PlatformActivationService } from "./platform-activation.service";
 
 const completeActivationSchema = z.object({
@@ -14,6 +15,7 @@ export class PlatformActivationController {
   constructor(private readonly activation: PlatformActivationService) {}
 
   @Post("complete")
+  @AllowPublicPlatformToken()
   complete(@Body(new ZodValidationPipe(completeActivationSchema)) body: CompleteActivationInput) {
     return this.activation.complete(body.token, { password: body.password });
   }

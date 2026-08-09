@@ -46,6 +46,20 @@ describe("platformAllowedOrigins", () => {
     expect(() => loadEnv({ ...BASE, PLATFORM_AUTH_SECRET: "short" })).toThrow();
     expect(() => loadEnv({ ...BASE, PLATFORM_AUTH_SECRET: undefined })).toThrow();
   });
+
+  it("rejects a platform secret shared with customer authentication", () => {
+    expect(() => loadEnv({ ...BASE, BETTER_AUTH_SECRET: BASE.PLATFORM_AUTH_SECRET })).toThrow();
+  });
+
+  it("rejects customer and platform applications that canonicalize to one origin", () => {
+    expect(() =>
+      loadEnv({
+        ...BASE,
+        ADMIN_ORIGIN: "https://shared.example.ru/customer",
+        SAAS_ADMIN_ORIGIN: "https://SHARED.example.ru/platform?source=test",
+      }),
+    ).toThrow();
+  });
 });
 
 describe("kioskAllowedOrigins", () => {

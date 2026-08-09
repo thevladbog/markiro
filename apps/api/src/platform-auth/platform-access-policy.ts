@@ -42,12 +42,25 @@ const PLATFORM_ROLE_CAPABILITIES = {
   ],
 } as const satisfies Record<PlatformRole, readonly PlatformCapability[]>;
 
-export interface PlatformAccessPolicy {
+export interface PlatformCapabilityPolicy {
+  mode: "capabilities";
   capabilities: readonly PlatformCapability[];
 }
 
+export interface PlatformPublicTokenPolicy {
+  mode: "public-token";
+}
+
+export type PlatformAccessPolicy = PlatformCapabilityPolicy | PlatformPublicTokenPolicy;
+
 export const RequirePlatformCapabilities = (...capabilities: PlatformCapability[]) =>
-  SetMetadata(PLATFORM_ACCESS_POLICY, { capabilities } satisfies PlatformAccessPolicy);
+  SetMetadata(PLATFORM_ACCESS_POLICY, {
+    mode: "capabilities",
+    capabilities,
+  } satisfies PlatformCapabilityPolicy);
+
+export const AllowPublicPlatformToken = () =>
+  SetMetadata(PLATFORM_ACCESS_POLICY, { mode: "public-token" } satisfies PlatformPublicTokenPolicy);
 
 export function platformCapabilitiesForRole(role: PlatformRole): readonly PlatformCapability[] {
   return PLATFORM_ROLE_CAPABILITIES[role];

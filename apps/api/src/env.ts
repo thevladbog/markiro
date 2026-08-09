@@ -172,6 +172,20 @@ const EnvSchema = z
     S3_FORCE_PATH_STYLE: explicitBooleanSchema,
   })
   .superRefine((env, ctx) => {
+    if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["PLATFORM_AUTH_SECRET"],
+        message: "must differ from BETTER_AUTH_SECRET",
+      });
+    }
+    if (env.SAAS_ADMIN_ORIGIN === env.ADMIN_ORIGIN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SAAS_ADMIN_ORIGIN"],
+        message: "must differ from ADMIN_ORIGIN",
+      });
+    }
     if (env.SMTP_PORT === 465 && env.SMTP_SECURE === false) {
       ctx.addIssue({
         code: "custom",

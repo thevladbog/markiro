@@ -43,8 +43,10 @@ export class PlatformAuthGuard implements CanActivate {
       context.getHandler(),
       context.getClass(),
     ]);
+    if (typeof request.path === "string" && !isPlatformPath(request.path)) return true;
     const targetId = `${context.getClass().name}.${context.getHandler().name}`;
-    const required = policy?.capabilities ?? [];
+    if (policy?.mode === "public-token") return true;
+    const required = policy?.mode === "capabilities" ? policy.capabilities : [];
     if (!policy) {
       return this.deny(request, targetId, "missing_policy", required, null, null);
     }
@@ -142,4 +144,9 @@ export class PlatformAuthGuard implements CanActivate {
       }),
     );
   }
+}
+
+function isPlatformPath(path: string): boolean {
+  const normalized = path.toLowerCase();
+  return normalized === "/platform" || normalized.startsWith("/platform/");
 }

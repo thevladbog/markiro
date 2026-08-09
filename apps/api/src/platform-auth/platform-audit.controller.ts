@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, Query, Req } from "@nestjs/common";
 import { and, desc, eq, gte, like, lte, or } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { z } from "zod";
@@ -6,8 +6,8 @@ import { DB } from "../auth/auth.module";
 import { Inject } from "@nestjs/common";
 import { ZodValidationPipe } from "../zod.pipe";
 import { RequirePlatformCapabilities } from "./platform-access-policy";
-import { PlatformAuthGuard, type RequestWithPlatformPrincipal } from "./platform-auth.guard";
-import { sanitizeAuditMetadata } from "./platform-audit.service";
+import type { RequestWithPlatformPrincipal } from "./platform-auth.guard";
+import { sanitizeAuditMetadata, sanitizeSupportAuditMetadata } from "./platform-audit.service";
 
 const auditQuerySchema = z.object({
   tenantId: z.string().trim().min(1).max(128).optional(),
@@ -34,7 +34,6 @@ const auditQuerySchema = z.object({
 type AuditQuery = z.infer<typeof auditQuerySchema>;
 
 @Controller("platform/audit")
-@UseGuards(PlatformAuthGuard)
 @RequirePlatformCapabilities("audit.read")
 export class PlatformAuditController {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -44,6 +43,10 @@ export class PlatformAuditController {
     @Req() request: RequestWithPlatformPrincipal,
     @Query(new ZodValidationPipe(auditQuerySchema)) query: AuditQuery,
   ) {
+    const sanitizeResponseMetadata =
+      request.platformPrincipal!.role === "support"
+        ? sanitizeSupportAuditMetadata
+        : sanitizeAuditMetadata;
     const roleFilter =
       request.platformPrincipal!.role === "support"
         ? or(
@@ -82,8 +85,8 @@ export class PlatformAuditController {
     return {
       items: rows.map((row) => ({
         ...row,
-        before: sanitizeAuditMetadata(row.before),
-        after: sanitizeAuditMetadata(row.after),
+        before: sanitizeResponseMetadata(row.before),
+        after: sanitizeResponseMetadata(row.after),
       })),
       nextOffset: rows.length === query.limit ? query.offset + query.limit : null,
     };

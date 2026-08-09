@@ -1,4 +1,5 @@
 import { Global, Module, type DynamicModule } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import type { PlatformAuth } from "@markiro/db";
 import { PlatformAuthGuard } from "./platform-auth.guard";
 import { PlatformAuditService } from "./platform-audit.service";
@@ -30,6 +31,7 @@ export class PlatformAuthModule {
       providers: [
         { provide: PLATFORM_AUTH, useValue: auth },
         PlatformAuthGuard,
+        { provide: APP_GUARD, useExisting: PlatformAuthGuard },
         PlatformAuditService,
         PlatformActivationService,
         PlatformTeamService,

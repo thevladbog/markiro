@@ -1,9 +1,9 @@
-import { Body, Controller, Get, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Req } from "@nestjs/common";
 import { PLATFORM_ROLES } from "@markiro/db";
 import { z } from "zod";
 import { ZodValidationPipe } from "../zod.pipe";
 import { RequirePlatformCapabilities } from "./platform-access-policy";
-import { PlatformAuthGuard, type RequestWithPlatformPrincipal } from "./platform-auth.guard";
+import type { RequestWithPlatformPrincipal } from "./platform-auth.guard";
 import { PlatformTeamService } from "./platform-team.service";
 
 const roleSchema = z.enum(PLATFORM_ROLES);
@@ -18,7 +18,6 @@ const inviteSchema = z.object({
 const roleChangeSchema = z.object({ role: roleSchema });
 
 @Controller("platform/team")
-@UseGuards(PlatformAuthGuard)
 @RequirePlatformCapabilities("platformTeam.write")
 export class PlatformTeamController {
   constructor(private readonly team: PlatformTeamService) {}

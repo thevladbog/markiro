@@ -19,6 +19,7 @@ export type PlatformAuditTransaction = Pick<Db, "insert">;
 
 const SECRET_KEY_PATTERN =
   /(password|secret|token|session|cookie|authorization|credential|backup.?codes?)/i;
+const FINANCIAL_KEY_PATTERN = /(amount|price|offer|payment|billing|currency|cost|invoice|tax)/i;
 const MAX_METADATA_DEPTH = 4;
 const MAX_METADATA_KEYS = 50;
 const MAX_METADATA_ARRAY_ITEMS = 50;
@@ -44,20 +45,30 @@ export class PlatformAuditService {
 }
 
 export function sanitizeAuditMetadata(value: unknown, depth = 0): unknown {
+  return sanitizeMetadata(value, depth, false);
+}
+
+export function sanitizeSupportAuditMetadata(value: unknown): unknown {
+  return sanitizeMetadata(value, 0, true);
+}
+
+function sanitizeMetadata(value: unknown, depth: number, redactFinancial: boolean): unknown {
   if (value === null || typeof value === "boolean" || typeof value === "number") return value;
   if (typeof value === "string") return value.slice(0, MAX_METADATA_STRING_LENGTH);
   if (depth >= MAX_METADATA_DEPTH) return "[truncated]";
   if (Array.isArray(value)) {
     return value
       .slice(0, MAX_METADATA_ARRAY_ITEMS)
-      .map((item) => sanitizeAuditMetadata(item, depth + 1));
+      .map((item) => sanitizeMetadata(item, depth + 1, redactFinancial));
   }
   if (typeof value !== "object") return null;
 
   const sanitized: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value).slice(0, MAX_METADATA_KEYS)) {
-    if (SECRET_KEY_PATTERN.test(key)) continue;
-    sanitized[key] = sanitizeAuditMetadata(item, depth + 1);
+    if (SECRET_KEY_PATTERN.test(key) || (redactFinancial && FINANCIAL_KEY_PATTERN.test(key))) {
+      continue;
+    }
+    sanitized[key] = sanitizeMetadata(item, depth + 1, redactFinancial);
   }
   return sanitized;
 }
