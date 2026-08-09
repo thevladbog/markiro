@@ -4,7 +4,6 @@ output "service_account_ids" {
     terraform             = yandex_iam_service_account.terraform.id
     state                 = yandex_iam_service_account.state.id
     app                   = yandex_iam_service_account.app.id
-    runner                = yandex_iam_service_account.runner.id
     deployment_controller = yandex_iam_service_account.deployment_controller.id
     audit                 = yandex_iam_service_account.audit.id
   }

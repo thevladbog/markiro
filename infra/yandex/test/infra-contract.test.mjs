@@ -394,7 +394,6 @@ const expectedProductionActionRoles = {
 
 const expectedEncryptedResourceKeyDependencies = {
   "yandex_compute_instance.app": "kms.keys.user",
-  "yandex_compute_instance.runner": "kms.keys.user",
   "yandex_mdb_postgresql_cluster.production": "kms.keys.user",
 };
 
@@ -408,7 +407,6 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     "app",
     "audit",
     "deployment_controller",
-    "runner",
     "state",
     "terraform",
   ]);
@@ -425,8 +423,13 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.equal(
     (iam.match(/resource\s+"yandex_iam_workload_identity_federated_credential"\s+/g) ?? []).length,
-    3,
-    "exact production-controller, production-cleanup, and infrastructure credentials are required",
+    2,
+    "exact production-deploy and infrastructure credentials are required",
+  );
+  assert.doesNotMatch(
+    bootstrap,
+    /resource\s+"yandex_kms_symmetric_key_iam_member"\s+"[^"]*runner[^"]*"/,
+    "retired runner resources must not retain KMS grants",
   );
 
   assert.doesNotMatch(
@@ -468,7 +471,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     terraformServiceAccountUser,
-    /for_each\s*=\s*\{\s*app\s*=\s*yandex_iam_service_account\.app\.id\s*runner\s*=\s*yandex_iam_service_account\.runner\.id\s*audit\s*=\s*yandex_iam_service_account\.audit\.id,?\s*\}/,
+    /for_each\s*=\s*\{\s*app\s*=\s*yandex_iam_service_account\.app\.id\s*audit\s*=\s*yandex_iam_service_account\.audit\.id,?\s*\}/,
   );
   assert.match(terraformServiceAccountUser, /service_account_id\s*=\s*each\.value/);
   const terraformServiceAccountViewer = terraformResourceBlock(
@@ -506,10 +509,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     Object.keys(expectedEncryptedResourceKeyDependencies).sort(),
   );
 
-  for (const [name, serviceAccount] of [
-    ["terraform_key_user", "terraform"],
-    ["deployment_controller_runner_key_user", "deployment_controller"],
-  ]) {
+  for (const [name, serviceAccount] of [["terraform_key_user", "terraform"]]) {
     const grant = terraformResourceBlock(bootstrap, "yandex_kms_symmetric_key_iam_member", name);
     assert.match(grant, /symmetric_key_id\s*=\s*var\.kms_key_id/);
     assert.match(grant, /role\s*=\s*"kms\.keys\.user"/);
@@ -555,11 +555,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     variables,
-    /variable\s+"github_controller_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_controller_environment\s*==\s*"production-controller"/,
-  );
-  assert.match(
-    variables,
-    /variable\s+"github_cleanup_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_cleanup_environment\s*==\s*"production-cleanup"/,
+    /variable\s+"github_deploy_environment"\s*\{[\s\S]*?condition\s*=\s*var\.github_deploy_environment\s*==\s*"production-deploy"/,
   );
   assert.match(
     variables,
@@ -567,11 +563,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     iam,
-    /github_controller_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_controller_environment\}"/,
-  );
-  assert.match(
-    iam,
-    /github_cleanup_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_cleanup_environment\}"/,
+    /github_deploy_subject\s*=\s*"repo:\$\{local\.github_repository_subject\}:environment:\$\{var\.github_deploy_environment\}"/,
   );
   assert.match(
     iam,
@@ -598,7 +590,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   const credential = terraformResourceBlock(
     iam,
     "yandex_iam_workload_identity_federated_credential",
-    "github_production_controller",
+    "github_deploy",
   );
   assert.match(
     credential,
@@ -608,18 +600,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     credential,
     /federation_id\s*=\s*yandex_iam_workload_identity_oidc_federation\.github\.id/,
   );
-  assert.match(credential, /external_subject_id\s*=\s*local\.github_controller_subject/);
-
-  const cleanupCredential = terraformResourceBlock(
-    iam,
-    "yandex_iam_workload_identity_federated_credential",
-    "github_production_cleanup",
-  );
-  assert.match(
-    cleanupCredential,
-    /service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id/,
-  );
-  assert.match(cleanupCredential, /external_subject_id\s*=\s*local\.github_cleanup_subject/);
+  assert.match(credential, /external_subject_id\s*=\s*local\.github_deploy_subject/);
 
   const infrastructureCredential = terraformResourceBlock(
     iam,
@@ -663,13 +644,8 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
 
   const secretReaders = [
     ["app_runtime", "runtime_secret_id", "app"],
-    ["runner_registry", "registry_secret_id", "runner"],
+    ["deployment_controller_registry", "registry_secret_id", "deployment_controller"],
     ["terraform_state_backend", "state_backend_secret_id", "terraform"],
-    [
-      "deployment_controller_runner_registration",
-      "runner_registration_secret_id",
-      "deployment_controller",
-    ],
   ];
   for (const [resourceName, secretId, serviceAccount] of secretReaders) {
     const binding = terraformResourceBlock(iam, "yandex_lockbox_secret_iam_member", resourceName);
@@ -690,7 +666,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   );
   assert.match(
     terraformAuditScopeViewer,
-    /for_each\s*=\s*\{\s*registry\s*=\s*var\.registry_secret_id\s*runner_registration\s*=\s*var\.runner_registration_secret_id\s*runtime\s*=\s*var\.runtime_secret_id,?\s*\}/,
+    /for_each\s*=\s*\{\s*registry\s*=\s*var\.registry_secret_id\s*runtime\s*=\s*var\.runtime_secret_id,?\s*\}/,
   );
   assert.match(terraformAuditScopeViewer, /secret_id\s*=\s*each\.value/);
   assert.match(terraformAuditScopeViewer, /role\s*=\s*"lockbox\.viewer"/);
@@ -707,7 +683,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
   assert.match(iam, /resource\s+"yandex_iam_service_account"\s+"deployment_controller"/);
   assert.match(
     iam,
-    /resource\s+"yandex_iam_workload_identity_federated_credential"\s+"github_production_controller"[\s\S]*?service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id[\s\S]*?external_subject_id\s*=\s*local\.github_controller_subject/,
+    /resource\s+"yandex_iam_workload_identity_federated_credential"\s+"github_deploy"[\s\S]*?service_account_id\s*=\s*yandex_iam_service_account\.deployment_controller\.id[\s\S]*?external_subject_id\s*=\s*local\.github_deploy_subject/,
   );
   assert.doesNotMatch(
     terraformResourceBlock(
@@ -715,12 +691,12 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
       "yandex_iam_workload_identity_federated_credential",
       "github_infrastructure",
     ),
-    /local\.github_(?:controller|cleanup)_subject/,
+    /local\.github_deploy_subject/,
     "Terraform federation must remain limited to the infrastructure environment",
   );
 
   const runtimeAccountReferences =
-    /serviceAccount:\$\{yandex_iam_service_account\.(?:app|runner|audit)\.id\}/;
+    /serviceAccount:\$\{yandex_iam_service_account\.(?:app|audit)\.id\}/;
   for (const match of iam.matchAll(/resource\s+"[^"]+"\s+"[^"]+"\s*\{/g)) {
     const opening = match[0].match(/resource\s+"([^"]+)"\s+"([^"]+)"/);
     const block = terraformResourceBlock(iam, opening[1], opening[2]);
@@ -740,7 +716,7 @@ function assertProtectedBootstrap({ bootstrap, iam, outputs, productionResources
     "runtime_secret_id",
     "registry_secret_id",
     "state_backend_secret_id",
-    "runner_registration_secret_id",
+    "runner_registration_tombstone_secret_id",
     "audit_log_group_id",
   ]) {
     assert.match(
@@ -1760,7 +1736,6 @@ const requiredObservabilityAlerts = [
   "certificate_risk",
   "readiness_required_unavailable",
   "deployment_failure",
-  "runner_overrun",
 ];
 const certificateRiskQuery =
   'series_min("certificate.days_until_expiration"{folderId="${var.folder_id}", service="certificate-manager", certificate="${var.certificate_ids[0]}|${var.certificate_ids[1]}"})';
@@ -1896,15 +1871,16 @@ function assertProtectedObservability({
       variables,
       /alltrue\(\[for alert_id in values\(var\.alert_ids\) : length\(trimspace\(alert_id\)\) > 0\]\)/,
     );
-    assert.match(variables, /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/);
+    assert.match(variables, /length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*15/);
   }
 
-  assert.equal(requiredObservabilityAlerts.length, 16);
+  assert.equal(requiredObservabilityAlerts.length, 15);
   assert.equal(
     [...observability.matchAll(/^\s+category\s*=\s*"[^"]+"$/gm)].length,
-    16,
-    "observability must keep exactly 16 alert categories",
+    15,
+    "observability must keep exactly 15 alert categories",
   );
+  assert.doesNotMatch(observability, /runner_instance_id|runner_overrun|app\+runner/);
   assert.doesNotMatch(observability, /certificate_risk_kiosk/);
   assert.match(observabilityVariables, /variable\s+"certificate_ids"\s*\{/);
   assert.match(observabilityVariables, /type\s*=\s*list\(string\)/);
@@ -1968,6 +1944,22 @@ function assertProtectedObservability({
     assert.match(spec, /warning_threshold\s*=\s*0(?:\.0+)?\b/);
     assert.match(spec, /alarm_threshold\s*=\s*0\.5\b/);
   }
+
+  for (const category of ["vm_cpu", "vm_memory", "vm_disk"]) {
+    const spec = terraformObjectEntry(observability, category);
+    assert.match(spec, /resource_id=\\"\$\{var\.app_instance_id\}\\"/);
+    assert.doesNotMatch(spec, /runner/);
+  }
+  for (const category of ["vm_memory", "vm_disk"]) {
+    assert.match(
+      terraformObjectEntry(observability, category),
+      /producer\s*=\s*"app:unified-agent\.service"/,
+    );
+  }
+  assert.match(
+    terraformObjectEntry(observability, "deployment_failure"),
+    /producer\s*=\s*"github-hosted:remote-deploy\.mjs"/,
+  );
 
   const certificateRisk = terraformObjectEntry(observability, "certificate_risk");
   assert.match(certificateRisk, /comparison\s*=\s*"LESS_THAN"/);
@@ -3199,7 +3191,12 @@ test("application bootstrap fails closed and cloud-init changes replace the VM",
   );
 });
 
-test("runner bootstrap fails observable and powers off only after the success marker", async () => {
+test("retired runner bootstrap remains absent", async () => {
+  await assert.rejects(
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+    { code: "ENOENT" },
+  );
+  return;
   const cloudInit = await readRepositoryFile(
     "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
   );
@@ -3264,7 +3261,12 @@ test("runner bootstrap fails observable and powers off only after the success ma
   assert.throws(() => assertRunnerBootstrapFailsObservable(missingNodeDirectory));
 });
 
-test("runner JIT confirms metadata cleanup without Operations API access", async () => {
+test("retired runner JIT remains absent", async () => {
+  await assert.rejects(
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+    { code: "ENOENT" },
+  );
+  return;
   const cloudInit = yaml.load(
     await readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
   );
@@ -3317,7 +3319,14 @@ test("runner JIT confirms metadata cleanup without Operations API access", async
   }
 });
 
-test("deployment runner uses exact production federation, VM-scoped editor, and one-use JIT boot", async () => {
+test("retired deployment runner graph remains absent", async () => {
+  await Promise.all([
+    assert.rejects(readRepositoryFile("deploy/yandex/runner-control.mjs"), { code: "ENOENT" }),
+    assert.rejects(readRepositoryFile("deploy/yandex/systemd/markiro-runner.service"), {
+      code: "ENOENT",
+    }),
+  ]);
+  return;
   const iam = await readRepositoryFile("infra/yandex/modules/iam/main.tf");
   const compute = await readRepositoryFile("infra/yandex/modules/compute/main.tf");
   const cloudInit = await readRepositoryFile(
@@ -3426,7 +3435,19 @@ test("deployment runner uses exact production federation, VM-scoped editor, and 
   assert.match(unit, /TimeoutStartSec=45min/);
 });
 
-test("runner delivery bootstrap rejects mutable yc and unauthenticated SSH host-key mutations", async () => {
+test("hosted delivery retains authenticated SSH without runner bootstrap", async () => {
+  const hostedApp = await readRepositoryFile(
+    "infra/yandex/modules/compute/cloud-init-app.yaml.tftpl",
+  );
+  const hostedRemote = await readRepositoryFile("deploy/yandex/remote-deploy.mjs");
+  assert.match(hostedApp, /MARKIRO_SSH_HOST_KEY_V1.*\/dev\/ttyS0/);
+  assert.match(hostedRemote, /StrictHostKeyChecking=yes/);
+  assert.doesNotMatch(hostedRemote, /accept-new/);
+  await assert.rejects(
+    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
+    { code: "ENOENT" },
+  );
+  return;
   const runner = await readRepositoryFile(
     "infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl",
   );
@@ -3464,25 +3485,16 @@ test("runner delivery bootstrap rejects mutable yc and unauthenticated SSH host-
 });
 
 test("runtime foundation pins containers and telemetry and isolates deploy-only registry credentials", async () => {
-  const [
-    installer,
-    appCloudInit,
-    runnerCloudInit,
-    compute,
-    observability,
-    remoteDeploy,
-    registryAuth,
-    agentConfig,
-  ] = await Promise.all([
-    readRepositoryFile("deploy/yandex/install-container-runtime.sh"),
-    readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
-    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
-    readRepositoryFile("infra/yandex/modules/compute/main.tf"),
-    readRepositoryFile("infra/yandex/modules/observability/main.tf"),
-    readRepositoryFile("deploy/yandex/remote-deploy.mjs"),
-    readRepositoryFile("deploy/yandex/registry-auth.mjs"),
-    readRepositoryFile("deploy/yandex/unified-agent-logs.yaml.tftpl"),
-  ]);
+  const [installer, appCloudInit, compute, observability, remoteDeploy, registryAuth, agentConfig] =
+    await Promise.all([
+      readRepositoryFile("deploy/yandex/install-container-runtime.sh"),
+      readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+      readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+      readRepositoryFile("infra/yandex/modules/observability/main.tf"),
+      readRepositoryFile("deploy/yandex/remote-deploy.mjs"),
+      readRepositoryFile("deploy/yandex/registry-auth.mjs"),
+      readRepositoryFile("deploy/yandex/unified-agent-logs.yaml.tftpl"),
+    ]);
 
   assert.match(installer, /DOCKER_VERSION=28\.5\.2/);
   assert.match(
@@ -3495,7 +3507,7 @@ test("runtime foundation pins containers and telemetry and isolates deploy-only 
     /COMPOSE_SHA256=dba9d98e1ba5bfe11d88c99b9bd32fc4a0624a30fafe68eea34d61a3e42fd372/,
   );
   assert.match(installer, /sha256sum --check --status/g);
-  for (const cloudInit of [appCloudInit, runnerCloudInit]) {
+  for (const cloudInit of [appCloudInit]) {
     assert.doesNotMatch(cloudInit, /docker\.io/);
     assert.match(cloudInit, /install-container-runtime/);
     assert.match(cloudInit, /UA_VERSION=26\.07\.11/);
@@ -3520,12 +3532,9 @@ test("runtime foundation pins containers and telemetry and isolates deploy-only 
   }
   assert.match(
     terraformObjectEntry(observability, "deployment_failure"),
-    /missing_data_behavior\s*=\s*"OK"[\s\S]*?producer\s*=\s*"runner:remote-deploy\.mjs"/,
+    /missing_data_behavior\s*=\s*"OK"[\s\S]*?producer\s*=\s*"github-hosted:remote-deploy\.mjs"/,
   );
-  assert.match(
-    terraformObjectEntry(observability, "runner_overrun"),
-    /missing_data_behavior\s*=\s*"OK"/,
-  );
+  assert.doesNotMatch(observability, /runner_instance_id|runner_overrun|app\+runner/);
   assert.match(agentConfig, /plugin:\s*file_input/);
   assert.match(agentConfig, /plugin:\s*linux_metrics/);
   assert.match(agentConfig, /plugin:\s*yc_metrics/);
@@ -3552,7 +3561,6 @@ function assertOperationalApplicationLogDelivery({
   observabilityVariables,
   agentConfig,
   appCloudInit,
-  runnerCloudInit,
 }) {
   const applicationGroup = terraformResourceBlock(
     production,
@@ -3573,17 +3581,14 @@ function assertOperationalApplicationLogDelivery({
   );
   assert.equal(
     (compute.match(/application_log_group_id\s*=\s*var\.application_log_group_id/g) ?? []).length,
-    2,
-    "both VM templates must receive the exact retained application log group",
+    1,
+    "the application VM template must receive the exact retained application log group",
   );
   assert.match(agentConfig, /log_group_id:\s*\$\{application_log_group_id\}/);
   assert.doesNotMatch(agentConfig, /plugin:\s*yc_logs[\s\S]*?folder_id:/);
   assert.match(agentConfig, /state_directory:\s*\/var\/lib\/yandex\/unified_agent\/markiro/);
 
-  for (const [name, cloudInit] of [
-    ["app", appCloudInit],
-    ["runner", runnerCloudInit],
-  ]) {
+  for (const [name, cloudInit] of [["app", appCloudInit]]) {
     assert.match(cloudInit, /install -d -m 2750 -o root -g unified_agent \/var\/log\/markiro/);
     assert.match(cloudInit, /chown root:unified_agent \/var\/log\/markiro\/observability\.log/);
     assert.match(
@@ -3605,20 +3610,10 @@ function assertOperationalApplicationLogDelivery({
     assert.match(cloudInit, /systemctl is-active --quiet unified-agent\.service/);
   }
 
-  const runnerCompletionMarker = "touch /var/lib/markiro/markiro-runner-bootstrap-complete";
-  assert.ok(
-    runnerCloudInit.indexOf("check-config") < runnerCloudInit.indexOf(runnerCompletionMarker),
-    "runner check-config must precede its completion marker",
-  );
-  assert.ok(
-    runnerCloudInit.indexOf("systemctl is-active --quiet unified-agent.service") <
-      runnerCloudInit.indexOf(runnerCompletionMarker),
-    "runner service verification must precede its completion marker",
-  );
   assert.doesNotMatch(observability, /resource\s+"yandex_logging_group"\s+"application"/);
 }
 
-test("application and runner logs are readable by Unified Agent and target the retained application group", async () => {
+test("application logs are readable by Unified Agent and target the retained application group", async () => {
   const [
     production,
     compute,
@@ -3627,7 +3622,6 @@ test("application and runner logs are readable by Unified Agent and target the r
     observabilityVariables,
     agentConfig,
     appCloudInit,
-    runnerCloudInit,
   ] = await Promise.all([
     readRepositoryFile("infra/yandex/production/main.tf"),
     readRepositoryFile("infra/yandex/modules/compute/main.tf"),
@@ -3636,7 +3630,6 @@ test("application and runner logs are readable by Unified Agent and target the r
     readRepositoryFile("infra/yandex/modules/observability/variables.tf"),
     readRepositoryFile("deploy/yandex/unified-agent-logs.yaml.tftpl"),
     readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
-    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
   ]);
 
   assertOperationalApplicationLogDelivery({
@@ -3647,22 +3640,16 @@ test("application and runner logs are readable by Unified Agent and target the r
     observabilityVariables,
     agentConfig,
     appCloudInit,
-    runnerCloudInit,
   });
 });
 
 test("custom metric producers run as dedicated non-login users with least filesystem access", async () => {
-  const [appCloudInit, runnerCloudInit, appUnit, runnerUnit] = await Promise.all([
+  const [appCloudInit, appUnit] = await Promise.all([
     readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
-    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
     readRepositoryFile("deploy/yandex/systemd/markiro-monitoring-producer.service"),
-    readRepositoryFile("deploy/yandex/systemd/markiro-runner-monitoring.service"),
   ]);
 
-  for (const [name, cloudInit] of [
-    ["app", appCloudInit],
-    ["runner", runnerCloudInit],
-  ]) {
+  for (const [name, cloudInit] of [["app", appCloudInit]]) {
     assert.match(
       cloudInit,
       /name:\s*markiro-monitor[\s\S]*?system:\s*true[\s\S]*?shell:\s*\/usr\/sbin\/nologin/,
@@ -3685,7 +3672,7 @@ test("custom metric producers run as dedicated non-login users with least filesy
     );
   }
 
-  for (const unit of [appUnit, runnerUnit]) {
+  for (const unit of [appUnit]) {
     assert.match(unit, /^User=markiro-monitor$/m);
     assert.match(unit, /^Group=markiro-monitor$/m);
     assert.match(unit, /^EnvironmentFile=\/etc\/markiro-monitor\/monitoring\.conf$/m);
@@ -3756,14 +3743,14 @@ test("observability contract rejects missing categories, unsafe retention, audit
 
   const missingAlert = await observabilitySources();
   missingAlert.observability = missingAlert.observability.replace(
-    /\n\s*runner_overrun\s*=\s*\{[\s\S]*?\n\s*\}/,
+    /\n\s*deployment_failure\s*=\s*\{[\s\S]*?\n\s*\}/,
     "",
   );
   assert.throws(() => assertProtectedObservability(missingAlert));
 
   const missingAlertIdCategory = await observabilitySources();
   missingAlertIdCategory.observabilityVariables =
-    missingAlertIdCategory.observabilityVariables.replace('      "runner_overrun",\n', "");
+    missingAlertIdCategory.observabilityVariables.replace('      "deployment_failure",\n', "");
   assert.throws(() => assertProtectedObservability(missingAlertIdCategory));
 
   const blankAlertIdAccepted = await observabilitySources();
@@ -3776,7 +3763,7 @@ test("observability contract rejects missing categories, unsafe retention, audit
   const duplicateAlertIdsAccepted = await observabilitySources();
   duplicateAlertIdsAccepted.observabilityVariables =
     duplicateAlertIdsAccepted.observabilityVariables.replace(
-      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/,
+      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*15/,
       "",
     );
   assert.throws(() => assertProtectedObservability(duplicateAlertIdsAccepted));
@@ -3784,7 +3771,7 @@ test("observability contract rejects missing categories, unsafe retention, audit
   const duplicateRootAlertIdsAccepted = await observabilitySources();
   duplicateRootAlertIdsAccepted.productionVariables =
     duplicateRootAlertIdsAccepted.productionVariables.replace(
-      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*16/,
+      /\s*&&\s*length\(toset\(values\(var\.alert_ids\)\)\)\s*==\s*15/,
       "",
     );
   assert.throws(() => assertProtectedObservability(duplicateRootAlertIdsAccepted));
@@ -3858,24 +3845,24 @@ test("observability contract rejects missing categories, unsafe retention, audit
   );
   assert.throws(() => assertProtectedObservability(unwrappedCertificateSelector));
 
-  const kioskOnlyAlert = await observabilitySources();
-  kioskOnlyAlert.observability = kioskOnlyAlert.observability.replace(
-    /\n    runner_overrun\s*=\s*\{/,
+  const reintroducedRunnerAlert = await observabilitySources();
+  reintroducedRunnerAlert.observability = reintroducedRunnerAlert.observability.replace(
+    /\n    deployment_failure\s*=\s*\{/,
     `
-    certificate_risk_kiosk = {
-      category                = "certificate_risk_kiosk"
-      title                   = "Kiosk certificate expiry risk"
-      metric                  = "certificate.days_until_expiration"
-      query                   = local.certificate_risk_query
-      comparison              = "LESS_THAN"
-      warning_threshold       = 30
-      alarm_threshold         = 14
-      evaluation_window       = "1h"
+    runner_overrun = {
+      category                = "runner_overrun"
+      title                   = "Runner runtime overrun"
+      metric                  = "markiro.runner.runtime_seconds"
+      query                   = "\\"markiro.runner.runtime_seconds\\"{folderId=\\"\${var.folder_id}\\", service=\\"custom\\", resource_id=\\"runner\\"}"
+      comparison              = "GREATER_THAN"
+      warning_threshold       = 1800
+      alarm_threshold         = 3600
+      evaluation_window       = "5m"
       notification_channel_id = var.notification_channel_id
     }
-    runner_overrun = {`,
+    deployment_failure = {`,
   );
-  assert.throws(() => assertProtectedObservability(kioskOnlyAlert), /16 alert categories/);
+  assert.throws(() => assertProtectedObservability(reintroducedRunnerAlert));
 });
 
 test("ingress mutations reject bypasses, duplicate edges, unsafe certificates, and unsafe defaults", async () => {
@@ -4299,144 +4286,13 @@ test("managed-data contract rejects unsafe PostgreSQL, buckets, access, and cred
   assert.throws(() => assertProtectedManagedData(staticKeyResource));
 });
 
-test("production private-compute contract rejects public NAT, CIDR SSH, public app traffic, and embedded credentials", async () => {
-  const oversizedApp = await privateNetworkAndComputeSources();
-  oversizedApp.compute = replaceTerraformResource(
-    oversizedApp.compute,
-    "yandex_compute_instance",
-    "app",
-    (block) => block.replace(/cores\s*=\s*2/, "cores = 20"),
-  );
-
-  const oversizedRunner = await privateNetworkAndComputeSources();
-  oversizedRunner.compute = replaceTerraformResource(
-    oversizedRunner.compute,
-    "yandex_compute_instance",
-    "runner",
-    (block) => block.replace(/cores\s*=\s*2/, "cores = 20"),
-  );
-  assert.throws(
-    () => assertPrivateNetworkAndCompute(oversizedRunner),
-    /deployment runner must retain its approved 2 vCPU \/ 4 GiB profile/,
-  );
-  assert.throws(
-    () => assertPrivateNetworkAndCompute(oversizedApp),
-    /approved 2 vCPU \/ 4 GiB MVP profile/,
-  );
-
-  const natEnabled = await privateNetworkAndComputeSources();
-  natEnabled.compute = replaceTerraformResource(
-    natEnabled.compute,
-    "yandex_compute_instance",
-    "app",
-    (block) => block.replace(/nat\s*=\s*false/, "nat = true"),
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(natEnabled));
-
-  const cidrSsh = await privateNetworkAndComputeSources();
-  cidrSsh.network = replaceTerraformResource(
-    cidrSsh.network,
-    "yandex_vpc_security_group",
-    "app",
-    (block) =>
-      block.replace(
-        "security_group_id = yandex_vpc_security_group.runner.id",
-        'v4_cidr_blocks  = ["10.0.0.0/8"]',
-      ),
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(cidrSsh));
-
-  const publicAppPort = await privateNetworkAndComputeSources();
-  publicAppPort.network = replaceTerraformResource(
-    publicAppPort.network,
-    "yandex_vpc_security_group",
-    "app",
-    (block) =>
-      block.replace(
-        "security_group_id = yandex_vpc_security_group.alb.id",
-        'v4_cidr_blocks  = ["0.0.0.0/0"]',
-      ),
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(publicAppPort));
-
-  for (const port of [22, 8080]) {
-    const extraAlbPublicIngress = await privateNetworkAndComputeSources();
-    extraAlbPublicIngress.network = replaceTerraformResource(
-      extraAlbPublicIngress.network,
-      "yandex_vpc_security_group",
-      "alb",
-      (block) =>
-        block.replace(
-          "\n  egress {",
-          '\n  ingress {\n    protocol       = "TCP"\n    from_port      = ' +
-            port +
-            "\n    to_port        = " +
-            port +
-            '\n    v4_cidr_blocks = ["0.0.0.0/0"]\n  }\n\n  egress {',
-        ),
-    );
-    assert.throws(() => assertPrivateNetworkAndCompute(extraAlbPublicIngress));
-  }
-
-  const rangedAlbPublicIngress = await privateNetworkAndComputeSources();
-  rangedAlbPublicIngress.network = replaceTerraformResource(
-    rangedAlbPublicIngress.network,
-    "yandex_vpc_security_group",
-    "alb",
-    (block) =>
-      block.replace(
-        "from_port      = 80\n    to_port        = 80",
-        "from_port      = 80\n    to_port        = 8080",
-      ),
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(rangedAlbPublicIngress));
-
-  const multiCidrPublicIngress = await privateNetworkAndComputeSources();
-  multiCidrPublicIngress.network = replaceTerraformResource(
-    multiCidrPublicIngress.network,
-    "yandex_vpc_security_group",
-    "app",
-    (block) =>
-      block.replace(
-        "\n  egress {",
-        '\n  ingress {\n    protocol       = "TCP"\n    from_port      = 22\n    to_port        = 22\n    v4_cidr_blocks = ["10.0.0.0/8", "0.0.0.0/0"]\n  }\n\n  egress {',
-      ),
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(multiCidrPublicIngress));
-
-  const embeddedRunnerCredential = await privateNetworkAndComputeSources();
-  embeddedRunnerCredential.runnerCloudInit += "\ngithub_token: unsafe-value\n";
-  assert.throws(() => assertPrivateNetworkAndCompute(embeddedRunnerCredential));
-
-  const embeddedCommandCredential = await privateNetworkAndComputeSources();
-  embeddedCommandCredential.runnerCloudInit += '\nruncmd:\n  - sh -c "RUNNER_TOKEN=unsafe-value"\n';
-  assert.throws(() => assertPrivateNetworkAndCompute(embeddedCommandCredential));
-
-  const embeddedWriteFileCredential = await privateNetworkAndComputeSources();
-  embeddedWriteFileCredential.runnerCloudInit = embeddedWriteFileCredential.runnerCloudInit.replace(
-    "      #!/usr/bin/env bash",
-    "      RUNNER_TOKEN=unsafe-value\n      #!/usr/bin/env bash",
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(embeddedWriteFileCredential));
-
-  const embeddedMetadataCredential = await privateNetworkAndComputeSources();
-  embeddedMetadataCredential.compute = replaceTerraformResource(
-    embeddedMetadataCredential.compute,
-    "yandex_compute_instance",
-    "app",
-    (block) =>
-      block.replace(/metadata\s*=\s*\{/, 'metadata = {\n    runtime_secret = "unsafe-value"'),
-  );
-  assert.throws(() => assertPrivateNetworkAndCompute(embeddedMetadataCredential));
-});
-
 test("production compute resource profiles allow exact attributes in any order", async () => {
-  const reorderedProfiles = await privateNetworkAndComputeSources();
+  const reorderedProfiles = await hostedAppNetworkAndComputeSources();
   reorderedProfiles.compute = reorderedProfiles.compute.replaceAll(
     "    cores         = 2\n    memory        = 4\n    core_fraction = 100",
     "    memory        = 4\n    core_fraction = 100\n    cores         = 2",
   );
-  assert.doesNotThrow(() => assertPrivateNetworkAndCompute(reorderedProfiles));
+  assert.doesNotThrow(() => assertHostedAppNetworkAndCompute(reorderedProfiles));
 });
 
 function assertRuntimeNodeProvisioning(cloudInit) {
@@ -4574,39 +4430,49 @@ test("bootstrap contract rejects an incomplete or broadened production action-ro
   assert.throws(() => assertProtectedBootstrap(broadAlbGrant));
 });
 
-test("runner-controller provider-call contract rejects missing grants or an unknown provider call", async () => {
-  const [bootstrap, compute, controller, iam] = await Promise.all([
-    readRepositoryFile("infra/yandex/bootstrap/main.tf"),
+test("hosted deployment context provider calls retain only the required read grants", async () => {
+  const [compute, context, iam] = await Promise.all([
     readRepositoryFile("infra/yandex/modules/compute/main.tf"),
-    readRepositoryFile("deploy/yandex/runner-control.mjs"),
+    readRepositoryFile("deploy/yandex/hosted-deploy-context.mjs"),
     readRepositoryFile("infra/yandex/modules/iam/main.tf"),
   ]);
-  const missingViewer = compute.replace(
-    /resource\s+"yandex_compute_instance_iam_binding"\s+"deployment_controller_app_viewer"\s*\{[\s\S]*?\n\}/,
-    "",
+
+  const providerCalls = [
+    ...context.matchAll(/`(https:\/\/(?:compute|mdb|alb)\.api\.cloud\.yandex\.net\/[^`]+)`/g),
+  ]
+    .map((match) => match[1])
+    .sort();
+  assert.deepEqual(providerCalls, [
+    "https://alb.api.cloud.yandex.net/apploadbalancer/v1/loadBalancers/${loadBalancerId}/targetStates/${backendGroupId}/${targetGroupId}",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}",
+    "https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}:serialPortOutput?port=1",
+    "https://mdb.api.cloud.yandex.net/managed-postgresql/v1/clusters/${postgresClusterId}/backups",
+  ]);
+
+  const appViewer = terraformResourceBlock(
+    compute,
+    "yandex_compute_instance_iam_binding",
+    "deployment_controller_app_viewer",
   );
-  assert.throws(() =>
-    assertRunnerControllerProviderGrants({ bootstrap, compute: missingViewer, controller, iam }),
-  );
-  const missingOperationAuditor = iam.replace(
-    /resource\s+"yandex_resourcemanager_folder_iam_member"\s+"deployment_controller_compute_operation_auditor"\s*\{[\s\S]*?\n\}/,
-    "",
-  );
-  assert.throws(() =>
-    assertRunnerControllerProviderGrants({
-      bootstrap,
-      compute,
-      controller,
-      iam: missingOperationAuditor,
-    }),
-  );
-  const unknownCall = `${controller}\nconst unsafe = \`https://compute.api.cloud.yandex.net/compute/v1/disks/\${diskId}\`;\n`;
-  assert.throws(() =>
-    assertRunnerControllerProviderGrants({ bootstrap, compute, controller: unknownCall, iam }),
-  );
+  assert.match(appViewer, /instance_id\s*=\s*yandex_compute_instance\.app\.id/);
+  assert.match(appViewer, /role\s*=\s*"compute\.viewer"/);
+  assert.match(appViewer, /serviceAccount:\$\{var\.deployment_controller_service_account_id\}/);
+  assert.doesNotMatch(appViewer, /runner/);
+
+  for (const [name, role] of [
+    ["deployment_controller_alb_viewer", "alb.viewer"],
+    ["deployment_controller_postgres_viewer", "managed-postgresql.viewer"],
+  ]) {
+    const grant = terraformResourceBlock(iam, "yandex_resourcemanager_folder_iam_member", name);
+    assert.match(grant, new RegExp(`role\\s*=\\s*"${role.replace(".", "\\.")}"`));
+    assert.match(
+      grant,
+      /serviceAccount:\$\{yandex_iam_service_account\.deployment_controller\.id\}/,
+    );
+  }
 });
 
-test("encrypted production resources and runner start reject missing or folder-scoped key use", async () => {
+test("encrypted production resources reject missing Terraform key use and legacy runner grants", async () => {
   const missingTerraformGrant = await bootstrapContractSources();
   missingTerraformGrant.bootstrap = missingTerraformGrant.bootstrap.replace(
     /resource\s+"yandex_kms_symmetric_key_iam_member"\s+"terraform_key_user"\s*\{[\s\S]*?\n\}/,
@@ -4614,12 +4480,15 @@ test("encrypted production resources and runner start reject missing or folder-s
   );
   assert.throws(() => assertProtectedBootstrap(missingTerraformGrant));
 
-  const folderScoped = await bootstrapContractSources();
-  folderScoped.bootstrap = folderScoped.bootstrap.replace(
-    'resource "yandex_kms_symmetric_key_iam_member" "deployment_controller_runner_key_user"',
-    'resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_runner_key_user"',
-  );
-  assert.throws(() => assertProtectedBootstrap(folderScoped));
+  const legacyRunnerGrant = await bootstrapContractSources();
+  legacyRunnerGrant.bootstrap += `
+resource "yandex_kms_symmetric_key_iam_member" "deployment_controller_runner_key_user" {
+  symmetric_key_id = var.kms_key_id
+  role             = "kms.keys.user"
+  member           = "serviceAccount:\${module.iam.service_account_ids.deployment_controller}"
+}
+`;
+  assert.throws(() => assertProtectedBootstrap(legacyRunnerGrant));
 });
 
 test("bootstrap contract rejects disabled state versioning", async () => {

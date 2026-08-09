@@ -85,7 +85,7 @@ locals {
       category                = "vm_cpu"
       title                   = "VM CPU utilization"
       metric                  = "cpu_usage"
-      query                   = "\"cpu_usage\"{folderId=\"${var.folder_id}\", service=\"compute\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
+      query                   = "\"cpu_usage\"{folderId=\"${var.folder_id}\", service=\"compute\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 75
       alarm_threshold         = 90
@@ -96,26 +96,26 @@ locals {
       category                = "vm_memory"
       title                   = "VM memory utilization"
       metric                  = "sys.memory.used_percent"
-      query                   = "\"sys.memory.used_percent\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
+      query                   = "\"sys.memory.used_percent\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 80
       alarm_threshold         = 90
       evaluation_window       = "10m"
       missing_data_behavior   = "ALARM"
-      producer                = "app+runner:unified-agent.service"
+      producer                = "app:unified-agent.service"
       notification_channel_id = var.notification_channel_id
     }
     vm_disk = {
       category                = "vm_disk"
       title                   = "VM disk utilization"
       metric                  = "sys.filesystem.used_percent"
-      query                   = "\"sys.filesystem.used_percent\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}|${var.runner_instance_id}\"}"
+      query                   = "\"sys.filesystem.used_percent\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.app_instance_id}\"}"
       comparison              = "GREATER_THAN"
       warning_threshold       = 80
       alarm_threshold         = 90
       evaluation_window       = "10m"
       missing_data_behavior   = "ALARM"
-      producer                = "app+runner:unified-agent.service"
+      producer                = "app:unified-agent.service"
       notification_channel_id = var.notification_channel_id
     }
     postgres_availability = {
@@ -198,20 +198,7 @@ locals {
       alarm_threshold         = 0.5
       evaluation_window       = "5m"
       missing_data_behavior   = "OK"
-      producer                = "runner:remote-deploy.mjs"
-      notification_channel_id = var.notification_channel_id
-    }
-    runner_overrun = {
-      category                = "runner_overrun"
-      title                   = "Runner runtime overrun"
-      metric                  = "markiro.runner.runtime_seconds"
-      query                   = "\"markiro.runner.runtime_seconds\"{folderId=\"${var.folder_id}\", service=\"custom\", resource_id=\"${var.runner_instance_id}\"}"
-      comparison              = "GREATER_THAN"
-      warning_threshold       = 3300
-      alarm_threshold         = 3600
-      evaluation_window       = "5m"
-      missing_data_behavior   = "OK"
-      producer                = "runner:markiro-runner-monitoring.timer"
+      producer                = "github-hosted:remote-deploy.mjs"
       notification_channel_id = var.notification_channel_id
     }
   }
@@ -314,7 +301,7 @@ resource "yandex_audit_trails_trail" "archive" {
 resource "yandex_monitoring_dashboard" "production" {
   name        = "markiro-production"
   title       = "Markiro production"
-  description = "Required SaaS health, security, database, delivery, and runner signals."
+  description = "Required SaaS health, security, database, and hosted delivery signals."
   folder_id   = var.folder_id
   labels      = var.labels
 

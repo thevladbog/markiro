@@ -49,12 +49,6 @@ variable "data_subnet_cidr" {
   nullable    = false
 }
 
-variable "management_subnet_cidr" {
-  description = "CIDR for the private management subnet."
-  type        = string
-  nullable    = false
-}
-
 variable "ubuntu_lts_image_family" {
   description = "Pinned Ubuntu LTS family used by every production VM."
   type        = string
@@ -111,29 +105,24 @@ variable "registry_secret_id" {
   }
 }
 
-variable "runner_service_account_id" {
-  description = "Bootstrap-created runtime service account for the runner VM."
-  type        = string
-  nullable    = false
-}
-
 variable "deployment_controller_service_account_id" {
   description = "Bootstrap-created GitHub deployment-controller service account ID."
   type        = string
   nullable    = false
 }
 
-variable "runner_registration_secret_id" {
-  description = "Bootstrap-created runner-only Lockbox secret ID; payload remains out of Terraform."
+variable "app_deploy_ssh_public_key" {
+  description = "Exact public Ed25519 key for the dedicated hosted deployment account."
   type        = string
   nullable    = false
 
   validation {
-    condition = length(trimspace(var.runner_registration_secret_id)) > 0 && !contains(
-      [var.runtime_secret_id, var.registry_secret_id],
-      var.runner_registration_secret_id,
+    condition = (
+      can(regex("^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$", var.app_deploy_ssh_public_key)) &&
+      !strcontains(var.app_deploy_ssh_public_key, "\n") &&
+      !strcontains(var.app_deploy_ssh_public_key, "\r")
     )
-    error_message = "runner_registration_secret_id must be distinct from the runtime and registry Lockbox secret IDs."
+    error_message = "app_deploy_ssh_public_key must be one canonical ssh-ed25519 public key."
   }
 }
 
@@ -290,9 +279,8 @@ variable "alert_ids" {
       "certificate_risk",
       "readiness_required_unavailable",
       "deployment_failure",
-      "runner_overrun",
-    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == 16
-    error_message = "alert_ids must be absent in first phase and otherwise contain exactly 16 unique, nonblank IDs for every required alert category."
+    ]) && alltrue([for alert_id in values(var.alert_ids) : length(trimspace(alert_id)) > 0]) && length(toset(values(var.alert_ids))) == 15
+    error_message = "alert_ids must be absent in first phase and otherwise contain exactly 15 unique, nonblank IDs for every required alert category."
   }
 }
 

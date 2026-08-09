@@ -27,7 +27,6 @@ const categories = [
   "certificate_risk",
   "readiness_required_unavailable",
   "deployment_failure",
-  "runner_overrun",
 ];
 const binding = Object.freeze({
   commit_sha: "1".repeat(40),
@@ -110,7 +109,7 @@ function ndjson(records) {
   return `${records.map((record) => JSON.stringify(record)).join("\n")}\n`;
 }
 
-test("extracts only the strict 16 alert specs and evidence bindings from apply JSON", () => {
+test("extracts only the strict 15 alert specs and evidence bindings from apply JSON", () => {
   const artifact = extractAlertSpecsArtifact(ndjson(applyRecords()), binding);
 
   assert.deepEqual(Object.keys(artifact).sort(), [
@@ -175,9 +174,10 @@ test("rejects missing, duplicate, sensitive, or unsupported Terraform output str
 
 test("rejects missing, extra, mismatched, or unsafe alert specifications", () => {
   const complete = alertSpecs();
-  const { runner_overrun: _runnerOverrun, ...missing } = complete;
+  const { deployment_failure: _deploymentFailure, ...missing } = complete;
   for (const specs of [
     missing,
+    { ...complete, runner_overrun: spec("runner_overrun") },
     { ...complete, extra_alert: spec("extra_alert") },
     {
       ...complete,

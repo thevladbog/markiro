@@ -20,7 +20,6 @@ const CATEGORIES = Object.freeze([
   "certificate_risk",
   "readiness_required_unavailable",
   "deployment_failure",
-  "runner_overrun",
 ]);
 const ARTIFACT_KEYS = Object.freeze([
   "alert_specs",

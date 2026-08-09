@@ -3,6 +3,11 @@ output "app_private_ip" {
   value       = module.compute.app_private_ip
 }
 
+output "app_public_ip" {
+  description = "Reserved public IPv4 address used only for key-authenticated deployment SSH."
+  value       = module.compute.app_public_ip
+}
+
 output "app_instance_id" {
   description = "ID of the private application VM."
   value       = module.compute.app_instance_id
@@ -11,11 +16,6 @@ output "app_instance_id" {
 output "app_target_group_id" {
   description = "ALB target group ID containing the private application target."
   value       = module.compute.app_target_group_id
-}
-
-output "runner_instance_id" {
-  description = "ID of the normally stopped runner VM."
-  value       = module.compute.runner_instance_id
 }
 
 output "postgres_cluster_id" {

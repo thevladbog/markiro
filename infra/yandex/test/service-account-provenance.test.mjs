@@ -13,14 +13,12 @@ const identities = Object.freeze({
   app: "sa-app",
   audit: "sa-audit",
   controller: "sa-controller",
-  runner: "sa-runner",
   terraform: "sa-terraform",
 });
 const names = Object.freeze({
   app: "markiro-production-app",
   audit: "markiro-production-audit",
   controller: "markiro-production-deployment-controller",
-  runner: "markiro-production-runner",
   terraform: "markiro-production-terraform",
 });
 
@@ -66,12 +64,6 @@ test("fetches each supplied ID through authenticated ServiceAccount.Get and emit
       name: "markiro-production-deployment-controller",
       status: "ACTIVE",
     },
-    runner: {
-      folderId,
-      id: "sa-runner",
-      name: "markiro-production-runner",
-      status: "ACTIVE",
-    },
     terraform: {
       folderId,
       id: "sa-terraform",
@@ -81,7 +73,7 @@ test("fetches each supplied ID through authenticated ServiceAccount.Get and emit
   });
   assert.deepEqual(
     requested.map(({ url }) => url),
-    ["sa-app", "sa-audit", "sa-controller", "sa-runner", "sa-terraform"].map(
+    ["sa-app", "sa-audit", "sa-controller", "sa-terraform"].map(
       (id) => `https://iam.api.cloud.yandex.net/iam/v1/serviceAccounts/${id}`,
     ),
   );
@@ -94,8 +86,8 @@ test("fetches each supplied ID through authenticated ServiceAccount.Get and emit
 test("rejects swapped but distinct identities", () => {
   const swapped = {
     ...identities,
-    controller: identities.runner,
-    runner: identities.controller,
+    controller: identities.audit,
+    audit: identities.controller,
   };
   assert.throws(
     () => validateServiceAccountProvenance({ folderId, identities: swapped, accounts: records() }),
@@ -105,7 +97,7 @@ test("rejects swapped but distinct identities", () => {
 
 test("rejects misnamed, wrong-folder, and suspended service accounts", () => {
   for (const accounts of [
-    records({ app: account("app", { name: "markiro-production-runner" }) }),
+    records({ app: account("app", { name: "markiro-production-audit" }) }),
     records({ audit: account("audit", { folderId: "other-folder" }) }),
     records({ terraform: account("terraform", { status: "SUSPENDED" }) }),
   ]) {
@@ -117,13 +109,13 @@ test("rejects misnamed, wrong-folder, and suspended service accounts", () => {
 });
 
 test("rejects missing, extra, malformed, aliased, or mismatched records", () => {
-  const { runner: _runner, ...missing } = records();
+  const { audit: _audit, ...missing } = records();
   for (const [candidateIdentities, accounts] of [
     [identities, missing],
     [identities, { ...records(), extra: account("app") }],
     [identities, { ...records(), app: null }],
     [identities, { ...records(), app: account("app", { id: "other-id" }) }],
-    [{ ...identities, runner: identities.app }, records()],
+    [{ ...identities, runner: "retired" }, records()],
   ]) {
     assert.throws(
       () =>
@@ -140,7 +132,7 @@ test("rejects missing, extra, malformed, aliased, or mismatched records", () => 
 test("rejects tampered canonical plan evidence", () => {
   const canonical = validateServiceAccountProvenance({ folderId, identities, accounts: records() });
   for (const document of [
-    { ...canonical, app: { ...canonical.app, name: "markiro-production-runner" } },
+    { ...canonical, app: { ...canonical.app, name: "markiro-production-audit" } },
     { ...canonical, app: { ...canonical.app, description: "unexpected" } },
     { ...canonical, extra: canonical.app },
   ]) {
