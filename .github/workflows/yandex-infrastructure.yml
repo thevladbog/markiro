@@ -215,17 +215,6 @@ jobs:
           terraform -chdir=infra/yandex/production validate
           terraform -chdir=infra/yandex/production plan -input=false -out="$plan" > /dev/null
           terraform -chdir=infra/yandex/production show -json "$plan" > "$plan_json"
-          jq -e '
-            all(.resource_changes[]?;
-              .address as $address | .change.actions as $actions |
-              if ($address == "module.compute.yandex_compute_instance.app") then
-                ($actions | index("delete") | not)
-              elif ($address == "module.postgres.yandex_mdb_postgresql_cluster.production" or
-                    $address == "module.postgres.yandex_mdb_postgresql_database.application" or
-                    $address == "module.object_storage.yandex_storage_bucket.media" or
-                    $address == "module.object_storage.yandex_storage_bucket.audit") then
-                ($actions | index("delete") | not)
-              else true end)
-          ' "$plan_json" > /dev/null
+          node infra/yandex/scripts/guard-production-plan.mjs "$plan_json"
           jq -c '[.resource_changes[]? | select(.change.actions != ["no-op"]) | {address, actions: .change.actions}]' "$plan_json"
           terraform -chdir=infra/yandex/production apply -input=false -auto-approve "$plan"

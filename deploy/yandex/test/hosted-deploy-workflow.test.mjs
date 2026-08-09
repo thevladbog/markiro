@@ -57,7 +57,7 @@ function assertDirectDeployWorkflow(source) {
     delivery.env.YC_APP_DEPLOY_SSH_PRIVATE_KEY,
     "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   );
-  assert.match(delivery.run, /printf '%s' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$key_path"/);
+  assert.match(delivery.run, /printf '%s\\n' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$key_path"/);
   assert.match(delivery.run, /chmod 600 "\$key_path"/);
   assert.match(delivery.run, /remote-deploy[.]mjs run/);
   assert.doesNotMatch(delivery.run, /curl|oidc|iam_token|hosted-deploy-context|serial|lockbox/i);

@@ -39,7 +39,7 @@ protected GitHub-hosted deploy job
 - the existing Managed PostgreSQL cluster and application database;
 - the private versioned media bucket;
 - the Terraform state bucket and state-backend secret;
-- the runtime, registry and SMTP secrets required by the application;
+- the runtime and SMTP secrets required by the application;
 - the KMS key while retained disks, PostgreSQL or buckets depend on it;
 - the public `markiro.app` DNS zone and the admin/kiosk records;
 - the application service account and the minimum permissions needed for

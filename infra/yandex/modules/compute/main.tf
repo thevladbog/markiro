@@ -37,6 +37,9 @@ locals {
     deploy_runtime_dropin_b64 = base64encode(
       file("${path.module}/../../../../deploy/yandex/systemd/markiro-deploy.service.d/runtime-env.conf")
     )
+    registry_auth_tmpfiles_b64 = base64encode(
+      file("${path.module}/../../../../deploy/yandex/tmpfiles.d/markiro-registry-auth.conf")
+    )
   })
 }
 

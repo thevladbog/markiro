@@ -104,7 +104,7 @@ jobs:
           key_path="$RUNNER_TEMP/markiro-deploy-key"
           test ! -e "$key_path"
           trap 'rm -f -- "$key_path"' EXIT
-          printf '%s' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$key_path"
+          printf '%s\n' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$key_path"
           chmod 600 "$key_path"
           export YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH="$key_path"
           node deploy/yandex/remote-deploy.mjs run

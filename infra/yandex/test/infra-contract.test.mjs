@@ -93,7 +93,13 @@ test("both public names are gated together and resolve only to the retained app 
     assert.match(record, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
     assert.match(record, /type\s*=\s*"A"/);
     assert.match(record, /data\s*=\s*\[module\.compute\.app_public_ip\]/);
+    assert.match(record, /name\s*=\s*local\.(?:admin|kiosk)_dns_name/);
   }
+  assert.match(production, /admin_dns_name\s*=\s*"\$\{trimsuffix\(var\.domain, "\."\)\}\."/);
+  assert.match(production, /kiosk_dns_name\s*=\s*"\$\{trimsuffix\(var\.kiosk_domain, "\."\)\}\."/);
+  const outputs = await source("infra/yandex/production/outputs.tf");
+  assert.match(outputs, /\(local\.admin_dns_name\)\s*=\s*module\.compute\.app_public_ip/);
+  assert.match(outputs, /\(local\.kiosk_dns_name\)\s*=\s*module\.compute\.app_public_ip/);
   const variables = await source("infra/yandex/production/variables.tf");
   const publicDns = block(variables, 'variable "public_dns_enabled"');
   assert.match(publicDns, /default\s*=\s*false/);
@@ -172,7 +178,10 @@ test("Terraform identity has infrastructure roles only and deploy has no cloud-p
 });
 
 test("app cloud-init is key-only, fail-fast and writes completion last", async () => {
-  const cloudInit = await source("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl");
+  const [cloudInit, tmpfiles] = await Promise.all([
+    source("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
+    source("deploy/yandex/tmpfiles.d/markiro-registry-auth.conf"),
+  ]);
   assert.match(cloudInit, /PasswordAuthentication no/);
   assert.match(cloudInit, /KbdInteractiveAuthentication no/);
   assert.match(cloudInit, /PermitRootLogin no/);
@@ -181,6 +190,8 @@ test("app cloud-init is key-only, fail-fast and writes completion last", async (
   assert.match(cloudInit, /\/usr\/bin\/bash\n\s+- -ceu/);
   assert.match(cloudInit, /set -o pipefail/);
   assert.match(cloudInit, /dpkg-query[^\n]+\$\$\{Status\}[^\n]+install ok installed/);
+  assert.match(cloudInit, /path:\s*\/etc\/tmpfiles\.d\/markiro-registry-auth\.conf/);
+  assert.equal(tmpfiles, "d /run/markiro-registry-auth 0700 root root -\n");
   const marker = "touch /var/lib/markiro/markiro-app-bootstrap-complete";
   assert.equal(cloudInit.lastIndexOf(marker), cloudInit.trimEnd().length - marker.length);
   assert.doesNotMatch(
@@ -222,18 +233,22 @@ test("infrastructure workflow has one protected manual apply without legacy phas
     workflow,
     /\(keys \| sort\) == \["entries"\][\s\S]*\(keys \| sort\) == \["key", "textValue"\][\s\S]*textValue \| type == "string"[\s\S]*textValue \| length > 0/,
   );
-  assert.match(
-    workflow,
-    /module\.compute\.yandex_compute_instance\.app[\s\S]*\$actions \| index\("delete"\) \| not/,
-  );
+  assert.match(workflow, /node infra\/yandex\/scripts\/guard-production-plan\.mjs "\$plan_json"/);
   assert.match(workflow, /terraform[^\n]+apply[^\n]+"\$plan"/);
-  assert.match(workflow, /module\.compute\.yandex_compute_instance\.app/);
-  assert.match(workflow, /module\.postgres\.yandex_mdb_postgresql_cluster\.production/);
-  assert.match(workflow, /module\.object_storage\.yandex_storage_bucket\.media/);
   assert.doesNotMatch(
     workflow,
     /observability_phase|postgres_provisioning_phase|self-hosted|deployment.controller|ALB|SWS|certificate|rehearsal/i,
   );
+});
+
+test("MVP design and plan retain only identities and secrets that still exist", async () => {
+  const [plan, design] = await Promise.all([
+    source("docs/superpowers/plans/2026-08-09-yandex-direct-vm-mvp.md"),
+    source("docs/superpowers/specs/2026-08-09-yandex-direct-vm-mvp-design.md"),
+  ]);
+  assert.doesNotMatch(plan, /Terraform\/state\/app\/postbox identities/);
+  assert.doesNotMatch(design, /runtime, registry and SMTP secrets/);
+  assert.match(design, /runtime and SMTP secrets/);
 });
 
 test("committed Terraform stays formatted with the pinned local binary when available", async (context) => {

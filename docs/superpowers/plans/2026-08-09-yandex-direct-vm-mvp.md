@@ -154,7 +154,7 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Modify: `infra/yandex/test/workload-identities.test.mjs`
 - Modify: `infra/yandex/test/service-account-provenance.test.mjs`
 
-- [ ] Add contracts retaining only Terraform/state/app/postbox identities and
+- [ ] Add contracts retaining only Terraform/state/app identities and
       the infrastructure OIDC credential. Reject deployment-controller, audit and
       runner service accounts/roles/credentials and runner-registration secret.
 - [ ] Run the focused IAM/bootstrap tests and capture RED.

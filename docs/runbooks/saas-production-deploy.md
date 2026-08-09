@@ -22,6 +22,8 @@ SHA. Workflow проверяет успешный release run и manifest, за�
 readiness, public smoke, finalize. При ошибке после prepare выполняется один
 bounded rollback к предыдущему healthy release. Миграции должны оставаться
 backward-compatible с предыдущим образом.
+Если bounded rollback не завершился, используйте
+[`yandex-recovery.md`](./yandex-recovery.md).
 
 Caddy слушает 80/443 на VM и выпускает ACME TLS для admin и kiosk. API не
 публикует отдельный host port. Production env материализуется из runtime

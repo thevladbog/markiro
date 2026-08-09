@@ -11,9 +11,9 @@ test("first go-live documents the single direct-VM infrastructure and deploy seq
     "## 1. Проверить выпуск образов",
     "## 2. Проверить резервную копию",
     "## 3. Применить упрощение инфраструктуры",
-    "## 4. Проверить прямой DNS и TLS",
+    "## 4. Проверить прямой DNS",
     "## 5. Запустить приложение",
-    "## 6. Проверить приложение",
+    "## 6. Проверить TLS и приложение",
     "## 7. Удалить остаточные данные аудита",
   ];
   let previous = -1;
@@ -26,6 +26,7 @@ test("first go-live documents the single direct-VM infrastructure and deploy seq
   assert.match(runbook, /enable_public_dns=true/);
   assert.match(runbook, /release_run_id=<successful-publish-run-id>/);
   assert.match(runbook, /release_sha=<same-40-character-main-sha>/);
+  assert.ok(runbook.indexOf("Caddy сам выпускает ACME-сертификаты") > runbook.indexOf("## 5."));
 });
 
 test("runbooks protect durable data and explicitly enumerate the retired cloud stack", async () => {
@@ -65,6 +66,8 @@ test("operator docs bind deploy to pinned SSH and exact immutable release inputs
   assert.match(deploy, /один[\s\S]*rollback/);
   assert.match(secrets, /job-scoped/);
   assert.match(secrets, /password-stdin/);
+  assert.match(secrets, /ротац/i);
+  assert.match(secrets, /APP_SSH_HOST_KEYS_B64/);
 });
 
 test("active runbooks do not instruct operators to use retired release phases", async () => {

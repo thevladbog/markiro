@@ -35,7 +35,7 @@ group, Certificate Manager certificates, SWS/ARL, Audit Trails, облачные
 groups и deployment-controller/runner ресурсы. Ожидаемые сохранения: app VM и
 её reserved IP, PostgreSQL, media, state, KMS, DNS zone и runtime secrets.
 
-## 4. Проверить прямой DNS и TLS
+## 4. Проверить прямой DNS
 
 Обе A-записи должны указывать на reserved public IP app VM:
 
@@ -44,8 +44,8 @@ dig +short A admin.markiro.app
 dig +short A kiosk.markiro.app
 ```
 
-После сходимости Caddy сам выпускает ACME-сертификаты. Проверьте HTTPS для обоих
-доменов; сертификаты Certificate Manager больше не используются.
+На этом шаге проверяется только DNS. Caddy начнёт выпуск ACME-сертификатов после
+запуска приложения на следующем шаге.
 
 ## 5. Запустить приложение
 
@@ -63,7 +63,10 @@ release_sha=<same-40-character-main-sha>
 GitHub job использует только job-scoped token для GHCR и всегда удаляет временный
 SSH key.
 
-## 6. Проверить приложение
+## 6. Проверить TLS и приложение
+
+После запуска Caddy сам выпускает ACME-сертификаты. Проверьте HTTPS для обоих
+доменов; сертификаты Certificate Manager больше не используются.
 
 Проверьте:
 

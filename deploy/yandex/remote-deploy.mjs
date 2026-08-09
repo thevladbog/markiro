@@ -236,6 +236,7 @@ function parseCandidate(output) {
 export async function deployRelease(dependencies, manifestText) {
   for (const name of [
     "transferBundle",
+    "reconcileHost",
     "refreshRuntime",
     "prepare",
     "smoke",
@@ -246,6 +247,7 @@ export async function deployRelease(dependencies, manifestText) {
   const manifest = parseReleaseManifest(manifestText, dependencies.expectedWorkflowRunId);
   if (manifest.commit !== dependencies.expectedCommit) throw new Error("invalid release manifest");
   await dependencies.transferBundle(manifest);
+  await dependencies.reconcileHost(manifest);
   await dependencies.refreshRuntime(manifest);
   let candidate;
   try {
@@ -400,7 +402,14 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
               "-C",
               process.cwd(),
               "compose.production.yml",
+              ".env.production.example",
               "deploy/production",
+              "deploy/yandex/reconcile-host.sh",
+              "deploy/yandex/runtime-env.mjs",
+              "deploy/yandex/registry-auth.mjs",
+              "deploy/yandex/cli-main.mjs",
+              "deploy/yandex/systemd",
+              "deploy/yandex/tmpfiles.d",
               "-C",
               manifestDirectory,
               "release-manifest.json",
@@ -408,6 +417,15 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             [...sshBase, "sudo", "tar", "-xf", "-", "-C", "/opt/markiro", "--no-same-owner"],
           );
         },
+        reconcileHost: () =>
+          system.run("ssh", [
+            ...sshBase,
+            "sudo",
+            "/usr/bin/bash",
+            `${releaseDirectory}/deploy/yandex/reconcile-host.sh`,
+            releaseDirectory,
+            "markiro-host-assets",
+          ]),
         refreshRuntime: () =>
           system.run("ssh", [
             ...sshBase,

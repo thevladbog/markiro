@@ -92,6 +92,11 @@ write_files:
     permissions: "0600"
     content: |
       MARKIRO_RUNTIME_SECRET_ID=${runtime_secret_id}
+  - path: /etc/tmpfiles.d/markiro-registry-auth.conf
+    owner: root:root
+    permissions: "0644"
+    encoding: b64
+    content: ${registry_auth_tmpfiles_b64}
 runcmd:
   - - /usr/bin/bash
     - -ceu
@@ -107,6 +112,7 @@ runcmd:
         chown root:root /etc/markiro /etc/markiro/runtime-secret-id
         chmod 0700 /etc/markiro
         chmod 0600 /etc/markiro/runtime-secret-id /etc/markiro/compose-contract.env
+        systemd-tmpfiles --create /etc/tmpfiles.d/markiro-registry-auth.conf
 
         install -d -m 0755 /run/sshd
         /usr/sbin/sshd -t

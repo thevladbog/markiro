@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
@@ -72,6 +74,7 @@ test("direct deployment transfers, prepares, smokes and finalizes without a clou
       expectedWorkflowRunId: RUN_ID,
       expectedCommit: COMMIT,
       transferBundle: async () => events.push("transfer"),
+      reconcileHost: async () => events.push("host-assets"),
       refreshRuntime: async () => events.push("runtime"),
       prepare: async () => {
         events.push("prepare");
@@ -86,7 +89,7 @@ test("direct deployment transfers, prepares, smokes and finalizes without a clou
     },
     MANIFEST,
   );
-  assert.deepEqual(events, ["transfer", "runtime", "prepare", "smoke", "finalize"]);
+  assert.deepEqual(events, ["transfer", "host-assets", "runtime", "prepare", "smoke", "finalize"]);
   assert.equal(result.state, "healthy");
 });
 
@@ -98,6 +101,7 @@ test("direct deployment rolls back once after a post-prepare failure", async () 
         expectedWorkflowRunId: RUN_ID,
         expectedCommit: COMMIT,
         transferBundle: async () => events.push("transfer"),
+        reconcileHost: async () => events.push("host-assets"),
         refreshRuntime: async () => events.push("runtime"),
         prepare: async () => CANDIDATE,
         smoke: async () => {
@@ -111,7 +115,7 @@ test("direct deployment rolls back once after a post-prepare failure", async () 
     ),
     /smoke failed/,
   );
-  assert.deepEqual(events, ["transfer", "runtime", "smoke", "rollback"]);
+  assert.deepEqual(events, ["transfer", "host-assets", "runtime", "smoke", "rollback"]);
 });
 
 function environment(overrides = {}) {
@@ -146,7 +150,9 @@ function systemFixture() {
         events.push({ path, value, options });
       },
       rm: async () => undefined,
-      streamArchive: async () => events.push("transfer"),
+      streamArchive: async (tarArguments) => {
+        events.push({ transfer: tarArguments });
+      },
       smoke: async () => events.push("smoke"),
       run: async (command, args, options = {}) => {
         commands.push({ command, args, input: options.input });
@@ -163,7 +169,10 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   const fixture = systemFixture();
   const result = await runRemoteDeployment(environment(), fixture.system);
   assert.equal(result.state, "healthy");
-  assert.ok(fixture.events.includes("transfer"));
+  const transfer = fixture.events.find((event) => event.transfer);
+  assert.ok(transfer.transfer.includes("deploy/yandex/runtime-env.mjs"));
+  assert.ok(transfer.transfer.includes("deploy/yandex/registry-auth.mjs"));
+  assert.ok(transfer.transfer.includes("deploy/yandex/tmpfiles.d"));
   assert.ok(fixture.events.includes("smoke"));
   const ssh = fixture.commands.find(({ command }) => command === "ssh");
   assert.ok(ssh.args.includes("markiro-deploy@203.0.113.44"));
@@ -173,6 +182,17 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   assert.match(prepare.input, /GHCR_USERNAME/);
   assert.match(prepare.input, /GHCR_TOKEN/);
   assert.ok(prepare.args.includes("MARKIRO_EDGE_MODE=direct"));
+  const hostAssets = fixture.commands.find(({ args }) => args.includes("markiro-host-assets"));
+  assert.ok(hostAssets);
+  const reconcileScript = await readFile(
+    path.resolve(import.meta.dirname, "../reconcile-host.sh"),
+    "utf8",
+  );
+  assert.match(reconcileScript, /systemd-tmpfiles --create/);
+  assert.ok(
+    fixture.commands.indexOf(hostAssets) < fixture.commands.indexOf(prepare),
+    "host assets must be reconciled before the first deploy stage",
+  );
   assert.equal(
     fixture.commands.some(({ command }) => command === "curl"),
     false,

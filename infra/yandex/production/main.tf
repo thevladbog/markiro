@@ -1,4 +1,6 @@
 locals {
+  admin_dns_name = "${trimsuffix(var.domain, ".")}."
+  kiosk_dns_name = "${trimsuffix(var.kiosk_domain, ".")}."
   labels = {
     app         = "markiro"
     environment = "production"
@@ -76,7 +78,7 @@ resource "yandex_dns_recordset" "application" {
   count = var.public_dns_enabled ? 1 : 0
 
   zone_id = var.dns_zone_id
-  name    = var.domain
+  name    = local.admin_dns_name
   type    = "A"
   ttl     = 300
   data    = [module.compute.app_public_ip]
@@ -86,7 +88,7 @@ resource "yandex_dns_recordset" "kiosk_application" {
   count = var.public_dns_enabled ? 1 : 0
 
   zone_id = var.dns_zone_id
-  name    = var.kiosk_domain
+  name    = local.kiosk_dns_name
   type    = "A"
   ttl     = 300
   data    = [module.compute.app_public_ip]
