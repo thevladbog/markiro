@@ -83,6 +83,8 @@ write_files:
       metadata_status=""
       for _ in $(seq 1 30); do
         metadata_status="$(curl --silent --show-error \
+          --connect-timeout 2 \
+          --max-time 5 \
           --output /dev/null \
           --write-out '%%{http_code}' \
           --header 'Metadata-Flavor: Google' \

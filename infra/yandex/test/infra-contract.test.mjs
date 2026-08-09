@@ -3049,6 +3049,8 @@ test("runner JIT confirms metadata cleanup without Operations API access", async
     /metadata_status=""\nfor _ in \$\(seq 1 30\); do[\s\S]*?\ndone\ntest "\$metadata_status" = 404/,
   )?.[0];
   assert.ok(confirmation, "runner JIT must bound and verify the metadata 200-to-404 transition");
+  assert.match(confirmation, /--connect-timeout 2/);
+  assert.match(confirmation, /--max-time 5/);
 
   const probeDirectory = await mkdtemp(path.join(tmpdir(), "markiro-runner-metadata-"));
   const statusesPath = path.join(probeDirectory, "statuses");
