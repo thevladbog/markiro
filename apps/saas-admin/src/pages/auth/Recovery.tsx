@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
+import { clearPlatformChallenge } from "../../auth/challenge.js";
 import { AuthFrame } from "./AuthFrame.js";
 
 const recoverySchema = z.object({
@@ -42,6 +43,7 @@ export function Recovery() {
       setSubmitError(revoked.error.message ?? t("auth.recovery.error"));
       return;
     }
+    clearPlatformChallenge();
     form.reset();
     void navigate("/two-factor?mode=enroll", {
       replace: true,
@@ -76,7 +78,7 @@ export function Recovery() {
           {t("auth.recovery.submit")}
         </Button>
       </form>
-      <Link className="auth-link" to="/login">
+      <Link className="auth-link" to="/login" onClick={clearPlatformChallenge}>
         {t("auth.recovery.back")}
       </Link>
     </AuthFrame>

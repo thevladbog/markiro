@@ -7,6 +7,7 @@ import { Alert, Button, Card, Spinner } from "@markiro/ui";
 
 import { ApiRequestError, platformApiFetch } from "../api/client.js";
 import { useAuthClient } from "./client.js";
+import { isPlatformChallengePending } from "./challenge.js";
 
 export type PlatformRole = "platform_admin" | "support" | "accountant";
 export type PlatformCapability =
@@ -76,6 +77,9 @@ export function PlatformAuthBoundary() {
   }
 
   if (!session.data) {
+    if (isPlatformChallengePending()) {
+      return <Navigate to="/two-factor?mode=challenge" replace />;
+    }
     return <Navigate to="/login" replace state={{ from: location.pathname }} />;
   }
 

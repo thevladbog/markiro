@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
+import { clearPlatformChallenge, isPlatformChallengePending } from "../../auth/challenge.js";
 import { AuthFrame } from "./AuthFrame.js";
 
 const codeSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
@@ -22,7 +23,10 @@ export function TwoFactor() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const mode = searchParams.get("mode") === "challenge" ? "challenge" : "enroll";
+  const mode =
+    searchParams.get("mode") === "challenge" || isPlatformChallengePending()
+      ? "challenge"
+      : "enroll";
   const [enrollment, setEnrollment] = useState<EnrollmentSecrets | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const codeForm = useForm<z.infer<typeof codeSchema>>({
@@ -51,9 +55,15 @@ export function TwoFactor() {
     setSubmitError(null);
     const result = await auth.twoFactor.verifyTotp({ code, trustDevice: false });
     if (result.error) {
+      if (result.error.code === "INVALID_TWO_FACTOR_COOKIE") {
+        clearPlatformChallenge();
+        void navigate("/login", { replace: true });
+        return;
+      }
       setSubmitError(result.error.message ?? t("auth.twoFactor.codeError"));
       return;
     }
+    clearPlatformChallenge();
     codeForm.reset();
     setEnrollment(null);
     await session.refetch?.();
@@ -120,9 +130,14 @@ export function TwoFactor() {
         </form>
       ) : null}
       {mode === "challenge" ? (
-        <Link className="auth-link" to="/recovery">
-          {t("auth.twoFactor.useBackup")}
-        </Link>
+        <div className="auth-link-group">
+          <Link className="auth-link" to="/recovery">
+            {t("auth.twoFactor.useBackup")}
+          </Link>
+          <Link className="auth-link" to="/login" onClick={clearPlatformChallenge}>
+            {t("auth.twoFactor.cancel")}
+          </Link>
+        </div>
       ) : null}
     </AuthFrame>
   );

@@ -23,6 +23,9 @@ select {
   z-index: var(--z-toast);
   top: 8px;
   left: 8px;
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   padding: 10px 14px;
   background: var(--surface-inverse);
   color: var(--fg-on-inverse);
@@ -574,12 +577,42 @@ select {
   font: var(--text-caption);
 }
 
+.native-field__error {
+  color: var(--err-fg) !important;
+  font: var(--text-body-sm) !important;
+}
+
 .native-field select {
   padding: 0 12px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-2);
   background: var(--surface-card);
   color: var(--fg-1);
+}
+
+.addon-effects {
+  display: grid;
+  gap: 12px;
+}
+
+.addon-effect-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.feature-effect {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border: 1px solid var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok-fg);
+  font: var(--text-body-sm);
 }
 
 .effect-rail {
@@ -660,6 +693,10 @@ select {
   border-top: 1px solid var(--line);
   color: var(--ok-fg);
   font: var(--text-body-sm);
+}
+
+.panel-live[data-tone="error"] {
+  color: var(--err-fg);
 }
 
 @media (max-width: 980px) {
@@ -792,6 +829,11 @@ select {
   .form-actions {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .addon-effect-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
   }
 
   .form-actions .mk-btn {

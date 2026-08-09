@@ -77,15 +77,23 @@ export function CatalogPage() {
 
   if (catalog.isPending || defaultDemo.isPending) {
     return (
-      <div className="catalog-state" role="status">
-        <Spinner label={t("catalog.loading")} />
-        <span>{t("catalog.loading")}</span>
-      </div>
+      <section className="catalog-page">
+        <PageHeader title={t("catalog.title")} />
+        <div className="catalog-state" role="status">
+          <Spinner label={t("catalog.loading")} />
+          <span>{t("catalog.loading")}</span>
+        </div>
+      </section>
     );
   }
 
   if (catalog.error || defaultDemo.error) {
-    return <Alert tone="error">{t("catalog.loadError")}</Alert>;
+    return (
+      <section className="catalog-page">
+        <PageHeader title={t("catalog.title")} />
+        <Alert tone="error">{t("catalog.loadError")}</Alert>
+      </section>
+    );
   }
 
   const tabs: Array<{ kind: CatalogKind; label: string }> = [
@@ -124,7 +132,7 @@ export function CatalogPage() {
       </Card>
       {selected ? (
         <CatalogVersionPanel
-          key={`${selected.id}:${selected.status}`}
+          key={selected.id}
           item={selected}
           canWrite={principal.capabilities.includes("catalog.write")}
           isSupport={isSupport}

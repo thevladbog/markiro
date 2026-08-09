@@ -22,6 +22,7 @@ export interface MutableAuthState {
   sessionError: unknown;
   signInResult: AuthActionResult<{ twoFactorRedirect?: boolean }>;
   enrollment: { totpURI: string; backupCodes: string[] };
+  verifyTotpResult: AuthActionResult<unknown> | null;
 }
 
 export function authState(overrides: Partial<MutableAuthState> = {}): MutableAuthState {
@@ -34,6 +35,7 @@ export function authState(overrides: Partial<MutableAuthState> = {}): MutableAut
       totpURI: "otpauth://totp/Markiro%20Platform:user@example.invalid?secret=not-persisted",
       backupCodes: ["alpha-one", "bravo-two"],
     },
+    verifyTotpResult: null,
     ...overrides,
   };
 }
@@ -65,6 +67,7 @@ export function fakeAuthClient(state: MutableAuthState): AuthClientLike {
     twoFactor: {
       enable: async () => ({ data: state.enrollment, error: null }),
       verifyTotp: async () => {
+        if (state.verifyTotpResult) return state.verifyTotpResult;
         state.session = readySession(true);
         return { data: { token: "not-rendered" }, error: null };
       },
@@ -228,10 +231,16 @@ export function installCatalogApi({
   me = ACCOUNTANT_ME,
   items = [DRAFT_PLAN, PUBLISHED_PLAN, ADDON, SERVICE],
   defaultDemoId = null,
+  saveStatuses = [],
+  defaultStatuses = [],
+  catalogStatus = 200,
 }: {
   me?: PlatformPrincipal;
   items?: CatalogVersionDto[];
   defaultDemoId?: string | null;
+  saveStatuses?: number[];
+  defaultStatuses?: number[];
+  catalogStatus?: number;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
   let demoId = defaultDemoId;
@@ -242,6 +251,9 @@ export function installCatalogApi({
       const url = String(input);
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
       if (url.endsWith("/api/platform/catalog/items") && (!init.method || init.method === "GET")) {
+        if (catalogStatus !== 200) {
+          return jsonResponse(catalogStatus, { code: "catalog_unavailable" });
+        }
         return jsonResponse(200, { items: catalog });
       }
       if (
@@ -251,6 +263,10 @@ export function installCatalogApi({
         return jsonResponse(200, { catalogVersionId: demoId });
       }
       if (url.endsWith("/api/platform/settings/demo-plan") && init.method === "PATCH") {
+        const status = defaultStatuses.shift() ?? 200;
+        if (status !== 200) {
+          return jsonResponse(status, { code: "catalog_version_conflict" });
+        }
         const body = JSON.parse(String(init.body)) as { catalogVersionId: string };
         demoId = body.catalogVersionId;
         return jsonResponse(200, { catalogVersionId: demoId });
@@ -270,6 +286,10 @@ export function installCatalogApi({
         );
       }
       if (match && init.method === "PATCH") {
+        const status = saveStatuses.shift() ?? 200;
+        if (status !== 200) {
+          return jsonResponse(status, { code: "catalog_version_conflict" });
+        }
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         catalog = catalog.map((item) => (item.id === match[2] ? { ...item, ...body } : item));
         return jsonResponse(

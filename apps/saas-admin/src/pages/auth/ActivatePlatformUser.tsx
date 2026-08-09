@@ -1,8 +1,8 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { z } from "zod";
 
 import { Alert, Button, Input } from "@markiro/ui";
@@ -23,11 +23,16 @@ const activationSchema = z
 
 type ActivationValues = z.infer<typeof activationSchema>;
 
+function activationTokenFromFragment(): string | null {
+  if (typeof window === "undefined" || !window.location.hash.startsWith("#")) return null;
+  const token = new URLSearchParams(window.location.hash.slice(1)).get("token");
+  return token && token.length >= 16 && token.length <= 512 ? token : null;
+}
+
 export function ActivatePlatformUser() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const tokenRef = useRef(searchParams.get("token"));
+  const tokenRef = useRef(activationTokenFromFragment());
   const exchangedRef = useRef(false);
   const [complete, setComplete] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -36,11 +41,9 @@ export function ActivatePlatformUser() {
     defaultValues: { password: "", confirmation: "" },
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    window.history.replaceState(window.history.state, "", "/activate");
     void navigate("/activate", { replace: true });
-    if (window.location.search.includes("token=")) {
-      window.history.replaceState(window.history.state, "", window.location.pathname);
-    }
   }, [navigate]);
 
   const submit = form.handleSubmit(async ({ password }) => {

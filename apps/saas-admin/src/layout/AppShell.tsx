@@ -68,7 +68,7 @@ export function AppShell() {
       <footer className="status-rail" role="status" aria-label={t("shell.statusLabel")}>
         <span>SAAS CONSOLE · 01</span>
         <span className="status-rail__separator" aria-hidden="true" />
-        <StatusChip status="ok" label={t("shell.apiAvailable")} />
+        <StatusChip status="ok" label={t("shell.sessionConfirmed")} />
         <span className="status-rail__spacer" />
         <span>{t("shell.secureSession")}</span>
         <span className="rail-coordinate">MOW · UTC+3</span>

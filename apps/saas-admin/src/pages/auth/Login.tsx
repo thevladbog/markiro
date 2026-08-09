@@ -8,6 +8,7 @@ import { z } from "zod";
 import { Alert, Button, Input } from "@markiro/ui";
 
 import { useAuthClient } from "../../auth/client.js";
+import { clearPlatformChallenge, markPlatformChallengePending } from "../../auth/challenge.js";
 import { AuthFrame } from "./AuthFrame.js";
 
 const loginSchema = z.object({
@@ -32,13 +33,16 @@ export function Login() {
     setSubmitError(null);
     const result = await auth.signIn.email(values);
     if (result.error) {
+      clearPlatformChallenge();
       setSubmitError(result.error.message ?? t("auth.login.error"));
       return;
     }
     if (result.data?.twoFactorRedirect) {
+      markPlatformChallengePending();
       void navigate("/two-factor?mode=challenge", { replace: true });
       return;
     }
+    clearPlatformChallenge();
     await session.refetch?.();
     const requested = (location.state as { from?: unknown } | null)?.from;
     void navigate(typeof requested === "string" ? requested : "/catalog", { replace: true });

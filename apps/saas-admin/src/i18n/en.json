@@ -6,6 +6,8 @@
     "validation": {
       "email": "Enter a valid address",
       "required": "This field is required",
+      "nameTooLong": "Use no more than 300 characters",
+      "unitTooLong": "Use no more than 100 characters",
       "password": "Use at least 8 characters",
       "confirmation": "Passwords must match",
       "code": "Enter 6 digits"
@@ -44,6 +46,7 @@
       "code": "Authenticator code",
       "verify": "Verify code",
       "useBackup": "Use a backup code",
+      "cancel": "Cancel verification",
       "enrollmentError": "Could not create the 2FA key",
       "codeError": "The code was not accepted"
     },
@@ -81,7 +84,7 @@
     "catalog": "Catalog",
     "language": "Interface language",
     "statusLabel": "Platform status",
-    "apiAvailable": "API · available",
+    "sessionConfirmed": "Session · confirmed",
     "secureSession": "2FA · SESSION SECURED"
   },
   "catalog": {
@@ -128,6 +131,23 @@
       "publicApi": "Public API",
       "pallets": "Pallet workflows"
     },
+    "effectNames": {
+      "lines": "Lines",
+      "stations": "Stations",
+      "kiosks": "Kiosks",
+      "cabinetUsers": "Cabinet users",
+      "labelEditor": "Label editor",
+      "publicApi": "Public API",
+      "pallets": "Pallet workflows"
+    },
+    "validation": {
+      "required": "This field is required",
+      "money": "Enter an amount in 0.00 format",
+      "positiveOrEmpty": "Enter a positive integer or leave the field empty",
+      "positive": "Enter a positive integer",
+      "effectRequired": "Add at least one effect",
+      "effectDuplicate": "Each effect type can be added only once"
+    },
     "form": {
       "identity": "Version parameters",
       "nameRu": "Russian name",
@@ -146,10 +166,18 @@
       "addonEffect": "Add-on effect",
       "effectKey": "Effect type",
       "effectValue": "Quota increment",
+      "effectKeyIndexed": "Effect type {{index}}",
+      "effectValueIndexed": "Quota increment {{index}}",
+      "featureEnabled": "The feature will be enabled",
+      "addEffect": "Add effect",
+      "removeEffect": "Remove effect {{index}}",
+      "remove": "Remove",
       "serviceNotice": "A service does not change quotas and is activated once."
     },
     "save": "Save draft",
     "saved": "Draft saved",
+    "saveConflict": "The version changed. Refresh the catalog.",
+    "saveError": "Could not save the draft.",
     "publishVersion": "Publish version {{version}}",
     "publishTitle": "Publish version {{version}}",
     "publishWarning": "Version {{version}} becomes immutable after publication.",
@@ -160,6 +188,9 @@
     "defaultDemo": "Default demo",
     "makeDefault": "Make version {{version}} the default demo",
     "makeDefaultShort": "Use for demos",
-    "defaultUpdated": "Version selected for new demos"
+    "defaultUpdated": "Version selected for new demos",
+    "defaultConflict": "The demo plan changed. Refresh the catalog.",
+    "defaultError": "Could not select the demo plan.",
+    "mutationStatus": "Version operation status"
   }
 }
