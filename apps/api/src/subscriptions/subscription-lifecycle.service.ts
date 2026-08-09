@@ -330,7 +330,8 @@ export class SubscriptionLifecycleService {
         !target ||
         (input.activationPolicy === "immediate" &&
           (target.status === "pending_activation" ||
-            (target.startsAt !== null && target.startsAt > operationAt) ||
+            target.startsAt === null ||
+            target.startsAt > operationAt ||
             (target.endsAt !== null && target.endsAt <= operationAt)))
       ) {
         throw new ConflictException({ code: "subscription_compatible_plan_required" });
@@ -340,6 +341,9 @@ export class SubscriptionLifecycleService {
           ? target.startsAt
           : resolveImmediateStart(input.effectiveAt, operationAt);
       if (!startsAt) throw new ConflictException({ code: "subscription_start_required" });
+      if (target.startsAt && startsAt < target.startsAt) {
+        throw new BadRequestException({ code: "addon_precedes_subscription_term" });
+      }
       const endsAt = input.endsAt ?? target.endsAt;
       validateTerm(startsAt, endsAt ?? undefined);
       if (input.activationPolicy === "immediate") {

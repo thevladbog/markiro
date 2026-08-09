@@ -19,7 +19,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
   const connection = createDb(process.env.DATABASE_URL!);
   const defaultDemo = new DefaultDemoSettingFixture(connection.db);
 
-  async function useDemo(durationDays = 14, published = true): Promise<string> {
+  async function createDemo(durationDays = 14, published = true): Promise<string> {
     const itemId = crypto.randomUUID();
     const versionId = crypto.randomUUID();
     await connection.db.insert(schema.catalogItems).values({
@@ -56,6 +56,11 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         .set({ status: "published", publishedAt: new Date() })
         .where(eq(schema.catalogItemVersions.id, versionId));
     }
+    return versionId;
+  }
+
+  async function useDemo(durationDays = 14, published = true): Promise<string> {
+    const versionId = await createDemo(durationDays, published);
     await defaultDemo.install(versionId);
     return versionId;
   }
@@ -426,6 +431,37 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .from(schema.platformSettings)
       .where(eq(schema.platformSettings.key, "default"));
     expect(restoredCompetitor).toEqual({ versionId: ownedVersionId });
+  });
+
+  it("does not install over a competing default-demo change made after capture", async () => {
+    const attemptedVersionId = await createDemo();
+    const competingVersionId = await createDemo();
+    const attemptedFixture = new DefaultDemoSettingFixture(connection.db);
+    const competingFixture = new DefaultDemoSettingFixture(connection.db);
+    await attemptedFixture.capture();
+    await competingFixture.capture();
+    await competingFixture.install(competingVersionId);
+
+    try {
+      await expect(attemptedFixture.install(attemptedVersionId)).rejects.toThrow(
+        "Default demo setting ownership lost",
+      );
+      const [unchanged] = await connection.db
+        .select({ versionId: schema.platformSettings.defaultDemoCatalogVersionId })
+        .from(schema.platformSettings)
+        .where(eq(schema.platformSettings.key, "default"));
+      expect(unchanged).toEqual({ versionId: competingVersionId });
+    } finally {
+      const [current] = await connection.db
+        .select({ versionId: schema.platformSettings.defaultDemoCatalogVersionId })
+        .from(schema.platformSettings)
+        .where(eq(schema.platformSettings.key, "default"));
+      if (current?.versionId === attemptedVersionId) {
+        await attemptedFixture.restore();
+      } else if (current?.versionId === competingVersionId) {
+        await competingFixture.restore();
+      }
+    }
   });
 });
 

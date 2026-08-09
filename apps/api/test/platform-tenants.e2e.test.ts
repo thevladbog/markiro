@@ -295,7 +295,10 @@ describe.skipIf(!ready)("platform tenant management", () => {
     tenantId = (created.body as { tenantId: string }).tenantId;
   }
 
-  async function createActiveTenant(prefix: string): Promise<string> {
+  async function createActiveTenant(
+    prefix: string,
+    parentEndsAt: Date | null = new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000),
+  ): Promise<string> {
     const created = await admin
       .post("/platform/tenants")
       .send({
@@ -310,7 +313,7 @@ describe.skipIf(!ready)("platform tenant management", () => {
       .send({
         catalogVersionId: paidPlanVersionId,
         activationPolicy: "immediate",
-        endsAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1_000).toISOString(),
+        ...(parentEndsAt ? { endsAt: parentEndsAt.toISOString() } : {}),
         reason: `${prefix} initial active plan`,
       })
       .expect(201);
@@ -907,6 +910,120 @@ describe.skipIf(!ready)("platform tenant management", () => {
     expect(
       await setup.db
         .select()
+        .from(schema.subscriptionAddons)
+        .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId)),
+    ).toEqual(beforeAddons);
+    expect(
+      await setup.db
+        .select({ id: schema.subscriptionEvents.id })
+        .from(schema.subscriptionEvents)
+        .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId)),
+    ).toEqual(beforeEvents);
+    expect(
+      await setup.db
+        .select({ id: schema.platformAuditEvents.id })
+        .from(schema.platformAuditEvents)
+        .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId)),
+    ).toEqual(beforeAudits);
+  });
+
+  it("rejects backdated immediate add-ons for finite and open-ended parent terms without mutation", async () => {
+    const finiteTenantId = await createActiveTenant("backdated-addon-finite");
+    const openTenantId = await createActiveTenant("backdated-addon-open", null);
+
+    for (const boundaryTenantId of [finiteTenantId, openTenantId]) {
+      const [parent] = await setup.db
+        .select({ startsAt: schema.tenantSubscriptions.startsAt })
+        .from(schema.tenantSubscriptions)
+        .where(
+          and(
+            eq(schema.tenantSubscriptions.tenantId, boundaryTenantId),
+            eq(schema.tenantSubscriptions.status, "active"),
+          ),
+        );
+      if (!parent?.startsAt) throw new Error("Expected an active parent start boundary");
+      const beforeAddons = await setup.db
+        .select({ id: schema.subscriptionAddons.id })
+        .from(schema.subscriptionAddons)
+        .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId));
+      const beforeEvents = await setup.db
+        .select({ id: schema.subscriptionEvents.id })
+        .from(schema.subscriptionEvents)
+        .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId));
+      const beforeAudits = await setup.db
+        .select({ id: schema.platformAuditEvents.id })
+        .from(schema.platformAuditEvents)
+        .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId));
+
+      await admin
+        .post(`/platform/tenants/${boundaryTenantId}/subscription/addons`)
+        .send({
+          catalogVersionId: addonVersionId,
+          quantity: 1,
+          activationPolicy: "immediate",
+          effectiveAt: new Date(parent.startsAt.getTime() - 60_000).toISOString(),
+          reason: "add-on cannot predate parent",
+        })
+        .expect(400);
+
+      expect(
+        await setup.db
+          .select({ id: schema.subscriptionAddons.id })
+          .from(schema.subscriptionAddons)
+          .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId)),
+      ).toEqual(beforeAddons);
+      expect(
+        await setup.db
+          .select({ id: schema.subscriptionEvents.id })
+          .from(schema.subscriptionEvents)
+          .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId)),
+      ).toEqual(beforeEvents);
+      expect(
+        await setup.db
+          .select({ id: schema.platformAuditEvents.id })
+          .from(schema.platformAuditEvents)
+          .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId)),
+      ).toEqual(beforeAudits);
+    }
+  });
+
+  it("rejects an immediate add-on when an active parent has no start boundary", async () => {
+    const boundaryTenantId = await createActiveTenant("null-start-addon-parent", null);
+    await setup.db
+      .update(schema.tenantSubscriptions)
+      .set({ startsAt: null })
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, boundaryTenantId),
+          eq(schema.tenantSubscriptions.status, "active"),
+        ),
+      );
+    const beforeAddons = await setup.db
+      .select({ id: schema.subscriptionAddons.id })
+      .from(schema.subscriptionAddons)
+      .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId));
+    const beforeEvents = await setup.db
+      .select({ id: schema.subscriptionEvents.id })
+      .from(schema.subscriptionEvents)
+      .where(eq(schema.subscriptionEvents.tenantId, boundaryTenantId));
+    const beforeAudits = await setup.db
+      .select({ id: schema.platformAuditEvents.id })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, boundaryTenantId));
+
+    await admin
+      .post(`/platform/tenants/${boundaryTenantId}/subscription/addons`)
+      .send({
+        catalogVersionId: addonVersionId,
+        quantity: 1,
+        activationPolicy: "immediate",
+        reason: "parent start boundary is required",
+      })
+      .expect(409);
+
+    expect(
+      await setup.db
+        .select({ id: schema.subscriptionAddons.id })
         .from(schema.subscriptionAddons)
         .where(eq(schema.subscriptionAddons.tenantId, boundaryTenantId)),
     ).toEqual(beforeAddons);

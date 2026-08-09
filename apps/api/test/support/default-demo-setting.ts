@@ -30,9 +30,17 @@ export class DefaultDemoSettingFixture {
 
   async install(versionId: string): Promise<void> {
     if (this.originalVersionId === undefined) throw new Error("Default demo was not captured");
+    const expectedVersionId = this.installedVersionId ?? this.originalVersionId;
     await this.db.transaction(async (tx) => {
       await lockCatalogVersion(tx, versionId);
       await lockSetting(tx);
+      const [current] = await tx
+        .select({ versionId: schema.platformSettings.defaultDemoCatalogVersionId })
+        .from(schema.platformSettings)
+        .where(eq(schema.platformSettings.key, "default"));
+      if ((current?.versionId ?? null) !== expectedVersionId) {
+        throw new Error("Default demo setting ownership lost");
+      }
       await tx
         .insert(schema.platformSettings)
         .values({ key: "default", defaultDemoCatalogVersionId: versionId })
