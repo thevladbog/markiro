@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { createDb, schema } from "@markiro/db";
 import { eq } from "drizzle-orm";
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   parseProvisionPlatformAdminArgs,
   runProvisionPlatformAdminCli,
@@ -15,6 +15,31 @@ const ready = Boolean(
 );
 
 describe("provision platform admin CLI", () => {
+  let provisionedEmail: string | undefined;
+
+  afterAll(async () => {
+    if (!ready || !provisionedEmail) return;
+    const connection = createDb(process.env.DATABASE_URL!);
+    try {
+      const [user] = await connection.db
+        .select({ id: schema.platformUsers.id })
+        .from(schema.platformUsers)
+        .where(eq(schema.platformUsers.email, provisionedEmail));
+      if (!user) return;
+      await connection.db.transaction(async (tx) => {
+        await tx
+          .delete(schema.emailDeliveries)
+          .where(eq(schema.emailDeliveries.platformUserId, user.id));
+        await tx
+          .delete(schema.platformVerifications)
+          .where(eq(schema.platformVerifications.value, JSON.stringify({ userId: user.id })));
+        await tx.delete(schema.platformUsers).where(eq(schema.platformUsers.id, user.id));
+      });
+    } finally {
+      await connection.pool.end();
+    }
+  });
+
   it("rejects every password argument before configuration or database access", async () => {
     expect(() =>
       parseProvisionPlatformAdminArgs(["--email", "admin@example.invalid", "--password", "x"]),
@@ -33,6 +58,7 @@ describe("provision platform admin CLI", () => {
 
   it.skipIf(!ready)("is idempotent and writes only user and delivery identifiers", async () => {
     const email = `bootstrap-${randomUUID()}@example.invalid`;
+    provisionedEmail = email;
     const firstStdout: string[] = [];
     const secondStdout: string[] = [];
     const stderr: string[] = [];

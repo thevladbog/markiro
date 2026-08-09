@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "../src/env";
 import { buildSmtpOptions } from "../src/modules/mail/mail-transport.service";
+import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 const baseEnv = {
+  ...PLATFORM_TEST_ENV,
   DATABASE_URL: "postgres://user:pass@localhost/db",
   BETTER_AUTH_SECRET: "insecure-test-placeholder",
   BETTER_AUTH_URL: "http://localhost:3000",

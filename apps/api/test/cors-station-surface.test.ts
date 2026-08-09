@@ -6,10 +6,12 @@ import type { Request } from "express";
 import { describe, expect, it } from "vitest";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
+import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 const ADMIN_ORIGIN = "https://admin.example.ru";
 const STATION_ORIGIN = "https://station.example.ru";
 const env = loadEnv({
+  ...PLATFORM_TEST_ENV,
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   BETTER_AUTH_SECRET: "0123456789abcdef0123",
   BETTER_AUTH_URL: "http://localhost:3000",
