@@ -49,6 +49,7 @@ test("release transfer terminates tar when SSH exits before consuming the archiv
   });
   const remote = Object.assign(new EventEmitter(), {
     exitCode: null,
+    stdin: new PassThrough(),
     stderr: new PassThrough(),
     kill() {
       return true;
@@ -65,6 +66,43 @@ test("release transfer terminates tar when SSH exits before consuming the archiv
   await assert.rejects(transfer, /private release transfer failed/);
   assert.equal(archive.killCalled, true);
   assert.equal(archive.stdout.destroyed, true);
+});
+
+test("release transfer pipes the archive into SSH and completes after both children exit", async () => {
+  const archive = Object.assign(new EventEmitter(), {
+    exitCode: null,
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill() {
+      return true;
+    },
+  });
+  const remote = Object.assign(new EventEmitter(), {
+    exitCode: null,
+    stdin: new PassThrough(),
+    stderr: new PassThrough(),
+    kill() {
+      return true;
+    },
+  });
+  const received = [];
+  remote.stdin.on("data", (chunk) => received.push(chunk));
+  remote.stdin.once("finish", () => {
+    remote.exitCode = 0;
+    remote.emit("close", 0);
+  });
+  const children = [archive, remote];
+  const transfer = streamArchive(["-cf", "-"], ["host", "tar"], {
+    spawn: () => children.shift(),
+    timeoutMs: 250,
+    writeDiagnostic: () => undefined,
+  });
+  archive.stdout.end("archive payload");
+  archive.exitCode = 0;
+  archive.emit("close", 0);
+
+  await transfer;
+  assert.equal(Buffer.concat(received).toString("utf8"), "archive payload");
 });
 
 test("direct deployment transfers, prepares, smokes and finalizes without a cloud control plane", async () => {
