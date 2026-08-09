@@ -1,7 +1,9 @@
 import { z } from "zod";
 
+const POSTGRES_INTEGER_MAX = 2_147_483_647;
 const decimalMoneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/, "Expected a decimal amount");
-const nullablePositiveInteger = z.number().int().positive().nullable();
+const positivePostgresIntegerSchema = z.number().int().positive().max(POSTGRES_INTEGER_MAX);
+const nullablePositiveInteger = positivePostgresIntegerSchema.nullable();
 
 const versionFieldsSchema = z.object({
   nameRu: z.string().trim().min(1).max(300),
@@ -32,7 +34,7 @@ export const planEntitlementSchema = z
 const addonEffectSchema = z.discriminatedUnion("key", [
   z.object({
     key: z.enum(["lines", "stations", "kiosks", "cabinetUsers"]),
-    quotaIncrement: z.number().int().positive(),
+    quotaIncrement: positivePostgresIntegerSchema,
   }),
   z.object({
     key: z.enum(["labelEditor", "publicApi", "pallets"]),

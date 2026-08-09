@@ -373,6 +373,108 @@ describe.skipIf(!ready)("platform catalog", () => {
     expect(service.body).not.toHaveProperty("addon");
   });
 
+  it("bounds persisted plan quota integers at the PostgreSQL int4 maximum", async () => {
+    const rejectedCode = `plan-int4-over-${randomUUID()}`;
+    const rejected = await admin
+      .post(`/platform/catalog/items/${rejectedCode}/versions`)
+      .send({
+        ...basicPlan,
+        plan: { ...basicPlan.plan, maxLines: 2_147_483_648 },
+      })
+      .expect(400);
+    expect(rejected.text).not.toMatch(/22003|integer out of range|Failed query/i);
+
+    const rejectedVersions = await setup.db
+      .select({ versionId: schema.catalogItemVersions.id })
+      .from(schema.catalogItemVersions)
+      .innerJoin(
+        schema.catalogItems,
+        eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
+      )
+      .where(eq(schema.catalogItems.code, rejectedCode));
+    expect(rejectedVersions).toEqual([]);
+    const rejectedEffects = await setup.db
+      .select({ catalogVersionId: schema.planEntitlements.catalogVersionId })
+      .from(schema.planEntitlements)
+      .innerJoin(
+        schema.catalogItemVersions,
+        eq(schema.catalogItemVersions.id, schema.planEntitlements.catalogVersionId),
+      )
+      .innerJoin(
+        schema.catalogItems,
+        eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
+      )
+      .where(eq(schema.catalogItems.code, rejectedCode));
+    expect(rejectedEffects).toEqual([]);
+
+    const acceptedCode = `plan-int4-max-${randomUUID()}`;
+    const accepted = await admin
+      .post(`/platform/catalog/items/${acceptedCode}/versions`)
+      .send({
+        ...basicPlan,
+        plan: { ...basicPlan.plan, maxLines: 2_147_483_647 },
+      })
+      .expect(201);
+    expect(accepted.body.plan.maxLines).toBe(2_147_483_647);
+    const [persisted] = await setup.db
+      .select({ maxLines: schema.planEntitlements.maxLines })
+      .from(schema.planEntitlements)
+      .where(eq(schema.planEntitlements.catalogVersionId, accepted.body.id as string));
+    expect(persisted).toEqual({ maxLines: 2_147_483_647 });
+  });
+
+  it("bounds persisted add-on quota increments at the PostgreSQL int4 maximum", async () => {
+    const rejectedCode = `addon-int4-over-${randomUUID()}`;
+    const rejected = await admin
+      .post(`/platform/catalog/items/${rejectedCode}/versions`)
+      .send({
+        ...basicPlan,
+        plan: undefined,
+        addon: { effects: [{ key: "lines", quotaIncrement: 2_147_483_648 }] },
+      })
+      .expect(400);
+    expect(rejected.text).not.toMatch(/22003|integer out of range|Failed query/i);
+
+    const rejectedVersions = await setup.db
+      .select({ versionId: schema.catalogItemVersions.id })
+      .from(schema.catalogItemVersions)
+      .innerJoin(
+        schema.catalogItems,
+        eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
+      )
+      .where(eq(schema.catalogItems.code, rejectedCode));
+    expect(rejectedVersions).toEqual([]);
+    const rejectedEffects = await setup.db
+      .select({ catalogVersionId: schema.addonEntitlements.catalogVersionId })
+      .from(schema.addonEntitlements)
+      .innerJoin(
+        schema.catalogItemVersions,
+        eq(schema.catalogItemVersions.id, schema.addonEntitlements.catalogVersionId),
+      )
+      .innerJoin(
+        schema.catalogItems,
+        eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
+      )
+      .where(eq(schema.catalogItems.code, rejectedCode));
+    expect(rejectedEffects).toEqual([]);
+
+    const acceptedCode = `addon-int4-max-${randomUUID()}`;
+    const accepted = await admin
+      .post(`/platform/catalog/items/${acceptedCode}/versions`)
+      .send({
+        ...basicPlan,
+        plan: undefined,
+        addon: { effects: [{ key: "lines", quotaIncrement: 2_147_483_647 }] },
+      })
+      .expect(201);
+    expect(accepted.body.addon.effects).toEqual([{ key: "lines", quotaIncrement: 2_147_483_647 }]);
+    const [persisted] = await setup.db
+      .select({ quotaIncrement: schema.addonEntitlements.quotaIncrement })
+      .from(schema.addonEntitlements)
+      .where(eq(schema.addonEntitlements.catalogVersionId, accepted.body.id as string));
+    expect(persisted).toEqual({ quotaIncrement: 2_147_483_647 });
+  });
+
   it("requires retirement before archive and refuses to retire the current default demo", async () => {
     const draft = await admin
       .post(`/platform/catalog/items/plan-demo-${randomUUID()}/versions`)
