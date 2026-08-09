@@ -38,6 +38,7 @@ import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/t
 import { MailTransportService } from "./modules/mail/mail-transport.service";
 import { ObjectStorageService } from "./modules/storage/object-storage.service";
 import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
+import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
 import type { PlatformAuth } from "@markiro/db";
 
 @Module({})
@@ -68,6 +69,7 @@ export class AppModule {
         ...(setup.platformAuth
           ? [PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN)]
           : []),
+        PlatformCatalogModule,
         AuthorizationModule,
         JobsModule.forRoot(setup.databaseUrl, env),
         OrgProfileModule,
