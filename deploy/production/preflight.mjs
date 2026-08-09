@@ -21,13 +21,12 @@ function invalid(variable) {
   return new Error(`${variable} is invalid`);
 }
 
-function validateKioskOrigin(envText, kioskDomain, edgeMode, httpsPort) {
+function validateKioskOrigin(envText, kioskDomain, httpsPort) {
   const origins = envText
     .split(/\r?\n/)
     .filter((line) => line.startsWith("KIOSK_ORIGIN="))
     .map((line) => line.slice("KIOSK_ORIGIN=".length));
-  const port =
-    edgeMode === "direct" && httpsPort !== undefined && httpsPort !== "443" ? `:${httpsPort}` : "";
+  const port = httpsPort !== undefined && httpsPort !== "443" ? `:${httpsPort}` : "";
   const expectedOrigin = `https://${kioskDomain}${port}`;
 
   if (origins.length !== 1 || origins[0] !== expectedOrigin)
@@ -166,7 +165,7 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string} kioskDomain
  * @property {string | undefined} acmeEmail
  * @property {string} envFile
- * @property {"direct" | "behind-alb"} edgeMode
+ * @property {"direct"} edgeMode
  */
 
 /**
@@ -195,20 +194,18 @@ export async function runPreflight(
   const acmeEmail = environment.ACME_EMAIL;
   const envFile = environment.MARKIRO_ENV_FILE || ".env.production";
 
-  if (edgeMode === "direct" && (!imageTag || !IMAGE_TAG_PATTERN.test(imageTag)))
-    throw invalid("MARKIRO_IMAGE_TAG");
+  if (!imageTag || !IMAGE_TAG_PATTERN.test(imageTag)) throw invalid("MARKIRO_IMAGE_TAG");
   if (!apiImageDigest || !IMAGE_DIGEST_PATTERN.test(apiImageDigest))
     throw invalid("MARKIRO_API_IMAGE_DIGEST");
   if (!edgeImageDigest || !IMAGE_DIGEST_PATTERN.test(edgeImageDigest))
     throw invalid("MARKIRO_EDGE_IMAGE_DIGEST");
   validateProductionDomains(domain, kioskDomain);
-  if (edgeMode !== "direct" && edgeMode !== "behind-alb") throw invalid("MARKIRO_EDGE_MODE");
-  const isDirectLocalPair =
-    edgeMode === "direct" && domain === "localhost" && kioskDomain === "kiosk.localhost";
+  if (edgeMode !== "direct") throw invalid("MARKIRO_EDGE_MODE");
+  const isDirectLocalPair = domain === "localhost" && kioskDomain === "kiosk.localhost";
   if (domain === "localhost" && !isDirectLocalPair) throw invalid("MARKIRO_DOMAIN");
   if (kioskDomain === "kiosk.localhost" && !isDirectLocalPair)
     throw invalid("MARKIRO_KIOSK_DOMAIN");
-  if (edgeMode === "direct" && (!acmeEmail || !isEmail(acmeEmail))) throw invalid("ACME_EMAIL");
+  if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
 
   try {
     const mode = await dependencies.mode(envFile);
@@ -225,7 +222,7 @@ export async function runPreflight(
   } catch {
     throw new Error("MARKIRO_ENV_FILE is inaccessible");
   }
-  validateKioskOrigin(envText, kioskDomain, edgeMode, environment.MARKIRO_HTTPS_PORT);
+  validateKioskOrigin(envText, kioskDomain, environment.MARKIRO_HTTPS_PORT);
 
   try {
     const composeEnvironment = {

@@ -125,15 +125,11 @@ export function productionBaseUrls(environment) {
     environment.MARKIRO_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
   );
-  const isLocalPair =
-    (environment.MARKIRO_EDGE_MODE || "direct") === "direct" &&
-    domain === "localhost" &&
-    kioskDomain === "kiosk.localhost";
+  const isLocalPair = domain === "localhost" && kioskDomain === "kiosk.localhost";
   if (domain === "localhost" && !isLocalPair) throw new Error("MARKIRO_DOMAIN is invalid");
   if (kioskDomain === "kiosk.localhost" && !isLocalPair)
     throw new Error("MARKIRO_KIOSK_DOMAIN is invalid");
-  const port =
-    environment.MARKIRO_EDGE_MODE === "behind-alb" ? undefined : environment.MARKIRO_HTTPS_PORT;
+  const port = environment.MARKIRO_HTTPS_PORT;
   return {
     admin: productionBaseUrl(domain, port),
     kiosk: productionBaseUrl(kioskDomain, port),

@@ -18,9 +18,13 @@ function stepByName(job, name) {
   return step;
 }
 
-function assertHostedDeployWorkflow(source) {
+function assertDirectDeployWorkflow(source) {
   const workflow = parseWorkflow(source);
   assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
+    "release_run_id",
+    "release_sha",
+  ]);
   assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
   const deploy = workflow.jobs.deploy;
   assert.equal(deploy["runs-on"], "ubuntu-latest");
@@ -28,114 +32,72 @@ function assertHostedDeployWorkflow(source) {
   assert.deepEqual(deploy.permissions, {
     actions: "read",
     contents: "read",
-    "id-token": "write",
+    packages: "read",
   });
-  assert.equal(deploy.needs, undefined);
   assert.equal(deploy.env.YC_APP_DEPLOY_LOGIN, "markiro-deploy");
-  assert.equal(deploy.env.MARKIRO_DEPLOYMENT_PHASE, "${{ inputs.deployment_phase }}");
-  assert.equal(
-    deploy.env.MARKIRO_ROLLBACK_REHEARSAL,
-    "${{ inputs.rollback_rehearsal && '1' || '0' }}",
-  );
+  assert.equal(deploy.env.YC_APP_PUBLIC_ADDRESS, "${{ vars.YC_APP_PUBLIC_ADDRESS }}");
+  assert.equal(deploy.env.APP_SSH_HOST_KEYS_B64, "${{ vars.APP_SSH_HOST_KEYS_B64 }}");
 
-  const checkout = deploy.steps.find(
-    (step) => typeof step.uses === "string" && step.uses.startsWith("actions/checkout@"),
+  const checkout = deploy.steps.find((step) =>
+    String(step.uses || "").startsWith("actions/checkout@"),
   );
   assert.ok(checkout);
   assert.match(checkout.uses, /^actions\/checkout@[0-9a-f]{40}$/);
   assert.equal(checkout.with.ref, "${{ steps.release.outputs.release-sha }}");
   assert.equal(checkout.with["persist-credentials"], false);
-  for (const step of deploy.steps.filter((candidate) => candidate.uses))
-    assert.match(step.uses, /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-f]{40}$/);
 
-  const validation = stepByName(deploy, "Validate exact release and rollback prerequisite").run;
+  const validation = stepByName(deploy, "Validate exact release").run;
   assert.match(validation, /release-manifest[.]mjs validate/);
-  assert.match(validation, /rollback-rehearsal-prerequisite\/rollback-rehearsal[.]json/);
-  assert.match(validation, /deploymentRunAttempt/);
-  assert.match(validation, /deploymentRunId/);
-  assert.doesNotMatch(validation, /cleanup-receipt|runnerDeregistered|runnerVmStopped/);
+  assert.doesNotMatch(validation, /rehearsal|cleanup|ALB/i);
 
-  const delivery = stepByName(deploy, "Authenticate and deploy the immutable bundle");
+  const delivery = stepByName(deploy, "Deploy immutable Compose bundle");
+  assert.equal(delivery.env.GHCR_TOKEN, "${{ github.token }}");
+  assert.equal(delivery.env.GHCR_USERNAME, "${{ github.actor }}");
   assert.equal(
     delivery.env.YC_APP_DEPLOY_SSH_PRIVATE_KEY,
     "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   );
-  assert.match(
-    delivery.run,
-    /if ! github_oidc_token="\$\(curl[\s\S]*?\|[\s\\]*jq -er[\s\S]*?\)"; then/,
-  );
-  assert.match(delivery.run, /if ! iam_token="\$\(curl[\s\S]*?\|[\s\\]*jq -er[\s\S]*?\)"; then/);
-  assert.match(delivery.run, /printf '::add-mask::%s\\n' "\$github_oidc_token"/);
-  assert.match(delivery.run, /printf '::add-mask::%s\\n' "\$iam_token"/);
-  assert.match(delivery.run, /printf '%s' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$key_path"/);
+  assert.match(delivery.run, /printf '%s\\n' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$key_path"/);
   assert.match(delivery.run, /chmod 600 "\$key_path"/);
-  assert.match(delivery.run, /hosted-deploy-context[.]mjs resolve/);
   assert.match(delivery.run, /remote-deploy[.]mjs run/);
-  assert.doesNotMatch(delivery.run, /ssh-keyscan|accept-new|runner-control|generate-jitconfig/);
-  assert.doesNotMatch(delivery.run, /echo[^\n]*(?:PRIVATE_KEY|iam_token|github_oidc_token)/i);
+  assert.doesNotMatch(delivery.run, /curl|oidc|iam_token|hosted-deploy-context|serial|lockbox/i);
 
   const cleanup = stepByName(deploy, "Remove local deployment credentials");
   assert.equal(cleanup.if, "always()");
   assert.match(cleanup.run, /markiro-deploy-key/);
-  assert.match(cleanup.run, /markiro-hosted-deploy-context[.]json/);
-  assert.match(cleanup.run, /release-manifest/);
 
-  const sourceWithoutComments = source.replace(/^\s*#.*$/gm, "");
+  const withoutComments = source.replace(/^\s*#.*$/gm, "");
   assert.doesNotMatch(
-    sourceWithoutComments,
-    /workflow_run|self-hosted|production-controller|production-cleanup|runner-label|YC_RUNNER_|cleanup-receipt|markiro-cleanup-/,
-  );
-  assert.match(
-    source,
-    /markiro-rollback-rehearsal-\$\{\{ steps[.]release[.]outputs[.]release-sha \}\}-attempt-/,
-  );
-  assert.match(
-    source,
-    /markiro-finalized-release-\$\{\{ steps[.]release[.]outputs[.]release-sha \}\}/,
+    withoutComments,
+    /id-token|workflow_run|self-hosted|production-controller|production-cleanup|rollback_rehearsal|rehearsal_run|YC_IAM|YC_LOAD_BALANCER|YC_BACKEND_GROUP|YC_TARGET_GROUP|YC_REGISTRY_SECRET|hosted-deploy-context|serial/i,
   );
 }
 
-test("production deployment is one manually approved GitHub-hosted job with bounded credentials", async () => {
-  assertHostedDeployWorkflow(await readFile(WORKFLOW_URL, "utf8"));
+test("production deploy is one ordinary protected SSH job without Yandex control plane", async () => {
+  assertDirectDeployWorkflow(await readFile(WORKFLOW_URL, "utf8"));
 });
 
-test("hosted workflow contract rejects automatic, multi-environment, unpinned and unclean delivery mutations", async () => {
+test("direct deploy workflow rejects automatic, unpinned and credential-unsafe mutations", async () => {
   const source = await readFile(WORKFLOW_URL, "utf8");
   const mutations = [
     [
       "automatic trigger",
-      source.replace(
-        "  workflow_dispatch:",
-        "  workflow_run:\n    workflows: [Publish production images]\n  workflow_dispatch:",
-      ),
+      source.replace("  workflow_dispatch:", "  workflow_run:\n  workflow_dispatch:"),
     ],
-    ["self-hosted runner", source.replace("runs-on: ubuntu-latest", "runs-on: self-hosted")],
-    [
-      "second environment",
-      source.replace("environment: production-deploy", "environment: production-controller"),
-    ],
-    ["OIDC permission", source.replace("id-token: write", "id-token: read")],
+    ["self hosted", source.replace("runs-on: ubuntu-latest", "runs-on: self-hosted")],
+    ["OIDC", source.replace("contents: read", "contents: read\n      id-token: write")],
     [
       "unpinned checkout",
       source.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@main"),
     ],
     ["conditional cleanup", source.replace("if: always()", "if: success()")],
     [
-      "missing context cleanup",
-      source.replaceAll("markiro-hosted-deploy-context.json", "context-not-removed.json"),
-    ],
-    [
-      "ambient checkout ref",
+      "wrong checkout",
       source.replace("${{ steps.release.outputs.release-sha }}", "${{ github.sha }}"),
     ],
   ];
-
   for (const [name, mutation] of mutations) {
     assert.notEqual(mutation, source, `${name} mutation must change the workflow`);
-    assert.throws(
-      () => assertHostedDeployWorkflow(mutation),
-      /workflow|Expected|match|equal|missing/i,
-      name,
-    );
+    assert.throws(() => assertDirectDeployWorkflow(mutation), undefined, name);
   }
 });

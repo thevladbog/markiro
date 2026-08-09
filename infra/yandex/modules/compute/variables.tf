@@ -1,46 +1,35 @@
 variable "folder_id" {
-  description = "Yandex Cloud folder containing the private compute instances."
+  description = "Yandex Cloud folder containing the application VM."
   type        = string
   nullable    = false
 }
 
 variable "zone" {
-  description = "Availability zone for the application instance."
+  description = "Availability zone for the application VM."
   type        = string
   nullable    = false
 }
 
 variable "ubuntu_lts_image_family" {
-  description = "Pinned Ubuntu LTS image family approved for production instances."
+  description = "Pinned Ubuntu LTS image family approved for production."
   type        = string
   nullable    = false
 }
 
 variable "kms_key_id" {
-  description = "KMS key used to encrypt each managed boot disk."
+  description = "KMS key used to encrypt the application boot disk."
   type        = string
   nullable    = false
-}
-
-variable "application_log_group_id" {
-  description = "Terraform-managed Cloud Logging group receiving sanitized VM application logs."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = length(trimspace(var.application_log_group_id)) > 0
-    error_message = "application_log_group_id must not be empty."
-  }
 }
 
 variable "app_service_account_id" {
-  description = "Runtime service-account ID attached to the application instance."
+  description = "Runtime service account attached to the application VM."
   type        = string
   nullable    = false
 }
 
 variable "runtime_secret_id" {
-  description = "Identifier of the runtime Lockbox container, never its payload."
+  description = "Runtime Lockbox secret identifier, never its payload."
   type        = string
   nullable    = false
 
@@ -50,14 +39,8 @@ variable "runtime_secret_id" {
   }
 }
 
-variable "deployment_controller_service_account_id" {
-  description = "Deployment-controller identity allowed to inspect the application VM."
-  type        = string
-  nullable    = false
-}
-
 variable "app_deploy_ssh_public_key" {
-  description = "Exact Ed25519 public key for the dedicated deployment account."
+  description = "Exact Ed25519 public key for the dedicated deploy account."
   type        = string
   nullable    = false
 
@@ -72,13 +55,13 @@ variable "app_deploy_ssh_public_key" {
 }
 
 variable "app_subnet_id" {
-  description = "Private application subnet ID."
+  description = "Application subnet ID."
   type        = string
   nullable    = false
 }
 
 variable "app_security_group_id" {
-  description = "Security group that accepts only ALB application traffic and key-authenticated deployment SSH."
+  description = "Security group for public HTTP, HTTPS and key-authenticated SSH."
   type        = string
   nullable    = false
 }
