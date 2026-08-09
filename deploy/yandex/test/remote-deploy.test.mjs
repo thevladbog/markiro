@@ -67,6 +67,49 @@ test("release transfer terminates tar when SSH exits before consuming the archiv
   assert.equal(archive.stdout.destroyed, true);
 });
 
+for (const [stderr, expectedCause] of [
+  ["ssh: connect to host 10.64.1.11 port 22: Connection timed out\n", "ssh-connect"],
+  ["markiro-runner@10.64.1.11: Permission denied (publickey).\n", "ssh-auth"],
+  ["Host key verification failed.\n", "ssh-host-key"],
+  ["sudo: a password is required\n", "remote-sudo"],
+  ["tar: Exiting with failure status due to previous errors\n", "remote-tar"],
+]) {
+  test(`release transfer reports only the safe ${expectedCause} diagnostic`, async () => {
+    const archive = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill() {
+        this.exitCode = null;
+        queueMicrotask(() => this.emit("close", null));
+        return true;
+      },
+    });
+    const remote = Object.assign(new EventEmitter(), {
+      exitCode: null,
+      stderr: new PassThrough(),
+      kill() {
+        return true;
+      },
+    });
+    const diagnostics = [];
+    const children = [archive, remote];
+    const transfer = streamArchive(["-cf", "-"], ["host", "tar"], {
+      spawn: () => children.shift(),
+      timeoutMs: 1_000,
+      writeDiagnostic: (value) => diagnostics.push(value),
+    });
+
+    remote.stderr.end(stderr);
+    remote.exitCode = 255;
+    remote.emit("close", 255);
+
+    await assert.rejects(transfer, /private release transfer failed/);
+    assert.deepEqual(diagnostics, [`MARKIRO_DEPLOY_FAILURE ${expectedCause}\n`]);
+    assert.equal(diagnostics[0].includes(stderr.trim()), false);
+  });
+}
+
 test("ALB target gate waits for the exact application target through transitional states", async () => {
   const responses = [
     {
