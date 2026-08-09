@@ -8,6 +8,7 @@ import { isMainModule } from "./cli-main.mjs";
 const HOST_KEY_MARKER = "MARKIRO_SSH_HOST_KEY_V1";
 const HOST_KEY_ALGORITHMS = ["ssh-ed25519", "ssh-rsa"];
 const MAXIMUM_PROVIDER_BYTES = 64 * 1024;
+const MAXIMUM_SERIAL_PROVIDER_BYTES = 256 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
 const ALB_ZONE_STATUSES = new Set([
   "HEALTHY",
@@ -212,7 +213,7 @@ function requireSingleAlbTarget(payload, expectedAddress, phase) {
     throw new Error("production first ALB gate failed");
 }
 
-async function readBoundedJson(response) {
+async function readBoundedJson(response, maximumBytes = MAXIMUM_PROVIDER_BYTES) {
   if (!response.ok || !response.body) throw new Error("hosted deployment provider request failed");
   const reader = response.body.getReader();
   const chunks = [];
@@ -222,7 +223,7 @@ async function readBoundedJson(response) {
       const { done, value } = await reader.read();
       if (done) break;
       bytes += value.byteLength;
-      if (bytes > MAXIMUM_PROVIDER_BYTES) {
+      if (bytes > maximumBytes) {
         await reader.cancel().catch(() => undefined);
         throw new Error("hosted deployment provider request failed");
       }
@@ -238,12 +239,12 @@ async function readBoundedJson(response) {
   }
 }
 
-async function requestJson(url, options = {}) {
+async function requestJson(url, options = {}, maximumBytes = MAXIMUM_PROVIDER_BYTES) {
   const response = await fetch(url, {
     ...options,
     signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
   });
-  return readBoundedJson(response);
+  return readBoundedJson(response, maximumBytes);
 }
 
 export async function resolveHostedDeployContext(
@@ -281,6 +282,7 @@ export async function resolveHostedDeployContext(
   const serial = await request(
     `https://compute.api.cloud.yandex.net/compute/v1/instances/${appInstanceId}:serialPortOutput?port=1`,
     requestOptions,
+    MAXIMUM_SERIAL_PROVIDER_BYTES,
   );
   return {
     appHostKeysB64: parseSerialHostKeys(serial?.contents),
