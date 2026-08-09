@@ -4,6 +4,9 @@ import { RequirePlatformCapabilities } from "../../platform-auth/platform-access
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import {
   createCatalogVersionSchema,
+  catalogItemReferenceSchema,
+  catalogMachineCodeSchema,
+  catalogVersionIdSchema,
   setDefaultDemoPlanSchema,
   updateCatalogVersionSchema,
   type CreateCatalogVersionDto,
@@ -24,7 +27,10 @@ export class PlatformCatalogController {
 
   @Get("items/:id/versions")
   @RequirePlatformCapabilities("catalog.read")
-  listVersions(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
+  listVersions(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+  ) {
     return this.catalog.listVersions(request.platformPrincipal!, id);
   }
 
@@ -32,8 +38,8 @@ export class PlatformCatalogController {
   @RequirePlatformCapabilities("catalog.read")
   getVersion(
     @Req() request: RequestWithPlatformPrincipal,
-    @Param("id") id: string,
-    @Param("versionId") versionId: string,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+    @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return this.catalog.getVersion(request.platformPrincipal!, id, versionId);
   }
@@ -42,7 +48,7 @@ export class PlatformCatalogController {
   @RequirePlatformCapabilities("catalog.write")
   createVersion(
     @Req() request: RequestWithPlatformPrincipal,
-    @Param("id") id: string,
+    @Param("id", new ZodValidationPipe(catalogMachineCodeSchema)) id: string,
     @Body(new ZodValidationPipe(createCatalogVersionSchema)) body: CreateCatalogVersionDto,
   ) {
     return this.catalog.createVersion(request.platformPrincipal!, id, body);
@@ -52,8 +58,8 @@ export class PlatformCatalogController {
   @RequirePlatformCapabilities("catalog.write")
   updateVersion(
     @Req() request: RequestWithPlatformPrincipal,
-    @Param("id") id: string,
-    @Param("versionId") versionId: string,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+    @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
     @Body(new ZodValidationPipe(updateCatalogVersionSchema)) body: UpdateCatalogVersionDto,
   ) {
     return this.catalog.updateVersion(request.platformPrincipal!, id, versionId, body);
@@ -64,8 +70,8 @@ export class PlatformCatalogController {
   @RequirePlatformCapabilities("catalog.write")
   publish(
     @Req() request: RequestWithPlatformPrincipal,
-    @Param("id") id: string,
-    @Param("versionId") versionId: string,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+    @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return this.catalog.publish(request.platformPrincipal!, id, versionId);
   }
@@ -75,8 +81,8 @@ export class PlatformCatalogController {
   @RequirePlatformCapabilities("catalog.write")
   retire(
     @Req() request: RequestWithPlatformPrincipal,
-    @Param("id") id: string,
-    @Param("versionId") versionId: string,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+    @Param("versionId", new ZodValidationPipe(catalogVersionIdSchema)) versionId: string,
   ) {
     return this.catalog.retire(request.platformPrincipal!, id, versionId);
   }
@@ -84,7 +90,10 @@ export class PlatformCatalogController {
   @Post("items/:id/archive")
   @HttpCode(200)
   @RequirePlatformCapabilities("catalog.write")
-  archive(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
+  archive(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(catalogItemReferenceSchema)) id: string,
+  ) {
     return this.catalog.archive(request.platformPrincipal!, id);
   }
 }

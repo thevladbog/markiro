@@ -20,6 +20,9 @@ import type {
 type CatalogItemRow = typeof schema.catalogItems.$inferSelect;
 type CatalogVersionRow = typeof schema.catalogItemVersions.$inferSelect;
 type CatalogItemKind = CatalogItemRow["kind"];
+type CatalogTransaction = Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown
+  ? T
+  : never;
 
 @Injectable()
 export class PlatformCatalogService {
@@ -95,11 +98,11 @@ export class PlatformCatalogService {
           if (!created) throw new ConflictException({ code: "catalog_item_create_failed" });
           item = created;
         }
+        item = await this.lockItem(tx, item.id);
         if (item.status === "archived")
           throw new ConflictException({ code: "catalog_item_archived" });
         if (item.kind !== kind) throw new ConflictException({ code: "catalog_item_kind_mismatch" });
 
-        await tx.execute(sql`select id from catalog_items where id = ${item.id} for update`);
         const [last] = await tx
           .select({ version: schema.catalogItemVersions.version })
           .from(schema.catalogItemVersions)
@@ -141,6 +144,7 @@ export class PlatformCatalogService {
   ): Promise<CatalogVersionDto> {
     try {
       return await this.db.transaction(async (tx) => {
+        await this.lockVersion(tx, versionId);
         const found = await this.findVersion(itemRef, versionId, tx);
         if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
         if (found.version.status !== "draft") {
@@ -239,11 +243,8 @@ export class PlatformCatalogService {
         if (found.version.status !== "published") {
           throw new ConflictException({ code: "catalog_version_not_published" });
         }
-        const [defaultDemo] = await tx
-          .select({ id: schema.platformSettings.defaultDemoCatalogVersionId })
-          .from(schema.platformSettings)
-          .where(eq(schema.platformSettings.key, "default"));
-        if (defaultDemo?.id === versionId) {
+        const defaultDemo = await this.lockDefaultDemoSetting(tx);
+        if (defaultDemo?.catalogVersionId === versionId) {
           throw new ConflictException({ code: "catalog_default_demo_in_use" });
         }
         const [version] = await tx
@@ -273,43 +274,49 @@ export class PlatformCatalogService {
   }
 
   async archive(principal: PlatformPrincipal, itemRef: string): Promise<{ status: "archived" }> {
-    const item = await this.findItem(itemRef);
-    if (!item) throw new NotFoundException({ code: "catalog_item_not_found" });
-    const nonRetired = await this.db
-      .select({ id: schema.catalogItemVersions.id })
-      .from(schema.catalogItemVersions)
-      .where(
-        and(
-          eq(schema.catalogItemVersions.catalogItemId, item.id),
-          or(
-            eq(schema.catalogItemVersions.status, "draft"),
-            eq(schema.catalogItemVersions.status, "published"),
-          ),
-        ),
-      )
-      .limit(1);
-    if (nonRetired.length > 0)
-      throw new ConflictException({ code: "catalog_item_versions_not_retired" });
-    await this.db.transaction(async (tx) => {
-      await tx
-        .update(schema.catalogItems)
-        .set({ status: "archived", updatedAt: sql`now()` })
-        .where(eq(schema.catalogItems.id, item.id));
-      await this.audit.record(tx, {
-        actorPlatformUserId: principal.userId,
-        actorRole: principal.role,
-        action: "catalog.item.archived",
-        outcome: "success",
-        tenantId: null,
-        targetType: "catalog_item",
-        targetId: item.id,
-        reason: null,
-        before: { status: item.status },
-        after: { status: "archived" },
-        requestId: null,
+    try {
+      return await this.db.transaction(async (tx) => {
+        const item = await this.findItem(itemRef, tx);
+        if (!item) throw new NotFoundException({ code: "catalog_item_not_found" });
+        const lockedItem = await this.lockItem(tx, item.id);
+        const nonRetired = await tx
+          .select({ id: schema.catalogItemVersions.id })
+          .from(schema.catalogItemVersions)
+          .where(
+            and(
+              eq(schema.catalogItemVersions.catalogItemId, lockedItem.id),
+              or(
+                eq(schema.catalogItemVersions.status, "draft"),
+                eq(schema.catalogItemVersions.status, "published"),
+              ),
+            ),
+          )
+          .limit(1);
+        if (nonRetired.length > 0) {
+          throw new ConflictException({ code: "catalog_item_versions_not_retired" });
+        }
+        await tx
+          .update(schema.catalogItems)
+          .set({ status: "archived", updatedAt: sql`now()` })
+          .where(eq(schema.catalogItems.id, lockedItem.id));
+        await this.audit.record(tx, {
+          actorPlatformUserId: principal.userId,
+          actorRole: principal.role,
+          action: "catalog.item.archived",
+          outcome: "success",
+          tenantId: null,
+          targetType: "catalog_item",
+          targetId: lockedItem.id,
+          reason: null,
+          before: { status: lockedItem.status },
+          after: { status: "archived" },
+          requestId: null,
+        });
+        return { status: "archived" };
       });
-    });
-    return { status: "archived" };
+    } catch (error) {
+      catalogDatabaseError(error);
+    }
   }
 
   async getDefaultDemo(
@@ -328,9 +335,8 @@ export class PlatformCatalogService {
   ): Promise<{ catalogVersionId: string }> {
     try {
       return await this.db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select id from catalog_item_versions where id = ${input.catalogVersionId} for update`,
-        );
+        await this.lockVersion(tx, input.catalogVersionId);
+        const before = await this.lockDefaultDemoSetting(tx);
         const [candidate] = await tx
           .select({
             id: schema.catalogItemVersions.id,
@@ -353,10 +359,6 @@ export class PlatformCatalogService {
         ) {
           throw new ConflictException({ code: "default_demo_version_invalid" });
         }
-        const [before] = await tx
-          .select({ catalogVersionId: schema.platformSettings.defaultDemoCatalogVersionId })
-          .from(schema.platformSettings)
-          .where(eq(schema.platformSettings.key, "default"));
         await tx
           .insert(schema.platformSettings)
           .values({
@@ -423,8 +425,36 @@ export class PlatformCatalogService {
     return found;
   }
 
+  private async lockItem(tx: CatalogTransaction, itemId: string): Promise<CatalogItemRow> {
+    await tx.execute(sql`select id from catalog_items where id = ${itemId} for update`);
+    const [item] = await tx
+      .select()
+      .from(schema.catalogItems)
+      .where(eq(schema.catalogItems.id, itemId));
+    if (!item) throw new NotFoundException({ code: "catalog_item_not_found" });
+    return item;
+  }
+
+  private async lockVersion(tx: CatalogTransaction, versionId: string): Promise<void> {
+    await tx.execute(sql`select id from catalog_item_versions where id = ${versionId} for update`);
+  }
+
+  private async lockDefaultDemoSetting(
+    tx: CatalogTransaction,
+  ): Promise<{ catalogVersionId: string } | undefined> {
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended('platform-default-demo-setting', 0))`,
+    );
+    await tx.execute(sql`select key from platform_settings where key = 'default' for update`);
+    const [setting] = await tx
+      .select({ catalogVersionId: schema.platformSettings.defaultDemoCatalogVersionId })
+      .from(schema.platformSettings)
+      .where(eq(schema.platformSettings.key, "default"));
+    return setting;
+  }
+
   private async insertEffects(
-    tx: Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown ? T : never,
+    tx: CatalogTransaction,
     versionId: string,
     kind: CatalogItemKind,
     input: CreateCatalogVersionDto,
@@ -449,7 +479,7 @@ export class PlatformCatalogService {
   }
 
   private async replaceEffects(
-    tx: Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown ? T : never,
+    tx: CatalogTransaction,
     versionId: string,
     kind: CatalogItemKind,
     input: UpdateCatalogVersionDto,
@@ -472,7 +502,7 @@ export class PlatformCatalogService {
   }
 
   private async assertCompleteEffects(
-    tx: Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown ? T : never,
+    tx: CatalogTransaction,
     version: CatalogVersionRow,
   ): Promise<void> {
     if (version.kind === "plan") {

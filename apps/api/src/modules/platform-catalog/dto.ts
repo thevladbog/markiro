@@ -128,6 +128,10 @@ export type UpdateCatalogVersionDto = z.infer<typeof updateCatalogVersionSchema>
 export const setDefaultDemoPlanSchema = z.object({ catalogVersionId: z.uuid() }).strict();
 export type SetDefaultDemoPlanDto = z.infer<typeof setDefaultDemoPlanSchema>;
 
+export const catalogMachineCodeSchema = z.string().regex(/^[a-z][a-z0-9-]{0,63}$/);
+export const catalogItemReferenceSchema = z.union([z.uuid(), catalogMachineCodeSchema]);
+export const catalogVersionIdSchema = z.uuid();
+
 export interface CatalogVersionDto {
   id: string;
   catalogItemId: string;

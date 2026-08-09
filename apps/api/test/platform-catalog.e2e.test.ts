@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, randomUUID } from "node:crypto";
 import express from "express";
-import { type INestApplication } from "@nestjs/common";
+import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type PlatformRole } from "@markiro/db";
@@ -10,6 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
+import type { CreateCatalogVersionDto } from "../src/modules/platform-catalog/dto";
 import { PlatformCatalogService } from "../src/modules/platform-catalog/platform-catalog.service";
 import {
   mountPlatformAuth,
@@ -68,6 +69,8 @@ describe.skipIf(!ready)("platform catalog", () => {
   let accountant: ReturnType<typeof request.agent>;
   let support: ReturnType<typeof request.agent>;
   let accountantId = "";
+  let adminId = "";
+  let barriersInstalled = false;
 
   async function createPlatformAgent(role: PlatformRole) {
     const password = randomBytes(24).toString("base64url");
@@ -105,7 +108,7 @@ describe.skipIf(!ready)("platform catalog", () => {
     return { agent: request.agent(app!.getHttpServer()).set("Cookie", cookie), userId };
   }
 
-  const basicPlan = {
+  const basicPlan: CreateCatalogVersionDto = {
     nameRu: "Базовый",
     nameEn: "Basic",
     unit: "month",
@@ -153,6 +156,7 @@ describe.skipIf(!ready)("platform catalog", () => {
 
     const createdAdmin = await createPlatformAgent("platform_admin");
     admin = createdAdmin.agent;
+    adminId = createdAdmin.userId;
     const createdAccountant = await createPlatformAgent("accountant");
     accountant = createdAccountant.agent;
     accountantId = createdAccountant.userId;
@@ -160,8 +164,99 @@ describe.skipIf(!ready)("platform catalog", () => {
   }, 120_000);
 
   afterAll(async () => {
+    if (barriersInstalled) {
+      await setup.pool.query(
+        "DROP TRIGGER IF EXISTS platform_catalog_version_barrier ON catalog_item_versions",
+      );
+      await setup.pool.query(
+        "DROP TRIGGER IF EXISTS platform_catalog_item_barrier ON catalog_items",
+      );
+      await setup.pool.query(
+        "DROP TRIGGER IF EXISTS platform_catalog_setting_barrier ON platform_settings",
+      );
+      await setup.pool.query("DROP FUNCTION IF EXISTS wait_for_platform_catalog_test_barrier()");
+      await setup.pool.query("DROP TABLE IF EXISTS platform_catalog_test_barriers");
+    }
     await app?.close();
   });
+
+  function principal(userId = adminId): Parameters<PlatformCatalogService["createVersion"]>[0] {
+    return {
+      userId,
+      role: "platform_admin",
+      capabilities: ["catalog.read", "catalog.write"],
+      twoFactorReady: true,
+    };
+  }
+
+  async function installBarriers(): Promise<void> {
+    if (barriersInstalled) return;
+    await setup.pool.query(
+      "CREATE TABLE platform_catalog_test_barriers (name text primary key, lock_key text not null)",
+    );
+    await setup.pool.query(`
+      CREATE FUNCTION wait_for_platform_catalog_test_barrier() RETURNS trigger
+      LANGUAGE plpgsql AS $$
+      DECLARE current_key text;
+      BEGIN
+        SELECT lock_key INTO current_key FROM platform_catalog_test_barriers WHERE name = TG_ARGV[0];
+        IF current_key IS NOT NULL THEN
+          PERFORM pg_advisory_xact_lock(hashtextextended(current_key, 0));
+        END IF;
+        RETURN NEW;
+      END
+      $$
+    `);
+    await setup.pool.query(`
+      CREATE TRIGGER platform_catalog_version_barrier
+      BEFORE UPDATE ON catalog_item_versions
+      FOR EACH ROW WHEN (OLD.status = 'published' AND NEW.status = 'retired')
+      EXECUTE FUNCTION wait_for_platform_catalog_test_barrier('version')
+    `);
+    await setup.pool.query(`
+      CREATE TRIGGER platform_catalog_item_barrier
+      BEFORE UPDATE ON catalog_items
+      FOR EACH ROW WHEN (NEW.status = 'archived')
+      EXECUTE FUNCTION wait_for_platform_catalog_test_barrier('item')
+    `);
+    await setup.pool.query(`
+      CREATE TRIGGER platform_catalog_setting_barrier
+      BEFORE UPDATE ON platform_settings
+      FOR EACH ROW EXECUTE FUNCTION wait_for_platform_catalog_test_barrier('setting')
+    `);
+    barriersInstalled = true;
+  }
+
+  async function holdBarrier(name: "version" | "item" | "setting"): Promise<() => Promise<void>> {
+    await installBarriers();
+    const lockKey = `platform-catalog-test-barrier:${name}:${randomUUID()}`;
+    await setup.pool.query("DELETE FROM platform_catalog_test_barriers WHERE name = $1", [name]);
+    await setup.pool.query(
+      "INSERT INTO platform_catalog_test_barriers (name, lock_key) VALUES ($1, $2)",
+      [name, lockKey],
+    );
+    const client = await setup.pool.connect();
+    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+    return async () => {
+      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+      await setup.pool.query("DELETE FROM platform_catalog_test_barriers WHERE name = $1", [name]);
+      client.release();
+    };
+  }
+
+  async function waitForBarrier(name: "version" | "item" | "setting"): Promise<void> {
+    for (let attempt = 0; attempt < 500; attempt += 1) {
+      const result = await setup.pool.query<{ count: number }>(`
+        SELECT count(*)::int AS count
+        FROM pg_locks
+        WHERE locktype = 'advisory' AND granted = false
+          AND database = (SELECT oid FROM pg_database WHERE datname = current_database())
+      `);
+      if ((result.rows[0]?.count ?? 0) > 0) return;
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error(`Timed out waiting for ${name} barrier`);
+  }
 
   it("wires the catalog service to the shared platform audit provider through AppModule", () => {
     expect(catalog).toBeInstanceOf(PlatformCatalogService);
@@ -217,6 +312,7 @@ describe.skipIf(!ready)("platform catalog", () => {
       .post(`/platform/catalog/items/addon-negative-${randomUUID()}/versions`)
       .send({
         ...basicPlan,
+        plan: undefined,
         addon: { effects: [{ key: "lines", quotaIncrement: -1 }] },
       })
       .expect(400);
@@ -226,7 +322,8 @@ describe.skipIf(!ready)("platform catalog", () => {
         ...basicPlan,
         billingMode: "one_time",
         billingPeriod: null,
-        service: {},
+        plan: undefined,
+        service: { effects: [{ key: "lines", quotaIncrement: 1 }] },
       })
       .expect(400);
     const service = await admin
@@ -279,5 +376,126 @@ describe.skipIf(!ready)("platform catalog", () => {
       .post(`/platform/catalog/items/${draft.body.catalogItemCode}/archive`)
       .send({})
       .expect(200);
+  });
+
+  it("rejects malformed catalog path parameters before they reach SQL", async () => {
+    const oversized = "a".repeat(65);
+    for (const code of ["invalid_code!", oversized]) {
+      const response = await admin
+        .post(`/platform/catalog/items/${code}/versions`)
+        .send(basicPlan)
+        .expect(400);
+      expect(response.text).not.toMatch(/22P02|invalid input syntax/i);
+    }
+    const response = await support
+      .get("/platform/catalog/items/plan-basic/versions/not-a-uuid")
+      .expect(400);
+    expect(response.text).not.toMatch(/22P02|invalid input syntax/i);
+  });
+
+  it("serializes default selection ahead of retiring that exact version", async () => {
+    const initial = await catalog.createVersion(
+      principal(),
+      `plan-race-initial-${randomUUID()}`,
+      basicPlan,
+    );
+    await catalog.publish(principal(), initial.catalogItemCode, initial.id);
+    const candidate = await catalog.createVersion(
+      principal(),
+      `plan-race-candidate-${randomUUID()}`,
+      basicPlan,
+    );
+    await catalog.publish(principal(), candidate.catalogItemCode, candidate.id);
+    await catalog.setDefaultDemo(principal(), { catalogVersionId: initial.id });
+
+    const release = await holdBarrier("setting");
+    const selecting = catalog.setDefaultDemo(principal(accountantId), {
+      catalogVersionId: candidate.id,
+    });
+    await waitForBarrier("setting");
+    const retiring = catalog.retire(principal(), candidate.catalogItemCode, candidate.id).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    await release();
+    await selecting;
+    const error = await retiring;
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({
+      code: "catalog_default_demo_in_use",
+    });
+  });
+
+  it("does not create a new version after an archive has acquired the item lock", async () => {
+    const code = `plan-archive-race-${randomUUID()}`;
+    const published = await catalog.createVersion(principal(), code, basicPlan);
+    await catalog.publish(principal(), code, published.id);
+    await catalog.retire(principal(), code, published.id);
+
+    const release = await holdBarrier("item");
+    const archiving = catalog.archive(principal(), code);
+    await waitForBarrier("item");
+    const creating = catalog.createVersion(principal(), code, basicPlan);
+    await release();
+    await archiving;
+    const error = await creating.then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).getResponse()).toEqual({ code: "catalog_item_archived" });
+    const versions = await setup.db
+      .select({ status: schema.catalogItemVersions.status })
+      .from(schema.catalogItemVersions)
+      .innerJoin(
+        schema.catalogItems,
+        eq(schema.catalogItems.id, schema.catalogItemVersions.catalogItemId),
+      )
+      .where(eq(schema.catalogItems.code, code));
+    expect(versions).toEqual([{ status: "retired" }]);
+  });
+
+  it("records the committed prior default for concurrent default changes", async () => {
+    const first = await catalog.createVersion(
+      principal(),
+      `plan-audit-first-${randomUUID()}`,
+      basicPlan,
+    );
+    const second = await catalog.createVersion(
+      principal(),
+      `plan-audit-second-${randomUUID()}`,
+      basicPlan,
+    );
+    const third = await catalog.createVersion(
+      principal(),
+      `plan-audit-third-${randomUUID()}`,
+      basicPlan,
+    );
+    for (const version of [first, second, third]) {
+      await catalog.publish(principal(), version.catalogItemCode, version.id);
+    }
+    await catalog.setDefaultDemo(principal(), { catalogVersionId: first.id });
+
+    const release = await holdBarrier("setting");
+    const selectingSecond = catalog.setDefaultDemo(principal(), { catalogVersionId: second.id });
+    await waitForBarrier("setting");
+    const selectingThird = catalog.setDefaultDemo(principal(accountantId), {
+      catalogVersionId: third.id,
+    });
+    await release();
+    await Promise.all([selectingSecond, selectingThird]);
+
+    const rows = await setup.db
+      .select({
+        before: schema.platformAuditEvents.before,
+        after: schema.platformAuditEvents.after,
+      })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.action, "catalog.default_demo.changed"))
+      .orderBy(desc(schema.platformAuditEvents.createdAt), desc(schema.platformAuditEvents.id));
+    const thirdChange = rows.find(
+      (row) => (row.after as { catalogVersionId?: string } | null)?.catalogVersionId === third.id,
+    );
+    expect(thirdChange?.before).toEqual({ catalogVersionId: second.id });
   });
 });
