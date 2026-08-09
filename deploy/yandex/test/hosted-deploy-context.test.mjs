@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { spawn } from "node:child_process";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 
 const CONTEXT_MODULE = "../hosted-deploy-context.mjs";
@@ -30,6 +32,7 @@ function publicKey(algorithm, seed = 1) {
 const ED25519_KEY = publicKey("ssh-ed25519");
 const RSA_KEY = publicKey("ssh-rsa");
 const HOST_KEYS_B64 = Buffer.from(`${ED25519_KEY}\n${RSA_KEY}`, "utf8").toString("base64");
+const CONTEXT_PATH = fileURLToPath(new URL(CONTEXT_MODULE, import.meta.url));
 const ENVIRONMENT = Object.freeze({
   MARKIRO_DEPLOYMENT_PHASE: "repeat",
   YC_APP_INSTANCE_ID: "fv4app123",
@@ -41,6 +44,98 @@ const ENVIRONMENT = Object.freeze({
 
 function marker(key) {
   return `MARKIRO_SSH_HOST_KEY_V1 ${key}`;
+}
+
+async function runCliWithProviderBytes({ instancePaddingBytes = 0, serialBytes }) {
+  const directory = await mkdtemp(join(tmpdir(), "markiro-hosted-context-cli-test-"));
+  const contextPath = join(directory, "context.json");
+  const preloadPath = join(directory, "provider-fetch.mjs");
+  const providerFixtures = {
+    instance: {
+      id: ENVIRONMENT.YC_APP_INSTANCE_ID,
+      padding: "x".repeat(instancePaddingBytes),
+      status: "RUNNING",
+      networkInterfaces: [
+        {
+          primaryV4Address: {
+            address: PRIVATE_ADDRESS,
+            oneToOneNat: { address: PUBLIC_ADDRESS, ipVersion: "IPV4" },
+          },
+        },
+      ],
+    },
+    backups: {
+      backups: [{ createdAt: new Date().toISOString() }],
+    },
+    targetStates: {
+      targetStates: [
+        {
+          target: { ipAddress: PRIVATE_ADDRESS },
+          status: { zoneStatuses: [{ status: "HEALTHY", zoneId: "ru-central1-d" }] },
+        },
+      ],
+    },
+    serial: {
+      contents: `${"x".repeat(serialBytes)}\n${marker(ED25519_KEY)}\n${marker(RSA_KEY)}`,
+    },
+  };
+  const preload = `
+const fixtures = ${JSON.stringify(providerFixtures)};
+globalThis.fetch = async (url) => {
+  const target = String(url);
+  let payload;
+  if (target.includes(":serialPortOutput")) payload = fixtures.serial;
+  else if (target.includes("/compute/v1/instances/")) payload = fixtures.instance;
+  else if (target.endsWith("/backups")) payload = fixtures.backups;
+  else if (target.includes("/targetStates/")) payload = fixtures.targetStates;
+  else return new Response("not found", { status: 404 });
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+};
+`;
+  await writeFile(preloadPath, preload, { encoding: "utf8", mode: 0o600 });
+  try {
+    const result = await new Promise((resolveResult, reject) => {
+      const child = spawn(
+        process.execPath,
+        ["--import", pathToFileURL(preloadPath).href, CONTEXT_PATH, "resolve"],
+        {
+          env: {
+            ...process.env,
+            ...ENVIRONMENT,
+            HOSTED_DEPLOY_CONTEXT_PATH: contextPath,
+            MARKIRO_DEPLOYMENT_PHASE: "first",
+            RUNNER_TEMP: directory,
+            YC_IAM_TOKEN: "test-iam-token",
+          },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("error", reject);
+      child.on("close", (code, signal) => resolveResult({ code, signal, stderr, stdout }));
+    });
+    let context;
+    try {
+      context = JSON.parse(await readFile(contextPath, "utf8"));
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    return { ...result, context };
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
 }
 
 function providerFixture(overrides = {}) {
@@ -251,6 +346,43 @@ test("hosted context canonicalizes authenticated host keys for the public addres
     authenticatedKnownHosts(encoded, PUBLIC_ADDRESS),
     `${PUBLIC_ADDRESS} ${ED25519_KEY}\n${PUBLIC_ADDRESS} ${RSA_KEY}\n`,
   );
+});
+
+test("hosted context accepts a bounded serial response larger than ordinary provider payloads", async () => {
+  const result = await runCliWithProviderBytes({ serialBytes: 70 * 1024 });
+
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(result.signal, null);
+  assert.equal(result.stderr, "");
+  assert.equal(result.stdout, "");
+  assert.deepEqual(result.context, {
+    appHostKeysB64: HOST_KEYS_B64,
+    appPrivateAddress: PRIVATE_ADDRESS,
+    appPublicAddress: PUBLIC_ADDRESS,
+  });
+});
+
+test("hosted context rejects a serial response beyond its dedicated bound", async () => {
+  const result = await runCliWithProviderBytes({ serialBytes: 257 * 1024 });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.signal, null);
+  assert.equal(result.stderr, "hosted deployment context failed\n");
+  assert.equal(result.stdout, "");
+  assert.equal(result.context, undefined);
+});
+
+test("hosted context retains the smaller bound for ordinary provider responses", async () => {
+  const result = await runCliWithProviderBytes({
+    instancePaddingBytes: 65 * 1024,
+    serialBytes: 1,
+  });
+
+  assert.equal(result.code, 1);
+  assert.equal(result.signal, null);
+  assert.equal(result.stderr, "hosted deployment context failed\n");
+  assert.equal(result.stdout, "");
+  assert.equal(result.context, undefined);
 });
 
 test("hosted context rejects malformed or duplicate authenticated serial host keys", async () => {
