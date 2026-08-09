@@ -100,10 +100,10 @@ function makeFailFirstAllExec(): SqlExecutor {
 function manualSource(): ScanSource & { emit: ScanListener } {
   let listener: ScanListener = () => {};
   return {
-    start(l) {
-      listener = l;
+    start(next) {
+      listener = next;
       return () => {
-        listener = () => {};
+        if (listener === next) listener = () => {};
       };
     },
     emit: (raw) => listener(raw),
