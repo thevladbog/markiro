@@ -99,6 +99,7 @@ const PRODUCTION_BUNDLE_STEPS = [
       "pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile\n" +
       "pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium\n",
   },
+  { name: "Verify Yandex runtime contracts", run: "pnpm test:yandex-runtime" },
   { name: "Verify production bundle contracts", run: "pnpm test:production-bundle:contract" },
   { name: "Generate masked test-only environment", run: GENERATE_ENVIRONMENT },
   {
@@ -1480,6 +1481,8 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
   const browserSmoke =
     "      - name: Browser-smoke production API documentation\n" +
     "        run: pnpm test:production-docs:browser\n";
+  const yandexRuntime =
+    "      - name: Verify Yandex runtime contracts\n" + "        run: pnpm test:yandex-runtime\n";
   const build =
     '          docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .';
   const logsIf =
@@ -1565,6 +1568,12 @@ test("CI contract rejects each hidden-step, shell, log, and cleanup mutation for
       expected: /unexpected production-bundle steps/,
     },
     {
+      name: "Yandex runtime contract gate removed",
+      search: yandexRuntime,
+      replacement: "",
+      expected: /unexpected production-bundle steps/,
+    },
+    {
       name: "absolute Docker executable",
       search: build,
       replacement: build.replace("docker build", "/usr/bin/docker build"),
@@ -1645,6 +1654,14 @@ test("release contract rejects verification, artifact identity, publication, and
       search: "permissions:\n  contents: read\n\njobs:",
       replacement: "permissions:\n  contents: read\n  packages: write\n\njobs:",
       expected: /release workflow must default to contents: read only/,
+    },
+    {
+      name: "omitted Yandex runtime contract verification step",
+      search:
+        "      - name: Verify Yandex runtime contracts\n" +
+        "        run: pnpm test:yandex-runtime\n",
+      replacement: "",
+      expected: /unexpected release production-bundle steps/,
     },
     {
       name: "omitted production-bundle contract verification step",
