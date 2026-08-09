@@ -394,10 +394,28 @@ CREATE FUNCTION "reject_published_catalog_version_mutation"() RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
-	IF OLD.status IN ('published', 'retired') THEN
+	IF TG_OP = 'DELETE' AND OLD.status IN ('published', 'retired') THEN
 		RAISE EXCEPTION 'published catalog versions are immutable';
 	END IF;
-	RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+	IF OLD.status = 'published' THEN
+		IF NEW.status = 'retired'
+			AND (to_jsonb(NEW) - ARRAY['status', 'updated_at'])
+				IS NOT DISTINCT FROM (to_jsonb(OLD) - ARRAY['status', 'updated_at']) THEN
+			IF EXISTS (
+				SELECT 1
+				FROM platform_settings
+				WHERE default_demo_catalog_version_id = OLD.id
+			) THEN
+				RAISE EXCEPTION 'the default demo catalog version cannot be retired';
+			END IF;
+			RETURN NEW;
+		END IF;
+		RAISE EXCEPTION 'published catalog versions are immutable';
+	END IF;
+	IF OLD.status = 'retired' THEN
+		RAISE EXCEPTION 'retired catalog versions are immutable';
+	END IF;
+	RETURN NEW;
 END;
 $$;
 --> statement-breakpoint
@@ -409,15 +427,28 @@ CREATE FUNCTION "reject_published_catalog_effect_mutation"() RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-	version_id uuid;
 	version_status catalog_version_status;
 BEGIN
-	version_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.catalog_version_id ELSE NEW.catalog_version_id END;
-	SELECT status INTO version_status FROM catalog_item_versions WHERE id = version_id;
-	IF version_status IN ('published', 'retired') THEN
-		RAISE EXCEPTION 'published catalog entitlement effects are immutable';
+	IF TG_OP IN ('UPDATE', 'DELETE') THEN
+		SELECT status INTO version_status
+		FROM catalog_item_versions
+		WHERE id = OLD.catalog_version_id;
+		IF version_status IN ('published', 'retired') THEN
+			RAISE EXCEPTION 'published catalog entitlement effects are immutable';
+		END IF;
 	END IF;
-	RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+	IF TG_OP IN ('INSERT', 'UPDATE') THEN
+		SELECT status INTO version_status
+		FROM catalog_item_versions
+		WHERE id = NEW.catalog_version_id;
+		IF version_status IN ('published', 'retired') THEN
+			RAISE EXCEPTION 'published catalog entitlement effects are immutable';
+		END IF;
+	END IF;
+	IF TG_OP = 'DELETE' THEN
+		RETURN OLD;
+	END IF;
+	RETURN NEW;
 END;
 $$;
 --> statement-breakpoint
@@ -457,15 +488,28 @@ CREATE FUNCTION "reject_published_offer_line_mutation"() RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-	parent_offer_id uuid;
 	parent_status offer_status;
 BEGIN
-	parent_offer_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.offer_id ELSE NEW.offer_id END;
-	SELECT status INTO parent_status FROM commercial_offers WHERE id = parent_offer_id;
-	IF parent_status IS DISTINCT FROM 'draft' THEN
-		RAISE EXCEPTION 'published commercial offer lines are immutable';
+	IF TG_OP IN ('UPDATE', 'DELETE') THEN
+		SELECT status INTO parent_status
+		FROM commercial_offers
+		WHERE id = OLD.offer_id;
+		IF parent_status IS DISTINCT FROM 'draft' THEN
+			RAISE EXCEPTION 'published commercial offer lines are immutable';
+		END IF;
 	END IF;
-	RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+	IF TG_OP IN ('INSERT', 'UPDATE') THEN
+		SELECT status INTO parent_status
+		FROM commercial_offers
+		WHERE id = NEW.offer_id;
+		IF parent_status IS DISTINCT FROM 'draft' THEN
+			RAISE EXCEPTION 'published commercial offer lines are immutable';
+		END IF;
+	END IF;
+	IF TG_OP = 'DELETE' THEN
+		RETURN OLD;
+	END IF;
+	RETURN NEW;
 END;
 $$;
 --> statement-breakpoint
