@@ -198,30 +198,62 @@ function run(command, args, options = {}) {
   });
 }
 
-async function streamArchive(tarArguments, sshArguments) {
+export async function streamArchive(tarArguments, sshArguments, options = {}) {
   await new Promise((resolve, reject) => {
-    const archive = spawn("tar", tarArguments, { shell: false, stdio: ["ignore", "pipe", "pipe"] });
-    const remote = spawn("ssh", sshArguments, {
-      shell: false,
-      stdio: [archive.stdout, "ignore", "pipe"],
-    });
-    archive.stderr.on("data", () => undefined);
-    remote.stderr.on("data", () => undefined);
+    const spawnChild = options.spawn ?? spawn;
+    const timeoutMs = options.timeoutMs ?? 120_000;
+    let archive;
+    let remote;
     let archiveCode;
     let remoteCode;
-    const finish = () => {
-      if (archiveCode === undefined || remoteCode === undefined) return;
-      if (archiveCode === 0 && remoteCode === 0) resolve();
-      else reject(new Error("private release transfer failed"));
+    let settled = false;
+    let timer;
+    const stop = (child) => {
+      if (child?.exitCode === null) child.kill("SIGTERM");
     };
-    archive.once("error", () => reject(new Error("private release transfer failed")));
-    remote.once("error", () => reject(new Error("private release transfer failed")));
+    const fail = (cause) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      archive?.stdout.destroy();
+      stop(archive);
+      stop(remote);
+      process.stderr.write(`MARKIRO_DEPLOY_FAILURE ${cause}\n`);
+      reject(new Error("private release transfer failed"));
+    };
+    const finish = () => {
+      if (settled) return;
+      if (archiveCode === undefined || remoteCode === undefined) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+    try {
+      archive = spawnChild("tar", tarArguments, {
+        shell: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      remote = spawnChild("ssh", sshArguments, {
+        shell: false,
+        stdio: [archive.stdout, "ignore", "pipe"],
+      });
+    } catch {
+      fail("transfer-spawn");
+      return;
+    }
+    archive.stderr.on("data", () => undefined);
+    remote.stderr.on("data", () => undefined);
+    timer = setTimeout(() => fail("transfer-timeout"), timeoutMs);
+    archive.once("error", () => fail("archive-spawn"));
+    remote.once("error", () => fail("ssh-spawn"));
     archive.once("close", (code) => {
       archiveCode = code;
+      if (code !== 0) return fail("archive-exit");
       finish();
     });
     remote.once("close", (code) => {
       remoteCode = code;
+      if (code !== 0) return fail("ssh-exit");
       finish();
     });
   });
@@ -441,6 +473,14 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
       `UserKnownHostsFile=${knownHosts}`,
       "-o",
       "StrictHostKeyChecking=yes",
+      "-o",
+      "BatchMode=yes",
+      "-o",
+      "ConnectTimeout=15",
+      "-o",
+      "ServerAliveInterval=15",
+      "-o",
+      "ServerAliveCountMax=2",
       `${login}@${address}`,
     ];
     const apiDigest = digest(manifest.api, API_PREFIX);
