@@ -407,4 +407,30 @@ describe.skipIf(!ready)("EntitlementsService", () => {
       response: { code: "subscription_entitlements_invalid" },
     });
   });
+
+  it("fails closed when a scheduled add-on has no activation timestamp", async () => {
+    const managed = await createManagedSubscription(db, { maxLines: 2 });
+    const addonVersionId = await createPublishedAddon(db, [
+      { entitlementKey: "lines", increment: 5 },
+    ]);
+    await db.insert(schema.subscriptionAddons).values({
+      tenantId: managed.tenantId,
+      subscriptionId: managed.subscriptionId,
+      addonVersionId,
+      quantity: 1,
+      startsAt: null,
+      endsAt: new Date(Date.now() + 60_000),
+      status: "scheduled",
+      source: "manual",
+    });
+
+    const failure = await new EntitlementsService(db, "managed_only")
+      .resolve(managed.tenantId)
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      status: 500,
+      response: { code: "subscription_entitlements_invalid" },
+    });
+  });
 });

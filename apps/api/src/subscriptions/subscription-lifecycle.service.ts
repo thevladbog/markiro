@@ -12,6 +12,7 @@ import { DB } from "../auth/auth.module";
 import type { AssignAddonDto, AssignPlanDto } from "../modules/platform-tenants/dto";
 import type { PlatformPrincipal } from "../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../platform-auth/platform-audit.service";
+import { lockTenantSubscriptionTimeline } from "./subscription-locks";
 
 type SubscriptionTransaction = Parameters<Db["transaction"]>[0] extends (arg: infer T) => unknown
   ? T
@@ -35,7 +36,7 @@ export class SubscriptionLifecycleService {
    * subscription rows by id, then child add-on rows by id.
    */
   async lockTenantTimeline(tx: SubscriptionTransaction, tenantId: string): Promise<void> {
-    await acquireTenantTimelineLock(tx, tenantId);
+    await lockTenantSubscriptionTimeline(tx, tenantId);
   }
 
   async activatePendingDemo(
@@ -486,15 +487,6 @@ function assertPlatformAdmin(actor: PlatformPrincipal): void {
   if (actor.role !== "platform_admin") {
     throw new ConflictException({ code: "direct_subscription_assignment_forbidden" });
   }
-}
-
-async function acquireTenantTimelineLock(
-  tx: SubscriptionTransaction,
-  tenantId: string,
-): Promise<void> {
-  await tx.execute(
-    sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-subscription:${tenantId}`}, 0))`,
-  );
 }
 
 async function requireTenant(tx: SubscriptionTransaction, tenantId: string): Promise<void> {

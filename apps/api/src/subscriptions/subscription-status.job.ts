@@ -4,6 +4,7 @@ import { and, asc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { SubscriptionTransaction } from "./entitlements.types";
+import { lockTenantSubscriptionTimeline } from "./subscription-locks";
 
 export const MATERIALIZE_SUBSCRIPTION_STATUSES_QUEUE = "materialize-subscription-statuses";
 export const MATERIALIZE_SUBSCRIPTION_STATUSES_CRON = "* * * * *";
@@ -15,104 +16,91 @@ interface MaterializeResult {
   addonsExpired: number;
 }
 
+export interface SubscriptionStatusCandidateSource {
+  dueTenantIds(at: Date): Promise<string[]>;
+}
+
+export const SUBSCRIPTION_STATUS_CANDIDATE_SOURCE = Symbol("SUBSCRIPTION_STATUS_CANDIDATE_SOURCE");
+
 @Injectable()
-export class SubscriptionStatusJob {
+export class DatabaseSubscriptionStatusCandidateSource implements SubscriptionStatusCandidateSource {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async run(at = new Date()): Promise<MaterializeResult> {
-    return this.db.transaction(async (tx) => {
-      const result: MaterializeResult = {
-        subscriptionsActivated: 0,
-        subscriptionsExpired: 0,
-        addonsActivated: 0,
-        addonsExpired: 0,
-      };
+  async dueTenantIds(at: Date): Promise<string[]> {
+    const candidates = await this.db.execute<{ tenantId: string }>(sql`
+      select tenant_id as "tenantId"
+      from tenant_subscriptions
+      where (status in ('trial', 'active') and ends_at is not null and ends_at <= ${at})
+         or (status = 'scheduled' and starts_at is not null and starts_at <= ${at})
+      union
+      select tenant_id as "tenantId"
+      from subscription_addons
+      where (status = 'active' and ends_at is not null and ends_at <= ${at})
+         or (status = 'scheduled' and starts_at is not null and starts_at <= ${at})
+      order by "tenantId"
+    `);
+    return candidates.rows.map((candidate) => candidate.tenantId);
+  }
+}
 
-      await tx.execute(sql`
+@Injectable()
+export class SubscriptionStatusJob {
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Inject(SUBSCRIPTION_STATUS_CANDIDATE_SOURCE)
+    private readonly candidates: SubscriptionStatusCandidateSource,
+  ) {}
+
+  async run(at = new Date()): Promise<MaterializeResult> {
+    const result: MaterializeResult = {
+      subscriptionsActivated: 0,
+      subscriptionsExpired: 0,
+      addonsActivated: 0,
+      addonsExpired: 0,
+    };
+    const tenantIds = [...new Set(await this.candidates.dueTenantIds(at))].sort();
+    for (const tenantId of tenantIds) {
+      const tenantResult = await this.db.transaction(async (tx) => {
+        const current: MaterializeResult = {
+          subscriptionsActivated: 0,
+          subscriptionsExpired: 0,
+          addonsActivated: 0,
+          addonsExpired: 0,
+        };
+
+        await lockTenantSubscriptionTimeline(tx, tenantId);
+
+        await tx.execute(sql`
         select id
         from tenant_subscriptions
-        where (status in ('trial', 'active') and ends_at is not null and ends_at <= ${at})
-           or (status = 'scheduled' and starts_at is not null and starts_at <= ${at})
-        order by tenant_id, starts_at nulls first, id
+        where tenant_id = ${tenantId}
+        order by id
         for update
       `);
-      const dueSubscriptions = await tx
-        .select()
-        .from(schema.tenantSubscriptions)
-        .where(
-          sql`(${schema.tenantSubscriptions.status} in ('trial', 'active') and ${schema.tenantSubscriptions.endsAt} is not null and ${schema.tenantSubscriptions.endsAt} <= ${at})
-            or (${schema.tenantSubscriptions.status} = 'scheduled' and ${schema.tenantSubscriptions.startsAt} is not null and ${schema.tenantSubscriptions.startsAt} <= ${at})`,
-        )
-        .orderBy(
-          asc(schema.tenantSubscriptions.tenantId),
-          asc(schema.tenantSubscriptions.startsAt),
-          asc(schema.tenantSubscriptions.id),
-        );
+        const dueSubscriptions = await tx
+          .select()
+          .from(schema.tenantSubscriptions)
+          .where(
+            sql`${schema.tenantSubscriptions.tenantId} = ${tenantId} and ((${schema.tenantSubscriptions.status} in ('trial', 'active') and ${schema.tenantSubscriptions.endsAt} is not null and ${schema.tenantSubscriptions.endsAt} <= ${at})
+            or (${schema.tenantSubscriptions.status} = 'scheduled' and ${schema.tenantSubscriptions.startsAt} is not null and ${schema.tenantSubscriptions.startsAt} <= ${at}))`,
+          )
+          .orderBy(asc(schema.tenantSubscriptions.startsAt), asc(schema.tenantSubscriptions.id));
 
-      // Expire old current rows before activating successors, preserving the
-      // one-current partial unique index at an exact term boundary.
-      for (const row of dueSubscriptions.filter(
-        (candidate) =>
-          candidate.status !== "scheduled" && candidate.endsAt !== null && candidate.endsAt <= at,
-      )) {
-        if (await this.transitionSubscription(tx, row, "expired", row.endsAt!, "term_ended")) {
-          result.subscriptionsExpired += 1;
-        }
-      }
-      for (const row of dueSubscriptions.filter((candidate) => candidate.status === "scheduled")) {
-        if (row.startsAt === null) continue;
-        const activated = await this.transitionSubscription(
-          tx,
-          row,
-          "active",
-          row.startsAt,
-          "scheduled_start_reached",
-        );
-        if (!activated) continue;
-        result.subscriptionsActivated += 1;
-        if (
-          row.endsAt !== null &&
-          row.endsAt <= at &&
-          (await this.transitionSubscription(
-            tx,
-            { ...row, status: "active" },
-            "expired",
-            row.endsAt,
-            "term_ended",
-          ))
-        ) {
-          result.subscriptionsExpired += 1;
-        }
-      }
-
-      await tx.execute(sql`
-        select id
-        from subscription_addons
-        where (status = 'active' and ends_at is not null and ends_at <= ${at})
-           or (status = 'scheduled' and starts_at is not null and starts_at <= ${at})
-        order by tenant_id, subscription_id, starts_at nulls first, id
-        for update
-      `);
-      const dueAddons = await tx
-        .select()
-        .from(schema.subscriptionAddons)
-        .where(
-          sql`(${schema.subscriptionAddons.status} = 'active' and ${schema.subscriptionAddons.endsAt} is not null and ${schema.subscriptionAddons.endsAt} <= ${at})
-            or (${schema.subscriptionAddons.status} = 'scheduled' and ${schema.subscriptionAddons.startsAt} is not null and ${schema.subscriptionAddons.startsAt} <= ${at})`,
-        )
-        .orderBy(
-          asc(schema.subscriptionAddons.tenantId),
-          asc(schema.subscriptionAddons.subscriptionId),
-          asc(schema.subscriptionAddons.startsAt),
-          asc(schema.subscriptionAddons.id),
-        );
-      for (const row of dueAddons) {
-        if (row.status === "active" && row.endsAt !== null && row.endsAt <= at) {
-          if (await this.transitionAddon(tx, row, "expired", row.endsAt, "term_ended")) {
-            result.addonsExpired += 1;
+        // Expire old current rows before activating successors, preserving the
+        // one-current partial unique index at an exact term boundary.
+        for (const row of dueSubscriptions.filter(
+          (candidate) =>
+            candidate.status !== "scheduled" && candidate.endsAt !== null && candidate.endsAt <= at,
+        )) {
+          if (await this.transitionSubscription(tx, row, "expired", row.endsAt!, "term_ended")) {
+            current.subscriptionsExpired += 1;
           }
-        } else if (row.status === "scheduled" && row.startsAt !== null) {
-          const activated = await this.transitionAddon(
+        }
+        for (const row of dueSubscriptions.filter(
+          (candidate) => candidate.status === "scheduled",
+        )) {
+          if (row.startsAt === null) continue;
+          const activated = await this.transitionSubscription(
             tx,
             row,
             "active",
@@ -120,11 +108,11 @@ export class SubscriptionStatusJob {
             "scheduled_start_reached",
           );
           if (!activated) continue;
-          result.addonsActivated += 1;
+          current.subscriptionsActivated += 1;
           if (
             row.endsAt !== null &&
             row.endsAt <= at &&
-            (await this.transitionAddon(
+            (await this.transitionSubscription(
               tx,
               { ...row, status: "active" },
               "expired",
@@ -132,12 +120,63 @@ export class SubscriptionStatusJob {
               "term_ended",
             ))
           ) {
-            result.addonsExpired += 1;
+            current.subscriptionsExpired += 1;
           }
         }
-      }
-      return result;
-    });
+
+        await tx.execute(sql`
+        select id
+        from subscription_addons
+        where tenant_id = ${tenantId}
+        order by id
+        for update
+      `);
+        const dueAddons = await tx
+          .select()
+          .from(schema.subscriptionAddons)
+          .where(
+            sql`${schema.subscriptionAddons.tenantId} = ${tenantId} and ((${schema.subscriptionAddons.status} = 'active' and ${schema.subscriptionAddons.endsAt} is not null and ${schema.subscriptionAddons.endsAt} <= ${at})
+            or (${schema.subscriptionAddons.status} = 'scheduled' and ${schema.subscriptionAddons.startsAt} is not null and ${schema.subscriptionAddons.startsAt} <= ${at}))`,
+          )
+          .orderBy(asc(schema.subscriptionAddons.startsAt), asc(schema.subscriptionAddons.id));
+        for (const row of dueAddons) {
+          if (row.status === "active" && row.endsAt !== null && row.endsAt <= at) {
+            if (await this.transitionAddon(tx, row, "expired", row.endsAt, "term_ended")) {
+              current.addonsExpired += 1;
+            }
+          } else if (row.status === "scheduled" && row.startsAt !== null) {
+            const activated = await this.transitionAddon(
+              tx,
+              row,
+              "active",
+              row.startsAt,
+              "scheduled_start_reached",
+            );
+            if (!activated) continue;
+            current.addonsActivated += 1;
+            if (
+              row.endsAt !== null &&
+              row.endsAt <= at &&
+              (await this.transitionAddon(
+                tx,
+                { ...row, status: "active" },
+                "expired",
+                row.endsAt,
+                "term_ended",
+              ))
+            ) {
+              current.addonsExpired += 1;
+            }
+          }
+        }
+        return current;
+      });
+      result.subscriptionsActivated += tenantResult.subscriptionsActivated;
+      result.subscriptionsExpired += tenantResult.subscriptionsExpired;
+      result.addonsActivated += tenantResult.addonsActivated;
+      result.addonsExpired += tenantResult.addonsExpired;
+    }
+    return result;
   }
 
   private async transitionSubscription(

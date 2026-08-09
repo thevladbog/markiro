@@ -25,6 +25,8 @@ import type {
 } from "./dto";
 import { canMutateTeamTarget, type TeamActorRole } from "./team-policy";
 
+type TeamExecutor = Pick<Db, "select">;
+
 export const TEAM_INVITATION_BASE_URL = "TEAM_INVITATION_BASE_URL";
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const ACTIVE_DELIVERY_STATUSES = ["queued", "sending", "retrying"] as const;
@@ -431,23 +433,32 @@ export class TeamService {
   }
 
   async removeMember(organizationId: string, actorUserId: string, memberId: string): Promise<void> {
-    const { target } = await this.assertMutableTarget(organizationId, actorUserId, memberId);
-    await this.db.transaction(async (tx) => {
-      await tx
-        .delete(schema.member)
-        .where(
-          and(eq(schema.member.organizationId, organizationId), eq(schema.member.id, memberId)),
+    await this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, organizationId, "cabinetUsers", async () => {
+        const { target } = await this.assertMutableTarget(
+          organizationId,
+          actorUserId,
+          memberId,
+          tx,
         );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId,
-        actorUserId,
-        action: "team.member.removed",
-        outcome: "success",
-        targetType: "member",
-        targetId: memberId,
-        before: { role: target.role },
-      });
-    });
+        const deleted = await tx
+          .delete(schema.member)
+          .where(
+            and(eq(schema.member.organizationId, organizationId), eq(schema.member.id, memberId)),
+          )
+          .returning({ id: schema.member.id });
+        if (deleted.length !== 1) throw new NotFoundException("Team member not found");
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId,
+          actorUserId,
+          action: "team.member.removed",
+          outcome: "success",
+          targetType: "member",
+          targetId: memberId,
+          before: { role: target.role },
+        });
+      }),
+    );
   }
 
   async resendInvitation(
@@ -646,8 +657,9 @@ export class TeamService {
     organizationId: string,
     actorUserId: string,
     targetMemberId: string,
+    executor: TeamExecutor = this.db,
   ) {
-    const [actor] = await this.db
+    const [actor] = await executor
       .select({ id: schema.member.id, role: schema.member.role })
       .from(schema.member)
       .where(
@@ -657,7 +669,7 @@ export class TeamService {
         ),
       )
       .limit(1);
-    const [target] = await this.db
+    const [target] = await executor
       .select({ id: schema.member.id, role: schema.member.role })
       .from(schema.member)
       .where(

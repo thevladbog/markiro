@@ -256,6 +256,8 @@ export class EntitlementsService {
         id: schema.subscriptionAddons.id,
         versionId: schema.subscriptionAddons.addonVersionId,
         quantity: schema.subscriptionAddons.quantity,
+        status: schema.subscriptionAddons.status,
+        startsAt: schema.subscriptionAddons.startsAt,
       })
       .from(schema.subscriptionAddons)
       .where(
@@ -274,6 +276,9 @@ export class EntitlementsService {
 
     const contributors: EntitlementContributor[] = [];
     for (const addon of addons) {
+      if (addon.status === "scheduled" && addon.startsAt === null) {
+        throw new SubscriptionEntitlementsInvalidException();
+      }
       const [version] = await executor
         .select({ id: schema.catalogItemVersions.id })
         .from(schema.catalogItemVersions)

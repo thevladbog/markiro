@@ -75,12 +75,22 @@ export class LinesService {
 
   /** Delete a production line. Returns 404 if not found, 409 if referenced by a shift. */
   async deleteLine(tenantId: string, id: string): Promise<void> {
-    await this.getLine(tenantId, id);
-
     try {
-      await this.db
-        .delete(schema.lines)
-        .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, id)));
+      await this.db.transaction((tx) =>
+        this.entitlements.withQuotaLock(tx, tenantId, "lines", async () => {
+          const [line] = await tx
+            .select({ id: schema.lines.id })
+            .from(schema.lines)
+            .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, id)))
+            .limit(1);
+          if (!line) throw new NotFoundException();
+          const deleted = await tx
+            .delete(schema.lines)
+            .where(and(eq(schema.lines.tenantId, tenantId), eq(schema.lines.id, id)))
+            .returning({ id: schema.lines.id });
+          if (deleted.length !== 1) throw new NotFoundException();
+        }),
+      );
     } catch (error) {
       // Catch PostgreSQL FK violation errors (code 23503); check both direct
       // code property and nested cause.code (node-postgres wraps it either way).
