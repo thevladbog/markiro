@@ -151,6 +151,7 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
       settled = true;
       clearTimeout(timer);
       archive?.stdout.destroy();
+      remote?.stdin.destroy();
       stop(archive);
       stop(remote);
       writeDiagnostic(`MARKIRO_DEPLOY_FAILURE ${cause}\n`);
@@ -169,8 +170,10 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
       });
       remote = spawnChild("ssh", sshArguments, {
         shell: false,
-        stdio: [archive.stdout, "ignore", "pipe"],
+        stdio: ["pipe", "ignore", "pipe"],
       });
+      remote.stdin.once("error", () => fail("transfer-pipe"));
+      archive.stdout.pipe(remote.stdin);
     } catch {
       fail("transfer-spawn");
       return;
