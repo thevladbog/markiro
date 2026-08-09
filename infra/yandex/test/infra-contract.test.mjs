@@ -3187,7 +3187,11 @@ test("deployment runner uses exact production federation, VM-scoped editor, and 
 
   assert.match(unit, /RuntimeDirectory=markiro-runner/);
   assert.match(unit, /ExecStart=\/usr\/local\/lib\/markiro\/runner-jit/);
-  assert.match(unit, /ExecStopPost=\+\/usr\/sbin\/poweroff/);
+  assert.doesNotMatch(
+    unit,
+    /ExecStopPost=.*poweroff/,
+    "the JIT listener exit must remain observable until protected cleanup stops the VM",
+  );
   assert.match(unit, /TimeoutStartSec=45min/);
 });
 
