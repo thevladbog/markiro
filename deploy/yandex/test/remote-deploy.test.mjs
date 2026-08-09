@@ -220,6 +220,17 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   assert.match(prepare.input, /GHCR_USERNAME/);
   assert.match(prepare.input, /GHCR_TOKEN/);
   assert.ok(prepare.args.includes("MARKIRO_EDGE_MODE=direct"));
+  assert.ok(prepare.args.includes(`--working-directory=/opt/markiro/releases/${COMMIT}`));
+  assert.deepEqual(prepare.args.slice(-6), [
+    "/usr/bin/node",
+    "/usr/local/lib/markiro/registry-auth.mjs",
+    "run-stdin",
+    "/usr/bin/node",
+    "deploy/production/deploy.mjs",
+    "prepare",
+  ]);
+  assert.equal(prepare.args.includes("/usr/bin/bash"), false);
+  assert.equal(prepare.args.includes("-c"), false);
   const hostAssets = fixture.commands.find(({ args }) => args.includes("markiro-host-assets"));
   assert.ok(hostAssets);
   const reconcileScript = await readFile(
