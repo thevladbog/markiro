@@ -48,6 +48,7 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   assert.match(source, /remote-deploy\.mjs run/);
   assert.match(source, /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
   assert.match(source, /APP_SSH_HOST_KEYS_B64/);
+  assert.match(source, /ACME_EMAIL:\s*\$\{\{ vars\.ACME_EMAIL \}\}/);
   assert.match(source, /GHCR_TOKEN:\s*\$\{\{ github\.token \}\}/);
   assert.match(source, /if:\s*always\(\)/);
   assert.doesNotMatch(
