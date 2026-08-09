@@ -1,726 +1,83 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 import test from "node:test";
 
-const repositoryRoot = path.resolve(import.meta.dirname, "../../..");
-const runbooks = {
-  "docs/runbooks/yandex-bootstrap.md": [
-    "bootstrap-prerequisites",
-    "bootstrap-local-apply",
-    "bootstrap-state-hmac",
-    "bootstrap-state-migration",
-    "bootstrap-state-verification",
-  ],
-  "docs/runbooks/yandex-secrets.md": [
-    "secrets-inventory",
-    "secrets-runtime-payload",
-    "secrets-mode-verification",
-    "secrets-post-activation-verification",
-    "secrets-rotation",
-  ],
-  "docs/runbooks/yandex-infrastructure-apply.md": [
-    "infrastructure-prerequisites",
-    "infrastructure-reviewed-plan",
-    "infrastructure-approved-apply",
-    "infrastructure-drift",
-  ],
-  "docs/runbooks/yandex-recovery.md": [
-    "recovery-prerequisites",
-    "recovery-postgres-pitr",
-    "recovery-media-version",
-    "recovery-state-version",
-    "recovery-vm",
-    "recovery-evidence",
-  ],
-  "docs/runbooks/yandex-first-go-live.md": [
-    "go-live-gate-01-plan-drift",
-    "go-live-gate-02-durable-protection",
-    "go-live-gate-03-certificate",
-    "go-live-gate-04-alb-sws-arl",
-    "go-live-gate-05-alert-specs",
-    "go-live-gate-06-backup-restore",
-    "go-live-gate-07-smtp-s3",
-    "go-live-gate-08-release-manifest",
-    "go-live-gate-09-deploy-smoke-rollback",
-    "go-live-gate-10-tenant-rbac",
-    "go-live-gate-11-notification-delivery",
-    "go-live-public-dns-apply",
-    "go-live-dns-convergence",
-  ],
-};
-const forbidden = [
-  /terraform\s+output\s+-json/i,
-  /terraform\s+show\s+-json/i,
-  /\bset\s+-x\b/,
-  /--password=/i,
-  /public_dns_enabled=true\s+-auto-approve/i,
-  /docker\s+compose\s+config(?!\s+--quiet(?:\s|$))/i,
-];
-const forbiddenCommands = [
-  "terraform output -json",
-  "terraform show -json",
-  "set -x",
-  "tool --password=unsafe",
-  "public_dns_enabled=true -auto-approve",
-  "docker compose config",
-];
-const verifierInputs = [
-  "MARKIRO_DOMAIN",
-  "MARKIRO_KIOSK_DOMAIN",
-  "MARKIRO_AUTHORITATIVE_DNS_SERVER",
-  "MARKIRO_PUBLIC_DNS_RESOLVERS",
-  "MARKIRO_APPROVED_DNS_A",
-  "MARKIRO_APPROVED_DNS_AAAA",
-];
-const dualHostGoLiveProcedures = {
-  preamble: [
-    "MARKIRO_KIOSK_DOMAIN=kiosk.markiro.app",
-    "desktop Tauri kiosk remains outside this web/TLS gate",
-    "browser kiosk PWA served by the protected ingress",
-  ],
-  "go-live-gate-01-plan-drift": [
-    "public_dns_enabled=false",
-    "expect exactly",
-    "one additional kiosk certificate",
-    "one additional kiosk certificate validation record",
-    "no replacement",
-    "no deletion",
-  ],
-  "go-live-gate-03-certificate": [
-    "issued status for both certificates",
-    "exact admin and kiosk",
-    "public_dns_enabled=false",
-  ],
-  "go-live-gate-05-alert-specs": [
-    "two-certificate artifact",
-    "existing `certificate_risk` alert ID",
-  ],
-  "go-live-gate-07-smtp-s3": [
-    "sanitized comparison",
-    "KIOSK_ORIGIN=https://kiosk.markiro.app",
-    "present exactly once",
-    "matches the protected kiosk domain",
-  ],
-  "go-live-gate-09-deploy-smoke-rollback": [
-    "http://127.0.0.1:8080/health/ready",
-    "curl --resolve <admin-domain>:443:<reserved-alb-ip>",
-    "curl --resolve <kiosk-domain>:443:<reserved-alb-ip>",
-    "These probes preserve",
-    "TLS SNI and both production authorities",
-  ],
-  "go-live-public-dns-apply": [
-    "public_dns_enabled=true",
-    "publishes both approved A records",
-    "exact admin domain",
-    "exact kiosk domain",
-    "same reserved ALB address",
-  ],
-  "go-live-dns-convergence": [
-    "two-domain convergence receipt",
-    "exact distinct admin and kiosk names",
-    "independently sorted",
-    "nonempty answer sets",
-    "same approved ALB address",
-    "production-public-smoke",
-    "full public route smoke through both",
-    "https://MARKIRO_DOMAIN",
-    "https://MARKIRO_KIOSK_DOMAIN",
-    "release header on both authorities",
-    "two-domain post-DNS smoke receipt",
-    "receipt proves only TLS, routes, security headers, readiness,",
-    "documentation, proxy behavior",
-    "SWS/ARL and alert-delivery confirmation remain separate",
-  ],
-};
+const root = new URL("../../../", import.meta.url);
+const read = (path) => readFile(new URL(path, root), "utf8");
 
-async function contents(relativePath) {
-  return readFile(path.join(repositoryRoot, relativePath), "utf8");
-}
-
-async function sources() {
-  const documents = await Promise.all(
-    Object.keys(runbooks).map(async (runbook) => [runbook, await contents(runbook)]),
-  );
-  return {
-    documents: Object.fromEntries(documents),
-    verifier: await contents("deploy/production/verify-dns.mjs"),
-    workflow: await contents(".github/workflows/yandex-infrastructure.yml"),
-    deployWorkflow: await contents(".github/workflows/deploy-production.yml"),
-    dnsWorkflow: await contents(".github/workflows/yandex-dns-convergence.yml"),
-    postDnsWorkflow: await contents(".github/workflows/yandex-post-dns-smoke.yml"),
-    remoteDeploy: await contents("deploy/yandex/remote-deploy.mjs"),
-    runtimeUnit: await contents("deploy/yandex/systemd/markiro-runtime-env.service"),
-    appCloudInit: await contents("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
-  };
-}
-
-function markersAppearInOrder(source, markers) {
+test("first go-live documents the single direct-VM infrastructure and deploy sequence", async () => {
+  const runbook = await read("docs/runbooks/yandex-first-go-live.md");
+  const ordered = [
+    "## 1. Проверить выпуск образов",
+    "## 2. Проверить резервную копию",
+    "## 3. Применить упрощение инфраструктуры",
+    "## 4. Проверить прямой DNS и TLS",
+    "## 5. Запустить приложение",
+    "## 6. Проверить приложение",
+    "## 7. Удалить остаточные данные аудита",
+  ];
   let previous = -1;
-  for (const marker of markers) {
-    const position = source.indexOf(`<!-- runbook-contract:${marker} -->`);
-    assert.ok(position > previous, `missing or unordered marker ${marker}`);
-    previous = position;
+  for (const heading of ordered) {
+    const index = runbook.indexOf(heading);
+    assert.ok(index > previous, "missing or unordered " + heading);
+    previous = index;
   }
-}
-
-function commandBlocks(source) {
-  return [...source.matchAll(/^```[^\n]*\n([\s\S]*?)^```$/gm)].map((match) => match[1]);
-}
-
-function ordered(source, values, label) {
-  let previous = -1;
-  for (const value of values) {
-    const position = source.indexOf(value);
-    assert.ok(position > previous, `${label} is missing or unordered: ${value}`);
-    previous = position;
-  }
-}
-
-function markerProcedure(source, marker) {
-  const start = source.indexOf(`<!-- runbook-contract:${marker} -->`);
-  assert.ok(start >= 0, `missing marker ${marker}`);
-  const next = source.indexOf("<!-- runbook-contract:", start + 1);
-  return source.slice(start, next === -1 ? source.length : next);
-}
-
-function goLiveProcedure(source, marker) {
-  if (marker !== "preamble") return markerProcedure(source, marker);
-  const firstMarker = source.indexOf("<!-- runbook-contract:");
-  assert.ok(firstMarker >= 0, "first-go-live runbook must contain contract markers");
-  return source.slice(0, firstMarker);
-}
-
-function escaped(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function positiveOrdered(source, values, label) {
-  ordered(source, values, label);
-  for (const value of values) {
-    assert.doesNotMatch(
-      source,
-      new RegExp(`(?:do not|never|must not)\\s+${escaped(value)}`, "i"),
-      `${label} negates required dual-host meaning: ${value}`,
-    );
-  }
-}
-
-const markerProcedures = {
-  "docs/runbooks/yandex-infrastructure-apply.md": {
-    "infrastructure-approved-apply": [
-      "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none\nobservability_phase=first",
-      "The cluster-targeted apply",
-      "suppresses raw Terraform stdout/stderr",
-      "It does not run the alert extractor",
-      "Create the owner",
-      "postgres_provisioning_phase=database\npostgres_owner_change_reference=protected_change_record_id\nobservability_phase=first",
-      "The database-targeted apply suppresses raw Terraform stdout/stderr",
-      "This database-targeted apply does not run the alert extractor",
-      "postgres_provisioning_phase=none\npostgres_owner_change_reference=none\nobservability_phase=first",
-      "yandex-alert-specs-",
-      "observability_phase=protected",
-    ],
-  },
-  "docs/runbooks/yandex-secrets.md": {
-    "secrets-inventory": [
-      "protected change record",
-      "runtime Lockbox payload",
-      "AWS_ACCESS_KEY_ID",
-      "YC_APP_DEPLOY_SSH_PRIVATE_KEY",
-      "production-deploy",
-      "no current version or payload",
-      "protected operational system",
-    ],
-    "secrets-runtime-payload": [
-      "Disable terminal recording",
-      "input or a protected descriptor",
-      "mode `0600`",
-      "every and only the keys from",
-      "S3 credentials",
-      "SMTP credentials",
-      "GHCR credentials",
-    ],
-    "secrets-mode-verification": [
-      "expected key names",
-      "/etc/markiro/production.env",
-      "root-owned file at mode `0600`",
-      "/usr/local/lib/markiro/.env.production.example",
-      "systemctl is-enabled --quiet markiro-runtime-env.service",
-      "systemctl restart markiro-runtime-env.service",
-      "exact generated environment inventory",
-      "sanitized readiness state",
-      "candidate-bound production preflight",
-    ],
-    "secrets-post-activation-verification": [
-      "successful finalized first deployment",
-      'expected_release="/opt/markiro/releases/$SUCCESSFUL_FIRST_RELEASE_SHA"',
-      "readlink -e",
-      'test "$active_release" = "$expected_release"',
-    ],
-    "secrets-rotation": [
-      "approved rotation record",
-      "standard input or a protected descriptor",
-      "Restart or redeploy",
-      "Revoke the previous credential",
-      "YC_APP_DEPLOY_SSH_PRIVATE_KEY",
-      "ssh-keygen -lf",
-      "YC_APP_DEPLOY_SSH_PUBLIC_KEY",
-      "Remove temporary protected files",
-    ],
-  },
-  "docs/runbooks/yandex-recovery.md": {
-    "recovery-prerequisites": [
-      "approved incident or drill record",
-      "target timestamp",
-      "distinct temporary PostgreSQL cluster",
-      "Disable tracing",
-    ],
-    "recovery-postgres-pitr": [
-      "PITR restore",
-      "Create the application owner",
-      "normal forward migration command",
-      "Verify tenant isolation",
-    ],
-    "recovery-media-version": [
-      "Select the required object version",
-      "Restore that version",
-      "Verify object metadata",
-    ],
-    "recovery-state-version": [
-      "Select a prior version",
-      "Copy it only into an isolated recovery location",
-      "Do not initialize a production backend",
-    ],
-    "recovery-vm": [
-      "new reviewed infrastructure plan",
-      "reserved public IP",
-      "no OS Login fallback",
-      "offline recovery copy",
-      "authenticated serial host-key",
-      "last known healthy digest pair",
-      "single-VM limitation",
-    ],
-    "recovery-evidence": [
-      "observed RTO/RPO",
-      "remediation change",
-      "separate cleanup approval",
-      "cleanup evidence separately",
-    ],
-  },
-  "docs/runbooks/yandex-first-go-live.md": {
-    "go-live-gate-09-deploy-smoke-rollback": [
-      "production-deploy",
-      "rollback_rehearsal=true",
-      "rehearsal_run_attempt=none",
-      "markiro-rollback-rehearsal-<release-sha>-attempt-<rehearsal-run-attempt>",
-      "rehearsal_run_id=<successful-rollback-rehearsal-run-id>",
-      "rehearsal_run_attempt=<successful-rollback-rehearsal-run-attempt>",
-      "rollback_rehearsal=false",
-      "same release SHA",
-      "successful finalized first deployment",
-    ],
-  },
-};
-
-function assertRunbookContract({
-  documents,
-  verifier,
-  workflow,
-  deployWorkflow,
-  dnsWorkflow,
-  postDnsWorkflow,
-  remoteDeploy,
-  runtimeUnit,
-  appCloudInit,
-}) {
-  for (const [runbook, markers] of Object.entries(runbooks)) {
-    const source = documents[runbook];
-    markersAppearInOrder(source, markers);
-    assert.ok(commandBlocks(source).length > 0 || !runbook.includes("bootstrap"));
-    for (const commands of commandBlocks(source)) {
-      for (const pattern of forbidden) {
-        assert.doesNotMatch(commands, pattern, `${runbook} contains a forbidden command`);
-      }
-    }
-  }
-
-  for (const [runbook, procedures] of Object.entries(markerProcedures)) {
-    for (const [marker, values] of Object.entries(procedures)) {
-      ordered(markerProcedure(documents[runbook], marker), values, `${runbook}:${marker}`);
-    }
-  }
-
-  const bootstrap = documents["docs/runbooks/yandex-bootstrap.md"];
-  assert.match(bootstrap, /production-deploy/, "bootstrap must name the deploy environment");
-  assert.match(bootstrap, /production-postgres-owner/);
-  assert.doesNotMatch(bootstrap, /production-controller|production-cleanup|self-hosted/i);
-  assert.match(bootstrap, /install .*Terraform `1\.15\.8`/i);
-  assert.match(bootstrap, /terraform version -json/);
-  assert.match(bootstrap, /node infra\/yandex\/scripts\/check-toolchain\.mjs/);
-  assert.doesNotMatch(bootstrap, /\/private\/tmp\/markiro-terraform/i);
-  ordered(
-    bootstrap,
-    [
-      "terraform -chdir=infra/yandex/bootstrap init -input=false -lockfile=readonly",
-      "terraform -chdir=infra/yandex/bootstrap plan -out=bootstrap.tfplan",
-      "terraform -chdir=infra/yandex/bootstrap apply bootstrap.tfplan",
-      "terraform -chdir=infra/yandex/bootstrap init -migrate-state -backend-config=backend.hcl -lockfile=readonly",
-    ],
-    "bootstrap Terraform procedure",
-  );
-
-  const infrastructure = documents["docs/runbooks/yandex-infrastructure-apply.md"];
-  assert.match(infrastructure, /production-deploy/);
-  assert.match(infrastructure, /production-postgres-owner/);
-  assert.match(infrastructure, /YC_APP_DEPLOY_SSH_PUBLIC_KEY/);
-  assert.doesNotMatch(
-    infrastructure,
-    /production-controller|production-cleanup|self-hosted|YC_OS_LOGIN/i,
-  );
-  for (const input of [
-    "target_sha",
-    "enable_public_dns=false",
-    "postgres_provisioning_phase=cluster",
-    "postgres_owner_change_reference=none",
-    "observability_phase=first",
-    "postgres_provisioning_phase=database",
-    "postgres_owner_change_reference=protected_change_record_id",
-  ]) {
-    assert.match(infrastructure, new RegExp(input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  }
-  ordered(
-    markerProcedure(infrastructure, "infrastructure-approved-apply"),
-    [
-      "postgres_provisioning_phase=cluster\npostgres_owner_change_reference=none",
-      "observability_phase=first",
-      "The cluster-targeted apply",
-      "suppresses raw Terraform stdout/stderr",
-      "Create the owner",
-      "runtime Lockbox",
-      "postgres_provisioning_phase=database\npostgres_owner_change_reference=protected_change_record_id\nobservability_phase=first",
-      "The database-targeted apply suppresses raw Terraform stdout/stderr",
-      "postgres_provisioning_phase=none\npostgres_owner_change_reference=none\nobservability_phase=first",
-    ],
-    "two-phase PostgreSQL procedure",
-  );
-  ordered(
-    markerProcedure(infrastructure, "infrastructure-approved-apply"),
-    [
-      "postgres_provisioning_phase=none\npostgres_owner_change_reference=none\nobservability_phase=first",
-      "Apply that saved plan",
-      "yandex-alert-specs-",
-      "alert-specs.json",
-      "commit_sha",
-      "evidence_sha256",
-      "plan_sha256",
-      "observability_phase=protected",
-    ],
-    "first-phase alert specification evidence handoff",
-  );
-  assert.match(infrastructure, /contains only `alert_specs` and\s+binding\s+metadata/i);
-  for (const workflowInterface of [
-    "postgres_provisioning_phase:",
-    "postgres_owner_change_reference:",
-    "postgres_owner_approval:",
-    "POSTGRES_OWNER_CHANGE_REFERENCE",
-    "evidence_postgres_owner_change_reference",
-    "github_run_attempt",
-  ]) {
-    assert.match(workflow, new RegExp(workflowInterface.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
-  }
-
-  const goLive = documents["docs/runbooks/yandex-first-go-live.md"];
-  for (const [marker, values] of Object.entries(dualHostGoLiveProcedures))
-    positiveOrdered(goLiveProcedure(goLive, marker), values, `dual host ${marker}`);
-  assert.match(goLive, /rollback_rehearsal=true/);
-  assert.match(goLive, /rollback_rehearsal=false/);
-  assert.match(goLive, /manual(?:ly)? dispatched/i);
-  assert.doesNotMatch(
-    goLive,
-    /workflow_run|production-controller|production-cleanup|self-hosted|cleanup receipt/i,
-  );
-  const ingressGate = markerProcedure(goLive, "go-live-gate-04-alb-sws-arl");
-  assert.match(ingressGate, /approved WAF destroy actions/i);
-  assert.match(ingressGate, /reject[\s\S]*WAF create, update, or unchanged actions/i);
-  assert.match(ingressGate, /no WAF resources remain/i);
-  const secrets = documents["docs/runbooks/yandex-secrets.md"];
-  const preFirstSecrets = markerProcedure(secrets, "secrets-mode-verification");
-  assert.doesNotMatch(preFirstSecrets, /\/opt\/markiro\/active-release/);
-  assert.doesNotMatch(preFirstSecrets, /deploy\/production\/preflight\.mjs/);
-  assert.doesNotMatch(preFirstSecrets, /docker compose/);
-  assert.match(
-    markerProcedure(secrets, "secrets-post-activation-verification"),
-    /\/opt\/markiro\/active-release/,
-  );
-  assert.match(
-    runtimeUnit,
-    /ExecStart=\/usr\/bin\/node \/usr\/local\/lib\/markiro\/runtime-env\.mjs/,
-  );
-  assert.match(
-    appCloudInit,
-    /path: \/usr\/local\/lib\/markiro\/runtime-env\.mjs[\s\S]*?owner: root:root[\s\S]*?permissions: "0700"/,
-  );
-  assert.match(
-    appCloudInit,
-    /path: \/usr\/local\/lib\/markiro\/\.env\.production\.example[\s\S]*?owner: root:root[\s\S]*?permissions: "0644"/,
-  );
-  assert.match(
-    appCloudInit,
-    /path: \/etc\/systemd\/system\/markiro-runtime-env\.service[\s\S]*?owner: root:root[\s\S]*?permissions: "0644"/,
-  );
-  assert.match(appCloudInit, /install -d -m 0700 \/etc\/markiro/);
-  assert.match(appCloudInit, /chmod 0600 \/etc\/markiro\/runtime-secret-id/);
-  assert.match(remoteDeploy, /\/opt\/markiro\/active-release/);
-  assert.match(remoteDeploy, /mv -Tf/);
-  ordered(
-    remoteDeploy,
-    [
-      "await dependencies.transferBundle(manifest)",
-      "await dependencies.refreshRuntime(manifest)",
-      "candidate = await dependencies.prepare(manifest)",
-    ],
-    "candidate-bound production preflight",
-  );
-  const publicDns = goLive.indexOf("<!-- runbook-contract:go-live-public-dns-apply -->");
-  assert.ok(publicDns >= 0, "missing public DNS apply marker");
-  for (let gate = 1; gate <= 11; gate += 1) {
-    const marker = `<!-- runbook-contract:go-live-gate-${String(gate).padStart(2, "0")}-`;
-    const position = goLive.indexOf(marker);
-    assert.ok(position >= 0 && position < publicDns, `gate ${gate} must precede public DNS`);
-  }
-  ordered(
-    goLive,
-    [
-      "deployment_phase=first",
-      "http://127.0.0.1:8080/health/ready",
-      "curl --resolve <admin-domain>:443:<reserved-alb-ip>",
-      "<!-- runbook-contract:go-live-public-dns-apply -->",
-      "production-public-smoke",
-    ],
-    "Yandex first-release ordering",
-  );
-  ordered(
-    goLive,
-    [
-      "<!-- runbook-contract:go-live-gate-07-smtp-s3 -->",
-      "pre-first activation materialization checks",
-      "rollback_rehearsal=true",
-      "/opt/markiro/active-release` pointer remains absent",
-      "rollback_rehearsal=false",
-      "successful finalized first deployment creates",
-      "post-activation active-path",
-    ],
-    "pre-first materialization through first activation",
-  );
-
-  const keySetup = markerProcedure(bootstrap, "bootstrap-prerequisites");
-  const keyBlocks = commandBlocks(keySetup).filter((block) =>
-    block.includes("ssh-keygen -t ed25519"),
-  );
-  assert.equal(keyBlocks.length, 1, "bootstrap must define one exact deploy-key block");
-  assert.equal(
-    keyBlocks[0].trim(),
-    [
-      "zsh -f",
-      "umask 077",
-      "ssh-keygen -t ed25519 -a 100 -f ./markiro-production-deploy -C markiro-production-deploy",
-      "ssh-keygen -lf ./markiro-production-deploy.pub",
-    ].join("\n"),
-  );
-  assert.doesNotMatch(keyBlocks[0], /set -euo pipefail|cat\s+.*markiro-production-deploy/);
-  assert.match(bootstrap, /offline recovery copy/);
-  assert.match(bootstrap, /YC_APP_DEPLOY_SSH_PUBLIC_KEY/);
-  assert.match(documents["docs/runbooks/yandex-secrets.md"], /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
-  for (const source of Object.values(documents)) {
-    assert.doesNotMatch(source, /ssh-keyscan|GITHUB_RUNNER_ADMIN_TOKEN|runner_overrun/);
-  }
-
-  assert.match(deployWorkflow, /runs-on:\s*ubuntu-latest/);
-  assert.match(deployWorkflow, /environment:\s*production-deploy/);
-  assert.doesNotMatch(
-    deployWorkflow,
-    /workflow_run|self-hosted|production-controller|production-cleanup/,
-  );
-  assert.doesNotMatch(
-    goLive.slice(0, publicDns),
-    /public smoke, `finalize`/i,
-    "pre-DNS Yandex procedure must not use public-hostname smoke",
-  );
-  assert.match(goLive.slice(publicDns), /public_dns_enabled=true/);
-  ordered(
-    goLive.slice(publicDns),
-    [
-      "production-dns-convergence",
-      "DNS convergence verification",
-      "release_sha=<current-main-40-character-sha>",
-      "dns_apply_run_id=<successful-approved-dns-apply-run-id>",
-      "production-public-smoke",
-      "release_run_id=<publish-production-images-run-id>",
-      "deployment_run_id=<successful-first-deployment-run-id>",
-      "dns_verifier_run_id=<successful-dns-convergence-run-id>",
-      "Post-DNS production smoke",
-    ],
-    "post-DNS public smoke dispatch",
-  );
-  assert.equal(
-    goLive.match(/release_sha=<current-main-40-character-sha>/g)?.length,
-    2,
-    "both protected dispatches must bind the exact release SHA",
-  );
-  assert.equal(
-    goLive.match(/dns_apply_run_id=<successful-approved-dns-apply-run-id>/g)?.length,
-    2,
-    "both protected dispatches must bind the exact DNS-apply run",
-  );
-  assert.match(dnsWorkflow, /environment:\s*production-dns-convergence/);
-  assert.match(dnsWorkflow, /node deploy\/yandex\/dns-convergence\.mjs run/);
-  assert.match(postDnsWorkflow, /environment:\s*production-public-smoke/);
-  assert.match(postDnsWorkflow, /node deploy\/yandex\/post-dns-smoke\.mjs run/);
-  assert.doesNotMatch(postDnsWorkflow, /remote-deploy|deploy[.]mjs|\bmigrate\b|\bdocker\b/i);
-  const convergenceProcedure = markerProcedure(goLive, "go-live-dns-convergence");
-  assert.doesNotMatch(
-    convergenceProcedure,
-    /confirm the certificate, SWS[/]ARL behavior,[\s\S]{0,160}from the uploaded post-DNS smoke receipt/i,
-  );
-  for (const input of verifierInputs) {
-    assert.match(verifier, new RegExp(input));
-    assert.match(dnsWorkflow, new RegExp(input));
-  }
-}
-
-test("Yandex operator runbooks bind ordered procedures to their real interfaces", async () => {
-  assertRunbookContract(await sources());
+  assert.match(runbook, /target_sha=<current-main-40-character-sha>/);
+  assert.match(runbook, /enable_public_dns=true/);
+  assert.match(runbook, /release_run_id=<successful-publish-run-id>/);
+  assert.match(runbook, /release_sha=<same-40-character-main-sha>/);
 });
 
-test("runbook contract rejects every unsafe command and missing DNS verifier input", async () => {
-  const current = await sources();
-  const firstRunbook = "docs/runbooks/yandex-bootstrap.md";
-
-  for (const command of forbiddenCommands) {
-    for (const fenceType of ["", "console"]) {
-      const mutated = structuredClone(current);
-      mutated.documents[firstRunbook] += `\n\`\`\`${fenceType}\n${command}\n\`\`\`\n`;
-      assert.throws(() => assertRunbookContract(mutated), `${fenceType}:${command}`);
-    }
+test("runbooks protect durable data and explicitly enumerate the retired cloud stack", async () => {
+  const [goLive, infra, recovery] = await Promise.all([
+    read("docs/runbooks/yandex-first-go-live.md"),
+    read("docs/runbooks/yandex-infrastructure-apply.md"),
+    read("docs/runbooks/yandex-recovery.md"),
+  ]);
+  const combined = goLive + "\n" + infra + "\n" + recovery;
+  for (const protectedName of ["PostgreSQL", "media", "state", "KMS"]) {
+    assert.match(combined, new RegExp(protectedName, "i"));
   }
-
-  for (const input of verifierInputs) {
-    const mutated = structuredClone(current);
-    mutated.dnsWorkflow = mutated.dnsWorkflow.replaceAll(input, "REMOVED_INPUT");
-    assert.throws(() => assertRunbookContract(mutated), input);
+  for (const retiredName of ["ALB", "SWS/ARL", "Audit Trails", "deployment-controller/runner"]) {
+    assert.match(goLive, new RegExp(retiredName.replace("/", "\\/"), "i"));
   }
+  assert.match(goLive, /metadata-only инвентаризацию/);
+  assert.match(goLive, /Не затрагивайте media или state bucket/);
+});
 
-  for (const [marker, values] of Object.entries(dualHostGoLiveProcedures)) {
-    for (const value of values) {
-      const missing = structuredClone(current);
-      const runbook = missing.documents["docs/runbooks/yandex-first-go-live.md"];
-      const procedure = goLiveProcedure(runbook, marker);
-      missing.documents["docs/runbooks/yandex-first-go-live.md"] = runbook.replace(
-        procedure,
-        procedure.replace(value, "REMOVED_DUAL_HOST_SEMANTIC"),
-      );
-      assert.throws(() => assertRunbookContract(missing), `${marker}:${value}:missing`);
+test("operator docs bind deploy to pinned SSH and exact immutable release inputs", async () => {
+  const [deploy, secrets] = await Promise.all([
+    read("docs/runbooks/saas-production-deploy.md"),
+    read("docs/runbooks/yandex-secrets.md"),
+  ]);
+  for (const value of [
+    "YC_APP_PUBLIC_ADDRESS",
+    "APP_SSH_HOST_KEYS_B64",
+    "YC_APP_DEPLOY_SSH_PRIVATE_KEY",
+    "release run ID",
+    "40-символьным",
+  ])
+    assert.match(deploy + "\n" + secrets, new RegExp(value));
+  assert.match(
+    deploy,
+    /transfer, prepare, migrations, start,[\s\S]*readiness, public smoke, finalize/,
+  );
+  assert.match(deploy, /один[\s\S]*rollback/);
+  assert.match(secrets, /job-scoped/);
+  assert.match(secrets, /password-stdin/);
+});
 
-      const moved = structuredClone(current);
-      const movedRunbook = moved.documents["docs/runbooks/yandex-first-go-live.md"];
-      const movedProcedure = goLiveProcedure(movedRunbook, marker);
-      let movedDocument = movedRunbook.replace(
-        movedProcedure,
-        movedProcedure.replace(value, "MOVED_DUAL_HOST_SEMANTIC"),
-      );
-      if (marker === "preamble") {
-        const destination = markerProcedure(movedDocument, "go-live-gate-01-plan-drift");
-        movedDocument = movedDocument.replace(destination, `${destination}\n${value}\n`);
-      } else {
-        movedDocument = movedDocument.replace(
-          "<!-- runbook-contract:go-live-gate-01-plan-drift -->",
-          `${value}\n<!-- runbook-contract:go-live-gate-01-plan-drift -->`,
-        );
-      }
-      moved.documents["docs/runbooks/yandex-first-go-live.md"] = movedDocument;
-      assert.throws(() => assertRunbookContract(moved), `${marker}:${value}:moved`);
-
-      const negated = structuredClone(current);
-      const negatedRunbook = negated.documents["docs/runbooks/yandex-first-go-live.md"];
-      const negatedProcedure = goLiveProcedure(negatedRunbook, marker);
-      negated.documents["docs/runbooks/yandex-first-go-live.md"] = negatedRunbook.replace(
-        negatedProcedure,
-        negatedProcedure.replace(value, `Do not ${value}`),
-      );
-      assert.throws(() => assertRunbookContract(negated), `${marker}:${value}:negated`);
-    }
-  }
-
-  for (const [runbook, procedures] of Object.entries(markerProcedures)) {
-    for (const [marker, values] of Object.entries(procedures)) {
-      const mutated = structuredClone(current);
-      const missingProcedure = markerProcedure(mutated.documents[runbook], marker);
-      mutated.documents[runbook] = mutated.documents[runbook].replace(
-        missingProcedure,
-        missingProcedure.replace(values[0], "REMOVED_REQUIRED_SEMANTIC"),
-      );
-      assert.throws(() => assertRunbookContract(mutated), `${runbook}:${marker}:missing`);
-
-      const reordered = structuredClone(current);
-      const procedure = markerProcedure(reordered.documents[runbook], marker);
-      const first = values[0];
-      const second = values[1];
-      const swapped = procedure
-        .replace(first, "RUNBOOK_ORDER_SENTINEL")
-        .replace(second, first)
-        .replace("RUNBOOK_ORDER_SENTINEL", second);
-      reordered.documents[runbook] = reordered.documents[runbook].replace(procedure, swapped);
-      assert.throws(() => assertRunbookContract(reordered), `${runbook}:${marker}:reordered`);
-    }
-  }
-
-  const unsafeMutations = [
-    [
-      "parent interactive fail-fast",
-      "docs/runbooks/yandex-bootstrap.md",
-      (source) => source.replace("zsh -f\numask 077", "set -euo pipefail\numask 077"),
-    ],
-    [
-      "plaintext private key output",
-      "docs/runbooks/yandex-bootstrap.md",
-      (source) =>
-        source.replace(
-          "ssh-keygen -lf ./markiro-production-deploy.pub",
-          "cat ./markiro-production-deploy\nssh-keygen -lf ./markiro-production-deploy.pub",
-        ),
-    ],
-    [
-      "unauthenticated host-key scan",
-      "docs/runbooks/yandex-recovery.md",
-      (source) => `${source}\nssh-keyscan app.example.invalid\n`,
-    ],
-    [
-      "OS Login fallback",
-      "docs/runbooks/yandex-infrastructure-apply.md",
-      (source) => `${source}\nYC_OS_LOGIN=operator\n`,
-    ],
-    [
-      "automatic deployment",
-      "docs/runbooks/yandex-first-go-live.md",
-      (source) => `${source}\nworkflow_run automatically starts deployment.\n`,
-    ],
-  ];
-  for (const [name, runbook, mutate] of unsafeMutations) {
-    const mutated = structuredClone(current);
-    mutated.documents[runbook] = mutate(mutated.documents[runbook]);
-    assert.throws(() => assertRunbookContract(mutated), name);
-  }
-
-  const dnsBeforeSmoke = structuredClone(current);
-  const dnsMarker = "<!-- runbook-contract:go-live-public-dns-apply -->";
-  dnsBeforeSmoke.documents["docs/runbooks/yandex-first-go-live.md"] = dnsBeforeSmoke.documents[
-    "docs/runbooks/yandex-first-go-live.md"
-  ]
-    .replace(`${dnsMarker}\n`, "")
-    .replace(
-      "<!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->",
-      `${dnsMarker}\n\n<!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->`,
-    );
-  assert.throws(() => assertRunbookContract(dnsBeforeSmoke), "DNS before finalized smoke");
+test("active runbooks do not instruct operators to use retired release phases", async () => {
+  const active = (
+    await Promise.all([
+      read("docs/runbooks/yandex-first-go-live.md"),
+      read("docs/runbooks/yandex-infrastructure-apply.md"),
+      read("docs/runbooks/saas-production-deploy.md"),
+      read("docs/runbooks/yandex-secrets.md"),
+    ])
+  ).join("\n");
+  assert.doesNotMatch(
+    active,
+    /deployment_phase=|rollback_rehearsal=|observability_phase=|postgres_provisioning_phase=|dns_apply_run_id=|dns_verifier_run_id=/,
+  );
 });

@@ -10,12 +10,6 @@ variable "zone" {
   nullable    = false
 }
 
-variable "alb_subnet_cidr" {
-  description = "CIDR for the public application load balancer subnet."
-  type        = string
-  nullable    = false
-}
-
 variable "app_subnet_cidr" {
   description = "CIDR for application virtual machines."
   type        = string

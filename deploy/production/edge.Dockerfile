@@ -17,8 +17,7 @@ COPY packages/ui ./packages/ui
 RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...
 
 FROM caddy:2.11.4-alpine AS runtime
-COPY deploy/production/Caddyfile /etc/caddy/Caddyfile.direct
-COPY deploy/production/Caddyfile.alb /etc/caddy/Caddyfile.alb
+COPY deploy/production/Caddyfile /etc/caddy/Caddyfile
 COPY deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint
 COPY --from=build /workspace/apps/admin/dist /srv/admin
 COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk

@@ -65,21 +65,6 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
   );
 });
 
-test("keeps the public route table HTTPS-facing when ALB terminates TLS", () => {
-  assert.deepEqual(
-    productionBaseUrls({
-      MARKIRO_DOMAIN: "markiro.example",
-      MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
-      MARKIRO_EDGE_MODE: "behind-alb",
-      MARKIRO_HTTPS_PORT: "18443",
-    }),
-    {
-      admin: "https://markiro.example",
-      kiosk: "https://kiosk.markiro.example",
-    },
-  );
-});
-
 test("rejects malformed and equal smoke authorities without disclosing their values", () => {
   const cases = [
     [
@@ -112,15 +97,6 @@ test("rejects malformed and equal smoke authorities without disclosing their val
       { MARKIRO_DOMAIN: "markiro.example", MARKIRO_KIOSK_DOMAIN: "kiosk.localhost" },
       "MARKIRO_KIOSK_DOMAIN is invalid",
       "markiro.example",
-    ],
-    [
-      {
-        MARKIRO_DOMAIN: "localhost",
-        MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
-        MARKIRO_EDGE_MODE: "behind-alb",
-      },
-      "MARKIRO_DOMAIN is invalid",
-      "kiosk.localhost",
     ],
   ];
 

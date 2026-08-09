@@ -1,5 +1,4 @@
 const BASE_COMPOSE_FILE = "compose.production.yml";
-const YANDEX_COMPOSE_FILE = "deploy/production/compose.yandex.yml";
 export const PRODUCTION_COMPOSE_PROJECT = "markiro-production";
 
 /**
@@ -7,9 +6,7 @@ export const PRODUCTION_COMPOSE_PROJECT = "markiro-production";
  * Every validation and lifecycle command must consume this list unchanged.
  */
 export function productionComposeFiles(environment) {
-  return environment.MARKIRO_EDGE_MODE === "behind-alb"
-    ? [BASE_COMPOSE_FILE, YANDEX_COMPOSE_FILE]
-    : [BASE_COMPOSE_FILE];
+  return [BASE_COMPOSE_FILE];
 }
 
 export function productionComposeArgs(environment, { includeCiOverlay = false } = {}) {

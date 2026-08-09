@@ -64,17 +64,6 @@ variable "github_repository_id" {
   }
 }
 
-variable "github_deploy_environment" {
-  description = "Exact protected GitHub environment permitted to run hosted production deployment."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = var.github_deploy_environment == "production-deploy"
-    error_message = "github_deploy_environment must be exactly production-deploy."
-  }
-}
-
 variable "github_infrastructure_environment" {
   description = "Exact protected GitHub environment permitted to exchange infrastructure automation tokens."
   type        = string

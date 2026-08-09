@@ -364,18 +364,15 @@ test("CLI reports a fixed nonzero failure before rename without disclosing secre
   });
 });
 
-test("installed-layout helpers resolve their colocated inventory and preserve symlink-safe CLI detection", async (t) => {
+test("installed runtime helper resolves its colocated inventory and preserves symlink-safe CLI detection", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "markiro runtime layout "));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  for (const file of ["runtime-env.mjs", "readiness-observer.mjs", "cli-main.mjs"]) {
+  for (const file of ["runtime-env.mjs", "cli-main.mjs"]) {
     await copyFile(resolve("deploy/yandex", file), join(directory, file));
   }
   await copyFile(resolve(".env.production.example"), join(directory, ".env.production.example"));
 
   const installedRuntime = await import(pathToFileURL(join(directory, "runtime-env.mjs")).href);
-  const installedObserver = await import(
-    pathToFileURL(join(directory, "readiness-observer.mjs")).href
-  );
   const installedCli = await import(pathToFileURL(join(directory, "cli-main.mjs")).href);
   const linkedRuntime = join(directory, "runtime link.mjs");
   await symlink(join(directory, "runtime-env.mjs"), linkedRuntime);
@@ -401,13 +398,6 @@ test("installed-layout helpers resolve their colocated inventory and preserve sy
       linkedRuntime,
     ]),
     true,
-  );
-  assert.deepEqual(
-    await installedObserver.observeReadiness({
-      domain: "markiro.example",
-      fetch: async () => ({ ok: true, json: async () => ({ status: "ok", checks: {} }) }),
-    }),
-    { category: "ok", exitCode: 0 },
   );
 });
 

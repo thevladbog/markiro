@@ -58,24 +58,24 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Delete: active `infra/yandex/modules/observability/*` wiring
 
 - [ ] Add focused contracts requiring exactly one retained VM/public address,
-  app/data subnets and SGs, public 22/80/443, direct DNS records to the app
-  address, and no ALB/SWS/ARL/certificate/logging/dashboard/audit-trail target
-  resources. Require the PostgreSQL, media bucket and KMS references unchanged.
+      app/data subnets and SGs, public 22/80/443, direct DNS records to the app
+      address, and no ALB/SWS/ARL/certificate/logging/dashboard/audit-trail target
+      resources. Require the PostgreSQL, media bucket and KMS references unchanged.
 - [ ] Add mutations that reintroduce an ALB resource, target group, SWS profile,
-  managed certificate, audit trail, cloud log group, monitoring dashboard or an
-  app replacement trigger; each must fail the contract.
+      managed certificate, audit trail, cloud log group, monitoring dashboard or an
+      app replacement trigger; each must fail the contract.
 - [ ] Run `node --test infra/yandex/test/infra-contract.test.mjs` and capture RED.
 - [ ] Remove the ingress/observability production modules and target group;
-  retain `yandex_vpc_address.app` and the existing app VM identity without a
-  replacement trigger. Point two gated DNS A records directly at that address.
+      retain `yandex_vpc_address.app` and the existing app VM identity without a
+      replacement trigger. Point two gated DNS A records directly at that address.
 - [ ] Reduce networking to app/data boundaries. Remove ALB subnet/SG and the
-  ALB-only port 8080 rule; add public 80/443 while retaining public key-only 22
-  and app-SG-to-data-SG 6432.
+      ALB-only port 8080 rule; add public 80/443 while retaining public key-only 22
+      and app-SG-to-data-SG 6432.
 - [ ] Stop creating audit writers/policies. Keep the versioned audit bucket as
-  a temporary protected legacy resource or remove it from management with a
-  non-destroying Terraform `removed` block until final cleanup.
+      a temporary protected legacy resource or remove it from management with a
+      non-destroying Terraform `removed` block until final cleanup.
 - [ ] Run the focused infra contract GREEN and
-  `terraform fmt -recursive -check infra/yandex`.
+      `terraform fmt -recursive -check infra/yandex`.
 
 ## Task 2: Make the runtime direct-Caddy only
 
@@ -90,12 +90,12 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Modify: `infra/yandex/test/infra-contract.test.mjs`
 
 - [ ] Add contracts requiring host ports 80/443, `MARKIRO_EDGE_MODE=direct`,
-  persistent Caddy ACME data and both exact authorities. Reject the behind-ALB
-  mode and cloud logging/monitoring units in app cloud-init.
+      persistent Caddy ACME data and both exact authorities. Reject the behind-ALB
+      mode and cloud logging/monitoring units in app cloud-init.
 - [ ] Run the focused Compose/edge/infra tests and capture RED.
 - [ ] Make direct mode the only production mode, remove the ALB Caddy variant,
-  preserve admin/kiosk route isolation and remove Unified Agent plus custom
-  monitoring/readiness timers from app bootstrap.
+      preserve admin/kiosk route isolation and remove Unified Agent plus custom
+      monitoring/readiness timers from app bootstrap.
 - [ ] Run the focused suites GREEN and build the edge image locally.
 
 ## Task 3: Replace Yandex control-plane deploy with ordinary SSH
@@ -108,16 +108,16 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Delete: `deploy/yandex/test/hosted-deploy-context.test.mjs`
 
 - [ ] Add tests requiring only `YC_APP_PUBLIC_ADDRESS`, dedicated deploy login,
-  owner-only private-key path, pinned host keys, release manifest, two domains
-  and job-scoped `GHCR_USERNAME`/`GHCR_TOKEN`. Reject all Yandex IAM, Compute,
-  Lockbox, ALB and serial-console inputs/calls.
+      owner-only private-key path, pinned host keys, release manifest, two domains
+      and job-scoped `GHCR_USERNAME`/`GHCR_TOKEN`. Reject all Yandex IAM, Compute,
+      Lockbox, ALB and serial-console inputs/calls.
 - [ ] Require deploy order: transfer, runtime refresh, prepare/migrate/start,
-  local readiness, public two-authority smoke, finalize; preserve one bounded
-  remote rollback after any post-prepare failure.
+      local readiness, public two-authority smoke, finalize; preserve one bounded
+      remote rollback after any post-prepare failure.
 - [ ] Run `node --test deploy/yandex/test/remote-deploy.test.mjs` and capture RED.
 - [ ] Remove provider lookups and ALB gates. Validate the configured public IP,
-  SSH identity and host keys locally. Feed registry credentials through the
-  existing stdin envelope without logging them.
+      SSH identity and host keys locally. Feed registry credentials through the
+      existing stdin envelope without logging them.
 - [ ] Run remote-deploy and registry-auth tests GREEN.
 
 ## Task 4: Collapse the GitHub deploy workflow
@@ -129,15 +129,15 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Modify: `deploy/production/test/workflow-contract.test.mjs`
 
 - [ ] Add a parsed workflow contract requiring one manual `ubuntu-latest` job,
-  one `production-deploy` environment, `contents/actions/packages: read`, no
-  `id-token`, and no deployment phase, rehearsal inputs/artifacts, OIDC, serial
-  lookup, Yandex token, controller/cleanup job or runner lifecycle.
+      one `production-deploy` environment, `contents/actions/packages: read`, no
+      `id-token`, and no deployment phase, rehearsal inputs/artifacts, OIDC, serial
+      lookup, Yandex token, controller/cleanup job or runner lifecycle.
 - [ ] Require protected values for app address, deploy private key and base64
-  host keys; require temporary mode `0600` files and unconditional cleanup.
+      host keys; require temporary mode `0600` files and unconditional cleanup.
 - [ ] Run the focused workflow tests and capture RED.
 - [ ] Retain exact release-run/SHA/manifest validation, then invoke the direct
-  remote deploy with `${{ github.token }}` as the job-scoped GHCR credential.
-  Upload no deployment evidence beyond ordinary Actions logs/status.
+      remote deploy with `${{ github.token }}` as the job-scoped GHCR credential.
+      Upload no deployment evidence beyond ordinary Actions logs/status.
 - [ ] Run workflow and production bundle contracts GREEN.
 
 ## Task 5: Remove obsolete IAM and bootstrap resources
@@ -155,13 +155,13 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Modify: `infra/yandex/test/service-account-provenance.test.mjs`
 
 - [ ] Add contracts retaining only Terraform/state/app/postbox identities and
-  the infrastructure OIDC credential. Reject deployment-controller, audit and
-  runner service accounts/roles/credentials and runner-registration secret.
+      the infrastructure OIDC credential. Reject deployment-controller, audit and
+      runner service accounts/roles/credentials and runner-registration secret.
 - [ ] Run the focused IAM/bootstrap tests and capture RED.
 - [ ] Remove obsolete accounts, grants, variables and outputs without changing
-  retained runtime/state/SMTP secret payloads or the app identity.
+      retained runtime/state/SMTP secret payloads or the app identity.
 - [ ] Run focused tests GREEN and produce a separate bootstrap plan; do not
-  apply it before the production plan has removed all references.
+      apply it before the production plan has removed all references.
 
 ## Task 6: Replace the go-live runbooks with one path
 
@@ -177,28 +177,28 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - Modify: `infra/yandex/test/runbook-contract.test.mjs`
 
 - [ ] Add contracts requiring exactly: protected plan, protected apply,
-  ordinary SSH deploy, DNS/TLS/public smoke, rollback by previous digest and
-  final cloud inventory. Reject ALB/SWS/ARL/managed certificate, sixteen-alert,
-  audit-trail, rehearsal, convergence-receipt and controller instructions.
+      ordinary SSH deploy, DNS/TLS/public smoke, rollback by previous digest and
+      final cloud inventory. Reject ALB/SWS/ARL/managed certificate, sixteen-alert,
+      audit-trail, rehearsal, convergence-receipt and controller instructions.
 - [ ] Run the runbook contract and capture RED.
 - [ ] Rewrite only the active MVP procedures; keep a short historical pointer
-  to the superseded design instead of preserving parallel instructions.
+      to the superseded design instead of preserving parallel instructions.
 - [ ] Run the runbook contract GREEN.
 
 ## Task 7: Verify and produce exact live plans
 
 - [ ] Run `node --test deploy/yandex/test/*.test.mjs`.
 - [ ] Run `node --test infra/yandex/test/*.test.mjs` with the pinned Terraform
-  binary on `PATH`.
+      binary on `PATH`.
 - [ ] Run `node --test deploy/production/test/*.test.mjs`.
 - [ ] Run `pnpm format:check`, `terraform fmt -recursive -check infra/yandex`
-  and `git diff --check`.
+      and `git diff --check`.
 - [ ] Initialize production and bootstrap backends without printing credentials
-  and create saved plans from the exact current remote state.
+      and create saved plans from the exact current remote state.
 - [ ] Parse both plans to report resource addresses/actions only. Reject any
-  app VM, PostgreSQL, media/state bucket or KMS replacement/deletion.
+      app VM, PostgreSQL, media/state bucket or KMS replacement/deletion.
 - [ ] Commit, push and open one PR with the exact plan summaries and validation
-  limits. Do not apply before review/merge.
+      limits. Do not apply before review/merge.
 
 ## Task 8: Apply, deploy and clean the cloud
 
@@ -207,7 +207,7 @@ Managed PostgreSQL, Object Storage, Lockbox, Cloud DNS and KMS.
 - [ ] Verify local readiness, public DNS, valid ACME TLS and admin/kiosk smoke.
 - [ ] Apply the bootstrap cleanup only after production references are gone.
 - [ ] Stop both Audit Trails, inventory every audit object/version, then delete
-  those versions and the audit bucket. Record that this deletion is not
-  recoverable.
+      those versions and the audit bucket. Record that this deletion is not
+      recoverable.
 - [ ] Run a final read-only Yandex inventory and confirm that only the retained
-  architecture remains.
+      architecture remains.

@@ -12,7 +12,6 @@ locals {
   github_repository_name        = split("/", var.github_repository)[1]
   github_repository_subject     = "${local.github_owner}@${var.github_repository_owner_id}/${local.github_repository_name}@${var.github_repository_id}"
   github_audience               = "https://github.com/${local.github_owner}"
-  github_deploy_subject         = "repo:${local.github_repository_subject}:environment:${var.github_deploy_environment}"
   github_infrastructure_subject = "repo:${local.github_repository_subject}:environment:${var.github_infrastructure_environment}"
 }
 
@@ -37,23 +36,9 @@ resource "yandex_iam_service_account" "app" {
   labels      = var.labels
 }
 
-resource "yandex_iam_service_account" "deployment_controller" {
-  name        = "markiro-production-deployment-controller"
-  description = "GitHub-hosted deployment identity limited to release gates and app discovery."
-  folder_id   = var.folder_id
-  labels      = var.labels
-}
-
-resource "yandex_iam_service_account" "audit" {
-  name        = "markiro-production-audit"
-  description = "Audit destination writer; destination-level access is defined with each destination."
-  folder_id   = var.folder_id
-  labels      = var.labels
-}
-
 resource "yandex_iam_workload_identity_oidc_federation" "github" {
   name        = "markiro-production-github"
-  description = "GitHub Actions production federation for Yandex organization ${var.organization_id}."
+  description = "GitHub Actions federation for protected infrastructure changes."
   folder_id   = var.folder_id
   labels      = var.labels
 
@@ -66,16 +51,7 @@ resource "yandex_iam_workload_identity_oidc_federation" "github" {
 resource "yandex_iam_workload_identity_oidc_federation_iam_binding" "terraform_user" {
   federation_id = yandex_iam_workload_identity_oidc_federation.github.id
   role          = "iam.workloadIdentityFederations.user"
-  members = [
-    "serviceAccount:${yandex_iam_service_account.terraform.id}",
-    "serviceAccount:${yandex_iam_service_account.deployment_controller.id}",
-  ]
-}
-
-resource "yandex_iam_workload_identity_federated_credential" "github_deploy" {
-  service_account_id  = yandex_iam_service_account.deployment_controller.id
-  federation_id       = yandex_iam_workload_identity_oidc_federation.github.id
-  external_subject_id = local.github_deploy_subject
+  members       = ["serviceAccount:${yandex_iam_service_account.terraform.id}"]
 }
 
 resource "yandex_iam_workload_identity_federated_credential" "github_infrastructure" {
@@ -102,50 +78,18 @@ resource "yandex_lockbox_secret_iam_member" "terraform_state_backend" {
   member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
-# Audit Trails validates every selected Lockbox resource scope as the creator.
-# Terraform needs metadata visibility only; payload access remains restricted.
-resource "yandex_lockbox_secret_iam_member" "terraform_audit_scope_viewer" {
-  for_each = {
-    registry = var.registry_secret_id
-    runtime  = var.runtime_secret_id
-  }
-
-  secret_id = each.value
-  role      = "lockbox.viewer"
-  member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
-}
-
-resource "yandex_lockbox_secret_iam_member" "deployment_controller_registry" {
-  secret_id = var.registry_secret_id
-  role      = "lockbox.payloadViewer"
-  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
-}
-
-# Bootstrap is applied by a protected operator. These service-specific roles are
-# the complete production Terraform capability set; it deliberately receives no
-# primitive editor/admin role and cannot change IAM bindings beyond services that
-# explicitly require their own administrative role.
 locals {
-  # This action-to-role map is kept explicit so every resource action in the
-  # production graph has a reviewable least-privilege grant.
   terraform_production_action_roles = {
-    "alb.resources.manage"                                  = "alb.editor"
-    "audit-trails.trails.manage"                            = "audit-trails.editor"
-    "certificate-manager.certificates.download-for-alb-tls" = "certificate-manager.certificates.downloader"
-    "certificate-manager.certificates.manage"               = "certificate-manager.editor"
-    "compute.instances-and-access.manage"                   = "compute.admin"
-    "dns.recordsets.manage"                                 = "dns.editor"
-    "logging.groups.manage"                                 = "logging.editor"
-    "managed-postgresql.resources.manage"                   = "managed-postgresql.editor"
-    "monitoring.dashboards.manage"                          = "monitoring.editor"
-    "smart-web-security.resources.manage"                   = "smart-web-security.editor"
-    "storage.buckets-and-policies.manage"                   = "storage.admin"
-    "vpc.gateways.attach-to-routes"                         = "vpc.gateways.user"
-    "vpc.gateways.manage"                                   = "vpc.gateways.editor"
-    "vpc.networks-subnets-routes.manage"                    = "vpc.privateAdmin"
-    "vpc.public-addresses.manage"                           = "vpc.publicAdmin"
-    "vpc.resources.use"                                     = "vpc.user"
-    "vpc.security-groups.manage"                            = "vpc.securityGroups.admin"
+    "compute.instances-and-access.manage" = "compute.admin"
+    "dns.recordsets.manage"               = "dns.editor"
+    "managed-postgresql.resources.manage" = "managed-postgresql.editor"
+    "storage.buckets-and-policies.manage" = "storage.admin"
+    "vpc.gateways.attach-to-routes"       = "vpc.gateways.user"
+    "vpc.gateways.manage"                 = "vpc.gateways.editor"
+    "vpc.networks-subnets-routes.manage"  = "vpc.privateAdmin"
+    "vpc.public-addresses.manage"         = "vpc.publicAdmin"
+    "vpc.resources.use"                   = "vpc.user"
+    "vpc.security-groups.manage"          = "vpc.securityGroups.admin"
   }
   terraform_folder_roles = toset(values(local.terraform_production_action_roles))
 }
@@ -158,71 +102,14 @@ resource "yandex_resourcemanager_folder_iam_member" "terraform_service_role" {
   member    = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
-resource "yandex_iam_service_account_iam_member" "terraform_service_account_user" {
-  for_each = {
-    app   = yandex_iam_service_account.app.id
-    audit = yandex_iam_service_account.audit.id
-  }
-
-  service_account_id = each.value
+resource "yandex_iam_service_account_iam_member" "terraform_app_user" {
+  service_account_id = yandex_iam_service_account.app.id
   role               = "iam.serviceAccounts.user"
   member             = "serviceAccount:${yandex_iam_service_account.terraform.id}"
 }
 
-# iam.serviceAccounts.user already authorizes ServiceAccount.Get for app and
-# audit. These resource-scoped viewer bindings complete the exact four-workload-
-# identity provenance check without exposing every account in the folder.
-resource "yandex_iam_service_account_iam_member" "terraform_service_account_viewer" {
-  for_each = {
-    deployment_controller = yandex_iam_service_account.deployment_controller.id
-    terraform             = yandex_iam_service_account.terraform.id
-  }
-
-  service_account_id = each.value
+resource "yandex_iam_service_account_iam_member" "terraform_self_viewer" {
+  service_account_id = yandex_iam_service_account.terraform.id
   role               = "viewer"
   member             = "serviceAccount:${yandex_iam_service_account.terraform.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_alb_viewer" {
-  folder_id = var.folder_id
-  role      = "alb.viewer"
-  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_postgres_viewer" {
-  folder_id = var.folder_id
-  role      = "managed-postgresql.viewer"
-  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
-}
-
-# Compute operation status is a folder resource even when the application VM
-# itself is exposed through a resource-scoped viewer grant.
-resource "yandex_resourcemanager_folder_iam_member" "deployment_controller_compute_operation_auditor" {
-  folder_id = var.folder_id
-  role      = "compute.auditor"
-  member    = "serviceAccount:${yandex_iam_service_account.deployment_controller.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "app_monitoring_editor" {
-  folder_id = var.folder_id
-  role      = "monitoring.editor"
-  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "app_logging_writer" {
-  folder_id = var.folder_id
-  role      = "logging.writer"
-  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "app_alb_viewer" {
-  folder_id = var.folder_id
-  role      = "alb.viewer"
-  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
-}
-
-resource "yandex_resourcemanager_folder_iam_member" "app_postgres_viewer" {
-  folder_id = var.folder_id
-  role      = "managed-postgresql.viewer"
-  member    = "serviceAccount:${yandex_iam_service_account.app.id}"
 }
