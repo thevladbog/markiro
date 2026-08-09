@@ -24,6 +24,16 @@ function requiredEnvironment(name, environment = process.env) {
   return value;
 }
 
+function deploymentEmail(value) {
+  if (
+    typeof value !== "string" ||
+    value.length > 254 ||
+    !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(value)
+  )
+    throw new Error("remote deployment configuration is incomplete");
+  return value;
+}
+
 function publicIpv4(value) {
   const octets = typeof value === "string" ? value.split(".") : [];
   if (
@@ -284,6 +294,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
     environment.MARKIRO_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
   );
+  const acmeEmail = deploymentEmail(requiredEnvironment("ACME_EMAIL", environment));
   const manifestText = await system.readFile(manifestPath, "utf8");
   const manifest = parseReleaseManifest(manifestText, expectedRunId);
   if (manifest.commit !== expectedCommit || process.cwd() === "/")
@@ -353,6 +364,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           `MARKIRO_DOMAIN=${domain}`,
           `MARKIRO_KIOSK_DOMAIN=${kioskDomain}`,
           "MARKIRO_EDGE_MODE=direct",
+          `ACME_EMAIL=${acmeEmail}`,
           "MARKIRO_REQUIRE_PREVIOUS_HEALTHY=0",
           "MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY=0",
           "MARKIRO_ENV_FILE=/etc/markiro/production.env",

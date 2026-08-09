@@ -169,6 +169,7 @@ function environment(overrides = {}) {
     GHCR_TOKEN: "masked-job-token",
     MARKIRO_DOMAIN: "admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+    ACME_EMAIL: "ops@example.test",
     ...overrides,
   };
 }
@@ -220,6 +221,7 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   assert.match(prepare.input, /GHCR_USERNAME/);
   assert.match(prepare.input, /GHCR_TOKEN/);
   assert.ok(prepare.args.includes("MARKIRO_EDGE_MODE=direct"));
+  assert.ok(prepare.args.includes("ACME_EMAIL=ops@example.test"));
   assert.ok(prepare.args.includes(`--working-directory=/opt/markiro/releases/${COMMIT}`));
   assert.deepEqual(prepare.args.slice(-6), [
     "/usr/bin/node",
@@ -269,6 +271,7 @@ for (const [name, overrides] of [
   ["dedicated login", { YC_APP_DEPLOY_LOGIN: "root" }],
   ["public address", { YC_APP_PUBLIC_ADDRESS: "not-an-ip" }],
   ["pinned host keys", { APP_SSH_HOST_KEYS_B64: "invalid" }],
+  ["ACME email", { ACME_EMAIL: "ops@example.test;touch /tmp/injected" }],
 ]) {
   test(`direct adapter rejects invalid ${name} configuration before transfer`, async () => {
     const fixture = systemFixture();
