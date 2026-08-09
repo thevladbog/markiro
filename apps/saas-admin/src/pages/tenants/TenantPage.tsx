@@ -8,7 +8,9 @@ import { Alert, Button, Card, ConfirmDialog, PageHeader, Spinner, StatusChip } f
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
+import { tenantErrorMessageKey } from "./errorMessages.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
+import { useUnsavedChanges } from "./useUnsavedChanges.js";
 
 const STATUS_TONE = {
   pending_activation: "warn",
@@ -36,23 +38,24 @@ export function TenantPage() {
   const [renewOpen, setRenewOpen] = useState(false);
   const [renewMessage, setRenewMessage] = useState<{
     tone: "ok" | "error";
-    text: string;
+    key: string;
   } | null>(null);
   const renew = useMutation({
     mutationFn: () => renewOwnerActivation(tenantId),
     onSuccess: async () => {
       setRenewOpen(false);
-      setRenewMessage({ tone: "ok", text: t("tenants.detail.activation.renewed") });
+      setRenewMessage({ tone: "ok", key: "tenants.detail.activation.renewed" });
       await queryClient.invalidateQueries({ queryKey: ["platform", "tenants", tenantId] });
     },
     onError: (error) => {
       const code = error instanceof ApiRequestError ? error.code : null;
       setRenewMessage({
         tone: "error",
-        text: t(`tenants.errors.${code ?? "renew_failed"}`),
+        key: tenantErrorMessageKey("renew", code),
       });
     },
   });
+  useUnsavedChanges(false, renew.isPending);
 
   if (!validTenantId.success) {
     return (
@@ -90,6 +93,7 @@ export function TenantPage() {
     principal.capabilities.includes("tenants.write") &&
     detail.ownerActivation !== null &&
     !detail.ownerActivation.emailVerified;
+  const renewSending = detail.ownerActivation?.status === "sending";
   const canDirectAssign = principal.role === "platform_admin";
   const financialVisible = principal.role !== "support";
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
@@ -118,7 +122,7 @@ export function TenantPage() {
         <Alert tone="warn">{t("tenants.detail.pendingActivation")}</Alert>
       ) : null}
 
-      <Card className="tenant-overview-card" title={t("tenants.detail.overviewTitle")}>
+      <Card className="tenant-overview-card" title={t("tenants.detail.overviewTitle")} titleAs="h2">
         <div className="tenant-overview-grid">
           <dl className="tenant-facts">
             <div>
@@ -148,16 +152,25 @@ export function TenantPage() {
                       })}
                 </span>
                 {canRenew ? (
-                  <Button variant="secondary" onClick={() => setRenewOpen(true)}>
+                  <Button
+                    variant="secondary"
+                    disabled={renewSending}
+                    onClick={() => setRenewOpen(true)}
+                  >
                     {t("tenants.detail.activation.renew")}
                   </Button>
+                ) : null}
+                {canRenew && renewSending ? (
+                  <span>{t("tenants.detail.activation.sendingBlocked")}</span>
                 ) : null}
               </>
             ) : (
               <span>{t("tenants.detail.activation.missing")}</span>
             )}
             <div className="tenant-operation-status" role="status" aria-live="polite">
-              {renewMessage ? <span data-tone={renewMessage.tone}>{renewMessage.text}</span> : null}
+              {renewMessage ? (
+                <span data-tone={renewMessage.tone}>{t(renewMessage.key)}</span>
+              ) : null}
             </div>
           </section>
         </div>
@@ -182,7 +195,7 @@ export function TenantPage() {
         confirmLabel={t("tenants.detail.activation.confirm")}
         cancelLabel={t("tenants.cancel")}
         busy={renew.isPending}
-        error={renewMessage?.tone === "error" ? renewMessage.text : undefined}
+        error={renewMessage?.tone === "error" ? t(renewMessage.key) : undefined}
         onCancel={() => setRenewOpen(false)}
         onConfirm={() => renew.mutate()}
       />

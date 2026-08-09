@@ -203,6 +203,8 @@
     "loading": "Loading tenants",
     "loadError": "Could not load tenants.",
     "noMatches": "No tenants match these filters",
+    "noMatchesOnPage": "No matches on this page",
+    "tableRegion": "Tenants on the current page",
     "noPlan": "No plan assigned",
     "unknownPlan": "Unknown plan",
     "version": "Version {{version}}",
@@ -218,7 +220,8 @@
       "search": "Search",
       "status": "Subscription status",
       "all": "All statuses",
-      "result": "Shown: {{count}}"
+      "result": "On page: {{count}} of {{pageCount}} · Total: {{total}}",
+      "pageScope": "Search covers only the current page (up to 50 tenants)."
     },
     "empty": {
       "title": "No tenants yet",
@@ -271,7 +274,8 @@
       "title": "Unsaved changes",
       "body": "Navigating away will discard the entered assignment and reason.",
       "continue": "Continue editing",
-      "discard": "Discard changes"
+      "discard": "Discard changes",
+      "busy": "An operation is in progress. Wait for it to finish."
     },
     "detail": {
       "back": "Back to tenants",
@@ -295,6 +299,7 @@
         "confirmBody": "The previous delivery will be cancelled and a new one created for:",
         "confirm": "Confirm delivery",
         "renewed": "New activation queued",
+        "sendingBlocked": "Email delivery is in progress. Resending will be available later.",
         "status": {
           "queued": "Email queued",
           "sending": "Email sending",
@@ -363,7 +368,7 @@
       "reason": "Reason",
       "review": "Review assignment",
       "success": "Assignment saved",
-      "accountantNotice": "Direct assignment is unavailable. Create a commercial offer and record payment.",
+      "accountantNotice": "Offer creation will appear in the Offers section after it launches.",
       "toOffers": "Go to offers",
       "validation": {
         "reason": "Enter a reason for this change",
@@ -372,7 +377,11 @@
         "quantity": "Enter an integer from 1 to 2147483647",
         "date": "Enter a valid date",
         "term": "The end date must be later than the start",
-        "afterCurrent": "This policy requires a current or scheduled plan"
+        "termLong": "The assignment term cannot exceed 10 years",
+        "addonTerm": "The add-on cannot outlive the target plan",
+        "afterCurrent": "This policy requires a current or scheduled plan",
+        "afterCurrentEnded": "The current plan has already ended. Refresh the data and choose immediate assignment.",
+        "afterCurrentScheduled": "A successor plan is already scheduled. Change it only through immediate assignment."
       },
       "confirm": {
         "title": "Confirm exact assignment",
@@ -382,6 +391,9 @@
         "feature": "{{name}}: {{value}}",
         "resultingQuota": "{{name}} after change: {{value}}",
         "resultingFeature": "{{name}} after change: enabled",
+        "targetPlan": "Target plan: {{plan}}",
+        "targetSubscription": "Target subscription: {{id}}",
+        "endsAt": "End date: {{value}}",
         "reason": "Reason: {{reason}}"
       }
     },
@@ -402,7 +414,7 @@
       "tenant_first_member_not_owner": "The tenant's first member is not an owner",
       "default_demo_not_configured": "Select a published default demo plan before creating a tenant",
       "activation_delivery_sending": "The previous email is still being sent",
-      "activation_delivery_changed": "Delivery state changed. Refresh the page.",
+      "activation_delivery_changed": "Delivery state changed. Refresh the page and try again.",
       "owner_already_activated": "The owner is already activated",
       "subscription_schedule_exists": "A successor plan is already scheduled",
       "subscription_compatible_plan_required": "No compatible plan is available for this add-on",
@@ -410,6 +422,12 @@
       "effective_at_out_of_range": "The start date is outside the allowed range",
       "subscription_term_out_of_range": "The subscription term is outside the allowed range",
       "addon_exceeds_subscription_term": "The add-on cannot outlive its plan",
+      "subscription_term_already_ended": "The subscription term has already ended. Refresh the page.",
+      "subscription_current_end_required": "The current plan has no end date",
+      "subscription_start_required": "The target subscription has no start date",
+      "addon_precedes_subscription_term": "The add-on cannot start before its plan",
+      "subscription_timeline_changed": "The subscription timeline changed. Refresh the page and review again.",
+      "subscription_addon_timeline_changed": "The add-on timeline changed. Refresh the page and review again.",
       "create_failed": "Could not create the tenant",
       "renew_failed": "Could not renew activation",
       "assignment_failed": "Could not save the assignment"

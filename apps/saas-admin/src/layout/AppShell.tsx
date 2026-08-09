@@ -6,12 +6,14 @@ import { Button, StatusChip } from "@markiro/ui";
 import { usePlatformPrincipal } from "../auth/PlatformAuthBoundary.js";
 import { useAuthClient } from "../auth/client.js";
 import i18n from "../i18n/index.js";
+import { NavigationGuardProvider, useNavigationGuard } from "./NavigationGuard.js";
 
-export function AppShell() {
+function AppShellContent() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const auth = useAuthClient();
   const navigate = useNavigate();
+  const guard = useNavigationGuard(false, false);
 
   const signOut = async () => {
     await auth.signOut();
@@ -65,7 +67,10 @@ export function AppShell() {
               EN
             </button>
           </div>
-          <Button variant="secondary" onClick={() => void signOut()}>
+          <Button
+            variant="secondary"
+            onClick={() => guard.requestProtectedAction(() => void signOut())}
+          >
             {t("auth.signOut")}
           </Button>
         </div>
@@ -82,5 +87,13 @@ export function AppShell() {
         <span className="rail-coordinate">MOW · UTC+3</span>
       </footer>
     </div>
+  );
+}
+
+export function AppShell() {
+  return (
+    <NavigationGuardProvider>
+      <AppShellContent />
+    </NavigationGuardProvider>
   );
 }

@@ -1,4 +1,4 @@
-import type { CSSProperties, Key, ReactNode } from "react";
+import type { CSSProperties, Key, KeyboardEvent, ReactNode } from "react";
 
 import { cn } from "../cn.js";
 
@@ -34,6 +34,8 @@ export interface TableProps<Row> {
   onPage?: (page: number) => void;
   /** Empty-state content */
   empty?: ReactNode;
+  /** Accessible name for the keyboard-focusable horizontal scroll region. */
+  scrollLabel?: string;
   className?: string;
   style?: CSSProperties;
 }
@@ -47,6 +49,18 @@ function cellValue<Row>(row: Row, key: string): ReactNode {
   return (row as Record<string, unknown>)[key] as ReactNode;
 }
 
+function moveHorizontalRegion(event: KeyboardEvent<HTMLDivElement>) {
+  if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+  event.preventDefault();
+  const region = event.currentTarget;
+  const maximum = Math.max(0, region.scrollWidth - region.clientWidth);
+  const step = Math.max(80, Math.round(region.clientWidth * 0.8));
+  region.scrollLeft = Math.min(
+    maximum,
+    Math.max(0, region.scrollLeft + (event.key === "ArrowRight" ? step : -step)),
+  );
+}
+
 export function Table<Row>({
   columns,
   rows,
@@ -58,6 +72,7 @@ export function Table<Row>({
   pageCount,
   onPage,
   empty = "No data",
+  scrollLabel,
   className,
   style,
 }: TableProps<Row>) {
@@ -72,7 +87,14 @@ export function Table<Row>({
         ...style,
       }}
     >
-      <div className="mk-table__scroll" style={{ overflowX: "auto" }}>
+      <div
+        className="mk-table__scroll"
+        role={scrollLabel ? "region" : undefined}
+        aria-label={scrollLabel}
+        tabIndex={scrollLabel ? 0 : undefined}
+        onKeyDown={scrollLabel ? moveHorizontalRegion : undefined}
+        style={{ overflowX: "auto" }}
+      >
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ background: "var(--surface-panel)" }}>

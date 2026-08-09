@@ -2,7 +2,6 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
 
 import {
   Alert,
@@ -19,6 +18,7 @@ import { ApiRequestError } from "../../api/client.js";
 import {
   assignTenantAddon,
   assignTenantPlan,
+  getTenant,
   listAssignableCatalogVersions,
   type AssignableCatalogVersion,
   type AssignAddonInput,
@@ -28,6 +28,7 @@ import {
   type TenantSubscription,
   type TenantSubscriptionAddon,
 } from "./api.js";
+import { tenantErrorMessageKey } from "./errorMessages.js";
 import { useUnsavedChanges } from "./useUnsavedChanges.js";
 
 type QuotaKey = "lines" | "stations" | "kiosks" | "cabinetUsers";
@@ -51,12 +52,17 @@ interface ConfirmationState {
   activationPolicy: ActivationPolicy;
   reason: string;
   summaries: string[];
+  endsAt?: string;
+  targetSubscription?: { id: string; planVersion: DetailPlanVersion };
+  currentEndsAt?: string;
   planInput?: AssignPlanInput;
   addonInput?: AssignAddonInput;
 }
 
 const QUOTA_KEYS: readonly QuotaKey[] = ["lines", "stations", "kiosks", "cabinetUsers"];
 const FEATURE_KEYS: readonly FeatureKey[] = ["labelEditor", "publicApi", "pallets"];
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const MAX_MANUAL_TERM_MS = 10 * 366 * DAY_MS;
 
 function versionLabel(
   version: { nameRu: string; nameEn: string; catalogItemCode: string | null; version: number },
@@ -133,14 +139,14 @@ function SubscriptionCard({
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
   if (!subscription) {
     return (
-      <Card className="subscription-card" title={title}>
+      <Card className="subscription-card" title={title} titleAs="h2">
         <p className="tenant-muted">{t("tenants.detail.subscription.none")}</p>
       </Card>
     );
   }
   const version = subscription.planVersion;
   return (
-    <Card className="subscription-card" title={title}>
+    <Card className="subscription-card" title={title} titleAs="h2">
       <div className="subscription-card__heading">
         <strong>{versionLabel(version, language)}</strong>
         <StatusChip
@@ -185,7 +191,7 @@ function AddonList({
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
   return (
     <section className="tenant-section" aria-label={title}>
-      <h3>{title}</h3>
+      <h2>{title}</h2>
       {addons.length === 0 ? (
         <p className="tenant-muted">{t("tenants.detail.addons.empty")}</p>
       ) : (
@@ -236,7 +242,7 @@ export function SubscriptionPanel({
   const [confirmation, setConfirmation] = useState<ConfirmationState | null>(null);
   const [mutationMessage, setMutationMessage] = useState<{
     tone: "ok" | "error";
-    text: string;
+    key: string;
   } | null>(null);
   const form = useForm<AssignmentFormValues>({
     defaultValues: {
@@ -261,7 +267,7 @@ export function SubscriptionPanel({
     mutationFn: (input: AssignAddonInput) => assignTenantAddon(detail.tenant.id, input),
   });
   const mutationPending = planMutation.isPending || addonMutation.isPending;
-  const guard = useUnsavedChanges(form.formState.isDirty, mutationPending);
+  useUnsavedChanges(form.formState.isDirty, mutationPending);
 
   const effective = useMemo(
     () =>
@@ -272,6 +278,11 @@ export function SubscriptionPanel({
       ),
     [detail.activeAddons, detail.currentSubscription?.planVersion],
   );
+  const currentTermEnded = Boolean(
+    detail.currentSubscription?.endsAt &&
+    new Date(detail.currentSubscription.endsAt).getTime() <= Date.now(),
+  );
+  const planSuccessorExists = detail.scheduledSubscription !== null;
   const publishedVersions = catalog.data?.items.filter((item) => item.status === "published") ?? [];
   const choices = publishedVersions.filter((item) => item.kind === kind);
   const versionOptions: SelectOption<string>[] = [
@@ -282,7 +293,7 @@ export function SubscriptionPanel({
     })),
   ];
 
-  const prepareConfirmation = form.handleSubmit((values) => {
+  const prepareConfirmation = form.handleSubmit(async (values) => {
     form.clearErrors();
     setMutationMessage(null);
     const reason = values.reason.trim();
@@ -316,27 +327,87 @@ export function SubscriptionPanel({
         form.setError("endsAt", { message: t("tenants.assignment.validation.date") });
         return;
       }
-      const targetStart =
+      endsAt = date.toISOString();
+    }
+
+    let effectiveDetail = detail;
+    if (values.activationPolicy === "after_current") {
+      try {
+        effectiveDetail = await getTenant(detail.tenant.id);
+        queryClient.setQueryData(["platform", "tenants", detail.tenant.id], effectiveDetail);
+      } catch {
+        setMutationMessage({ tone: "error", key: "tenants.errors.assignment_failed" });
+        return;
+      }
+    }
+
+    const operationAt = new Date();
+    let targetStart = operationAt;
+    let targetSubscription: TenantSubscription | null = null;
+    let currentEndsAt: string | undefined;
+    if (values.activationPolicy === "after_current" && values.kind === "plan") {
+      if (effectiveDetail.scheduledSubscription) {
+        form.setError("activationPolicy", {
+          message: t("tenants.assignment.validation.afterCurrentScheduled"),
+        });
+        return;
+      }
+      const currentEnd = effectiveDetail.currentSubscription?.endsAt;
+      if (!currentEnd) {
+        form.setError("activationPolicy", {
+          message: t("tenants.assignment.validation.afterCurrent"),
+        });
+        return;
+      }
+      if (new Date(currentEnd).getTime() <= operationAt.getTime()) {
+        form.setError("activationPolicy", {
+          message: t("tenants.assignment.validation.afterCurrentEnded"),
+        });
+        return;
+      }
+      targetStart = new Date(currentEnd);
+      currentEndsAt = currentEnd;
+    } else if (values.kind === "addon") {
+      targetSubscription =
         values.activationPolicy === "after_current"
-          ? values.kind === "plan"
-            ? detail.currentSubscription?.endsAt
-            : detail.scheduledSubscription?.startsAt
-          : new Date().toISOString();
-      if (!targetStart || date <= new Date(targetStart)) {
+          ? effectiveDetail.scheduledSubscription
+          : effectiveDetail.currentSubscription;
+      if (
+        !targetSubscription ||
+        !targetSubscription.startsAt ||
+        (values.activationPolicy === "immediate" &&
+          (targetSubscription.status === "pending_activation" ||
+            new Date(targetSubscription.startsAt) > operationAt ||
+            (targetSubscription.endsAt !== null &&
+              new Date(targetSubscription.endsAt) <= operationAt)))
+      ) {
+        form.setError("activationPolicy", {
+          message: t("tenants.assignment.validation.afterCurrent"),
+        });
+        return;
+      }
+      if (values.activationPolicy === "after_current") {
+        targetStart = new Date(targetSubscription.startsAt);
+      }
+    }
+
+    if (endsAt) {
+      const end = new Date(endsAt);
+      if (end <= targetStart) {
         form.setError("endsAt", { message: t("tenants.assignment.validation.term") });
         return;
       }
-      endsAt = date.toISOString();
-    }
-    if (
-      values.activationPolicy === "after_current" &&
-      ((values.kind === "plan" && !detail.currentSubscription?.endsAt) ||
-        (values.kind === "addon" && !detail.scheduledSubscription))
-    ) {
-      form.setError("activationPolicy", {
-        message: t("tenants.assignment.validation.afterCurrent"),
-      });
-      return;
+      if (end.getTime() - targetStart.getTime() > MAX_MANUAL_TERM_MS) {
+        form.setError("endsAt", { message: t("tenants.assignment.validation.termLong") });
+        return;
+      }
+      if (
+        targetSubscription?.endsAt &&
+        end.getTime() > new Date(targetSubscription.endsAt).getTime()
+      ) {
+        form.setError("endsAt", { message: t("tenants.assignment.validation.addonTerm") });
+        return;
+      }
     }
 
     const common = {
@@ -388,13 +459,29 @@ export function SubscriptionPanel({
         activationPolicy: values.activationPolicy,
         reason,
         summaries,
+        ...(endsAt ? { endsAt } : {}),
+        ...(currentEndsAt ? { currentEndsAt } : {}),
         planInput: common,
       });
       return;
     }
     if (values.kind === "addon" && version.addon) {
-      const resultingQuotas = { ...effective.quotas };
-      const resultingFeatures = { ...effective.features };
+      if (!targetSubscription) return;
+      const targetAddons =
+        values.activationPolicy === "after_current"
+          ? effectiveDetail.scheduledAddons.filter(
+              (addon) => addon.subscriptionId === targetSubscription.id,
+            )
+          : effectiveDetail.activeAddons.filter(
+              (addon) => addon.subscriptionId === targetSubscription.id,
+            );
+      const targetEffective = applyAddons(
+        quotaFromPlan(targetSubscription.planVersion),
+        featuresFromPlan(targetSubscription.planVersion),
+        targetAddons,
+      );
+      const resultingQuotas = { ...targetEffective.quotas };
+      const resultingFeatures = { ...targetEffective.features };
       for (const effect of version.addon.effects) {
         if ("quotaIncrement" in effect) {
           const currentQuota = resultingQuotas[effect.key];
@@ -424,6 +511,11 @@ export function SubscriptionPanel({
         activationPolicy: values.activationPolicy,
         reason,
         summaries,
+        ...(endsAt ? { endsAt } : {}),
+        targetSubscription: {
+          id: targetSubscription.id,
+          planVersion: targetSubscription.planVersion,
+        },
         addonInput: { ...common, quantity },
       });
     }
@@ -432,6 +524,22 @@ export function SubscriptionPanel({
   const confirmAssignment = async () => {
     if (!confirmation) return;
     setMutationMessage(null);
+    if (
+      confirmation.kind === "plan" &&
+      confirmation.activationPolicy === "after_current" &&
+      confirmation.currentEndsAt &&
+      new Date(confirmation.currentEndsAt).getTime() <= Date.now()
+    ) {
+      setConfirmation(null);
+      setMutationMessage({
+        tone: "error",
+        key: "tenants.assignment.validation.afterCurrentEnded",
+      });
+      await queryClient.invalidateQueries({
+        queryKey: ["platform", "tenants", detail.tenant.id],
+      });
+      return;
+    }
     try {
       if (confirmation.kind === "plan" && confirmation.planInput) {
         await planMutation.mutateAsync(confirmation.planInput);
@@ -448,12 +556,12 @@ export function SubscriptionPanel({
         }),
         queryClient.invalidateQueries({ queryKey: ["platform", "tenants"] }),
       ]);
-      setMutationMessage({ tone: "ok", text: t("tenants.assignment.success") });
+      setMutationMessage({ tone: "ok", key: "tenants.assignment.success" });
     } catch (error) {
       const code = error instanceof ApiRequestError ? error.code : null;
       setMutationMessage({
         tone: "error",
-        text: t(`tenants.errors.${code ?? "assignment_failed"}`),
+        key: tenantErrorMessageKey(confirmation.kind, code),
       });
     }
   };
@@ -473,7 +581,7 @@ export function SubscriptionPanel({
         />
       </section>
 
-      <Card className="usage-card" title={t("tenants.detail.usageTitle")}>
+      <Card className="usage-card" title={t("tenants.detail.usageTitle")} titleAs="h2">
         <div className="usage-grid">
           {QUOTA_KEYS.map((key) => {
             const used = detail.usage[key];
@@ -532,21 +640,10 @@ export function SubscriptionPanel({
         />
       </div>
 
-      {accountant ? (
-        <Alert
-          tone="info"
-          action={
-            <Link className="tenant-action-link" to={`/offers?tenantId=${detail.tenant.id}`}>
-              {t("tenants.assignment.toOffers")}
-            </Link>
-          }
-        >
-          {t("tenants.assignment.accountantNotice")}
-        </Alert>
-      ) : null}
+      {accountant ? <Alert tone="info">{t("tenants.assignment.accountantNotice")}</Alert> : null}
 
       {canDirectAssign ? (
-        <Card className="assignment-card" title={t("tenants.assignment.title")}>
+        <Card className="assignment-card" title={t("tenants.assignment.title")} titleAs="h2">
           {catalog.isPending ? (
             <p role="status">{t("tenants.assignment.loading")}</p>
           ) : catalog.error ? (
@@ -591,7 +688,11 @@ export function SubscriptionPanel({
                 label={t("tenants.assignment.policy")}
                 options={[
                   { value: "immediate", label: t("tenants.assignment.immediate") },
-                  { value: "after_current", label: t("tenants.assignment.afterCurrent") },
+                  {
+                    value: "after_current",
+                    label: t("tenants.assignment.afterCurrent"),
+                    disabled: kind === "plan" && (currentTermEnded || planSuccessorExists),
+                  },
                 ]}
                 value={form.watch("activationPolicy")}
                 {...(form.formState.errors.activationPolicy?.message
@@ -601,6 +702,15 @@ export function SubscriptionPanel({
                   form.setValue("activationPolicy", value, { shouldDirty: true })
                 }
               />
+              {kind === "plan" && (currentTermEnded || planSuccessorExists) ? (
+                <p className="tenant-policy-note">
+                  {t(
+                    currentTermEnded
+                      ? "tenants.assignment.validation.afterCurrentEnded"
+                      : "tenants.assignment.validation.afterCurrentScheduled",
+                  )}
+                </p>
+              ) : null}
               {kind === "addon" ? (
                 <Input
                   label={t("tenants.assignment.quantity")}
@@ -642,13 +752,13 @@ export function SubscriptionPanel({
           )}
           <div className="tenant-operation-status" role="status" aria-live="polite">
             {mutationMessage ? (
-              <span data-tone={mutationMessage.tone}>{mutationMessage.text}</span>
+              <span data-tone={mutationMessage.tone}>{t(mutationMessage.key)}</span>
             ) : null}
           </div>
         </Card>
       ) : null}
 
-      <Card className="history-card" title={t("tenants.detail.historyTitle")}>
+      <Card className="history-card" title={t("tenants.detail.historyTitle")} titleAs="h2">
         {detail.events.length === 0 ? (
           <p className="tenant-muted">{t("tenants.detail.historyEmpty")}</p>
         ) : (
@@ -684,8 +794,33 @@ export function SubscriptionPanel({
                   : t("tenants.assignment.afterCurrent")}
               </span>
               {confirmation.kind === "addon" ? (
+                <>
+                  <span>
+                    {t("tenants.assignment.confirm.quantity", {
+                      quantity: confirmation.quantity,
+                    })}
+                  </span>
+                  {confirmation.targetSubscription ? (
+                    <>
+                      <span>
+                        {t("tenants.assignment.confirm.targetPlan", {
+                          plan: versionLabel(confirmation.targetSubscription.planVersion, language),
+                        })}
+                      </span>
+                      <span>
+                        {t("tenants.assignment.confirm.targetSubscription", {
+                          id: confirmation.targetSubscription.id,
+                        })}
+                      </span>
+                    </>
+                  ) : null}
+                </>
+              ) : null}
+              {confirmation.endsAt ? (
                 <span>
-                  {t("tenants.assignment.confirm.quantity", { quantity: confirmation.quantity })}
+                  {t("tenants.assignment.confirm.endsAt", {
+                    value: formatDate(confirmation.endsAt, language),
+                  })}
                 </span>
               ) : null}
               <ul>
@@ -701,19 +836,9 @@ export function SubscriptionPanel({
         confirmLabel={t("tenants.assignment.confirm.submit")}
         cancelLabel={t("tenants.cancel")}
         busy={mutationPending}
-        error={mutationMessage?.tone === "error" ? mutationMessage.text : undefined}
+        error={mutationMessage?.tone === "error" ? t(mutationMessage.key) : undefined}
         onCancel={() => setConfirmation(null)}
         onConfirm={() => void confirmAssignment()}
-      />
-      <ConfirmDialog
-        open={guard.confirmOpen}
-        title={t("tenants.unsaved.title")}
-        description={t("tenants.unsaved.body")}
-        confirmLabel={t("tenants.unsaved.discard")}
-        cancelLabel={t("tenants.unsaved.continue")}
-        tone="destructive"
-        onCancel={guard.cancelDiscard}
-        onConfirm={guard.confirmDiscard}
       />
     </div>
   );

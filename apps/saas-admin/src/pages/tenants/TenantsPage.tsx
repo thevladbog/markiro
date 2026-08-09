@@ -142,7 +142,16 @@ export function TenantsPage() {
   const statusOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("tenants.filters.all") },
     ...(
-      ["pending_activation", "trial", "active", "scheduled", "expired", "unmanaged"] as const
+      [
+        "pending_activation",
+        "trial",
+        "active",
+        "scheduled",
+        "expired",
+        "superseded",
+        "cancelled",
+        "unmanaged",
+      ] as const
     ).map((value) => ({ value, label: t(`tenants.status.${value}`) })),
   ];
   const pageCount = Math.max(1, Math.ceil((tenants.data?.total ?? 0) / limit));
@@ -163,7 +172,13 @@ export function TenantsPage() {
       <FilterBar
         label={t("tenants.filters.label")}
         resultSummary={
-          tenants.data ? t("tenants.filters.result", { count: visibleItems.length }) : ""
+          tenants.data
+            ? t("tenants.filters.result", {
+                count: visibleItems.length,
+                pageCount: tenants.data.items.length,
+                total: tenants.data.total,
+              })
+            : ""
         }
       >
         <Input
@@ -184,6 +199,7 @@ export function TenantsPage() {
           }}
         />
       </FilterBar>
+      <p className="tenant-search-scope">{t("tenants.filters.pageScope")}</p>
       {tenants.isPending ? (
         <div className="tenant-list-state" role="status">
           <Spinner label={t("tenants.loading")} />
@@ -205,7 +221,12 @@ export function TenantsPage() {
       ) : (
         <>
           <Card className="tenant-table-card" padding={0}>
-            <Table columns={columns} rows={visibleItems} empty={t("tenants.noMatches")} />
+            <Table
+              columns={columns}
+              rows={visibleItems}
+              empty={t("tenants.noMatchesOnPage")}
+              scrollLabel={t("tenants.tableRegion")}
+            />
           </Card>
           {pageCount > 1 ? (
             <nav className="tenant-pagination" aria-label={t("tenants.pagination.label")}>

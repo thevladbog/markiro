@@ -52,7 +52,10 @@ export function readySession(twoFactorEnabled = true): PlatformSessionData {
   };
 }
 
-export function fakeAuthClient(state: MutableAuthState): AuthClientLike {
+export function fakeAuthClient(
+  state: MutableAuthState,
+  { onSignOut }: { onSignOut?: () => void } = {},
+): AuthClientLike {
   return {
     useSession: () => ({
       data: state.session,
@@ -62,7 +65,10 @@ export function fakeAuthClient(state: MutableAuthState): AuthClientLike {
     signIn: {
       email: async () => state.signInResult,
     },
-    signOut: async () => ({ data: { success: true }, error: null }),
+    signOut: async () => {
+      onSignOut?.();
+      return { data: { success: true }, error: null };
+    },
     revokeOtherSessions: async () => ({ data: { status: true }, error: null }),
     twoFactor: {
       enable: async () => ({ data: state.enrollment, error: null }),
@@ -363,7 +369,7 @@ export const TENANT_LIST_ITEM = {
   subscription: {
     id: "b1111111-1111-4111-8111-111111111111",
     status: "trial",
-    startsAt: "2026-08-10T08:00:00.000Z",
+    startsAt: "2026-08-08T08:00:00.000Z",
     endsAt: "2026-08-24T08:00:00.000Z",
     planVersion: {
       id: PUBLISHED_PLAN.id,
@@ -398,7 +404,7 @@ export const TENANT_DETAIL = {
     tenantId: TENANT_ID,
     planVersionId: PUBLISHED_PLAN.id,
     status: "trial",
-    startsAt: "2026-08-10T08:00:00.000Z",
+    startsAt: "2026-08-08T08:00:00.000Z",
     endsAt: "2026-08-24T08:00:00.000Z",
     source: "demo",
     createdByPlatformUserId: null,
@@ -569,19 +575,26 @@ export function installTenantApi({
   items = [TENANT_LIST_ITEM],
   detail = TENANT_DETAIL,
   listStatus = 200,
+  total = items.length,
   createResponses = [],
-  renewStatus = 200,
-  assignmentStatus = 201,
+  renewResponses = [],
+  assignmentResponses = [],
+  detailResponses = [],
+  renewHandler,
 }: {
   me?: PlatformPrincipal;
   items?: Array<Record<string, unknown>>;
   detail?: Record<string, unknown>;
   listStatus?: number;
+  total?: number;
   createResponses?: Array<{ status: number; code?: string }>;
-  renewStatus?: number;
-  assignmentStatus?: number;
+  renewResponses?: Array<{ status: number; code?: string }>;
+  assignmentResponses?: Array<{ status: number; code?: string }>;
+  detailResponses?: Array<Record<string, unknown>>;
+  renewHandler?: () => Promise<Response>;
 } = {}) {
   const mutationCalls: TenantMutationCall[] = [];
+  let detailRequestCount = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -590,7 +603,7 @@ export function installTenantApi({
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return listStatus === 200
-          ? jsonResponse(200, { items, page: 1, limit: 50, total: items.length })
+          ? jsonResponse(200, { items, page: 1, limit: 50, total })
           : jsonResponse(listStatus, { code: "tenant_list_unavailable" });
       }
       if (url.endsWith("/api/platform/tenants") && method === "POST") {
@@ -608,16 +621,22 @@ export function installTenantApi({
         });
       }
       if (url.endsWith(`/api/platform/tenants/${TENANT_ID}`) && method === "GET") {
-        return jsonResponse(200, detail);
+        const response = detailResponses[detailRequestCount] ?? detail;
+        detailRequestCount += 1;
+        return jsonResponse(200, response);
       }
       if (
         url.endsWith(`/api/platform/tenants/${TENANT_ID}/owner-activation/renew`) &&
         method === "POST"
       ) {
         mutationCalls.push({ method, path: url, body: JSON.parse(String(init.body)) });
-        return renewStatus === 200
+        if (renewHandler) return renewHandler();
+        const response = renewResponses.shift() ?? { status: 200 };
+        return response.status === 200
           ? jsonResponse(200, { deliveryId: "14111111-1111-4111-8111-111111111111" })
-          : jsonResponse(renewStatus, { code: "activation_delivery_sending" });
+          : jsonResponse(response.status, {
+              code: response.code ?? "activation_delivery_sending",
+            });
       }
       if (
         (url.endsWith(`/api/platform/tenants/${TENANT_ID}/subscription/plan`) ||
@@ -626,8 +645,11 @@ export function installTenantApi({
       ) {
         const body = JSON.parse(String(init.body));
         mutationCalls.push({ method, path: url, body });
-        if (assignmentStatus !== 201) {
-          return jsonResponse(assignmentStatus, { code: "subscription_schedule_exists" });
+        const response = assignmentResponses.shift() ?? { status: 201 };
+        if (response.status !== 201) {
+          return jsonResponse(response.status, {
+            code: response.code ?? "subscription_schedule_exists",
+          });
         }
         const startsAt =
           body.activationPolicy === "after_current"
@@ -668,5 +690,8 @@ export function installTenantApi({
       throw new Error(`Unexpected request: ${method} ${url}`);
     }),
   );
-  return { mutationCalls: () => structuredClone(mutationCalls) };
+  return {
+    mutationCalls: () => structuredClone(mutationCalls),
+    detailRequestCount: () => detailRequestCount,
+  };
 }

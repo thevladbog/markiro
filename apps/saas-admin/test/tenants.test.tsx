@@ -47,7 +47,7 @@ describe("platform tenants", () => {
     );
   });
 
-  it("searches the bounded page, sends the exact status filter, and redacts support prices", async () => {
+  it("truthfully searches only the bounded page and exposes all lifecycle filters", async () => {
     const second = {
       ...structuredClone(TENANT_LIST_ITEM),
       id: "16111111-1111-4111-8111-111111111111",
@@ -55,22 +55,48 @@ describe("platform tenants", () => {
       slug: "north-site",
       subscriptionStatus: "pending_activation",
     };
-    installTenantApi({ me: SUPPORT_ME, items: [TENANT_LIST_ITEM, second] });
+    installTenantApi({ me: SUPPORT_ME, items: [TENANT_LIST_ITEM, second], total: 101 });
     renderSaasApp({ initialEntry: "/tenants" });
     const user = userEvent.setup();
 
     expect(await screen.findByRole("heading", { name: "Тенанты" })).toBeDefined();
     expect(screen.queryByText(/₽|Цена/)).toBeNull();
+    expect(
+      screen.getByText("Поиск выполняется только по текущей странице (до 50 тенантов)."),
+    ).toBeDefined();
+    expect(await screen.findByText("На странице: 2 из 2 · Всего: 101")).toBeDefined();
+    const statusFilter = screen.getByLabelText("Статус подписки");
+    expect(within(statusFilter).getByRole("option", { name: "Заменена" })).toBeDefined();
+    expect(within(statusFilter).getByRole("option", { name: "Отменена" })).toBeDefined();
+    expect(screen.getByText("Страница 1 из 3")).toBeDefined();
+
     await user.type(screen.getByLabelText("Поиск"), "северная");
     expect(screen.getByText("Северная площадка")).toBeDefined();
     expect(screen.queryByText("Первый завод")).toBeNull();
-    await user.selectOptions(screen.getByLabelText("Статус подписки"), "pending_activation");
+    expect(screen.getByText("На странице: 1 из 2 · Всего: 101")).toBeDefined();
+    await user.clear(screen.getByLabelText("Поиск"));
+    await user.type(screen.getByLabelText("Поиск"), "нет на странице");
+    expect(screen.getByText("На текущей странице совпадений нет")).toBeDefined();
+    expect(screen.getByText("На странице: 0 из 2 · Всего: 101")).toBeDefined();
+    expect(screen.getByText("Страница 1 из 3")).toBeDefined();
+
+    await user.selectOptions(statusFilter, "pending_activation");
 
     expect(
       vi
         .mocked(fetch)
         .mock.calls.some(([input]) => String(input).includes("status=pending_activation")),
     ).toBe(true);
+  });
+
+  it("gives the horizontally scrollable tenant table a keyboard focus target and name", async () => {
+    installTenantApi({ me: SUPPORT_ME });
+    renderSaasApp({ initialEntry: "/tenants" });
+
+    const tableRegion = await screen.findByRole("region", {
+      name: "Тенанты на текущей странице",
+    });
+    expect(tableRegion.getAttribute("tabindex")).toBe("0");
   });
 
   it("shows financial terms to an accountant without exposing tenant creation", async () => {
@@ -130,6 +156,7 @@ describe("platform tenants", () => {
     });
     renderSaasApp({ initialEntry: "/tenants/new" });
     const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "RU" }));
     await user.type(await screen.findByLabelText("Название"), "Первый завод");
     await user.type(screen.getByLabelText("Slug"), "first-factory");
     await user.type(screen.getByLabelText("Email владельца"), "owner@example.com");
@@ -150,5 +177,23 @@ describe("platform tenants", () => {
         "Select a published default demo plan before creating a tenant",
       ),
     ).toBeDefined();
+  });
+
+  it("uses an allowlisted generic create error for an unknown server code", async () => {
+    installTenantApi({
+      me: SUPPORT_ME,
+      createResponses: [{ status: 409, code: "tenants.status.active" }],
+    });
+    renderSaasApp({ initialEntry: "/tenants/new" });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "RU" }));
+    await user.type(await screen.findByLabelText("Название"), "Первый завод");
+    await user.type(screen.getByLabelText("Slug"), "first-factory");
+    await user.type(screen.getByLabelText("Email владельца"), "owner@example.com");
+
+    await user.click(screen.getByRole("button", { name: "Создать и отправить активацию" }));
+
+    expect(await screen.findByText("Не удалось создать тенанта")).toBeDefined();
+    expect(screen.queryByText("Активна")).toBeNull();
   });
 });

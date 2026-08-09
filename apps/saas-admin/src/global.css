@@ -723,6 +723,23 @@ textarea {
   flex: 1 1 360px;
 }
 
+.tenant-search-scope {
+  margin: -8px 0 0;
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.tenant-policy-note {
+  margin: -8px 0 0;
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.tenant-table-card .mk-table__scroll:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
 .tenant-status-filter {
   flex: 0 1 260px;
 }
@@ -812,7 +829,7 @@ textarea {
 
 .tenant-create-intro h2,
 .tenant-create-intro p,
-.tenant-section h3,
+.tenant-section h2,
 .tenant-muted {
   margin: 0;
 }
@@ -1011,9 +1028,17 @@ textarea {
   background: var(--surface-card);
 }
 
-.tenant-section h3 {
+.tenant-section h2 {
   margin-bottom: 14px;
   font: var(--text-h3);
+}
+
+.navigation-busy-notice {
+  position: fixed;
+  z-index: 70;
+  right: 20px;
+  bottom: 52px;
+  width: min(420px, calc(100vw - 40px));
 }
 
 .addon-timeline,
@@ -1120,7 +1145,9 @@ textarea {
 }
 
 .assignment-confirmation strong,
-.renew-confirmation strong {
+.assignment-confirmation span,
+.renew-confirmation strong,
+.renew-confirmation span {
   overflow-wrap: anywhere;
 }
 

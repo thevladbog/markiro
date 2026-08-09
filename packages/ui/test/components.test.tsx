@@ -1080,6 +1080,32 @@ describe("Table", () => {
     expect(numericCell.className).toContain("nowrap");
   });
 
+  it("moves a labeled horizontal region with keyboard arrow keys", () => {
+    render(
+      <Table
+        columns={[
+          { key: "batch", title: "Партия", width: 400 },
+          { key: "qty", title: "Кол-во", width: 400 },
+        ]}
+        rows={[{ batch: "№ 214", qty: "47 213" }]}
+        scrollLabel="Партии"
+      />,
+    );
+
+    const scroll = screen.getByRole("region", { name: "Партии" });
+    Object.defineProperties(scroll, {
+      clientWidth: { configurable: true, value: 320 },
+      scrollWidth: { configurable: true, value: 800 },
+    });
+    scroll.focus();
+
+    expect(document.activeElement).toBe(scroll);
+    expect(fireEvent.keyDown(scroll, { key: "ArrowRight" })).toBe(false);
+    expect(scroll.scrollLeft).toBeGreaterThan(0);
+    expect(fireEvent.keyDown(scroll, { key: "ArrowLeft" })).toBe(false);
+    expect(scroll.scrollLeft).toBe(0);
+  });
+
   it("renders the empty state when there are no rows", () => {
     render(<Table columns={[{ key: "batch", title: "Партия" }]} rows={[]} empty="Пока пусто" />);
 
