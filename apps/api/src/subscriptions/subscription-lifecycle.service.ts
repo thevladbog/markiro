@@ -17,6 +17,7 @@ type SubscriptionTransaction = Parameters<Db["transaction"]>[0] extends (arg: in
   ? T
   : never;
 type SubscriptionRow = typeof schema.tenantSubscriptions.$inferSelect;
+type EndedSubscriptionRow = SubscriptionRow & { endsAt: Date };
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_MANUAL_TERM_MS = 10 * 366 * DAY_MS;
@@ -29,12 +30,21 @@ export class SubscriptionLifecycleService {
     @Optional() private readonly audit?: PlatformAuditService,
   ) {}
 
+  /**
+   * Global tenant timeline lock order: tenant advisory lock, parent
+   * subscription rows by id, then child add-on rows by id.
+   */
+  async lockTenantTimeline(tx: SubscriptionTransaction, tenantId: string): Promise<void> {
+    await acquireTenantTimelineLock(tx, tenantId);
+  }
+
   async activatePendingDemo(
     tx: SubscriptionTransaction,
     input: { tenantId: string; activatedAt: Date; sourceUserId: string },
   ): Promise<SubscriptionRow | null> {
+    await this.lockTenantTimeline(tx, input.tenantId);
     await tx.execute(
-      sql`select id from tenant_subscriptions where tenant_id = ${input.tenantId} and status = 'pending_activation' for update`,
+      sql`select id from tenant_subscriptions where tenant_id = ${input.tenantId} and status = 'pending_activation' order by id for update`,
     );
     const [pending] = await tx
       .select({
@@ -105,38 +115,24 @@ export class SubscriptionLifecycleService {
     input: AssignPlanDto,
   ): Promise<SubscriptionRow> {
     assertPlatformAdmin(actor);
-    const operationAt = new Date();
-    validateEffectiveAt(input.effectiveAt, operationAt);
     return this.db.transaction(async (tx) => {
-      await lockTenantTimeline(tx, tenantId);
+      await this.lockTenantTimeline(tx, tenantId);
+      const operationAt = new Date();
+      validateEffectiveAt(input.effectiveAt, operationAt);
+      if (input.activationPolicy === "immediate") {
+        const startsAt = resolveImmediateStart(input.effectiveAt, operationAt);
+        validateTerm(startsAt, input.endsAt);
+        validateActiveEnd(input.endsAt, operationAt);
+      }
       await requireTenant(tx, tenantId);
       const candidate = await requirePublishedVersion(tx, input.catalogVersionId, "plan");
 
-      let current = await findCurrentSubscription(tx, tenantId);
-      const existingScheduled = await findScheduledSubscription(tx, tenantId);
-      if (current?.endsAt && current.endsAt <= operationAt) {
-        await tx
-          .update(schema.tenantSubscriptions)
-          .set({ status: "expired", updatedAt: operationAt })
-          .where(
-            and(
-              eq(schema.tenantSubscriptions.id, current.id),
-              eq(schema.tenantSubscriptions.tenantId, tenantId),
-            ),
-          );
-        await tx.insert(schema.subscriptionEvents).values({
-          tenantId,
-          subscriptionId: current.id,
-          eventKind: "plan.expired",
-          effectiveAt: current.endsAt,
-          actorPlatformUserId: actor.userId,
-          source: "platform_manual",
-          reason: input.reason,
-          before: subscriptionSnapshot(current),
-          after: { ...subscriptionSnapshot(current), status: "expired" },
-        });
-        current = undefined;
-      }
+      const lockedTimeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
+      const expiredCurrent = isEndedSubscription(lockedTimeline.current, operationAt)
+        ? lockedTimeline.current
+        : undefined;
+      const current = expiredCurrent ? undefined : lockedTimeline.current;
+      const existingScheduled = lockedTimeline.scheduled;
 
       const before = current ? subscriptionSnapshot(current) : null;
       let startsAt: Date;
@@ -151,18 +147,64 @@ export class SubscriptionLifecycleService {
         startsAt = current.endsAt;
         status = "scheduled";
       } else {
-        startsAt = input.effectiveAt ?? operationAt;
+        startsAt = resolveImmediateStart(input.effectiveAt, operationAt);
         status = "active";
+      }
+      validateTerm(startsAt, input.endsAt);
+      if (status === "active") validateActiveEnd(input.endsAt, operationAt);
+
+      if (expiredCurrent) {
+        const expired = await tx
+          .update(schema.tenantSubscriptions)
+          .set({ status: "expired", updatedAt: operationAt })
+          .where(
+            and(
+              eq(schema.tenantSubscriptions.id, expiredCurrent.id),
+              eq(schema.tenantSubscriptions.tenantId, tenantId),
+              eq(schema.tenantSubscriptions.status, expiredCurrent.status),
+            ),
+          )
+          .returning({ id: schema.tenantSubscriptions.id });
+        if (expired.length !== 1) {
+          throw new ConflictException({ code: "subscription_timeline_changed" });
+        }
+        await this.retireSubscriptionAddons(tx, actor, expiredCurrent, input.reason, operationAt);
+        await tx.insert(schema.subscriptionEvents).values({
+          tenantId,
+          subscriptionId: expiredCurrent.id,
+          eventKind: "plan.expired",
+          effectiveAt: expiredCurrent.endsAt,
+          actorPlatformUserId: actor.userId,
+          source: "platform_manual",
+          reason: input.reason,
+          before: subscriptionSnapshot(expiredCurrent),
+          after: { ...subscriptionSnapshot(expiredCurrent), status: "expired" },
+        });
+      }
+
+      if (status === "active") {
         if (existingScheduled) {
-          await tx
+          const cancelled = await tx
             .update(schema.tenantSubscriptions)
             .set({ status: "cancelled", updatedAt: operationAt })
             .where(
               and(
                 eq(schema.tenantSubscriptions.id, existingScheduled.id),
                 eq(schema.tenantSubscriptions.tenantId, tenantId),
+                eq(schema.tenantSubscriptions.status, "scheduled"),
               ),
-            );
+            )
+            .returning({ id: schema.tenantSubscriptions.id });
+          if (cancelled.length !== 1) {
+            throw new ConflictException({ code: "subscription_timeline_changed" });
+          }
+          await this.retireSubscriptionAddons(
+            tx,
+            actor,
+            existingScheduled,
+            input.reason,
+            operationAt,
+          );
           await tx.insert(schema.subscriptionEvents).values({
             tenantId,
             subscriptionId: existingScheduled.id,
@@ -176,15 +218,21 @@ export class SubscriptionLifecycleService {
           });
         }
         if (current) {
-          await tx
+          const superseded = await tx
             .update(schema.tenantSubscriptions)
             .set({ status: "superseded", updatedAt: operationAt })
             .where(
               and(
                 eq(schema.tenantSubscriptions.id, current.id),
                 eq(schema.tenantSubscriptions.tenantId, tenantId),
+                eq(schema.tenantSubscriptions.status, current.status),
               ),
-            );
+            )
+            .returning({ id: schema.tenantSubscriptions.id });
+          if (superseded.length !== 1) {
+            throw new ConflictException({ code: "subscription_timeline_changed" });
+          }
+          await this.retireSubscriptionAddons(tx, actor, current, input.reason, operationAt);
           await tx.insert(schema.subscriptionEvents).values({
             tenantId,
             subscriptionId: current.id,
@@ -198,7 +246,6 @@ export class SubscriptionLifecycleService {
           });
         }
       }
-      validateTerm(startsAt, input.endsAt);
 
       const [created] = await tx
         .insert(schema.tenantSubscriptions)
@@ -253,10 +300,10 @@ export class SubscriptionLifecycleService {
     input: AssignAddonDto,
   ): Promise<typeof schema.subscriptionAddons.$inferSelect> {
     assertPlatformAdmin(actor);
-    const operationAt = new Date();
-    validateEffectiveAt(input.effectiveAt, operationAt);
     return this.db.transaction(async (tx) => {
-      await lockTenantTimeline(tx, tenantId);
+      await this.lockTenantTimeline(tx, tenantId);
+      const operationAt = new Date();
+      validateEffectiveAt(input.effectiveAt, operationAt);
       await requireTenant(tx, tenantId);
       const candidate = await requirePublishedVersion(tx, input.catalogVersionId, "addon");
       const effects = await tx
@@ -276,14 +323,14 @@ export class SubscriptionLifecycleService {
         throw new ConflictException({ code: "addon_entitlements_invalid" });
       }
 
+      const timeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
       const target =
-        input.activationPolicy === "after_current"
-          ? await findScheduledSubscription(tx, tenantId)
-          : await findCurrentSubscription(tx, tenantId);
+        input.activationPolicy === "after_current" ? timeline.scheduled : timeline.current;
       if (
         !target ||
         (input.activationPolicy === "immediate" &&
           (target.status === "pending_activation" ||
+            (target.startsAt !== null && target.startsAt > operationAt) ||
             (target.endsAt !== null && target.endsAt <= operationAt)))
       ) {
         throw new ConflictException({ code: "subscription_compatible_plan_required" });
@@ -291,10 +338,13 @@ export class SubscriptionLifecycleService {
       const startsAt =
         input.activationPolicy === "after_current"
           ? target.startsAt
-          : (input.effectiveAt ?? operationAt);
+          : resolveImmediateStart(input.effectiveAt, operationAt);
       if (!startsAt) throw new ConflictException({ code: "subscription_start_required" });
       const endsAt = input.endsAt ?? target.endsAt;
       validateTerm(startsAt, endsAt ?? undefined);
+      if (input.activationPolicy === "immediate") {
+        validateActiveEnd(endsAt ?? undefined, operationAt);
+      }
       if (target.endsAt && endsAt && endsAt > target.endsAt) {
         throw new BadRequestException({ code: "addon_exceeds_subscription_term" });
       }
@@ -352,6 +402,74 @@ export class SubscriptionLifecycleService {
     if (!this.audit) throw new Error("Platform audit provider is required for direct assignments");
     return this.audit;
   }
+
+  private async retireSubscriptionAddons(
+    tx: SubscriptionTransaction,
+    actor: PlatformPrincipal,
+    subscription: SubscriptionRow,
+    reason: string,
+    operationAt: Date,
+  ): Promise<void> {
+    await tx.execute(
+      sql`select id from subscription_addons where tenant_id = ${subscription.tenantId} and subscription_id = ${subscription.id} and status in ('active', 'scheduled') order by id for update`,
+    );
+    const addons = await tx
+      .select()
+      .from(schema.subscriptionAddons)
+      .where(
+        and(
+          eq(schema.subscriptionAddons.tenantId, subscription.tenantId),
+          eq(schema.subscriptionAddons.subscriptionId, subscription.id),
+          inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+        ),
+      )
+      .orderBy(schema.subscriptionAddons.id);
+    for (const addon of addons) {
+      const nextStatus = addon.endsAt && addon.endsAt <= operationAt ? "expired" : "revoked";
+      const before = addonSnapshot(addon);
+      const after = { ...before, status: nextStatus };
+      const changed = await tx
+        .update(schema.subscriptionAddons)
+        .set({ status: nextStatus, updatedAt: operationAt })
+        .where(
+          and(
+            eq(schema.subscriptionAddons.id, addon.id),
+            eq(schema.subscriptionAddons.tenantId, subscription.tenantId),
+            eq(schema.subscriptionAddons.subscriptionId, subscription.id),
+            eq(schema.subscriptionAddons.status, addon.status),
+          ),
+        )
+        .returning({ id: schema.subscriptionAddons.id });
+      if (changed.length !== 1) {
+        throw new ConflictException({ code: "subscription_addon_timeline_changed" });
+      }
+      const eventKind = nextStatus === "expired" ? "addon.expired" : "addon.revoked";
+      await tx.insert(schema.subscriptionEvents).values({
+        tenantId: subscription.tenantId,
+        subscriptionId: subscription.id,
+        eventKind,
+        effectiveAt: nextStatus === "expired" ? (addon.endsAt ?? operationAt) : operationAt,
+        actorPlatformUserId: actor.userId,
+        source: "platform_manual",
+        reason,
+        before,
+        after,
+      });
+      await this.requireAudit().record(tx, {
+        actorPlatformUserId: actor.userId,
+        actorRole: actor.role,
+        action: `platform.tenant.subscription.${eventKind.replace(".", "_")}`,
+        outcome: "success",
+        tenantId: subscription.tenantId,
+        targetType: "subscription_addon",
+        targetId: addon.id,
+        reason,
+        before,
+        after,
+        requestId: null,
+      });
+    }
+  }
 }
 
 function assertPlatformAdmin(actor: PlatformPrincipal): void {
@@ -360,7 +478,10 @@ function assertPlatformAdmin(actor: PlatformPrincipal): void {
   }
 }
 
-async function lockTenantTimeline(tx: SubscriptionTransaction, tenantId: string): Promise<void> {
+async function acquireTenantTimelineLock(
+  tx: SubscriptionTransaction,
+  tenantId: string,
+): Promise<void> {
   await tx.execute(
     sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-subscription:${tenantId}`}, 0))`,
   );
@@ -396,10 +517,13 @@ async function requirePublishedVersion(
   return candidate;
 }
 
-async function findCurrentSubscription(
+async function lockAndFindTimelineSubscriptions(
   tx: SubscriptionTransaction,
   tenantId: string,
-): Promise<SubscriptionRow | undefined> {
+): Promise<{ current: SubscriptionRow | undefined; scheduled: SubscriptionRow | undefined }> {
+  await tx.execute(
+    sql`select id from tenant_subscriptions where tenant_id = ${tenantId} and status in ('pending_activation', 'trial', 'active', 'scheduled') order by id for update`,
+  );
   const [current] = await tx
     .select()
     .from(schema.tenantSubscriptions)
@@ -411,13 +535,6 @@ async function findCurrentSubscription(
     )
     .orderBy(desc(schema.tenantSubscriptions.updatedAt))
     .limit(1);
-  return current;
-}
-
-async function findScheduledSubscription(
-  tx: SubscriptionTransaction,
-  tenantId: string,
-): Promise<SubscriptionRow | undefined> {
   const [scheduled] = await tx
     .select()
     .from(schema.tenantSubscriptions)
@@ -428,7 +545,7 @@ async function findScheduledSubscription(
       ),
     )
     .limit(1);
-  return scheduled;
+  return { current, scheduled };
 }
 
 function validateEffectiveAt(effectiveAt: Date | undefined, now: Date): void {
@@ -447,6 +564,25 @@ function validateTerm(startsAt: Date, endsAt: Date | undefined): void {
   if (duration <= 0 || duration > MAX_MANUAL_TERM_MS) {
     throw new BadRequestException({ code: "subscription_term_out_of_range" });
   }
+}
+
+function validateActiveEnd(endsAt: Date | undefined, now: Date): void {
+  if (endsAt && endsAt <= now) {
+    throw new BadRequestException({ code: "subscription_term_already_ended" });
+  }
+}
+
+function resolveImmediateStart(effectiveAt: Date | undefined, now: Date): Date {
+  return effectiveAt && effectiveAt < now ? effectiveAt : now;
+}
+
+function isEndedSubscription(
+  subscription: SubscriptionRow | undefined,
+  now: Date,
+): subscription is EndedSubscriptionRow {
+  return subscription?.endsAt !== null && subscription?.endsAt !== undefined
+    ? subscription.endsAt <= now
+    : false;
 }
 
 function subscriptionSnapshot(subscription: SubscriptionRow) {

@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, count, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -180,13 +180,50 @@ export class PlatformTenantsService {
       )
       .limit(1);
     const now = new Date();
-    const addons = await this.db
-      .select()
+    const addonRows = await this.db
+      .select({ addon: schema.subscriptionAddons })
       .from(schema.subscriptionAddons)
+      .innerJoin(
+        schema.tenantSubscriptions,
+        and(
+          eq(schema.tenantSubscriptions.tenantId, schema.subscriptionAddons.tenantId),
+          eq(schema.tenantSubscriptions.id, schema.subscriptionAddons.subscriptionId),
+        ),
+      )
       .where(
         and(
           eq(schema.subscriptionAddons.tenantId, tenantId),
-          inArray(schema.subscriptionAddons.status, ["active", "scheduled"]),
+          or(
+            and(
+              eq(schema.subscriptionAddons.status, "active"),
+              inArray(schema.tenantSubscriptions.status, ["trial", "active"]),
+              lte(schema.subscriptionAddons.startsAt, now),
+              or(
+                isNull(schema.subscriptionAddons.endsAt),
+                gt(schema.subscriptionAddons.endsAt, now),
+              ),
+              or(
+                isNull(schema.tenantSubscriptions.startsAt),
+                lte(schema.tenantSubscriptions.startsAt, now),
+              ),
+              or(
+                isNull(schema.tenantSubscriptions.endsAt),
+                gt(schema.tenantSubscriptions.endsAt, now),
+              ),
+            ),
+            and(
+              eq(schema.subscriptionAddons.status, "scheduled"),
+              eq(schema.tenantSubscriptions.status, "scheduled"),
+              or(
+                isNull(schema.subscriptionAddons.endsAt),
+                gt(schema.subscriptionAddons.endsAt, now),
+              ),
+              or(
+                isNull(schema.tenantSubscriptions.endsAt),
+                gt(schema.tenantSubscriptions.endsAt, now),
+              ),
+            ),
+          ),
         ),
       )
       .orderBy(desc(schema.subscriptionAddons.createdAt));
@@ -196,7 +233,7 @@ export class PlatformTenantsService {
       .where(eq(schema.subscriptionEvents.tenantId, tenantId))
       .orderBy(desc(schema.subscriptionEvents.effectiveAt), desc(schema.subscriptionEvents.id))
       .limit(200);
-    const [lineUsage, stationUsage, kioskUsage, cabinetUsage] = await Promise.all([
+    const [lineUsage, stationUsage, kioskUsage, cabinetUsage, invitationUsage] = await Promise.all([
       this.db
         .select({ value: count() })
         .from(schema.lines)
@@ -218,6 +255,16 @@ export class PlatformTenantsService {
         .select({ value: count() })
         .from(schema.member)
         .where(eq(schema.member.organizationId, tenantId)),
+      this.db
+        .select({ value: count() })
+        .from(schema.invitation)
+        .where(
+          and(
+            eq(schema.invitation.organizationId, tenantId),
+            eq(schema.invitation.status, "pending"),
+            gt(schema.invitation.expiresAt, now),
+          ),
+        ),
     ]);
     const currentDto = current
       ? await this.subscriptionDto(current, actor.role !== "support")
@@ -226,7 +273,7 @@ export class PlatformTenantsService {
       ? await this.subscriptionDto(scheduled, actor.role !== "support")
       : null;
     const addonDtos = await Promise.all(
-      addons.map((addon) => this.addonDto(addon, actor.role !== "support")),
+      addonRows.map(({ addon }) => this.addonDto(addon, actor.role !== "support")),
     );
     const scrub =
       actor.role === "support" ? sanitizeSupportAuditMetadata : (value: unknown) => value;
@@ -257,7 +304,7 @@ export class PlatformTenantsService {
       ),
       scheduledAddons: addonDtos.filter((addon) => addon.status === "scheduled"),
       usage: {
-        cabinetUsers: cabinetUsage[0]?.value ?? 0,
+        cabinetUsers: (cabinetUsage[0]?.value ?? 0) + (invitationUsage[0]?.value ?? 0),
         kiosks: kioskUsage[0]?.value ?? 0,
         lines: lineUsage[0]?.value ?? 0,
         stations: stationUsage[0]?.value ?? 0,

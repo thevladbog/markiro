@@ -89,9 +89,15 @@ export class TenantOwnerActivationService {
       if (hasCredential && input.password) {
         throw new BadRequestException({ code: "existing_credential" });
       }
-      const activatedAt = new Date();
+      let password: string | undefined;
       if (!hasCredential) {
-        const password = await hashCredentialPassword(input.password!);
+        const passwordInput = input.password;
+        if (!passwordInput) throw new BadRequestException({ code: "password_required" });
+        password = await hashCredentialPassword(passwordInput);
+      }
+      await this.subscriptions.lockTenantTimeline(tx, subject.tenantId);
+      const activatedAt = new Date();
+      if (password) {
         if (credential) {
           await tx
             .update(schema.account)

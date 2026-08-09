@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { and, eq, inArray, like, or } from "drizzle-orm";
-import { afterAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
@@ -11,13 +11,15 @@ import {
   provisionTenantOwner,
   runProvisionTenantOwnerCli,
 } from "../src/cli/provision-tenant-owner";
+import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
 
 const ready = Boolean(process.env.DATABASE_URL);
 
 describe.skipIf(!ready)("tenant owner provisioning", () => {
   const connection = createDb(process.env.DATABASE_URL!);
+  const defaultDemo = new DefaultDemoSettingFixture(connection.db);
 
-  async function usePublishedDemo(durationDays = 14): Promise<string> {
+  async function useDemo(durationDays = 14, published = true): Promise<string> {
     const itemId = crypto.randomUUID();
     const versionId = crypto.randomUUID();
     await connection.db.insert(schema.catalogItems).values({
@@ -48,45 +50,52 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       maxCabinetUsers: 2,
       demoDurationDays: durationDays,
     });
-    await connection.db
-      .update(schema.catalogItemVersions)
-      .set({ status: "published", publishedAt: new Date() })
-      .where(eq(schema.catalogItemVersions.id, versionId));
-    await connection.db
-      .insert(schema.platformSettings)
-      .values({ key: "default", defaultDemoCatalogVersionId: versionId })
-      .onConflictDoUpdate({
-        target: schema.platformSettings.key,
-        set: { defaultDemoCatalogVersionId: versionId, updatedAt: new Date() },
-      });
+    if (published) {
+      await connection.db
+        .update(schema.catalogItemVersions)
+        .set({ status: "published", publishedAt: new Date() })
+        .where(eq(schema.catalogItemVersions.id, versionId));
+    }
+    await defaultDemo.install(versionId);
     return versionId;
   }
 
+  beforeAll(async () => {
+    await defaultDemo.capture();
+  });
+
   afterAll(async () => {
-    const deliveries = await connection.db
-      .select({ id: schema.emailDeliveries.id })
-      .from(schema.emailDeliveries)
-      .where(
-        or(
-          like(schema.emailDeliveries.recipient, "first-owner-%@example.com"),
-          like(schema.emailDeliveries.recipient, "renew-owner-%@example.com"),
-          like(schema.emailDeliveries.recipient, "locked-renew-%@example.com"),
-          like(schema.emailDeliveries.recipient, "unmanaged-owner-%@example.com"),
-        ),
-      );
-    if (deliveries.length > 0) {
-      await connection.db.delete(schema.emailOutbox).where(
-        inArray(
-          schema.emailOutbox.deliveryId,
-          deliveries.map((delivery) => delivery.id),
-        ),
-      );
+    try {
+      const deliveries = await connection.db
+        .select({ id: schema.emailDeliveries.id })
+        .from(schema.emailDeliveries)
+        .where(
+          or(
+            like(schema.emailDeliveries.recipient, "first-owner-%@example.com"),
+            like(schema.emailDeliveries.recipient, "renew-owner-%@example.com"),
+            like(schema.emailDeliveries.recipient, "locked-renew-%@example.com"),
+            like(schema.emailDeliveries.recipient, "unmanaged-owner-%@example.com"),
+          ),
+        );
+      if (deliveries.length > 0) {
+        await connection.db.delete(schema.emailOutbox).where(
+          inArray(
+            schema.emailOutbox.deliveryId,
+            deliveries.map((delivery) => delivery.id),
+          ),
+        );
+      }
+    } finally {
+      try {
+        await defaultDemo.restore();
+      } finally {
+        await connection.pool.end();
+      }
     }
-    await connection.pool.end();
   });
 
   it("creates one tenant, owner, incomplete profile, and activation delivery when repeated", async () => {
-    const demoVersionId = await usePublishedDemo();
+    const demoVersionId = await useDemo();
     const suffix = crypto.randomUUID();
     const email = `first-owner-${suffix}@example.com`;
     const tenantSlug = `first-tenant-${suffix}`;
@@ -217,7 +226,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {
-    await usePublishedDemo();
+    await useDemo();
     const suffix = crypto.randomUUID();
     const email = `renew-owner-${suffix}@example.com`;
     const tenantSlug = `renew-tenant-${suffix}`;
@@ -274,7 +283,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
   });
 
   it("rejects renewal while the mail worker owns the delivery lock", async () => {
-    await usePublishedDemo();
+    await useDemo();
     const suffix = crypto.randomUUID();
     const email = `locked-renew-${suffix}@example.com`;
     const input = {
@@ -330,9 +339,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
   });
 
   it("fails before tenant writes without a default demo and allows only the explicit CLI compatibility path", async () => {
-    await connection.db
-      .delete(schema.platformSettings)
-      .where(eq(schema.platformSettings.key, "default"));
+    await useDemo(14, false);
     const suffix = crypto.randomUUID();
     const input = {
       email: `unmanaged-owner-${suffix}@example.com`,
@@ -397,6 +404,28 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       memberId: unmanaged.memberId,
     });
     expect(renewed.deliveryId).not.toBe(unmanaged.deliveryId);
+  });
+
+  it("does not restore over a competing default-demo setting change", async () => {
+    const earlierVersionId = await useDemo();
+    const ownedVersionId = await useDemo();
+    const competingFixture = new DefaultDemoSettingFixture(connection.db);
+    await competingFixture.capture();
+    await competingFixture.install(earlierVersionId);
+
+    await expect(defaultDemo.restore()).resolves.toBe(false);
+    const [unchanged] = await connection.db
+      .select({ versionId: schema.platformSettings.defaultDemoCatalogVersionId })
+      .from(schema.platformSettings)
+      .where(eq(schema.platformSettings.key, "default"));
+    expect(unchanged).toEqual({ versionId: earlierVersionId });
+
+    await expect(competingFixture.restore()).resolves.toBe(true);
+    const [restoredCompetitor] = await connection.db
+      .select({ versionId: schema.platformSettings.defaultDemoCatalogVersionId })
+      .from(schema.platformSettings)
+      .where(eq(schema.platformSettings.key, "default"));
+    expect(restoredCompetitor).toEqual({ versionId: ownedVersionId });
   });
 });
 
