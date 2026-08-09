@@ -146,6 +146,7 @@ async function sources() {
     documents: Object.fromEntries(documents),
     verifier: await contents("deploy/production/verify-dns.mjs"),
     workflow: await contents(".github/workflows/yandex-infrastructure.yml"),
+    deployWorkflow: await contents(".github/workflows/deploy-production.yml"),
     dnsWorkflow: await contents(".github/workflows/yandex-dns-convergence.yml"),
     postDnsWorkflow: await contents(".github/workflows/yandex-post-dns-smoke.yml"),
     remoteDeploy: await contents("deploy/yandex/remote-deploy.mjs"),
@@ -226,7 +227,9 @@ const markerProcedures = {
       "protected change record",
       "runtime Lockbox payload",
       "AWS_ACCESS_KEY_ID",
-      "GITHUB_RUNNER_ADMIN_TOKEN",
+      "YC_APP_DEPLOY_SSH_PRIVATE_KEY",
+      "production-deploy",
+      "no current version or payload",
       "protected operational system",
     ],
     "secrets-runtime-payload": [
@@ -260,7 +263,9 @@ const markerProcedures = {
       "standard input or a protected descriptor",
       "Restart or redeploy",
       "Revoke the previous credential",
-      "GITHUB_RUNNER_ADMIN_TOKEN",
+      "YC_APP_DEPLOY_SSH_PRIVATE_KEY",
+      "ssh-keygen -lf",
+      "YC_APP_DEPLOY_SSH_PUBLIC_KEY",
       "Remove temporary protected files",
     ],
   },
@@ -289,7 +294,10 @@ const markerProcedures = {
     ],
     "recovery-vm": [
       "new reviewed infrastructure plan",
-      "no public IP",
+      "reserved public IP",
+      "no OS Login fallback",
+      "offline recovery copy",
+      "authenticated serial host-key",
       "last known healthy digest pair",
       "single-VM limitation",
     ],
@@ -302,16 +310,15 @@ const markerProcedures = {
   },
   "docs/runbooks/yandex-first-go-live.md": {
     "go-live-gate-09-deploy-smoke-rollback": [
+      "production-deploy",
       "rollback_rehearsal=true",
       "rehearsal_run_attempt=none",
       "markiro-rollback-rehearsal-<release-sha>-attempt-<rehearsal-run-attempt>",
-      "production-cleanup",
-      "markiro-cleanup-<release-sha>-attempt-<rehearsal-run-attempt>",
-      "runner registration is absent",
-      "runner VM is stopped",
       "rehearsal_run_id=<successful-rollback-rehearsal-run-id>",
       "rehearsal_run_attempt=<successful-rollback-rehearsal-run-attempt>",
       "rollback_rehearsal=false",
+      "same release SHA",
+      "successful finalized first deployment",
     ],
   },
 };
@@ -320,6 +327,7 @@ function assertRunbookContract({
   documents,
   verifier,
   workflow,
+  deployWorkflow,
   dnsWorkflow,
   postDnsWorkflow,
   remoteDeploy,
@@ -344,14 +352,9 @@ function assertRunbookContract({
   }
 
   const bootstrap = documents["docs/runbooks/yandex-bootstrap.md"];
-  assert.match(
-    bootstrap,
-    /production-controller/,
-    "bootstrap must name the controller environment",
-  );
   assert.match(bootstrap, /production-deploy/, "bootstrap must name the deploy environment");
-  assert.match(bootstrap, /production-cleanup/, "bootstrap must name the cleanup environment");
   assert.match(bootstrap, /production-postgres-owner/);
+  assert.doesNotMatch(bootstrap, /production-controller|production-cleanup|self-hosted/i);
   assert.match(bootstrap, /install .*Terraform `1\.15\.8`/i);
   assert.match(bootstrap, /terraform version -json/);
   assert.match(bootstrap, /node infra\/yandex\/scripts\/check-toolchain\.mjs/);
@@ -368,10 +371,13 @@ function assertRunbookContract({
   );
 
   const infrastructure = documents["docs/runbooks/yandex-infrastructure-apply.md"];
-  assert.match(infrastructure, /production-controller/);
   assert.match(infrastructure, /production-deploy/);
-  assert.match(infrastructure, /production-cleanup/);
   assert.match(infrastructure, /production-postgres-owner/);
+  assert.match(infrastructure, /YC_APP_DEPLOY_SSH_PUBLIC_KEY/);
+  assert.doesNotMatch(
+    infrastructure,
+    /production-controller|production-cleanup|self-hosted|YC_OS_LOGIN/i,
+  );
   for (const input of [
     "target_sha",
     "enable_public_dns=false",
@@ -429,7 +435,11 @@ function assertRunbookContract({
     positiveOrdered(goLiveProcedure(goLive, marker), values, `dual host ${marker}`);
   assert.match(goLive, /rollback_rehearsal=true/);
   assert.match(goLive, /rollback_rehearsal=false/);
-  assert.match(goLive, /automatic\s+`workflow_run` delivery always fixes this input to false/i);
+  assert.match(goLive, /manual(?:ly)? dispatched/i);
+  assert.doesNotMatch(
+    goLive,
+    /workflow_run|production-controller|production-cleanup|self-hosted|cleanup receipt/i,
+  );
   const ingressGate = markerProcedure(goLive, "go-live-gate-04-alb-sws-arl");
   assert.match(ingressGate, /approved WAF destroy actions/i);
   assert.match(ingressGate, /reject[\s\S]*WAF create, update, or unchanged actions/i);
@@ -497,12 +507,40 @@ function assertRunbookContract({
       "pre-first activation materialization checks",
       "rollback_rehearsal=true",
       "/opt/markiro/active-release` pointer remains absent",
-      "production-cleanup",
       "rollback_rehearsal=false",
       "successful finalized first deployment creates",
       "post-activation active-path",
     ],
     "pre-first materialization through first activation",
+  );
+
+  const keySetup = markerProcedure(bootstrap, "bootstrap-prerequisites");
+  const keyBlocks = commandBlocks(keySetup).filter((block) =>
+    block.includes("ssh-keygen -t ed25519"),
+  );
+  assert.equal(keyBlocks.length, 1, "bootstrap must define one exact deploy-key block");
+  assert.equal(
+    keyBlocks[0].trim(),
+    [
+      "zsh -f",
+      "umask 077",
+      "ssh-keygen -t ed25519 -a 100 -f ./markiro-production-deploy -C markiro-production-deploy",
+      "ssh-keygen -lf ./markiro-production-deploy.pub",
+    ].join("\n"),
+  );
+  assert.doesNotMatch(keyBlocks[0], /set -euo pipefail|cat\s+.*markiro-production-deploy/);
+  assert.match(bootstrap, /offline recovery copy/);
+  assert.match(bootstrap, /YC_APP_DEPLOY_SSH_PUBLIC_KEY/);
+  assert.match(documents["docs/runbooks/yandex-secrets.md"], /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
+  for (const source of Object.values(documents)) {
+    assert.doesNotMatch(source, /ssh-keyscan|GITHUB_RUNNER_ADMIN_TOKEN|runner_overrun/);
+  }
+
+  assert.match(deployWorkflow, /runs-on:\s*ubuntu-latest/);
+  assert.match(deployWorkflow, /environment:\s*production-deploy/);
+  assert.doesNotMatch(
+    deployWorkflow,
+    /workflow_run|self-hosted|production-controller|production-cleanup/,
   );
   assert.doesNotMatch(
     goLive.slice(0, publicDns),
@@ -636,4 +674,53 @@ test("runbook contract rejects every unsafe command and missing DNS verifier inp
       assert.throws(() => assertRunbookContract(reordered), `${runbook}:${marker}:reordered`);
     }
   }
+
+  const unsafeMutations = [
+    [
+      "parent interactive fail-fast",
+      "docs/runbooks/yandex-bootstrap.md",
+      (source) => source.replace("zsh -f\numask 077", "set -euo pipefail\numask 077"),
+    ],
+    [
+      "plaintext private key output",
+      "docs/runbooks/yandex-bootstrap.md",
+      (source) =>
+        source.replace(
+          "ssh-keygen -lf ./markiro-production-deploy.pub",
+          "cat ./markiro-production-deploy\nssh-keygen -lf ./markiro-production-deploy.pub",
+        ),
+    ],
+    [
+      "unauthenticated host-key scan",
+      "docs/runbooks/yandex-recovery.md",
+      (source) => `${source}\nssh-keyscan app.example.invalid\n`,
+    ],
+    [
+      "OS Login fallback",
+      "docs/runbooks/yandex-infrastructure-apply.md",
+      (source) => `${source}\nYC_OS_LOGIN=operator\n`,
+    ],
+    [
+      "automatic deployment",
+      "docs/runbooks/yandex-first-go-live.md",
+      (source) => `${source}\nworkflow_run automatically starts deployment.\n`,
+    ],
+  ];
+  for (const [name, runbook, mutate] of unsafeMutations) {
+    const mutated = structuredClone(current);
+    mutated.documents[runbook] = mutate(mutated.documents[runbook]);
+    assert.throws(() => assertRunbookContract(mutated), name);
+  }
+
+  const dnsBeforeSmoke = structuredClone(current);
+  const dnsMarker = "<!-- runbook-contract:go-live-public-dns-apply -->";
+  dnsBeforeSmoke.documents["docs/runbooks/yandex-first-go-live.md"] = dnsBeforeSmoke.documents[
+    "docs/runbooks/yandex-first-go-live.md"
+  ]
+    .replace(`${dnsMarker}\n`, "")
+    .replace(
+      "<!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->",
+      `${dnsMarker}\n\n<!-- runbook-contract:go-live-gate-09-deploy-smoke-rollback -->`,
+    );
+  assert.throws(() => assertRunbookContract(dnsBeforeSmoke), "DNS before finalized smoke");
 });

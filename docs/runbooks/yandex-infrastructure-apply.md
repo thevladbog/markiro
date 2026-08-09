@@ -11,20 +11,22 @@ Local production apply is prohibited.
 
 1. Open a protected change record. Confirm the target is the current
    40-character `main` commit and that the applicable tests passed.
-2. Confirm Terraform `1.15.8`, Yandex provider `0.215.0`, Node.js 24, pnpm
-   11.10.0, runner `2.336.0`, and `yc` `1.23.0` pins are unchanged or have an
-   approved provenance review. The `yc` SHA-256 is a measured repository pin,
-   not vendor-attested provenance.
+2. Confirm Terraform `1.15.8`, Yandex provider `0.215.0`, Node.js 24, and pnpm
+   11.10.0 pins are unchanged or have an approved provenance review.
 3. Confirm access uses the exact protected environments:
-   `production-controller` for runner control, `production-deploy` for the
-   self-hosted deployment job, `production-cleanup` for runner cleanup,
-   `production-infrastructure` for Terraform, `production-public-dns` for
-   public DNS approval, and `production-postgres-owner` for the database-owner
-   boundary. Restrict each to `main`; these exact names are also OIDC subjects.
-   Do not treat a boolean or a change-record reference as environment approval,
-   and do not configure an obsolete shared `production` environment.
+   `production-deploy` for the GitHub-hosted application delivery,
+   `production-infrastructure` for Terraform, `production-public-dns` for public
+   DNS approval, and `production-postgres-owner` for the database-owner
+   boundary. Restrict each to `main`; the deploy and infrastructure names are
+   exact OIDC subjects. Do not treat a boolean or a change-record reference as
+   environment approval, and do not configure an obsolete shared `production`
+   environment.
 4. Set `public_dns_enabled=false` unless this is the separately approved final
    DNS operation. Never use an automatic approval flag for public DNS.
+5. Confirm `YC_APP_DEPLOY_SSH_PUBLIC_KEY` in `production-infrastructure` is the
+   reviewed single-line Ed25519 public key. Compare its `ssh-keygen -lf`
+   fingerprint with the offline record. The private key belongs only in the
+   `production-deploy` secret and must never reach Terraform.
 
 ## Generate and review the protected plan
 
@@ -50,6 +52,13 @@ observability_phase=protected
 4. Stop on an unexpected create, replacement, delete, state migration, or any
    change to state, media, audit, PostgreSQL, Lockbox, or DNS. Obtain a new
    review rather than editing the state or rerunning an old plan.
+5. For the one-time simplification plan, approve only this bounded transition:
+   create the protected app public address, replace the app VM to install the
+   key-only deploy account, update the app SSH security-group/IAM wiring, delete
+   the runner VM, runner security group, runner service account and runner-only
+   grants, and reduce Monitoring wiring from 16 to 15 alerts. Reject any
+   replacement or deletion of PostgreSQL, Object Storage buckets or objects,
+   KMS keys, ALB, certificates, the DNS zone, or audit storage.
 
 ## Approve the saved-plan apply
 
@@ -123,7 +132,7 @@ metadata: `commit_sha`, `evidence_sha256`, `github_run_id`,
 `github_run_attempt`, `observability_phase=first`, and `plan_sha256`. Match all
 binding values to the reviewed apply evidence before using the specifications;
 the workflow rejects extra fields and never uploads raw Terraform event output
-or any other root output. Create all 16 Monitoring alerts manually from those
+or any other root output. Create all 15 Monitoring alerts manually from those
 specs; provider `0.215.0` cannot mutate alerts. Run the pre-go-live live metric
 inventory and query check, including `sys.memory.used_percent`,
 `sys.filesystem.used_percent`, and `markiro.readiness.required_unavailable`.
@@ -145,7 +154,7 @@ missing, duplicate, blank, or extra ID.
 10. Before the first deployment, verify the bootstrap IAM boundary still grants
     the audit service account `audit-trails.viewer` on this folder,
     `logging.writer` on the bootstrap-created audit log group, and the exact KMS
-    encryption permission. Verify the deployment controller uses
+    encryption permission. Verify the GitHub-hosted deployment uses
     `YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID`; it must never exchange a
     GitHub OIDC token for `YC_TERRAFORM_SERVICE_ACCOUNT_ID`.
 

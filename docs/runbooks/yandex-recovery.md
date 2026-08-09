@@ -62,10 +62,16 @@ system; never store resource IDs, output, or evidence in Git or chat.
 
 1. Generate a new reviewed infrastructure plan that recreates only the app VM
    from Terraform. Preserve PostgreSQL, state, media, audit, and Lockbox.
-2. Confirm the VM receives no public IP, uses OS Login, emits only the expected
-   serial host-key records, and materializes runtime secrets at protected modes.
-3. Deploy the last known healthy digest pair through the protected runner.
-   Verify local readiness, ALB target health, and an authorized smoke request.
+2. Confirm the VM retains the Terraform-managed reserved public IP, uses the
+   dedicated key-only `markiro-deploy` account, emits only the expected serial
+   host-key records, and materializes runtime secrets at protected modes. There
+   is no OS Login fallback.
+3. Compare the encrypted offline recovery copy's public fingerprint with the
+   protected `YC_APP_DEPLOY_SSH_PUBLIC_KEY`, resolve the authenticated serial host-key
+   context, and deploy the last known healthy digest pair through the
+   same strict-host-key-checked SSH interface. Never use an unauthenticated host
+   key scan. Verify local readiness, ALB target health, and an authorized smoke
+   request.
 4. Keep the single-VM limitation explicit: VM replacement creates a visible
    interruption until the deferred multi-target HA design is implemented.
 

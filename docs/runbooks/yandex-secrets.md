@@ -21,14 +21,15 @@ rendered Compose output.
    `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` for the state identity.
 4. Keep the deploy-only registry payload separate. It contains exactly
    `GHCR_USERNAME` and `GHCR_TOKEN` for a read-only package principal. Only the
-   deployment-runner VM identity may read this container; the app VM identity
-   must not. The runner passes only that validated two-entry envelope through
-   the authenticated deployment SSH channel to the root helper.
-5. Keep the runner-registration payload separate. It contains exactly
-   `GITHUB_RUNNER_ADMIN_TOKEN`. Prefer a GitHub App installation token; use a
-   repository-scoped fine-grained PAT only as the documented fallback. Never
-   put it in a GitHub repository or environment secret. Only the protected
-   controller identity may read it; the runner VM identity must not.
+   deployment-controller identity may read this container; the app VM identity
+   must not. The GitHub-hosted deployment passes only that validated two-entry
+   envelope through the authenticated deployment SSH channel to the root helper.
+5. Keep `YC_APP_DEPLOY_SSH_PRIVATE_KEY` only as an environment secret in
+   `production-deploy`; keep the matching `YC_APP_DEPLOY_SSH_PUBLIC_KEY` only as
+   a non-secret variable in `production-infrastructure`. Compare their public
+   `ssh-keygen -lf` fingerprint with the encrypted offline recovery record. The
+   retained runner-registration Lockbox container is an inventory tombstone: it
+   must have no current version or payload and no IAM reader.
 6. Record entry names, Lockbox container IDs, access binding review IDs, and
    rotation due dates in the protected operational system. Record no values.
 
@@ -52,7 +53,7 @@ rendered Compose output.
    mail until the first go-live gate authorizes it.
 6. Populate the separate deploy-only registry container with exactly these
    GHCR credentials:
-   `GHCR_USERNAME` and `GHCR_TOKEN`. The deployment runner retrieves the latest
+   `GHCR_USERNAME` and `GHCR_TOKEN`. The GitHub-hosted deployment retrieves the latest
    version at each deployment and sends only the validated two-entry envelope
    over the strict-host-key-checked SSH standard input. The app's root helper
    authenticates with `--password-stdin` under a root-owned transient
@@ -136,10 +137,11 @@ test "$(cat "$readiness_result")" = required_unavailable
    non-secret release inputs. Do not run a release preflight from this pre-first
    procedure.
 4. Verify no registry `DOCKER_CONFIG` remains after deployment and that the app
-   identity cannot read the registry container. Verify the runner receives only
-   the bounded encoded JIT configuration and deletes its metadata key before the
-   runner process starts; it must not be able to read the registration
-   container. Record only sanitized evidence IDs in the protected system.
+   identity cannot read the registry container. Verify the hosted job removes
+   its temporary mode-`0600` SSH key and context files on both success and
+   failure. Confirm the runner-registration tombstone still has no version,
+   payload, or reader. Record only sanitized evidence IDs in the protected
+   system.
 
 ## Verify the active path only after first activation
 
@@ -180,10 +182,12 @@ test -f "$active_release/deploy/production/preflight.mjs"
 4. Revoke the previous credential only after the new consumer succeeds. Rotate
    PostgreSQL access before retiring the prior database role; rotate state HMAC
    only through a separately reviewed backend migration procedure.
-5. For `GITHUB_RUNNER_ADMIN_TOKEN`, rotate the GitHub App token or fallback PAT
-   in Lockbox, verify the controller generates one JIT configuration and the VM
-   deletes it before startup, then revoke the previous token. The runner is
-   normally stopped outside that window.
+5. For `YC_APP_DEPLOY_SSH_PRIVATE_KEY`, first generate a new Ed25519 pair in a
+   protected child shell. Compare `ssh-keygen -lf` fingerprints, update
+   `YC_APP_DEPLOY_SSH_PUBLIC_KEY`, apply the reviewed app-VM replacement while
+   DNS remains false, and only then update `YC_APP_DEPLOY_SSH_PRIVATE_KEY`.
+   Complete one approved deployment before revoking and deleting the old key;
+   preserve the new encrypted offline recovery copy.
 6. For `GHCR_TOKEN`, upload the new read-only token as a new registry Lockbox
    version, run one digest deployment, verify logout and transient-directory
    cleanup, then revoke the prior token.

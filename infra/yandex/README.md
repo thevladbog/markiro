@@ -179,26 +179,20 @@ credential-free. Pull requests run Terraform formatting, exact lock/toolchain
 checks, `init -backend=false`, validation, and infrastructure contracts without
 OIDC, environment variables, Lockbox, or a remote backend.
 
-The combined bootstrap/foundation must preserve separate GitHub workload
-subjects on the shared federation:
+The combined bootstrap/foundation preserves two GitHub workload subjects on the
+shared federation:
 
-- `production-controller` is reserved for the GitHub-hosted deployment
-  controller and may federate only as the deployment-controller service
-  account.
-- `production-cleanup` is reserved for the independent GitHub-hosted cleanup
-  job and may federate only as the deployment-controller service account.
-- `production-deploy` protects the self-hosted deployment job. That job has
-  `id-token: none`, and this subject must not have a Yandex federated
-  credential.
-- `production-infrastructure` is reserved for Terraform plan and apply jobs.
+- `production-deploy` is reserved for the one GitHub-hosted deployment job and
+  may federate only as the deployment-controller service account.
+- `production-infrastructure` is reserved for Terraform plan and apply jobs and
+  may federate only as the Terraform service account.
 - `production-postgres-owner` is reserved for the database-only approval that
   attests the completed cluster apply, exact owner creation, and runtime
   Lockbox write before the database plan is created.
 
 Configure `github_repository_owner_id = "47273232"`,
 `github_repository_id = "1308139775"`,
-`github_controller_environment = "production-controller"`,
-`github_cleanup_environment = "production-cleanup"`, and
+`github_deploy_environment = "production-deploy"`, and
 `github_infrastructure_environment = "production-infrastructure"` when
 bootstrapping. In GitHub, protect the `production-infrastructure`
 environment with required reviewers and main-branch deployment restrictions.
@@ -213,18 +207,12 @@ the current GitHub run identity and non-secret snake_case change record
 reference into saved-plan evidence; it does not inspect external record
 contents.
 
-Protect `production-controller`, `production-deploy`, and
-`production-cleanup` independently with main-branch deployment restrictions.
-Use distinct required-reviewer policies for controller and cleanup so approval
-of one privileged subject cannot authorize the other. The exact external
-subjects include GitHub's immutable owner and repository IDs:
-`repo:thevladbog@47273232/markiro@1308139775:environment:production-controller`,
-`repo:thevladbog@47273232/markiro@1308139775:environment:production-deploy`, and
-`repo:thevladbog@47273232/markiro@1308139775:environment:production-cleanup`;
-only the first and third receive deployment-controller credentials. Neither
-may exchange for the Terraform service account. The infrastructure credential
-uses the same immutable repository prefix with the
-`production-infrastructure` environment.
+Protect `production-deploy` with required reviewers and main-branch deployment
+restrictions. Its exact external subject is
+`repo:thevladbog@47273232/markiro@1308139775:environment:production-deploy` and
+may exchange only as the deployment-controller identity. The infrastructure
+credential uses the same immutable repository prefix with the
+`production-infrastructure` environment and may exchange only as Terraform.
 
 The infrastructure environment supplies repository/environment variables, not
 long-lived secrets. Required identity and state variables are
@@ -232,9 +220,12 @@ long-lived secrets. Required identity and state variables are
 `YC_TERRAFORM_SERVICE_ACCOUNT_ID`, `YC_STATE_BACKEND_SECRET_ID`, and
 `YC_STATE_BUCKET_NAME`. It also supplies the non-secret `YC_*`/`MARKIRO_DOMAIN`
 values mapped to the production root's `TF_VAR_*` inputs; the `YC_ALERT_IDS`
-collection uses valid Terraform expression syntax. Audit Trails derives its
-exact Lockbox scope from the three distinct runtime, registry, and runner
-registration secret inputs rather than accepting a separate list.
+collection uses valid Terraform expression syntax. It also supplies the
+single-line `YC_APP_DEPLOY_SSH_PUBLIC_KEY`; the corresponding private key exists
+only as `YC_APP_DEPLOY_SSH_PRIVATE_KEY` in `production-deploy`. Audit Trails
+derives its exact Lockbox scope from the runtime and registry secret inputs
+rather than accepting a separate list. The retained runner-registration secret
+container is an empty, unreadable inventory tombstone.
 
 On a trusted infrastructure run, the job requests a GitHub OIDC token for the configured
 audience, exchanges it for a short-lived Yandex IAM token, and reads only the
@@ -267,25 +258,25 @@ Both `.terraform.lock.hcl` files are committed. Local state, plans, generated
 backend configuration, and automatic variable files are ignored and must never
 be committed.
 
-## Deployment-runner binary and SSH trust pins
+## Hosted deployment and SSH trust pins
 
-Both VM bootstraps install Docker Engine `28.5.2` and Docker Compose v2
+The app VM bootstrap installs Docker Engine `28.5.2` and Docker Compose v2
 `2.40.3` from exact official HTTPS artifacts with repository-controlled
 SHA-256 pins. The app bootstrap does not become complete until the server and
 plugin versions match and `docker compose ... config --quiet` renders the
 production model from the bundled Compose contract. Ubuntu `docker.io` and
 mutable install scripts are not part of the image contract.
 
-Both VMs also install Unified Agent `26.07.11` from the exact Ubuntu 24.04
+The app VM also installs Unified Agent `26.07.11` from the exact Ubuntu 24.04
 package and repository-controlled SHA-256. It collects Linux memory/disk
 metrics and ships only the bounded, allowlisted, redacted journal export.
-`markiro-monitoring-producer` writes the ALB-backend, PostgreSQL-backup-age,
-readiness-degradation, and runner-runtime metrics used by `alert_specs`;
+`markiro-monitoring-producer` writes the ALB-backend, PostgreSQL-backup-age, and
+readiness-degradation metrics used by `alert_specs`;
 `remote-deploy.mjs` writes the deployment result metric. Every custom alert
 spec names its producer and its missing-data behavior.
 
 Private GHCR authentication uses the separate deploy-only registry Lockbox
-container. The deployment-runner VM identity reads exactly `GHCR_USERNAME` and
+container. The deployment-controller identity reads exactly `GHCR_USERNAME` and
 `GHCR_TOKEN`, validates that closed shape, and sends it through the
 strict-host-key-checked SSH standard input. The app VM identity has no registry
 Lockbox access. Its root helper uses `docker login --password-stdin` under a
@@ -294,29 +285,17 @@ Those entries never enter cloud-init or the runtime environment file. Rotation
 is a new Lockbox version followed by one verified digest deployment and
 revocation of the prior read-only token.
 
-The protected controller, not the VM, calls GitHub `generate-jitconfig` and
-upserts only the encoded one-use configuration into the runner's metadata while
-it is stopped. The runner deletes that key and waits for the provider operation
-to complete before executing Actions Runner. The VM must use a distinct
-least-privilege identity with no access to the runner-registration Lockbox;
-only the controller workload identity may read the GitHub admin token.
-
-The deployment runner installs Yandex Cloud CLI `1.23.0` from the exact
-versioned official Linux AMD64 object and verifies the repository-controlled
-SHA-256
-`3e287905b63685847aa77f17f92bf7156037cc63b9a42c6cd901db69a61604c9`
-before installation. It then requires `yc version --semantic` to return exactly
-`1.23.0`. Yandex currently publishes no checksum or signature for that object;
-the pin was independently measured from the exact HTTPS payload. Upgrade it only
-through the two-reviewer procedure in
-`docs/runbooks/saas-production-deploy.md`; mutable stable/latest paths are not
-allowed in cloud-init.
+The app VM has a Terraform-managed reserved public address and permits SSH only
+to `markiro-deploy` with the reviewed Ed25519 public key. Password, interactive,
+and root authentication are disabled. The GitHub-hosted job writes the matching
+private key only to a runner-temporary mode-`0600` file and removes it with its
+bounded context on every exit.
 
 Application cloud-init emits only the versioned `MARKIRO_SSH_HOST_KEY_V1`
 OpenSSH public-key records to its serial output. The protected controller
 requires exactly one valid `ssh-ed25519` and one valid `ssh-rsa` payload,
 canonicalizes that pair, and retrieves it through the authenticated Compute
-serial-output API. The private runner revalidates the exact pair and uses a
-private `known_hosts` file with strict host checking for the app's internal IP.
-Do not place SSH private host keys in Terraform, metadata, workflow outputs, or
-deployment artifacts.
+serial-output API. The hosted job revalidates the exact pair and uses a private
+`known_hosts` file with strict host checking for the app's reserved public IP.
+Do not place SSH private host keys or the deploy private key in Terraform,
+metadata, workflow outputs, or deployment artifacts.
