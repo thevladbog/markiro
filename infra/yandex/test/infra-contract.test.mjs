@@ -229,10 +229,35 @@ test("infrastructure workflow has one protected manual apply without legacy phas
     2,
     "both validation and apply must use the Yandex provider mirror",
   );
-  assert.match(
-    workflow,
-    /\(keys \| sort\) == \["entries"\][\s\S]*\(keys \| sort\) == \["key", "textValue"\][\s\S]*textValue \| type == "string"[\s\S]*textValue \| length > 0/,
+  const payloadFilter = workflow.match(/jq -e '([\s\S]*?)' <<<"\$payload" > \/dev\/null/)?.[1];
+  assert.ok(payloadFilter, "workflow must validate the Lockbox payload before exporting it");
+  const validPayload = {
+    versionId: "e6q-valid-version",
+    entries: [
+      { key: "AWS_ACCESS_KEY_ID", textValue: "access-key" },
+      { key: "AWS_SECRET_ACCESS_KEY", textValue: "secret-key" },
+    ],
+  };
+  assert.doesNotThrow(() =>
+    execFileSync("jq", ["-e", payloadFilter], {
+      encoding: "utf8",
+      input: JSON.stringify(validPayload),
+      stdio: ["pipe", "pipe", "pipe"],
+    }),
   );
+  for (const invalidPayload of [
+    { entries: validPayload.entries },
+    { ...validPayload, versionId: "" },
+    { ...validPayload, unexpected: true },
+  ]) {
+    assert.throws(() =>
+      execFileSync("jq", ["-e", payloadFilter], {
+        encoding: "utf8",
+        input: JSON.stringify(invalidPayload),
+        stdio: ["pipe", "pipe", "pipe"],
+      }),
+    );
+  }
   assert.match(workflow, /node infra\/yandex\/scripts\/guard-production-plan\.mjs "\$plan_json"/);
   assert.match(workflow, /terraform[^\n]+apply[^\n]+"\$plan"/);
   assert.doesNotMatch(
