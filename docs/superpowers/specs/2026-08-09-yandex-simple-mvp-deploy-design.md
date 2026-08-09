@@ -1,7 +1,7 @@
 # Yandex Cloud Simple MVP Deployment
 
 **Date:** 2026-08-09
-**Status:** Verbal design approved; written review pending
+**Status:** Approved for implementation
 **Supersedes:** The deployment-runner and OS Login delivery sections of
 `docs/superpowers/specs/2026-08-05-yandex-saas-infrastructure-design.md`
 **Related:** `docs/superpowers/specs/2026-08-07-yandex-mvp-budget-design.md`,
