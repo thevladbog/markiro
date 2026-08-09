@@ -28,12 +28,6 @@ variable "data_subnet_cidr" {
   nullable    = false
 }
 
-variable "management_subnet_cidr" {
-  description = "CIDR for private management and ephemeral runner instances."
-  type        = string
-  nullable    = false
-}
-
 variable "labels" {
   description = "Common non-secret labels for network resources."
   type        = map(string)

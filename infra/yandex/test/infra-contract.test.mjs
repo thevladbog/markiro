@@ -870,18 +870,15 @@ function assertRunnerControllerProviderGrants({ bootstrap, compute, controller, 
   }
 }
 
-function assertPrivateNetworkAndCompute({
+function assertHostedAppNetworkAndCompute({
   network,
+  networkVariables,
   networkOutputs,
   compute,
+  computeVariables,
   computeOutputs,
   appCloudInit,
-  runnerCloudInit,
-  production,
-  productionOutputs,
 }) {
-  const securityGroups = ["alb", "app", "data", "runner"];
-
   for (const moduleSource of [network, compute]) {
     assert.match(
       moduleSource,
@@ -890,15 +887,18 @@ function assertPrivateNetworkAndCompute({
   }
 
   assert.match(network, /resource\s+"yandex_vpc_network"\s+"production"\s*\{/);
-  for (const subnet of ["alb", "app", "data", "management"]) {
+  for (const subnet of ["alb", "app", "data"]) {
     assert.match(network, new RegExp(`resource\\s+"yandex_vpc_subnet"\\s+"${subnet}"\\s*\\{`));
   }
-  for (const securityGroup of securityGroups) {
+  for (const securityGroup of ["alb", "app", "data"]) {
     assert.match(
       network,
       new RegExp(`resource\\s+"yandex_vpc_security_group"\\s+"${securityGroup}"\\s*\\{`),
     );
   }
+  assert.doesNotMatch(network, /yandex_vpc_(?:subnet|security_group)"\s+"(?:management|runner)"/);
+  assert.doesNotMatch(networkVariables, /management_subnet_cidr/);
+  assert.doesNotMatch(networkOutputs, /management_subnet_id|runner/);
 
   assert.match(
     network,
@@ -922,7 +922,7 @@ function assertPrivateNetworkAndCompute({
     { fromPort: 80, protocol: "TCP", toPort: 80 },
     { fromPort: 443, protocol: "TCP", toPort: 443 },
   ]);
-  for (const securityGroup of ["app", "data", "runner"]) {
+  for (const securityGroup of ["data"]) {
     for (const ingress of terraformNestedBlocks(
       terraformResourceBlock(network, "yandex_vpc_security_group", securityGroup),
       "ingress",
@@ -938,7 +938,7 @@ function assertPrivateNetworkAndCompute({
   );
   assert.match(
     appSecurityGroup,
-    /from_port\s*=\s*22[\s\S]*?security_group_id\s*=\s*yandex_vpc_security_group\.runner\.id/,
+    /from_port\s*=\s*22[\s\S]*?v4_cidr_blocks\s*=\s*\["0\.0\.0\.0\/0"\]/,
   );
   const dataSecurityGroup = terraformResourceBlock(network, "yandex_vpc_security_group", "data");
   assert.match(
@@ -954,31 +954,42 @@ function assertPrivateNetworkAndCompute({
   assert.ok(sshIngress, "app security group must define an SSH ingress rule");
   assert.ok(appPortIngress, "app security group must define an application ingress rule");
   assert.ok(dataIngress, "data security group must define a PostgreSQL ingress rule");
-  assert.doesNotMatch(sshIngress, /v4_cidr_blocks\s*=/);
+  assert.deepEqual(ingressRules(appSecurityGroup), [
+    { fromPort: 22, protocol: "TCP", toPort: 22 },
+    { fromPort: 8080, protocol: "TCP", toPort: 8080 },
+  ]);
+  assert.deepEqual(
+    [...sshIngress.matchAll(/"([^\"]+\/\d+)"/g)].map((match) => match[1]),
+    ["0.0.0.0/0"],
+  );
   assert.doesNotMatch(appPortIngress, /v4_cidr_blocks\s*=/);
   assert.doesNotMatch(dataIngress, /v4_cidr_blocks\s*=/);
 
+  const appAddress = terraformResourceBlock(compute, "yandex_vpc_address", "app");
+  assert.match(appAddress, /deletion_protection\s*=\s*true/);
+  assert.match(appAddress, /external_ipv4_address\s*\{[\s\S]*?zone_id\s*=\s*var\.zone/);
   assert.match(
     compute,
     /data\s+"yandex_compute_image"\s+"ubuntu_lts"\s*\{[\s\S]*?family\s*=\s*var\.ubuntu_lts_image_family/,
   );
-  for (const instance of ["app", "runner"]) {
-    const resource = terraformResourceBlock(compute, "yandex_compute_instance", instance);
-    assert.match(resource, /nat\s*=\s*false/);
-    assert.match(resource, /enable-oslogin\s*=\s*true/);
-    assert.match(resource, /serial-port-enable\s*=\s*false/);
-    assert.match(
-      resource,
-      /boot_disk\s*\{[\s\S]*?initialize_params\s*\{[\s\S]*?image_id\s*=\s*data\.yandex_compute_image\.ubuntu_lts\.id/,
-    );
-    assert.match(resource, /kms_key_id\s*=\s*var\.kms_key_id/);
-    assert.doesNotMatch(
-      resource,
-      /metadata\s*=\s*\{[\s\S]*?\b(?:github[_-]?(?:token|registration)|runtime[_-]?secret|secret|password|token)\s*=/i,
-      "instance metadata must not contain a runtime credential payload",
-    );
-  }
   const app = terraformResourceBlock(compute, "yandex_compute_instance", "app");
+  assert.match(app, /nat\s*=\s*true/);
+  assert.match(
+    app,
+    /nat_ip_address\s*=\s*yandex_vpc_address\.app\.external_ipv4_address\[0\]\.address/,
+  );
+  assert.match(app, /enable-oslogin\s*=\s*false/);
+  assert.match(app, /serial-port-enable\s*=\s*false/);
+  assert.match(
+    app,
+    /boot_disk\s*\{[\s\S]*?initialize_params\s*\{[\s\S]*?image_id\s*=\s*data\.yandex_compute_image\.ubuntu_lts\.id/,
+  );
+  assert.match(app, /kms_key_id\s*=\s*var\.kms_key_id/);
+  assert.doesNotMatch(
+    app,
+    /metadata\s*=\s*\{[\s\S]*?\b(?:github[_-]?(?:token|registration)|runtime[_-]?secret|secret|password|token)\s*=/i,
+    "instance metadata must not contain a runtime credential payload",
+  );
   const appResources = terraformNestedBlocks(app, "resources");
   assert.equal(appResources.length, 1, "app VM must define one exact resource profile");
   for (const [attribute, value] of [
@@ -993,21 +1004,8 @@ function assertPrivateNetworkAndCompute({
     );
   }
 
-  const runner = terraformResourceBlock(compute, "yandex_compute_instance", "runner");
-  const runnerResources = terraformNestedBlocks(runner, "resources");
-  assert.equal(runnerResources.length, 1, "runner VM must define one exact resource profile");
-  for (const [attribute, value] of [
-    ["cores", 2],
-    ["memory", 4],
-    ["core_fraction", 100],
-  ]) {
-    assert.match(
-      runnerResources[0],
-      new RegExp(`^\\s*${attribute}\\s*=\\s*${value}\\s*$`, "m"),
-      "deployment runner must retain its approved 2 vCPU / 4 GiB profile",
-    );
-  }
-  assert.doesNotMatch(compute, /nat\s*=\s*true/);
+  assert.equal(terraformDeclarationCount(compute, "resource", "yandex_compute_instance"), 1);
+  assert.doesNotMatch(compute, /yandex_compute_instance\.runner|runner_service_account_id/);
   assert.match(
     compute,
     /resource\s+"yandex_alb_target_group"\s+"app"\s*\{[\s\S]*?ip_address\s*=\s*yandex_compute_instance\.app\.network_interface\.0\.ip_address/,
@@ -1018,74 +1016,108 @@ function assertPrivateNetworkAndCompute({
     false,
     "app cloud-init must not embed a credential payload",
   );
-  assert.equal(
-    hasCloudInitCredentialPayload(runnerCloudInit),
-    false,
-    "runner cloud-init must not embed a credential payload",
-  );
+  assert.doesNotMatch(computeVariables, /runner_|management_subnet_id/);
   assert.match(
-    runnerCloudInit,
-    /path:\s*\/usr\/local\/lib\/markiro\/runner-jit[\s\S]*?permissions:\s*"0755"[\s\S]*?markiro-runner-jit[\s\S]*?updateMetadata/,
+    computeVariables,
+    /variable\s+"app_deploy_ssh_public_key"\s*\{[\s\S]*?condition\s*=\s*\(\s*can\(regex\("\^ssh-ed25519 \[A-Za-z0-9\+\/\]\+\=\{0,2\}\$"/,
   );
-  assert.doesNotMatch(
-    runnerCloudInit,
-    /generate-jitconfig|runner_registration_secret_id|GITHUB_RUNNER_ADMIN_TOKEN|payload\.lockbox/,
+  assert.match(computeVariables, /!strcontains\(var\.app_deploy_ssh_public_key, "\\n"\)/);
+  assert.match(computeVariables, /!strcontains\(var\.app_deploy_ssh_public_key, "\\r"\)/);
+  const keyPattern = /can\(regex\("([^"]+)", var\.app_deploy_ssh_public_key\)\)/.exec(
+    computeVariables,
+  )?.[1];
+  assert.equal(typeof keyPattern, "string");
+  const validPublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMarkiroHostedDeployKey1234567890+/=";
+  const keyIsAccepted = (value) =>
+    new RegExp(keyPattern).test(value) && !value.includes("\n") && !value.includes("\r");
+  assert.equal(keyIsAccepted(validPublicKey), true);
+  for (const invalidPublicKey of [
+    validPublicKey.replace("ssh-ed25519", "ssh-rsa"),
+    `from=\"10.0.0.1\" ${validPublicKey}`,
+    `${validPublicKey} deploy@example`,
+    `${validPublicKey}\n${validPublicKey}`,
+    `${validPublicKey}\r\n`,
+  ])
+    assert.equal(keyIsAccepted(invalidPublicKey), false, invalidPublicKey.split(/\r?\n/, 1)[0]);
+
+  const cloudInit = yaml.load(appCloudInit);
+  const users = cloudInit.users ?? [];
+  assert.deepEqual(users.map((user) => user.name).sort(), ["markiro-deploy", "markiro-monitor"]);
+  const deployUser = users.find((user) => user.name === "markiro-deploy");
+  assert.deepEqual(deployUser.groups, ["docker", "sudo"]);
+  assert.equal(deployUser.lock_passwd, true);
+  assert.equal(deployUser.shell, "/bin/bash");
+  assert.equal(deployUser.sudo, "ALL=(ALL) NOPASSWD:ALL");
+  assert.deepEqual(deployUser.ssh_authorized_keys, ["${app_deploy_ssh_public_key}"]);
+  const sshdDropin = cloudInit.write_files?.find(
+    (file) => file.path === "/etc/ssh/sshd_config.d/60-markiro-deploy.conf",
   );
-  assert.match(compute, /service_account_id\s*=\s*var\.runner_service_account_id/);
-  assert.match(
-    compute,
-    /members\s*=\s*\[[\s\S]*?var\.deployment_controller_service_account_id[\s\S]*?var\.runner_service_account_id/,
-  );
-  assert.match(runnerCloudInit, /\/etc\/systemd\/system\/markiro-runner\.service/);
-  assert.match(runnerCloudInit, /systemctl\s+enable\s+markiro-runner\.service/);
-  assert.doesNotMatch(runnerCloudInit, /systemctl\s+start\s+markiro-runner\.service/);
-  assert.match(runnerCloudInit, /markiro-runner-bootstrap-complete/);
-  assert.doesNotMatch(runnerCloudInit, /markiro-runner-ready/);
-  assert.match(runnerCloudInit, /power_state\s*:\s*[\s\S]*?mode\s*:\s*poweroff/);
+  assert.equal(sshdDropin?.owner, "root:root");
+  assert.equal(sshdDropin?.permissions, "0600");
+  for (const directive of [
+    "PasswordAuthentication no",
+    "KbdInteractiveAuthentication no",
+    "ChallengeResponseAuthentication no",
+    "PermitRootLogin no",
+    "PubkeyAuthentication yes",
+    "AuthenticationMethods publickey",
+    "AllowUsers markiro-deploy",
+  ])
+    assert.match(sshdDropin?.content ?? "", new RegExp(`^${directive}$`, "m"));
+
+  const bootstrap = cloudInit.runcmd?.[0]?.[2];
+  assert.equal(typeof bootstrap, "string");
+  for (const command of [
+    "/usr/sbin/sshd -t",
+    "systemctl reload ssh.service",
+    "passwd -S markiro-deploy",
+    "/home/markiro-deploy/.ssh",
+    "/home/markiro-deploy/.ssh/authorized_keys",
+  ])
+    assert.match(bootstrap, new RegExp(command.replaceAll("/", "\\/")));
+  const marker = "touch /var/lib/markiro/markiro-app-bootstrap-complete";
+  assert.equal(bootstrap.trimEnd().split("\n").at(-1), marker);
+  assert.ok(bootstrap.indexOf("/usr/sbin/sshd -t") < bootstrap.indexOf(marker));
+  assert.ok(bootstrap.indexOf("systemctl reload ssh.service") < bootstrap.indexOf(marker));
 
   assert.match(computeOutputs, /output\s+"app_private_ip"\s*\{/);
+  assert.match(computeOutputs, /output\s+"app_public_ip"\s*\{/);
+  assert.match(
+    terraformOutputBlock(computeOutputs, "app_public_ip"),
+    /yandex_vpc_address\.app\.external_ipv4_address\[0\]\.address/,
+  );
   assert.match(computeOutputs, /output\s+"app_target_group_id"\s*\{/);
-  assert.match(computeOutputs, /output\s+"runner_instance_id"\s*\{/);
-  assert.doesNotMatch(computeOutputs, /nat_ip_address|public.*ip/i);
+  assert.doesNotMatch(computeOutputs, /runner_instance_id/);
   assert.match(networkOutputs, /output\s+"app_subnet_id"\s*\{/);
-  assert.match(production, /module\s+"network"\s*\{/);
-  assert.match(production, /module\s+"compute"\s*\{/);
-  assert.match(productionOutputs, /output\s+"app_private_ip"\s*\{/);
-  assert.match(productionOutputs, /output\s+"app_target_group_id"\s*\{/);
-  assert.match(productionOutputs, /output\s+"runner_instance_id"\s*\{/);
-  assert.doesNotMatch(productionOutputs, /nat_ip_address/i);
 }
 
-async function privateNetworkAndComputeSources() {
+async function hostedAppNetworkAndComputeSources() {
   const [
     network,
+    networkVariables,
     networkOutputs,
     compute,
+    computeVariables,
     computeOutputs,
     appCloudInit,
-    runnerCloudInit,
-    production,
-    productionOutputs,
   ] = await Promise.all([
     readRepositoryFile("infra/yandex/modules/network/main.tf"),
+    readRepositoryFile("infra/yandex/modules/network/variables.tf"),
     readRepositoryFile("infra/yandex/modules/network/outputs.tf"),
     readRepositoryFile("infra/yandex/modules/compute/main.tf"),
+    readRepositoryFile("infra/yandex/modules/compute/variables.tf"),
     readRepositoryFile("infra/yandex/modules/compute/outputs.tf"),
     readRepositoryFile("infra/yandex/modules/compute/cloud-init-app.yaml.tftpl"),
-    readRepositoryFile("infra/yandex/modules/compute/cloud-init-runner.yaml.tftpl"),
-    readRepositoryFile("infra/yandex/production/main.tf"),
-    readRepositoryFile("infra/yandex/production/outputs.tf"),
   ]);
 
   return {
     network,
+    networkVariables,
     networkOutputs,
     compute,
+    computeVariables,
     computeOutputs,
     appCloudInit,
-    runnerCloudInit,
-    production,
-    productionOutputs,
   };
 }
 
@@ -2916,8 +2948,84 @@ test("bootstrap protects state, exact workload identity, secrets, and least priv
   assertProtectedBootstrap(await bootstrapContractSources());
 });
 
-test("production network and compute keep application and runner traffic private", async () => {
-  assertPrivateNetworkAndCompute(await privateNetworkAndComputeSources());
+test("production network and compute expose only hardened hosted app SSH", async () => {
+  const sources = await hostedAppNetworkAndComputeSources();
+  assertHostedAppNetworkAndCompute(sources);
+
+  const mutations = [
+    [
+      "public application port",
+      {
+        ...sources,
+        network: sources.network.replace(
+          "security_group_id = yandex_vpc_security_group.alb.id",
+          'v4_cidr_blocks = ["0.0.0.0/0"]',
+        ),
+      },
+    ],
+    [
+      "additional SSH source",
+      {
+        ...sources,
+        network: sources.network.replaceAll(
+          'v4_cidr_blocks = ["0.0.0.0/0"]',
+          'v4_cidr_blocks = ["0.0.0.0/0", "10.0.0.0/8"]',
+        ),
+      },
+    ],
+    [
+      "missing address protection",
+      {
+        ...sources,
+        compute: sources.compute.replace(
+          "deletion_protection = true",
+          "deletion_protection = false",
+        ),
+      },
+    ],
+    [
+      "OS Login",
+      {
+        ...sources,
+        compute: sources.compute.replace("enable-oslogin     = false", "enable-oslogin     = true"),
+      },
+    ],
+    [
+      "weakened key validation",
+      {
+        ...sources,
+        computeVariables: sources.computeVariables.replace(
+          "^ssh-ed25519 [A-Za-z0-9+/]+={0,2}$",
+          "ssh-ed25519",
+        ),
+      },
+    ],
+    [
+      "password authentication",
+      {
+        ...sources,
+        appCloudInit: sources.appCloudInit.replace(
+          "PasswordAuthentication no",
+          "PasswordAuthentication yes",
+        ),
+      },
+    ],
+    [
+      "second interactive user",
+      {
+        ...sources,
+        appCloudInit: sources.appCloudInit.replace(
+          "users:\n",
+          "users:\n  - name: intruder\n    shell: /bin/bash\n",
+        ),
+      },
+    ],
+  ];
+
+  for (const [name, mutation] of mutations) {
+    assert.notDeepEqual(mutation, sources, `${name} mutation must change its source`);
+    assert.throws(() => assertHostedAppNetworkAndCompute(mutation), undefined, name);
+  }
 });
 
 function assertRunnerBootstrapFailsObservable(cloudInit) {
