@@ -139,13 +139,13 @@ jobs:
             rm -f -- "$rehearsal_run_path"
           fi
           printf 'release-run-id=%s\nrelease-sha=%s\n' "$release_run_id" "$release_sha" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: ${{ steps.release.outputs.release-sha }}
           fetch-depth: 1
           persist-credentials: false
       - name: Download the exact trusted release manifest
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: markiro-release-manifest-${{ steps.release.outputs.release-sha }}
           path: ${{ runner.temp }}/release-manifest
@@ -154,7 +154,7 @@ jobs:
           run-id: ${{ steps.release.outputs.release-run-id }}
       - name: Download prerequisite rollback rehearsal evidence
         if: inputs.deployment_phase == 'first' && inputs.rollback_rehearsal == false
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ inputs.rehearsal_run_attempt }}
           path: ${{ runner.temp }}/rollback-rehearsal-prerequisite
@@ -307,7 +307,7 @@ jobs:
           chmod 600 "$evidence_path"
       - name: Upload finalized release evidence
         if: env.MARKIRO_ROLLBACK_REHEARSAL != '1'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: markiro-finalized-release-${{ steps.release.outputs.release-sha }}
           path: ${{ runner.temp }}/finalized-release.json
@@ -315,7 +315,7 @@ jobs:
           if-no-files-found: error
       - name: Upload rollback rehearsal evidence
         if: env.MARKIRO_ROLLBACK_REHEARSAL == '1'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: markiro-rollback-rehearsal-${{ steps.release.outputs.release-sha }}-attempt-${{ github.run_attempt }}
           path: ${{ runner.temp }}/rollback-rehearsal.json

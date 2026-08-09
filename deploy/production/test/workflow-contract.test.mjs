@@ -586,6 +586,43 @@ function assertProductionDeploymentWorkflow(
 ) {
   const workflow = parseWorkflow(deploymentSource, "production deployment workflow");
 
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
+    "deployment_phase",
+    "rehearsal_run_attempt",
+    "rehearsal_run_id",
+    "release_run_id",
+    "release_sha",
+    "rollback_rehearsal",
+  ]);
+  assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
+  const job = workflow.jobs.deploy;
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.environment, "production-deploy");
+  assert.deepEqual(job.permissions, {
+    actions: "read",
+    contents: "read",
+    "id-token": "write",
+  });
+  assert.equal(job.env.MARKIRO_DOMAIN, "${{ vars.MARKIRO_DOMAIN }}");
+  assert.equal(job.env.MARKIRO_KIOSK_DOMAIN, "${{ vars.MARKIRO_KIOSK_DOMAIN }}");
+  assert.match(deploymentSource, /YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID/);
+  assert.match(deploymentSource, /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
+  assert.match(deploymentSource, /hosted-deploy-context\.mjs resolve/);
+  assert.match(deploymentSource, /YC_APP_PUBLIC_ADDRESS/);
+  assert.match(remoteDeploySource, /StrictHostKeyChecking=yes/);
+  assert.match(deploymentSource, /Remove local deployment credentials[\s\S]*?if: always\(\)/);
+  assert.doesNotMatch(
+    deploymentSource,
+    /workflow_run|self-hosted|runner-control|production-controller|production-cleanup/,
+  );
+  assert.doesNotMatch(deploymentSource, /YC_TERRAFORM_SERVICE_ACCOUNT_ID|YC_OS_LOGIN/);
+  assert.match(remoteDeploySource, /rollbackRehearsal/);
+  assertPinnedComments(deploymentSource, CHECKOUT, "v4");
+  assertPinnedComments(deploymentSource, DOWNLOAD_ARTIFACT, "v8.0.1");
+  assertPinnedComments(deploymentSource, UPLOAD_ARTIFACT, "v7.0.1");
+  return;
+
   assert.deepEqual(Object.keys(workflow.on).sort(), ["workflow_dispatch", "workflow_run"]);
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs).sort(), [
     "deployment_phase",
@@ -843,11 +880,10 @@ function assertProductionDeploymentWorkflow(
   assertPinnedComments(deploymentSource, UPLOAD_ARTIFACT, "v7.0.1");
 }
 
-test("production deployment is protected, release-bound, dynamically labelled, and always cleaned", async () => {
+test("production deployment is protected, release-bound, hosted, and always cleans credentials", async () => {
   assertProductionDeploymentWorkflow(
     await source(".github/workflows/deploy-production.yml"),
     await source("deploy/yandex/remote-deploy.mjs"),
-    await source("deploy/yandex/runner-control.mjs"),
   );
 });
 
@@ -856,7 +892,7 @@ async function executeReleaseIdentityGate({ releaseRun = {}, rehearsalRun = {} }
     await source(".github/workflows/deploy-production.yml"),
     "production deployment workflow",
   );
-  const step = workflow.jobs.controller.steps.find(
+  const step = workflow.jobs.deploy.steps.find(
     ({ name }) => name === "Resolve exact trusted release identity",
   );
   const directory = await mkdtemp(join(tmpdir(), "markiro-release-identity-gate-"));
@@ -988,7 +1024,20 @@ async function executeCleanupReceipt(releaseSha) {
   };
 }
 
-test("successful cleanup records and uploads evidence when release identity resolution wrote no SHA", async () => {
+test("hosted deployment has no runner cleanup job and always removes local credentials", async () => {
+  const workflow = parseWorkflow(
+    await source(".github/workflows/deploy-production.yml"),
+    "production deployment workflow",
+  );
+  assert.equal(workflow.jobs.cleanup, undefined);
+  const cleanup = workflow.jobs.deploy.steps.find(
+    ({ name }) => name === "Remove local deployment credentials",
+  );
+  assert.equal(cleanup.if, "always()");
+  assert.match(cleanup.run, /markiro-deploy-key/);
+  assert.match(cleanup.run, /markiro-hosted-deploy-context\.json/);
+  assert.match(cleanup.run, /rollback-rehearsal-result\.json/);
+  return;
   const { artifactName, receipt, result } = await executeCleanupReceipt("");
   const malformed = await executeCleanupReceipt("not-a-release-sha");
 
@@ -1023,6 +1072,33 @@ test("successful cleanup records and uploads evidence when release identity reso
 test("production deployment contract rejects trigger, label, cleanup, and gate mutations", async () => {
   const deployment = await source(".github/workflows/deploy-production.yml");
   const remote = await source("deploy/yandex/remote-deploy.mjs");
+
+  for (const [name, search, replacement] of [
+    ["automatic trigger", "  workflow_dispatch:\n", "  workflow_run:\n  workflow_dispatch:\n"],
+    ["self-hosted job", "runs-on: ubuntu-latest", "runs-on: self-hosted"],
+    [
+      "wrong protected environment",
+      "environment: production-deploy",
+      "environment: production-controller",
+    ],
+    [
+      "infrastructure identity",
+      "YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID: ${{ vars.YC_DEPLOYMENT_CONTROLLER_SERVICE_ACCOUNT_ID }}",
+      "YC_TERRAFORM_SERVICE_ACCOUNT_ID: ${{ vars.YC_TERRAFORM_SERVICE_ACCOUNT_ID }}",
+    ],
+    ["cleanup only on success", "if: always()", "if: success()"],
+  ]) {
+    const mutated = replaceExactlyOnce(deployment, search, replacement, name);
+    assert.throws(() => assertProductionDeploymentWorkflow(mutated, remote), undefined, name);
+  }
+  const weakenedHostTrust = replaceExactlyOnce(
+    remote,
+    "StrictHostKeyChecking=yes",
+    "StrictHostKeyChecking=accept-new",
+    "weakened host trust",
+  );
+  assert.throws(() => assertProductionDeploymentWorkflow(deployment, weakenedHostTrust));
+  return;
   const controller = await source("deploy/yandex/runner-control.mjs");
 
   assert.match(
@@ -1371,7 +1447,6 @@ test("dual-host workflow contracts reject missing kiosk values, admin substituti
   const release = await source(".github/workflows/release-images.yml");
   const deployment = await source(".github/workflows/deploy-production.yml");
   const remote = await source("deploy/yandex/remote-deploy.mjs");
-  const controller = await source("deploy/yandex/runner-control.mjs");
   const infrastructure = await source(".github/workflows/yandex-infrastructure.yml");
   const convergence = await source(".github/workflows/yandex-dns-convergence.yml");
   const convergenceScript = await source("deploy/yandex/dns-convergence.mjs");
@@ -1395,11 +1470,7 @@ test("dual-host workflow contracts reject missing kiosk values, admin substituti
   }
 
   for (const [label, sourceText, validate] of [
-    [
-      "deployment",
-      deployment,
-      (mutated) => assertProductionDeploymentWorkflow(mutated, remote, controller),
-    ],
+    ["deployment", deployment, (mutated) => assertProductionDeploymentWorkflow(mutated, remote)],
     [
       "convergence",
       convergence,
