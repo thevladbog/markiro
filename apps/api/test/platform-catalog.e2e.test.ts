@@ -10,11 +10,13 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
+import { PlatformCatalogService } from "../src/modules/platform-catalog/platform-catalog.service";
 import {
   mountPlatformAuth,
   setupPlatformAuth,
   type PlatformAuthSetup,
 } from "../src/platform-auth/platform-auth.setup";
+import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -57,6 +59,8 @@ function currentTotp(uri: string): string {
 
 describe.skipIf(!ready)("platform catalog", () => {
   let app: INestApplication | undefined;
+  let catalog: PlatformCatalogService;
+  let audit: PlatformAuditService;
   let setup: AuthSetup;
   let platformSetup: PlatformAuthSetup;
   let env: ReturnType<typeof loadEnv>;
@@ -136,6 +140,8 @@ describe.skipIf(!ready)("platform catalog", () => {
         }),
       ],
     }).compile();
+    catalog = ref.get(PlatformCatalogService);
+    audit = ref.get(PlatformAuditService);
     app = ref.createNestApplication({ bodyParser: false });
     app.enableCors(corsDelegate(env));
     const server = app.getHttpAdapter().getInstance();
@@ -155,6 +161,12 @@ describe.skipIf(!ready)("platform catalog", () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  it("wires the catalog service to the shared platform audit provider through AppModule", () => {
+    expect(catalog).toBeInstanceOf(PlatformCatalogService);
+    expect(audit).toBeInstanceOf(PlatformAuditService);
+    expect(Reflect.get(catalog, "audit")).toBe(audit);
   });
 
   it("publishes an exact plan version, redacts finance for support, and audits the immutable transition", async () => {

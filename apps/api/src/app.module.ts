@@ -67,9 +67,11 @@ export class AppModule {
       imports: [
         AuthModule.forRoot(setup),
         ...(setup.platformAuth
-          ? [PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN)]
+          ? [
+              PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
+              PlatformCatalogModule,
+            ]
           : []),
-        PlatformCatalogModule,
         AuthorizationModule,
         JobsModule.forRoot(setup.databaseUrl, env),
         OrgProfileModule,
