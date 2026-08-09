@@ -26,6 +26,10 @@ const emailSchema = z
   .transform((value) => value.trim().toLocaleLowerCase("en-US"))
   .pipe(z.email());
 const passwordSchema = z.string().min(8).max(128);
+const completeActivationRequestSchema = z.object({
+  token: z.string().min(16).max(512),
+  password: passwordSchema,
+});
 
 export interface PlatformActivationRuntime {
   now?: () => Date;
@@ -430,6 +434,21 @@ export class PlatformActivationService {
       throw new NotFoundException({ code: "activation_unavailable" });
     }
     return { twoFactorEnrollmentRequired: true };
+  }
+
+  async completePublicRequest(input: unknown): Promise<{ twoFactorEnrollmentRequired: true }> {
+    const parsed = completeActivationRequestSchema.safeParse(input);
+    if (!parsed.success) {
+      await this.db.transaction((tx) =>
+        this.recordCompletionDenial(tx, {
+          targetId: null,
+          reason: "malformed_request",
+          before: null,
+        }),
+      );
+      throw new NotFoundException({ code: "activation_unavailable" });
+    }
+    return this.complete(parsed.data.token, { password: parsed.data.password });
   }
 
   private async recordCompletionDenial(

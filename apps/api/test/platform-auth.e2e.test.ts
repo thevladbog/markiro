@@ -3,7 +3,7 @@ import express from "express";
 import { Controller, Get, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { schema } from "@markiro/db";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -182,6 +182,83 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
       before: null,
       after: null,
     });
+  });
+
+  it("audits malformed public activation payloads exactly once without credential metadata", async () => {
+    const attempts = [
+      {
+        token: randomBytes(4).toString("base64url"),
+        password: randomBytes(24).toString("base64url"),
+      },
+      {
+        token: randomBytes(24).toString("base64url"),
+        password: randomBytes(4).toString("base64url"),
+      },
+    ];
+
+    for (const attempt of attempts) {
+      const beforeCountRows = await setup.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.platformAuditEvents)
+        .where(
+          and(
+            eq(schema.platformAuditEvents.action, "platform.activation.denied"),
+            eq(schema.platformAuditEvents.reason, "malformed_request"),
+          ),
+        );
+      const beforeCount = beforeCountRows[0]?.count ?? 0;
+
+      const response = await request(app!.getHttpServer())
+        .post("/platform/activation/complete")
+        .send(attempt)
+        .expect(404);
+      expect(response.body).toEqual({ code: "activation_unavailable" });
+
+      const afterCountRows = await setup.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(schema.platformAuditEvents)
+        .where(
+          and(
+            eq(schema.platformAuditEvents.action, "platform.activation.denied"),
+            eq(schema.platformAuditEvents.reason, "malformed_request"),
+          ),
+        );
+      const afterCount = afterCountRows[0]?.count ?? 0;
+      expect(afterCount).toBe(beforeCount + 1);
+
+      const [denial] = await setup.db
+        .select({
+          action: schema.platformAuditEvents.action,
+          outcome: schema.platformAuditEvents.outcome,
+          targetId: schema.platformAuditEvents.targetId,
+          reason: schema.platformAuditEvents.reason,
+          before: schema.platformAuditEvents.before,
+          after: schema.platformAuditEvents.after,
+        })
+        .from(schema.platformAuditEvents)
+        .where(
+          and(
+            eq(schema.platformAuditEvents.action, "platform.activation.denied"),
+            eq(schema.platformAuditEvents.reason, "malformed_request"),
+          ),
+        )
+        .orderBy(desc(schema.platformAuditEvents.createdAt), desc(schema.platformAuditEvents.id))
+        .limit(1);
+      expect(denial).toEqual({
+        action: "platform.activation.denied",
+        outcome: "denied",
+        targetId: null,
+        reason: "malformed_request",
+        before: null,
+        after: null,
+      });
+      const serializedDenial = JSON.stringify(denial);
+      expect(
+        [attempt.token, attempt.password].some((credential) =>
+          serializedDenial.includes(credential),
+        ),
+      ).toBe(false);
+    }
   });
 
   it("requires verified platform TOTP before returning the platform principal", async () => {
