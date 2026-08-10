@@ -2,6 +2,8 @@ import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   createOrderSchema,
   type CreateOrderDto,
@@ -13,7 +15,7 @@ import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 /** Device-facing routes under `/kiosk`, authenticated via `x-kiosk-token` (no session cookie). */
 @ApiTags("kiosk")
 @Controller("kiosk")
-@UseGuards(KioskDeviceGuard)
+@UseGuards(KioskDeviceGuard, SubscriptionAccessGuard)
 export class KioskController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 
@@ -23,6 +25,7 @@ export class KioskController {
   }
 
   @Post("orders")
+  @AllowSubscriptionRecovery("kiosk")
   async createOrder(
     @Req() req: RequestWithKiosk,
     @Body(new ZodValidationPipe(createOrderSchema)) body: CreateOrderDto,

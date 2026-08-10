@@ -16,6 +16,8 @@ import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { RequireFeature } from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   createLabelTemplateSchema,
   updateLabelTemplateSchema,
@@ -30,7 +32,7 @@ import { LabelTemplatesService } from "./label-templates.service";
 @Controller("label-templates")
 // The station never calls this module. Cabinet authorization keeps a station
 // api-key out even though TenantGuard accepts it for tenant resolution.
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 export class LabelTemplatesController {
   constructor(private readonly labelTemplatesService: LabelTemplatesService) {}
 
@@ -51,6 +53,7 @@ export class LabelTemplatesController {
 
   @Post()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireFeature("labelEditor")
   async createLabelTemplate(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createLabelTemplateSchema)) body: CreateLabelTemplateDto,
@@ -60,6 +63,7 @@ export class LabelTemplatesController {
 
   @Patch(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireFeature("labelEditor")
   async updateLabelTemplate(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -71,6 +75,7 @@ export class LabelTemplatesController {
   @Delete(":id")
   @HttpCode(204)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireFeature("labelEditor")
   async deleteLabelTemplate(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.labelTemplatesService.deleteLabelTemplate(req.tenantId!, id);
   }

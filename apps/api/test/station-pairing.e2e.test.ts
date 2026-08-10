@@ -284,6 +284,12 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         organizationName: "Test Plant",
         line: { id: expect.any(String), name: "Packing" },
       },
+      subscription: {
+        access: "unmanaged",
+        status: "unmanaged",
+        startsAt: null,
+        endsAt: null,
+      },
     });
     expect(JSON.stringify(identity.body)).not.toContain(apiKey);
     expect(JSON.stringify(identity.body)).not.toContain(otherDeviceName);

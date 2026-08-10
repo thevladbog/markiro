@@ -74,6 +74,29 @@ describe("createKioskClient", () => {
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toMatchObject({ deviceSeq: 3, createdAt: "2026-07-28T06:00:00.000Z" });
   });
+
+  it("retains the server error code needed to classify an expired-subscription refusal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(403, {
+          code: "subscription_read_only",
+          message: "Subscription is read-only",
+        }),
+      ),
+    );
+
+    const err = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+      .submitOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] })
+      .catch((caught: unknown) => caught);
+
+    expect(err).toBeInstanceOf(KioskApiError);
+    expect(err).toMatchObject({
+      status: 403,
+      code: "subscription_read_only",
+      message: "Subscription is read-only",
+    });
+  });
 });
 
 /**

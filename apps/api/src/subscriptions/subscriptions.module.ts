@@ -6,6 +6,7 @@ import {
   SUBSCRIPTION_STATUS_CANDIDATE_SOURCE,
   SubscriptionStatusJob,
 } from "./subscription-status.job";
+import { SubscriptionAccessGuard } from "./subscription-access.guard";
 
 @Global()
 @Module({})
@@ -16,13 +17,19 @@ export class SubscriptionsModule {
       providers: [
         { provide: SUBSCRIPTION_ENFORCEMENT_MODE, useValue: enforcementMode },
         EntitlementsService,
+        SubscriptionAccessGuard,
         {
           provide: SUBSCRIPTION_STATUS_CANDIDATE_SOURCE,
           useClass: DatabaseSubscriptionStatusCandidateSource,
         },
         SubscriptionStatusJob,
       ],
-      exports: [EntitlementsService, SubscriptionStatusJob],
+      exports: [
+        SUBSCRIPTION_ENFORCEMENT_MODE,
+        EntitlementsService,
+        SubscriptionAccessGuard,
+        SubscriptionStatusJob,
+      ],
     };
   }
 }

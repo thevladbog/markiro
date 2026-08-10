@@ -15,6 +15,11 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -34,7 +39,7 @@ import { OperatorsService } from "./operators.service";
  */
 @ApiTags("operators")
 @Controller("operators")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 export class OperatorsController {
   constructor(private readonly operatorsService: OperatorsService) {}
 
@@ -45,6 +50,7 @@ export class OperatorsController {
   }
 
   @Put(":employeeId")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async grantAccess(
     @Req() req: RequestWithTenant,
@@ -55,6 +61,7 @@ export class OperatorsController {
   }
 
   @Patch(":employeeId")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateAccess(
     @Req() req: RequestWithTenant,
@@ -66,6 +73,7 @@ export class OperatorsController {
 
   @Delete(":employeeId")
   @HttpCode(204)
+  @AllowSubscriptionReadOnly("security")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async revokeAccess(
     @Req() req: RequestWithTenant,

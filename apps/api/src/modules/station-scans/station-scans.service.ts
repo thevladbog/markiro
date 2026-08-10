@@ -13,6 +13,8 @@ import type { MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 
 /**
  * Upper bound on how many distinct calendar months a single batch's
@@ -114,6 +116,7 @@ export class StationScansService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly ssccService: SsccService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /**
@@ -137,6 +140,9 @@ export class StationScansService {
         terminalId: authenticatedTerminalId,
       })),
     };
+    if (await this.assertRecoveryEligible(tenantId, body)) {
+      return { applied: 0, alreadyApplied: true, conflicts: [] };
+    }
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
     // proactively maintains current+next month; a device offline across a
@@ -1126,6 +1132,51 @@ export class StationScansService {
 
       return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
     });
+  }
+
+  /** Returns true when an expired-tenant replay was already durably applied. */
+  private async assertRecoveryEligible(tenantId: string, body: SyncBatchDto): Promise<boolean> {
+    const serverNow = new Date();
+    const access = await this.entitlements.resolveRecovery(tenantId, this.db, serverNow);
+    if (access.access !== "read_only") return false;
+
+    // Idempotency outranks a later eligibility decision. The station pins
+    // this exact batch id until it receives an acknowledgement, so a response
+    // lost before expiry must still be acknowledged after expiry even if the
+    // referenced shift is later corrected or closed. No business write occurs
+    // on this path; the original transaction already committed it.
+    const [alreadyApplied] = await this.db
+      .select({ batchId: schema.syncBatches.batchId })
+      .from(schema.syncBatches)
+      .where(
+        and(
+          eq(schema.syncBatches.tenantId, tenantId),
+          eq(schema.syncBatches.batchId, body.batchId),
+        ),
+      );
+    if (alreadyApplied) return true;
+
+    const endsAt = access.subscription?.endsAt;
+    if (!endsAt) throw new SubscriptionReadOnlyException();
+    const shiftIds = [
+      ...new Set([
+        ...body.items.map((item) => item.shiftId),
+        ...body.boxes.map((box) => box.shiftId),
+        ...body.exceptions.map((exception) => exception.shiftId),
+      ]),
+    ];
+    if (shiftIds.length === 0) return false;
+    const rows = await this.db
+      .select({ id: schema.shifts.id, openedAt: schema.shifts.openedAt })
+      .from(schema.shifts)
+      .where(and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, shiftIds)));
+    if (
+      rows.length !== shiftIds.length ||
+      rows.some((shift) => shift.openedAt === null || shift.openedAt >= endsAt)
+    ) {
+      throw new SubscriptionReadOnlyException();
+    }
+    return false;
   }
 
   /**

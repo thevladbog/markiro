@@ -3,6 +3,7 @@ import { schema, type Db } from "@markiro/db";
 import { ShiftsService } from "../src/modules/shifts/shifts.service";
 import type { OperatorsService } from "../src/modules/operators/operators.service";
 import type { SsccService } from "../src/modules/sscc/sscc.service";
+import type { EntitlementsService } from "../src/subscriptions/entitlements.service";
 
 /**
  * A chainable stub covering both shapes `ShiftsService.getBundle` needs:
@@ -98,7 +99,7 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
       },
     } as unknown as SsccService;
 
-    const service = new ShiftsService(db, fakeOperatorsService(), sscc);
+    const service = new ShiftsService(db, fakeOperatorsService(), sscc, {} as EntitlementsService);
 
     await expect(service.getBundle("tenant-1", "shift-1", "device-1")).rejects.toBe(boom);
   });

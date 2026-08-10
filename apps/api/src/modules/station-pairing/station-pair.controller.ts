@@ -10,7 +10,10 @@ import {
   type StationIdentityResultDto,
 } from "./dto";
 import { StationPairingService } from "./station-pairing.service";
-import { ApiStationPairSecretResponse } from "../device-pairing/secret-response.openapi";
+import {
+  ApiStationPairSecretResponse,
+  subscriptionAccessSchema,
+} from "../device-pairing/secret-response.openapi";
 
 /**
  * `pair` is deliberately unauthenticated because an unpaired station has no
@@ -32,7 +35,7 @@ export class StationPairController {
     schema: {
       type: "object",
       additionalProperties: false,
-      required: ["device"],
+      required: ["device", "subscription"],
       properties: {
         device: {
           type: "object",
@@ -52,6 +55,7 @@ export class StationPairController {
             },
           },
         },
+        subscription: subscriptionAccessSchema,
       },
     },
   })

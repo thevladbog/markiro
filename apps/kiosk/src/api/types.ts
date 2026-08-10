@@ -53,6 +53,13 @@ export interface CreateOrderResultDto {
   conflicts: OrderConflict[];
 }
 
+export interface SubscriptionAccessSnapshotDto {
+  access: "managed" | "read_only" | "unmanaged";
+  status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
 /**
  * GET /kiosk/bootstrap — everything a kiosk needs to work offline.
  *
@@ -74,6 +81,7 @@ export interface CreateOrderResultDto {
  */
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
+  subscription: SubscriptionAccessSnapshotDto;
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];

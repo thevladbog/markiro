@@ -7,10 +7,12 @@ import type {
 
 export class KioskApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly code: string | null;
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "KioskApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -139,17 +141,27 @@ export function isUnreachable(err: unknown): boolean {
   return GATEWAY_STATUSES.has(err.status);
 }
 
-async function readError(res: Response): Promise<string> {
+interface KioskErrorResponse {
+  message: string;
+  code: string | null;
+}
+
+async function readError(res: Response): Promise<KioskErrorResponse> {
   try {
     const body: unknown = await res.json();
-    if (body && typeof body === "object" && "message" in body) {
-      const message = (body as { message?: unknown }).message;
-      if (typeof message === "string") return message;
+    if (body && typeof body === "object") {
+      const response = body as { code?: unknown; message?: unknown };
+      if (typeof response.message === "string") {
+        return {
+          message: response.message,
+          code: typeof response.code === "string" ? response.code : null,
+        };
+      }
     }
   } catch {
     // non-JSON body
   }
-  return res.statusText || `HTTP ${res.status}`;
+  return { message: res.statusText || `HTTP ${res.status}`, code: null };
 }
 
 function baseOf(serverUrl: string): string {
@@ -198,7 +210,10 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
 
   const attempt = (async (): Promise<T> => {
     const res = await fetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) throw new KioskApiError(res.status, await readError(res));
+    if (!res.ok) {
+      const error = await readError(res);
+      throw new KioskApiError(res.status, error.message, error.code);
+    }
     return (await res.json()) as T;
   })();
 

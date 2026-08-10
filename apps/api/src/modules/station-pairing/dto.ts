@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { OperatorMirrorRecord } from "@markiro/db";
+import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
 
 export const pairStationSchema = z.object({
   code: z.string().regex(/^\d{8}$/),
@@ -24,7 +25,8 @@ export interface PairStationResultDto {
   };
   credential: { apiKey: string; serverUrl: string };
   operators: OperatorMirrorRecord[];
+  subscription: SubscriptionAccessSnapshot;
 }
 
 /** Authenticated legacy-config bootstrap; deliberately contains no credential material. */
-export type StationIdentityResultDto = Pick<PairStationResultDto, "device">;
+export type StationIdentityResultDto = Pick<PairStationResultDto, "device" | "subscription">;

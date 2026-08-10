@@ -46,9 +46,24 @@ const kioskOperatorSchema: ResponseSchema = {
   },
 };
 
+export const subscriptionAccessSchema: ResponseSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["access", "status", "startsAt", "endsAt"],
+  properties: {
+    access: { type: "string", enum: ["managed", "read_only", "unmanaged"] },
+    status: {
+      type: "string",
+      enum: ["unmanaged", "pending_activation", "trial", "active", "expired", "read_only"],
+    },
+    startsAt: { type: "string", format: "date-time", nullable: true },
+    endsAt: { type: "string", format: "date-time", nullable: true },
+  },
+};
+
 const stationPairSchema: ResponseSchema = {
   type: "object",
-  required: ["device", "credential", "operators"],
+  required: ["device", "credential", "operators", "subscription"],
   properties: {
     device: {
       type: "object",
@@ -75,14 +90,25 @@ const stationPairSchema: ResponseSchema = {
       },
     },
     operators: { type: "array", items: stationOperatorSchema },
+    subscription: subscriptionAccessSchema,
   },
 };
 
 const kioskBootstrapSchema: ResponseSchema = {
   type: "object",
-  required: ["generatedAt", "config", "badgeSalt", "reasons", "products", "employees", "operators"],
+  required: [
+    "generatedAt",
+    "subscription",
+    "config",
+    "badgeSalt",
+    "reasons",
+    "products",
+    "employees",
+    "operators",
+  ],
   properties: {
     generatedAt: { type: "string", format: "date-time" },
+    subscription: subscriptionAccessSchema,
     config: {
       type: "object",
       required: ["dayLimitPerEmployee", "showPrices"],

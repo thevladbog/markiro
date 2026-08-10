@@ -13,6 +13,8 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { RequireSubscriptionWrite } from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -28,7 +30,7 @@ import { PickupRejectionsService } from "./pickup-rejections.service";
 // it (see docs/device-key-surface.md).
 @ApiTags("pickup-rejections")
 @Controller("pickup-rejections")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 export class PickupRejectionsController {
   constructor(private readonly pickupRejectionsService: PickupRejectionsService) {}
 
@@ -44,6 +46,7 @@ export class PickupRejectionsController {
 
   @Post(":id/acknowledge")
   @HttpCode(200)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async acknowledge(
     @Req() req: RequestWithTenant,

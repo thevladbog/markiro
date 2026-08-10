@@ -61,6 +61,7 @@ export class StationPairingService {
 
   /** Resolves metadata only from the tenant/device principal proven by TenantGuard. */
   async identity(tenantId: string, deviceId: string): Promise<StationIdentityResultDto> {
+    const serverNow = new Date();
     const [station] = await this.db
       .select({
         id: schema.stationDevices.id,
@@ -98,6 +99,7 @@ export class StationPairingService {
             ? { id: station.lineId, name: station.lineName }
             : null,
       },
+      subscription: await this.entitlements.accessSnapshot(tenantId, this.db, serverNow),
     };
   }
 
@@ -278,6 +280,8 @@ export class StationPairingService {
       );
     if (!station) throw new StationPairingException("PAIR_INVALID");
 
+    await this.entitlements.assertWriteAccess(candidate.tenantId, this.db, new Date());
+
     // Build before the conditional claim. If an operator mirror cannot be
     // prepared, the code stays live and no candidate key exists to clean up.
     const operators = await this.operators.buildRoster(candidate.tenantId);
@@ -395,6 +399,7 @@ export class StationPairingService {
       },
       credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
       operators,
+      subscription: await this.entitlements.accessSnapshot(candidate.tenantId),
     };
   }
 

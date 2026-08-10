@@ -3,6 +3,8 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import { RequireSubscriptionWrite } from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -24,7 +26,7 @@ import { ConflictsService } from "./conflicts.service";
  */
 @ApiTags("conflicts")
 @Controller("conflicts")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 export class ConflictsController {
   constructor(private readonly conflictsService: ConflictsService) {}
 
@@ -39,6 +41,7 @@ export class ConflictsController {
 
   @Post(":id/review")
   @HttpCode(200)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async reviewConflict(
     @Req() req: RequestWithTenant,

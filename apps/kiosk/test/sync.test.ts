@@ -699,6 +699,57 @@ describe("flushQueue", () => {
     ]);
   });
 
+  it("sets aside one post-expiry order and drains later eligible records", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [{ rawKm: "01…late" }],
+        createdAt: "2026-08-10T12:00:00.000Z",
+      },
+      "e1",
+    );
+    for (const deviceSeq of [2, 3]) {
+      await enqueueOrder(
+        {
+          deviceSeq,
+          badgeDigest: "B",
+          reason: "buy",
+          items: [],
+          createdAt: "2026-08-09T12:00:00.000Z",
+        },
+        "e1",
+      );
+    }
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        if (body.deviceSeq === 1) {
+          throw new KioskApiError(403, "Subscription is read-only", "subscription_read_only");
+        }
+        return {
+          orderNo: `ORD-26-000${body.deviceSeq}`,
+          status: "pending",
+          itemCount: 0,
+          conflicts: [],
+        };
+      }),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-08-10T12:01:00.000Z"));
+
+    expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2, 3]);
+    expect(await listQueue()).toEqual([]);
+    expect(await listQuarantine()).toMatchObject([
+      {
+        deviceSeq: 1,
+        status: 403,
+        message: "Subscription is read-only",
+      },
+    ]);
+  });
+
   /**
    * 401 IS THE DEVICE, NOT THE ORDER. An archived kiosk answers every request
    * with it, so quarantining on a 401 would empty a whole queue on a
@@ -1102,6 +1153,15 @@ describe("isTerminalRejection", () => {
     expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(false);
   });
 
+  it("treats only the exact subscription read-only 403 as a per-record verdict", () => {
+    expect(
+      isTerminalRejection(
+        new KioskApiError(403, "Subscription is read-only", "subscription_read_only"),
+      ),
+    ).toBe(true);
+    expect(isTerminalRejection(new KioskApiError(403, "Forbidden", "some_other_code"))).toBe(false);
+  });
+
   it("keeps a transport failure retryable — it carries no verdict at all", () => {
     expect(isTerminalRejection(new TypeError("Failed to fetch"))).toBe(false);
     expect(isTerminalRejection(new KioskTimeoutError(15_000))).toBe(false);
@@ -1110,6 +1170,12 @@ describe("isTerminalRejection", () => {
 
 const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
   generatedAt,
+  subscription: {
+    access: "managed",
+    status: "active",
+    startsAt: "2026-07-01T00:00:00.000Z",
+    endsAt: "2026-08-31T00:00:00.000Z",
+  },
   config: { dayLimitPerEmployee: 5, showPrices: true },
   badgeSalt: "c2FsdA==",
   reasons: [],

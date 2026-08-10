@@ -187,6 +187,12 @@ describe("redeemStationPairing", () => {
           },
           credential: { apiKey: "station-credential", serverUrl: "https://station.example" },
           operators: [],
+          subscription: {
+            access: "managed",
+            status: "active",
+            startsAt: "2026-08-01T00:00:00.000Z",
+            endsAt: "2026-09-01T00:00:00.000Z",
+          },
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       ),

@@ -53,4 +53,11 @@ export interface EffectiveEntitlements {
   features: Record<FeatureEntitlementKey, boolean>;
 }
 
+export interface SubscriptionAccessSnapshot {
+  access: EffectiveEntitlements["access"];
+  status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
+  startsAt: string | null;
+  endsAt: string | null;
+}
+
 export type SubscriptionEnforcementMode = "managed_only" | "all";

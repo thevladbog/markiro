@@ -156,6 +156,12 @@ beforeAll(async () => {
 function bootstrapAt(generatedAt: string): KioskBootstrapDto {
   return {
     generatedAt,
+    subscription: {
+      access: "managed",
+      status: "active",
+      startsAt: "2026-07-01T00:00:00.000Z",
+      endsAt: "2026-08-31T00:00:00.000Z",
+    },
     config: { dayLimitPerEmployee: 5, showPrices: true },
     badgeSalt: SALT,
     reasons: [{ id: "r-defect", name: "Брак" }],

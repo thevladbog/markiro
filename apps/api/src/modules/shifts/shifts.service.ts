@@ -29,6 +29,8 @@ import type {
   ShiftMode,
   UpdateShiftDto,
 } from "./dto";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
@@ -49,6 +51,7 @@ export class ShiftsService {
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
     private readonly sscc: SsccService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
@@ -109,6 +112,9 @@ export class ShiftsService {
    * one) -- allowed by design; the printing station decides the fallback.
    */
   async createShift(tenantId: string, data: CreateShiftDto): Promise<ShiftDto> {
+    if (data.palletsEnabled === true) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+    }
     const product = await this.findProductRow(tenantId, data.productId);
     if (!product) {
       throw new BadRequestException("Unknown product for this organization");
@@ -166,6 +172,9 @@ export class ShiftsService {
    * (post-patch) values, mirroring the create-time validation.
    */
   async updateShift(tenantId: string, id: string, data: UpdateShiftDto): Promise<ShiftDto> {
+    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+    }
     const current = await this.findRow(tenantId, id);
     if (!current) {
       throw new NotFoundException();
@@ -268,6 +277,13 @@ export class ShiftsService {
     if (current.status !== "active") {
       throw new ConflictException("Shift can only be closed while active");
     }
+    const access = await this.entitlements.resolveRecovery(tenantId);
+    if (access.access === "read_only") {
+      const endsAt = access.subscription?.endsAt;
+      if (!endsAt || current.openedAt === null || current.openedAt >= endsAt) {
+        throw new SubscriptionReadOnlyException();
+      }
+    }
 
     const [row] = await this.db
       .update(schema.shifts)
@@ -293,6 +309,9 @@ export class ShiftsService {
     if (!current) throw new NotFoundException();
     if (current.status !== "planned") {
       throw new ConflictException("Shift can only be opened while planned");
+    }
+    if (current.palletsEnabled) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
     const [row] = await this.db
       .update(schema.shifts)

@@ -15,6 +15,11 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -32,7 +37,7 @@ import { TeamService } from "./team.service";
 
 @ApiTags("team")
 @Controller("team")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @RequirePermissions(CABINET_CAPABILITY.MEMBERS_MANAGE)
 export class TeamController {
   constructor(private readonly team: TeamService) {}
@@ -43,6 +48,7 @@ export class TeamController {
   }
 
   @Post("invitations")
+  @RequireSubscriptionWrite()
   createInvitation(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createTeamInvitationSchema)) body: CreateTeamInvitationDto,
@@ -51,6 +57,7 @@ export class TeamController {
   }
 
   @Post("invitations/:id/resend")
+  @RequireSubscriptionWrite()
   resendInvitation(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -60,11 +67,13 @@ export class TeamController {
 
   @Delete("invitations/:id")
   @HttpCode(204)
+  @AllowSubscriptionReadOnly("security")
   cancelInvitation(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.team.cancelInvitation(req.tenantId!, req.userId!, id);
   }
 
   @Patch("members/:id")
+  @RequireSubscriptionWrite()
   updateMember(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -74,6 +83,7 @@ export class TeamController {
   }
 
   @Put("members/:id/employee")
+  @RequireSubscriptionWrite()
   linkEmployee(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -83,12 +93,14 @@ export class TeamController {
   }
 
   @Delete("members/:id/employee")
+  @RequireSubscriptionWrite()
   unlinkEmployee(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<TeamMemberDto> {
     return this.team.unlinkEmployee(req.tenantId!, req.userId!, id);
   }
 
   @Delete("members/:id")
   @HttpCode(204)
+  @AllowSubscriptionReadOnly("security")
   removeMember(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.team.removeMember(req.tenantId!, req.userId!, id);
   }

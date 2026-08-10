@@ -17,6 +17,14 @@ export interface StationProvisioning {
   apiKey: string;
   serverUrl: string;
   operators: OperatorMirrorRecord[];
+  subscription?: StationSubscriptionAccess;
+}
+
+interface StationSubscriptionAccess {
+  access: "managed" | "read_only" | "unmanaged";
+  status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
+  startsAt: string | null;
+  endsAt: string | null;
 }
 
 export type PairingResult =
@@ -124,8 +132,10 @@ async function readJson(response: Response): Promise<unknown> {
  * write. A partial response must never leave the station half-paired.
  */
 function decodeProvisioning(value: unknown): StationProvisioning | null {
-  if (!isExactRecord(value, ["device", "credential", "operators"])) return null;
-  const { device, credential, operators } = value;
+  if (!isExactRecordWithOptional(value, ["device", "credential", "operators"], ["subscription"])) {
+    return null;
+  }
+  const { device, credential, operators, subscription } = value;
   if (!isExactRecord(device, ["id", "name", "tenantId", "organizationName", "line"])) return null;
   if (!isExactRecord(credential, ["apiKey", "serverUrl"])) return null;
   if (
@@ -136,7 +146,8 @@ function decodeProvisioning(value: unknown): StationProvisioning | null {
     !isNonEmptyString(credential.apiKey) ||
     !isHttpsOrHttpUrl(credential.serverUrl) ||
     !Array.isArray(operators) ||
-    !operators.every(isOperator)
+    !operators.every(isOperator) ||
+    (subscription !== undefined && !isSubscriptionAccess(subscription))
   ) {
     return null;
   }
@@ -165,7 +176,26 @@ function decodeProvisioning(value: unknown): StationProvisioning | null {
     apiKey: credential.apiKey,
     serverUrl: credential.serverUrl,
     operators,
+    ...(subscription !== undefined ? { subscription } : {}),
   };
+}
+
+function isSubscriptionAccess(value: unknown): value is StationSubscriptionAccess {
+  return (
+    isExactRecord(value, ["access", "status", "startsAt", "endsAt"]) &&
+    typeof value.access === "string" &&
+    ["managed", "read_only", "unmanaged"].includes(value.access) &&
+    typeof value.status === "string" &&
+    ["unmanaged", "pending_activation", "trial", "active", "expired", "read_only"].includes(
+      value.status,
+    ) &&
+    isNullableTimestamp(value.startsAt) &&
+    isNullableTimestamp(value.endsAt)
+  );
+}
+
+function isNullableTimestamp(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
 }
 
 function isOperator(value: unknown): value is OperatorMirrorRecord {
@@ -216,5 +246,18 @@ function isExactRecord(value: unknown, keys: string[]): value is Record<string, 
     isRecord(value) &&
     Object.keys(value).length === keys.length &&
     keys.every((key) => key in value)
+  );
+}
+
+function isExactRecordWithOptional(
+  value: unknown,
+  required: string[],
+  optional: string[],
+): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    required.every((key) => key in value) &&
+    keys.every((key) => required.includes(key) || optional.includes(key))
   );
 }

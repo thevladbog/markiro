@@ -4,7 +4,9 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import {
   SubscriptionEntitlementsInvalidException,
+  SubscriptionFeatureDisabledException,
   SubscriptionLimitReachedException,
+  SubscriptionReadOnlyException,
   SubscriptionUnmanagedException,
 } from "./subscription-errors";
 import {
@@ -16,6 +18,7 @@ import {
   QUANTITATIVE_ENTITLEMENT_KEYS,
   type QuantitativeEntitlementKey,
   type SubscriptionEnforcementMode,
+  type SubscriptionAccessSnapshot,
   type SubscriptionTransaction,
   subscriptionQuotaLockIdentity,
 } from "./entitlements.types";
@@ -154,6 +157,56 @@ export class EntitlementsService {
       stations: stations?.value ?? 0,
       kiosks: kiosks?.value ?? 0,
       cabinetUsers: (members?.value ?? 0) + (invitations?.value ?? 0),
+    };
+  }
+
+  async resolveRecovery(
+    tenantId: string,
+    executor: EntitlementsExecutor = this.db,
+    at = new Date(),
+  ): Promise<EffectiveEntitlements> {
+    const resolved = await this.resolve(tenantId, executor, at);
+    if (resolved.access === "unmanaged" && this.enforcementMode === "all") {
+      throw new SubscriptionUnmanagedException();
+    }
+    return resolved;
+  }
+
+  async assertWriteAccess(
+    tenantId: string,
+    executor: EntitlementsExecutor = this.db,
+    at = new Date(),
+  ): Promise<EffectiveEntitlements> {
+    const resolved = await this.resolveRecovery(tenantId, executor, at);
+    if (resolved.access === "read_only") throw new SubscriptionReadOnlyException();
+    return resolved;
+  }
+
+  async assertFeatureAccess(
+    tenantId: string,
+    key: FeatureEntitlementKey,
+    executor: EntitlementsExecutor = this.db,
+    at = new Date(),
+  ): Promise<EffectiveEntitlements> {
+    const resolved = await this.assertWriteAccess(tenantId, executor, at);
+    if (!resolved.features[key]) throw new SubscriptionFeatureDisabledException(key);
+    return resolved;
+  }
+
+  async accessSnapshot(
+    tenantId: string,
+    executor: EntitlementsExecutor = this.db,
+    at = new Date(),
+  ): Promise<SubscriptionAccessSnapshot> {
+    const resolved = await this.resolve(tenantId, executor, at);
+    return {
+      access: resolved.access,
+      status:
+        resolved.access === "unmanaged"
+          ? "unmanaged"
+          : (resolved.subscription?.status ?? "read_only"),
+      startsAt: resolved.subscription?.startsAt?.toISOString() ?? null,
+      endsAt: resolved.subscription?.endsAt?.toISOString() ?? null,
     };
   }
 

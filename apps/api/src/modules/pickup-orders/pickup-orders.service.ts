@@ -30,6 +30,8 @@ import { nextOrderNo } from "../../pickup/order-number";
 import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
 import { OperatorsService } from "../operators/operators.service";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 import type {
   CreateOrderDto,
   CreateOrderResultDto,
@@ -123,6 +125,7 @@ export class PickupOrdersService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /**
@@ -169,7 +172,18 @@ export class PickupOrdersService {
     // minting itself a fresh daily allowance (see its doc comment). Hoisted
     // here rather than left at step 5 purely so the early-throw paths can
     // share it.
-    const when = this.resolveScanTime(dto.createdAt, kioskId);
+    const serverNow = new Date();
+    const when = this.resolveScanTime(dto.createdAt, kioskId, serverNow);
+    const access = await this.entitlements.resolveRecovery(tenantId, this.db, serverNow);
+    if (access.access === "read_only") {
+      const endsAt = access.subscription?.endsAt;
+      const claimedAt = dto.createdAt ? new Date(dto.createdAt) : null;
+      const occurrenceIsAuthoritativeEnough =
+        claimedAt !== null && claimedAt.getTime() === when.getTime();
+      if (!endsAt || !occurrenceIsAuthoritativeEnough || when >= endsAt) {
+        throw new SubscriptionReadOnlyException();
+      }
+    }
 
     // 2. Badge -> active employee (badge's revoked_at is null, employee active).
     //
@@ -348,6 +362,7 @@ export class PickupOrdersService {
     // UTC day the per-employee counts below are taken over can never straddle
     // a midnight between two `new Date()` calls.
     const generatedAt = new Date();
+    const subscription = await this.entitlements.accessSnapshot(tenantId, this.db, generatedAt);
 
     const [kiosk] = await this.db
       .select({
@@ -411,6 +426,7 @@ export class PickupOrdersService {
 
     return {
       generatedAt: generatedAt.toISOString(),
+      subscription,
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -1437,8 +1453,7 @@ export class PickupOrdersService {
    * is the conservative outcome — the order is kept, and the allowance it
    * spends is today's.
    */
-  private resolveScanTime(createdAt: string | undefined, kioskId: string): Date {
-    const now = new Date();
+  private resolveScanTime(createdAt: string | undefined, kioskId: string, now = new Date()): Date {
     if (!createdAt) return now;
 
     const claimed = new Date(createdAt);

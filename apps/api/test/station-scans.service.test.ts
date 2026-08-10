@@ -16,6 +16,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
 import { StationScansService } from "../src/modules/station-scans/station-scans.service";
 import type { SsccService } from "../src/modules/sscc/sscc.service";
 import type { SyncBatchDto } from "../src/modules/station-scans/dto";
+import type { EntitlementsService } from "../src/subscriptions/entitlements.service";
 
 function item(scannedAt: string): SyncBatchDto["items"][number] {
   return {
@@ -36,6 +37,9 @@ function item(scannedAt: string): SyncBatchDto["items"][number] {
 // so a stub that is never called satisfies StationScansService's second
 // constructor argument.
 const ssccServiceStub = { recordConsumedSerial: vi.fn() } as unknown as SsccService;
+const entitlementsServiceStub = {
+  resolveRecovery: async () => ({ access: "managed" }),
+} as unknown as EntitlementsService;
 
 /**
  * `monthsAgo` months before "now" (real wall clock), on the 15th at
@@ -78,7 +82,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
         throw new Error("must not open a transaction for a batch rejected by the month cap");
       },
     } as unknown as Db;
-    const service = new StationScansService(dbStub, ssccServiceStub);
+    const service = new StationScansService(dbStub, ssccServiceStub, entitlementsServiceStub);
 
     // One item per month across more months than the cap (24) allows --
     // well within `items.max(500)` (dto.ts), exactly the shape Finding 2
@@ -129,7 +133,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
         return fn(tx);
       },
     } as unknown as Db;
-    const service = new StationScansService(dbStub, ssccServiceStub);
+    const service = new StationScansService(dbStub, ssccServiceStub, entitlementsServiceStub);
 
     const items = Array.from({ length: 3 }, (_, i) => item(`2026-0${i + 1}-15T00:00:00.000Z`));
 
@@ -172,7 +176,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
         throw new Error("must not open a transaction for a batch outside the timestamp window");
       },
     } as unknown as Db;
-    const service = new StationScansService(dbStub, ssccServiceStub);
+    const service = new StationScansService(dbStub, ssccServiceStub, entitlementsServiceStub);
 
     // 20 years in the past -- absurdly outside any reasonable window, and
     // nowhere near WINDOW_PAST_MS (3 years, station-scans.service.ts).
@@ -207,7 +211,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
         throw new Error("must not open a transaction for a batch with an unknown shift");
       },
     } as unknown as Db;
-    const service = new StationScansService(dbStub, ssccServiceStub);
+    const service = new StationScansService(dbStub, ssccServiceStub, entitlementsServiceStub);
 
     // Well within the timestamp window, so this isolates the shift-ownership
     // rejection rather than the window one.

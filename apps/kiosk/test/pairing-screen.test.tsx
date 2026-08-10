@@ -52,6 +52,12 @@ function bundle(generatedAt = "2026-07-28T07:00:00.000Z"): PairKioskResultDto {
     nextDeviceSeq: 7,
     bootstrap: {
       generatedAt,
+      subscription: {
+        access: "managed",
+        status: "active",
+        startsAt: "2026-07-01T00:00:00.000Z",
+        endsAt: "2026-08-31T00:00:00.000Z",
+      },
       config: { dayLimitPerEmployee: 5, showPrices: true },
       badgeSalt: "c2FsdA==",
       reasons: [{ id: "r1", name: "Брак" }],

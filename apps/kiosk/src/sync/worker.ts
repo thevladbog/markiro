@@ -389,12 +389,24 @@ export function flushQueue(client: KioskClient, now: () => Date): Promise<void> 
  * 408 and 429 are transport back-pressure and retry by definition. A status
  * left off this list costs only a stalled queue that recovers; one wrongly on
  * it costs orders that could have been delivered — so the list stays the three
- * the server actually raises against a body it will never take.
+ * statuses the server actually raises against a body it will never take.
+ *
+ * Subscription expiry is the one coded exception. A 403 by itself remains
+ * retryable: it may describe an authorization policy that changes when an
+ * administrator repairs the device or user. The exact
+ * `subscription_read_only` code instead means this record's claimed occurrence
+ * is after the subscription ended. Replaying the same immutable record cannot
+ * change that verdict, while later queue records may still be eligible because
+ * they carry an earlier validated occurrence and a different device sequence.
  */
 const TERMINAL_STATUSES: ReadonlySet<number> = new Set([400, 409, 422]);
 
 export function isTerminalRejection(err: unknown): boolean {
-  return err instanceof KioskApiError && TERMINAL_STATUSES.has(err.status);
+  return (
+    err instanceof KioskApiError &&
+    (TERMINAL_STATUSES.has(err.status) ||
+      (err.status === 403 && err.code === "subscription_read_only"))
+  );
 }
 
 /**

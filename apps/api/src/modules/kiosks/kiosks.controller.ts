@@ -37,13 +37,18 @@ import {
   ApiLegacyKioskEnrollSecretResponse,
   ApiPairingCodeSecretResponse,
 } from "../device-pairing/secret-response.openapi";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 
 // Cabinet-only: the kiosk device talks to /kiosk/* behind KioskDeviceGuard and
 // never needs this module, so no device key — station or kiosk — should reach
 // it (see docs/device-key-surface.md).
 @ApiTags("kiosks")
 @Controller("kiosks")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 export class KiosksController {
   constructor(
     private readonly kiosksService: KiosksService,
@@ -59,6 +64,7 @@ export class KiosksController {
 
   @Post()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async createKiosk(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createKioskSchema)) body: CreateKioskDto,
@@ -75,6 +81,7 @@ export class KiosksController {
 
   @Patch(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async updateKiosk(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -99,6 +106,7 @@ export class KiosksController {
   @Delete(":id")
   @HttpCode(204)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @AllowSubscriptionReadOnly("security")
   async archiveKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     try {
       await this.kiosksService.archiveKiosk(req.tenantId!, id);
@@ -113,6 +121,7 @@ export class KiosksController {
   @Post(":id/unbind")
   @HttpCode(204)
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  @AllowSubscriptionReadOnly("security")
   async unbindKiosk(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     try {
       await this.kiosksService.unbindKiosk(req.tenantId!, id);
@@ -126,6 +135,7 @@ export class KiosksController {
   @Put(":id/products")
   @HttpCode(200)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async setProducts(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -139,6 +149,7 @@ export class KiosksController {
   @Header("Cache-Control", "no-store")
   @ApiLegacyKioskEnrollSecretResponse()
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  @RequireSubscriptionWrite()
   async enroll(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -158,6 +169,7 @@ export class KiosksController {
   @Header("Cache-Control", "no-store")
   @ApiPairingCodeSecretResponse()
   @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
+  @RequireSubscriptionWrite()
   async issuePairingCode(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
