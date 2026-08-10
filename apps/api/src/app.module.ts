@@ -104,7 +104,7 @@ export class AppModule {
         BoxExceptionsModule,
         StorageModule.forRoot(env),
         TeamModule.forRoot(env.ADMIN_ORIGIN),
-        InvitationsModule,
+        InvitationsModule.forRoot(setup.databaseUrl),
         ProfileModule,
         TenantOwnerActivationModule,
       ],

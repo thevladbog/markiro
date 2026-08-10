@@ -13,6 +13,10 @@ import type { AuthSetup } from "../../auth/auth.setup";
 import { AUTH, DB, DB_POOL } from "../../auth/auth.module";
 import { subscriptionQuotaLockIdentity } from "../../subscriptions/entitlements.types";
 import { MailJobsService, type MailPgClient } from "../mail/mail-jobs.service";
+import {
+  InvitationAdvisoryLockPool,
+  type InvitationAdvisoryLockClient,
+} from "./invitation-advisory-lock-pool.service";
 import type { PublicInvitationDto, RegisterInvitationDto } from "./dto";
 
 @Injectable()
@@ -23,6 +27,7 @@ export class InvitationsService {
     @Inject(DB) private readonly db: Db,
     @Inject(DB_POOL) private readonly pool: AuthSetup["pool"],
     private readonly mailJobs: MailJobsService,
+    private readonly advisoryLocks: InvitationAdvisoryLockPool,
   ) {}
 
   async getPublic(invitationId: string): Promise<PublicInvitationDto> {
@@ -99,18 +104,16 @@ export class InvitationsService {
       throw new ForbiddenException("Signed-in account is not the invitation recipient");
     }
 
-    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, (client) =>
-      this.withInvitationAcceptanceQuotaLock(client, invitation.organizationId, async () => {
-        const response = await this.auth.api.acceptInvitation({
-          body: { invitationId },
-          headers,
-          asResponse: true,
-        });
-        if (!response.ok) return response;
-        await this.finalizeAccepted(invitationId, session.user.id, invitation.email);
-        return response;
-      }),
-    );
+    return this.withInvitationAcceptanceLocks(invitationId, invitation.organizationId, async () => {
+      const response = await this.auth.api.acceptInvitation({
+        body: { invitationId },
+        headers,
+        asResponse: true,
+      });
+      if (!response.ok) return response;
+      await this.finalizeAccepted(invitationId, session.user.id, invitation.email);
+      return response;
+    });
   }
 
   async reject(invitationId: string, headers: Headers): Promise<Response> {
@@ -456,18 +459,7 @@ export class InvitationsService {
     organizationId: string,
     action: (client: MailPgClient) => Promise<T>,
   ): Promise<T> {
-    const [delivery] = await this.db
-      .select({ id: schema.emailDeliveries.id })
-      .from(schema.emailDeliveries)
-      .where(
-        and(
-          eq(schema.emailDeliveries.tenantId, organizationId),
-          eq(schema.emailDeliveries.sourceId, invitationId),
-          inArray(schema.emailDeliveries.status, ["queued", "sending", "retrying"]),
-        ),
-      )
-      .orderBy(desc(schema.emailDeliveries.createdAt))
-      .limit(1);
+    const delivery = await this.findActiveInvitationDelivery(invitationId, organizationId);
     if (!delivery) {
       const client = await this.pool.connect();
       try {
@@ -481,27 +473,93 @@ export class InvitationsService {
     return result.value;
   }
 
-  private async withInvitationAcceptanceQuotaLock<T>(
-    client: MailPgClient,
+  private async withInvitationAcceptanceLocks<T>(
+    invitationId: string,
     organizationId: string,
     action: () => Promise<T>,
   ): Promise<T> {
-    const lock = subscriptionQuotaLockIdentity(organizationId, "cabinetUsers");
-    let acquired = false;
+    const delivery = await this.findActiveInvitationDelivery(invitationId, organizationId);
+    const quotaLock = subscriptionQuotaLockIdentity(organizationId, "cabinetUsers");
+    const client = await this.advisoryLocks.connect();
+    let deliveryAcquired = false;
+    let quotaAcquired = false;
+    let discardClient = false;
     try {
+      if (delivery) {
+        const result = await client.query<{ locked: boolean }>(
+          "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
+          [delivery.id],
+        );
+        deliveryAcquired = result.rows[0]?.locked === true;
+        if (!deliveryAcquired) {
+          throw new ConflictException({ code: "delivery_in_flight" });
+        }
+      }
       await client.query("SELECT pg_advisory_lock(hashtext($1), $2)", [
-        lock.namespace,
-        lock.keyOrder,
+        quotaLock.namespace,
+        quotaLock.keyOrder,
       ]);
-      acquired = true;
+      quotaAcquired = true;
       return await action();
     } finally {
-      if (acquired) {
-        await client.query("SELECT pg_advisory_unlock(hashtext($1), $2)", [
-          lock.namespace,
-          lock.keyOrder,
-        ]);
+      if (quotaAcquired) {
+        const released = await this.releaseAcceptanceLock(
+          client,
+          "SELECT pg_advisory_unlock(hashtext($1), $2) AS unlocked",
+          [quotaLock.namespace, quotaLock.keyOrder],
+          "quota",
+        );
+        discardClient ||= !released;
       }
+      if (deliveryAcquired && delivery) {
+        const released = await this.releaseAcceptanceLock(
+          client,
+          "SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS unlocked",
+          [delivery.id],
+          "delivery",
+        );
+        discardClient ||= !released;
+      }
+      try {
+        client.release(discardClient);
+      } catch {
+        this.#logger.error("Could not return an invitation advisory-lock connection to its pool");
+      }
+    }
+  }
+
+  private async findActiveInvitationDelivery(invitationId: string, organizationId: string) {
+    const [delivery] = await this.db
+      .select({ id: schema.emailDeliveries.id })
+      .from(schema.emailDeliveries)
+      .where(
+        and(
+          eq(schema.emailDeliveries.tenantId, organizationId),
+          eq(schema.emailDeliveries.sourceId, invitationId),
+          inArray(schema.emailDeliveries.status, ["queued", "sending", "retrying"]),
+        ),
+      )
+      .orderBy(desc(schema.emailDeliveries.createdAt))
+      .limit(1);
+    return delivery;
+  }
+
+  private async releaseAcceptanceLock(
+    client: InvitationAdvisoryLockClient,
+    query: string,
+    values: readonly unknown[],
+    kind: "delivery" | "quota",
+  ): Promise<boolean> {
+    try {
+      const result = await client.query<{ unlocked: boolean }>(query, values);
+      if (result.rows[0]?.unlocked !== true) {
+        this.#logger.error(`Invitation ${kind} advisory lock was not owned during cleanup`);
+        return false;
+      }
+      return true;
+    } catch {
+      this.#logger.error(`Could not release an invitation ${kind} advisory lock`);
+      return false;
     }
   }
 

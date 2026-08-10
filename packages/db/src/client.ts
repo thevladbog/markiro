@@ -1,8 +1,12 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 
-export function createDb(url: string) {
-  const pool = new pg.Pool({ connectionString: url });
+export interface DbPoolOptions {
+  max?: number;
+}
+
+export function createDb(url: string, poolOptions: DbPoolOptions = {}) {
+  const pool = new pg.Pool({ connectionString: url, ...poolOptions });
   const db = drizzle(pool);
   return { db, pool };
 }

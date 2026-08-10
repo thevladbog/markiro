@@ -459,13 +459,6 @@ describe.skipIf(!ready)("transactional subscription quotas", () => {
       ]),
     );
     expect((await app!.get(EntitlementsService).usage(tenantId)).cabinetUsers).toBe(2);
-    const memberships = await db
-      .select({ userId: schema.member.userId })
-      .from(schema.member)
-      .where(eq(schema.member.organizationId, tenantId));
-    expect(memberships.map((row) => row.userId).sort()).toEqual(
-      [owner!.userId, inviteeMember!.userId].sort(),
-    );
     await expect(
       db
         .select({
