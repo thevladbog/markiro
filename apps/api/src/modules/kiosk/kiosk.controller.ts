@@ -14,7 +14,6 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import {
   AllowSubscriptionReadOnly,
   AllowSubscriptionRecovery,
-  RequireSubscriptionWrite,
 } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
@@ -54,7 +53,7 @@ export class KioskController {
   }
 
   @Post("order-admissions")
-  @RequireSubscriptionWrite()
+  @AllowSubscriptionRecovery("kiosk")
   async attestOrder(
     @Req() req: RequestWithKiosk,
     @Body(new ZodValidationPipe(createOrderAdmissionSchema)) body: CreateOrderAdmissionDto,

@@ -812,6 +812,25 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         .set("x-kiosk-token", token)
         .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
         .send({ ...content, ...body });
+    const retriedAdmission = await request(app!.getHttpServer())
+      .post("/kiosk/order-admissions")
+      .set("x-kiosk-token", kioskToken)
+      .send({
+        ...content,
+        deviceSeq: 0,
+        admissionNonce: exact.body.admissionProof,
+      })
+      .expect(201);
+    expect(retriedAdmission.body).toEqual(exact.body);
+    await request(app!.getHttpServer())
+      .post("/kiosk/order-admissions")
+      .set("x-kiosk-token", kioskToken)
+      .send({
+        ...content,
+        deviceSeq: 99,
+        admissionNonce: "n".repeat(32),
+      })
+      .expect(403);
     await post({
       deviceSeq: 0,
       createdAt: exact.body.claimedAt,
@@ -894,12 +913,26 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
   it("has no fixed bootstrap proof window and admits sequence 128 after 129 queued records", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
+    const volumeEmployeeId = randomUUID();
+    const volumeBadge = `volume-badge-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: volumeEmployeeId,
+      tenantId,
+      fullName: "Admission volume employee",
+      status: "active",
+    });
+    await db.insert(schema.employeeBadges).values({
+      tenantId,
+      employeeId: volumeEmployeeId,
+      badgeCode: volumeBadge,
+    });
     const kioskId = randomUUID();
     const kioskToken = `proof-volume-${randomUUID()}`;
     await db.insert(schema.kiosks).values({
       id: kioskId,
       tenantId,
       name: "Admission volume kiosk",
+      dayLimitPerEmployee: 1000,
       deviceTokenHash: hashDeviceToken(kioskToken),
     });
     await attachPlan(tenantId, {
@@ -914,35 +947,81 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .expect(200);
     expect(bootstrap.body).not.toHaveProperty("admissionProofs");
 
-    const statuses: number[] = [];
-    for (let deviceSeq = 0; deviceSeq <= 128; deviceSeq += 1) {
+    const admissions: Array<{ deviceSeq: number; admissionProof: string; claimedAt: string }> = [];
+    for (let deviceSeq = 0; deviceSeq < 128; deviceSeq += 1) {
       const response = await request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", kioskToken)
-        .send({ deviceSeq, badgeCode: "badge", reason: "buy", items: [] });
-      statuses.push(response.status);
+        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [] });
+      expect(response.status).toBe(201);
+      admissions.push({
+        deviceSeq,
+        admissionProof: response.body.admissionProof,
+        claimedAt: response.body.claimedAt,
+      });
     }
-    expect(statuses).toEqual(Array.from({ length: 129 }, () => 201));
+    await request(app!.getHttpServer())
+      .post("/kiosk/order-admissions")
+      .set("x-kiosk-token", kioskToken)
+      .send({ deviceSeq: 128, badgeCode: volumeBadge, reason: "buy", items: [] })
+      .expect(409);
     const outstanding = await db
       .select({ deviceSeq: schema.kioskOrderAdmissions.deviceSeq })
       .from(schema.kioskOrderAdmissions)
       .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
     expect(outstanding.map(({ deviceSeq }) => deviceSeq).sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 129 }, (_, deviceSeq) => deviceSeq),
+      Array.from({ length: 128 }, (_, deviceSeq) => deviceSeq),
     );
 
-    // Reissuing one idempotency key rotates its bearer in place; a retry does
-    // not grow storage, while distinct honest queued records stay uncapped.
-    await request(app!.getHttpServer())
-      .post("/kiosk/order-admissions")
-      .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 128, badgeCode: "badge", reason: "buy", items: [] })
-      .expect(201);
-    const afterRetry = await db
+    // Consume the outstanding rows, then verify honest serialized delivery can
+    // continue beyond the cap without requiring dense sequence values.
+    for (const admission of admissions) {
+      const submitted = await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", kioskToken)
+        .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
+        .send({
+          deviceSeq: admission.deviceSeq,
+          badgeCode: volumeBadge,
+          reason: "buy",
+          items: [],
+          createdAt: admission.claimedAt,
+          admissionProof: admission.admissionProof,
+        });
+      expect(submitted.status).toBe(201);
+    }
+    const afterConsume = await db
       .select({ id: schema.kioskOrderAdmissions.id })
       .from(schema.kioskOrderAdmissions)
       .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
-    expect(afterRetry).toHaveLength(129);
+    expect(afterConsume).toEqual([]);
+
+    // Serialized just-in-time delivery remains valid beyond the outstanding cap.
+    for (let deviceSeq = 128; deviceSeq <= 256; deviceSeq += 1) {
+      const admission = await request(app!.getHttpServer())
+        .post("/kiosk/order-admissions")
+        .set("x-kiosk-token", kioskToken)
+        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [] })
+        .expect(201);
+      await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", kioskToken)
+        .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
+        .send({
+          deviceSeq,
+          badgeCode: volumeBadge,
+          reason: "buy",
+          items: [],
+          createdAt: admission.body.claimedAt,
+          admissionProof: admission.body.admissionProof,
+        })
+        .expect(201);
+    }
+    const afterJitConsume = await db
+      .select({ id: schema.kioskOrderAdmissions.id })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(afterJitConsume).toEqual([]);
   }, 30_000);
 
   it("consumes an exact admission after a durable terminal order rejection", async () => {

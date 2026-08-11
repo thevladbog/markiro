@@ -551,10 +551,16 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           let attestedBody = order.body;
           try {
             const admissionNonce = order.admissionNonce ?? crypto.randomUUID().replaceAll("-", "");
-            if (!order.admissionNonce && !(await persistAdmissionNonce(order.deviceSeq, admissionNonce))) {
+            if (
+              !order.admissionNonce &&
+              !(await persistAdmissionNonce(order.deviceSeq, admissionNonce))
+            ) {
               continue;
             }
-            const admission = await client.attestOrder({ ...admissionRequest(order.body), admissionNonce });
+            const admission = await client.attestOrder({
+              ...admissionRequest(order.body),
+              admissionNonce,
+            });
             const submitBody = admissionRequest(order.body);
             delete submitBody.admissionNonce;
             attestedBody = {

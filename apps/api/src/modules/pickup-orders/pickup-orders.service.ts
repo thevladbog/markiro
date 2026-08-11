@@ -438,26 +438,42 @@ export class PickupOrdersService {
       const token = requestedToken ?? issueOpaqueKioskAdmissionToken();
       // Serialize reservations for this authenticated device. One deviceSeq
       // owns one constant-sized row (the request body itself is not stored),
-      // while distinct offline records remain uncapped: a kiosk that queued a
-      // genuine large backlog before this rolling upgrade must not lose older
-      // attestations merely because a later one was issued.
+      // while distinct offline records are bounded by the per-kiosk outstanding
+      // cap: a kiosk that queued a genuine backlog can drain it record-by-record.
       await tx
         .select({ id: schema.kiosks.id })
         .from(schema.kiosks)
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
         .for("update");
-      const durableRow = (await tx
-        .select({ maxDurableSeq: max(schema.pickupOrders.deviceSeq) })
-        .from(schema.pickupOrders)
-        .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId))))[0];
-      const admissionRow = (await tx
-        .select({
-          maxAdmissionSeq: max(schema.kioskOrderAdmissions.deviceSeq),
-          outstandingCount: sql<number>`count(*)`,
-        })
-        .from(schema.kioskOrderAdmissions)
-        .where(and(eq(schema.kioskOrderAdmissions.tenantId, tenantId), eq(schema.kioskOrderAdmissions.kioskId, kioskId))))[0];
-      const durable = Math.max(Number(durableRow?.maxDurableSeq ?? 0), Number(admissionRow?.maxAdmissionSeq ?? 0));
+      const durableRow = (
+        await tx
+          .select({ maxDurableSeq: max(schema.pickupOrders.deviceSeq) })
+          .from(schema.pickupOrders)
+          .where(
+            and(
+              eq(schema.pickupOrders.tenantId, tenantId),
+              eq(schema.pickupOrders.kioskId, kioskId),
+            ),
+          )
+      )[0];
+      const admissionRow = (
+        await tx
+          .select({
+            maxAdmissionSeq: max(schema.kioskOrderAdmissions.deviceSeq),
+            outstandingCount: sql<number>`count(*)`,
+          })
+          .from(schema.kioskOrderAdmissions)
+          .where(
+            and(
+              eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+              eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+            ),
+          )
+      )[0];
+      const durable = Math.max(
+        Number(durableRow?.maxDurableSeq ?? 0),
+        Number(admissionRow?.maxAdmissionSeq ?? 0),
+      );
       if (
         !admissionSequenceWithinWindow({
           maxDurableSeq: durable,

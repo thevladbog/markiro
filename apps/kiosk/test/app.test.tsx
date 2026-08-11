@@ -934,6 +934,7 @@ describe("KioskShell", () => {
     expect(server.admissions).toEqual([
       {
         deviceSeq: 5,
+        admissionNonce: expect.any(String),
         badgeDigest,
         reason: "buy",
         writeoffReasonId: null,

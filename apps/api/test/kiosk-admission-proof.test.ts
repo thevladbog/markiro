@@ -15,13 +15,13 @@ const order = {
 };
 
 describe("durable kiosk order admission", () => {
-  it("rejects a reservation that jumps beyond the durable queue window", () => {
-    expect(admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 2, candidate: 13 })).toBe(
-      true,
-    );
-    expect(admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 2, candidate: 14 })).toBe(
-      false,
-    );
+  it("bounds outstanding proofs without requiring dense device sequences", () => {
+    expect(
+      admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 2, candidate: 13 }),
+    ).toBe(true);
+    expect(
+      admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 2, candidate: 10_000 }),
+    ).toBe(true);
     for (let candidate = 1; candidate <= 129; candidate += 1) {
       expect(
         admissionSequenceWithinWindow({
@@ -31,6 +31,12 @@ describe("durable kiosk order admission", () => {
         }),
       ).toBe(true);
     }
+    expect(
+      admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 127, candidate: 11 }),
+    ).toBe(true);
+    expect(
+      admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 128, candidate: 11 }),
+    ).toBe(false);
   });
   it("binds the digest to normalized business content and device sequence", () => {
     expect(canonicalKioskOrderContent(order)).toEqual({

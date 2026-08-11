@@ -189,7 +189,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: ["GET /kiosk/bootstrap (KioskController.bootstrap)"],
   },
   {
-    contract: customerContract(KIOSK_GUARDS, { mode: "write" }),
+    contract: customerContract(KIOSK_GUARDS, { mode: "recovery", kind: "kiosk" }),
     routes: ["POST /kiosk/order-admissions (KioskController.attestOrder)"],
   },
   {

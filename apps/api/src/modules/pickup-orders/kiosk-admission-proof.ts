@@ -1,13 +1,16 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { CreateOrderAdmissionDto, CreateOrderDto } from "./dto";
 
+export const MAX_OUTSTANDING_KIOSK_ADMISSIONS = 128;
+
 export function admissionSequenceWithinWindow(input: {
   maxDurableSeq: number;
   outstandingCount: number;
   candidate: number;
 }): boolean {
-  const maxSeen = Math.max(0, input.maxDurableSeq);
-  return input.candidate <= maxSeen + input.outstandingCount + 1;
+  // Sequence values are monotonic but intentionally may contain gaps: the
+  // only bounded resource here is the number of unconsumed proofs.
+  return input.outstandingCount < MAX_OUTSTANDING_KIOSK_ADMISSIONS;
 }
 
 type CanonicalOrderContent = Pick<CreateOrderAdmissionDto, "deviceSeq" | "reason" | "items"> & {

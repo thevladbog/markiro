@@ -74,7 +74,8 @@ export async function attestQueuedOrder(deviceSeq: number, body: CreateOrderDto)
 export async function persistAdmissionNonce(deviceSeq: number, nonce: string): Promise<boolean> {
   const updated = await updateEach(STORE_QUEUE, (value) => {
     const queued = value as QueuedOrder;
-    if (queued.deviceSeq !== deviceSeq || queued.admissionState !== "pending_attestation") return null;
+    if (queued.deviceSeq !== deviceSeq || queued.admissionState !== "pending_attestation")
+      return null;
     return { ...queued, admissionNonce: nonce };
   });
   return updated === 1;
