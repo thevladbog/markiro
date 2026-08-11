@@ -106,7 +106,10 @@ function finalizeField(
   if (state.data === undefined && !state.barcode && !state.graphic) return;
   const ordinal = elements.length + 1;
   if (ordinal > MAX_LABEL_CODE_ELEMENTS) {
-    throw new DomainError("LABEL_CODE_LIMIT", `label code exceeds ${MAX_LABEL_CODE_ELEMENTS} elements`);
+    throw new DomainError(
+      "LABEL_CODE_LIMIT",
+      `label code exceeds ${MAX_LABEL_CODE_ELEMENTS} elements`,
+    );
   }
   const id = importedElementId("zpl", ordinal);
   const xMm = dotsToMm(state.xDots, dpi);
@@ -116,7 +119,9 @@ function finalizeField(
     const widthMm = dotsToMm(state.graphic.widthDots, dpi);
     const heightMm = dotsToMm(state.graphic.heightDots, dpi);
     const thicknessMm = Math.max(0.1, dotsToMm(state.graphic.thicknessDots, dpi));
-    const isLine = state.graphic.widthDots <= state.graphic.thicknessDots || state.graphic.heightDots <= state.graphic.thicknessDots;
+    const isLine =
+      state.graphic.widthDots <= state.graphic.thicknessDots ||
+      state.graphic.heightDots <= state.graphic.thicknessDots;
     const element: LabelElement = isLine
       ? {
           kind: "line",
@@ -172,7 +177,10 @@ function finalizeField(
 export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult {
   assertImportInputLimits(input);
   if (tokenCount(input) > MAX_LABEL_CODE_COMMANDS) {
-    throw new DomainError("LABEL_CODE_LIMIT", `label code exceeds ${MAX_LABEL_CODE_COMMANDS} commands`);
+    throw new DomainError(
+      "LABEL_CODE_LIMIT",
+      `label code exceeds ${MAX_LABEL_CODE_COMMANDS} commands`,
+    );
   }
 
   let widthDots: number | undefined;
@@ -185,7 +193,13 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
     const line = lineIndex + 1;
     const tokens = Array.from(source.matchAll(TOKEN_RE));
     if (tokens.length === 0) {
-      if (source.trim()) warnings.push({ line, source, code: "UNSUPPORTED_COMMAND", message: "unsupported ZPL line" });
+      if (source.trim())
+        warnings.push({
+          line,
+          source,
+          code: "UNSUPPORTED_COMMAND",
+          message: "unsupported ZPL line",
+        });
       continue;
     }
     let state: ZplState | null = null;
@@ -193,7 +207,12 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
       const name = token[1]!;
       const args = token[2] ?? "";
       if (!SUPPORTED.has(name)) {
-        warnings.push({ line, source, code: "UNSUPPORTED_COMMAND", message: `unsupported ZPL command ^${name}` });
+        warnings.push({
+          line,
+          source,
+          code: "UNSUPPORTED_COMMAND",
+          message: `unsupported ZPL command ^${name}`,
+        });
         continue;
       }
       switch (name) {
@@ -229,7 +248,8 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
           if (!state) fail(line, source, "ZPL field block requires ^FO");
           const parts = args.split(",");
           const width = Number(parts[0]);
-          if (!Number.isFinite(width) || width <= 0) fail(line, source, "invalid ZPL field block width");
+          if (!Number.isFinite(width) || width <= 0)
+            fail(line, source, "invalid ZPL field block width");
           state.maxWidthDots = width;
           const alignment = alignFromZpl(parts[3]?.trim());
           if (alignment) state.align = alignment;

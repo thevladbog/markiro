@@ -139,9 +139,7 @@ export function Palette({ labelWidthMm, labelHeightMm, onAdd }: PaletteProps) {
 
   return (
     <div className="label-editor__palette">
-      <span className="label-editor__eyebrow">
-        {t("pages.labels.editor.palette.title")}
-      </span>
+      <span className="label-editor__eyebrow">{t("pages.labels.editor.palette.title")}</span>
       {PALETTE_BUTTONS.map((button) => (
         <Button
           key={button.labelKey}

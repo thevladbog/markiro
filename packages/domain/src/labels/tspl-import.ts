@@ -1,9 +1,5 @@
 import { DomainError } from "../errors.js";
-import {
-  parseLabelTemplate,
-  type LabelElement,
-  type LabelTemplateSpec,
-} from "./model.js";
+import { parseLabelTemplate, type LabelElement, type LabelTemplateSpec } from "./model.js";
 import {
   assertImportInputLimits,
   importedElementId,
@@ -73,7 +69,10 @@ function addElement(
   line: number,
 ): void {
   if (elements.length >= MAX_LABEL_CODE_ELEMENTS) {
-    throw new DomainError("LABEL_CODE_LIMIT", `label code exceeds ${MAX_LABEL_CODE_ELEMENTS} elements`);
+    throw new DomainError(
+      "LABEL_CODE_LIMIT",
+      `label code exceeds ${MAX_LABEL_CODE_ELEMENTS} elements`,
+    );
   }
   elements.push(element);
   sourceLines[element.id] = line;
@@ -88,13 +87,16 @@ function parseText(
 ): LabelElement {
   const xMm = dotsToMm(numberAt(args, 0, line, source), dpi);
   const yMm = dotsToMm(numberAt(args, 1, line, source), dpi);
-  if (required(args, 2, line, source) !== "0") fail(line, source, "only TSPL font \"0\" is supported");
-  if (numberAt(args, 3, line, source) !== 0) fail(line, source, "only non-rotated TSPL text is supported");
+  if (required(args, 2, line, source) !== "0")
+    fail(line, source, 'only TSPL font "0" is supported');
+  if (numberAt(args, 3, line, source) !== 0)
+    fail(line, source, "only non-rotated TSPL text is supported");
   const fontSizePt = Math.max(4, Math.min(72, numberAt(args, 4, line, source)));
   const widthScale = numberAt(args, 5, line, source);
   if (widthScale <= 0) fail(line, source, "TSPL text scale must be positive");
   const possibleAlignment = args[6];
-  const hasAlignment = possibleAlignment === "1" || possibleAlignment === "2" || possibleAlignment === "3";
+  const hasAlignment =
+    possibleAlignment === "1" || possibleAlignment === "2" || possibleAlignment === "3";
   const align = hasAlignment
     ? possibleAlignment === "1"
       ? "left"
@@ -111,9 +113,13 @@ function parseText(
     fontSizePt,
   };
   if (parsed.kind === "field") {
-    return align ? { kind: "field", ...common, align, field: parsed.field } : { kind: "field", ...common, field: parsed.field };
+    return align
+      ? { kind: "field", ...common, align, field: parsed.field }
+      : { kind: "field", ...common, field: parsed.field };
   }
-  return align ? { kind: "text", ...common, align, text: parsed.value } : { kind: "text", ...common, text: parsed.value };
+  return align
+    ? { kind: "text", ...common, align, text: parsed.value }
+    : { kind: "text", ...common, text: parsed.value };
 }
 
 function parseBarcode(
@@ -129,7 +135,8 @@ function parseBarcode(
   const format = type === "128" ? "code128" : type === "EAN13" ? "ean13" : undefined;
   if (!format) fail(line, source, `unsupported TSPL barcode type ${type}`);
   const sizeMm = Math.max(0.1, dotsToMm(numberAt(args, 3, line, source), dpi));
-  if (numberAt(args, 5, line, source) !== 0) fail(line, source, "only non-rotated TSPL barcodes are supported");
+  if (numberAt(args, 5, line, source) !== 0)
+    fail(line, source, "only non-rotated TSPL barcodes are supported");
   const parsed = parseTemplatePayload(required(args, 8, line, source), line);
   return {
     kind: "barcode",
@@ -146,7 +153,10 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
   assertImportInputLimits(input);
   const lines = input.split(/\r?\n/);
   if (lines.filter((line) => line.trim()).length > MAX_LABEL_CODE_COMMANDS) {
-    throw new DomainError("LABEL_CODE_LIMIT", `label code exceeds ${MAX_LABEL_CODE_COMMANDS} commands`);
+    throw new DomainError(
+      "LABEL_CODE_LIMIT",
+      `label code exceeds ${MAX_LABEL_CODE_COMMANDS} commands`,
+    );
   }
   let widthMm: number | undefined;
   let heightMm: number | undefined;
@@ -164,7 +174,8 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
     const args = splitTsplArguments(match[2] ?? "", line);
     switch (command) {
       case "SIZE":
-        if (widthMm !== undefined || heightMm !== undefined) fail(line, source, "TSPL source contains multiple SIZE statements");
+        if (widthMm !== undefined || heightMm !== undefined)
+          fail(line, source, "TSPL source contains multiple SIZE statements");
         widthMm = parseSize(required(args, 0, line, source), line, source);
         heightMm = parseSize(required(args, 1, line, source), line, source);
         break;
@@ -175,10 +186,20 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
       case "PRINT":
         break;
       case "TEXT":
-        addElement(elements, parseText(args, line, source, dpi, elements.length + 1), sourceLineByElementId, line);
+        addElement(
+          elements,
+          parseText(args, line, source, dpi, elements.length + 1),
+          sourceLineByElementId,
+          line,
+        );
         break;
       case "BARCODE":
-        addElement(elements, parseBarcode(args, line, source, dpi, elements.length + 1), sourceLineByElementId, line);
+        addElement(
+          elements,
+          parseBarcode(args, line, source, dpi, elements.length + 1),
+          sourceLineByElementId,
+          line,
+        );
         break;
       case "DMATRIX": {
         const xMm = dotsToMm(numberAt(args, 0, line, source), dpi);
@@ -204,7 +225,8 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
       case "QRCODE": {
         const xMm = dotsToMm(numberAt(args, 0, line, source), dpi);
         const yMm = dotsToMm(numberAt(args, 1, line, source), dpi);
-        if (numberAt(args, 5, line, source) !== 0) fail(line, source, "only non-rotated TSPL QR codes are supported");
+        if (numberAt(args, 5, line, source) !== 0)
+          fail(line, source, "only non-rotated TSPL QR codes are supported");
         const parsed = parseTemplatePayload(required(args, 6, line, source), line);
         addElement(
           elements,
@@ -250,7 +272,8 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
         const yEndMm = dotsToMm(numberAt(args, 3, line, source), dpi);
         const width = xEndMm - xMm;
         const height = yEndMm - yMm;
-        if (width <= 0 || height <= 0) fail(line, source, "TSPL BOX end must be below and right of start");
+        if (width <= 0 || height <= 0)
+          fail(line, source, "TSPL BOX end must be below and right of start");
         addElement(
           elements,
           {
@@ -268,7 +291,12 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
         break;
       }
       default:
-        warnings.push({ line, source, code: "UNSUPPORTED_COMMAND", message: `unsupported TSPL command ${command}` });
+        warnings.push({
+          line,
+          source,
+          code: "UNSUPPORTED_COMMAND",
+          message: `unsupported TSPL command ${command}`,
+        });
         break;
     }
   }

@@ -163,7 +163,10 @@ export function ImportCodeDialog({
             />
             <Select
               aria-label={t("pages.labels.editor.import.dpiLabel")}
-              options={[{ value: "203", label: "203 DPI" }, { value: "300", label: "300 DPI" }]}
+              options={[
+                { value: "203", label: "203 DPI" },
+                { value: "300", label: "300 DPI" },
+              ]}
               value={String(dpi)}
               onValueChange={(value) => {
                 setDpi(value === "300" ? 300 : 203);
@@ -204,7 +207,11 @@ export function ImportCodeDialog({
               </strong>
               {analysis.result.warnings.length > 0 && (
                 <div className="label-editor__import-warnings">
-                  <p>{t("pages.labels.editor.import.unsupportedTitle", { count: analysis.result.warnings.length })}</p>
+                  <p>
+                    {t("pages.labels.editor.import.unsupportedTitle", {
+                      count: analysis.result.warnings.length,
+                    })}
+                  </p>
                   {analysis.result.warnings.map((warning) => (
                     <div key={`${warning.line}-${warning.source}`}>
                       <span>{warning.line}: </span>
@@ -212,19 +219,26 @@ export function ImportCodeDialog({
                     </div>
                   ))}
                   <Checkbox
-                    label={t("pages.labels.editor.import.acknowledge", { count: analysis.result.warnings.length })}
+                    label={t("pages.labels.editor.import.acknowledge", {
+                      count: analysis.result.warnings.length,
+                    })}
                     checked={acknowledgedUnsupported}
                     onCheckedChange={setAcknowledgedUnsupported}
                   />
                 </div>
               )}
               {analysis.adjustedIds.length > 0 && (
-                <p>{t("pages.labels.editor.import.adjusted", { count: analysis.adjustedIds.length })}</p>
+                <p>
+                  {t("pages.labels.editor.import.adjusted", { count: analysis.adjustedIds.length })}
+                </p>
               )}
             </div>
           )}
         </div>
-        <aside className="label-editor__import-fields" aria-label={t("pages.labels.editor.import.fieldsTitle")}>
+        <aside
+          className="label-editor__import-fields"
+          aria-label={t("pages.labels.editor.import.fieldsTitle")}
+        >
           <div className="label-editor__eyebrow">{t("pages.labels.editor.import.fieldsTitle")}</div>
           <p>{t("pages.labels.editor.import.fieldsHint")}</p>
           {fieldRows.map(({ field, label, placeholder }) => (

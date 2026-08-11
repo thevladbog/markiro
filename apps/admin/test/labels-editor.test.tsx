@@ -162,7 +162,16 @@ describe("Palette", () => {
   it("shows a visible label for every palette action", () => {
     renderCreateFlow();
 
-    for (const label of ["Текст", "Поле", "DataMatrix", "Code128", "EAN-13", "QR", "Линия", "Рамка"]) {
+    for (const label of [
+      "Текст",
+      "Поле",
+      "DataMatrix",
+      "Code128",
+      "EAN-13",
+      "QR",
+      "Линия",
+      "Рамка",
+    ]) {
       expect(screen.getByText(label)).toBeDefined();
     }
   });

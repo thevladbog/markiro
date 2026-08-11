@@ -41,10 +41,16 @@ describe("label code import contract", () => {
 
   it("rejects unknown and mixed placeholders with a source location", () => {
     expect(() => parseTemplatePayload("{{warehouse.bin}}", 12)).toThrow(
-      expect.objectContaining({ code: "LABEL_CODE_INVALID", cause: { line: 12, source: "{{warehouse.bin}}" } }),
+      expect.objectContaining({
+        code: "LABEL_CODE_INVALID",
+        cause: { line: 12, source: "{{warehouse.bin}}" },
+      }),
     );
     expect(() => parseTemplatePayload("Товар: {{product.name}}", 13)).toThrow(
-      expect.objectContaining({ code: "LABEL_CODE_INVALID", cause: { line: 13, source: "Товар: {{product.name}}" } }),
+      expect.objectContaining({
+        code: "LABEL_CODE_INVALID",
+        cause: { line: 13, source: "Товар: {{product.name}}" },
+      }),
     );
   });
 
@@ -102,11 +108,27 @@ describe("label code import contract", () => {
 
       expect(result.spec.elements).toEqual([
         expect.objectContaining({ kind: "barcode", format: "code128", data: { literal: "123" } }),
-        expect.objectContaining({ kind: "barcode", format: "ean13", data: { literal: "4600682000013" } }),
+        expect.objectContaining({
+          kind: "barcode",
+          format: "ean13",
+          data: { literal: "4600682000013" },
+        }),
         expect.objectContaining({ kind: "barcode", format: "datamatrix" }),
-        expect.objectContaining({ kind: "barcode", format: "qr", data: { literal: "https://markiro.app" } }),
-        expect.objectContaining({ kind: "line", xMm: expect.any(Number), x2Mm: expect.any(Number) }),
-        expect.objectContaining({ kind: "box", widthMm: expect.any(Number), heightMm: expect.any(Number) }),
+        expect.objectContaining({
+          kind: "barcode",
+          format: "qr",
+          data: { literal: "https://markiro.app" },
+        }),
+        expect.objectContaining({
+          kind: "line",
+          xMm: expect.any(Number),
+          x2Mm: expect.any(Number),
+        }),
+        expect.objectContaining({
+          kind: "box",
+          widthMm: expect.any(Number),
+          heightMm: expect.any(Number),
+        }),
         expect.objectContaining({ kind: "text", text: "Hello^World" }),
       ]);
       expect(result.warnings).toEqual([
@@ -118,12 +140,12 @@ describe("label code import contract", () => {
       expect(() => parseZplLabel("^XA^FO1,1^FDtext^FS^XZ", 203)).toThrow(
         expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
       );
-      expect(() =>
-        parseZplLabel("^XA^PW400^LL400^FO1,1^FD{{warehouse.bin}}^FS^XZ", 203),
-      ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
-      expect(() =>
-        parseZplLabel("^XA^PW400^LL400^FO1,1^A0R,20,20^FDtext^FS^XZ", 203),
-      ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
+      expect(() => parseZplLabel("^XA^PW400^LL400^FO1,1^FD{{warehouse.bin}}^FS^XZ", 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+      expect(() => parseZplLabel("^XA^PW400^LL400^FO1,1^A0R,20,20^FDtext^FS^XZ", 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
     });
   });
 

@@ -260,7 +260,15 @@ describe("editor geometry containment", () => {
     const elements: LabelElement[] = [
       { kind: "text", id: "text", xMm: 99, yMm: 99, text: "Long text", fontSizePt: 12 },
       { kind: "field", id: "field", xMm: 99, yMm: 99, field: "product.name", fontSizePt: 12 },
-      { kind: "barcode", id: "linear", xMm: 99, yMm: 99, format: "code128", data: "sscc", sizeMm: 5 },
+      {
+        kind: "barcode",
+        id: "linear",
+        xMm: 99,
+        yMm: 99,
+        format: "code128",
+        data: "sscc",
+        sizeMm: 5,
+      },
       { kind: "barcode", id: "matrix", xMm: 99, yMm: 99, format: "qr", data: "sscc", sizeMm: 1 },
       { kind: "line", id: "line", xMm: 90, yMm: 95, x2Mm: 120, y2Mm: 95, thicknessMm: 1 },
       { kind: "box", id: "box", xMm: 95, yMm: 95, widthMm: 20, heightMm: 20, thicknessMm: 1 },
@@ -292,7 +300,15 @@ describe("editor geometry containment", () => {
 
     expect(
       fitElementWithinLabel(
-        { kind: "box", id: "too-large", xMm: 0, yMm: 0, widthMm: 101, heightMm: 10, thicknessMm: 1 },
+        {
+          kind: "box",
+          id: "too-large",
+          xMm: 0,
+          yMm: 0,
+          widthMm: 101,
+          heightMm: 10,
+          thicknessMm: 1,
+        },
         label,
         data,
       ),
@@ -453,7 +469,9 @@ describe("editorReducer", () => {
 
   it("moveBy clamps the resulting rendered bounds to the label edge", () => {
     const state = createEditorState(
-      makeSpec([{ kind: "box", id: "bx1", xMm: 90, yMm: 90, widthMm: 20, heightMm: 20, thicknessMm: 1 }]),
+      makeSpec([
+        { kind: "box", id: "bx1", xMm: 90, yMm: 90, widthMm: 20, heightMm: 20, thicknessMm: 1 },
+      ]),
     );
     const next = editorReducer(state, { type: "moveBy", id: "bx1", dxMm: 50, dyMm: 50 });
     expect(next.spec.elements[0]).toEqual(expect.objectContaining({ xMm: 80, yMm: 80 }));

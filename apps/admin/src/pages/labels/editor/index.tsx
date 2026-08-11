@@ -334,9 +334,7 @@ function LabelEditorContent({
               type="number"
               mono
               value={spec.heightMm}
-              onChange={(event) =>
-                handleLabelResize(spec.widthMm, Number(event.target.value) || 0)
-              }
+              onChange={(event) => handleLabelResize(spec.widthMm, Number(event.target.value) || 0)}
               style={{ width: 90 }}
             />
           </>
@@ -369,8 +367,13 @@ function LabelEditorContent({
         </Button>
       </div>
 
-      <div className={`label-editor__body${propertiesCollapsed ? " label-editor__body--properties-collapsed" : ""}`}>
-        <aside className="label-editor__palette-region" aria-label={t("pages.labels.editor.palette.title")}>
+      <div
+        className={`label-editor__body${propertiesCollapsed ? " label-editor__body--properties-collapsed" : ""}`}
+      >
+        <aside
+          className="label-editor__palette-region"
+          aria-label={t("pages.labels.editor.palette.title")}
+        >
           <Palette
             labelWidthMm={spec.widthMm}
             labelHeightMm={spec.heightMm}
@@ -378,7 +381,10 @@ function LabelEditorContent({
           />
         </aside>
 
-        <main className="label-editor__workspace" aria-label={t("pages.labels.editor.workspaceLabel")}>
+        <main
+          className="label-editor__workspace"
+          aria-label={t("pages.labels.editor.workspaceLabel")}
+        >
           <LabelCanvas
             spec={spec}
             selectedId={editor.state.selectedId}
@@ -393,7 +399,10 @@ function LabelEditorContent({
           />
         </main>
 
-        <aside className="label-editor__properties" aria-label={t("pages.labels.editor.properties.title")}>
+        <aside
+          className="label-editor__properties"
+          aria-label={t("pages.labels.editor.properties.title")}
+        >
           {propertiesCollapsed ? (
             <Button
               type="button"
