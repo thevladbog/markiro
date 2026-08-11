@@ -47,8 +47,10 @@ function ensureSafeText(value, maxBytes = MAX_TEXT_BYTES) {
 }
 
 function ensureDate(value) {
-  if (typeof value !== "string" || new Date(value).toISOString() !== value) invalid();
-  if (Date.parse(value) > Date.now() + 24 * 60 * 60 * 1000) invalid();
+  if (typeof value !== "string") invalid();
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) invalid();
+  if (date.getTime() > Date.now()) invalid();
 }
 
 function ensureBundleUrl(version, url, expectedUrl = url) {
@@ -182,7 +184,17 @@ export async function stageStationRelease({
   await writeFile(join(outputDirectory, names.checksums), checksums, { flag: "wx", mode: 0o600 });
   await writeFile(
     join(outputDirectory, names.notes),
-    `Markiro Station ${version}\n\nManual Windows x64 beta release.\n`,
+    [
+      `Markiro Station ${version}`,
+      "",
+      "Manual Windows x64 beta release.",
+      "Installer is unsigned; verify SHA256SUMS before manual installation.",
+      "Acceptance status: Windows and hardware checks pending operator validation.",
+      `baseSha: ${baseSha}`,
+      `releaseSha: ${releaseSha}`,
+      `publishedAt: ${pubDate}`,
+      "",
+    ].join("\n"),
     { flag: "wx", mode: 0o600 },
   );
   await writeFile(

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -52,5 +52,19 @@ test("updates exactly the Tauri and Cargo package versions", async () => {
   assert.match(
     await readFile(join(root, "apps/station/src-tauri/Cargo.toml"), "utf8"),
     /version = "0\.1\.0-beta\.1"/,
+  );
+});
+
+test("rejects symlinked source version files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "markiro-station-version-link-"));
+  const tauriRoot = join(root, "apps/station/src-tauri");
+  await mkdir(tauriRoot, { recursive: true });
+  const external = join(root, "external.json");
+  await writeFile(external, JSON.stringify({ version: "0.1.0" }));
+  await symlink(external, join(tauriRoot, "tauri.conf.json"));
+  await writeFile(join(tauriRoot, "Cargo.toml"), '[package]\nversion = "0.1.0"\n');
+  await assert.rejects(
+    readStationSourceVersion(pathToFileURL(`${root}/`)),
+    /invalid station beta source tree/,
   );
 });

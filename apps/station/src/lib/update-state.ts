@@ -1,9 +1,9 @@
 import type { SqlExecutor } from "./mirror.js";
+import { isStationBetaVersion } from "./station-version.js";
 
 export const UPDATE_STATE_KEY = "station_update_state_v1";
 export const AUTO_CHECK_INTERVAL_MS = 86_400_000;
 const MAX_STATE_BYTES = 2 * 1024;
-const BETA_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.([1-9]\d*)$/;
 
 export type UpdateSeverity = "none" | "info" | "warn" | "urgent";
 
@@ -34,15 +34,15 @@ function canonicalDate(value: unknown): string {
   if (typeof value !== "string") invalid();
   const date = new Date(value);
   if (!Number.isFinite(date.getTime()) || date.toISOString() !== value) invalid();
-  return value;
+  return date.toISOString();
 }
 
 function ensureNotFuture(value: string, now = Date.now()): void {
-  if (Date.parse(value) > now) invalid();
+  if (Date.parse(value) > now + 5 * 60_000) invalid();
 }
 
 function validateVersion(value: unknown): string {
-  if (typeof value !== "string" || !BETA_VERSION.test(value)) invalid();
+  if (!isStationBetaVersion(value)) invalid();
   return value;
 }
 
@@ -134,7 +134,8 @@ export async function loadUpdateState(exec: SqlExecutor): Promise<PersistedUpdat
       [UPDATE_STATE_KEY],
     );
     const raw = rows[0]?.value;
-    if (typeof raw !== "string" || Buffer.byteLength(raw, "utf8") > MAX_STATE_BYTES) return null;
+    if (typeof raw !== "string" || new TextEncoder().encode(raw).byteLength > MAX_STATE_BYTES)
+      return null;
     return validateState(JSON.parse(raw));
   } catch {
     return null;
@@ -147,7 +148,7 @@ export async function saveUpdateState(
 ): Promise<void> {
   const validated = validateState(state);
   const value = JSON.stringify(validated);
-  if (Buffer.byteLength(value, "utf8") > MAX_STATE_BYTES) invalid();
+  if (new TextEncoder().encode(value).byteLength > MAX_STATE_BYTES) invalid();
   await exec.run(
     `INSERT INTO station_meta (key, value) VALUES (?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,

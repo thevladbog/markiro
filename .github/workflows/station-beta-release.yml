@@ -34,8 +34,6 @@ jobs:
       contents: write
     env:
       VITE_STATION_API_URL: https://admin.markiro.app
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
     steps:
       - name: Checkout the dispatch SHA
@@ -43,8 +41,18 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
 
       - name: Verify main provenance and successful CI
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -76,6 +84,8 @@ jobs:
 
       - name: Resolve existing beta for promotion retry
         if: inputs.mode == 'promote-existing'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -109,6 +119,9 @@ jobs:
 
       - name: Build signed Windows NSIS updater artifacts
         if: inputs.mode == 'publish'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
@@ -137,11 +150,13 @@ jobs:
       - name: Publish immutable version release
         id: immutable-release
         if: inputs.mode == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
-          git push origin "HEAD:refs/heads/$candidate_ref"
+          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" push origin "HEAD:refs/heads/$candidate_ref"
           printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_ENV"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease --target "$release_sha" --title "Markiro Station $version" --notes-file "$RUNNER_TEMP/station-staged/release-notes.md"
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-staged"/*
@@ -154,6 +169,8 @@ jobs:
 
       - name: Prepare existing beta assets for promotion
         if: inputs.mode == 'promote-existing'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -164,11 +181,13 @@ jobs:
 
       - name: Promote beta channel
         if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           if ! gh release view station-beta-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create station-beta-channel --repo "$GITHUB_REPOSITORY" --title "Markiro Station beta channel" --notes "Mutable beta channel pointer; immutable releases remain versioned."
+            gh release create station-beta-channel --repo "$GITHUB_REPOSITORY" --prerelease --title "Markiro Station beta channel" --notes "Mutable beta channel pointer; immutable releases remain versioned."
           else
             rm -rf "$RUNNER_TEMP/station-channel-backup"
             mkdir "$RUNNER_TEMP/station-channel-backup"
@@ -191,6 +210,8 @@ jobs:
 
       - name: Cleanup owned candidate ref and temporary release material
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set +e

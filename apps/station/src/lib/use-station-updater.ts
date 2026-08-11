@@ -11,6 +11,7 @@ import {
   type UpdateSeverity,
 } from "./update-state.js";
 import type { SqlExecutor } from "./mirror.js";
+import { compareStationVersions } from "./station-version.js";
 
 export type StationUpdateDownloadEvent =
   | { event: "Started"; contentLength: number | null }
@@ -60,22 +61,6 @@ export interface UseStationUpdaterDeps {
   pendingOutbox: number;
   port: StationUpdaterPort;
   now?: () => number;
-}
-
-function compareVersions(left: string, right: string): number {
-  const parse = (value: string) => {
-    const match = /^(\d+)\.(\d+)\.(\d+)-beta\.(\d+)$/.exec(value);
-    if (!match) throw new Error("invalid station update state");
-    return match.slice(1).map(Number);
-  };
-  const a = parse(left);
-  const b = parse(right);
-  for (let index = 0; index < a.length; index += 1) {
-    const leftValue = a[index] ?? 0;
-    const rightValue = b[index] ?? 0;
-    if (leftValue !== rightValue) return leftValue - rightValue;
-  }
-  return 0;
 }
 
 function toIso(now: () => number): string {
@@ -138,7 +123,10 @@ export function useStationUpdater({
         let handle: StationUpdateHandle | null = null;
         try {
           handle = await port.check();
-          if (runGeneration !== generation.current) return;
+          if (runGeneration !== generation.current) {
+            await handle?.close().catch(() => undefined);
+            return;
+          }
           if (handleRef.current && handleRef.current !== handle) await handleRef.current.close();
           handleRef.current = handle;
           const next = recordCheckSuccess(
@@ -181,7 +169,7 @@ export function useStationUpdater({
     let handle: StationUpdateHandle | null = null;
     try {
       handle = await port.check();
-      if (!handle || compareVersions(handle.version, target.version) < 0) {
+      if (!handle || compareStationVersions(handle.version, target.version) !== 0) {
         if (handle) await handle.close();
         setError("target-changed");
         throw new Error("target changed");
@@ -227,7 +215,6 @@ export function useStationUpdater({
     return () => {
       cancelled = true;
       generation.current += 1;
-      if (timerRef.current !== null) window.clearTimeout(timerRef.current);
     };
   }, [applyState, enabled, exec, runCheck]);
 

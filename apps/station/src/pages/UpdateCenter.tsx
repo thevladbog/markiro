@@ -84,7 +84,7 @@ export function UpdateCenter({
           />
         ) : null}
         {confirming ? (
-          <div className="station-update-center__confirm" role="dialog" aria-modal="true">
+          <div className="station-update-center__confirm">
             <h2>{t("updates.confirmTitle")}</h2>
             <p>{t("updates.confirmBody", { version: available?.version ?? "" })}</p>
             <div className="station-update-center__confirm-actions">

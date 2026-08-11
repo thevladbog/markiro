@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { open, readFile, rename, rm, stat } from "node:fs/promises";
+import { lstat, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -76,7 +76,7 @@ function sourcePaths(root) {
 }
 
 async function assertRegularFile(path) {
-  const info = await stat(path);
+  const info = await lstat(path);
   if (!info.isFile()) invalid("invalid station beta source tree");
 }
 
@@ -175,8 +175,16 @@ async function prepare(bump, outputPath) {
   const current = await readStationSourceVersion(root);
   const version = nextStationBetaVersion(await readTags(), bump);
   if (current === version) invalid("invalid station beta release state");
-  await writeStationSourceVersion(root, version);
-  await writeOutput(outputPath, version);
+  const reservation = await open(outputPath, "wx", 0o600);
+  await reservation.close();
+  try {
+    await writeStationSourceVersion(root, version);
+    await rm(outputPath, { force: true });
+    await writeOutput(outputPath, version);
+  } catch (error) {
+    await rm(outputPath, { force: true });
+    throw error;
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {

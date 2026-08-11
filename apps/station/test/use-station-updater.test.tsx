@@ -1,6 +1,6 @@
 import { DatabaseSync } from "node:sqlite";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeExec } from "./support/sqlite-exec.js";
 import {
   useStationUpdater,
@@ -8,15 +8,17 @@ import {
   type StationUpdaterPort,
 } from "../src/lib/use-station-updater.js";
 
-const beta2: StationUpdateHandle = {
-  currentVersion: "0.1.0-beta.1",
-  version: "0.1.0-beta.2",
-  publishedAt: "2026-08-10T00:00:00.000Z",
-  downloadAndInstall: vi.fn().mockResolvedValue(undefined),
-  close: vi.fn().mockResolvedValue(undefined),
-};
+function makeBeta2(): StationUpdateHandle {
+  return {
+    currentVersion: "0.1.0-beta.1",
+    version: "0.1.0-beta.2",
+    publishedAt: "2026-08-10T00:00:00.000Z",
+    downloadAndInstall: vi.fn().mockResolvedValue(undefined),
+    close: vi.fn().mockResolvedValue(undefined),
+  };
+}
 
-function fixture(handle: StationUpdateHandle | null = beta2) {
+function fixture(handle: StationUpdateHandle | null = makeBeta2()) {
   const db = new DatabaseSync(":memory:");
   db.exec("CREATE TABLE station_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
   const exec = makeExec(db);
@@ -24,12 +26,15 @@ function fixture(handle: StationUpdateHandle | null = beta2) {
     check: vi.fn().mockResolvedValue(handle),
     relaunch: vi.fn().mockResolvedValue(undefined),
   };
-  return { exec, port };
+  return { exec, port, handle };
 }
 
 describe("useStationUpdater", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+  });
   it("checks once after enable, throttles remounts, and never downloads automatically", async () => {
-    const { exec, port } = fixture();
+    const { exec, port, handle } = fixture();
     const now = () => Date.parse("2026-08-11T00:00:00.000Z");
     const { result, unmount } = renderHook(() =>
       useStationUpdater({
@@ -42,13 +47,14 @@ describe("useStationUpdater", () => {
       }),
     );
     await waitFor(() => expect(port.check).toHaveBeenCalledOnce());
-    expect(beta2.downloadAndInstall).not.toHaveBeenCalled();
+    expect(handle?.downloadAndInstall).not.toHaveBeenCalled();
     expect(result.current.persisted?.available?.version).toBe("0.1.0-beta.2");
     unmount();
   });
 
   it("denies install during a shift and installs only after explicit invocation", async () => {
-    const { exec, port } = fixture();
+    const handle = makeBeta2();
+    const { exec, port } = fixture(handle);
     const now = () => Date.parse("2026-08-11T00:00:00.000Z");
     const view = renderHook(
       ({ activeShift }) =>
@@ -64,15 +70,15 @@ describe("useStationUpdater", () => {
     );
     await waitFor(() => expect(port.check).toHaveBeenCalledOnce());
     await expect(view.result.current.install()).rejects.toThrow("active shift");
-    expect(beta2.downloadAndInstall).not.toHaveBeenCalled();
+    expect(handle.downloadAndInstall).not.toHaveBeenCalled();
     view.rerender({ activeShift: false });
     await act(async () => view.result.current.install());
-    expect(beta2.downloadAndInstall).toHaveBeenCalledOnce();
+    expect(handle.downloadAndInstall).toHaveBeenCalledOnce();
     expect(port.relaunch).toHaveBeenCalledOnce();
   });
 
   it("bypasses the automatic throttle on a manual check and reports download progress", async () => {
-    const handle = { ...beta2, downloadAndInstall: vi.fn() };
+    const handle = { ...makeBeta2(), downloadAndInstall: vi.fn() };
     handle.downloadAndInstall.mockImplementation(async (onProgress) => {
       onProgress({ event: "Started", contentLength: 10 });
       onProgress({ event: "Progress", chunkLength: 4 });

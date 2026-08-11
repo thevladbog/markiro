@@ -62,8 +62,9 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
 
 ### Manual station beta update
 
-- [ ] Download the immutable Windows installer manually and compare its version,
-      SHA-256 and signature with `latest.json`.
+- [ ] Download the immutable Windows installer manually and compare its version
+      and SHA-256 with `SHA256SUMS`; verify the updater bundle signature against
+      `latest.json` separately.
 - [ ] Install beta.1, then beta.2 while no shift is active; confirm installation
       is blocked during an active shift and pending outbox data is retained.
 - [ ] Record any SmartScreen prompt and operator decision in the beta acceptance

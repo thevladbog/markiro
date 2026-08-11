@@ -5,43 +5,17 @@ import type {
   StationUpdateHandle,
   StationUpdaterPort,
 } from "./use-station-updater.js";
-
-const BETA_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.([1-9]\d*)$/;
+import { compareStationVersions, isStationBetaVersion } from "./station-version.js";
 
 function invalid(): never {
   throw new Error("invalid station update state");
 }
 
-function parseVersion(value: unknown): [number, number, number, number] {
-  if (typeof value !== "string") invalid();
-  const match = BETA_VERSION.exec(value);
-  if (!match) invalid();
-  const parsed = match.slice(1).map(Number);
-  if (!parsed.every(Number.isSafeInteger)) invalid();
-  return parsed as [number, number, number, number];
-}
-
-function compareVersions(left: string, right: string): number {
-  const a = parseVersion(left);
-  const b = parseVersion(right);
-  for (let index = 0; index < a.length; index += 1) {
-    const leftValue = a[index] ?? 0;
-    const rightValue = b[index] ?? 0;
-    if (leftValue !== rightValue) return leftValue - rightValue;
-  }
-  return 0;
-}
-
 function canonicalDate(value: unknown): string {
   if (typeof value !== "string") invalid();
   const date = new Date(value);
-  if (
-    !Number.isFinite(date.getTime()) ||
-    date.toISOString() !== value ||
-    date.getTime() > Date.now()
-  )
-    invalid();
-  return value;
+  if (!Number.isFinite(date.getTime()) || date.getTime() > Date.now() + 5 * 60_000) invalid();
+  return date.toISOString();
 }
 
 function mapEvent(event: DownloadEvent): StationUpdateDownloadEvent {
@@ -55,7 +29,8 @@ function mapEvent(event: DownloadEvent): StationUpdateDownloadEvent {
 function toHandle(update: Update): StationUpdateHandle {
   const currentVersion = update.currentVersion;
   const version = update.version;
-  if (compareVersions(version, currentVersion) <= 0) invalid();
+  if (!isStationBetaVersion(version)) invalid();
+  if (compareStationVersions(version, currentVersion) <= 0) invalid();
   const publishedAt = canonicalDate(update.date);
   return {
     currentVersion,

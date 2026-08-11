@@ -615,7 +615,7 @@ what a station's device api-key may reach on the server.
 
 ### Manual beta updates
 
-The station update center is manual-only. It highlights releases older than 14
+The station update center is manual-only. It highlights releases older than 7
 days (urgent after 30 days), never downloads or installs in the background, and
 blocks installation during an active shift. Review
 [`docs/runbooks/station-beta-release.md`](../../docs/runbooks/station-beta-release.md)
