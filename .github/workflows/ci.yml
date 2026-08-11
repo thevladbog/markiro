@@ -280,6 +280,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Verify station release contracts
         run: pnpm test:station-release:contract
+      - name: Generate ephemeral CI updater key
+        shell: pwsh
+        run: |
+          $keyPath = Join-Path $env:RUNNER_TEMP "station-ci-updater.key"
+          pnpm --filter @markiro/station exec tauri signer generate --ci --write-keys $keyPath
+          "TAURI_SIGNING_PRIVATE_KEY_PATH=$keyPath" >> $env:GITHUB_ENV
       # vite can't resolve `@markiro/ui`/`@markiro/db`/`@markiro/domain`
       # without their `dist/` present, and `tauri build` needs the webview
       # built for the same reason as the `station-rust` job above.
