@@ -42,6 +42,8 @@ test("station beta publication is protected, serialized, main-only and channel-l
     signingStep.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD,
     "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
   );
+  assert.match(text, /Decode Tauri updater signing key/);
+  assert.match(text, /untrusted comment: rsign encrypted secret key/);
   assert.match(text, /persist-credentials:\s*false/);
   assert.match(text, /pnpm\/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1/);
   assert.match(text, /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/);
