@@ -242,6 +242,7 @@
       "positive": "Enter a positive integer",
       "integer32OrEmpty": "Enter an integer from 1 to 2147483647 or leave the field empty",
       "integer32": "Enter an integer from 1 to 2147483647",
+      "descriptionTooLong": "Use no more than 2000 characters",
       "effectRequired": "Add at least one effect",
       "effectDuplicate": "Each effect type can be added only once"
     },
@@ -250,6 +251,8 @@
       "code": "Item code",
       "nameRu": "Russian name",
       "nameEn": "English name",
+      "descriptionRu": "Russian description",
+      "descriptionEn": "English description",
       "unit": "Billing unit",
       "customUnit": "Custom unit",
       "unitPrice": "Unit price",

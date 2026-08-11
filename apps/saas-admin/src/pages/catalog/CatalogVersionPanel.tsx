@@ -33,6 +33,8 @@ interface CatalogFormValues {
   financialVisible: boolean;
   nameRu: string;
   nameEn: string;
+  descriptionRu: string;
+  descriptionEn: string;
   unit: string;
   unitPrice: string;
   vatRateBps: number | null;
@@ -93,6 +95,8 @@ const catalogFormSchema = z
     financialVisible: z.boolean(),
     nameRu: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     nameEn: z.string().trim().min(1, "required").max(300, "nameTooLong"),
+    descriptionRu: z.string().max(2000, "descriptionTooLong"),
+    descriptionEn: z.string().max(2000, "descriptionTooLong"),
     unit: z.string().trim().min(1, "required").max(100, "unitTooLong"),
     unitPrice: z.string(),
     vatRateBps: z.number().nullable(),
@@ -181,6 +185,8 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     financialVisible: item.unitPrice !== undefined,
     nameRu: item.nameRu,
     nameEn: item.nameEn,
+    descriptionRu: item.descriptionRu ?? "",
+    descriptionEn: item.descriptionEn ?? "",
     unit: item.unit,
     unitPrice: item.unitPrice ?? "",
     vatRateBps: item.vatRateBps ?? null,
@@ -203,6 +209,8 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
   const common: CatalogVersionPatch = {
     nameRu: values.nameRu,
     nameEn: values.nameEn,
+    descriptionRu: values.descriptionRu.trim() || null,
+    descriptionEn: values.descriptionEn.trim() || null,
     unit: values.unit,
   };
   if (item.unitPrice !== undefined) {
@@ -457,6 +465,14 @@ export function CatalogVersionPanel({
                     {...inputErrorProps(form.formState.errors.nameEn, t)}
                     {...form.register("nameEn")}
                   />
+                  <label className="native-field">
+                    <span>{t("catalog.form.descriptionRu")}</span>
+                    <textarea rows={3} {...form.register("descriptionRu")} />
+                  </label>
+                  <label className="native-field">
+                    <span>{t("catalog.form.descriptionEn")}</span>
+                    <textarea rows={3} {...form.register("descriptionEn")} />
+                  </label>
                   <CatalogUnitField
                     kind={item.kind}
                     value={form.watch("unit")}

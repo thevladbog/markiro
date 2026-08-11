@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Input } from "@markiro/ui";
+import { Alert, Button, Checkbox, Input } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { createCatalogVersion, type CatalogCreateInput, type CatalogVersionDto } from "./api.js";
@@ -29,6 +29,8 @@ export function CatalogCreatePanel({
   const [code, setCode] = useState("");
   const [nameRu, setNameRu] = useState("");
   const [nameEn, setNameEn] = useState("");
+  const [descriptionRu, setDescriptionRu] = useState("");
+  const [descriptionEn, setDescriptionEn] = useState("");
   const [unit, setUnit] = useState(
     kind === "service" ? "project" : "month",
   );
@@ -39,6 +41,10 @@ export function CatalogCreatePanel({
   const [stations, setStations] = useState("");
   const [kiosks, setKiosks] = useState("");
   const [users, setUsers] = useState("");
+  const [demoDurationDays, setDemoDurationDays] = useState("");
+  const [labelEditorEnabled, setLabelEditorEnabled] = useState(false);
+  const [publicApiEnabled, setPublicApiEnabled] = useState(false);
+  const [palletsEnabled, setPalletsEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const create = useMutation({
@@ -46,6 +52,8 @@ export function CatalogCreatePanel({
       const base = {
         nameRu: nameRu.trim(),
         nameEn: nameEn.trim(),
+        descriptionRu: descriptionRu.trim() || null,
+        descriptionEn: descriptionEn.trim() || null,
         unit: unit.trim(),
         billingMode: kind === "service" ? ("one_time" as const) : ("recurring" as const),
         billingPeriod: kind === "service" ? null : ("month" as const),
@@ -62,10 +70,10 @@ export function CatalogCreatePanel({
                 maxStations: stations ? Number(stations) : null,
                 maxKiosks: kiosks ? Number(kiosks) : null,
                 maxCabinetUsers: users ? Number(users) : null,
-                labelEditorEnabled: false,
-                publicApiEnabled: false,
-                palletsEnabled: false,
-                demoDurationDays: null,
+                demoDurationDays: demoDurationDays ? Number(demoDurationDays) : null,
+                labelEditorEnabled,
+                publicApiEnabled,
+                palletsEnabled,
               },
             }
           : kind === "addon"
@@ -147,6 +155,24 @@ export function CatalogCreatePanel({
               onChange={(event) => setNameEn(event.target.value)}
               required
             />
+            <label className="native-field">
+              <span>{t("catalog.form.descriptionRu")}</span>
+              <textarea
+                aria-label={t("catalog.form.descriptionRu")}
+                value={descriptionRu}
+                onChange={(event) => setDescriptionRu(event.target.value)}
+                rows={3}
+              />
+            </label>
+            <label className="native-field">
+              <span>{t("catalog.form.descriptionEn")}</span>
+              <textarea
+                aria-label={t("catalog.form.descriptionEn")}
+                value={descriptionEn}
+                onChange={(event) => setDescriptionEn(event.target.value)}
+                rows={3}
+              />
+            </label>
             <CatalogUnitField kind={kind} value={unit} onChange={setUnit} />
             <Input
               label={t("catalog.form.unitPrice")}
@@ -185,6 +211,29 @@ export function CatalogCreatePanel({
                 value={users}
                 onChange={(event) => setUsers(event.target.value)}
                 inputMode="numeric"
+              />
+              <Input
+                label={t("catalog.form.demoDays")}
+                value={demoDurationDays}
+                onChange={(event) => setDemoDurationDays(event.target.value)}
+                inputMode="numeric"
+              />
+            </div>
+            <div className="feature-grid">
+              <Checkbox
+                label={t("catalog.form.labelEditor")}
+                checked={labelEditorEnabled}
+                onCheckedChange={setLabelEditorEnabled}
+              />
+              <Checkbox
+                label={t("catalog.form.publicApi")}
+                checked={publicApiEnabled}
+                onCheckedChange={setPublicApiEnabled}
+              />
+              <Checkbox
+                label={t("catalog.form.pallets")}
+                checked={palletsEnabled}
+                onCheckedChange={setPalletsEnabled}
               />
             </div>
           </fieldset>

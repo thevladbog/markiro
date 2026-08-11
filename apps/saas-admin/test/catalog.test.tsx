@@ -150,6 +150,39 @@ describe("commercial catalog", () => {
     });
   });
 
+  it("submits complete plan commercial terms", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "plan-complete");
+    await user.type(screen.getByLabelText("Название на русском"), "Полный тариф");
+    await user.type(screen.getByLabelText("Название на английском"), "Complete plan");
+    await user.type(screen.getByLabelText("Описание на русском"), "Для производства");
+    await user.type(screen.getByLabelText("Описание на английском"), "For production");
+    await user.clear(screen.getByLabelText("Линии"));
+    await user.type(screen.getByLabelText("Линии"), "10");
+    await user.clear(screen.getByLabelText("Дней демо"));
+    await user.type(screen.getByLabelText("Дней демо"), "30");
+    await user.click(screen.getByLabelText("Редактор этикеток"));
+    await user.click(screen.getByLabelText("Публичный API"));
+    await user.click(screen.getByLabelText("Работа с палетами"));
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+
+    expect(api.createCalls()[0]?.body).toMatchObject({
+      descriptionRu: "Для производства",
+      descriptionEn: "For production",
+      plan: {
+        maxLines: 10,
+        demoDurationDays: 30,
+        labelEditorEnabled: true,
+        publicApiEnabled: true,
+        palletsEnabled: true,
+      },
+    });
+  });
+
   it("opens a catalog version when clicking any cell in its row", async () => {
     installCatalogApi({ items: [PUBLISHED_PLAN] });
     renderSaasApp();
@@ -318,6 +351,8 @@ describe("commercial catalog", () => {
         method: "PATCH",
         path: "/api/platform/catalog/items/plan-basic/versions/11111111-1111-4111-8111-111111111111",
         body: {
+          descriptionRu: "Для одной площадки",
+          descriptionEn: "For one site",
           nameRu: "Базовый",
           nameEn: "Basic",
           unit: "month",
@@ -369,6 +404,8 @@ describe("commercial catalog", () => {
         method: "PATCH",
         path: "/api/platform/catalog/items/addon-station/versions/41111111-1111-4111-8111-111111111111",
         body: {
+          descriptionRu: null,
+          descriptionEn: null,
           nameRu: "Дополнительная станция",
           nameEn: "Extra station",
           unit: "station",
