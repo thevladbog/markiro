@@ -16,6 +16,7 @@ import {
 
 interface ZplState {
   line: number;
+  source: string;
   xDots: number;
   yDots: number;
   fontHeightDots: number;
@@ -67,10 +68,23 @@ function requiredNumber(values: number[], index: number, line: number, source: s
 
 function decodeFieldData(value: string, indicator: string | undefined): string {
   if (!indicator) return value;
-  const escaped = new RegExp(`${indicator}([0-9A-Fa-f]{2}|1)`, "g");
-  return value.replace(escaped, (_match, code: string) =>
-    code === "1" ? "" : String.fromCharCode(Number.parseInt(code, 16)),
-  );
+  let decoded = "";
+  for (let index = 0; index < value.length; index += 1) {
+    if (value.startsWith(indicator, index)) {
+      const code = value.slice(index + indicator.length, index + indicator.length + 2);
+      if (code === "1") {
+        index += indicator.length;
+        continue;
+      }
+      if (/^[0-9A-Fa-f]{2}$/.test(code)) {
+        decoded += String.fromCharCode(Number.parseInt(code, 16));
+        index += indicator.length + 1;
+        continue;
+      }
+    }
+    decoded += value[index];
+  }
+  return decoded;
 }
 
 function dotsToMm(dots: number, dpi: 203 | 300): number {
@@ -188,6 +202,9 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
   const elements: LabelElement[] = [];
   const sourceLineByElementId: Record<string, number> = {};
   const warnings: LabelImportResult["warnings"] = [];
+  let state: ZplState | null = null;
+  let started = false;
+  let ended = false;
 
   for (const [lineIndex, source] of input.split(/\r?\n/).entries()) {
     const line = lineIndex + 1;
@@ -202,11 +219,13 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
         });
       continue;
     }
-    let state: ZplState | null = null;
     for (const token of tokens) {
       const name = token[1]!;
       const args = token[2] ?? "";
+      if (ended) fail(line, source, "ZPL commands cannot appear after ^XZ");
+      if (name !== "XA" && !started) fail(line, source, "ZPL source must start with ^XA");
       if (!SUPPORTED.has(name)) {
+        if (state) fail(line, source, `unsupported ZPL command ^${name} inside an active field`);
         warnings.push({
           line,
           source,
@@ -223,11 +242,13 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
           heightDots = requiredNumber(parseNumbers(args, 1, line, source), 0, line, source);
           break;
         case "FO": {
+          if (state) fail(line, source, "ZPL field is missing ^FS");
           const numbers = parseNumbers(args, 2, line, source);
           const xDots = requiredNumber(numbers, 0, line, source);
           const yDots = requiredNumber(numbers, 1, line, source);
           state = {
             line,
+            source,
             xDots,
             yDots,
             fontHeightDots: 24,
@@ -239,7 +260,7 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
           if (!state) fail(line, source, "ZPL font command requires ^FO");
           const orientation = args.trim().charAt(0) || "N";
           if (orientation !== "N") fail(line, source, "only non-rotated ZPL text is supported");
-          const numbers = parseNumbers(args.trim().slice(1), 2, line, source);
+          const numbers = parseNumbers(args.trim().slice(1).replace(/^,/, ""), 2, line, source);
           state.fontHeightDots = requiredNumber(numbers, 0, line, source);
           state.fontWidthDots = requiredNumber(numbers, 1, line, source);
           break;
@@ -303,15 +324,24 @@ export function parseZplLabel(input: string, dpi: 203 | 300): LabelImportResult 
           }
           break;
         case "XA":
+          if (started) fail(line, source, "ZPL source must contain exactly one ^XA document");
+          started = true;
+          break;
         case "XZ":
+          if (!started || ended) fail(line, source, "invalid ZPL document framing");
+          if (state) fail(line, source, "ZPL source ended with an active field missing ^FS");
+          ended = true;
           break;
       }
     }
-    if (state?.data !== undefined || state?.barcode || state?.graphic) {
-      finalizeField(state, dpi, elements, sourceLineByElementId);
-    }
   }
 
+  if (!started || !ended) {
+    throw new DomainError("LABEL_CODE_INVALID", "ZPL source must contain one ^XA...^XZ document");
+  }
+  if (state) {
+    fail(state.line, state.source, "ZPL source ended with an active field missing ^FS");
+  }
   if (widthDots === undefined || heightDots === undefined) {
     throw new DomainError("LABEL_CODE_INVALID", "ZPL source must include ^PW and ^LL");
   }

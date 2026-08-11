@@ -486,6 +486,33 @@ describe("editorReducer", () => {
     expect(next.geometryError).toBe("ELEMENT_TOO_LARGE");
   });
 
+  it("resizeLabel fits elements on a valid shrink", () => {
+    const state = createEditorState(
+      makeSpec([
+        { kind: "box", id: "bx1", xMm: 80, yMm: 80, widthMm: 20, heightMm: 20, thicknessMm: 1 },
+      ]),
+    );
+    const next = editorReducer(state, { type: "resizeLabel", widthMm: 90, heightMm: 90 });
+    expect(next.spec.widthMm).toBe(90);
+    expect(next.spec.elements[0]).toEqual(expect.objectContaining({ xMm: 70, yMm: 70 }));
+    expect(next.geometryError).toBeNull();
+    expect(next.history).toEqual([state.spec]);
+  });
+
+  it("resizeLabel rejects invalid dimensions without changing spec or history", () => {
+    const state = createEditorState(specWithBox());
+    for (const widthMm of [Number.NaN, Number.POSITIVE_INFINITY]) {
+      const next = editorReducer(state, { type: "resizeLabel", widthMm, heightMm: 90 });
+      expect(next.spec).toBe(state.spec);
+      expect(next.history).toHaveLength(0);
+      expect(next.geometryError).toBe("ELEMENT_TOO_LARGE");
+    }
+    const empty = createEditorState(makeSpec([]));
+    const invalidEmpty = editorReducer(empty, { type: "resizeLabel", widthMm: 0, heightMm: 0 });
+    expect(invalidEmpty.spec).toBe(empty.spec);
+    expect(invalidEmpty.geometryError).toBe("ELEMENT_TOO_LARGE");
+  });
+
   it("moveBy: translates a line's second endpoint by the same delta (preserves length/direction)", () => {
     const spec = makeSpec([
       { kind: "line", id: "l1", xMm: 10, yMm: 10, x2Mm: 30, y2Mm: 10, thicknessMm: 0.5 },

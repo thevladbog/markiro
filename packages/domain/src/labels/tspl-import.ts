@@ -249,6 +249,9 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
         const yMm = dotsToMm(numberAt(args, 1, line, source), dpi);
         const widthMm = dotsToMm(numberAt(args, 2, line, source), dpi);
         const heightMm = dotsToMm(numberAt(args, 3, line, source), dpi);
+        if (widthMm <= 0 || heightMm <= 0)
+          fail(line, source, "TSPL BAR dimensions must be positive");
+        const horizontal = widthMm >= heightMm;
         addElement(
           elements,
           {
@@ -256,9 +259,9 @@ export function parseTsplLabel(input: string, dpi: 203 | 300): LabelImportResult
             id: importedElementId("tspl", elements.length + 1),
             xMm,
             yMm,
-            x2Mm: xMm + widthMm,
-            y2Mm: yMm + heightMm,
-            thicknessMm: Math.max(0.1, Math.min(widthMm || 0.1, heightMm || 0.1)),
+            x2Mm: horizontal ? xMm + widthMm : xMm,
+            y2Mm: horizontal ? yMm : yMm + heightMm,
+            thicknessMm: Math.min(widthMm, heightMm),
           },
           sourceLineByElementId,
           line,

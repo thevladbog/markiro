@@ -512,6 +512,9 @@ describe("Code import", () => {
     const clipboard = vi.fn(async () => undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText: clipboard } });
     renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+    expect(screen.getByText("Выбрано: Текст")).toBeDefined();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
     fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
     const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Копировать {{product.name}}" }));
@@ -527,6 +530,9 @@ describe("Code import", () => {
 
     expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
     expect(screen.getByText("Выберите элемент на холсте")).toBeDefined();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
+    fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
+    expect(screen.getByRole("dialog", { name: "Отменить несохранённые изменения?" })).toBeDefined();
   });
 });
 

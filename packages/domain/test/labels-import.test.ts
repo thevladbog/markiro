@@ -85,6 +85,10 @@ describe("label code import contract", () => {
           align: "center",
         }),
       ]);
+      expect((result.spec.elements[0] as { fontSizePt: number }).fontSizePt).toBeCloseTo(
+        (34 * 72) / 203,
+        5,
+      );
       expect(result.sourceLineByElementId).toEqual({ "import-zpl-1": 4, "import-zpl-2": 5 });
     });
 
@@ -100,7 +104,7 @@ describe("label code import contract", () => {
           "^FO10,200^GB300,4,4^FS",
           "^FO400,200^GB300,180,4^FS",
           "^FO10,400^FH_^FDHello_5EWorld^FS",
-          "^FO10,500^GFA,10,10,1,FF^FS",
+          "^GFA,10,10,1,FF",
           "^XZ",
         ].join("\n"),
         203,
@@ -132,7 +136,7 @@ describe("label code import contract", () => {
         expect.objectContaining({ kind: "text", text: "Hello^World" }),
       ]);
       expect(result.warnings).toEqual([
-        expect.objectContaining({ line: 10, source: "^FO10,500^GFA,10,10,1,FF^FS" }),
+        expect.objectContaining({ line: 10, source: "^GFA,10,10,1,FF" }),
       ]);
     });
 
@@ -146,6 +150,20 @@ describe("label code import contract", () => {
       expect(() => parseZplLabel("^XA^PW400^LL400^FO1,1^A0R,20,20^FDtext^FS^XZ", 203)).toThrow(
         expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
       );
+      expect(() => parseZplLabel("^XA^PW400^LL400^FO1,1^FDtext^XZ", 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+      expect(() => parseZplLabel("^XA^PW400^LL400^FO1,1^FDtext^FS^XZ^XA^XZ", 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+    });
+
+    it("keeps fields across physical lines and accepts regex-special ^FH indicators", () => {
+      const result = parseZplLabel(
+        "^XA\n^PW400\n^LL400\n^FO10,10\n^FH[\n^FDHello[5EWorld\n^FS\n^XZ",
+        203,
+      );
+      expect(result.spec.elements[0]).toEqual(expect.objectContaining({ text: "Hello^World" }));
     });
   });
 
@@ -193,6 +211,17 @@ describe("label code import contract", () => {
         "import-tspl-5": 9,
         "import-tspl-6": 10,
       });
+      expect(result.spec.elements[4]).toEqual(
+        expect.objectContaining({ x2Mm: expect.any(Number), y2Mm: expect.any(Number) }),
+      );
+      const bar = result.spec.elements[4]!;
+      if (bar.kind === "line") {
+        expect(bar.y2Mm).toBe(bar.yMm);
+        expect(bar.thicknessMm).toBeGreaterThan(0);
+      }
+      expect(() => parseTsplLabel("SIZE 100 mm, 50 mm\nBAR 10,10,0,4", 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
     });
 
     it("decodes doubled quotes and reports unsupported bitmap lines", () => {

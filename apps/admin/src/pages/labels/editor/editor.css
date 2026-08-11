@@ -26,6 +26,7 @@
 
 .label-editor__body {
   display: grid;
+  position: relative;
   grid-template-columns: 196px minmax(0, 1fr) 320px;
   min-width: 0;
   min-height: 0;

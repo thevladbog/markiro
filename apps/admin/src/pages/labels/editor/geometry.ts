@@ -18,6 +18,14 @@ export function fitElementWithinLabel(
   spec: Pick<LabelTemplateSpec, "widthMm" | "heightMm">,
   data: Record<LabelField, string> = sampleLabelData(),
 ): ElementFitResult {
+  if (
+    !Number.isFinite(spec.widthMm) ||
+    !Number.isFinite(spec.heightMm) ||
+    spec.widthMm <= 0 ||
+    spec.heightMm <= 0
+  ) {
+    return { ok: false, reason: "ELEMENT_TOO_LARGE" };
+  }
   const bounds = elementBoundsMm(element, data);
   if (
     !Number.isFinite(bounds.x) ||
@@ -67,6 +75,14 @@ export function fitSpecElements(
   spec: LabelTemplateSpec,
   data: Record<LabelField, string> = sampleLabelData(),
 ): { ok: true; spec: LabelTemplateSpec; adjustedIds: string[] } | ElementFitFailure {
+  if (
+    !Number.isFinite(spec.widthMm) ||
+    !Number.isFinite(spec.heightMm) ||
+    spec.widthMm <= 0 ||
+    spec.heightMm <= 0
+  ) {
+    return { ok: false, reason: "ELEMENT_TOO_LARGE" };
+  }
   const adjustedIds: string[] = [];
   const elements: LabelElement[] = [];
   for (const element of spec.elements) {

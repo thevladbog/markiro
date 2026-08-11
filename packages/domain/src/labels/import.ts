@@ -30,6 +30,10 @@ export interface ParseLabelCodeOptions {
 
 const knownFields = new Set<string>(LABEL_FIELDS);
 
+function isLabelField(value: string): value is LabelField {
+  return knownFields.has(value);
+}
+
 export function assertImportInputLimits(input: string): void {
   if (new TextEncoder().encode(input).byteLength > MAX_LABEL_CODE_BYTES) {
     throw new DomainError(
@@ -55,9 +59,9 @@ export function parseTemplatePayload(
 ): { kind: "field"; field: LabelField } | { kind: "literal"; value: string } {
   const match = /^\{\{([^{}]+)\}\}$/.exec(value);
   if (match) {
-    const candidate = match[1]!;
-    if (knownFields.has(candidate)) {
-      return { kind: "field", field: candidate as LabelField };
+    const candidate = match[1];
+    if (candidate !== undefined && isLabelField(candidate)) {
+      return { kind: "field", field: candidate };
     }
     invalidPayload(value, line, `unknown label field placeholder "${candidate}"`);
   }

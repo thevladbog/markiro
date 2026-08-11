@@ -214,6 +214,7 @@ function LabelEditorContent({
   function handleImportReplace(result: LabelImportResult): void {
     editor.replaceSpec(result.spec);
     editor.select(null);
+    setCustomSize(matchPresetKey(result.spec.widthMm, result.spec.heightMm) === null);
     markDirty();
     setShowImportDialog(false);
   }

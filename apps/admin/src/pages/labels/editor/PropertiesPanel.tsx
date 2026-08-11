@@ -51,6 +51,11 @@ export function PropertiesPanel({
     return (
       <div className="label-editor__properties-empty">
         {t("pages.labels.editor.properties.none")}
+        {geometryError && (
+          <div className="label-editor__geometry-error" role="alert">
+            {t("pages.labels.editor.properties.geometryError")}
+          </div>
+        )}
       </div>
     );
   }
