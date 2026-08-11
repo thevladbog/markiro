@@ -515,8 +515,19 @@ textarea {
 }
 
 .version-panel {
+  position: fixed;
+  inset: 0 0 0 auto;
+  z-index: 100;
+  width: min(760px, 100vw);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--line-strong);
   background: var(--surface-card);
+  box-shadow: -16px 0 40px color-mix(in srgb, var(--surface-inverse) 18%, transparent);
+}
+
+.catalog-create-panel .catalog-form {
+  padding: 24px;
 }
 
 .version-panel__header {
