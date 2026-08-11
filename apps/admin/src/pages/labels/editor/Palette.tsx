@@ -11,7 +11,7 @@
 import { useTranslation } from "react-i18next";
 
 import type { LabelElement } from "@markiro/domain";
-import { IconButton } from "@markiro/ui";
+import { Button } from "@markiro/ui";
 
 export interface PaletteProps {
   /** The label's own size -- new elements are centered within it. */
@@ -138,30 +138,23 @@ export function Palette({ labelWidthMm, labelHeightMm, onAdd }: PaletteProps) {
   const centerYMm = Math.round(labelHeightMm / 2);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: "16px 12px" }}>
-      <span
-        style={{
-          font: "500 11px/1 var(--font-ui)",
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-          padding: "0 4px 6px 4px",
-        }}
-      >
-        {t("pages.labels.editor.palette.title")}
-      </span>
+    <div className="label-editor__palette">
+      <span className="label-editor__eyebrow">{t("pages.labels.editor.palette.title")}</span>
       {PALETTE_BUTTONS.map((button) => (
-        <IconButton
+        <Button
           key={button.labelKey}
           aria-label={t(`pages.labels.editor.palette.${button.labelKey}`)}
           variant="secondary"
           size="compact"
           icon={<span aria-hidden="true">{button.icon}</span>}
           title={t(`pages.labels.editor.palette.${button.labelKey}`)}
+          className="label-editor__palette-button"
           onClick={() =>
             onAdd(button.build(centerXMm, centerYMm, t("pages.labels.editor.defaultText")))
           }
-        />
+        >
+          <span>{t(`pages.labels.editor.palette.${button.labelKey}`)}</span>
+        </Button>
       ))}
     </div>
   );

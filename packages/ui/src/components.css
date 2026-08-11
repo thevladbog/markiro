@@ -31,7 +31,8 @@
 .mk-icon-button:focus-visible,
 .mk-date-picker__trigger:focus-visible,
 .mk-date-picker__navigation:focus-visible,
-.mk-date-picker__day:focus-visible {
+.mk-date-picker__day:focus-visible,
+.mk-textarea__control:focus-visible {
   outline: 2px solid var(--focus-ring) !important;
   outline-offset: 2px !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent) !important;

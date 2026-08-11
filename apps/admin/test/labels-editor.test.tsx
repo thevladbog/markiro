@@ -158,6 +158,34 @@ describe("Palette", () => {
     expect((screen.getByLabelText("X, мм") as HTMLInputElement).value).toBe("50");
     expect((screen.getByLabelText("Y, мм") as HTMLInputElement).value).toBe("50");
   });
+
+  it("shows a visible label for every palette action", () => {
+    renderCreateFlow();
+
+    for (const label of [
+      "Текст",
+      "Поле",
+      "DataMatrix",
+      "Code128",
+      "EAN-13",
+      "QR",
+      "Линия",
+      "Рамка",
+    ]) {
+      expect(screen.getByText(label)).toBeDefined();
+    }
+  });
+
+  it("collapses and reopens properties without clearing the selected element", () => {
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Свернуть" }));
+    expect(screen.queryByText("Выбрано: Текст")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть свойства" }));
+    expect(screen.getByText("Выбрано: Текст")).toBeDefined();
+    expect((screen.getByLabelText("X, мм") as HTMLInputElement).value).toBe("50");
+  });
 });
 
 describe("PropertiesPanel + Save (round-trip into the POSTed spec)", () => {
@@ -435,6 +463,76 @@ describe("Zoom captions (LabelCanvas + PreviewPane)", () => {
 
     expect(screen.getByText("масштаб 4 px/мм")).toBeDefined();
     expect(screen.getByText("масштаб 3 px/мм")).toBeDefined();
+  });
+});
+
+describe("Code import", () => {
+  it("opens a labelled import dialog with every available template field", () => {
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+
+    expect(screen.getByRole("dialog", { name: "Импорт кода" })).toBeDefined();
+    for (const placeholder of [
+      "{{product.name}}",
+      "{{product.gtin}}",
+      "{{km.code}}",
+      "{{sscc}}",
+      "{{shift.no}}",
+      "{{date}}",
+      "{{qty}}",
+      "{{operator}}",
+      "{{counterparty.name}}",
+    ]) {
+      expect(screen.getByText(placeholder)).toBeDefined();
+    }
+  });
+
+  it("requires acknowledgement for unsupported source lines and invalidates stale analysis", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    const source = "^XA\n^PW799\n^LL400\n^FO10,10^FD{{product.name}}^FS\n^GFA,10,10,1,FF\n^XZ";
+    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), { target: { value: source } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+
+    expect(await within(dialog).findByText("^GFA,10,10,1,FF")).toBeDefined();
+    const replace = within(dialog).getByRole("button", { name: "Заменить этикетку" });
+    expect(replace.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /Удалить неподдерживаемые/ }));
+    expect(replace.hasAttribute("disabled")).toBe(false);
+
+    const dpi = within(dialog).getByRole("combobox", { name: "DPI импорта" });
+    await user.click(dpi);
+    await user.click(await screen.findByRole("option", { name: "300 DPI" }));
+    expect(replace.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("copies an exact field placeholder and atomically replaces the composition", async () => {
+    const clipboard = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText: clipboard } });
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+    expect(screen.getByText("Выбрано: Текст")).toBeDefined();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Копировать {{product.name}}" }));
+    expect(clipboard).toHaveBeenCalledWith("{{product.name}}");
+
+    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), {
+      target: {
+        value: "^XA\n^PW799\n^LL400\n^FO10,10^FD{{product.name}}^FS\n^XZ",
+      },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
+    expect(screen.getByText("Выберите элемент на холсте")).toBeDefined();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
+    fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
+    expect(screen.getByRole("dialog", { name: "Отменить несохранённые изменения?" })).toBeDefined();
   });
 });
 
