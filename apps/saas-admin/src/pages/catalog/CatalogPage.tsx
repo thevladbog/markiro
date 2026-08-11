@@ -142,6 +142,7 @@ export function CatalogPage() {
               aria-selected={activeKind === tab.kind}
               onClick={() => {
                 setActiveKind(tab.kind);
+                setCreating(false);
                 setSelectedId(null);
               }}
             >
@@ -155,7 +156,10 @@ export function CatalogPage() {
           columns={columns}
           rows={visibleItems}
           empty={t("catalog.empty")}
-          onRowClick={(item) => setSelectedId(item.id)}
+          onRowClick={(item) => {
+            setCreating(false);
+            setSelectedId(item.id);
+          }}
         />
       </Card>
       {selected ? (

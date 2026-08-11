@@ -53,6 +53,23 @@ describe("commercial catalog", () => {
     expect(await screen.findByRole("region", { name: "Версия 1 · Базовый" })).toBeDefined();
   });
 
+  it("closes the create panel before switching tabs or opening a row", async () => {
+    installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [PUBLISHED_PLAN] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    expect(screen.getByRole("region", { name: "Новая позиция каталога" })).toBeDefined();
+
+    await user.click(screen.getByRole("tab", { name: "Дополнения" }));
+    expect(screen.queryByRole("region", { name: "Новая позиция каталога" })).toBeNull();
+
+    await user.click(screen.getByRole("tab", { name: "Тарифы" }));
+    await user.click(await screen.findByRole("cell", { name: "1" }));
+    expect(screen.queryByRole("region", { name: "Новая позиция каталога" })).toBeNull();
+    expect(await screen.findByRole("region", { name: "Версия 1 · Базовый" })).toBeDefined();
+  });
+
   it("archives a retired catalog position from its open row", async () => {
     const retired = { ...structuredClone(SERVICE), status: "retired" as const };
     installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [retired] });
