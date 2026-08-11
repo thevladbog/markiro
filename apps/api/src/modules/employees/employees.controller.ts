@@ -44,6 +44,7 @@ import { EmployeesService } from "./employees.service";
 // station api-key out even though TenantGuard accepts it for tenant
 // resolution.
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 

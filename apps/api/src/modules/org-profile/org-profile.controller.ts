@@ -3,7 +3,10 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
-import { RequireSubscriptionWrite } from "../../subscriptions/subscription-access-policy";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -19,6 +22,7 @@ import { OrgProfileService } from "./org-profile.service";
 @ApiTags("org-profile")
 @Controller("org/profile")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.TENANT_SETTINGS_MANAGE)
 export class OrgProfileController {
   constructor(private readonly orgProfileService: OrgProfileService) {}

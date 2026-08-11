@@ -265,6 +265,7 @@ describe.skipIf(!ready)("EntitlementsService", () => {
     expect(resolved.quotas).toEqual({ lines: 9, stations: 8, kiosks: 7, cabinetUsers: 6 });
 
     const expired = await createManagedSubscription(db, {
+      startsAt: new Date("2026-08-01T00:00:00.000Z"),
       endsAt: boundary,
       maxLines: 4,
     });

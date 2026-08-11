@@ -18,6 +18,7 @@ import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  AllowSubscriptionReadOnly,
   AllowSubscriptionRecovery,
   RequireSubscriptionWrite,
 } from "../../subscriptions/subscription-access-policy";
@@ -40,6 +41,7 @@ import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 @ApiTags("shifts")
 @Controller("shifts")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class ShiftsController {
   constructor(private readonly shiftsService: ShiftsService) {}
 
@@ -118,6 +120,7 @@ export class ShiftsController {
 
   @Get(":id/bundle")
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @AllowSubscriptionRecovery("shift")
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
     return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
   }

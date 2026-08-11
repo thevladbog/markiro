@@ -49,6 +49,7 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 @ApiTags("kiosks")
 @Controller("kiosks")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class KiosksController {
   constructor(
     private readonly kiosksService: KiosksService,

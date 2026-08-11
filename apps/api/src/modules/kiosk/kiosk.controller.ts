@@ -1,12 +1,18 @@
-import { Body, Controller, Get, Headers, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
+import {
+  AllowSubscriptionReadOnly,
+  AllowSubscriptionRecovery,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
+  createOrderAdmissionSchema,
   createOrderSchema,
-  MAX_KIOSK_DEVICE_SEQ,
+  type CreateOrderAdmissionDto,
+  type CreateOrderAdmissionResultDto,
   type CreateOrderDto,
   type CreateOrderResultDto,
   type KioskBootstrapDto,
@@ -17,20 +23,22 @@ import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 @ApiTags("kiosk")
 @Controller("kiosk")
 @UseGuards(KioskDeviceGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class KioskController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 
   @Get("bootstrap")
-  async bootstrap(
+  async bootstrap(@Req() req: RequestWithKiosk): Promise<KioskBootstrapDto> {
+    return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!);
+  }
+
+  @Post("order-admissions")
+  @RequireSubscriptionWrite()
+  async attestOrder(
     @Req() req: RequestWithKiosk,
-    @Headers("x-kiosk-next-device-seq") nextDeviceSeq: string | undefined,
-  ): Promise<KioskBootstrapDto> {
-    const parsed = nextDeviceSeq === undefined ? undefined : Number(nextDeviceSeq);
-    const requested =
-      Number.isSafeInteger(parsed) && parsed! >= 0 && parsed! <= MAX_KIOSK_DEVICE_SEQ
-        ? parsed
-        : undefined;
-    return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!, requested);
+    @Body(new ZodValidationPipe(createOrderAdmissionSchema)) body: CreateOrderAdmissionDto,
+  ): Promise<CreateOrderAdmissionResultDto> {
+    return this.pickupOrdersService.attestKioskOrder(req.tenantId!, req.kioskId!, body);
   }
 
   @Post("orders")

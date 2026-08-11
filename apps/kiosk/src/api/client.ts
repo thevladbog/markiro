@@ -1,4 +1,6 @@
 import type {
+  CreateOrderAdmissionDto,
+  CreateOrderAdmissionResultDto,
   CreateOrderDto,
   CreateOrderResultDto,
   KioskBootstrapDto,
@@ -261,14 +263,11 @@ export async function pairKiosk(serverUrl: string, code: string): Promise<PairKi
 
 export interface KioskClient {
   bootstrap(): Promise<KioskBootstrapDto>;
+  attestOrder(body: CreateOrderAdmissionDto): Promise<CreateOrderAdmissionResultDto>;
   submitOrder(body: CreateOrderDto): Promise<CreateOrderResultDto>;
 }
 
-export function createKioskClient(cfg: {
-  token: string;
-  serverUrl: string;
-  nextDeviceSeq?: number;
-}): KioskClient {
+export function createKioskClient(cfg: { token: string; serverUrl: string }): KioskClient {
   const base = baseOf(cfg.serverUrl);
 
   async function request<T>(
@@ -284,9 +283,6 @@ export function createKioskClient(cfg: {
         headers: {
           "Content-Type": "application/json",
           "x-kiosk-token": cfg.token,
-          ...(cfg.nextDeviceSeq !== undefined
-            ? { "x-kiosk-next-device-seq": String(cfg.nextDeviceSeq) }
-            : {}),
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       },
@@ -298,6 +294,13 @@ export function createKioskClient(cfg: {
     // Every authenticated call bumps `kiosks.last_seen_at` server-side, so a
     // periodic bootstrap doubles as the heartbeat — there is no separate one.
     bootstrap: () => request<KioskBootstrapDto>("GET", "/kiosk/bootstrap", BOOTSTRAP_TIMEOUT_MS),
+    attestOrder: (body) =>
+      request<CreateOrderAdmissionResultDto>(
+        "POST",
+        "/kiosk/order-admissions",
+        SUBMIT_TIMEOUT_MS,
+        body,
+      ),
     submitOrder: (body) =>
       request<CreateOrderResultDto>("POST", "/kiosk/orders", SUBMIT_TIMEOUT_MS, body),
   };

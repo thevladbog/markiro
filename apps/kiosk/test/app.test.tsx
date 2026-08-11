@@ -229,6 +229,7 @@ interface FakeServer {
    */
   takenTodayElsewhere: number;
   bootstraps: number;
+  admissions: Array<Omit<CreateOrderDto, "createdAt" | "admissionProof">>;
   orders: CreateOrderDto[];
 }
 let server: FakeServer;
@@ -266,6 +267,7 @@ beforeEach(() => {
     generatedAt: NOW.toISOString(),
     takenTodayElsewhere: 0,
     bootstraps: 0,
+    admissions: [],
     orders: [],
   };
   globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -281,6 +283,17 @@ beforeEach(() => {
     if (url.endsWith("/kiosk/bootstrap")) {
       server.bootstraps += 1;
       return jsonResponse(bootstrapAt(server.generatedAt));
+    }
+    if (url.endsWith("/kiosk/order-admissions")) {
+      const body = JSON.parse(String(init?.body)) as Omit<
+        CreateOrderDto,
+        "createdAt" | "admissionProof"
+      >;
+      server.admissions.push(body);
+      return jsonResponse({
+        claimedAt: server.generatedAt,
+        admissionProof: `admission-${body.deviceSeq}`,
+      });
     }
     if (url.endsWith("/kiosk/orders")) {
       const body = JSON.parse(String(init?.body)) as CreateOrderDto;
@@ -918,6 +931,15 @@ describe("KioskShell", () => {
 
     await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
     expect(server.orders).toHaveLength(1);
+    expect(server.admissions).toEqual([
+      {
+        deviceSeq: 5,
+        badgeDigest,
+        reason: "buy",
+        writeoffReasonId: null,
+        items: [{ rawKm: KM }],
+      },
+    ]);
     expect(server.orders[0]).toMatchObject({
       deviceSeq: 5,
       // The DIGEST of the badge that was scanned, never the badge itself — see
@@ -925,6 +947,8 @@ describe("KioskShell", () => {
       badgeDigest,
       reason: "buy",
       items: [{ rawKm: KM }],
+      createdAt: server.generatedAt,
+      admissionProof: "admission-5",
     });
     expect(server.orders[0]).not.toHaveProperty("badgeCode");
     // Acknowledged, so it has left the queue — and the counter moved on, or the

@@ -13,7 +13,10 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
-import { RequireSubscriptionWrite } from "../../subscriptions/subscription-access-policy";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -31,6 +34,7 @@ import { PickupRejectionsService } from "./pickup-rejections.service";
 @ApiTags("pickup-rejections")
 @Controller("pickup-rejections")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class PickupRejectionsController {
   constructor(private readonly pickupRejectionsService: PickupRejectionsService) {}
 

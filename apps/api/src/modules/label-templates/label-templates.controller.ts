@@ -16,7 +16,10 @@ import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
-import { RequireFeature } from "../../subscriptions/subscription-access-policy";
+import {
+  AllowSubscriptionReadOnly,
+  RequireFeature,
+} from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   createLabelTemplateSchema,
@@ -33,6 +36,7 @@ import { LabelTemplatesService } from "./label-templates.service";
 // The station never calls this module. Cabinet authorization keeps a station
 // api-key out even though TenantGuard accepts it for tenant resolution.
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class LabelTemplatesController {
   constructor(private readonly labelTemplatesService: LabelTemplatesService) {}
 

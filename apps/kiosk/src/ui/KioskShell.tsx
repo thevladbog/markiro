@@ -32,7 +32,13 @@ import {
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
-import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
+import {
+  attestQueuedOrder,
+  enqueueOrder,
+  listQuarantine,
+  listQueue,
+  quarantineQueue,
+} from "../store/queue.js";
 import { scrubStoredBadgeCodes } from "../store/scrub.js";
 import {
   cancelFlushRetry,
@@ -218,12 +224,12 @@ export function KioskShell(): React.JSX.Element {
     const base = createKioskClient({
       token: cfg.token,
       serverUrl: cfg.serverUrl,
-      nextDeviceSeq: cfg.nextDeviceSeq,
     });
     return {
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
+      attestOrder: (body) => base.attestOrder(body),
       submitOrder: async (body) => {
         try {
           const result = await base.submitOrder(body);
@@ -718,22 +724,21 @@ export function KioskShell(): React.JSX.Element {
       const cfg = configRef.current;
       if (!cfg) return;
       const deviceSeq = cfg.nextDeviceSeq;
-      const admissionProof = snapshotRef.current?.bootstrap.admissionProofs?.find(
-        (candidate) => candidate.deviceSeq === deviceSeq,
-      )?.proof;
-      const body: CreateOrderDto = {
+      const content = {
         deviceSeq,
         badgeDigest: active.badgeDigest,
         reason: state.reason,
         writeoffReasonId: state.writeoffReasonId,
         items: state.items.map((item) => ({ rawKm: item.rawKm })),
+      };
+      const body: CreateOrderDto = {
+        ...content,
         // The scan time, not the sync time: an order queued through an outage
         // replays hours later and must still be filed under when it happened.
         // Read off the SERVER's clock (`scannedAt`), because this stamp is what
         // the server dates the order by and therefore which UTC day its day
         // limit charges it to — a field the tablet's own date must not decide.
         createdAt: scannedAt().toISOString(),
-        ...(admissionProof ? { admissionProof } : {}),
       };
       try {
         // THE COUNTER FIRST, and this ordering is load-bearing.
@@ -767,6 +772,21 @@ export function KioskShell(): React.JSX.Element {
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
         await enqueueOrder(body, active.employeeId);
+        const client = clientFor(advanced);
+        if (client) {
+          try {
+            const admission = await client.attestOrder(content);
+            await attestQueuedOrder(deviceSeq, {
+              ...content,
+              createdAt: admission.claimedAt,
+              admissionProof: admission.admissionProof,
+            });
+          } catch {
+            // The proofless queued body remains the durable recovery record.
+            // While access is live it may still submit normally; after expiry
+            // the server's exact 403 moves it to manual quarantine.
+          }
+        }
         // From here on the server's answer for THIS order is worth keeping.
         awaited.current = { deviceSeq, result: null };
         await drain();
@@ -785,7 +805,7 @@ export function KioskShell(): React.JSX.Element {
         console.error("kiosk: the order could not be filed", err);
       }
     },
-    [applyConfig, drain, scannedAt],
+    [applyConfig, clientFor, drain, scannedAt],
   );
 
   /**

@@ -261,19 +261,12 @@ export class StationScansService {
         if (!existing) throw new ConflictException({ code: "station_batch_mismatch" });
 
         if (existing.terminalId === null && existing.payloadDigest === null) {
-          const denied = this.deniedRecords(body, "legacy_unbound_replay");
-          await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
-          const result = { applied: 0, alreadyApplied: true, conflicts: [], denied };
-          await tx
-            .update(schema.syncBatches)
-            .set({ terminalId: authenticatedTerminalId, payloadDigest: digest, result })
-            .where(
-              and(
-                eq(schema.syncBatches.tenantId, tenantId),
-                eq(schema.syncBatches.batchId, body.batchId),
-              ),
-            );
-          return result;
+          // Rows created before migration 0032 carry no authoritative terminal
+          // or payload binding. The first post-upgrade caller cannot safely
+          // manufacture one: it may be another station replaying the same old
+          // batch id. Preserve the historical payload-independent ack and
+          // leave the row unbound, with no quarantine or business write.
+          return { applied: 0, alreadyApplied: true, conflicts: [] };
         }
 
         if (existing.terminalId !== authenticatedTerminalId || existing.payloadDigest !== digest) {
@@ -1293,32 +1286,6 @@ export class StationScansService {
         );
       return result;
     });
-  }
-
-  private deniedRecords(
-    body: SyncBatchDto,
-    code: "legacy_unbound_replay",
-  ): DeniedStationRecordDto[] {
-    return [
-      ...body.items.map((item, recordIndex) => ({
-        recordKind: "item" as const,
-        recordIndex,
-        shiftId: item.shiftId,
-        code,
-      })),
-      ...body.boxes.map((box, recordIndex) => ({
-        recordKind: "box" as const,
-        recordIndex,
-        shiftId: box.shiftId,
-        code,
-      })),
-      ...body.exceptions.map((exception, recordIndex) => ({
-        recordKind: "exception" as const,
-        recordIndex,
-        shiftId: exception.shiftId,
-        code,
-      })),
-    ];
   }
 
   private async quarantine(

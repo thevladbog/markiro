@@ -32,6 +32,7 @@ type CreateApiKeyDto = z.infer<typeof createApiKeySchema>;
 @ApiTags("integrations")
 @Controller("integrations/public_api/keys")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
 export class ApiKeysController {
   constructor(

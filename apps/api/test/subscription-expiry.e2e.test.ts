@@ -14,10 +14,7 @@ import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
-import {
-  issueKioskAdmissionProof,
-  verifyKioskAdmissionProof,
-} from "../src/modules/pickup-orders/kiosk-admission-proof";
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -38,10 +35,6 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
 
   beforeAll(async () => {
     for (const [key, value] of Object.entries(PLATFORM_TEST_ENV)) vi.stubEnv(key, value);
-    vi.stubEnv(
-      "KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL",
-      new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
-    );
     const env = loadEnv({
       ...process.env,
       ...PLATFORM_TEST_ENV,
@@ -554,26 +547,33 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Recovery kiosk",
       deviceTokenHash: hashDeviceToken(kioskToken),
     });
-    const endsAt = new Date(Date.now() - 60_000);
-    await attachPlan(tenantId, { startsAt: new Date(endsAt.getTime() - 86_400_000), endsAt });
+    const initialEndsAt = new Date(Date.now() + 86_400_000);
+    const subscription = await attachPlan(tenantId, {
+      startsAt: new Date(Date.now() - 86_400_000),
+      endsAt: initialEndsAt,
+    });
 
-    const post = (deviceSeq: number, createdAt: string) =>
+    const reserve = (token: string, deviceSeq: number) =>
+      request(app!.getHttpServer())
+        .post("/kiosk/order-admissions")
+        .set("x-kiosk-token", token)
+        .send({ deviceSeq, badgeCode, reason: "buy", items: [] })
+        .expect(201);
+    const firstAdmission = await reserve(kioskToken, 1);
+    const laterAdmission = await reserve(kioskToken, 3);
+
+    const post = (deviceSeq: number, createdAt: string, admissionProof?: string) =>
       request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
-        .send({ deviceSeq, badgeCode, reason: "buy", items: [], createdAt });
-
-    const queuedAt = new Date(endsAt.getTime() - 1_000).toISOString();
-    const accepted = await post(1, queuedAt).expect(201);
-    expect(accepted.body).toMatchObject({ status: "pending", itemCount: 0 });
-    const replay = await post(1, new Date().toISOString()).expect(201);
-    expect(replay.body.orderNo).toBe(accepted.body.orderNo);
-
-    const denied = await post(2, new Date().toISOString()).expect(403);
-    expect(denied.body).toEqual({ code: "subscription_read_only" });
-
-    const laterEligible = await post(3, queuedAt).expect(201);
-    expect(laterEligible.body.orderNo).not.toBe(accepted.body.orderNo);
+        .send({
+          deviceSeq,
+          badgeCode,
+          reason: "buy",
+          items: [],
+          createdAt,
+          ...(admissionProof ? { admissionProof } : {}),
+        });
 
     const secondKioskId = randomUUID();
     const secondKioskToken = `kiosk-${randomUUID()}`;
@@ -583,10 +583,49 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Second recovery kiosk",
       deviceTokenHash: hashDeviceToken(secondKioskToken),
     });
+    const secondAdmission = await reserve(secondKioskToken, 1);
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date() })
+      .where(eq(schema.tenantSubscriptions.id, subscription.subscriptionId));
+
+    const accepted = await post(
+      1,
+      firstAdmission.body.claimedAt,
+      firstAdmission.body.admissionProof,
+    ).expect(201);
+    expect(accepted.body).toMatchObject({ status: "pending", itemCount: 0 });
+    const replay = await post(1, new Date().toISOString()).expect(201);
+    expect(replay.body.orderNo).toBe(accepted.body.orderNo);
+
+    const denied = await post(2, new Date().toISOString()).expect(403);
+    expect(denied.body).toEqual({ code: "subscription_read_only" });
+
+    const laterEligible = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", kioskToken)
+      .send({
+        deviceSeq: 3,
+        badgeCode,
+        reason: "buy",
+        items: [],
+        createdAt: laterAdmission.body.claimedAt,
+        admissionProof: laterAdmission.body.admissionProof,
+      })
+      .expect(201);
+    expect(laterEligible.body.orderNo).not.toBe(accepted.body.orderNo);
+
     const independentDeviceSequence = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", secondKioskToken)
-      .send({ deviceSeq: 1, badgeCode, reason: "buy", items: [], createdAt: queuedAt })
+      .send({
+        deviceSeq: 1,
+        badgeCode,
+        reason: "buy",
+        items: [],
+        createdAt: secondAdmission.body.claimedAt,
+        admissionProof: secondAdmission.body.admissionProof,
+      })
       .expect(201);
     expect(independentDeviceSequence.body.orderNo).not.toBe(accepted.body.orderNo);
 
@@ -613,9 +652,9 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         badgeCode: otherBadgeCode,
         reason: "buy",
         items: [],
-        createdAt: queuedAt,
+        createdAt: firstAdmission.body.claimedAt,
       })
-      .expect(422);
+      .expect(403, { code: "subscription_read_only" });
 
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
@@ -624,7 +663,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .expect(400);
   });
 
-  it("accepts a genuine authenticated kiosk occurrence after seven days and rejects forged identity, sequence, and time claims", async () => {
+  it("never auto-applies proofless or generic pre-issued backdated orders after expiry", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
     const employeeId = randomUUID();
@@ -634,100 +673,62 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await db.insert(schema.employees).values({
       id: employeeId,
       tenantId,
-      fullName: "Proof employee",
+      fullName: "Untrusted recovery employee",
       status: "active",
     });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode });
     await db.insert(schema.kiosks).values({
       id: kioskId,
       tenantId,
-      name: "Proof kiosk",
+      name: "Untrusted recovery kiosk",
       deviceTokenHash: hashDeviceToken(kioskToken),
     });
     const startsAt = new Date(Date.now() - 10 * 24 * 60 * 60_000);
     const endsAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
-    const subscription = await attachPlan(tenantId, { startsAt, endsAt });
+    await attachPlan(tenantId, { startsAt, endsAt });
     const createdAt = new Date(startsAt.getTime() + 60 * 60_000);
-    const proof = issueKioskAdmissionProof({
-      secret: loadEnv().KIOSK_ADMISSION_PROOF_SECRET,
-      tenantId,
-      kioskId,
-      subscriptionId: subscription.subscriptionId,
-      deviceSeq: 10,
-      issuedAt: startsAt,
-      notAfter: endsAt,
-    });
-    const post = (body: Record<string, unknown>, token = kioskToken) =>
+    const genericProof = "legacy-pre-issued-generic-proof";
+    const post = (body: Record<string, unknown>) =>
       request(app!.getHttpServer())
         .post("/kiosk/orders")
-        .set("x-kiosk-token", token)
+        .set("x-kiosk-token", kioskToken)
         .send({ badgeCode, reason: "buy", items: [], createdAt: createdAt.toISOString(), ...body });
 
-    await post({ deviceSeq: 10, admissionProof: proof }).expect(201);
-    await post({ deviceSeq: 11, admissionProof: proof }).expect(403);
-    await post({ deviceSeq: 12, admissionProof: `${proof.slice(0, -1)}x` }).expect(403);
-    await post({
-      deviceSeq: 13,
-      admissionProof: issueKioskAdmissionProof({
-        secret: loadEnv().KIOSK_ADMISSION_PROOF_SECRET,
-        tenantId,
-        kioskId,
-        subscriptionId: subscription.subscriptionId,
-        deviceSeq: 13,
-        issuedAt: startsAt,
-        notAfter: endsAt,
-      }),
-      createdAt: new Date(endsAt.getTime() + 1).toISOString(),
-    }).expect(403);
-
-    const otherKioskId = randomUUID();
-    const otherToken = `other-${randomUUID()}`;
-    await db.insert(schema.kiosks).values({
-      id: otherKioskId,
-      tenantId,
-      name: "Other proof kiosk",
-      deviceTokenHash: hashDeviceToken(otherToken),
-    });
-    await post({ deviceSeq: 10, admissionProof: proof }, otherToken).expect(403);
     const audit = vi.spyOn(Logger.prototype, "warn");
     try {
-      await post({ deviceSeq: 14 }).expect(201);
-      const auditPayload = audit.mock.calls
-        .map(([value]) => (typeof value === "string" ? value : ""))
-        .find((value) => value.includes('"action":"kiosk.legacy_proofless_recovery"'));
-      expect(auditPayload).toBeDefined();
-      const parsedAudit = JSON.parse(auditPayload!) as Record<string, unknown>;
-      expect(parsedAudit).toEqual({
-        action: "kiosk.legacy_proofless_recovery",
-        tenantId,
-        kioskId,
-        deviceSeq: 14,
-        outcome: "accepted",
+      await post({ deviceSeq: 9 }).expect(403, { code: "subscription_read_only" });
+      await post({ deviceSeq: 10, admissionProof: genericProof }).expect(403, {
+        code: "subscription_read_only",
       });
-      expect(parsedAudit).not.toHaveProperty("proof");
-      expect(parsedAudit).not.toHaveProperty("token");
-      expect(parsedAudit).not.toHaveProperty("raw");
+      expect(
+        audit.mock.calls.some(([value]) =>
+          String(value).includes('"action":"kiosk.legacy_proofless_recovery"'),
+        ),
+      ).toBe(false);
     } finally {
       audit.mockRestore();
     }
-
-    const configuredSunset = loadEnv().KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL!;
-    vi.stubEnv(
-      "KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL",
-      new Date(Date.now() - 60_000).toISOString(),
-    );
-    try {
-      await post({ deviceSeq: 15 }).expect(403);
-    } finally {
-      vi.stubEnv("KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL", configuredSunset.toISOString());
-    }
+    const rows = await db
+      .select({ id: schema.pickupOrders.id })
+      .from(schema.pickupOrders)
+      .where(eq(schema.pickupOrders.tenantId, tenantId));
+    expect(rows).toEqual([]);
   });
 
-  it("issues kiosk/tenant/subscription/sequence-bound admission proofs from the requested durable sequence", async () => {
+  it("accepts only a server-time reservation bound to exact order content after expiry", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
+    const employeeId = randomUUID();
+    const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `proof-bootstrap-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: employeeId,
+      tenantId,
+      fullName: "Attested employee",
+      status: "active",
+    });
+    await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode });
     await db.insert(schema.kiosks).values({
       id: kioskId,
       tenantId,
@@ -737,35 +738,207 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const startsAt = new Date(Date.now() - 60_000);
     const endsAt = new Date(Date.now() + 86_400_000);
     const subscription = await attachPlan(tenantId, { startsAt, endsAt });
+    const content = { badgeCode, reason: "buy", items: [] };
+    const reserve = async (deviceSeq: number) =>
+      request(app!.getHttpServer())
+        .post("/kiosk/order-admissions")
+        .set("x-kiosk-token", kioskToken)
+        .send({ deviceSeq, ...content })
+        .expect(201);
+    const exact = await reserve(10);
+    const wrongTime = await reserve(11);
+    const wrongContent = await reserve(12);
 
-    const response = await request(app!.getHttpServer())
+    const persistedAdmissions = await db
+      .select({
+        tokenHash: schema.kioskOrderAdmissions.tokenHash,
+        payloadDigest: schema.kioskOrderAdmissions.payloadDigest,
+      })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(persistedAdmissions).toHaveLength(3);
+    expect(JSON.stringify(persistedAdmissions)).not.toContain(exact.body.admissionProof);
+    expect(JSON.stringify(persistedAdmissions)).not.toContain(badgeCode);
+    const durableAudit = await db
+      .select({
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+    expect(JSON.stringify(durableAudit)).not.toContain(exact.body.admissionProof);
+
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ status: "expired", endsAt: new Date(exact.body.claimedAt as string) })
+      .where(eq(schema.tenantSubscriptions.id, subscription.subscriptionId));
+
+    // A renewal may already exist but not have started. The reservation is
+    // bound to the subscription that was authoritative when the server issued
+    // it, not whichever read-only row the resolver happens to rank today.
+    const pendingPlanVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: null,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+    });
+    await createManagedSubscription(db, {
+      tenantId,
+      planVersionId: pendingPlanVersionId,
+      status: "pending_activation",
+      startsAt: null,
+      endsAt: null,
+    });
+
+    const post = (body: Record<string, unknown>, token = kioskToken) =>
+      request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", token)
+        .send({ ...content, ...body });
+    await post({
+      deviceSeq: 10,
+      createdAt: exact.body.claimedAt,
+      admissionProof: exact.body.admissionProof,
+    }).expect(201);
+    await post({
+      deviceSeq: 11,
+      createdAt: new Date(Date.parse(wrongTime.body.claimedAt as string) - 60_000).toISOString(),
+      admissionProof: wrongTime.body.admissionProof,
+    }).expect(403, { code: "subscription_read_only" });
+    await post({
+      deviceSeq: 12,
+      createdAt: wrongContent.body.claimedAt,
+      admissionProof: wrongContent.body.admissionProof,
+      reason: "writeoff",
+    }).expect(403, { code: "subscription_read_only" });
+    await post({
+      deviceSeq: 13,
+      createdAt: exact.body.claimedAt,
+      admissionProof: "forged-admission-token",
+    }).expect(403, { code: "subscription_read_only" });
+    await post({
+      deviceSeq: 14,
+      createdAt: exact.body.claimedAt,
+      admissionProof: exact.body.admissionProof,
+    }).expect(403, { code: "subscription_read_only" });
+
+    const otherKioskId = randomUUID();
+    const otherKioskToken = `proof-other-kiosk-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: otherKioskId,
+      tenantId,
+      name: "Other admission proof kiosk",
+      deviceTokenHash: hashDeviceToken(otherKioskToken),
+    });
+    await post(
+      {
+        deviceSeq: 10,
+        createdAt: exact.body.claimedAt,
+        admissionProof: exact.body.admissionProof,
+      },
+      otherKioskToken,
+    ).expect(403, { code: "subscription_read_only" });
+
+    const otherAgent = request.agent(app!.getHttpServer());
+    const otherTenantId = await signUpAndActivate(otherAgent);
+    const otherEmployeeId = randomUUID();
+    const otherTenantKioskToken = `proof-other-tenant-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: otherEmployeeId,
+      tenantId: otherTenantId,
+      fullName: "Other attestation tenant employee",
+      status: "active",
+    });
+    await db.insert(schema.employeeBadges).values({
+      tenantId: otherTenantId,
+      employeeId: otherEmployeeId,
+      badgeCode,
+    });
+    await db.insert(schema.kiosks).values({
+      id: randomUUID(),
+      tenantId: otherTenantId,
+      name: "Other tenant admission proof kiosk",
+      deviceTokenHash: hashDeviceToken(otherTenantKioskToken),
+    });
+    await attachPlan(otherTenantId, {
+      startsAt: new Date(Date.now() - 2 * 86_400_000),
+      endsAt: new Date(Date.now() - 86_400_000),
+    });
+    await post(
+      {
+        deviceSeq: 10,
+        createdAt: exact.body.claimedAt,
+        admissionProof: exact.body.admissionProof,
+      },
+      otherTenantKioskToken,
+    ).expect(403, { code: "subscription_read_only" });
+  });
+
+  it("has no fixed bootstrap proof window and admits sequence 128 after 129 queued records", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const kioskId = randomUUID();
+    const kioskToken = `proof-volume-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Admission volume kiosk",
+      deviceTokenHash: hashDeviceToken(kioskToken),
+    });
+    await attachPlan(tenantId, {
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: new Date(Date.now() + 86_400_000),
+    });
+
+    const bootstrap = await request(app!.getHttpServer())
       .get("/kiosk/bootstrap")
       .set("x-kiosk-token", kioskToken)
-      .set("x-kiosk-next-device-seq", "73")
+      .set("x-kiosk-next-device-seq", "0")
       .expect(200);
-    expect(response.body.admissionProofs).toHaveLength(128);
-    expect(response.body.admissionProofs[0].deviceSeq).toBe(73);
-    const generatedAt = new Date(response.body.generatedAt as string);
-    expect(
-      verifyKioskAdmissionProof({
-        secrets: [loadEnv().KIOSK_ADMISSION_PROOF_SECRET],
-        proof: response.body.admissionProofs[0].proof,
-        tenantId,
-        kioskId,
-        subscriptionId: subscription.subscriptionId,
-        deviceSeq: 73,
-        claimedAt: generatedAt,
-        now: generatedAt,
-        expectedEndsAt: endsAt,
-      }),
-    ).toEqual({ ok: true, occurredAt: generatedAt });
+    expect(bootstrap.body).not.toHaveProperty("admissionProofs");
 
-    const final = await request(app!.getHttpServer())
-      .get("/kiosk/bootstrap")
-      .set("x-kiosk-token", kioskToken)
-      .set("x-kiosk-next-device-seq", "2147483647")
-      .expect(200);
-    expect(final.body.admissionProofs).toHaveLength(1);
-    expect(final.body.admissionProofs[0].deviceSeq).toBe(2_147_483_647);
+    const statuses: number[] = [];
+    for (let deviceSeq = 0; deviceSeq <= 128; deviceSeq += 1) {
+      const response = await request(app!.getHttpServer())
+        .post("/kiosk/order-admissions")
+        .set("x-kiosk-token", kioskToken)
+        .send({ deviceSeq, badgeCode: "badge", reason: "buy", items: [] });
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual(Array.from({ length: 129 }, () => 201));
+  });
+
+  it("derives the bootstrap snapshot from one recovery resolution instead of a racy second read", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const kioskId = randomUUID();
+    const kioskToken = `single-snapshot-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Single snapshot kiosk",
+      deviceTokenHash: hashDeviceToken(kioskToken),
+    });
+    await attachPlan(tenantId, {
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: new Date(Date.now() + 86_400_000),
+    });
+    const entitlements = app!.get(EntitlementsService);
+    const splitRead = vi
+      .spyOn(entitlements, "accessSnapshot")
+      .mockRejectedValueOnce(new Error("split subscription snapshot read"));
+    const recoveryRead = vi.spyOn(entitlements, "resolveRecovery");
+    try {
+      const response = await request(app!.getHttpServer())
+        .get("/kiosk/bootstrap")
+        .set("x-kiosk-token", kioskToken)
+        .expect(200);
+      expect(response.body.subscription).toMatchObject({ access: "managed", status: "active" });
+      expect(splitRead).not.toHaveBeenCalled();
+      expect(recoveryRead).toHaveBeenCalledTimes(1);
+    } finally {
+      splitRead.mockRestore();
+      recoveryRead.mockRestore();
+    }
   });
 });

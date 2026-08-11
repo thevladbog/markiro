@@ -1,5 +1,5 @@
 import type { CreateOrderDto } from "../api/types.js";
-import { STORE_QUARANTINE, STORE_QUEUE, withStore } from "./db.js";
+import { STORE_QUARANTINE, STORE_QUEUE, updateEach, withStore } from "./db.js";
 
 export interface QueuedOrder {
   deviceSeq: number;
@@ -33,6 +33,19 @@ export interface QueuedOrder {
 export async function enqueueOrder(body: CreateOrderDto, employeeId: string): Promise<void> {
   const record: QueuedOrder = { deviceSeq: body.deviceSeq, employeeId, body };
   await withStore(STORE_QUEUE, "readwrite", (s) => s.put(record));
+}
+
+/**
+ * Adds the server reservation to a queued order without resurrecting a record
+ * that a concurrent drain already acknowledged. IndexedDB serialises this
+ * cursor transaction with the drain's delete transaction.
+ */
+export async function attestQueuedOrder(deviceSeq: number, body: CreateOrderDto): Promise<boolean> {
+  const updated = await updateEach(STORE_QUEUE, (value) => {
+    const queued = value as QueuedOrder;
+    return queued.deviceSeq === deviceSeq ? { ...queued, body } : null;
+  });
+  return updated === 1;
 }
 
 /** Orders awaiting sync, ascending by `deviceSeq` — `getAll()` on a store

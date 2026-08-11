@@ -40,6 +40,7 @@ import { OperatorsService } from "./operators.service";
 @ApiTags("operators")
 @Controller("operators")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class OperatorsController {
   constructor(private readonly operatorsService: OperatorsService) {}
 

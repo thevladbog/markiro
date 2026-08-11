@@ -43,6 +43,7 @@ import { PickupOrdersService } from "./pickup-orders.service";
 @ApiTags("pickup-orders")
 @Controller("pickup-orders")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class PickupOrdersController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 

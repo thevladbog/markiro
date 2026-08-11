@@ -11,6 +11,7 @@ import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
+import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -109,6 +110,19 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
     });
     return id;
+  }
+
+  async function attachManagedSubscription(tenantId: string, startsAt: Date, endsAt: Date) {
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: null,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+      labelEditorEnabled: true,
+      publicApiEnabled: true,
+      palletsEnabled: true,
+    });
+    return createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
 
   it("POST /shifts/:id/open flips planned->active and sets openedAt; 409 if not planned", async () => {
@@ -328,12 +342,14 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .send({ productId, mode: "aggregation" })
         .expect(201);
       shiftId = (plain.body as { id: string }).id;
+      await agent.post(`/shifts/${shiftId}/open`).expect(200);
 
       const issuer = await agent
         .post("/shifts")
         .send({ productId, mode: "aggregation", ssccIssuerCounterpartyId: counterpartyId })
         .expect(201);
       issuerShiftId = (issuer.body as { id: string }).id;
+      await agent.post(`/shifts/${issuerShiftId}/open`).expect(200);
 
       const validation = await agent
         .post("/shifts")
@@ -381,6 +397,98 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
           ),
         );
     }
+
+    it("returns a planned aggregation bundle without allocating an SSCC block", async () => {
+      const productId = await seedProduct(orgId, {
+        status: "active",
+        productGroup: "Beverages",
+        boxCapacity: 12,
+        palletCapacity: 48,
+      });
+      const planned = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation" })
+        .expect(201);
+      const rowsBefore = await blocksForOrgGln();
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${planned.body.id}/bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+
+      expect(response.body.shift.status).toBe("planned");
+      expect(response.body.sscc).toBeNull();
+      expect(await blocksForOrgGln()).toHaveLength(rowsBefore.length);
+    });
+
+    it("returns an expired active-shift bundle without allocating an SSCC block", async () => {
+      const tenantAgent = request.agent(app!.getHttpServer());
+      const tenantId = await signUpAndActivate(tenantAgent);
+      await tenantAgent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      const productId = await seedProduct(tenantId, {
+        status: "active",
+        productGroup: "Beverages",
+        boxCapacity: 12,
+        palletCapacity: 48,
+      });
+      const shift = await tenantAgent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation" })
+        .expect(201);
+      await tenantAgent.post(`/shifts/${shift.body.id}/open`).expect(200);
+      const device = await createTestStationDevice(app!, tenantAgent, "Expired bundle terminal");
+      const now = new Date();
+      await attachManagedSubscription(
+        tenantId,
+        new Date(now.getTime() - 2 * 60 * 60_000),
+        new Date(now.getTime() - 60 * 60_000),
+      );
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${shift.body.id}/bundle`)
+        .set("x-api-key", device.apiKey)
+        .expect(200);
+
+      expect(response.body.shift.status).toBe("active");
+      expect(response.body.sscc).toBeNull();
+      const allocated = await db
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(eq(schema.ssccBlocks.tenantId, tenantId));
+      expect(allocated).toEqual([]);
+    });
+
+    it("allocates recovery SSCCs for an active shift authoritatively opened before expiry", async () => {
+      const tenantAgent = request.agent(app!.getHttpServer());
+      const tenantId = await signUpAndActivate(tenantAgent);
+      await tenantAgent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      const productId = await seedProduct(tenantId, { status: "active", boxCapacity: 12 });
+      const shift = await tenantAgent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation" })
+        .expect(201);
+      await tenantAgent.post(`/shifts/${shift.body.id}/open`).expect(200);
+      const device = await createTestStationDevice(app!, tenantAgent, "Recovery bundle terminal");
+      const now = new Date();
+      const endsAt = new Date(now.getTime() - 60 * 60_000);
+      await attachManagedSubscription(tenantId, new Date(now.getTime() - 3 * 60 * 60_000), endsAt);
+      await db
+        .update(schema.shifts)
+        .set({ openedAt: new Date(endsAt.getTime() - 60 * 60_000) })
+        .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shift.body.id)));
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${shift.body.id}/bundle`)
+        .set("x-api-key", device.apiKey)
+        .expect(200);
+
+      expect(response.body.sscc).toMatchObject({ issuerPrefix: orgGln.slice(0, 9) });
+      const allocated = await db
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(eq(schema.ssccBlocks.tenantId, tenantId));
+      expect(allocated).toHaveLength(1);
+    });
 
     it("a second bundle fetch by the same device returns the held block and cuts no new one (Task 7 finding 3)", async () => {
       const first = await request(app!.getHttpServer())

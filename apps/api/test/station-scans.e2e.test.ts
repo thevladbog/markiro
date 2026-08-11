@@ -302,56 +302,55 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(foreignReplay.body).toEqual({ code: "station_batch_mismatch" });
   });
 
-  it("durably quarantines and binds a replay of a grandfathered unbound batch", async () => {
+  it("never lets the first post-0032 caller bind a grandfathered unbound batch", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);
-    const apiKey = await deviceKey(agent);
-    const stationId = deviceIdsByKey.get(apiKey)!;
+    const originalApiKey = await deviceKey(agent);
+    const foreignApiKey = await deviceKey(agent);
     const shiftId = await openShift(agent);
     const batchId = `grandfathered-${randomUUID()}`;
-    const replayed = item(shiftId, 1);
+    const originalPayload = item(shiftId, 1);
+    const foreignPayload = item(shiftId, 2);
     await db.insert(schema.syncBatches).values({ tenantId, batchId });
 
-    const response = await request(app!.getHttpServer())
+    const foreignFirst = await request(app!.getHttpServer())
       .post("/station/scans")
-      .set("x-api-key", apiKey)
+      .set("x-api-key", foreignApiKey)
       .set("x-station-capabilities", "station-recovery-v1")
-      .send({ batchId, items: [replayed] })
+      .send({ batchId, items: [foreignPayload] })
       .expect(201);
-
-    expect(response.body).toEqual({
+    expect(foreignFirst.body).toEqual({
       applied: 0,
       alreadyApplied: true,
       conflicts: [],
-      denied: [
-        {
-          recordKind: "item",
-          recordIndex: 0,
-          shiftId,
-          code: "legacy_unbound_replay",
-        },
-      ],
     });
-    expect(await scanEventsCount(tenantId, shiftId)).toBe(0);
 
-    const quarantined = await db.execute<{
-      terminal_id: string;
-      record_kind: string;
-      reason: string;
-      payload: { raw: string };
-    }>(sql`
-      select terminal_id, record_kind, reason, payload
+    const originalLater = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", originalApiKey)
+      .set("x-station-capabilities", "station-recovery-v1")
+      .send({ batchId, items: [originalPayload] })
+      .expect(201);
+    expect(originalLater.body).toEqual({ applied: 0, alreadyApplied: true, conflicts: [] });
+
+    const [binding] = await db
+      .select({
+        terminalId: schema.syncBatches.terminalId,
+        payloadDigest: schema.syncBatches.payloadDigest,
+        result: schema.syncBatches.result,
+      })
+      .from(schema.syncBatches)
+      .where(
+        and(eq(schema.syncBatches.tenantId, tenantId), eq(schema.syncBatches.batchId, batchId)),
+      );
+    expect(binding).toEqual({ terminalId: null, payloadDigest: null, result: null });
+    expect(await scanEventsCount(tenantId, shiftId)).toBe(0);
+    const quarantined = await db.execute<{ count: string }>(sql`
+      select count(*)::text as count
       from station_sync_quarantine
       where tenant_id = ${tenantId} and batch_id = ${batchId}
     `);
-    expect(quarantined.rows).toEqual([
-      {
-        terminal_id: stationId,
-        record_kind: "item",
-        reason: "legacy_unbound_replay",
-        payload: expect.objectContaining({ raw: replayed.raw }),
-      },
-    ]);
+    expect(quarantined.rows).toEqual([{ count: "0" }]);
   });
 
   it("accepts late data for a closed shift and stamps it", async () => {

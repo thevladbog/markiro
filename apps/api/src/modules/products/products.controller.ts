@@ -41,6 +41,7 @@ import { ProductsService } from "./products.service";
 @ApiTags("products")
 @Controller("products")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
 

@@ -39,6 +39,7 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 @ApiTags("station-devices")
 @Controller("station-devices")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
 export class StationDevicesController {
   constructor(

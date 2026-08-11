@@ -199,6 +199,10 @@ export class EntitlementsService {
     at = new Date(),
   ): Promise<SubscriptionAccessSnapshot> {
     const resolved = await this.resolve(tenantId, executor, at);
+    return this.snapshotFrom(resolved);
+  }
+
+  snapshotFrom(resolved: EffectiveEntitlements): SubscriptionAccessSnapshot {
     return {
       access: resolved.access,
       status:

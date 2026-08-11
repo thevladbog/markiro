@@ -38,6 +38,7 @@ import { TeamService } from "./team.service";
 @ApiTags("team")
 @Controller("team")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.MEMBERS_MANAGE)
 export class TeamController {
   constructor(private readonly team: TeamService) {}

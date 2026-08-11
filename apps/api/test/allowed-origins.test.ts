@@ -23,19 +23,20 @@ const BASE = {
   SAAS_ADMIN_ORIGIN: "https://saas.example.ru",
   ADMIN_ORIGIN: "https://admin.example.ru",
   PAIRING_CODE_PEPPER: "0123456789abcdef0123",
-  KIOSK_ADMISSION_PROOF_SECRET: "0123456789abcdef0123456789abcdef",
 } satisfies NodeJS.ProcessEnv;
 
-describe("loadEnv kiosk admission proof rollout", () => {
-  it("treats blank optional rotation and legacy-sunset inventory entries as unset", () => {
+describe("loadEnv durable kiosk order admission", () => {
+  it("does not expose a rotating proof keyring or a proofless auto-apply sunset", () => {
     const env = loadEnv({
       ...BASE,
-      KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET: "",
-      KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL: "",
+      KIOSK_ADMISSION_PROOF_SECRET: "retired-secret-must-not-be-runtime-config",
+      KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET: "retired-previous-secret",
+      KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL: "2099-01-01T00:00:00.000Z",
     });
 
-    expect(env.KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET).toBeUndefined();
-    expect(env.KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL).toBeUndefined();
+    expect(env).not.toHaveProperty("KIOSK_ADMISSION_PROOF_SECRET");
+    expect(env).not.toHaveProperty("KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET");
+    expect(env).not.toHaveProperty("KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL");
   });
 });
 

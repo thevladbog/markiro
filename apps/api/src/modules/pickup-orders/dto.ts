@@ -52,14 +52,33 @@ export const MAX_KIOSK_DEVICE_SEQ = 2_147_483_647;
  * was offline during the upgrade. It can go once no device can still hold a
  * pre-upgrade queue; the device's own seven-day staleness block bounds that.
  */
+const createOrderContentShape = {
+  deviceSeq: z.number().int().nonnegative().max(MAX_KIOSK_DEVICE_SEQ),
+  badgeDigest: z.string().refine(isCanonicalDigestB64, "Not a canonical badge digest").optional(),
+  badgeCode: z.string().min(1).optional(),
+  reason: z.enum(["buy", "writeoff"]),
+  writeoffReasonId: z.string().uuid().nullable().optional(),
+  items: z.array(createOrderItemSchema),
+};
+
+const hasExactlyOneBadgeIdentity = (body: {
+  badgeDigest?: string | undefined;
+  badgeCode?: string | undefined;
+}): boolean => (body.badgeDigest === undefined) !== (body.badgeCode === undefined);
+
+export const createOrderAdmissionSchema = z
+  .object(createOrderContentShape)
+  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required");
+export type CreateOrderAdmissionDto = z.infer<typeof createOrderAdmissionSchema>;
+
+export interface CreateOrderAdmissionResultDto {
+  claimedAt: string;
+  admissionProof: string;
+}
+
 export const createOrderSchema = z
   .object({
-    deviceSeq: z.number().int().nonnegative().max(MAX_KIOSK_DEVICE_SEQ),
-    badgeDigest: z.string().refine(isCanonicalDigestB64, "Not a canonical badge digest").optional(),
-    badgeCode: z.string().min(1).optional(),
-    reason: z.enum(["buy", "writeoff"]),
-    writeoffReasonId: z.string().uuid().nullable().optional(),
-    items: z.array(createOrderItemSchema),
+    ...createOrderContentShape,
     createdAt: z.string().datetime().optional(),
     admissionProof: z.string().min(1).max(2048).optional(),
   })
@@ -67,10 +86,7 @@ export const createOrderSchema = z
   // the server would have to rank, and a body carrying a digest AND the
   // plaintext it is meant to replace is the very thing this field exists to
   // stop being persisted.
-  .refine(
-    (body) => (body.badgeDigest === undefined) !== (body.badgeCode === undefined),
-    "Exactly one of badgeDigest or badgeCode is required",
-  );
+  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required");
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 
 /** A scanned item that could not be accepted into the order, and why. */
@@ -109,7 +125,6 @@ export interface CreateOrderResultDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshot;
-  admissionProofs?: { deviceSeq: number; proof: string }[];
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];

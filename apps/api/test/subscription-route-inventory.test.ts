@@ -210,13 +210,19 @@ describe("registered subscription route inventory", () => {
     await ref?.close();
   });
 
-  it("classifies every registered unsafe route and the conditional CommerceML import", () => {
+  it("classifies every customer route and pins its exact trust-chain guard order", () => {
     const reflector = new Reflector();
-    const inspected = routes.filter(
-      (route) =>
+    const inspected = routes.filter((route) => {
+      const guards = [
+        ...((Reflect.getMetadata(GUARDS_METADATA, route.controller) ?? []) as Type[]),
+        ...((Reflect.getMetadata(GUARDS_METADATA, route.handler) ?? []) as Type[]),
+      ];
+      return (
+        guards.includes(SubscriptionAccessGuard) ||
         UNSAFE_METHODS.has(route.method) ||
-        (route.controller.name === "ExchangeController" && route.handlerName === "get"),
-    );
+        (route.controller.name === "ExchangeController" && route.handlerName === "get")
+      );
+    });
     const encounteredExemptions: string[] = [];
     const unclassified: string[] = [];
 
@@ -232,13 +238,33 @@ describe("registered subscription route inventory", () => {
 
       if (subscriptionIndex >= 0) {
         expect(policy, `${routeKey(route)} lacks a subscription policy`).toBeDefined();
-        const identities = guards.slice(0, subscriptionIndex).map((guard) => guard.name);
-        expect(
-          identities.some((name) =>
-            ["TenantGuard", "KioskDeviceGuard", "StationOnlyGuard"].includes(name),
-          ),
-          `${routeKey(route)} runs subscription access before authoritative identity`,
-        ).toBe(true);
+        if (UNSAFE_METHODS.has(route.method)) {
+          const handlerPolicy = Reflect.getMetadata(
+            ROUTE_SUBSCRIPTION_ACCESS_POLICY,
+            route.handler,
+          ) as SubscriptionAccessPolicy | undefined;
+          expect(
+            handlerPolicy,
+            `${routeKey(route)} inherits class read access instead of declaring mutation policy`,
+          ).toBeDefined();
+          expect(
+            handlerPolicy?.mode,
+            `${routeKey(route)} explicitly classifies an unsafe method as read-only`,
+          ).not.toBe("read");
+        }
+        const names = guards.map((guard) => guard.name);
+        const expected =
+          route.controller.name === "KioskController"
+            ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
+            : route.controller.name === "StationScansController"
+              ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
+              : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
+        expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(
+          expected,
+        );
+        if (route.controller.name === "ShiftsController" && route.handlerName === "getBundle") {
+          expect(policy).toEqual({ mode: "recovery", kind: "shift" });
+        }
         continue;
       }
 

@@ -119,15 +119,6 @@ const EnvSchema = z
     ADMIN_ORIGIN: canonicalOriginSchema.default("http://localhost:5173"),
     SAAS_ADMIN_ORIGIN: canonicalOriginSchema,
     SUBSCRIPTION_ENFORCEMENT_MODE: z.enum(["managed_only", "all"]).default("managed_only"),
-    // Explicit rollout control for pre-admission-proof kiosk queues. Unset is
-    // deliberately fail-closed; each deployment must choose a sunset after
-    // its last old kiosk bundle could still hold queued work.
-    KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL: z.coerce.date().optional(),
-    // Independent from the short-lived pairing-code pepper: admission proofs
-    // may remain queued beyond subscription expiry, so rotating pairing codes
-    // must not strand them. Keep one previous key during a controlled rotation.
-    KIOSK_ADMISSION_PROOF_SECRET: z.string().min(32),
-    KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET: z.string().min(32).optional(),
     // Origin the pickup kiosk PWA (apps/kiosk) is served from, when it is
     // served from one at all. OPTIONAL, and deliberately WITHOUT a localhost
     // default, unlike ADMIN_ORIGIN:
@@ -242,8 +233,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "SMTP_USER",
     "SMTP_PASSWORD",
     "SMTP_REPLY_TO",
-    "KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET",
-    "KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL",
     ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];

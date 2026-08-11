@@ -17,7 +17,10 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
-import { RequireSubscriptionWrite } from "../../subscriptions/subscription-access-policy";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -42,6 +45,7 @@ import { IntegrationsService } from "./integrations.service";
 @ApiTags("integrations")
 @Controller("integrations")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class IntegrationsController {
   constructor(
     private readonly integrations: IntegrationsService,
