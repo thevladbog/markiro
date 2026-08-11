@@ -50,7 +50,9 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.match(text, /Decode Tauri updater signing key/);
   assert.match(text, /normalized_key=\"\$\(.*normalize-signing-key\.mjs\)/s);
   assert.match(text, /normalized_key=.*\r?\n\s*normalized_key_file=/);
+  assert.match(text, /printf '%s' \"\$normalized_key\" > \"\$normalized_key_file\"/);
   assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY=\"\$normalized_key_file\"/);
+  assert.match(text, /trap 'rm -f \"\$normalized_key_file\"' EXIT/);
   assert.ok(text.indexOf("normalize-signing-key.mjs") < text.indexOf("tauri build"));
   assert.match(text, /persist-credentials:\s*false/);
   assert.match(text, /pnpm\/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1/);
