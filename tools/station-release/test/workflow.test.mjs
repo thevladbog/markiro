@@ -29,6 +29,8 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.match(text, /VITE_STATION_API_URL:\s*https:\/\/admin\.markiro\.app/);
   assert.match(text, /TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(text, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD/);
+  assert.match(text, /Waiting for CI for \$GITHUB_SHA/);
+  assert.match(text, /for attempt in \{1\.\.90\}/);
   assert.equal(workflow.jobs.release.env.TAURI_SIGNING_PRIVATE_KEY, undefined);
   assert.equal(workflow.jobs.release.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD, undefined);
   const signingStep = workflow.jobs.release.steps.find(
