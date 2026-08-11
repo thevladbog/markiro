@@ -6,6 +6,12 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { createCatalogVersion, type CatalogCreateInput, type CatalogVersionDto } from "./api.js";
+import {
+  AddonEffectsEditor,
+  newAddonEffect,
+  toAddonEffects,
+  type EditableAddonEffect,
+} from "./AddonEffectsEditor.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField } from "./CatalogVatField.js";
 
@@ -28,6 +34,7 @@ export function CatalogCreatePanel({
   );
   const [price, setPrice] = useState("0.00");
   const [vatRateBps, setVatRateBps] = useState<number | null>(2200);
+  const [addonEffects, setAddonEffects] = useState<EditableAddonEffect[]>(() => [newAddonEffect()]);
   const [lines, setLines] = useState("");
   const [stations, setStations] = useState("");
   const [kiosks, setKiosks] = useState("");
@@ -62,7 +69,7 @@ export function CatalogCreatePanel({
               },
             }
           : kind === "addon"
-            ? { ...base, addon: { effects: [{ key: "stations", quotaIncrement: 1 }] } }
+            ? { ...base, addon: { effects: toAddonEffects(addonEffects) } }
             : { ...base, service: {} };
       return createCatalogVersion(code.trim(), input);
     },
@@ -106,7 +113,16 @@ export function CatalogCreatePanel({
             setError(t("catalog.createRequired"));
             return;
           }
-          create.mutate();
+          try {
+            if (kind === "addon") toAddonEffects(addonEffects);
+            create.mutate();
+          } catch (cause) {
+            setError(
+              cause instanceof Error && cause.message === "effectDuplicate"
+                ? t("catalog.validation.effectDuplicate")
+                : t("catalog.validation.effectRequired"),
+            );
+          }
         }}
       >
         <fieldset>
@@ -172,6 +188,9 @@ export function CatalogCreatePanel({
               />
             </div>
           </fieldset>
+        ) : null}
+        {kind === "addon" ? (
+          <AddonEffectsEditor effects={addonEffects} onChange={setAddonEffects} />
         ) : null}
         {error ? <Alert tone="error">{error}</Alert> : null}
         <div className="form-actions">

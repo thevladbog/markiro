@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { useFieldArray, useForm, type FieldError } from "react-hook-form";
+import { useForm, type FieldError } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
@@ -22,6 +22,11 @@ import {
 } from "./api.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField, formatVat } from "./CatalogVatField.js";
+import {
+  AddonEffectsEditor,
+  fromAddonEffects,
+  type EditableAddonEffect,
+} from "./AddonEffectsEditor.js";
 
 interface CatalogFormValues {
   kind: CatalogVersionDto["kind"];
@@ -40,7 +45,7 @@ interface CatalogFormValues {
   labelEditorEnabled: boolean;
   publicApiEnabled: boolean;
   palletsEnabled: boolean;
-  addonEffects: Array<{ key: AddonEffect["key"]; value: string }>;
+  addonEffects: EditableAddonEffect[];
 }
 
 const EFFECT_KEYS = [
@@ -103,6 +108,7 @@ const catalogFormSchema = z
     addonEffects: z
       .array(
         z.object({
+          rowId: z.string(),
           key: z.enum(EFFECT_KEYS),
           value: z.string(),
         }),
@@ -169,11 +175,7 @@ function numericOrNull(value: string): number | null {
 }
 
 function formDefaults(item: CatalogVersionDto): CatalogFormValues {
-  const savedAddonEffects =
-    item.addon?.effects.map((effect) => ({
-      key: effect.key,
-      value: "quotaIncrement" in effect ? String(effect.quotaIncrement) : "",
-    })) ?? [];
+  const savedAddonEffects = item.addon ? fromAddonEffects(item.addon.effects) : [];
   return {
     kind: item.kind,
     financialVisible: item.unitPrice !== undefined,
@@ -191,8 +193,9 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     labelEditorEnabled: item.plan?.labelEditorEnabled ?? false,
     publicApiEnabled: item.plan?.publicApiEnabled ?? false,
     palletsEnabled: item.plan?.palletsEnabled ?? false,
-    addonEffects:
-      savedAddonEffects.length > 0 ? savedAddonEffects : [{ key: "stations", value: "1" }],
+    addonEffects: savedAddonEffects.length > 0 ? savedAddonEffects : [
+      { rowId: crypto.randomUUID(), key: "stations", value: "1" },
+    ],
   };
 }
 
@@ -290,7 +293,6 @@ export function CatalogVersionPanel({
     resolver: zodResolver(catalogFormSchema),
     defaultValues: formDefaults(item),
   });
-  const addonEffects = useFieldArray({ control: form.control, name: "addonEffects" });
   const isDraft = item.status === "draft";
   const canEdit = isDraft && canWrite;
 
@@ -376,6 +378,21 @@ export function CatalogVersionPanel({
   });
 
   const summaries = quotaSummary(item, (key, options = {}) => t(key, options));
+  const addonFormErrors = form.formState.errors.addonEffects;
+  const addonErrorEntries = Array.isArray(addonFormErrors)
+    ? (addonFormErrors as unknown as Array<{ key?: FieldError; value?: FieldError }>)
+    : undefined;
+  const addonErrors = addonErrorEntries
+    ? addonErrorEntries.map((entry) => {
+        const key = entry?.key ? fieldError(entry.key, t) : undefined;
+        const value = entry?.value ? fieldError(entry.value, t) : undefined;
+        return { ...(key ? { key } : {}), ...(value ? { value } : {}) };
+      })
+    : undefined;
+  const addonRootError =
+    !addonErrorEntries && addonFormErrors && "root" in addonFormErrors && addonFormErrors.root
+      ? fieldError(addonFormErrors.root, t)
+      : undefined;
   const isDefaultDemo = defaultDemoId === item.id;
   const regionLabel = t("catalog.panelLabel", { version: item.version, name: item.nameRu });
 
@@ -539,78 +556,17 @@ export function CatalogVersionPanel({
                 </fieldset>
               ) : null}
               {item.kind === "addon" ? (
-                <fieldset>
-                  <legend>{t("catalog.form.addonEffect")}</legend>
-                  <div className="addon-effects">
-                    {addonEffects.fields.map((field, index) => {
-                      const key = form.watch(`addonEffects.${index}.key`);
-                      const keyError = form.formState.errors.addonEffects?.[index]?.key;
-                      const keyErrorId = keyError ? `addon-effect-${field.id}-error` : undefined;
-                      return (
-                        <div className="addon-effect-row" key={field.id}>
-                          <label className="native-field">
-                            <span>{t("catalog.form.effectKeyIndexed", { index: index + 1 })}</span>
-                            <select
-                              aria-label={t("catalog.form.effectKeyIndexed", { index: index + 1 })}
-                              aria-invalid={keyError ? true : undefined}
-                              aria-describedby={keyErrorId}
-                              {...form.register(`addonEffects.${index}.key`)}
-                            >
-                              {EFFECT_KEYS.map((effectKey) => (
-                                <option key={effectKey} value={effectKey}>
-                                  {t(`catalog.effectNames.${effectKey}`)}
-                                </option>
-                              ))}
-                            </select>
-                            {keyError ? (
-                              <span className="native-field__error" id={keyErrorId}>
-                                {fieldError(keyError, t)}
-                              </span>
-                            ) : null}
-                          </label>
-                          {QUOTA_EFFECT_KEYS.has(key) ? (
-                            <Input
-                              label={t("catalog.form.effectValueIndexed", { index: index + 1 })}
-                              inputMode="numeric"
-                              mono
-                              {...inputErrorProps(
-                                form.formState.errors.addonEffects?.[index]?.value,
-                                t,
-                              )}
-                              {...form.register(`addonEffects.${index}.value`)}
-                            />
-                          ) : (
-                            <div className="feature-effect" role="status">
-                              {t("catalog.form.featureEnabled")}
-                            </div>
-                          )}
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={addonEffects.fields.length === 1}
-                            aria-label={t("catalog.form.removeEffect", { index: index + 1 })}
-                            onClick={() => addonEffects.remove(index)}
-                          >
-                            {t("catalog.form.remove")}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                    {form.formState.errors.addonEffects?.root ? (
-                      <Alert tone="error">
-                        {fieldError(form.formState.errors.addonEffects.root, t)}
-                      </Alert>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={addonEffects.fields.length >= 7}
-                      onClick={() => addonEffects.append({ key: "stations", value: "1" })}
-                    >
-                      {t("catalog.form.addEffect")}
-                    </Button>
-                  </div>
-                </fieldset>
+                <AddonEffectsEditor
+                  effects={form.watch("addonEffects")}
+                  onChange={(next) =>
+                    form.setValue("addonEffects", next, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                  {...(addonErrors ? { errors: addonErrors } : {})}
+                  {...(addonRootError ? { listError: addonRootError } : {})}
+                />
               ) : null}
               {item.kind === "service" ? (
                 <Alert tone="info">{t("catalog.form.serviceNotice")}</Alert>

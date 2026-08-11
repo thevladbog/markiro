@@ -265,6 +265,7 @@
       "publicApi": "Публичный API",
       "pallets": "Работа с палетами",
       "addonEffect": "Эффект дополнения",
+      "addonEffectGroup": "Что расширяет дополнение",
       "effectKey": "Тип эффекта",
       "effectValue": "Прибавка к квоте",
       "effectKeyIndexed": "Тип эффекта {{index}}",

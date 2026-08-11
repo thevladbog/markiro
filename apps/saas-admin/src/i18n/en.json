@@ -265,6 +265,7 @@
       "publicApi": "Public API",
       "pallets": "Pallet workflows",
       "addonEffect": "Add-on effect",
+      "addonEffectGroup": "What this add-on expands",
       "effectKey": "Effect type",
       "effectValue": "Quota increment",
       "effectKeyIndexed": "Effect type {{index}}",

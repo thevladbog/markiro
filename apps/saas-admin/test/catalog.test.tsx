@@ -119,6 +119,37 @@ describe("commercial catalog", () => {
     expect((screen.getByLabelText("Другая единица") as HTMLInputElement).value).toBe("station");
   });
 
+  it("shows and submits explicit add-on entitlement effects", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
+    await user.click(screen.getByRole("button", { name: "Создать позицию" }));
+
+    expect(screen.getByRole("group", { name: "Что расширяет дополнение" })).toBeDefined();
+    expect((screen.getByLabelText("Тип эффекта 1") as HTMLSelectElement).value).toBe("stations");
+    expect((screen.getByLabelText("Прибавка к квоте 1") as HTMLInputElement).value).toBe("1");
+    await user.selectOptions(screen.getByLabelText("Тип эффекта 1"), "kiosks");
+    await user.clear(screen.getByLabelText("Прибавка к квоте 1"));
+    await user.type(screen.getByLabelText("Прибавка к квоте 1"), "3");
+    await user.click(screen.getByRole("button", { name: "Добавить эффект" }));
+    await user.selectOptions(screen.getByLabelText("Тип эффекта 2"), "publicApi");
+    await user.type(screen.getByLabelText("Код позиции"), "addon-kiosk");
+    await user.type(screen.getByLabelText("Название на русском"), "Киоски");
+    await user.type(screen.getByLabelText("Название на английском"), "Kiosks");
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+
+    expect(api.createCalls()[0]?.body).toMatchObject({
+      addon: {
+        effects: [
+          { key: "kiosks", quotaIncrement: 3 },
+          { key: "publicApi", featureEnabled: true },
+        ],
+      },
+    });
+  });
+
   it("opens a catalog version when clicking any cell in its row", async () => {
     installCatalogApi({ items: [PUBLISHED_PLAN] });
     renderSaasApp();
@@ -291,6 +322,8 @@ describe("commercial catalog", () => {
           nameEn: "Basic",
           unit: "month",
           unitPrice: "15000.00",
+          vatRateBps: 2000,
+          vatIncluded: true,
           plan: {
             maxLines: 2147483647,
             maxStations: 3,
@@ -340,6 +373,8 @@ describe("commercial catalog", () => {
           nameEn: "Extra station",
           unit: "station",
           unitPrice: "2500.00",
+          vatRateBps: 2000,
+          vatIncluded: true,
           addon: { effects: [{ key: "stations", quotaIncrement: 2147483647 }] },
         },
       },
