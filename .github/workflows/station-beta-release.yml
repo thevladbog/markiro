@@ -141,17 +141,8 @@ jobs:
         run: |
           set -euo pipefail
           echo 'Decode Tauri updater signing key'
-          export TAURI_SIGNING_PRIVATE_KEY="$(node -e '
-            const value = process.env.TAURI_SIGNING_PRIVATE_KEY ?? "";
-            const decoded = value.startsWith("untrusted comment:")
-              ? value
-              : Buffer.from(value.replace(/\s+/g, ""), "base64").toString("utf8");
-            if (!decoded.startsWith("untrusted comment: rsign encrypted secret key\n")) {
-              process.stderr.write("TAURI_SIGNING_PRIVATE_KEY is not a Tauri rsign private key\\n");
-              process.exit(1);
-            }
-            process.stdout.write(decoded);
-          }')"
+          normalized_key="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | node tools/station-release/normalize-signing-key.mjs)"
+          export TAURI_SIGNING_PRIVATE_KEY="$normalized_key"
           pnpm --filter @markiro/station tauri build
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
           installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
