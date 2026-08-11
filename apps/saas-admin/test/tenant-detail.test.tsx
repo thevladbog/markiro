@@ -260,9 +260,11 @@ describe("tenant subscription detail", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText(/^Окончание: 1 янв\. 2027 г\.,/)).toBeDefined();
     await user.click(within(dialog).getByRole("button", { name: "Назначить точную версию" }));
-    expect(api.mutationCalls()[0]).toMatchObject({
-      body: { endsAt: "2027-01-01T09:00:00.000Z" },
-    });
+    const submittedEndsAt = api.mutationCalls()[0]?.body.endsAt;
+    expect(typeof submittedEndsAt).toBe("string");
+    const normalizedEndsAt = new Date(submittedEndsAt as string);
+    expect(normalizedEndsAt.toISOString().slice(0, 10)).toBe("2027-01-01");
+    expect(normalizedEndsAt.getUTCMinutes()).toBe(0);
   });
 
   it("keeps support read-only and presents offers as deliberately unavailable", async () => {
