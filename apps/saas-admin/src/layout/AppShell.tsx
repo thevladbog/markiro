@@ -55,7 +55,9 @@ function AppShellContent() {
             {t("shell.offers")}
           </NavLink>
           <NavLink to="/billing" className={({ isActive }) => (isActive ? "active" : undefined)}>
-            <span className="nav-index" aria-hidden="true">04</span>
+            <span className="nav-index" aria-hidden="true">
+              04
+            </span>
             {t("shell.billing")}
           </NavLink>
           <NavLink to="/team" className={({ isActive }) => (isActive ? "active" : undefined)}>

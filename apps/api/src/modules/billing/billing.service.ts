@@ -1,4 +1,10 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -10,7 +16,8 @@ const cents = (value: string): bigint => {
   const [whole, fraction = "00"] = value.split(".");
   return BigInt(whole ?? "0") * 100n + BigInt(fraction.padEnd(2, "0"));
 };
-const money = (value: bigint): string => `${value / 100n}.${(value % 100n).toString().padStart(2, "0")}`;
+const money = (value: bigint): string =>
+  `${value / 100n}.${(value % 100n).toString().padStart(2, "0")}`;
 
 @Injectable()
 export class BillingService {
@@ -74,8 +81,11 @@ export class BillingService {
         const nameRu = version?.nameRu ?? line.nameRu;
         const nameEn = version?.nameEn ?? line.nameEn;
         const unit = version?.unit ?? line.unit;
-        if (!nameRu || !nameEn || !unit) throw new BadRequestException({ code: "invoice_line_name_required" });
-        const rate = BigInt(line.vatRateBps ?? (version?.vatRate ? Math.round(Number(version.vatRate) * 100) : 0));
+        if (!nameRu || !nameEn || !unit)
+          throw new BadRequestException({ code: "invoice_line_name_required" });
+        const rate = BigInt(
+          line.vatRateBps ?? (version?.vatRate ? Math.round(Number(version.vatRate) * 100) : 0),
+        );
         const lineGross = cents(line.agreedUnitPrice) * BigInt(line.quantity);
         const lineVat = line.vatIncluded
           ? (lineGross * rate) / (10_000n + rate)
@@ -105,7 +115,10 @@ export class BillingService {
           lineSubtotal: money(lineSubtotal),
           lineVat: money(lineVat),
           lineTotal: money(lineTotal),
-          activationPolicy: line.kind === "plan" || line.kind === "addon" ? (line.activationPolicy ?? "manual") : null,
+          activationPolicy:
+            line.kind === "plan" || line.kind === "addon"
+              ? (line.activationPolicy ?? "manual")
+              : null,
         });
       }
       const [updated] = await tx
@@ -119,36 +132,96 @@ export class BillingService {
 
   async list(tenantId?: string) {
     const query = this.db.select().from(schema.invoices).orderBy(desc(schema.invoices.createdAt));
-    return { items: tenantId ? await query.where(eq(schema.invoices.tenantId, tenantId)) : await query };
+    return {
+      items: tenantId ? await query.where(eq(schema.invoices.tenantId, tenantId)) : await query,
+    };
   }
 
   async get(id: string) {
-    const [invoice] = await this.db.select().from(schema.invoices).where(eq(schema.invoices.id, id)).limit(1);
+    const [invoice] = await this.db
+      .select()
+      .from(schema.invoices)
+      .where(eq(schema.invoices.id, id))
+      .limit(1);
     if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-    const lines = await this.db.select().from(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, id));
-    const documents = await this.db.select().from(schema.invoiceDocuments).where(eq(schema.invoiceDocuments.invoiceId, id));
+    const lines = await this.db
+      .select()
+      .from(schema.invoiceLines)
+      .where(eq(schema.invoiceLines.invoiceId, id));
+    const documents = await this.db
+      .select()
+      .from(schema.invoiceDocuments)
+      .where(eq(schema.invoiceDocuments.invoiceId, id));
     return { ...invoice, lines, documents };
   }
 
   async issue(principal: PlatformPrincipal, id: string) {
     return this.db.transaction(async (tx) => {
-      const [invoice] = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, id)).limit(1);
+      const [invoice] = await tx
+        .select()
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, id))
+        .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
       if (invoice.status !== "draft") throw new ConflictException({ code: "invoice_not_draft" });
-      const [seller] = await tx.select().from(schema.operatorBillingProfiles).where(eq(schema.operatorBillingProfiles.isCurrent, true)).limit(1);
-      const [buyer] = await tx.select().from(schema.tenantBillingProfiles).where(and(eq(schema.tenantBillingProfiles.tenantId, invoice.tenantId), eq(schema.tenantBillingProfiles.isCurrent, true))).limit(1);
+      const [seller] = await tx
+        .select()
+        .from(schema.operatorBillingProfiles)
+        .where(eq(schema.operatorBillingProfiles.isCurrent, true))
+        .limit(1);
+      const [buyer] = await tx
+        .select()
+        .from(schema.tenantBillingProfiles)
+        .where(
+          and(
+            eq(schema.tenantBillingProfiles.tenantId, invoice.tenantId),
+            eq(schema.tenantBillingProfiles.isCurrent, true),
+          ),
+        )
+        .limit(1);
       if (!seller || !buyer) throw new ConflictException({ code: "billing_profile_required" });
-      const [updated] = await tx.update(schema.invoices).set({ status: "issued", issueDate: new Date(), issuedAt: new Date(), issuedByPlatformUserId: principal.userId, sellerSnapshot: seller, buyerSnapshot: buyer }).where(eq(schema.invoices.id, id)).returning();
-      await this.audit.record(tx, { actorPlatformUserId: principal.userId, actorRole: principal.role, action: "billing.invoice.issued", outcome: "success", tenantId: invoice.tenantId, targetType: "invoice", targetId: id, reason: null, before: { status: invoice.status }, after: { status: "issued", number: invoice.number }, requestId: null });
+      const [updated] = await tx
+        .update(schema.invoices)
+        .set({
+          status: "issued",
+          issueDate: new Date(),
+          issuedAt: new Date(),
+          issuedByPlatformUserId: principal.userId,
+          sellerSnapshot: seller,
+          buyerSnapshot: buyer,
+        })
+        .where(eq(schema.invoices.id, id))
+        .returning();
+      await this.audit.record(tx, {
+        actorPlatformUserId: principal.userId,
+        actorRole: principal.role,
+        action: "billing.invoice.issued",
+        outcome: "success",
+        tenantId: invoice.tenantId,
+        targetType: "invoice",
+        targetId: id,
+        reason: null,
+        before: { status: invoice.status },
+        after: { status: "issued", number: invoice.number },
+        requestId: null,
+      });
       return updated;
     });
   }
 
   async cancel(principal: PlatformPrincipal, id: string) {
-    const [invoice] = await this.db.select().from(schema.invoices).where(eq(schema.invoices.id, id)).limit(1);
+    const [invoice] = await this.db
+      .select()
+      .from(schema.invoices)
+      .where(eq(schema.invoices.id, id))
+      .limit(1);
     if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
     if (invoice.status === "paid") throw new ConflictException({ code: "invoice_paid" });
-    const [updated] = await this.db.update(schema.invoices).set({ status: "cancelled", cancelledAt: new Date() }).where(eq(schema.invoices.id, id)).returning();
+    const [updated] = await this.db
+      .update(schema.invoices)
+      .set({ status: "cancelled", cancelledAt: new Date() })
+      .where(eq(schema.invoices.id, id))
+      .returning();
     return updated;
   }
 }

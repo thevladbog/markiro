@@ -37,7 +37,9 @@ const TenantPage = lazy(() =>
 const OffersPage = lazy(() =>
   import("./pages/offers/OffersPage.js").then((module) => ({ default: module.OffersPage })),
 );
-const BillingPage = lazy(() => import("./pages/billing/BillingPage.js").then((module) => ({ default: module.BillingPage })));
+const BillingPage = lazy(() =>
+  import("./pages/billing/BillingPage.js").then((module) => ({ default: module.BillingPage })),
+);
 const TeamPage = lazy(() =>
   import("./pages/team/TeamPage.js").then((module) => ({ default: module.TeamPage })),
 );

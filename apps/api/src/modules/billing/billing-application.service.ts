@@ -13,13 +13,30 @@ export class BillingApplicationService {
   ) {}
 
   async apply(principal: PlatformPrincipal, invoiceId: string) {
-    const [invoice] = await this.db.select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).limit(1);
+    const [invoice] = await this.db
+      .select()
+      .from(schema.invoices)
+      .where(eq(schema.invoices.id, invoiceId))
+      .limit(1);
     if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
     if (invoice.status !== "paid") throw new ConflictException({ code: "invoice_not_paid" });
-    const lines = await this.db.select().from(schema.invoiceLines).where(eq(schema.invoiceLines.invoiceId, invoiceId)).orderBy(schema.invoiceLines.position);
+    const lines = await this.db
+      .select()
+      .from(schema.invoiceLines)
+      .where(eq(schema.invoiceLines.invoiceId, invoiceId))
+      .orderBy(schema.invoiceLines.position);
     const results: Array<{ lineId: string; status: string; result?: unknown }> = [];
     for (const line of lines) {
-      const [previous] = await this.db.select().from(schema.invoiceApplicationEvents).where(and(eq(schema.invoiceApplicationEvents.invoiceLineId, line.id), eq(schema.invoiceApplicationEvents.status, "applied"))).limit(1);
+      const [previous] = await this.db
+        .select()
+        .from(schema.invoiceApplicationEvents)
+        .where(
+          and(
+            eq(schema.invoiceApplicationEvents.invoiceLineId, line.id),
+            eq(schema.invoiceApplicationEvents.status, "applied"),
+          ),
+        )
+        .limit(1);
       if (previous) {
         results.push({ lineId: line.id, status: "skipped" });
         continue;
@@ -29,26 +46,68 @@ export class BillingApplicationService {
         if (line.kind === "plan" && line.catalogVersionId) {
           result = await this.lifecycle.assignPlan(principal, invoice.tenantId, {
             catalogVersionId: line.catalogVersionId,
-            activationPolicy: line.activationPolicy === "after_current" ? "after_current" : "immediate",
+            activationPolicy:
+              line.activationPolicy === "after_current" ? "after_current" : "immediate",
             reason: `invoice:${invoice.number}`,
           });
         } else if (line.kind === "addon" && line.catalogVersionId) {
-          const statuses = line.activationPolicy === "after_current" ? ["scheduled"] : ["active", "trial", "pending_activation"];
-          const [target] = await this.db.select({ id: schema.tenantSubscriptions.id }).from(schema.tenantSubscriptions).where(and(eq(schema.tenantSubscriptions.tenantId, invoice.tenantId), inArray(schema.tenantSubscriptions.status, statuses as never[]))).orderBy(desc(schema.tenantSubscriptions.updatedAt)).limit(1);
+          const statuses =
+            line.activationPolicy === "after_current"
+              ? ["scheduled"]
+              : ["active", "trial", "pending_activation"];
+          const [target] = await this.db
+            .select({ id: schema.tenantSubscriptions.id })
+            .from(schema.tenantSubscriptions)
+            .where(
+              and(
+                eq(schema.tenantSubscriptions.tenantId, invoice.tenantId),
+                inArray(schema.tenantSubscriptions.status, statuses as never[]),
+              ),
+            )
+            .orderBy(desc(schema.tenantSubscriptions.updatedAt))
+            .limit(1);
           if (!target) throw new ConflictException({ code: "subscription_target_missing" });
           result = await this.lifecycle.assignAddon(principal, invoice.tenantId, {
             catalogVersionId: line.catalogVersionId,
             expectedSubscriptionId: target.id,
             quantity: line.quantity,
-            activationPolicy: line.activationPolicy === "after_current" ? "after_current" : "immediate",
+            activationPolicy:
+              line.activationPolicy === "after_current" ? "after_current" : "immediate",
             reason: `invoice:${invoice.number}`,
           });
         }
-        await this.db.insert(schema.invoiceApplicationEvents).values({ tenantId: invoice.tenantId, invoiceId, invoiceLineId: line.id, attempt: 1, status: "applied", kind: line.kind, source: "manual", beforeSnapshot: null, afterSnapshot: result, errorCode: null, actorPlatformUserId: principal.userId });
+        await this.db.insert(schema.invoiceApplicationEvents).values({
+          tenantId: invoice.tenantId,
+          invoiceId,
+          invoiceLineId: line.id,
+          attempt: 1,
+          status: "applied",
+          kind: line.kind,
+          source: "manual",
+          beforeSnapshot: null,
+          afterSnapshot: result,
+          errorCode: null,
+          actorPlatformUserId: principal.userId,
+        });
         results.push({ lineId: line.id, status: "applied", result });
       } catch (error) {
-        const code = error instanceof ConflictException ? ((error.getResponse() as { code?: string }).code ?? "application_conflict") : "application_failed";
-        await this.db.insert(schema.invoiceApplicationEvents).values({ tenantId: invoice.tenantId, invoiceId, invoiceLineId: line.id, attempt: 1, status: "failed", kind: line.kind, source: "manual", beforeSnapshot: null, afterSnapshot: null, errorCode: code, actorPlatformUserId: principal.userId });
+        const code =
+          error instanceof ConflictException
+            ? ((error.getResponse() as { code?: string }).code ?? "application_conflict")
+            : "application_failed";
+        await this.db.insert(schema.invoiceApplicationEvents).values({
+          tenantId: invoice.tenantId,
+          invoiceId,
+          invoiceLineId: line.id,
+          attempt: 1,
+          status: "failed",
+          kind: line.kind,
+          source: "manual",
+          beforeSnapshot: null,
+          afterSnapshot: null,
+          errorCode: code,
+          actorPlatformUserId: principal.userId,
+        });
         results.push({ lineId: line.id, status: "failed" });
       }
     }

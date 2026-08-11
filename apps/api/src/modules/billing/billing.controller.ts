@@ -9,7 +9,11 @@ import { createInvoiceSchema, invoiceIdSchema, type CreateInvoiceDto } from "./d
 
 @Controller("platform/invoices")
 export class BillingController {
-  constructor(private readonly billing: BillingService, private readonly documents: BillingDocumentsService, private readonly application: BillingApplicationService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly documents: BillingDocumentsService,
+    private readonly application: BillingApplicationService,
+  ) {}
 
   @Get()
   @RequirePlatformCapabilities("billing.read")
@@ -25,13 +29,19 @@ export class BillingController {
 
   @Post()
   @RequirePlatformCapabilities("billing.write")
-  create(@Req() req: RequestWithPlatformPrincipal, @Body(new ZodValidationPipe(createInvoiceSchema)) body: CreateInvoiceDto) {
+  create(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Body(new ZodValidationPipe(createInvoiceSchema)) body: CreateInvoiceDto,
+  ) {
     return this.billing.create(req.platformPrincipal!, body);
   }
 
   @Post(":id/issue")
   @RequirePlatformCapabilities("billing.write")
-  issue(@Req() req: RequestWithPlatformPrincipal, @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+  issue(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+  ) {
     return this.billing.issue(req.platformPrincipal!, id);
   }
 
@@ -49,13 +59,19 @@ export class BillingController {
 
   @Post(":id/apply")
   @RequirePlatformCapabilities("billing.write")
-  apply(@Req() req: RequestWithPlatformPrincipal, @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+  apply(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+  ) {
     return this.application.apply(req.platformPrincipal!, id);
   }
 
   @Post(":id/cancel")
   @RequirePlatformCapabilities("billing.write")
-  cancel(@Req() req: RequestWithPlatformPrincipal, @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+  cancel(
+    @Req() req: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+  ) {
     return this.billing.cancel(req.platformPrincipal!, id);
   }
 }
