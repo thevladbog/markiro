@@ -246,6 +246,32 @@ describe("LoginPage", () => {
     await screen.findByText("SHELL_PLACEHOLDER");
   });
 
+  it("refreshes the session before navigating after sign-in", async () => {
+    let resolveRefresh!: () => void;
+    const refresh = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const client = createFakeAuthClient({
+      useSession: () => ({ data: null, isPending: false, error: null, refetch: refresh }),
+    });
+    renderRouted(client, "/login", <LoginPage />);
+
+    fireEvent.change(screen.getByLabelText("Электронная почта"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.change(screen.getByLabelText("Пароль"), { target: { value: "hunter2!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
+
+    resolveRefresh();
+    await screen.findByText("SHELL_PLACEHOLDER");
+  });
+
   it("toggles password visibility without changing its value", () => {
     renderRouted(createFakeAuthClient(), "/login", <LoginPage />);
     const password = screen.getByLabelText("Пароль") as HTMLInputElement;
@@ -438,6 +464,44 @@ describe("SelectOrgPage", () => {
     expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
 
     resolveSetActive({ data: {}, error: null });
+    await screen.findByText("SHELL_PLACEHOLDER");
+  });
+
+  it("refreshes the session before navigating after organization activation", async () => {
+    let resolveRefresh!: () => void;
+    const refresh = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const client = createFakeAuthClient({
+      useSession: () => ({
+        data: {
+          session: { activeOrganizationId: null },
+          user: { id: "user_1", email: "user@example.com" },
+        },
+        isPending: false,
+        error: null,
+        refetch: refresh,
+      }),
+      organization: {
+        create: vi.fn(),
+        list: vi.fn(async () => ({
+          data: [{ id: "org_1", name: "Acme Corp", slug: "acme-corp" }],
+          error: null,
+        })),
+        setActive: vi.fn(async () => ({ data: {}, error: null })),
+      },
+    });
+    renderRouted(client, "/org/select", <SelectOrgPage />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Выбрать" }));
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
+
+    resolveRefresh();
     await screen.findByText("SHELL_PLACEHOLDER");
   });
 

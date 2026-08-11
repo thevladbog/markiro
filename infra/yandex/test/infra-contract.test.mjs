@@ -128,6 +128,10 @@ test("media and temporarily retained audit data are private, versioned, encrypte
     assert.match(bucket, /prevent_destroy\s*=\s*true/);
   }
   assert.match(storage, /AllowApplicationMediaObjects/);
+  const appUploader = block(storage, 'resource "yandex_storage_bucket_iam_binding" "app_uploader"');
+  assert.match(appUploader, /bucket\s*=\s*yandex_storage_bucket\.media\.bucket/);
+  assert.match(appUploader, /role\s*=\s*"storage\.uploader"/);
+  assert.match(appUploader, /members\s*=\s*\["serviceAccount:\$\{var\.app_service_account_id\}"\]/);
   assert.doesNotMatch(storage, /audit_writer|audit_uploader|audit_service_account/);
 });
 
