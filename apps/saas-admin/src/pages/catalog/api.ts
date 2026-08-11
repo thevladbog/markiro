@@ -83,6 +83,32 @@ export type CatalogCreateInput = CatalogVersionPatch & {
   service?: Record<string, never>;
 };
 
+export function catalogVersionToCreateInput(item: CatalogVersionDto): CatalogCreateInput {
+  if (!item.unitPrice) throw new Error("catalog_version_financial_terms_missing");
+  const common = {
+    nameRu: item.nameRu,
+    nameEn: item.nameEn,
+    descriptionRu: item.descriptionRu,
+    descriptionEn: item.descriptionEn,
+    unit: item.unit,
+    billingMode: item.billingMode,
+    billingPeriod: item.billingPeriod,
+    unitPrice: item.unitPrice,
+    vatRateBps: item.vatRateBps ?? null,
+    vatIncluded: item.vatRateBps !== null && item.vatIncluded === true,
+  } as const;
+  if (item.kind === "plan") {
+    if (!item.plan) throw new Error("catalog_version_plan_missing");
+    return { ...common, plan: { ...item.plan } };
+  }
+  if (item.kind === "addon") {
+    if (!item.addon) throw new Error("catalog_version_addon_missing");
+    return { ...common, addon: { effects: item.addon.effects.map((effect) => ({ ...effect })) } };
+  }
+  if (!item.service) throw new Error("catalog_version_service_missing");
+  return { ...common, service: {} };
+}
+
 export function createCatalogVersion(
   itemCode: string,
   input: CatalogCreateInput,

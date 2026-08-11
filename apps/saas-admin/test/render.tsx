@@ -282,6 +282,7 @@ export function installCatalogApi({
   let demoId = defaultDemoId;
   const patchCalls: CatalogPatchCall[] = [];
   const createCalls: CatalogCreateCall[] = [];
+  let createSequence = 0;
 
   vi.stubGlobal(
     "fetch",
@@ -315,14 +316,20 @@ export function installCatalogApi({
         if (status !== 201) return jsonResponse(status, { code: "catalog_item_conflict" });
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         createCalls.push({ itemCode: createMatch[1]!, body: structuredClone(body) });
+        const source = catalog.find((item) => item.catalogItemCode === createMatch[1]);
+        const nextVersion =
+          Math.max(0, ...catalog
+            .filter((item) => item.catalogItemCode === createMatch[1])
+            .map((item) => item.version)) + 1;
+        createSequence += 1;
         const created = {
-          ...structuredClone(DRAFT_PLAN),
+          ...structuredClone(source ?? DRAFT_PLAN),
           ...body,
-          id: "71111111-1111-4111-8111-111111111111",
-          catalogItemId: "81111111-1111-4111-8111-111111111111",
+          id: `71111111-1111-4111-8111-${String(createSequence).padStart(12, "0")}`,
+          catalogItemId: source?.catalogItemId ?? "81111111-1111-4111-8111-111111111111",
           catalogItemCode: createMatch[1],
           kind: body.plan ? "plan" : body.addon ? "addon" : "service",
-          version: 1,
+          version: nextVersion,
           status: "draft",
           publishedAt: null,
           publishedByPlatformUserId: null,

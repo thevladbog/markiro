@@ -169,6 +169,8 @@
     "createRequired": "Enter a code, names, and billing unit",
     "createConflict": "An item with this code already exists or is unavailable",
     "createError": "Could not create the catalog item.",
+    "clone": "New version",
+    "cloneError": "Could not create the new version.",
     "retire": "Retire from catalog",
     "retired": "Version {{version}} retired",
     "retireTitle": "Retire version {{version}}?",

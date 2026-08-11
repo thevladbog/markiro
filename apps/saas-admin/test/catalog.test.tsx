@@ -183,6 +183,68 @@ describe("commercial catalog", () => {
     });
   });
 
+  it("clones an immutable version into the next draft", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [PUBLISHED_PLAN] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 1" }));
+    await user.click(screen.getByRole("button", { name: "Новая версия" }));
+
+    expect(api.createCalls()).toHaveLength(1);
+    expect(api.createCalls()[0]?.itemCode).toBe("plan-basic");
+    expect(api.createCalls()[0]?.body).toMatchObject({
+      nameRu: "Базовый",
+      unit: "month",
+      unitPrice: "15000.00",
+      vatRateBps: 2000,
+      vatIncluded: true,
+      plan: PUBLISHED_PLAN.plan,
+    });
+    expect(await screen.findByRole("region", { name: "Версия 2 · Базовый" })).toBeDefined();
+  });
+
+  it("clones add-on effects and one-time service terms", async () => {
+    const addonApi = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [ADDON] });
+    const addonRender = renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
+    await user.click(screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }));
+    await user.click(screen.getByRole("button", { name: "Новая версия" }));
+    expect(addonApi.createCalls()[0]?.body).toMatchObject({
+      billingMode: "recurring",
+      addon: { effects: [{ key: "stations", quotaIncrement: 1 }] },
+    });
+    addonRender.unmount();
+
+    const serviceApi = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [SERVICE] });
+    renderSaasApp();
+    await user.click(await screen.findByRole("tab", { name: "Услуги" }));
+    await user.click(screen.getByRole("button", { name: "Открыть Внедрение, версия 1" }));
+    await user.click(screen.getByRole("button", { name: "Новая версия" }));
+    expect(serviceApi.createCalls()[0]?.body).toMatchObject({
+      billingMode: "one_time",
+      billingPeriod: null,
+      unit: "project",
+      service: {},
+    });
+  });
+
+  it("reports a clone failure without replacing the source version", async () => {
+    const api = installCatalogApi({
+      me: PLATFORM_ADMIN_ME,
+      items: [PUBLISHED_PLAN],
+      createResponses: [500],
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 1" }));
+    await user.click(screen.getByRole("button", { name: "Новая версия" }));
+    expect(await screen.findByText("Не удалось создать новую версию.")).toBeDefined();
+    expect(api.items()).toHaveLength(1);
+    expect(screen.getByRole("region", { name: "Версия 1 · Базовый" })).toBeDefined();
+  });
+
   it("opens a catalog version when clicking any cell in its row", async () => {
     installCatalogApi({ items: [PUBLISHED_PLAN] });
     renderSaasApp();

@@ -15,6 +15,8 @@ import {
   archiveCatalogItem,
   setDefaultDemoPlan,
   updateCatalogVersion,
+  catalogVersionToCreateInput,
+  createCatalogVersion,
   type AddonEffect,
   type CatalogVersionDto,
   type CatalogVersionPatch,
@@ -281,12 +283,14 @@ export function CatalogVersionPanel({
   isSupport,
   defaultDemoId,
   onClose,
+  onVersionCreated,
 }: {
   item: CatalogVersionDto;
   canWrite: boolean;
   isSupport: boolean;
   defaultDemoId: string | null;
   onClose: () => void;
+  onVersionCreated?: (created: CatalogVersionDto) => void;
 }) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
@@ -328,6 +332,16 @@ export function CatalogVersionPanel({
             : t("catalog.saveError"),
       });
     },
+  });
+  const clone = useMutation({
+    mutationFn: () => createCatalogVersion(item.catalogItemCode, catalogVersionToCreateInput(item)),
+    onSuccess: (created) => {
+      queryClient.setQueryData<{ items: CatalogVersionDto[] }>(["platform", "catalog"], (current) =>
+        current ? { items: [...current.items, created] } : { items: [created] },
+      );
+      onVersionCreated?.(created);
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.cloneError") }),
   });
   const publish = useMutation({
     mutationFn: () => publishCatalogVersion(item.catalogItemCode, item.id),
@@ -426,6 +440,16 @@ export function CatalogVersionPanel({
           {canWrite && item.status === "retired" ? (
             <Button variant="secondary" onClick={() => setArchiveOpen(true)}>
               {t("catalog.archive")}
+            </Button>
+          ) : null}
+          {canWrite && item.status !== "draft" ? (
+            <Button
+              variant="primary"
+              loading={clone.isPending}
+              disabled={clone.isPending}
+              onClick={() => clone.mutate()}
+            >
+              {t("catalog.clone")}
             </Button>
           ) : null}
           <Button variant="secondary" onClick={onClose} aria-label={t("catalog.closePanel")}>

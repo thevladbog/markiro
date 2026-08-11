@@ -195,6 +195,7 @@ export function CatalogPage() {
           isSupport={isSupport}
           defaultDemoId={defaultDemo.data?.catalogVersionId ?? null}
           onClose={() => setSelectedId(null)}
+          onVersionCreated={(created) => setSelectedId(created.id)}
         />
       ) : null}
       {creating ? (
