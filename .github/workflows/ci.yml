@@ -96,11 +96,14 @@ jobs:
       - run: pnpm --filter @markiro/db db:migrate
       - name: Build API workspace dependencies
         run: pnpm turbo build --filter '@markiro/api...'
-      - name: Run real SMTP and object-storage smoke
+      - name: Run tenant provisioning and activation tests
         run: >-
           pnpm --filter @markiro/api exec vitest run
           test/provision-tenant-owner.e2e.test.ts
           test/tenant-owner-activation.e2e.test.ts
+      - name: Run real SMTP and object-storage smoke
+        run: >-
+          pnpm --filter @markiro/api exec vitest run
           test/local-infrastructure.e2e.test.ts
       - name: Show infrastructure logs on failure
         if: failure()
@@ -176,7 +179,7 @@ jobs:
             printf '%s\n' "ADMIN_ORIGIN=https://localhost:18443"
             printf '%s\n' "PLATFORM_AUTH_SECRET=$platform_auth_secret"
             printf '%s\n' "PLATFORM_AUTH_URL=https://localhost:18443"
-            printf '%s\n' "SAAS_ADMIN_ORIGIN=https://localhost:18443"
+            printf '%s\n' "SAAS_ADMIN_ORIGIN=https://saas-admin.localhost:18443"
             printf '%s\n' "KIOSK_ORIGIN=https://kiosk.localhost:18443"
             printf '%s\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"
             printf '%s\n' "SMTP_HOST=mailpit"
