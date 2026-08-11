@@ -64,8 +64,7 @@ describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
       billingPeriod: "month",
       unitPrice: "0.00",
       vatIncluded: true,
-      status: "published",
-      publishedAt: new Date(),
+      status: "draft",
     });
     await setup.db.insert(schema.planEntitlements).values({
       catalogVersionId: versionId,
@@ -75,6 +74,10 @@ describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
       maxCabinetUsers: 2,
       demoDurationDays: 14,
     });
+    await setup.db
+      .update(schema.catalogItemVersions)
+      .set({ status: "published", publishedAt: new Date() })
+      .where(eq(schema.catalogItemVersions.id, versionId));
     await defaultDemo.install(versionId);
   });
 
