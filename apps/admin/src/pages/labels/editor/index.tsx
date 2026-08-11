@@ -34,6 +34,7 @@ import {
   generateZpl,
   sampleLabelData,
   type LabelElement,
+  type LabelImportResult,
   type LabelTemplateSpec,
   type RasterizeTextFn,
 } from "@markiro/domain";
@@ -50,6 +51,7 @@ import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from
 import "./editor.css";
 import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
 import { LabelCanvas } from "./LabelCanvas.js";
+import { ImportCodeDialog } from "./ImportCodeDialog.js";
 import { Palette } from "./Palette.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
@@ -162,6 +164,7 @@ function LabelEditorContent({
     () => matchPresetKey(initialSpec.widthMm, initialSpec.heightMm) === null,
   );
   const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   const createMutation = useCreateLabelTemplate();
   const updateMutation = useUpdateLabelTemplate();
@@ -206,6 +209,13 @@ function LabelEditorContent({
   function handleLabelResize(widthMm: number, heightMm: number): void {
     editor.resizeLabel(widthMm, heightMm);
     markDirty();
+  }
+
+  function handleImportReplace(result: LabelImportResult): void {
+    editor.replaceSpec(result.spec);
+    editor.select(null);
+    markDirty();
+    setShowImportDialog(false);
   }
 
   function handleSizePresetChange(value: string): void {
@@ -348,6 +358,9 @@ function LabelEditorContent({
           style={{ width: 100 }}
         />
         <span style={{ flex: 1 }} />
+        <Button type="button" variant="secondary" onClick={() => setShowImportDialog(true)}>
+          {t("pages.labels.editor.import.open")}
+        </Button>
         <Button type="button" variant="secondary" onClick={() => void handleDownload()}>
           {t("pages.labels.editor.download", { format: spec.language.toUpperCase() })}
         </Button>
@@ -424,6 +437,15 @@ function LabelEditorContent({
           {t("pages.labels.editor.dirtyGuard.body")}
         </p>
       </Modal>
+
+      <ImportCodeDialog
+        open={showImportDialog}
+        initialLanguage={spec.language}
+        initialDpi={spec.dpi}
+        currentDirty={dirty}
+        onClose={() => setShowImportDialog(false)}
+        onReplace={handleImportReplace}
+      />
     </div>
   );
 }

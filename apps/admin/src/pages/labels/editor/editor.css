@@ -157,6 +157,115 @@
   font: var(--text-body-sm);
 }
 
+.label-editor__import-layout {
+  display: grid;
+  min-width: 0;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+}
+
+.label-editor__import-source,
+.label-editor__import-fields {
+  min-width: 0;
+}
+
+.label-editor__import-options {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.label-editor__import-code-label {
+  display: block;
+  margin: 16px 0 8px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.label-editor__import-code {
+  display: block;
+  width: 100%;
+  min-height: 320px;
+  box-sizing: border-box;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: 12px/1.5 var(--font-mono);
+}
+
+.label-editor__import-note,
+.label-editor__import-fields > p,
+.label-editor__import-analysis,
+.label-editor__import-error {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.label-editor__import-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--err);
+  border-radius: var(--r-2);
+  color: var(--err);
+}
+
+.label-editor__import-warnings {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.label-editor__import-warnings code {
+  overflow-wrap: anywhere;
+  color: var(--fg-2);
+  font: 12px/1.4 var(--font-mono);
+}
+
+.label-editor__import-fields {
+  padding-left: 20px;
+  border-left: 1px solid var(--line);
+}
+
+.label-editor__import-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.label-editor__import-field > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.label-editor__import-field code {
+  overflow-wrap: anywhere;
+  color: var(--fg-3);
+  font: 11px/1.3 var(--font-mono);
+}
+
+@media (max-width: 760px) {
+  .label-editor__import-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .label-editor__import-fields {
+    padding-top: 16px;
+    padding-left: 0;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+}
+
 @media (max-width: 1180px) {
   .label-editor__body {
     grid-template-columns: 176px minmax(0, 1fr) 300px;
