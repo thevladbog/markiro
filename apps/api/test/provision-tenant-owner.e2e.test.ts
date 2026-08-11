@@ -621,6 +621,9 @@ describe("tenant owner provisioning CLI arguments", () => {
       const cleanupConnection = createDb(process.env.DATABASE_URL!);
       try {
         await cleanupConnection.db
+          .delete(schema.platformAuditEvents)
+          .where(eq(schema.platformAuditEvents.tenantId, output.tenantId as string));
+        await cleanupConnection.db
           .delete(schema.organization)
           .where(eq(schema.organization.id, output.tenantId as string));
         await cleanupConnection.db
