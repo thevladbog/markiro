@@ -3,6 +3,14 @@ import { useTranslation } from "react-i18next";
 /** What the station can honestly say about its scanner. */
 export type ScannerIndicator = "keyboard" | "connected" | "disconnected";
 export type FloorConnectivityState = "online" | "offline" | "sync-stuck";
+export type UpdateSeverity = "none" | "info" | "warn" | "urgent";
+
+export interface UpdateIndicatorModel {
+  severity: UpdateSeverity;
+  label: string;
+  glyph: "↻" | "!";
+  available: boolean;
+}
 
 export function floorConnectivityState(
   online: boolean,
@@ -30,6 +38,8 @@ export interface StatusBarProps {
    * a badge, never a modal, never anything competing with a scan verdict.
    */
   conflicts: number;
+  update?: UpdateIndicatorModel;
+  onOpenUpdates?: () => void;
 }
 
 // Persistent floor status bar. Scanner/printer indicators reflect the live
@@ -46,6 +56,8 @@ export function StatusBar({
   syncPending,
   syncStuck,
   conflicts,
+  update,
+  onOpenUpdates,
 }: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
@@ -112,6 +124,18 @@ export function StatusBar({
           testId="printer-status"
         />
       </dl>
+      {update && onOpenUpdates ? (
+        <button
+          type="button"
+          className="station-update-indicator"
+          data-update-severity={update.severity}
+          aria-label={`${update.glyph} ${update.label}`}
+          onClick={onOpenUpdates}
+        >
+          <span aria-hidden="true">{update.glyph}</span>
+          <span>{update.label}</span>
+        </button>
+      ) : null}
     </header>
   );
 }

@@ -109,6 +109,14 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     offline: "offline",
     "sync-stuck": "sync-stuck",
   } as const satisfies Record<FloorConnectivityState, string>,
+  updates: {
+    current: "update-current",
+    info: "update-info",
+    warn: "update-warn",
+    urgent: "update-urgent",
+    error: "update-error",
+    "active-shift": "update-active-shift",
+  } as const,
   printVerification: {
     waiting: "print-verification",
     mismatch: "print-mismatch",

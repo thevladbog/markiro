@@ -113,6 +113,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <SyncFixture stuck={fixture.variant === "stuck"} locale={locale} />;
     case "print":
       return <PrintFixture variant={fixture.variant} locale={locale} />;
+    case "updates":
+      return <UpdateFixture variant={fixture.variant} locale={locale} />;
     case "long-copy":
       return <LongCopyFixture locale={fixture.variant === "en" ? "en" : "ru"} />;
   }
@@ -834,6 +836,45 @@ function PrintFixture({ variant, locale }: { variant: string; locale: GalleryLoc
               : ru
                 ? "Ожидание сканирования"
                 : "Waiting for scan"}
+        </Alert>
+      </div>
+    </StationScreen>
+  );
+}
+
+function UpdateFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  const activeShift = variant === "active-shift";
+  const error = variant === "error";
+  const current = variant === "current";
+  const tone = error || activeShift ? "warn" : current ? "ok" : "info";
+  return (
+    <StationScreen
+      title={ru ? "Обновления станции" : "Station updates"}
+      actions={
+        <GalleryFooter
+          locale={locale}
+          {...(current ? {} : { primary: ru ? "Скачать и установить" : "Download and install" })}
+        />
+      }
+    >
+      <div className="gallery-centered-card" data-update-severity={variant}>
+        <Alert tone={tone}>
+          {current
+            ? ru
+              ? "На станции установлена актуальная версия."
+              : "This station is up to date."
+            : error
+              ? ru
+                ? "Не удалось проверить обновления. Локальная работа продолжается."
+                : "Could not check for updates. Local work continues."
+              : activeShift
+                ? ru
+                  ? "Завершите активную смену перед установкой."
+                  : "Leave the active shift before installing."
+                : ru
+                  ? "Доступна версия 0.1.0-beta.2. Скачивание выполняется вручную."
+                  : "Version 0.1.0-beta.2 is available. Download is manual."}
         </Alert>
       </div>
     </StationScreen>
