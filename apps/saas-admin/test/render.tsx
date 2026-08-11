@@ -254,12 +254,19 @@ interface CatalogPatchCall {
   body: unknown;
 }
 
+interface CatalogCreateCall {
+  itemCode: string;
+  body: unknown;
+}
+
 export function installCatalogApi({
   me = ACCOUNTANT_ME,
   items = [DRAFT_PLAN, PUBLISHED_PLAN, ADDON, SERVICE],
   defaultDemoId = null,
   saveStatuses = [],
   defaultStatuses = [],
+  createResponses = [],
+  archiveStatuses = [],
   catalogStatus = 200,
 }: {
   me?: PlatformPrincipal;
@@ -267,11 +274,15 @@ export function installCatalogApi({
   defaultDemoId?: string | null;
   saveStatuses?: number[];
   defaultStatuses?: number[];
+  createResponses?: number[];
+  archiveStatuses?: number[];
   catalogStatus?: number;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
   let demoId = defaultDemoId;
   const patchCalls: CatalogPatchCall[] = [];
+  const createCalls: CatalogCreateCall[] = [];
+  let createSequence = 0;
 
   vi.stubGlobal(
     "fetch",
@@ -298,6 +309,44 @@ export function installCatalogApi({
         const body = JSON.parse(String(init.body)) as { catalogVersionId: string };
         demoId = body.catalogVersionId;
         return jsonResponse(200, { catalogVersionId: demoId });
+      }
+      const createMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/versions$/);
+      if (createMatch && init.method === "POST") {
+        const status = createResponses.shift() ?? 201;
+        if (status !== 201) return jsonResponse(status, { code: "catalog_item_conflict" });
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        createCalls.push({ itemCode: createMatch[1]!, body: structuredClone(body) });
+        const source = catalog.find((item) => item.catalogItemCode === createMatch[1]);
+        const nextVersion =
+          Math.max(
+            0,
+            ...catalog
+              .filter((item) => item.catalogItemCode === createMatch[1])
+              .map((item) => item.version),
+          ) + 1;
+        createSequence += 1;
+        const created = {
+          ...structuredClone(source ?? DRAFT_PLAN),
+          ...body,
+          id: `71111111-1111-4111-8111-${String(createSequence).padStart(12, "0")}`,
+          catalogItemId: source?.catalogItemId ?? "81111111-1111-4111-8111-111111111111",
+          catalogItemCode: createMatch[1],
+          kind: body.plan ? "plan" : body.addon ? "addon" : "service",
+          version: nextVersion,
+          status: "draft",
+          publishedAt: null,
+          publishedByPlatformUserId: null,
+        } as CatalogVersionDto;
+        catalog = [...catalog, created];
+        return jsonResponse(201, created);
+      }
+      const archiveMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/archive$/);
+      if (archiveMatch && init.method === "POST") {
+        const status = archiveStatuses.shift() ?? 200;
+        if (status !== 200)
+          return jsonResponse(status, { code: "catalog_item_versions_not_retired" });
+        catalog = catalog.filter((item) => item.catalogItemCode !== archiveMatch[1]);
+        return jsonResponse(200, { status: "archived" });
       }
       const match = url.match(
         /\/api\/platform\/catalog\/items\/([^/]+)\/versions\/([^/]+)(\/publish)?$/,
@@ -334,6 +383,7 @@ export function installCatalogApi({
     items: () => catalog,
     defaultDemoId: () => demoId,
     patchCalls: () => structuredClone(patchCalls),
+    createCalls: () => structuredClone(createCalls),
   };
 }
 

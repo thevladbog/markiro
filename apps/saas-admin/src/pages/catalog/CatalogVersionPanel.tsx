@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { useFieldArray, useForm, type FieldError } from "react-hook-form";
+import { useEffect, useState } from "react";
+import { useForm, type FieldError } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
@@ -11,21 +11,37 @@ import { Alert, Button, Checkbox, ConfirmDialog, Input, StatusChip } from "@mark
 import { ApiRequestError } from "../../api/client.js";
 import {
   publishCatalogVersion,
+  retireCatalogVersion,
+  archiveCatalogItem,
   setDefaultDemoPlan,
   updateCatalogVersion,
+  catalogVersionToCreateInput,
+  createCatalogVersion,
   type AddonEffect,
   type CatalogVersionDto,
   type CatalogVersionPatch,
   type PlanEntitlements,
 } from "./api.js";
+import { CatalogUnitField } from "./CatalogUnitField.js";
+import { CatalogVatField, formatVat } from "./CatalogVatField.js";
+import {
+  AddonEffectsEditor,
+  fromAddonEffects,
+  type EditableAddonEffect,
+} from "./AddonEffectsEditor.js";
+import { useCatalogDrawerClose } from "./CatalogDrawer.js";
 
 interface CatalogFormValues {
   kind: CatalogVersionDto["kind"];
   financialVisible: boolean;
   nameRu: string;
   nameEn: string;
+  descriptionRu: string;
+  descriptionEn: string;
   unit: string;
   unitPrice: string;
+  vatRateBps: number | null;
+  vatIncluded: boolean;
   maxLines: string;
   maxStations: string;
   maxKiosks: string;
@@ -34,7 +50,7 @@ interface CatalogFormValues {
   labelEditorEnabled: boolean;
   publicApiEnabled: boolean;
   palletsEnabled: boolean;
-  addonEffects: Array<{ key: AddonEffect["key"]; value: string }>;
+  addonEffects: EditableAddonEffect[];
 }
 
 const EFFECT_KEYS = [
@@ -82,8 +98,12 @@ const catalogFormSchema = z
     financialVisible: z.boolean(),
     nameRu: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     nameEn: z.string().trim().min(1, "required").max(300, "nameTooLong"),
+    descriptionRu: z.string().max(2000, "descriptionTooLong"),
+    descriptionEn: z.string().max(2000, "descriptionTooLong"),
     unit: z.string().trim().min(1, "required").max(100, "unitTooLong"),
     unitPrice: z.string(),
+    vatRateBps: z.number().nullable(),
+    vatIncluded: z.boolean(),
     maxLines: z.string(),
     maxStations: z.string(),
     maxKiosks: z.string(),
@@ -95,6 +115,7 @@ const catalogFormSchema = z
     addonEffects: z
       .array(
         z.object({
+          rowId: z.string(),
           key: z.enum(EFFECT_KEYS),
           value: z.string(),
         }),
@@ -161,18 +182,18 @@ function numericOrNull(value: string): number | null {
 }
 
 function formDefaults(item: CatalogVersionDto): CatalogFormValues {
-  const savedAddonEffects =
-    item.addon?.effects.map((effect) => ({
-      key: effect.key,
-      value: "quotaIncrement" in effect ? String(effect.quotaIncrement) : "",
-    })) ?? [];
+  const savedAddonEffects = item.addon ? fromAddonEffects(item.addon.effects) : [];
   return {
     kind: item.kind,
     financialVisible: item.unitPrice !== undefined,
     nameRu: item.nameRu,
     nameEn: item.nameEn,
+    descriptionRu: item.descriptionRu ?? "",
+    descriptionEn: item.descriptionEn ?? "",
     unit: item.unit,
     unitPrice: item.unitPrice ?? "",
+    vatRateBps: item.vatRateBps ?? null,
+    vatIncluded: item.vatIncluded ?? false,
     maxLines: String(item.plan?.maxLines ?? ""),
     maxStations: String(item.plan?.maxStations ?? ""),
     maxKiosks: String(item.plan?.maxKiosks ?? ""),
@@ -182,7 +203,9 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     publicApiEnabled: item.plan?.publicApiEnabled ?? false,
     palletsEnabled: item.plan?.palletsEnabled ?? false,
     addonEffects:
-      savedAddonEffects.length > 0 ? savedAddonEffects : [{ key: "stations", value: "1" }],
+      savedAddonEffects.length > 0
+        ? savedAddonEffects
+        : [{ rowId: crypto.randomUUID(), key: "stations", value: "1" }],
   };
 }
 
@@ -190,9 +213,15 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
   const common: CatalogVersionPatch = {
     nameRu: values.nameRu,
     nameEn: values.nameEn,
+    descriptionRu: values.descriptionRu.trim() || null,
+    descriptionEn: values.descriptionEn.trim() || null,
     unit: values.unit,
   };
-  if (item.unitPrice !== undefined) common.unitPrice = values.unitPrice;
+  if (item.unitPrice !== undefined) {
+    common.unitPrice = values.unitPrice;
+    common.vatRateBps = values.vatRateBps;
+    common.vatIncluded = values.vatRateBps !== null && values.vatIncluded;
+  }
   if (item.kind === "plan") {
     const plan: PlanEntitlements = {
       maxLines: numericOrNull(values.maxLines),
@@ -256,16 +285,23 @@ export function CatalogVersionPanel({
   isSupport,
   defaultDemoId,
   onClose,
+  onVersionCreated,
+  onDirtyChange,
 }: {
   item: CatalogVersionDto;
   canWrite: boolean;
   isSupport: boolean;
   defaultDemoId: string | null;
   onClose: () => void;
+  onVersionCreated?: (created: CatalogVersionDto) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const requestClose = useCatalogDrawerClose(onClose);
   const queryClient = useQueryClient();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [retireOpen, setRetireOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
     tone: "ok" | "error";
     text: string;
@@ -274,7 +310,6 @@ export function CatalogVersionPanel({
     resolver: zodResolver(catalogFormSchema),
     defaultValues: formDefaults(item),
   });
-  const addonEffects = useFieldArray({ control: form.control, name: "addonEffects" });
   const isDraft = item.status === "draft";
   const canEdit = isDraft && canWrite;
 
@@ -303,6 +338,17 @@ export function CatalogVersionPanel({
       });
     },
   });
+  const clone = useMutation({
+    mutationFn: () => createCatalogVersion(item.catalogItemCode, catalogVersionToCreateInput(item)),
+    onSuccess: (created) => {
+      queryClient.setQueryData<{ items: CatalogVersionDto[] }>(
+        ["platform", "catalog"],
+        (current) => (current ? { items: [...current.items, created] } : { items: [created] }),
+      );
+      onVersionCreated?.(created);
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.cloneError") }),
+  });
   const publish = useMutation({
     mutationFn: () => publishCatalogVersion(item.catalogItemCode, item.id),
     onSuccess: (updated) => {
@@ -330,8 +376,54 @@ export function CatalogVersionPanel({
       });
     },
   });
+  const retire = useMutation({
+    mutationFn: () => retireCatalogVersion(item.catalogItemCode, item.id),
+    onSuccess: (updated) => {
+      replaceCatalogItem(updated);
+      setRetireOpen(false);
+      setStatusMessage({ tone: "ok", text: t("catalog.retired", { version: item.version }) });
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.retireError") }),
+  });
+  const archive = useMutation({
+    mutationFn: () => archiveCatalogItem(item.catalogItemCode),
+    onSuccess: () => {
+      setArchiveOpen(false);
+      queryClient.setQueryData<{ items: CatalogVersionDto[] }>(
+        ["platform", "catalog"],
+        (current) =>
+          current
+            ? {
+                items: current.items.filter(
+                  (entry) => entry.catalogItemCode !== item.catalogItemCode,
+                ),
+              }
+            : current,
+      );
+      onClose();
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.archiveError") }),
+  });
 
   const summaries = quotaSummary(item, (key, options = {}) => t(key, options));
+  const addonFormErrors = form.formState.errors.addonEffects;
+  const addonErrorEntries = Array.isArray(addonFormErrors)
+    ? (addonFormErrors as unknown as Array<{ key?: FieldError; value?: FieldError }>)
+    : undefined;
+  const addonErrors = addonErrorEntries
+    ? addonErrorEntries.map((entry) => {
+        const key = entry?.key ? fieldError(entry.key, t) : undefined;
+        const value = entry?.value ? fieldError(entry.value, t) : undefined;
+        return { ...(key ? { key } : {}), ...(value ? { value } : {}) };
+      })
+    : undefined;
+  const addonRootError =
+    !addonErrorEntries && addonFormErrors && "root" in addonFormErrors && addonFormErrors.root
+      ? fieldError(addonFormErrors.root, t)
+      : undefined;
+  useEffect(() => {
+    onDirtyChange?.(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
   const isDefaultDemo = defaultDemoId === item.id;
   const regionLabel = t("catalog.panelLabel", { version: item.version, name: item.nameRu });
 
@@ -349,7 +441,27 @@ export function CatalogVersionPanel({
             }
             label={t(`catalog.status.${item.status}`)}
           />
-          <Button variant="secondary" onClick={onClose} aria-label={t("catalog.closePanel")}>
+          {canWrite && item.status === "published" ? (
+            <Button variant="secondary" onClick={() => setRetireOpen(true)}>
+              {t("catalog.retire")}
+            </Button>
+          ) : null}
+          {canWrite && item.status === "retired" ? (
+            <Button variant="secondary" onClick={() => setArchiveOpen(true)}>
+              {t("catalog.archive")}
+            </Button>
+          ) : null}
+          {canWrite && item.status !== "draft" ? (
+            <Button
+              variant="primary"
+              loading={clone.isPending}
+              disabled={clone.isPending}
+              onClick={() => clone.mutate()}
+            >
+              {t("catalog.clone")}
+            </Button>
+          ) : null}
+          <Button variant="secondary" onClick={requestClose} aria-label={t("catalog.closePanel")}>
             {t("catalog.close")}
           </Button>
         </div>
@@ -386,21 +498,50 @@ export function CatalogVersionPanel({
                     {...inputErrorProps(form.formState.errors.nameEn, t)}
                     {...form.register("nameEn")}
                   />
-                  <Input
-                    label={t("catalog.form.unit")}
-                    required
-                    {...inputErrorProps(form.formState.errors.unit, t)}
-                    {...form.register("unit")}
+                  <label className="native-field">
+                    <span>{t("catalog.form.descriptionRu")}</span>
+                    <textarea rows={3} {...form.register("descriptionRu")} />
+                  </label>
+                  <label className="native-field">
+                    <span>{t("catalog.form.descriptionEn")}</span>
+                    <textarea rows={3} {...form.register("descriptionEn")} />
+                  </label>
+                  <CatalogUnitField
+                    kind={item.kind}
+                    value={form.watch("unit")}
+                    onChange={(value) =>
+                      form.setValue("unit", value, { shouldDirty: true, shouldValidate: true })
+                    }
+                    {...(() => {
+                      const error = fieldError(form.formState.errors.unit, t);
+                      return error ? { error } : {};
+                    })()}
                   />
                   {!isSupport && item.unitPrice !== undefined ? (
-                    <Input
-                      label={t("catalog.form.unitPrice")}
-                      inputMode="decimal"
-                      mono
-                      required
-                      {...inputErrorProps(form.formState.errors.unitPrice, t)}
-                      {...form.register("unitPrice")}
-                    />
+                    <>
+                      <Input
+                        label={t("catalog.form.unitPrice")}
+                        inputMode="decimal"
+                        mono
+                        required
+                        {...inputErrorProps(form.formState.errors.unitPrice, t)}
+                        {...form.register("unitPrice")}
+                      />
+                      <CatalogVatField
+                        value={form.watch("vatRateBps")}
+                        onChange={(value) => {
+                          form.setValue("vatRateBps", value, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          });
+                          form.setValue("vatIncluded", value !== null, { shouldDirty: true });
+                        }}
+                        {...(() => {
+                          const error = fieldError(form.formState.errors.vatRateBps, t);
+                          return error ? { error } : {};
+                        })()}
+                      />
+                    </>
                   ) : null}
                 </div>
               </fieldset>
@@ -464,78 +605,17 @@ export function CatalogVersionPanel({
                 </fieldset>
               ) : null}
               {item.kind === "addon" ? (
-                <fieldset>
-                  <legend>{t("catalog.form.addonEffect")}</legend>
-                  <div className="addon-effects">
-                    {addonEffects.fields.map((field, index) => {
-                      const key = form.watch(`addonEffects.${index}.key`);
-                      const keyError = form.formState.errors.addonEffects?.[index]?.key;
-                      const keyErrorId = keyError ? `addon-effect-${field.id}-error` : undefined;
-                      return (
-                        <div className="addon-effect-row" key={field.id}>
-                          <label className="native-field">
-                            <span>{t("catalog.form.effectKeyIndexed", { index: index + 1 })}</span>
-                            <select
-                              aria-label={t("catalog.form.effectKeyIndexed", { index: index + 1 })}
-                              aria-invalid={keyError ? true : undefined}
-                              aria-describedby={keyErrorId}
-                              {...form.register(`addonEffects.${index}.key`)}
-                            >
-                              {EFFECT_KEYS.map((effectKey) => (
-                                <option key={effectKey} value={effectKey}>
-                                  {t(`catalog.effectNames.${effectKey}`)}
-                                </option>
-                              ))}
-                            </select>
-                            {keyError ? (
-                              <span className="native-field__error" id={keyErrorId}>
-                                {fieldError(keyError, t)}
-                              </span>
-                            ) : null}
-                          </label>
-                          {QUOTA_EFFECT_KEYS.has(key) ? (
-                            <Input
-                              label={t("catalog.form.effectValueIndexed", { index: index + 1 })}
-                              inputMode="numeric"
-                              mono
-                              {...inputErrorProps(
-                                form.formState.errors.addonEffects?.[index]?.value,
-                                t,
-                              )}
-                              {...form.register(`addonEffects.${index}.value`)}
-                            />
-                          ) : (
-                            <div className="feature-effect" role="status">
-                              {t("catalog.form.featureEnabled")}
-                            </div>
-                          )}
-                          <Button
-                            type="button"
-                            variant="secondary"
-                            disabled={addonEffects.fields.length === 1}
-                            aria-label={t("catalog.form.removeEffect", { index: index + 1 })}
-                            onClick={() => addonEffects.remove(index)}
-                          >
-                            {t("catalog.form.remove")}
-                          </Button>
-                        </div>
-                      );
-                    })}
-                    {form.formState.errors.addonEffects?.root ? (
-                      <Alert tone="error">
-                        {fieldError(form.formState.errors.addonEffects.root, t)}
-                      </Alert>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      disabled={addonEffects.fields.length >= 7}
-                      onClick={() => addonEffects.append({ key: "stations", value: "1" })}
-                    >
-                      {t("catalog.form.addEffect")}
-                    </Button>
-                  </div>
-                </fieldset>
+                <AddonEffectsEditor
+                  effects={form.watch("addonEffects")}
+                  onChange={(next) =>
+                    form.setValue("addonEffects", next, {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    })
+                  }
+                  {...(addonErrors ? { errors: addonErrors } : {})}
+                  {...(addonRootError ? { listError: addonRootError } : {})}
+                />
               ) : null}
               {item.kind === "service" ? (
                 <Alert tone="info">{t("catalog.form.serviceNotice")}</Alert>
@@ -578,6 +658,18 @@ export function CatalogVersionPanel({
                   <div>
                     <dt>{t("catalog.form.unitPrice")}</dt>
                     <dd className="mono">{t("catalog.money", { value: item.unitPrice })}</dd>
+                  </div>
+                ) : null}
+                {!isSupport && item.unitPrice !== undefined ? (
+                  <div>
+                    <dt>{t("catalog.form.vat")}</dt>
+                    <dd>
+                      {formatVat(
+                        item.vatRateBps ?? null,
+                        item.vatIncluded ?? false,
+                        (key, options) => (options ? t(key, options) : t(key)),
+                      )}
+                    </dd>
                   </div>
                 ) : null}
               </dl>
@@ -633,6 +725,28 @@ export function CatalogVersionPanel({
         error={publish.error ? t("catalog.publishError") : undefined}
         onCancel={() => setPublishOpen(false)}
         onConfirm={() => publish.mutate()}
+      />
+      <ConfirmDialog
+        open={retireOpen}
+        title={t("catalog.retireTitle", { version: item.version })}
+        description={t("catalog.retireWarning")}
+        entity={`${item.catalogItemCode} · v${item.version}`}
+        confirmLabel={t("catalog.retire")}
+        cancelLabel={t("catalog.cancel")}
+        busy={retire.isPending}
+        onCancel={() => setRetireOpen(false)}
+        onConfirm={() => retire.mutate()}
+      />
+      <ConfirmDialog
+        open={archiveOpen}
+        title={t("catalog.archiveTitle")}
+        description={t("catalog.archiveWarning")}
+        entity={item.catalogItemCode}
+        confirmLabel={t("catalog.archive")}
+        cancelLabel={t("catalog.cancel")}
+        busy={archive.isPending}
+        onCancel={() => setArchiveOpen(false)}
+        onConfirm={() => archive.mutate()}
       />
     </section>
   );

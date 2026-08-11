@@ -11,20 +11,20 @@ export type PlatformUser = {
   createdAt: string;
 };
 
-export const listPlatformTeam = () => platformApiFetch<PlatformUser[]>("/platform/team");
+export const listPlatformTeam = () => platformApiFetch<PlatformUser[]>("/team");
 export const invitePlatformUser = (email: string, role: PlatformRole) =>
-  platformApiFetch<{ deliveryId?: string }>("/platform/team", {
+  platformApiFetch<{ deliveryId?: string }>("/team", {
     method: "POST",
     body: JSON.stringify({ email, role }),
   });
 export const changePlatformRole = (id: string, role: PlatformRole) =>
-  platformApiFetch(`/platform/team/${id}/role`, {
+  platformApiFetch(`/team/${id}/role`, {
     method: "PATCH",
     body: JSON.stringify({ role }),
   });
 export const suspendPlatformUser = (id: string) =>
-  platformApiFetch(`/platform/team/${id}/suspend`, { method: "POST", body: "{}" });
+  platformApiFetch(`/team/${id}/suspend`, { method: "POST", body: "{}" });
 export const renewPlatformActivation = (id: string) =>
-  platformApiFetch(`/platform/team/${id}/activation/renew`, { method: "POST", body: "{}" });
+  platformApiFetch(`/team/${id}/activation/renew`, { method: "POST", body: "{}" });
 export const recoverPlatformTwoFactor = (id: string) =>
-  platformApiFetch(`/platform/team/${id}/2fa/recover`, { method: "POST", body: "{}" });
+  platformApiFetch(`/team/${id}/2fa/recover`, { method: "POST", body: "{}" });

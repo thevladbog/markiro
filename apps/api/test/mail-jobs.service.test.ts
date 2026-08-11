@@ -106,6 +106,44 @@ describe("MailJobsService dispatch", () => {
 });
 
 describe("MailJobsService delivery claim", () => {
+  it("renders and sends platform activation deliveries", async () => {
+    const crypto = new MailCryptoService(Buffer.alloc(32, 9));
+    const encrypted = crypto.encrypt(DELIVERY_ID, {
+      kind: "platform-user-activation",
+      recipientName: "Пользователь",
+      actionUrl: "https://saas.example/activate#token=activation-token",
+      expiresInMinutes: 60,
+    });
+    const { pool } = fakePool(({ text }) => {
+      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+        return {
+          rows: [
+            {
+              id: DELIVERY_ID,
+              tenantId: null,
+              userId: null,
+              recipient: "platform@example.test",
+              kind: "platform-user-activation",
+              sourceId: "platform-activation:user-1",
+              attemptCount: 1,
+              ...encrypted,
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    const { service, renderer, transport } = createService(pool);
+
+    await service.processDelivery(DELIVERY_ID);
+
+    expect(renderer).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "platform-user-activation" }),
+    );
+    expect(transport.send).toHaveBeenCalledWith(expect.anything(), "platform@example.test");
+  });
+
   it("holds an advisory lock, revalidates the invitation, sends, and erases payload", async () => {
     const crypto = new MailCryptoService(Buffer.alloc(32, 9));
     const encrypted = crypto.encrypt(DELIVERY_ID, {
