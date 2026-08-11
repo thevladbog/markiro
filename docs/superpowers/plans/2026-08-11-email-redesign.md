@@ -40,10 +40,12 @@
 ### Task 1: Build the shared image-free Markiro email shell
 
 **Files:**
+
 - Modify: `packages/email/src/layout.tsx`
 - Test: `packages/email/test/render.test.tsx`
 
 **Interfaces:**
+
 - Consumes: React `ReactNode`; React Email `Body`, `Button`, `Container`, `Head`, `Heading`, `Html`, `Link`, `Preview`, `Section`, `Text`.
 - Produces: `EmailLayout(props: { preview: string; eyebrow: string; heading: string; footer?: string; children: ReactNode }): JSX.Element`.
 - Produces: `EmailAction(props: { href: string; children: ReactNode }): JSX.Element`.
@@ -198,13 +200,7 @@ export function EmailAction({ href, children }: { href: string; children: ReactN
   );
 }
 
-export function EmailExpiryNotice({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
+export function EmailExpiryNotice({ label, children }: { label: string; children: ReactNode }) {
   return (
     <Section aria-label="Срок действия ссылки" style={styles.expiryNotice}>
       <Text style={styles.expiryLabel}>{label}</Text>
@@ -391,13 +387,7 @@ interface EmailLayoutProps {
   children: ReactNode;
 }
 
-export function EmailLayout({
-  preview,
-  eyebrow,
-  heading,
-  footer,
-  children,
-}: EmailLayoutProps) {
+export function EmailLayout({ preview, eyebrow, heading, footer, children }: EmailLayoutProps) {
   return (
     <Html lang="ru">
       <Head>
@@ -462,6 +452,7 @@ git commit -m "feat(email): add branded transactional shell"
 ### Task 2: Move all four scenarios onto the spacious shared composition
 
 **Files:**
+
 - Modify: `packages/email/src/invitation.tsx`
 - Modify: `packages/email/src/tenant-owner-activation.tsx`
 - Modify: `packages/email/src/email-verification.tsx`
@@ -469,6 +460,7 @@ git commit -m "feat(email): add branded transactional shell"
 - Test: `packages/email/test/render.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `EmailLayout`, `EmailAction`, `EmailExpiryNotice`, `EmailFallbackLink`, and `emailStyles` from Task 1.
 - Consumes: existing `formatRussianMinutes(minutes: number): string` and invitation `dateFormatter` behavior.
 - Produces: the existing four template functions and prop interfaces without signature changes.
@@ -508,9 +500,7 @@ In `renders a password reset without leaking markup into the subject`, add:
 
 ```tsx
 expect(output.html).toContain("Восстановление пароля");
-expect(output.text).toContain(
-  "Если вы не запрашивали смену пароля, ничего делать не нужно.",
-);
+expect(output.text).toContain("Если вы не запрашивали смену пароля, ничего делать не нужно.");
 ```
 
 - [ ] **Step 2: Run the full render test and confirm RED**
@@ -558,8 +548,8 @@ Keep `TenantOwnerActivationEmailProps` unchanged and preserve the existing-accou
 >
   <Text style={emailStyles.greeting}>Здравствуйте, {recipientName}.</Text>
   <Text style={emailStyles.paragraph}>
-    Для вас создан кабинет организации {organizationName}. Активируйте доступ по ссылке. Если у
-    вас уже есть аккаунт Маркиро, его пароль останется без изменений.
+    Для вас создан кабинет организации {organizationName}. Активируйте доступ по ссылке. Если у вас
+    уже есть аккаунт Маркиро, его пароль останется без изменений.
   </Text>
   <EmailAction href={actionUrl}>Активировать доступ</EmailAction>
   <EmailExpiryNotice label="Одноразовая ссылка">
@@ -639,12 +629,14 @@ git commit -m "feat(email): redesign transactional templates"
 ### Task 3: Add a complete React Email preview set
 
 **Files:**
+
 - Modify: `packages/email/emails/invitation-preview.tsx`
 - Create: `packages/email/emails/tenant-owner-activation-preview.tsx`
 - Create: `packages/email/emails/email-verification-preview.tsx`
 - Create: `packages/email/emails/password-reset-preview.tsx`
 
 **Interfaces:**
+
 - Consumes: the four unchanged template component prop interfaces from Task 2.
 - Produces: four default-exported zero-argument React preview components discovered by `react-email dev` and checked by `tsconfig.test.json`.
 
@@ -740,9 +732,11 @@ git commit -m "chore(email): add transactional previews"
 ### Task 4: Run final automated and visual acceptance
 
 **Files:**
+
 - Verify only; no expected source changes.
 
 **Interfaces:**
+
 - Consumes: the complete package output from Tasks 1–3.
 - Produces: evidence for automated package health and a bounded manual responsive-preview result; it does not claim Gmail, Outlook, Apple Mail, or physical-device acceptance.
 

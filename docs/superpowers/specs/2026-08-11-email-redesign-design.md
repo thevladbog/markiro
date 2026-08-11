@@ -66,16 +66,16 @@ spacing range according to hierarchy while keeping the action easy to tap.
 
 The palette follows `packages/ui/src/tokens.css`:
 
-| Role | Value | Use |
-| --- | --- | --- |
-| Ink | `#17161a` | Hero, headings, primary text |
-| Paper | `#fafaf8` | Page and quiet panels |
-| White | `#ffffff` | Main message surface |
-| Panel | `#f0efea` | Outer background or expiry surface |
-| Line | `#e0ded7` | Dividers and structural borders |
-| Muted text | `#6b6862` | Supporting and footer copy |
-| Primary green | `#0faf56` | Main CTA only |
-| Mark module | `#3ddc7a` | The green module in the logo and small status mark |
+| Role          | Value     | Use                                                |
+| ------------- | --------- | -------------------------------------------------- |
+| Ink           | `#17161a` | Hero, headings, primary text                       |
+| Paper         | `#fafaf8` | Page and quiet panels                              |
+| White         | `#ffffff` | Main message surface                               |
+| Panel         | `#f0efea` | Outer background or expiry surface                 |
+| Line          | `#e0ded7` | Dividers and structural borders                    |
+| Muted text    | `#6b6862` | Supporting and footer copy                         |
+| Primary green | `#0faf56` | Main CTA only                                      |
+| Mark module   | `#3ddc7a` | The green module in the logo and small status mark |
 
 ## Email-safe Markiro logo
 
@@ -118,12 +118,12 @@ changes.
 
 ## Template content
 
-| Template | Hero/context | Heading | Primary action | Supporting information |
-| --- | --- | --- | --- | --- |
-| Organization invitation | Organization name | Invitation to the team | `Принять приглашение` | Inviter name and exact expiry date/time |
-| Tenant-owner activation | Organization name | Welcome to Markiro | `Активировать доступ` | Existing-account password remains unchanged; one-time duration |
-| Email verification | Account/email context | Confirm email | `Подтвердить email` | Why confirmation is required; one-time duration |
-| Password reset | Account/security context | Restore access | `Сбросить пароль` | Request explanation; one-time duration and safe ignore guidance |
+| Template                | Hero/context             | Heading                | Primary action        | Supporting information                                          |
+| ----------------------- | ------------------------ | ---------------------- | --------------------- | --------------------------------------------------------------- |
+| Organization invitation | Organization name        | Invitation to the team | `Принять приглашение` | Inviter name and exact expiry date/time                         |
+| Tenant-owner activation | Organization name        | Welcome to Markiro     | `Активировать доступ` | Existing-account password remains unchanged; one-time duration  |
+| Email verification      | Account/email context    | Confirm email          | `Подтвердить email`   | Why confirmation is required; one-time duration                 |
+| Password reset          | Account/security context | Restore access         | `Сбросить пароль`     | Request explanation; one-time duration and safe ignore guidance |
 
 Copy stays direct and operational. It does not use promotional language or
 exclamation marks. The current subjects remain stable:

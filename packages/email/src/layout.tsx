@@ -14,7 +14,7 @@ import {
 
 interface EmailLayoutProps {
   preview: string;
-  eyebrow: string;
+  eyebrow?: string;
   heading: string;
   footer?: string;
   children: ReactNode;
@@ -92,7 +92,13 @@ function EmailBrand() {
   );
 }
 
-export function EmailLayout({ preview, eyebrow, heading, footer, children }: EmailLayoutProps) {
+export function EmailLayout({
+  preview,
+  eyebrow = "Маркиро",
+  heading,
+  footer,
+  children,
+}: EmailLayoutProps) {
   return (
     <Html lang="ru">
       <Head>
@@ -165,6 +171,44 @@ export const emailStyles = {
     fontSize: "16px",
     lineHeight: "26px",
     margin: "18px 0 0",
+  },
+  actionSection: {
+    margin: "30px 0 0",
+  },
+  button: {
+    backgroundColor: palette.accent,
+    borderRadius: "4px",
+    boxSizing: "border-box" as const,
+    color: palette.white,
+    display: "block",
+    fontSize: "15px",
+    fontWeight: "600",
+    lineHeight: "20px",
+    padding: "15px 18px",
+    textAlign: "center" as const,
+    textDecoration: "none",
+    width: "100%",
+  },
+  muted: {
+    color: palette.muted,
+    fontSize: "12px",
+    lineHeight: "18px",
+    margin: "24px 0 0",
+  },
+  fallback: {
+    color: palette.muted,
+    fontSize: "12px",
+    lineHeight: "18px",
+    margin: "26px 0 0",
+    wordBreak: "break-all" as const,
+  },
+  fallbackLink: {
+    color: "#1a4f9c",
+    fontFamily: fontMono,
+    fontSize: "11px",
+    lineHeight: "20px",
+    textDecoration: "underline",
+    wordBreak: "break-all" as const,
   },
 } as const;
 
