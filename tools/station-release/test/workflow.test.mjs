@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { load } from "js-yaml";
+import { normalizeTauriSigningKey } from "../normalize-signing-key.mjs";
 
 const root = new URL("../../../", import.meta.url);
 const source = () => readFile(new URL(".github/workflows/station-beta-release.yml", root), "utf8");
@@ -29,6 +30,10 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.match(text, /VITE_STATION_API_URL:\s*https:\/\/admin\.markiro\.app/);
   assert.match(text, /TAURI_SIGNING_PRIVATE_KEY/);
   assert.match(text, /TAURI_SIGNING_PRIVATE_KEY_PASSWORD/);
+  assert.match(text, /Waiting for CI for \$GITHUB_SHA/);
+  assert.match(text, /for attempt in \{1\.\.90\}/);
+  assert.match(text, /--commit \"\$GITHUB_SHA\"/);
+  assert.match(text, /CI for \$GITHUB_SHA completed with conclusion/);
   assert.equal(workflow.jobs.release.env.TAURI_SIGNING_PRIVATE_KEY, undefined);
   assert.equal(workflow.jobs.release.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD, undefined);
   const signingStep = workflow.jobs.release.steps.find(
@@ -43,7 +48,9 @@ test("station beta publication is protected, serialized, main-only and channel-l
     "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
   );
   assert.match(text, /Decode Tauri updater signing key/);
-  assert.match(text, /untrusted comment: rsign encrypted secret key/);
+  assert.match(text, /normalized_key=\"\$\(.*normalize-signing-key\.mjs\)/s);
+  assert.match(text, /normalized_key=.*\r?\n\s*export TAURI_SIGNING_PRIVATE_KEY=/);
+  assert.ok(text.indexOf("normalize-signing-key.mjs") < text.indexOf("tauri build"));
   assert.match(text, /persist-credentials:\s*false/);
   assert.match(text, /pnpm\/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1/);
   assert.match(text, /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/);
@@ -54,4 +61,12 @@ test("station beta publication is protected, serialized, main-only and channel-l
   );
   assert.doesNotMatch(text, /force|:latest\b|pull_request_target|self-hosted|id-token|curl .+\|/i);
   assert.doesNotMatch(text, /continue-on-error/i);
+});
+
+test("normalizes raw and base64-wrapped Tauri keys and rejects invalid input", async () => {
+  const raw = "untrusted comment: rsign encrypted secret key\nRWZha2U=\n";
+  assert.equal(normalizeTauriSigningKey(raw), raw);
+  const wrapped = Buffer.from(raw, "utf8").toString("base64");
+  assert.equal(normalizeTauriSigningKey(wrapped), raw);
+  assert.throws(() => normalizeTauriSigningKey("not-a-signing-key"), /not a Tauri rsign/);
 });
