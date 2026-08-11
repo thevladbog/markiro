@@ -115,6 +115,14 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
     .strict(),
   z
     .object({
+      kind: z.literal("platform-user-activation"),
+      recipientName: z.string().min(1),
+      actionUrl: httpUrl,
+      expiresInMinutes: z.number().int().positive(),
+    })
+    .strict(),
+  z
+    .object({
       kind: z.literal("email-verification"),
       recipientName: z.string().min(1),
       actionUrl: httpUrl,

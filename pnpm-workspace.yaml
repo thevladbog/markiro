@@ -6,6 +6,9 @@ allowBuilds:
   sharp: true
   "@scarf/scarf": false # telemetry postinstall — deliberately blocked
   vue-demi: false # browser runtime is prebuilt; do not run its postinstall switcher
+settings:
+  # Do not silently add optional peer dependencies to production images.
+  autoInstallPeers: false
 overrides:
   # React Email's preview CLI pulls Next.js as tooling. Keep that transitive
   # runtime on the first 16.x release patched for the App Router DoS and SSRF
@@ -32,6 +35,9 @@ overrides:
   # explicitly disable Agent. Do not deploy the unused agent-chat/AI tree,
   # which otherwise adds OpenTelemetry to the API runtime.
   "@scalar/api-reference>@scalar/agent-chat": "-"
+  # Better Auth treats OpenTelemetry as an optional peer and safely falls back
+  # to its no-op tracer when it is absent. Keep telemetry out of production.
+  "@better-auth/core>@opentelemetry/api": "-"
 
   # GHSA-mh99-v99m-4gvg / CVE-2026-14257: brace-expansion <=5.0.7 expands
   # braces without an upper bound on total output *length* and can OOM the

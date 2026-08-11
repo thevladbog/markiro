@@ -32,6 +32,8 @@ export interface TableProps<Row> {
   page?: number;
   pageCount?: number;
   onPage?: (page: number) => void;
+  /** Opens a row when any cell is clicked or the focused row is activated. */
+  onRowClick?: (row: Row) => void;
   /** Empty-state content */
   empty?: ReactNode;
   /** Accessible name for the keyboard-focusable horizontal scroll region. */
@@ -71,6 +73,7 @@ export function Table<Row>({
   page,
   pageCount,
   onPage,
+  onRowClick,
   empty = "No data",
   scrollLabel,
   className,
@@ -143,7 +146,26 @@ export function Table<Row>({
               </tr>
             )}
             {rows.map((row, index) => (
-              <tr key={getRowKey(row, index)} style={{ borderTop: "1px solid var(--line)" }}>
+              <tr
+                key={getRowKey(row, index)}
+                tabIndex={onRowClick ? 0 : undefined}
+                onClick={onRowClick ? () => onRowClick(row) : undefined}
+                onKeyDown={
+                  onRowClick
+                    ? (event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          onRowClick(row);
+                        }
+                      }
+                    : undefined
+                }
+                style={{
+                  borderTop: "1px solid var(--line)",
+                  cursor: onRowClick ? "pointer" : undefined,
+                }}
+              >
                 {columns.map((column) => (
                   <td
                     key={column.key}
