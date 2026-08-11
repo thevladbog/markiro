@@ -4,7 +4,7 @@ Date: 2026-08-11
 
 ## Outcome
 
-Task 8 plus review rounds 1 and 2 are implemented. Subscription enforcement is explicit at the
+Task 8 plus review rounds 1 through 3 are implemented. Subscription enforcement is explicit at the
 registered route or authoritative mutation boundary; there is no global unsafe-method blocker and
 no Task 9 UI. Authentication, profile/security maintenance, reads, exports, device bootstrap, and
 eligible offline recovery remain available. Customer writes and paid features fail closed under the
@@ -22,11 +22,17 @@ Applied migrations `0030` and `0031`, including their snapshots, are byte-for-by
 `HEAD`. Their SQL SHA-1 values remain `8831f2db00883d7ac4f1f7a71f51f916415a2aca` and
 `46e0a1fe5f1d38e0f9a7e7f64e340d35051b3e83` respectively.
 
+Round 3 required no schema change. Applied migrations `0030` through `0033` are unchanged from the
+round-2 commit; no `0034` was added.
+
 ## Registered route inventory
 
 `subscription-route-inventory.test.ts` compiles the real `AppModule`, walks registered controller
-methods through Nest `ModulesContainer`, and inspects every route carrying
-`SubscriptionAccessGuard`, every unsafe method, and conditional CommerceML GET import.
+methods through Nest `ModulesContainer`, and compares all 97 routes carrying
+`SubscriptionAccessGuard` with a canonical route/policy/ordered-guard inventory. Filtering by the
+actual guard rather than a controller-name list means a new guarded GET is also caught. Duplicate,
+new, removed, or stale canonical entries fail exact equality. Every unsafe method and conditional
+CommerceML GET import remains covered by the wider exemption audit.
 
 Every guarded customer route must have explicit subscription metadata and one exact guard chain:
 
@@ -34,8 +40,10 @@ Every guarded customer route must have explicit subscription metadata and one ex
 - station sync: `TenantGuard -> StationOnlyGuard -> SubscriptionAccessGuard`;
 - kiosk: `KioskDeviceGuard -> SubscriptionAccessGuard`.
 
-Every guarded unsafe method must own a handler-level non-read policy; it cannot silently inherit
-the controller's class-level read policy.
+Every guarded unsafe method must own a handler-level policy; it cannot silently inherit the
+controller's class-level read policy. Intentional side-effect-free POST, security maintenance, and
+export continuity are explicit `read_only_allowed` canonical entries rather than accidental method
+classification.
 
 This includes customer GET routes, so the side-effecting shift bundle endpoint cannot hide behind
 HTTP method classification. `GET /shifts/:id/bundle` is explicitly shift recovery. A new
@@ -74,6 +82,11 @@ kiosk/station pairing (2, enforced after authoritative tenant resolution), tenan
 - The kiosk error parser retains server `code` independently of `message`.
   `subscription_read_only` quarantines only that record and the same drain pass continues; ordinary
   403 remains retryable.
+- Rolling capability negotiation prevents a pre-Task-8 kiosk from wedging on that new coded 403.
+  The current client sends `x-kiosk-capabilities: subscription-recovery-v1` and receives the exact
+  403 verdict it understands. A client with no capability receives the same exact
+  `subscription_read_only` body under terminal-compatible 422, before any business write. A helper
+  frozen from commit `d8c6fc8b` proves that status is terminal to the old worker.
 - Before a new queued order is submitted, an authenticated kiosk requests a just-in-time server
   reservation for that exact sequence and normalized order content. The server selects its own
   `claimedAt` inside the write-access transaction and returns a random opaque bearer. PostgreSQL
@@ -92,9 +105,16 @@ kiosk/station pairing (2, enforced after authoritative tenant resolution), tenan
   auto-applied after expiry. Exact 403 handling moves each one to durable client quarantine/manual
   recovery and continues draining later records. The existing seven-day client no-new-work lock is
   unchanged.
-- Admission failure before delivery does not lose work: the queue row is written first, and its
-  cursor-safe update cannot resurrect a row concurrently dequeued by sync. Exact applied replay
-  remains idempotent.
+- Admission and delivery now share the one serialized drain. A new order is first stored as
+  `pending_attestation`; the exact attested body is durably written before submit. A delayed
+  response crossing expiry cannot race a second drain into submitting the proofless body, and a
+  conditional update that finds the row removed neither submits nor resurrects it. A crash before
+  persistence re-attests; a crash after persistence resumes the exact proof-bearing submit.
+- Admission rows are constant-sized and unique per authenticated tenant/kiosk/sequence; rotating a
+  bearer for the same sequence updates in place without imposing a fixed honest-queue cap. Distinct
+  129-record backlogs remain valid. Durable order success consumes the admission in the order
+  transaction; durable rejection consumes it in the rejection transaction; already-durable replay
+  also cleans a leftover row. No bearer/proof or raw business payload is logged or added to audit.
 - Bootstrap now derives redacted subscription state from the same single recovery resolution and
   transaction; there is no split subscription/proof read and no unconditional proof array.
 
@@ -130,16 +150,32 @@ Round 2 RED before the production fixes:
 - final adversarial self-review added one RED: a valid old reservation returned 403 when a pending
   renewal became resolver-selected.
 
+Round 3 RED before production changes:
+
+- kiosk API client: 1 failure / 24 skipped because the recovery capability header was absent;
+- kiosk worker: pending attestation lost the race to submit, and removal during a delayed response
+  could have submitted or resurrected the stale in-memory row;
+- API recovery matrix: 5 behavioral failures across legacy no-cap response (403 instead of 422),
+  unconsumed success, unconsumed terminal rejection, unconsumed already-durable replay, and 129
+  retained rows lacking an explicit same-sequence storage-bound assertion;
+- route inventory: the canonical contract was initially empty against 97 actual guarded customer
+  routes; the earlier unsafe-mode assertion compared against the nonexistent `read` enum value;
+- full kiosk integration then exposed a further real regression: because attestation had become the
+  first network step, reachability state was updated only around submit. Both direct outage and
+  gateway outage tests failed until attestation carried the same signal.
+
 ## GREEN verification
 
 | Check | Result |
 | --- | --- |
-| Round 2 focused API matrix | 5 files, 100/100 passed |
-| Final adversarial expiry/recovery file | 1 file, 10/10 passed |
+| Round 3 focused API expiry/recovery | 1 file, 12/12 passed |
+| Registered 97-route canonical inventory | 1 file, 2/2 passed |
+| Round 3 focused kiosk API/worker | 2 files, 112/112 passed |
+| Final affected kiosk API/worker/shell | 3 files, 159/159 passed |
 | Durable admission schema focused | 1/1 passed |
 | DB full suite | 19 files, 100/100 passed |
-| API final configured full suite | 116 passed files, 1 skipped; 1201 passed, 2 skipped (1203 total) |
-| Kiosk full suite | 20 files, 435/435 passed |
+| API final configured full suite | 116 passed files, 1 skipped; 1204 passed, 2 skipped (1206 total) |
+| Kiosk final full suite | 20 files, 437/437 passed |
 | Station focused timeout retry | 2/2 passed, 55 filtered |
 | Station isolated full suite | 51 files, 581/581 passed |
 | DB/API/kiosk/station typecheck | passed |
@@ -150,10 +186,11 @@ Round 2 RED before the production fixes:
 | Migration apply | `0033` applied successfully to configured local development Postgres |
 
 The final API full run used `.env` plus the exact non-secret values from
-`PLATFORM_TEST_ENV`. A preceding invocation without those three variables failed 52 suites during
-environment parsing and is not counted as behavioral verification; the correctly configured rerun
-above supersedes it. Expected Nest error output in the green run comes from explicit fault-injection
-and rollback tests.
+`PLATFORM_TEST_ENV`. Expected Nest error output in the green run comes from explicit fault-injection
+and rollback tests. A full run accidentally launched from the main checkout also passed but is not
+counted; the table records only the subsequent configured run from this Task 8 worktree. The DB
+count likewise records the configured rerun with `DATABASE_URL`, not the initial intentionally
+skipped no-environment invocation.
 
 The two configured API skips are:
 

@@ -26,12 +26,29 @@ export interface QueuedOrder {
    * version of the app left behind.
    */
   body: CreateOrderDto;
+  /**
+   * New orders first persist in this state before any request is made. The
+   * sync worker owns the whole attest -> persist -> submit sequence, so a
+   * refresh/online drain cannot race the shell and submit the proofless body.
+   * Missing means an older queued record, or one whose exact attestation has
+   * already been persisted and is safe to submit after a restart.
+   */
+  admissionState?: "pending_attestation";
 }
 
 /** Queues one scanned order. `deviceSeq` is the store's `keyPath`, so this is
  * the only place a queued order's key is derived — from the body itself. */
-export async function enqueueOrder(body: CreateOrderDto, employeeId: string): Promise<void> {
-  const record: QueuedOrder = { deviceSeq: body.deviceSeq, employeeId, body };
+export async function enqueueOrder(
+  body: CreateOrderDto,
+  employeeId: string,
+  admissionState?: "pending_attestation",
+): Promise<void> {
+  const record: QueuedOrder = {
+    deviceSeq: body.deviceSeq,
+    employeeId,
+    body,
+    ...(admissionState ? { admissionState } : {}),
+  };
   await withStore(STORE_QUEUE, "readwrite", (s) => s.put(record));
 }
 
@@ -43,7 +60,12 @@ export async function enqueueOrder(body: CreateOrderDto, employeeId: string): Pr
 export async function attestQueuedOrder(deviceSeq: number, body: CreateOrderDto): Promise<boolean> {
   const updated = await updateEach(STORE_QUEUE, (value) => {
     const queued = value as QueuedOrder;
-    return queued.deviceSeq === deviceSeq ? { ...queued, body } : null;
+    if (queued.deviceSeq !== deviceSeq || queued.admissionState !== "pending_attestation") {
+      return null;
+    }
+    const completed: QueuedOrder = { ...queued, body };
+    delete completed.admissionState;
+    return completed;
   });
   return updated === 1;
 }

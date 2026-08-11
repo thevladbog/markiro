@@ -32,13 +32,7 @@ import {
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
-import {
-  attestQueuedOrder,
-  enqueueOrder,
-  listQuarantine,
-  listQueue,
-  quarantineQueue,
-} from "../store/queue.js";
+import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
 import { scrubStoredBadgeCodes } from "../store/scrub.js";
 import {
   cancelFlushRetry,
@@ -229,7 +223,18 @@ export function KioskShell(): React.JSX.Element {
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
-      attestOrder: (body) => base.attestOrder(body),
+      attestOrder: async (body) => {
+        try {
+          const result = await base.attestOrder(body);
+          // The reservation is now the first network step of a delivery, so
+          // it carries the same reachability evidence submit used to own.
+          setOnline(true);
+          return result;
+        } catch (err) {
+          if (isUnreachable(err)) setOnline(false);
+          throw err;
+        }
+      },
       submitOrder: async (body) => {
         try {
           const result = await base.submitOrder(body);
@@ -771,22 +776,12 @@ export function KioskShell(): React.JSX.Element {
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
-        await enqueueOrder(body, active.employeeId);
-        const client = clientFor(advanced);
-        if (client) {
-          try {
-            const admission = await client.attestOrder(content);
-            await attestQueuedOrder(deviceSeq, {
-              ...content,
-              createdAt: admission.claimedAt,
-              admissionProof: admission.admissionProof,
-            });
-          } catch {
-            // The proofless queued body remains the durable recovery record.
-            // While access is live it may still submit normally; after expiry
-            // the server's exact 403 moves it to manual quarantine.
-          }
-        }
+        await enqueueOrder(body, active.employeeId, "pending_attestation");
+        // Attestation belongs to the same globally serialized drain as submit.
+        // Splitting it here let an interval drain read and submit this durable
+        // proofless record while the reservation request was still in flight.
+        // The worker now persists the attested body before it submits, and a
+        // crash resumes from either explicit pending state.
         // From here on the server's answer for THIS order is worth keeping.
         awaited.current = { deviceSeq, result: null };
         await drain();
@@ -805,7 +800,7 @@ export function KioskShell(): React.JSX.Element {
         console.error("kiosk: the order could not be filed", err);
       }
     },
-    [applyConfig, clientFor, drain, scannedAt],
+    [applyConfig, drain, scannedAt],
   );
 
   /**

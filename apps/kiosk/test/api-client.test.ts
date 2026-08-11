@@ -135,6 +135,9 @@ describe("createKioskClient", () => {
       code: "subscription_read_only",
       message: "HTTP 403",
     });
+    expect((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).headers).toMatchObject({
+      "x-kiosk-capabilities": "subscription-recovery-v1",
+    });
   });
 });
 

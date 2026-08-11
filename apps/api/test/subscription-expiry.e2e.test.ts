@@ -15,6 +15,9 @@ import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 import { EntitlementsService } from "../src/subscriptions/entitlements.service";
+import { preTask8KioskWillQuarantine } from "./support/pre-task8-kiosk-client";
+
+const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -566,6 +569,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
+        .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
         .send({
           deviceSeq,
           badgeCode,
@@ -604,6 +608,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const laterEligible = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
       .send({
         deviceSeq: 3,
         badgeCode,
@@ -629,6 +634,12 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .expect(201);
     expect(independentDeviceSequence.body.orderNo).not.toBe(accepted.body.orderNo);
 
+    const consumedAdmissions = await db
+      .select({ id: schema.kioskOrderAdmissions.id })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(consumedAdmissions).toEqual([]);
+
     const otherAgent = request.agent(app!.getHttpServer());
     const otherTenantId = await signUpAndActivate(otherAgent);
     const otherEmployeeId = randomUUID();
@@ -647,6 +658,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
       .send({
         deviceSeq: 5,
         badgeCode: otherBadgeCode,
@@ -688,15 +700,19 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await attachPlan(tenantId, { startsAt, endsAt });
     const createdAt = new Date(startsAt.getTime() + 60 * 60_000);
     const genericProof = "legacy-pre-issued-generic-proof";
-    const post = (body: Record<string, unknown>) =>
+    const post = (body: Record<string, unknown>, capability = KIOSK_RECOVERY_CAPABILITY) =>
       request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
+        .set("x-kiosk-capabilities", capability)
         .send({ badgeCode, reason: "buy", items: [], createdAt: createdAt.toISOString(), ...body });
 
     const audit = vi.spyOn(Logger.prototype, "warn");
     try {
-      await post({ deviceSeq: 9 }).expect(403, { code: "subscription_read_only" });
+      const legacy = await post({ deviceSeq: 9 }, "").expect(422, {
+        code: "subscription_read_only",
+      });
+      expect(preTask8KioskWillQuarantine(legacy.status)).toBe(true);
       await post({ deviceSeq: 10, admissionProof: genericProof }).expect(403, {
         code: "subscription_read_only",
       });
@@ -794,6 +810,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", token)
+        .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
         .send({ ...content, ...body });
     await post({
       deviceSeq: 10,
@@ -906,6 +923,123 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       statuses.push(response.status);
     }
     expect(statuses).toEqual(Array.from({ length: 129 }, () => 201));
+    const outstanding = await db
+      .select({ deviceSeq: schema.kioskOrderAdmissions.deviceSeq })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(outstanding.map(({ deviceSeq }) => deviceSeq).sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 129 }, (_, deviceSeq) => deviceSeq),
+    );
+
+    // Reissuing one idempotency key rotates its bearer in place; a retry does
+    // not grow storage, while distinct honest queued records stay uncapped.
+    await request(app!.getHttpServer())
+      .post("/kiosk/order-admissions")
+      .set("x-kiosk-token", kioskToken)
+      .send({ deviceSeq: 128, badgeCode: "badge", reason: "buy", items: [] })
+      .expect(201);
+    const afterRetry = await db
+      .select({ id: schema.kioskOrderAdmissions.id })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(afterRetry).toHaveLength(129);
+  });
+
+  it("consumes an exact admission after a durable terminal order rejection", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const kioskId = randomUUID();
+    const kioskToken = `proof-rejection-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Admission rejection kiosk",
+      deviceTokenHash: hashDeviceToken(kioskToken),
+    });
+    await attachPlan(tenantId, {
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: new Date(Date.now() + 86_400_000),
+    });
+    const content = {
+      deviceSeq: 1,
+      badgeCode: `unknown-${randomUUID()}`,
+      reason: "buy" as const,
+      items: [{ rawKm: "010460704360021721rejected" }],
+    };
+    const admission = await request(app!.getHttpServer())
+      .post("/kiosk/order-admissions")
+      .set("x-kiosk-token", kioskToken)
+      .send(content)
+      .expect(201);
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
+      .send({
+        ...content,
+        createdAt: admission.body.claimedAt,
+        admissionProof: admission.body.admissionProof,
+      })
+      .expect(422);
+
+    const outstanding = await db
+      .select({ id: schema.kioskOrderAdmissions.id })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(outstanding).toEqual([]);
+  });
+
+  it("consumes a later admission when replaying an already durable order", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const employeeId = randomUUID();
+    const badgeCode = `badge-${randomUUID()}`;
+    const kioskId = randomUUID();
+    const kioskToken = `proof-idempotent-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: employeeId,
+      tenantId,
+      fullName: "Idempotent admission employee",
+      status: "active",
+    });
+    await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode });
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Idempotent admission kiosk",
+      deviceTokenHash: hashDeviceToken(kioskToken),
+    });
+    await attachPlan(tenantId, {
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: new Date(Date.now() + 86_400_000),
+    });
+    const content = { deviceSeq: 1, badgeCode, reason: "buy" as const, items: [] };
+    const created = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
+      .send(content)
+      .expect(201);
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/order-admissions")
+      .set("x-kiosk-token", kioskToken)
+      .send(content)
+      .expect(201);
+    const replay = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
+      .send(content)
+      .expect(201);
+    expect(replay.body.orderNo).toBe(created.body.orderNo);
+
+    const outstanding = await db
+      .select({ id: schema.kioskOrderAdmissions.id })
+      .from(schema.kioskOrderAdmissions)
+      .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
+    expect(outstanding).toEqual([]);
   });
 
   it("derives the bootstrap snapshot from one recovery resolution instead of a racy second read", async () => {

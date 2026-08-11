@@ -283,6 +283,10 @@ export function createKioskClient(cfg: { token: string; serverUrl: string }): Ki
         headers: {
           "Content-Type": "application/json",
           "x-kiosk-token": cfg.token,
+          // Opts into the coded 403 used only by a worker that can quarantine
+          // subscription-expired records without treating every 403 as final.
+          // Older servers ignore unknown request headers.
+          "x-kiosk-capabilities": "subscription-recovery-v1",
         },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       },

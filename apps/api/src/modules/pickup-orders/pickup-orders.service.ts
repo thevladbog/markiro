@@ -162,6 +162,11 @@ export class PickupOrdersService {
         ),
       );
     if (existing) {
+      // The order is already durable, so any reservation left behind for this
+      // idempotency key has served its only purpose. This also repairs the
+      // crash window where the order committed but an older deployment did
+      // not consume its admission row.
+      await this.consumeKioskAdmission(this.db, tenantId, kioskId, dto.deviceSeq);
       return {
         orderNo: existing.orderNo,
         status: "pending",
@@ -244,18 +249,22 @@ export class PickupOrdersService {
       // is examined, so without this the codes the worker walked off with
       // leave no trace at all. Codes only: an item-less badge heartbeat
       // lost nothing and must not add noise here.
-      if (dto.items.length > 0) {
-        await this.recordScanRejection(this.db, {
-          tenantId,
-          kioskId,
-          employeeId: null,
-          badgeCode: await this.auditBadgeValue(tenantId, dto),
-          orderId: null,
-          deviceSeq: dto.deviceSeq,
-          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
-          scannedAt: when,
-        });
-      }
+      const badgeCode = dto.items.length > 0 ? await this.auditBadgeValue(tenantId, dto) : null;
+      await this.db.transaction(async (tx) => {
+        if (dto.items.length > 0) {
+          await this.recordScanRejection(tx, {
+            tenantId,
+            kioskId,
+            employeeId: null,
+            badgeCode,
+            orderId: null,
+            deviceSeq: dto.deviceSeq,
+            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
+            scannedAt: when,
+          });
+        }
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
+      });
       throw new UnprocessableEntityException("Unknown or inactive badge");
     }
 
@@ -273,18 +282,21 @@ export class PickupOrdersService {
       // this is `badgeCode: null` -- the mirror image of the badge case.
       // Rethrow unchanged: this call site must not alter the kiosk's
       // response, whichever of `resolveWriteoffReasonId`'s two messages fired.
-      if (dto.items.length > 0) {
-        await this.recordScanRejection(this.db, {
-          tenantId,
-          kioskId,
-          employeeId,
-          badgeCode: null,
-          orderId: null,
-          deviceSeq: dto.deviceSeq,
-          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
-          scannedAt: when,
-        });
-      }
+      await this.db.transaction(async (tx) => {
+        if (dto.items.length > 0) {
+          await this.recordScanRejection(tx, {
+            tenantId,
+            kioskId,
+            employeeId,
+            badgeCode: null,
+            orderId: null,
+            deviceSeq: dto.deviceSeq,
+            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
+            scannedAt: when,
+          });
+        }
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
+      });
       throw error;
     }
 
@@ -330,6 +342,7 @@ export class PickupOrdersService {
           ),
         );
       if (twin) {
+        await this.consumeKioskAdmission(this.db, tenantId, kioskId, dto.deviceSeq);
         return {
           orderNo: twin.orderNo,
           status: "pending",
@@ -341,15 +354,18 @@ export class PickupOrdersService {
       // `pickup_scan_rejections` is that home: the cabinet would otherwise
       // never learn that a worker's ENTIRE scan session was refused -- the
       // same blind spot `syncConflicts` exists to close, in its worst case.
-      await this.recordScanRejection(this.db, {
-        tenantId,
-        kioskId,
-        employeeId,
-        badgeCode: null,
-        orderId: null,
-        deviceSeq: dto.deviceSeq,
-        codes: conflicts,
-        scannedAt: when,
+      await this.db.transaction(async (tx) => {
+        await this.recordScanRejection(tx, {
+          tenantId,
+          kioskId,
+          employeeId,
+          badgeCode: null,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: conflicts,
+          scannedAt: when,
+        });
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
       });
       // Kept alongside the durable row: cheap, and ops alerting may key on it.
       this.logger.warn(
@@ -400,6 +416,16 @@ export class PickupOrdersService {
         throw new ConflictException({ code: "kiosk_admission_not_required" });
       }
       const token = issueOpaqueKioskAdmissionToken();
+      // Serialize reservations for this authenticated device. One deviceSeq
+      // owns one constant-sized row (the request body itself is not stored),
+      // while distinct offline records remain uncapped: a kiosk that queued a
+      // genuine large backlog before this rolling upgrade must not lose older
+      // attestations merely because a later one was issued.
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
       await tx
         .insert(schema.kioskOrderAdmissions)
         .values({
@@ -1763,6 +1789,7 @@ export class PickupOrdersService {
               scannedAt: when,
             });
           }
+          await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });
       } catch (error) {
@@ -1778,6 +1805,7 @@ export class PickupOrdersService {
               ),
             );
           if (!winner) throw error; // shouldn't happen, but avoid looping forever
+          await this.consumeKioskAdmission(this.db, tenantId, kioskId, deviceSeq);
           return { orderNo: winner.orderNo, itemCount: winner.itemCount, conflicts: [] };
         }
 
@@ -1835,5 +1863,22 @@ export class PickupOrdersService {
     const code = err?.code || cause?.code;
     const constraint = err?.constraint || cause?.constraint;
     return code === "23505" && constraint === "pickup_orders_kiosk_device_seq_uq";
+  }
+
+  private async consumeKioskAdmission(
+    db: Pick<Db, "delete">,
+    tenantId: string,
+    kioskId: string,
+    deviceSeq: number,
+  ): Promise<void> {
+    await db
+      .delete(schema.kioskOrderAdmissions)
+      .where(
+        and(
+          eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+          eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+          eq(schema.kioskOrderAdmissions.deviceSeq, deviceSeq),
+        ),
+      );
   }
 }

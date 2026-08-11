@@ -1,4 +1,5 @@
 import { isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
+import type { CreateOrderAdmissionDto, CreateOrderDto } from "../api/types.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
@@ -6,7 +7,13 @@ import {
 } from "../store/cache.js";
 import { readConfig } from "../store/config.js";
 import { appendJournal } from "../store/journal.js";
-import { dequeueOrder, listQueue, quarantineOrder, type QueuedOrder } from "../store/queue.js";
+import {
+  attestQueuedOrder,
+  dequeueOrder,
+  listQueue,
+  quarantineOrder,
+  type QueuedOrder,
+} from "../store/queue.js";
 
 /**
  * How often a paired kiosk pulls a fresh bootstrap. Every authenticated call
@@ -409,6 +416,30 @@ export function isTerminalRejection(err: unknown): boolean {
   );
 }
 
+function admissionRequest(body: CreateOrderDto): CreateOrderAdmissionDto {
+  const content: CreateOrderDto = { ...body };
+  delete content.admissionProof;
+  delete content.createdAt;
+  return content;
+}
+
+/**
+ * An admission route can legitimately be absent (rolling back to an old
+ * server) or unnecessary (an unmanaged/perpetual tenant). An exact
+ * subscription 403 means the reservation window closed while this order was
+ * pending; submitting the proofless body is intentional because the negotiated
+ * order endpoint then returns the durable terminal verdict the worker can
+ * quarantine. Other 403s remain retryable and keep the pending record intact.
+ */
+function maySubmitWithoutAttestation(err: unknown): boolean {
+  return (
+    err instanceof KioskApiError &&
+    (err.status === 404 ||
+      (err.status === 403 && err.code === "subscription_read_only") ||
+      (err.status === 409 && err.code === "kiosk_admission_not_required"))
+  );
+}
+
 /**
  * Moves a permanently refused order aside. NOTHING IS DROPPED — the whole
  * record, raw marking codes and all, goes to the quarantine store, which is
@@ -514,7 +545,27 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
        * alone (neither carries a status) and mean opposite things here. */
       let answered = false;
       try {
-        const result = await client.submitOrder(order.body);
+        let submittedOrder = order;
+        if (order.admissionState === "pending_attestation") {
+          let attestedBody = order.body;
+          try {
+            const admission = await client.attestOrder(admissionRequest(order.body));
+            attestedBody = {
+              ...admissionRequest(order.body),
+              createdAt: admission.claimedAt,
+              admissionProof: admission.admissionProof,
+            };
+          } catch (error) {
+            if (!maySubmitWithoutAttestation(error)) throw error;
+          }
+          // The cursor update is conditional on this exact pending record
+          // still existing. A concurrent removal wins; never submit from the
+          // stale in-memory snapshot or put it back after the response.
+          if (!(await attestQueuedOrder(order.deviceSeq, attestedBody))) continue;
+          submittedOrder = { ...order, body: attestedBody };
+          delete submittedOrder.admissionState;
+        }
+        const result = await client.submitOrder(submittedOrder.body);
         answered = true;
         delivered = true;
         const at = now().toISOString();
@@ -526,7 +577,7 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           // body the server stamps the order as it arrives, which is this
           // moment. Journalling the sync time instead would move an order
           // queued through an outage into the wrong day for the day count.
-          createdAt: order.body.createdAt ?? at,
+          createdAt: submittedOrder.body.createdAt ?? at,
           // The kiosk the server just filed it under — the one whose token
           // carried it, not the one it was scanned at. An order queued at gate
           // A and delivered after a re-pairing to gate B belongs to B, and the

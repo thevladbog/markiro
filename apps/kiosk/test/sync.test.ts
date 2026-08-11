@@ -14,7 +14,7 @@ import {
   STALE_BLOCK_MS,
   STALE_WARN_MS,
 } from "../src/sync/worker.js";
-import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
+import { dequeueOrder, enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
 import * as queueStore from "../src/store/queue.js";
 import * as journalStore from "../src/store/journal.js";
 import * as configStore from "../src/store/config.js";
@@ -114,6 +114,94 @@ describe("cacheAge", () => {
 });
 
 describe("flushQueue", () => {
+  it("serializes a crash-safe pending attestation before submit even when the response crosses expiry", async () => {
+    let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
+    const admission = new Promise<{ claimedAt: string; admissionProof: string }>((resolve) => {
+      resolveAdmission = resolve;
+    });
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [{ rawKm: "01…reserved-before-expiry" }],
+        createdAt: "2026-08-10T11:59:59.000Z",
+      },
+      "e1",
+      "pending_attestation",
+    );
+    const client = {
+      bootstrap: vi.fn(),
+      attestOrder: vi.fn(() => admission),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-26-0001",
+        status: "pending" as const,
+        itemCount: 1,
+        conflicts: [],
+      })),
+    };
+
+    const draining = flushQueue(client, () => new Date("2026-08-10T12:00:01.000Z"));
+    await vi.waitFor(() => {
+      expect(client.attestOrder.mock.calls.length + client.submitOrder.mock.calls.length).toBe(1);
+    });
+    expect(client.attestOrder).toHaveBeenCalledOnce();
+    expect(client.submitOrder).not.toHaveBeenCalled();
+
+    resolveAdmission({
+      claimedAt: "2026-08-10T11:59:59.500Z",
+      admissionProof: "opaque-admission",
+    });
+    await draining;
+
+    expect(client.submitOrder).toHaveBeenCalledWith({
+      deviceSeq: 1,
+      badgeDigest: "B",
+      reason: "buy",
+      items: [{ rawKm: "01…reserved-before-expiry" }],
+      createdAt: "2026-08-10T11:59:59.500Z",
+      admissionProof: "opaque-admission",
+    });
+    expect(await listQueue()).toEqual([]);
+  });
+
+  it("does not submit or resurrect a pending order removed before its delayed attestation arrives", async () => {
+    let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
+    const admission = new Promise<{ claimedAt: string; admissionProof: string }>((resolve) => {
+      resolveAdmission = resolve;
+    });
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] },
+      "e1",
+      "pending_attestation",
+    );
+    const client = {
+      bootstrap: vi.fn(),
+      attestOrder: vi.fn(() => admission),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "must-not-submit",
+        status: "pending" as const,
+        itemCount: 0,
+        conflicts: [],
+      })),
+    };
+
+    const draining = flushQueue(client, () => new Date());
+    await vi.waitFor(() => {
+      expect(client.attestOrder.mock.calls.length + client.submitOrder.mock.calls.length).toBe(1);
+    });
+    expect(client.attestOrder).toHaveBeenCalledOnce();
+    await dequeueOrder(1);
+    resolveAdmission({
+      claimedAt: "2026-08-10T11:59:59.500Z",
+      admissionProof: "opaque-admission",
+    });
+    await draining;
+
+    expect(client.submitOrder).not.toHaveBeenCalled();
+    expect(await listQueue()).toEqual([]);
+  });
+
   it("submits in deviceSeq order and drops each order only after the server acknowledges it", async () => {
     for (const deviceSeq of [1, 2]) {
       await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
