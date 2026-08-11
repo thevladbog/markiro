@@ -595,7 +595,6 @@ describe("tenant owner provisioning CLI arguments", () => {
   it.skipIf(process.env.LOCAL_INFRA_SMOKE !== "1")(
     "prints only identifiers on stdout through the real documented command",
     async () => {
-      await useDemo();
       const suffix = crypto.randomUUID();
       const result = spawnSync(
         "pnpm",
@@ -611,6 +610,7 @@ describe("tenant owner provisioning CLI arguments", () => {
           "Subprocess tenant",
           "--tenant-slug",
           `subprocess-${suffix}`,
+          "--allow-unmanaged-without-demo",
         ],
         { cwd: resolve(process.cwd(), "../.."), encoding: "utf8", env: process.env },
       );
