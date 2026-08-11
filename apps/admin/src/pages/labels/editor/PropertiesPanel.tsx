@@ -16,20 +16,8 @@
 import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LabelElement, LabelField } from "@markiro/domain";
+import { LABEL_FIELDS, type LabelElement } from "@markiro/domain";
 import { Button, Checkbox, Input, Select } from "@markiro/ui";
-
-const LABEL_FIELDS: LabelField[] = [
-  "product.name",
-  "product.gtin",
-  "km.code",
-  "sscc",
-  "shift.no",
-  "date",
-  "qty",
-  "operator",
-  "counterparty.name",
-];
 
 const ALIGN_OPTIONS: Array<{ value: "left" | "center" | "right"; labelKey: string }> = [
   { value: "left", labelKey: "alignLeft" },
@@ -41,46 +29,52 @@ export interface PropertiesPanelProps {
   element: LabelElement | null;
   onChange: (id: string, patch: Partial<LabelElement>) => void;
   onDelete: (id: string) => void;
+  onCollapse?: () => void;
+  geometryError?: "ELEMENT_TOO_LARGE" | null;
 }
-
-const ROW_STYLE = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 };
-const SECTION_STYLE = { display: "flex", flexDirection: "column" as const, gap: 12 };
 
 function numberFromInput(event: ChangeEvent<HTMLInputElement>): number {
   const value = Number(event.target.value);
   return Number.isFinite(value) ? value : 0;
 }
 
-export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanelProps) {
+export function PropertiesPanel({
+  element,
+  onChange,
+  onDelete,
+  onCollapse,
+  geometryError,
+}: PropertiesPanelProps) {
   const { t } = useTranslation();
 
   if (!element) {
-    return (
-      <div style={{ padding: 16 }}>
-        <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
-          {t("pages.labels.editor.properties.none")}
-        </span>
-      </div>
-    );
+    return <div className="label-editor__properties-empty">{t("pages.labels.editor.properties.none")}</div>;
   }
 
   const kindLabel = t(`pages.labels.editor.kinds.${element.kind}`);
   const patch = (fields: Partial<LabelElement>) => onChange(element.id, fields);
 
   return (
-    <div style={{ ...SECTION_STYLE, padding: 16 }}>
-      <span
-        style={{
-          font: "500 11px/1 var(--font-ui)",
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        }}
-      >
-        {t("pages.labels.editor.properties.selected", { kind: kindLabel })}
-      </span>
+    <section className="label-editor__properties-panel" aria-labelledby="label-editor-properties-title">
+      <header className="label-editor__properties-header">
+        <span id="label-editor-properties-title" className="label-editor__eyebrow">
+          {t("pages.labels.editor.properties.selected", { kind: kindLabel })}
+        </span>
+        {onCollapse && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="compact"
+            className="label-editor__collapse-button"
+            onClick={onCollapse}
+          >
+            {t("pages.labels.editor.properties.collapse")}
+          </Button>
+        )}
+      </header>
+      <div className="label-editor__properties-content">
 
-      <div style={ROW_STYLE}>
+      <div className="label-editor__property-row">
         <Input
           label={t("pages.labels.editor.properties.x")}
           type="number"
@@ -98,7 +92,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
       </div>
 
       {(element.kind === "text" || element.kind === "field") && (
-        <div style={SECTION_STYLE}>
+        <div className="label-editor__property-section">
           {element.kind === "text" && (
             <Input
               label={t("pages.labels.editor.properties.text")}
@@ -117,7 +111,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
               onValueChange={(value) => patch({ field: value })}
             />
           )}
-          <div style={ROW_STYLE}>
+          <div className="label-editor__property-row">
             <Input
               label={t("pages.labels.editor.properties.fontSize")}
               type="number"
@@ -154,7 +148,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
       )}
 
       {element.kind === "barcode" && (
-        <div style={SECTION_STYLE}>
+        <div className="label-editor__property-section">
           <Input
             label={t("pages.labels.editor.properties.size")}
             type="number"
@@ -196,7 +190,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
       )}
 
       {element.kind === "line" && (
-        <div style={ROW_STYLE}>
+        <div className="label-editor__property-row">
           <Input
             label={t("pages.labels.editor.properties.x2")}
             type="number"
@@ -222,7 +216,7 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
       )}
 
       {element.kind === "box" && (
-        <div style={ROW_STYLE}>
+        <div className="label-editor__property-row">
           <Input
             label={t("pages.labels.editor.properties.width")}
             type="number"
@@ -255,6 +249,12 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
       >
         {t("pages.labels.editor.properties.delete")}
       </Button>
-    </div>
+      {geometryError && (
+        <div className="label-editor__geometry-error" role="alert">
+          {t("pages.labels.editor.properties.geometryError")}
+        </div>
+      )}
+      </div>
+    </section>
   );
 }

@@ -562,6 +562,7 @@
         "heightLabel": "Label height, mm",
         "dpiLabel": "DPI",
         "languageLabel": "Language",
+        "workspaceLabel": "Label canvas",
         "loadError": "Could not load the template. Refresh the page or sign in again.",
         "palette": {
           "title": "Elements",
@@ -583,6 +584,10 @@
           "box": "Box"
         },
         "properties": {
+          "title": "Element properties",
+          "collapse": "Collapse",
+          "expand": "Open properties",
+          "geometryError": "The element does not fit inside the label. Reduce its size or enlarge the label.",
           "selected": "Selected: {{kind}}",
           "none": "Select an element on the canvas",
           "x": "X, mm",

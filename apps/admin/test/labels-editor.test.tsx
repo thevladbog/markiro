@@ -158,6 +158,25 @@ describe("Palette", () => {
     expect((screen.getByLabelText("X, мм") as HTMLInputElement).value).toBe("50");
     expect((screen.getByLabelText("Y, мм") as HTMLInputElement).value).toBe("50");
   });
+
+  it("shows a visible label for every palette action", () => {
+    renderCreateFlow();
+
+    for (const label of ["Текст", "Поле", "DataMatrix", "Code128", "EAN-13", "QR", "Линия", "Рамка"]) {
+      expect(screen.getByText(label)).toBeDefined();
+    }
+  });
+
+  it("collapses and reopens properties without clearing the selected element", () => {
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Свернуть" }));
+    expect(screen.queryByText("Выбрано: Текст")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Открыть свойства" }));
+    expect(screen.getByText("Выбрано: Текст")).toBeDefined();
+    expect((screen.getByLabelText("X, мм") as HTMLInputElement).value).toBe("50");
+  });
 });
 
 describe("PropertiesPanel + Save (round-trip into the POSTed spec)", () => {

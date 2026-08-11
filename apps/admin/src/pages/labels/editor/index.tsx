@@ -47,6 +47,7 @@ import {
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
 import { toast } from "../../../lib/toast.js";
 import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from "../api.js";
+import "./editor.css";
 import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
 import { LabelCanvas } from "./LabelCanvas.js";
 import { Palette } from "./Palette.js";
@@ -160,6 +161,7 @@ function LabelEditorContent({
   const [customSize, setCustomSize] = useState(
     () => matchPresetKey(initialSpec.widthMm, initialSpec.heightMm) === null,
   );
+  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
 
   const createMutation = useCreateLabelTemplate();
   const updateMutation = useUpdateLabelTemplate();
@@ -201,6 +203,11 @@ function LabelEditorContent({
     markDirty();
   }
 
+  function handleLabelResize(widthMm: number, heightMm: number): void {
+    editor.resizeLabel(widthMm, heightMm);
+    markDirty();
+  }
+
   function handleSizePresetChange(value: string): void {
     if (value === "custom") {
       setCustomSize(true);
@@ -209,7 +216,7 @@ function LabelEditorContent({
     const preset = SIZE_PRESETS.find((p) => p.key === value);
     if (!preset) return;
     setCustomSize(false);
-    handleReplaceSpec({ ...spec, widthMm: preset.widthMm, heightMm: preset.heightMm });
+    handleLabelResize(preset.widthMm, preset.heightMm);
   }
 
   async function handleSave(): Promise<void> {
@@ -264,18 +271,8 @@ function LabelEditorContent({
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 14,
-          padding: "14px 24px",
-          borderBottom: "1px solid var(--line)",
-          background: "var(--surface-card)",
-          flexWrap: "wrap",
-        }}
-      >
+    <div className="label-editor">
+      <div className="label-editor__toolbar">
         <a
           href="/labels"
           onClick={(event) => {
@@ -318,7 +315,7 @@ function LabelEditorContent({
               mono
               value={spec.widthMm}
               onChange={(event) =>
-                handleReplaceSpec({ ...spec, widthMm: Number(event.target.value) || 0 })
+                handleLabelResize(Number(event.target.value) || 0, spec.heightMm)
               }
               style={{ width: 90 }}
             />
@@ -328,7 +325,7 @@ function LabelEditorContent({
               mono
               value={spec.heightMm}
               onChange={(event) =>
-                handleReplaceSpec({ ...spec, heightMm: Number(event.target.value) || 0 })
+                handleLabelResize(spec.widthMm, Number(event.target.value) || 0)
               }
               style={{ width: 90 }}
             />
@@ -359,28 +356,16 @@ function LabelEditorContent({
         </Button>
       </div>
 
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-        <div style={{ width: 196, flexShrink: 0, borderRight: "1px solid var(--line)" }}>
+      <div className={`label-editor__body${propertiesCollapsed ? " label-editor__body--properties-collapsed" : ""}`}>
+        <aside className="label-editor__palette-region" aria-label={t("pages.labels.editor.palette.title")}>
           <Palette
             labelWidthMm={spec.widthMm}
             labelHeightMm={spec.heightMm}
             onAdd={handleAddElement}
           />
-        </div>
+        </aside>
 
-        <div
-          style={{
-            flex: 1,
-            minWidth: 0,
-            background: "var(--surface-panel)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: 24,
-            padding: 24,
-            overflow: "auto",
-          }}
-        >
+        <main className="label-editor__workspace" aria-label={t("pages.labels.editor.workspaceLabel")}>
           <LabelCanvas
             spec={spec}
             selectedId={editor.state.selectedId}
@@ -393,15 +378,30 @@ function LabelEditorContent({
             rasterizeText={rasterizeText}
             checkFamilyCoverage={checkFamilyCoverage}
           />
-        </div>
+        </main>
 
-        <div style={{ width: 260, flexShrink: 0, borderLeft: "1px solid var(--line)" }}>
-          <PropertiesPanel
-            element={selectedElement}
-            onChange={handlePropertyChange}
-            onDelete={handleDeleteElement}
-          />
-        </div>
+        <aside className="label-editor__properties" aria-label={t("pages.labels.editor.properties.title")}>
+          {propertiesCollapsed ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="compact"
+              className="label-editor__reopen-properties"
+              aria-label={t("pages.labels.editor.properties.expand")}
+              onClick={() => setPropertiesCollapsed(false)}
+            >
+              {t("pages.labels.editor.properties.expand")}
+            </Button>
+          ) : (
+            <PropertiesPanel
+              element={selectedElement}
+              onChange={handlePropertyChange}
+              onDelete={handleDeleteElement}
+              onCollapse={() => setPropertiesCollapsed(true)}
+              geometryError={editor.state.geometryError}
+            />
+          )}
+        </aside>
       </div>
 
       <Modal
