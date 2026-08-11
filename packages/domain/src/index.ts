@@ -17,7 +17,13 @@ export { validatePickupKm } from "./scan/pickup.js";
 export type { PickupKmResult } from "./scan/pickup.js";
 export { validateShiftScan } from "./scan/validate.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
-export { mmToDots, parseLabelTemplate, ptToDots, sampleLabelData } from "./labels/model.js";
+export {
+  LABEL_FIELDS,
+  mmToDots,
+  parseLabelTemplate,
+  ptToDots,
+  sampleLabelData,
+} from "./labels/model.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
@@ -28,6 +34,18 @@ export type {
   LabelTemplateSpec,
   LabelTextElement,
 } from "./labels/model.js";
+export {
+  MAX_LABEL_CODE_BYTES,
+  MAX_LABEL_CODE_COMMANDS,
+  MAX_LABEL_CODE_ELEMENTS,
+} from "./labels/import.js";
+export type {
+  LabelCodeLanguage,
+  LabelImportResult,
+  LabelImportWarning,
+  LabelImportWarningCode,
+  ParseLabelCodeOptions,
+} from "./labels/import.js";
 export {
   buildGfaCommand,
   generateZpl,
