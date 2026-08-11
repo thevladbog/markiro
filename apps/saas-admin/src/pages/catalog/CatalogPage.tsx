@@ -2,11 +2,21 @@ import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Card, PageHeader, Spinner, StatusChip, Table, type TableColumn } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  PageHeader,
+  Spinner,
+  StatusChip,
+  Table,
+  type TableColumn,
+} from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getDefaultDemoPlan, listCatalogVersions, type CatalogVersionDto } from "./api.js";
 import { CatalogVersionPanel } from "./CatalogVersionPanel.js";
+import { CatalogCreatePanel } from "./CatalogCreatePanel.js";
 
 type CatalogKind = CatalogVersionDto["kind"];
 
@@ -21,6 +31,7 @@ export function CatalogPage() {
   const principal = usePlatformPrincipal();
   const [activeKind, setActiveKind] = useState<CatalogKind>("plan");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const catalog = useQuery({
     queryKey: ["platform", "catalog"],
     queryFn: listCatalogVersions,
@@ -108,6 +119,18 @@ export function CatalogPage() {
       <div className="catalog-coordinate" aria-hidden="true">
         CATALOG / VERSION CONTROL / {activeKind.toUpperCase()}
       </div>
+      {principal.capabilities.includes("catalog.write") ? (
+        <div className="catalog-toolbar">
+          <Button
+            onClick={() => {
+              setSelectedId(null);
+              setCreating(true);
+            }}
+          >
+            {t("catalog.create")}
+          </Button>
+        </div>
+      ) : null}
       <Card className="catalog-frame" padding={0}>
         <div className="catalog-tabs" role="tablist" aria-label={t("catalog.groupLabel")}>
           {tabs.map((tab) => (
@@ -138,6 +161,13 @@ export function CatalogPage() {
           isSupport={isSupport}
           defaultDemoId={defaultDemo.data?.catalogVersionId ?? null}
           onClose={() => setSelectedId(null)}
+        />
+      ) : null}
+      {creating ? (
+        <CatalogCreatePanel
+          kind={activeKind}
+          onClose={() => setCreating(false)}
+          onCreated={(created) => setSelectedId(created.id)}
         />
       ) : null}
     </section>

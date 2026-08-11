@@ -11,6 +11,8 @@ import { Alert, Button, Checkbox, ConfirmDialog, Input, StatusChip } from "@mark
 import { ApiRequestError } from "../../api/client.js";
 import {
   publishCatalogVersion,
+  retireCatalogVersion,
+  archiveCatalogItem,
   setDefaultDemoPlan,
   updateCatalogVersion,
   type AddonEffect,
@@ -266,6 +268,8 @@ export function CatalogVersionPanel({
   const { t } = useTranslation();
   const queryClient = useQueryClient();
   const [publishOpen, setPublishOpen] = useState(false);
+  const [retireOpen, setRetireOpen] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{
     tone: "ok" | "error";
     text: string;
@@ -330,6 +334,34 @@ export function CatalogVersionPanel({
       });
     },
   });
+  const retire = useMutation({
+    mutationFn: () => retireCatalogVersion(item.catalogItemCode, item.id),
+    onSuccess: (updated) => {
+      replaceCatalogItem(updated);
+      setRetireOpen(false);
+      setStatusMessage({ tone: "ok", text: t("catalog.retired", { version: item.version }) });
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.retireError") }),
+  });
+  const archive = useMutation({
+    mutationFn: () => archiveCatalogItem(item.catalogItemCode),
+    onSuccess: () => {
+      setArchiveOpen(false);
+      queryClient.setQueryData<{ items: CatalogVersionDto[] }>(
+        ["platform", "catalog"],
+        (current) =>
+          current
+            ? {
+                items: current.items.filter(
+                  (entry) => entry.catalogItemCode !== item.catalogItemCode,
+                ),
+              }
+            : current,
+      );
+      onClose();
+    },
+    onError: () => setStatusMessage({ tone: "error", text: t("catalog.archiveError") }),
+  });
 
   const summaries = quotaSummary(item, (key, options = {}) => t(key, options));
   const isDefaultDemo = defaultDemoId === item.id;
@@ -349,6 +381,16 @@ export function CatalogVersionPanel({
             }
             label={t(`catalog.status.${item.status}`)}
           />
+          {canWrite && item.status === "published" ? (
+            <Button variant="secondary" onClick={() => setRetireOpen(true)}>
+              {t("catalog.retire")}
+            </Button>
+          ) : null}
+          {canWrite && item.status === "retired" ? (
+            <Button variant="secondary" onClick={() => setArchiveOpen(true)}>
+              {t("catalog.archive")}
+            </Button>
+          ) : null}
           <Button variant="secondary" onClick={onClose} aria-label={t("catalog.closePanel")}>
             {t("catalog.close")}
           </Button>
@@ -633,6 +675,28 @@ export function CatalogVersionPanel({
         error={publish.error ? t("catalog.publishError") : undefined}
         onCancel={() => setPublishOpen(false)}
         onConfirm={() => publish.mutate()}
+      />
+      <ConfirmDialog
+        open={retireOpen}
+        title={t("catalog.retireTitle", { version: item.version })}
+        description={t("catalog.retireWarning")}
+        entity={`${item.catalogItemCode} · v${item.version}`}
+        confirmLabel={t("catalog.retire")}
+        cancelLabel={t("catalog.cancel")}
+        busy={retire.isPending}
+        onCancel={() => setRetireOpen(false)}
+        onConfirm={() => retire.mutate()}
+      />
+      <ConfirmDialog
+        open={archiveOpen}
+        title={t("catalog.archiveTitle")}
+        description={t("catalog.archiveWarning")}
+        entity={item.catalogItemCode}
+        confirmLabel={t("catalog.archive")}
+        cancelLabel={t("catalog.cancel")}
+        busy={archive.isPending}
+        onCancel={() => setArchiveOpen(false)}
+        onConfirm={() => archive.mutate()}
       />
     </section>
   );

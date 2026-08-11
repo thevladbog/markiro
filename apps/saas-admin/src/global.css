@@ -282,7 +282,7 @@ textarea {
 .app-header {
   min-height: 72px;
   display: grid;
-  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr) auto;
+  grid-template-columns: minmax(230px, 0.8fr) minmax(0, 1.8fr) auto;
   align-items: stretch;
   border-bottom: 1px solid var(--line-strong);
   background: var(--surface-card);
@@ -318,10 +318,13 @@ textarea {
 .app-nav {
   display: flex;
   align-items: stretch;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .app-nav a {
-  min-width: 160px;
+  min-width: 0;
+  flex: 1 1 0;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
@@ -331,6 +334,7 @@ textarea {
   color: var(--fg-2);
   text-decoration: none;
   font: 600 14px/20px var(--font-ui);
+  white-space: nowrap;
 }
 
 .app-nav a.active {
@@ -418,6 +422,11 @@ textarea {
 .catalog-page {
   display: grid;
   gap: 16px;
+}
+
+.catalog-toolbar {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .catalog-coordinate {

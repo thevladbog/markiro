@@ -260,6 +260,8 @@ export function installCatalogApi({
   defaultDemoId = null,
   saveStatuses = [],
   defaultStatuses = [],
+  createResponses = [],
+  archiveStatuses = [],
   catalogStatus = 200,
 }: {
   me?: PlatformPrincipal;
@@ -267,6 +269,8 @@ export function installCatalogApi({
   defaultDemoId?: string | null;
   saveStatuses?: number[];
   defaultStatuses?: number[];
+  createResponses?: number[];
+  archiveStatuses?: number[];
   catalogStatus?: number;
 } = {}) {
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
@@ -298,6 +302,34 @@ export function installCatalogApi({
         const body = JSON.parse(String(init.body)) as { catalogVersionId: string };
         demoId = body.catalogVersionId;
         return jsonResponse(200, { catalogVersionId: demoId });
+      }
+      const createMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/versions$/);
+      if (createMatch && init.method === "POST") {
+        const status = createResponses.shift() ?? 201;
+        if (status !== 201) return jsonResponse(status, { code: "catalog_item_conflict" });
+        const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        const created = {
+          ...structuredClone(DRAFT_PLAN),
+          ...body,
+          id: "71111111-1111-4111-8111-111111111111",
+          catalogItemId: "81111111-1111-4111-8111-111111111111",
+          catalogItemCode: createMatch[1],
+          kind: body.plan ? "plan" : body.addon ? "addon" : "service",
+          version: 1,
+          status: "draft",
+          publishedAt: null,
+          publishedByPlatformUserId: null,
+        } as CatalogVersionDto;
+        catalog = [...catalog, created];
+        return jsonResponse(201, created);
+      }
+      const archiveMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/archive$/);
+      if (archiveMatch && init.method === "POST") {
+        const status = archiveStatuses.shift() ?? 200;
+        if (status !== 200)
+          return jsonResponse(status, { code: "catalog_item_versions_not_retired" });
+        catalog = catalog.filter((item) => item.catalogItemCode !== archiveMatch[1]);
+        return jsonResponse(200, { status: "archived" });
       }
       const match = url.match(
         /\/api\/platform\/catalog\/items\/([^/]+)\/versions\/([^/]+)(\/publish)?$/,

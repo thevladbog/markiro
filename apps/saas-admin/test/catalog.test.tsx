@@ -7,6 +7,8 @@ import {
   DRAFT_PLAN,
   ADDON,
   PUBLISHED_PLAN,
+  PLATFORM_ADMIN_ME,
+  SERVICE,
   SUPPORT_ME,
   installCatalogApi,
   renderSaasApp,
@@ -26,6 +28,32 @@ describe("commercial catalog", () => {
     expect(await screen.findByRole("tab", { name: "Тарифы" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Дополнения" })).toBeDefined();
     expect(screen.getByRole("tab", { name: "Услуги" })).toBeDefined();
+  });
+
+  it("opens a create form and creates a new catalog item", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "plan-pro");
+    await user.type(screen.getByLabelText("Название на русском"), "Профи");
+    await user.type(screen.getByLabelText("Название на английском"), "Pro");
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+    expect(await screen.findByRole("region", { name: "Версия 1 · Профи" })).toBeDefined();
+    expect(api.items()).toHaveLength(1);
+  });
+
+  it("archives a retired catalog position from its open row", async () => {
+    const retired = { ...structuredClone(SERVICE), status: "retired" as const };
+    installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [retired] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("tab", { name: "Услуги" }));
+    await user.click(await screen.findByRole("button", { name: "Открыть Внедрение, версия 1" }));
+    await user.click(screen.getByRole("button", { name: "Архивировать позицию" }));
+    const dialog = screen.getByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Архивировать позицию" }));
+    expect(await screen.findByText("Версий этого типа пока нет")).toBeDefined();
   });
 
   it("shows support names and effects without a price label or placeholder", async () => {
