@@ -595,6 +595,7 @@ describe("tenant owner provisioning CLI arguments", () => {
   it.skipIf(process.env.LOCAL_INFRA_SMOKE !== "1")(
     "prints only identifiers on stdout through the real documented command",
     async () => {
+      await useDemo();
       const suffix = crypto.randomUUID();
       const result = spawnSync(
         "pnpm",
