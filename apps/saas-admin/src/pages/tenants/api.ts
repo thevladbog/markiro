@@ -6,7 +6,10 @@ const POSTGRES_INTEGER_MAX = 2_147_483_647;
 const isoDateSchema = z.preprocess(
   (value) => {
     if (typeof value !== "string") return value;
-    const normalized = value.trim().replace(" ", "T");
+    const normalized = value
+      .trim()
+      .replace(" ", "T")
+      .replace(/([+-]\d{2})$/, "$1:00");
     return /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
   },
   z.iso.datetime({ offset: true }),
