@@ -52,6 +52,11 @@ function assertDirectGraph({ production, network, compute }) {
   assert.match(compute, /resource\s+"yandex_vpc_address"\s+"app"/);
   assert.match(compute, /deletion_protection\s*=\s*true/);
   assert.match(compute, /resource\s+"yandex_compute_instance"\s+"app"/);
+  const instance = block(compute, 'resource "yandex_compute_instance" "app"');
+  assert.match(
+    instance,
+    /lifecycle\s*\{[\s\S]*ignore_changes\s*=\s*\[[\s\S]*boot_disk\[0\]\.initialize_params\[0\]\.image_id[\s\S]*\]/,
+  );
   assert.match(compute, /nat_ip_address\s*=\s*yandex_vpc_address\.app/);
   assert.doesNotMatch(compute, /replace_triggered_by/);
 
