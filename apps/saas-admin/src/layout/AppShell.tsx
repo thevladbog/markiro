@@ -54,6 +54,18 @@ function AppShellContent() {
             </span>
             {t("shell.offers")}
           </NavLink>
+          <NavLink to="/team" className={({ isActive }) => (isActive ? "active" : undefined)}>
+            <span className="nav-index" aria-hidden="true">
+              04
+            </span>
+            {t("shell.team")}
+          </NavLink>
+          <NavLink to="/audit" className={({ isActive }) => (isActive ? "active" : undefined)}>
+            <span className="nav-index" aria-hidden="true">
+              05
+            </span>
+            {t("shell.audit")}
+          </NavLink>
         </nav>
         <div className="app-tools">
           <span className="role-tag">{t(`roles.${principal.role}`)}</span>

@@ -37,6 +37,12 @@ const TenantPage = lazy(() =>
 const OffersPage = lazy(() =>
   import("./pages/offers/OffersPage.js").then((module) => ({ default: module.OffersPage })),
 );
+const TeamPage = lazy(() =>
+  import("./pages/team/TeamPage.js").then((module) => ({ default: module.TeamPage })),
+);
+const AuditPage = lazy(() =>
+  import("./pages/audit/AuditPage.js").then((module) => ({ default: module.AuditPage })),
+);
 
 function RouteLoading() {
   const { t } = useTranslation();
@@ -66,6 +72,8 @@ export const appRoutes = createRoutesFromElements(
       <Route element={<AppShell />}>
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/offers" element={<OffersPage />} />
+        <Route path="/team" element={<TeamPage />} />
+        <Route path="/audit" element={<AuditPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         <Route path="/tenants/new" element={<CreateTenantPanel />} />
         <Route path="/tenants/:tenantId" element={<TenantPage />} />

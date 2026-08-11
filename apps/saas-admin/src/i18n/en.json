@@ -102,10 +102,44 @@
     "tenants": "Tenants",
     "catalog": "Catalog",
     "offers": "Offers",
+    "team": "Team",
+    "audit": "Audit",
     "language": "Interface language",
     "statusLabel": "Platform status",
     "sessionConfirmed": "Session · confirmed",
     "secureSession": "2FA · SESSION SECURED"
+  },
+  "team": {
+    "title": "Platform team",
+    "loading": "Loading team",
+    "loadError": "Could not load team",
+    "inviteTitle": "Invite a colleague",
+    "email": "Email",
+    "role": "Role",
+    "roleFor": "Role for {{email}}",
+    "status": "Status",
+    "actions": "Actions",
+    "invite": "Send invitation",
+    "suspend": "Suspend",
+    "renew": "Renew activation",
+    "recover2fa": "Reset 2FA",
+    "empty": "No team members yet",
+    "statuses": {
+      "active": "Active",
+      "suspended": "Suspended",
+      "pending_activation": "Pending activation"
+    }
+  },
+  "audit": {
+    "title": "Platform audit",
+    "loading": "Loading audit",
+    "loadError": "Could not load audit",
+    "time": "Time",
+    "action": "Action",
+    "tenant": "Tenant",
+    "outcome": "Outcome",
+    "empty": "No audit records yet",
+    "outcomes": { "success": "Success", "failed": "Failed", "denied": "Denied" }
   },
   "catalog": {
     "title": "Catalog",
