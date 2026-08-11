@@ -70,7 +70,13 @@ export class BillingDocumentsService {
 }
 
 function escapeHtml(value: unknown): string {
-  return String(value ?? "")
+  const text =
+    value === null || value === undefined
+      ? ""
+      : typeof value === "string" || typeof value === "number" || typeof value === "boolean"
+        ? String(value)
+        : "";
+  return text
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
