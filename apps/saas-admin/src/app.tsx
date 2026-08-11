@@ -34,6 +34,9 @@ const CreateTenantPanel = lazy(() =>
 const TenantPage = lazy(() =>
   import("./pages/tenants/TenantPage.js").then((module) => ({ default: module.TenantPage })),
 );
+const OffersPage = lazy(() =>
+  import("./pages/offers/OffersPage.js").then((module) => ({ default: module.OffersPage })),
+);
 
 function RouteLoading() {
   const { t } = useTranslation();
@@ -62,6 +65,7 @@ export const appRoutes = createRoutesFromElements(
     <Route element={<PlatformAuthBoundary />}>
       <Route element={<AppShell />}>
         <Route path="/catalog" element={<CatalogPage />} />
+        <Route path="/offers" element={<OffersPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         <Route path="/tenants/new" element={<CreateTenantPanel />} />
         <Route path="/tenants/:tenantId" element={<TenantPage />} />
