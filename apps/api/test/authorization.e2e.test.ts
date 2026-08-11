@@ -100,9 +100,28 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
   it("gives an owner every cabinet capability", async () => {
     const { agent } = await activeOrganizationFixture();
 
-    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+    expect((await agent.get("/access/me").expect(200)).body).toMatchObject({
       roles: ["owner"],
       capabilities: OWNER_CAPABILITIES,
+    });
+  });
+
+  it("includes request-time subscription state, usage, quotas, features, and scheduled successor", async () => {
+    const { agent } = await activeOrganizationFixture();
+
+    const access = (await agent.get("/access/me").expect(200)).body;
+
+    expect(access).toMatchObject({
+      subscription: { access: "unmanaged", status: "unmanaged", plan: null },
+      usage: {
+        lines: expect.any(Number),
+        stations: expect.any(Number),
+        kiosks: expect.any(Number),
+        cabinetUsers: expect.any(Number),
+      },
+      quotas: expect.objectContaining({ lines: null }),
+      features: expect.objectContaining({ labelEditor: expect.any(Boolean) }),
+      scheduled: null,
     });
   });
 
@@ -110,7 +129,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "manager");
 
-    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+    expect((await agent.get("/access/me").expect(200)).body).toMatchObject({
       roles: ["manager"],
       capabilities: ["operations.read", "operations.write"],
     });
@@ -126,7 +145,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "admin");
 
-    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+    expect((await agent.get("/access/me").expect(200)).body).toMatchObject({
       roles: ["admin"],
       capabilities: ADMIN_CAPABILITIES,
     });
@@ -141,7 +160,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "member");
 
-    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+    expect((await agent.get("/access/me").expect(200)).body).toMatchObject({
       roles: ["member"],
       capabilities: [],
     });
@@ -152,7 +171,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "not-a-cabinet-role");
 
-    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+    expect((await agent.get("/access/me").expect(200)).body).toMatchObject({
       roles: [],
       capabilities: [],
     });
@@ -163,7 +182,7 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     const { agent, organizationId } = await activeOrganizationFixture();
     await setOnlyOrganizationMemberRole(db, organizationId, "admin,member");
 
-    expect((await agent.get("/access/me").expect(200)).body).toEqual({
+    expect((await agent.get("/access/me").expect(200)).body).toMatchObject({
       roles: ["admin", "member"],
       capabilities: ADMIN_CAPABILITIES,
     });
