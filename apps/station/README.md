@@ -613,6 +613,15 @@ what a station's device api-key may reach on the server.
 
 ## Tests
 
+### Manual beta updates
+
+The station update center is manual-only. It highlights releases older than 14
+days (urgent after 30 days), never downloads or installs in the background, and
+blocks installation during an active shift. Review
+[`docs/runbooks/station-beta-release.md`](../../docs/runbooks/station-beta-release.md)
+before installing a Windows artifact. Pending outbox data remains local across
+an update and restart.
+
 ```bash
 pnpm --filter @markiro/station test    # vitest (jsdom); uses node:sqlite
 cargo test --manifest-path apps/station/src-tauri/Cargo.toml
