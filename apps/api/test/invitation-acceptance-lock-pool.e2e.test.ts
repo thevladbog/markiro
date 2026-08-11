@@ -326,10 +326,18 @@ describe.skipIf(!ready)("invitation acceptance advisory-lock pool", () => {
       probe.release();
       await app.close();
       try {
-        const appSessions = await probeConnection.pool.query<{ count: number }>(
+        let appSessions = await probeConnection.pool.query<{ count: number }>(
           "select count(*)::int as count from pg_stat_activity where application_name = $1",
           [applicationName],
         );
+        const sessionDeadline = Date.now() + 2_000;
+        while ((appSessions.rows[0]?.count ?? 0) !== 0 && Date.now() < sessionDeadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+          appSessions = await probeConnection.pool.query<{ count: number }>(
+            "select count(*)::int as count from pg_stat_activity where application_name = $1",
+            [applicationName],
+          );
+        }
         expect(appSessions.rows).toEqual([{ count: 0 }]);
       } finally {
         await probeConnection.pool.end();
