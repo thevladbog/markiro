@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { schema } from "@markiro/db";
+import * as schema from "../src/schema.js";
 
 describe("tenant billing schema", () => {
   it("exports billing profiles, invoices, documents, imports, matches, and application events", () => {
