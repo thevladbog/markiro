@@ -260,7 +260,8 @@ describe("tenant subscription detail", () => {
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText(/^Окончание: 1 янв\. 2027 г\.,/)).toBeDefined();
     await user.click(within(dialog).getByRole("button", { name: "Назначить точную версию" }));
-    const submittedEndsAt = api.mutationCalls()[0]?.body.endsAt;
+    const submittedEndsAt = (api.mutationCalls()[0]?.body as { endsAt?: unknown } | undefined)
+      ?.endsAt;
     expect(typeof submittedEndsAt).toBe("string");
     const normalizedEndsAt = new Date(submittedEndsAt as string);
     expect(normalizedEndsAt.toISOString().slice(0, 10)).toBe("2027-01-01");
