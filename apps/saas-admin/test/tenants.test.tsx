@@ -58,6 +58,17 @@ describe("platform tenants", () => {
     expect(screen.queryByText("Не удалось загрузить тенантов")).toBeNull();
   });
 
+  it("accepts Postgres timestamp values without an explicit offset", async () => {
+    installTenantApi({
+      me: SUPPORT_ME,
+      items: [{ ...TENANT_LIST_ITEM, createdAt: "2026-08-11 14:42:47.129" }],
+    });
+    renderSaasApp({ initialEntry: "/tenants" });
+
+    expect(await screen.findByText("Первый завод")).toBeDefined();
+    expect(screen.queryByText("Не удалось загрузить тенантов")).toBeNull();
+  });
+
   it("truthfully searches only the bounded page and exposes all lifecycle filters", async () => {
     const second = {
       ...structuredClone(TENANT_LIST_ITEM),

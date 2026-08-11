@@ -3,7 +3,14 @@ import { z } from "zod";
 import { platformApiFetch } from "../../api/client.js";
 
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
-const isoDateSchema = z.iso.datetime({ offset: true });
+const isoDateSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    const normalized = value.trim().replace(" ", "T");
+    return /(?:Z|[+-]\d{2}:\d{2})$/.test(normalized) ? normalized : `${normalized}Z`;
+  },
+  z.iso.datetime({ offset: true }),
+);
 const nullableIsoDateSchema = isoDateSchema.nullable();
 const subscriptionStatusSchema = z.enum([
   "pending_activation",
