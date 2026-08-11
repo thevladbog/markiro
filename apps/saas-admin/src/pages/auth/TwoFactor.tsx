@@ -1,9 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
+import QRCode from "qrcode";
 
 import { Alert, Button, Input } from "@markiro/ui";
 
@@ -15,6 +16,34 @@ const codeSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
 const passwordSchema = z.object({ password: z.string().min(8) });
 
 type EnrollmentSecrets = { totpURI: string; backupCodes: string[] };
+
+function EnrollmentQrCode({ value, label }: { value: string; label: string }) {
+  const [svg, setSvg] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void QRCode.toString(value, { type: "svg", margin: 2, errorCorrectionLevel: "M" })
+      .then((result) => {
+        if (!cancelled) setSvg(result);
+      })
+      .catch(() => {
+        if (!cancelled) setSvg(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [value]);
+
+  if (!svg) return null;
+  return (
+    <div
+      className="enrollment-qr"
+      role="img"
+      aria-label={label}
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
 
 export function TwoFactor() {
   const { t } = useTranslation();
@@ -104,6 +133,7 @@ export function TwoFactor() {
       {enrollment ? (
         <section className="enrollment-secrets" aria-label={t("auth.twoFactor.secretSurface")}>
           <p>{t("auth.twoFactor.secretWarning")}</p>
+          <EnrollmentQrCode value={enrollment.totpURI} label={t("auth.twoFactor.qrAlt")} />
           <code className="enrollment-uri">{enrollment.totpURI}</code>
           <h2>{t("auth.twoFactor.backupTitle")}</h2>
           <ul className="backup-codes">

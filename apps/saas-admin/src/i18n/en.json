@@ -41,6 +41,7 @@
       "enrollBody": "Operational sections remain locked until the new key is verified.",
       "createKey": "Create 2FA key",
       "secretSurface": "2FA enrollment data",
+      "qrAlt": "QR code for two-factor authentication setup",
       "secretWarning": "Add the key to your app and save the backup codes. They disappear after you leave this screen.",
       "backupTitle": "Backup codes",
       "code": "Authenticator code",

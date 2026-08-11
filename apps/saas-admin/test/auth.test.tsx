@@ -83,6 +83,19 @@ describe("platform authentication", () => {
     expect(window.sessionStorage.getItem("markiro.platform.2fa-challenge")).toBe("pending");
   });
 
+  it("shows a scannable QR code after starting 2FA enrollment", async () => {
+    const state = authState({ session: readySession(false) });
+    renderSaasApp({ initialEntry: "/two-factor?mode=enroll", state });
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Пароль"), "password-value");
+    await user.click(screen.getByRole("button", { name: "Создать ключ 2FA" }));
+
+    expect(
+      await screen.findByRole("img", { name: "QR-код для настройки двухфакторной аутентификации" }),
+    ).toBeDefined();
+  });
+
   it("restores a pending Better Auth challenge after refresh and protected-route navigation", async () => {
     window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");
     const firstRender = renderSaasApp({ initialEntry: "/catalog", state: authState() });
