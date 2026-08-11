@@ -223,6 +223,18 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformOffersController.create": platform(
+    "platform billing offer creation is guarded by platform capabilities",
+  ),
+  "PlatformOffersController.publish": platform(
+    "platform billing offer publication is guarded by platform capabilities",
+  ),
+  "PlatformOffersController.cancel": platform(
+    "platform billing offer cancellation is guarded by platform capabilities",
+  ),
+  "PlatformOffersController.pay": platform(
+    "platform payment fulfilment is guarded by platform capabilities",
+  ),
   "ProfileController.deleteAvatar": profile,
   "ProfileController.updateProfile": profile,
   "ProfileController.uploadAvatar": profile,
