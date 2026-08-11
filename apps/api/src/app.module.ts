@@ -41,6 +41,9 @@ import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
 import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
 import { PlatformTenantsModule } from "./modules/platform-tenants/platform-tenants.module";
 import { PlatformOffersModule } from "./modules/platform-offers/platform-offers.module";
+import { BillingProfilesModule } from "./modules/billing-profiles/billing-profiles.module";
+import { BillingModule } from "./modules/billing/billing.module";
+import { BillingPaymentsModule } from "./modules/billing-payments/billing-payments.module";
 import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 
@@ -75,6 +78,9 @@ export class AppModule {
               PlatformCatalogModule,
               PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
               PlatformOffersModule,
+              BillingProfilesModule,
+              BillingModule,
+              BillingPaymentsModule,
             ]
           : []),
         AuthorizationModule,
