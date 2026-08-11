@@ -25,8 +25,9 @@ export interface PairStationResultDto {
   };
   credential: { apiKey: string; serverUrl: string };
   operators: OperatorMirrorRecord[];
-  subscription: SubscriptionAccessSnapshot;
+  subscription?: SubscriptionAccessSnapshot;
 }
 
 /** Authenticated legacy-config bootstrap; deliberately contains no credential material. */
-export type StationIdentityResultDto = Pick<PairStationResultDto, "device" | "subscription">;
+export type StationIdentityResultDto = Pick<PairStationResultDto, "device"> &
+  Partial<Pick<PairStationResultDto, "subscription">>;

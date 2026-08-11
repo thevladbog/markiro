@@ -17,6 +17,7 @@ import {
   inArray,
   isNull,
   lte,
+  max,
   ne,
   notExists,
   sql,
@@ -32,17 +33,24 @@ import type { PickupSlipData } from "../../pickup/slip";
 import { OperatorsService } from "../operators/operators.service";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
-import type {
-  CreateOrderDto,
-  CreateOrderResultDto,
-  KioskBootstrapDto,
-  ListPickupOrdersQueryDto,
-  ListPickupOrdersResponseDto,
-  OrderConflict,
-  PickupOrderDetailDto,
-  PickupOrderRowDto,
-  PickupOrderStatus,
-  ResolvePickupOrderDto,
+import { loadEnv } from "../../env";
+import {
+  issueKioskAdmissionProof,
+  legacyProoflessOccurrenceAllowed,
+  verifyKioskAdmissionProof,
+} from "./kiosk-admission-proof";
+import {
+  MAX_KIOSK_DEVICE_SEQ,
+  type CreateOrderDto,
+  type CreateOrderResultDto,
+  type KioskBootstrapDto,
+  type ListPickupOrdersQueryDto,
+  type ListPickupOrdersResponseDto,
+  type OrderConflict,
+  type PickupOrderDetailDto,
+  type PickupOrderRowDto,
+  type PickupOrderStatus,
+  type ResolvePickupOrderDto,
 } from "./dto";
 
 /** An item that survived KM validation, allowlist resolution and in-request dedup. */
@@ -173,16 +181,58 @@ export class PickupOrdersService {
     // here rather than left at step 5 purely so the early-throw paths can
     // share it.
     const serverNow = new Date();
-    const when = this.resolveScanTime(dto.createdAt, kioskId, serverNow);
     const access = await this.entitlements.resolveRecovery(tenantId, this.db, serverNow);
+    let when: Date;
     if (access.access === "read_only") {
       const endsAt = access.subscription?.endsAt;
       const claimedAt = dto.createdAt ? new Date(dto.createdAt) : null;
-      const occurrenceIsAuthoritativeEnough =
-        claimedAt !== null && claimedAt.getTime() === when.getTime();
-      if (!endsAt || !occurrenceIsAuthoritativeEnough || when >= endsAt) {
-        throw new SubscriptionReadOnlyException();
+      const proofResult =
+        endsAt && access.subscription && claimedAt && dto.admissionProof
+          ? verifyKioskAdmissionProof({
+              secrets: kioskAdmissionProofSecrets(loadEnv()),
+              proof: dto.admissionProof,
+              tenantId,
+              kioskId,
+              subscriptionId: access.subscription.id,
+              deviceSeq: dto.deviceSeq,
+              claimedAt,
+              now: serverNow,
+              expectedEndsAt: endsAt,
+            })
+          : { ok: false as const };
+      if (proofResult.ok) {
+        when = proofResult.occurredAt;
+      } else {
+        const legacyUntil = loadEnv().KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL;
+        const startsAt = access.subscription?.startsAt;
+        if (
+          dto.admissionProof !== undefined ||
+          claimedAt === null ||
+          !startsAt ||
+          !endsAt ||
+          !legacyProoflessOccurrenceAllowed({
+            now: serverNow,
+            configuredSunset: legacyUntil,
+            claimedAt,
+            startsAt,
+            endsAt,
+          })
+        ) {
+          throw new SubscriptionReadOnlyException();
+        }
+        when = claimedAt;
+        this.logger.warn(
+          JSON.stringify({
+            action: "kiosk.legacy_proofless_recovery",
+            tenantId,
+            kioskId,
+            deviceSeq: dto.deviceSeq,
+            outcome: "accepted",
+          }),
+        );
       }
+    } else {
+      when = this.resolveScanTime(dto.createdAt, kioskId, serverNow);
     }
 
     // 2. Badge -> active employee (badge's revoked_at is null, employee active).
@@ -357,12 +407,28 @@ export class PickupOrdersService {
   }
 
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
-  async bootstrap(tenantId: string, kioskId: string): Promise<KioskBootstrapDto> {
+  async bootstrap(
+    tenantId: string,
+    kioskId: string,
+    requestedNextDeviceSeq?: number,
+  ): Promise<KioskBootstrapDto> {
     // ONE reading of the clock for the whole payload, so `generatedAt` and the
     // UTC day the per-employee counts below are taken over can never straddle
     // a midnight between two `new Date()` calls.
     const generatedAt = new Date();
     const subscription = await this.entitlements.accessSnapshot(tenantId, this.db, generatedAt);
+    const resolvedSubscription = await this.entitlements.resolveRecovery(
+      tenantId,
+      this.db,
+      generatedAt,
+    );
+    const admissionProofs = await this.kioskAdmissionProofs(
+      tenantId,
+      kioskId,
+      resolvedSubscription,
+      generatedAt,
+      requestedNextDeviceSeq,
+    );
 
     const [kiosk] = await this.db
       .select({
@@ -427,6 +493,7 @@ export class PickupOrdersService {
     return {
       generatedAt: generatedAt.toISOString(),
       subscription,
+      ...(admissionProofs.length > 0 ? { admissionProofs } : {}),
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -458,6 +525,56 @@ export class PickupOrdersService {
         active: o.active,
       })),
     };
+  }
+
+  private async kioskAdmissionProofs(
+    tenantId: string,
+    kioskId: string,
+    access: Awaited<ReturnType<EntitlementsService["resolveRecovery"]>>,
+    issuedAt: Date,
+    requestedNextDeviceSeq?: number,
+  ): Promise<{ deviceSeq: number; proof: string }[]> {
+    if (access.access !== "managed") return [];
+    const activeSubscription = access.subscription;
+    if (!activeSubscription?.endsAt) return [];
+    const notAfter = activeSubscription.endsAt;
+    const [[orderMax], [rejectionMax]] = await Promise.all([
+      this.db
+        .select({ value: max(schema.pickupOrders.deviceSeq) })
+        .from(schema.pickupOrders)
+        .where(
+          and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId)),
+        ),
+      this.db
+        .select({ value: max(schema.pickupScanRejections.deviceSeq) })
+        .from(schema.pickupScanRejections)
+        .where(
+          and(
+            eq(schema.pickupScanRejections.tenantId, tenantId),
+            eq(schema.pickupScanRejections.kioskId, kioskId),
+          ),
+        ),
+    ]);
+    const serverNext = Math.max(orderMax?.value ?? -1, rejectionMax?.value ?? -1) + 1;
+    const first = Math.max(serverNext, requestedNextDeviceSeq ?? 0);
+    if (first > MAX_KIOSK_DEVICE_SEQ) return [];
+    const count = Math.min(128, MAX_KIOSK_DEVICE_SEQ - first + 1);
+    const secret = loadEnv().KIOSK_ADMISSION_PROOF_SECRET;
+    return Array.from({ length: count }, (_unused, offset) => {
+      const deviceSeq = first + offset;
+      return {
+        deviceSeq,
+        proof: issueKioskAdmissionProof({
+          secret,
+          tenantId,
+          kioskId,
+          subscriptionId: activeSubscription.id,
+          deviceSeq,
+          issuedAt,
+          notAfter,
+        }),
+      };
+    });
   }
 
   /** Admin list, joined with employee/kiosk/writeoff-reason names, newest first. */
@@ -1758,4 +1875,13 @@ export class PickupOrdersService {
     const constraint = err?.constraint || cause?.constraint;
     return code === "23505" && constraint === "pickup_orders_kiosk_device_seq_uq";
   }
+}
+
+function kioskAdmissionProofSecrets(env: ReturnType<typeof loadEnv>): readonly string[] {
+  return [
+    env.KIOSK_ADMISSION_PROOF_SECRET,
+    ...(env.KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET
+      ? [env.KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET]
+      : []),
+  ];
 }

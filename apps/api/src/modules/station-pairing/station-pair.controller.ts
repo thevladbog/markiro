@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Ip, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Header, Headers, Ip, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
@@ -35,7 +35,7 @@ export class StationPairController {
     schema: {
       type: "object",
       additionalProperties: false,
-      required: ["device", "subscription"],
+      required: ["device"],
       properties: {
         device: {
           type: "object",
@@ -55,12 +55,22 @@ export class StationPairController {
             },
           },
         },
-        subscription: subscriptionAccessSchema,
+        subscription: {
+          ...subscriptionAccessSchema,
+          description: "Present only when the client sends subscription-state-v1.",
+        },
       },
     },
   })
-  identity(@Req() req: RequestWithTenant): Promise<StationIdentityResultDto> {
-    return this.pairing.identity(req.tenantId!, req.deviceId!);
+  identity(
+    @Req() req: RequestWithTenant,
+    @Headers("x-station-capabilities") capabilities: string | undefined,
+  ): Promise<StationIdentityResultDto> {
+    return this.pairing.identity(
+      req.tenantId!,
+      req.deviceId!,
+      hasCapability(capabilities, "subscription-state-v1"),
+    );
   }
 
   @Post("pair")
@@ -69,7 +79,12 @@ export class StationPairController {
   async pair(
     @Body(new ZodValidationPipe(pairStationSchema)) body: PairStationDto,
     @Ip() ip: string,
+    @Headers("x-station-capabilities") capabilities: string | undefined,
   ): Promise<PairStationResultDto> {
-    return this.pairing.redeem(body.code, ip);
+    return this.pairing.redeem(body.code, ip, hasCapability(capabilities, "subscription-state-v1"));
   }
+}
+
+function hasCapability(value: string | undefined, capability: string): boolean {
+  return value?.split(",").some((candidate) => candidate.trim() === capability) ?? false;
 }

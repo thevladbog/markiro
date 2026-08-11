@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -6,6 +6,7 @@ import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-acce
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   createOrderSchema,
+  MAX_KIOSK_DEVICE_SEQ,
   type CreateOrderDto,
   type CreateOrderResultDto,
   type KioskBootstrapDto,
@@ -20,8 +21,16 @@ export class KioskController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 
   @Get("bootstrap")
-  async bootstrap(@Req() req: RequestWithKiosk): Promise<KioskBootstrapDto> {
-    return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!);
+  async bootstrap(
+    @Req() req: RequestWithKiosk,
+    @Headers("x-kiosk-next-device-seq") nextDeviceSeq: string | undefined,
+  ): Promise<KioskBootstrapDto> {
+    const parsed = nextDeviceSeq === undefined ? undefined : Number(nextDeviceSeq);
+    const requested =
+      Number.isSafeInteger(parsed) && parsed! >= 0 && parsed! <= MAX_KIOSK_DEVICE_SEQ
+        ? parsed
+        : undefined;
+    return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!, requested);
   }
 
   @Post("orders")

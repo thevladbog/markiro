@@ -23,7 +23,21 @@ const BASE = {
   SAAS_ADMIN_ORIGIN: "https://saas.example.ru",
   ADMIN_ORIGIN: "https://admin.example.ru",
   PAIRING_CODE_PEPPER: "0123456789abcdef0123",
+  KIOSK_ADMISSION_PROOF_SECRET: "0123456789abcdef0123456789abcdef",
 } satisfies NodeJS.ProcessEnv;
+
+describe("loadEnv kiosk admission proof rollout", () => {
+  it("treats blank optional rotation and legacy-sunset inventory entries as unset", () => {
+    const env = loadEnv({
+      ...BASE,
+      KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET: "",
+      KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL: "",
+    });
+
+    expect(env.KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET).toBeUndefined();
+    expect(env.KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL).toBeUndefined();
+  });
+});
 
 describe("platformAllowedOrigins", () => {
   it("grants only the exact SaaS admin origin and never the customer admin origin", () => {

@@ -51,6 +51,14 @@ function refusingClient(err: unknown) {
   };
 }
 
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as Response;
+}
+
 describe("cacheAge", () => {
   const base = "2026-07-28T00:00:00.000Z";
   // Instants are derived from the exported thresholds rather than hand-written
@@ -747,6 +755,48 @@ describe("flushQueue", () => {
         status: 403,
         message: "Subscription is read-only",
       },
+    ]);
+  });
+
+  it("uses the real API error body to quarantine an expired head and submit the next record", async () => {
+    for (const deviceSeq of [1, 2]) {
+      await enqueueOrder(
+        {
+          deviceSeq,
+          badgeDigest: "B",
+          reason: "buy",
+          items: [],
+          createdAt: `2026-08-0${deviceSeq + 8}T12:00:00.000Z`,
+        },
+        "e1",
+      );
+    }
+    const submitted: number[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (_input, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}") as { deviceSeq?: number };
+        submitted.push(body.deviceSeq ?? -1);
+        return body.deviceSeq === 1
+          ? jsonResponse(403, { code: "subscription_read_only" })
+          : jsonResponse(201, {
+              orderNo: "ORD-26-0002",
+              status: "pending",
+              itemCount: 0,
+              conflicts: [],
+            });
+      }),
+    );
+
+    await flushQueue(
+      createKioskClient({ token: "tok", serverUrl: "http://srv" }),
+      () => new Date("2026-08-10T12:01:00.000Z"),
+    );
+
+    expect(submitted).toEqual([1, 2]);
+    expect(await listQueue()).toEqual([]);
+    expect(await listQuarantine()).toMatchObject([
+      { deviceSeq: 1, status: 403, message: "HTTP 403" },
     ]);
   });
 

@@ -60,7 +60,11 @@ export class StationPairingService {
   ) {}
 
   /** Resolves metadata only from the tenant/device principal proven by TenantGuard. */
-  async identity(tenantId: string, deviceId: string): Promise<StationIdentityResultDto> {
+  async identity(
+    tenantId: string,
+    deviceId: string,
+    includeSubscription = false,
+  ): Promise<StationIdentityResultDto> {
     const serverNow = new Date();
     const [station] = await this.db
       .select({
@@ -99,7 +103,9 @@ export class StationPairingService {
             ? { id: station.lineId, name: station.lineName }
             : null,
       },
-      subscription: await this.entitlements.accessSnapshot(tenantId, this.db, serverNow),
+      ...(includeSubscription
+        ? { subscription: await this.entitlements.accessSnapshot(tenantId, this.db, serverNow) }
+        : {}),
     };
   }
 
@@ -167,7 +173,11 @@ export class StationPairingService {
     throw new Error("Could not mint a unique station pairing code");
   }
 
-  async redeem(code: string, source: string): Promise<PairStationResultDto> {
+  async redeem(
+    code: string,
+    source: string,
+    includeSubscription = false,
+  ): Promise<PairStationResultDto> {
     const now = new Date();
     const windowStart = pairAttemptWindowStart(now);
     const auditContext: StationPairAuditContext = {
@@ -185,7 +195,7 @@ export class StationPairingService {
         }
         throw error;
       }
-      result = await this.attemptRedeem(code, now, auditContext);
+      result = await this.attemptRedeem(code, now, auditContext, includeSubscription);
     } catch (error) {
       this.auditPairing(auditContext, "failed");
       throw error;
@@ -201,6 +211,7 @@ export class StationPairingService {
     code: string,
     now: Date,
     auditContext: StationPairAuditContext,
+    includeSubscription: boolean,
   ): Promise<PairStationResultDto> {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
@@ -399,7 +410,9 @@ export class StationPairingService {
       },
       credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
       operators,
-      subscription: await this.entitlements.accessSnapshot(candidate.tenantId),
+      ...(includeSubscription
+        ? { subscription: await this.entitlements.accessSnapshot(candidate.tenantId) }
+        : {}),
     };
   }
 

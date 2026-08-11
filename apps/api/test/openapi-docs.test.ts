@@ -143,12 +143,12 @@ describe("self-hosted OpenAPI documentation", () => {
         },
         content: {
           "application/json": {
-            schema: { type: "object", required: ["device", "subscription"] },
+            schema: { type: "object", required: ["device"] },
           },
         },
       });
       const schema = responseSchema(response);
-      expectExactObjectFields(schema, ["device", "subscription"]);
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual(["device", "subscription"]);
       expectExactObjectFields(schema.properties!.device!, [
         "id",
         "name",
@@ -274,7 +274,7 @@ describe("self-hosted OpenAPI documentation", () => {
       );
       const contracts = [
         ["/station-devices/{id}/pairing-code", "201", ["code", "expiresAt"]],
-        ["/station/pair", "201", ["device", "credential", "operators", "subscription"]],
+        ["/station/pair", "201", ["device", "credential", "operators"]],
         ["/kiosks/{id}/pairing-code", "201", ["code", "expiresAt"]],
         ["/kiosk/pair", "201", ["device", "token", "nextDeviceSeq", "bootstrap"]],
         ["/kiosks/{id}/enroll", "200", ["token"]],
@@ -308,7 +308,12 @@ describe("self-hosted OpenAPI documentation", () => {
       );
 
       const station = responseSchema(operationResponse(document, "/station/pair", "201"));
-      expectExactObjectFields(station, ["device", "credential", "operators", "subscription"]);
+      expect(Object.keys(station.properties ?? {}).sort()).toEqual([
+        "credential",
+        "device",
+        "operators",
+        "subscription",
+      ]);
       const stationDevice = property(station, "device");
       expectExactObjectFields(stationDevice, [
         "id",

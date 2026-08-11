@@ -215,7 +215,11 @@ export function KioskShell(): React.JSX.Element {
    */
   const clientFor = useCallback((cfg: KioskConfig | null): KioskClient | null => {
     if (!cfg?.token) return null;
-    const base = createKioskClient({ token: cfg.token, serverUrl: cfg.serverUrl });
+    const base = createKioskClient({
+      token: cfg.token,
+      serverUrl: cfg.serverUrl,
+      nextDeviceSeq: cfg.nextDeviceSeq,
+    });
     return {
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
@@ -714,6 +718,9 @@ export function KioskShell(): React.JSX.Element {
       const cfg = configRef.current;
       if (!cfg) return;
       const deviceSeq = cfg.nextDeviceSeq;
+      const admissionProof = snapshotRef.current?.bootstrap.admissionProofs?.find(
+        (candidate) => candidate.deviceSeq === deviceSeq,
+      )?.proof;
       const body: CreateOrderDto = {
         deviceSeq,
         badgeDigest: active.badgeDigest,
@@ -726,6 +733,7 @@ export function KioskShell(): React.JSX.Element {
         // the server dates the order by and therefore which UTC day its day
         // limit charges it to — a field the tablet's own date must not decide.
         createdAt: scannedAt().toISOString(),
+        ...(admissionProof ? { admissionProof } : {}),
       };
       try {
         // THE COUNTER FIRST, and this ordering is load-bearing.

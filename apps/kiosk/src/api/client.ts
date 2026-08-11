@@ -151,12 +151,13 @@ async function readError(res: Response): Promise<KioskErrorResponse> {
     const body: unknown = await res.json();
     if (body && typeof body === "object") {
       const response = body as { code?: unknown; message?: unknown };
-      if (typeof response.message === "string") {
-        return {
-          message: response.message,
-          code: typeof response.code === "string" ? response.code : null,
-        };
-      }
+      return {
+        message:
+          typeof response.message === "string"
+            ? response.message
+            : res.statusText || `HTTP ${res.status}`,
+        code: typeof response.code === "string" ? response.code : null,
+      };
     }
   } catch {
     // non-JSON body
@@ -263,7 +264,11 @@ export interface KioskClient {
   submitOrder(body: CreateOrderDto): Promise<CreateOrderResultDto>;
 }
 
-export function createKioskClient(cfg: { token: string; serverUrl: string }): KioskClient {
+export function createKioskClient(cfg: {
+  token: string;
+  serverUrl: string;
+  nextDeviceSeq?: number;
+}): KioskClient {
   const base = baseOf(cfg.serverUrl);
 
   async function request<T>(
@@ -276,7 +281,13 @@ export function createKioskClient(cfg: { token: string; serverUrl: string }): Ki
       `${base}${path}`,
       {
         method,
-        headers: { "Content-Type": "application/json", "x-kiosk-token": cfg.token },
+        headers: {
+          "Content-Type": "application/json",
+          "x-kiosk-token": cfg.token,
+          ...(cfg.nextDeviceSeq !== undefined
+            ? { "x-kiosk-next-device-seq": String(cfg.nextDeviceSeq) }
+            : {}),
+        },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       },
       timeoutMs,

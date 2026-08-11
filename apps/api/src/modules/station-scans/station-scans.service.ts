@@ -1,4 +1,5 @@
-import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
+import { createHash } from "node:crypto";
+import { BadRequestException, ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -12,9 +13,13 @@ import {
 import type { MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
-import type { BatchConflictDto, SyncBatchDto, SyncBatchResponseDto } from "./dto";
+import type {
+  BatchConflictDto,
+  DeniedStationRecordDto,
+  SyncBatchDto,
+  SyncBatchResponseDto,
+} from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
-import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 
 /**
  * Upper bound on how many distinct calendar months a single batch's
@@ -109,6 +114,20 @@ function assertScannedAtWithinWindow(items: SyncBatchDto["items"]): void {
   }
 }
 
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
+}
+
+function payloadDigest(body: SyncBatchDto): string {
+  return createHash("sha256").update(canonicalJson(body)).digest("hex");
+}
+
 @Injectable()
 export class StationScansService {
   private readonly logger = new Logger(StationScansService.name);
@@ -140,9 +159,7 @@ export class StationScansService {
         terminalId: authenticatedTerminalId,
       })),
     };
-    if (await this.assertRecoveryEligible(tenantId, body)) {
-      return { applied: 0, alreadyApplied: true, conflicts: [] };
-    }
+    const digest = payloadDigest(body);
     // Ensure the months this batch actually needs have partitions BEFORE
     // opening the transaction below. Only the scheduled job (JobsModule)
     // proactively maintains current+next month; a device offline across a
@@ -174,12 +191,11 @@ export class StationScansService {
         .select({ id: schema.shifts.id })
         .from(schema.shifts)
         .where(and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, shiftIds)));
-      if (ownedIds.length !== shiftIds.length) {
-        throw new BadRequestException("Unknown shift in batch");
-      }
+      const owned = new Set(ownedIds.map((row) => row.id));
+      const partitionItems = body.items.filter((item) => owned.has(item.shiftId));
 
       const monthStarts = new Set(
-        body.items.map((i) => {
+        partitionItems.map((i) => {
           const d = new Date(i.scannedAt);
           // Do NOT derive this via Date.UTC(d.getUTCFullYear(), ...): Date.UTC
           // applies JS's legacy two-digit-year mapping, silently remapping a
@@ -218,13 +234,143 @@ export class StationScansService {
     return this.db.transaction(async (tx) => {
       const claimed = await tx
         .insert(schema.syncBatches)
-        .values({ tenantId, batchId: body.batchId })
+        .values({
+          tenantId,
+          batchId: body.batchId,
+          terminalId: authenticatedTerminalId,
+          payloadDigest: digest,
+        })
         .onConflictDoNothing()
         .returning({ batchId: schema.syncBatches.batchId });
 
-      // Someone already applied this batch — almost always this same device
-      // retrying after a lost response. Report success so it acknowledges.
-      if (claimed.length === 0) return { applied: 0, alreadyApplied: true, conflicts: [] };
+      if (claimed.length === 0) {
+        const [existing] = await tx
+          .select({
+            terminalId: schema.syncBatches.terminalId,
+            payloadDigest: schema.syncBatches.payloadDigest,
+            result: schema.syncBatches.result,
+          })
+          .from(schema.syncBatches)
+          .where(
+            and(
+              eq(schema.syncBatches.tenantId, tenantId),
+              eq(schema.syncBatches.batchId, body.batchId),
+            ),
+          )
+          .for("update");
+        if (!existing) throw new ConflictException({ code: "station_batch_mismatch" });
+
+        if (existing.terminalId === null && existing.payloadDigest === null) {
+          const denied = this.deniedRecords(body, "legacy_unbound_replay");
+          await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
+          const result = { applied: 0, alreadyApplied: true, conflicts: [], denied };
+          await tx
+            .update(schema.syncBatches)
+            .set({ terminalId: authenticatedTerminalId, payloadDigest: digest, result })
+            .where(
+              and(
+                eq(schema.syncBatches.tenantId, tenantId),
+                eq(schema.syncBatches.batchId, body.batchId),
+              ),
+            );
+          return result;
+        }
+
+        if (existing.terminalId !== authenticatedTerminalId || existing.payloadDigest !== digest) {
+          throw new ConflictException({ code: "station_batch_mismatch" });
+        }
+        const stored = existing.result as SyncBatchResponseDto | null;
+        return {
+          applied: 0,
+          alreadyApplied: true,
+          conflicts: stored?.conflicts ?? [],
+          ...(stored?.denied ? { denied: stored.denied } : {}),
+        };
+      }
+
+      const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
+      const allShiftIds = [
+        ...new Set([
+          ...body.items.map((item) => item.shiftId),
+          ...body.boxes.map((box) => box.shiftId),
+          ...body.exceptions.map((exception) => exception.shiftId),
+        ]),
+      ];
+      const shiftRows =
+        allShiftIds.length === 0
+          ? []
+          : await tx
+              .select({ id: schema.shifts.id, openedAt: schema.shifts.openedAt })
+              .from(schema.shifts)
+              .where(
+                and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, allShiftIds)),
+              )
+              .orderBy(schema.shifts.id)
+              .for("update");
+      const shiftById = new Map(shiftRows.map((shift) => [shift.id, shift]));
+      let denied: DeniedStationRecordDto[] = [];
+      if (access.access === "read_only") {
+        const endsAt = access.subscription?.endsAt ?? null;
+        const eligible = (shiftId: string) => {
+          const shift = shiftById.get(shiftId);
+          return (
+            shift !== undefined &&
+            shift.openedAt !== null &&
+            endsAt !== null &&
+            shift.openedAt < endsAt
+          );
+        };
+        denied = [
+          ...body.items.flatMap((item, recordIndex) =>
+            eligible(item.shiftId)
+              ? []
+              : [
+                  {
+                    recordKind: "item" as const,
+                    recordIndex,
+                    shiftId: item.shiftId,
+                    code: "subscription_read_only" as const,
+                  },
+                ],
+          ),
+          ...body.boxes.flatMap((box, recordIndex) =>
+            eligible(box.shiftId)
+              ? []
+              : [
+                  {
+                    recordKind: "box" as const,
+                    recordIndex,
+                    shiftId: box.shiftId,
+                    code: "subscription_read_only" as const,
+                  },
+                ],
+          ),
+          ...body.exceptions.flatMap((exception, recordIndex) =>
+            eligible(exception.shiftId)
+              ? []
+              : [
+                  {
+                    recordKind: "exception" as const,
+                    recordIndex,
+                    shiftId: exception.shiftId,
+                    code: "subscription_read_only" as const,
+                  },
+                ],
+          ),
+        ];
+        await this.quarantine(tx, tenantId, authenticatedTerminalId, digest, body, denied);
+        const deniedKeys = new Set(denied.map((item) => `${item.recordKind}:${item.recordIndex}`));
+        body = {
+          ...body,
+          items: body.items.filter((_item, index) => !deniedKeys.has(`item:${index}`)),
+          boxes: body.boxes.filter((_box, index) => !deniedKeys.has(`box:${index}`)),
+          exceptions: body.exceptions.filter(
+            (_exception, index) => !deniedKeys.has(`exception:${index}`),
+          ),
+        };
+      } else if (shiftRows.length !== allShiftIds.length) {
+        throw new BadRequestException("Unknown shift in batch");
+      }
 
       // Both defaulted so a closure-only batch (no items at all -- see the
       // box-closures loop at the end of this transaction) reaches the final
@@ -1130,53 +1276,84 @@ export class StationScansService {
           );
       }
 
-      return { applied: body.items.length, alreadyApplied: false, conflicts: batchConflicts };
+      const result: SyncBatchResponseDto = {
+        applied: body.items.length,
+        alreadyApplied: false,
+        conflicts: batchConflicts,
+        ...(denied.length > 0 ? { denied } : {}),
+      };
+      await tx
+        .update(schema.syncBatches)
+        .set({ result: result as unknown as Record<string, unknown> })
+        .where(
+          and(
+            eq(schema.syncBatches.tenantId, tenantId),
+            eq(schema.syncBatches.batchId, body.batchId),
+          ),
+        );
+      return result;
     });
   }
 
-  /** Returns true when an expired-tenant replay was already durably applied. */
-  private async assertRecoveryEligible(tenantId: string, body: SyncBatchDto): Promise<boolean> {
-    const serverNow = new Date();
-    const access = await this.entitlements.resolveRecovery(tenantId, this.db, serverNow);
-    if (access.access !== "read_only") return false;
-
-    // Idempotency outranks a later eligibility decision. The station pins
-    // this exact batch id until it receives an acknowledgement, so a response
-    // lost before expiry must still be acknowledged after expiry even if the
-    // referenced shift is later corrected or closed. No business write occurs
-    // on this path; the original transaction already committed it.
-    const [alreadyApplied] = await this.db
-      .select({ batchId: schema.syncBatches.batchId })
-      .from(schema.syncBatches)
-      .where(
-        and(
-          eq(schema.syncBatches.tenantId, tenantId),
-          eq(schema.syncBatches.batchId, body.batchId),
-        ),
-      );
-    if (alreadyApplied) return true;
-
-    const endsAt = access.subscription?.endsAt;
-    if (!endsAt) throw new SubscriptionReadOnlyException();
-    const shiftIds = [
-      ...new Set([
-        ...body.items.map((item) => item.shiftId),
-        ...body.boxes.map((box) => box.shiftId),
-        ...body.exceptions.map((exception) => exception.shiftId),
-      ]),
+  private deniedRecords(
+    body: SyncBatchDto,
+    code: "legacy_unbound_replay",
+  ): DeniedStationRecordDto[] {
+    return [
+      ...body.items.map((item, recordIndex) => ({
+        recordKind: "item" as const,
+        recordIndex,
+        shiftId: item.shiftId,
+        code,
+      })),
+      ...body.boxes.map((box, recordIndex) => ({
+        recordKind: "box" as const,
+        recordIndex,
+        shiftId: box.shiftId,
+        code,
+      })),
+      ...body.exceptions.map((exception, recordIndex) => ({
+        recordKind: "exception" as const,
+        recordIndex,
+        shiftId: exception.shiftId,
+        code,
+      })),
     ];
-    if (shiftIds.length === 0) return false;
-    const rows = await this.db
-      .select({ id: schema.shifts.id, openedAt: schema.shifts.openedAt })
-      .from(schema.shifts)
-      .where(and(eq(schema.shifts.tenantId, tenantId), inArray(schema.shifts.id, shiftIds)));
-    if (
-      rows.length !== shiftIds.length ||
-      rows.some((shift) => shift.openedAt === null || shift.openedAt >= endsAt)
-    ) {
-      throw new SubscriptionReadOnlyException();
-    }
-    return false;
+  }
+
+  private async quarantine(
+    tx: Pick<Db, "insert">,
+    tenantId: string,
+    terminalId: string,
+    digest: string,
+    body: SyncBatchDto,
+    denied: DeniedStationRecordDto[],
+  ): Promise<void> {
+    if (denied.length === 0) return;
+    const payloads = {
+      item: body.items,
+      box: body.boxes,
+      exception: body.exceptions,
+    } as const;
+    await tx
+      .insert(schema.stationSyncQuarantine)
+      .values(
+        denied.map((item) => ({
+          tenantId,
+          batchId: body.batchId,
+          terminalId,
+          payloadDigest: digest,
+          recordKind: item.recordKind,
+          recordIndex: item.recordIndex,
+          shiftId: item.shiftId,
+          reason: item.code,
+          payload: payloads[item.recordKind][item.recordIndex] as unknown as Record<
+            string,
+            unknown
+          >,
+        })),
+      )
+      .onConflictDoNothing();
   }
 
   /**

@@ -37,6 +37,7 @@ export interface CreateOrderDto {
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];
   createdAt?: string;
+  admissionProof?: string;
 }
 
 /** A scanned item that could not be accepted into the order, and why. */
@@ -82,6 +83,7 @@ export interface SubscriptionAccessSnapshotDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshotDto;
+  admissionProofs?: { deviceSeq: number; proof: string }[];
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];

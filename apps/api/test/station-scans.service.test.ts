@@ -111,6 +111,7 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
   it("does not reject a batch within the cap on month count alone", async () => {
     ensurePartitionsMock.mockClear().mockResolvedValue([]);
     let claimedTransaction = false;
+    const reachedTransaction = new Error("reached authoritative transaction");
     const dbStub = {
       // Finding 2's early shift-ownership guard now runs before
       // `ensurePartitions`, outside the transaction -- answer it as "owned"
@@ -121,49 +122,40 @@ describe("StationScansService.applyBatch month cap (Finding 2)", () => {
           where: () => Promise.resolve([{ id: "11111111-1111-1111-1111-111111111111" }]),
         }),
       }),
-      transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+      transaction: async () => {
         claimedTransaction = true;
-        const tx = {
-          insert: () => ({
-            values: () => ({
-              onConflictDoNothing: () => ({ returning: () => Promise.resolve([]) }),
-            }),
-          }),
-        };
-        return fn(tx);
+        throw reachedTransaction;
       },
     } as unknown as Db;
     const service = new StationScansService(dbStub, ssccServiceStub, entitlementsServiceStub);
 
     const items = Array.from({ length: 3 }, (_, i) => item(`2026-0${i + 1}-15T00:00:00.000Z`));
 
-    const result = await service.applyBatch(
-      "tenant-1",
-      {
-        batchId: "m1:install-1:200",
-        items,
-        boxes: [],
-        exceptions: [],
-      },
-      "station-1",
-    );
+    await expect(
+      service.applyBatch(
+        "tenant-1",
+        {
+          batchId: "m1:install-1:200",
+          items,
+          boxes: [],
+          exceptions: [],
+        },
+        "station-1",
+      ),
+    ).rejects.toBe(reachedTransaction);
 
     expect(ensurePartitionsMock).toHaveBeenCalledTimes(1);
     expect(claimedTransaction).toBe(true);
-    // The batch is already recorded (`onConflictDoNothing` returned no row
-    // in this stub) -- this test only cares that the month cap itself did
-    // not block a legitimate, small batch from reaching the transaction.
-    expect(result).toEqual({ applied: 0, alreadyApplied: true, conflicts: [] });
+    // Reaching the transaction proves the month cap itself did not reject a
+    // legitimate, small batch. Transaction behavior is covered by e2e tests.
   });
 });
 
 /**
- * Unit-level coverage for the rest of Finding 2: `ensurePartitions` used to
- * run before the shift-ownership check, so a batch full of nonexistent shift
- * ids still triggered the DDL. The e2e suite covers the same behaviour
- * end-to-end; this file isolates it with a fake `Db` that throws if a
- * `select` (the ownership guard) or a `transaction` is ever opened, so a
- * rejected batch provably never reaches either.
+ * Unit-level coverage for the rest of Finding 2. The pure timestamp window is
+ * rejected before database work; unknown shifts are filtered out of the
+ * partition preflight and then rejected only after the authoritative
+ * tenant-scoped shift load is locked inside the write transaction.
  */
 describe("StationScansService.applyBatch shift-ownership guard ordering (Finding 2)", () => {
   it("rejects a batch with a scannedAt outside the acceptable window before ever querying shifts, calling ensurePartitions, or opening a transaction", async () => {
@@ -197,8 +189,9 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
     expect(ensurePartitionsMock).not.toHaveBeenCalled();
   });
 
-  it("rejects a batch referencing an unknown shift before ever calling ensurePartitions or opening a transaction", async () => {
+  it("rejects an unknown shift at the authoritative tenant-scoped transaction boundary", async () => {
     ensurePartitionsMock.mockClear();
+    let openedTransaction = false;
     const dbStub = {
       select: () => ({
         from: () => ({
@@ -207,8 +200,25 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
           where: () => Promise.resolve([]),
         }),
       }),
-      transaction: () => {
-        throw new Error("must not open a transaction for a batch with an unknown shift");
+      transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
+        openedTransaction = true;
+        const tx = {
+          insert: () => ({
+            values: () => ({
+              onConflictDoNothing: () => ({
+                returning: () => Promise.resolve([{ batchId: "m1:install-1:1" }]),
+              }),
+            }),
+          }),
+          select: () => ({
+            from: () => ({
+              where: () => ({
+                orderBy: () => ({ for: () => Promise.resolve([]) }),
+              }),
+            }),
+          }),
+        };
+        return fn(tx);
       },
     } as unknown as Db;
     const service = new StationScansService(dbStub, ssccServiceStub, entitlementsServiceStub);
@@ -229,6 +239,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
         "station-1",
       ),
     ).rejects.toBeInstanceOf(BadRequestException);
-    expect(ensurePartitionsMock).not.toHaveBeenCalled();
+    expect(openedTransaction).toBe(true);
+    expect(ensurePartitionsMock).toHaveBeenCalledWith(dbStub, []);
   });
 });

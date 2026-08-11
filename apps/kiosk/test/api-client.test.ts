@@ -57,6 +57,24 @@ describe("createKioskClient", () => {
     expect((init as RequestInit).headers).toMatchObject({ "x-kiosk-token": "tok" });
   });
 
+  it("asks bootstrap for proofs starting at the device's durable next sequence", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse(200, { generatedAt: "2026-07-28T00:00:00Z" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createKioskClient({
+      token: "tok",
+      serverUrl: "http://srv",
+      nextDeviceSeq: 73,
+    }).bootstrap();
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init as RequestInit).headers).toMatchObject({
+      "x-kiosk-next-device-seq": "73",
+    });
+  });
+
   it("carries the scan time so a late sync is not recorded as happening now", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       jsonResponse(201, { orderNo: "ORD-26-0001", conflicts: [] }),
@@ -78,12 +96,7 @@ describe("createKioskClient", () => {
   it("retains the server error code needed to classify an expired-subscription refusal", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        jsonResponse(403, {
-          code: "subscription_read_only",
-          message: "Subscription is read-only",
-        }),
-      ),
+      vi.fn(async () => jsonResponse(403, { code: "subscription_read_only" })),
     );
 
     const err = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
@@ -94,7 +107,7 @@ describe("createKioskClient", () => {
     expect(err).toMatchObject({
       status: 403,
       code: "subscription_read_only",
-      message: "Subscription is read-only",
+      message: "HTTP 403",
     });
   });
 });

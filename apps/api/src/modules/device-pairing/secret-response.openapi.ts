@@ -63,7 +63,8 @@ export const subscriptionAccessSchema: ResponseSchema = {
 
 const stationPairSchema: ResponseSchema = {
   type: "object",
-  required: ["device", "credential", "operators", "subscription"],
+  additionalProperties: false,
+  required: ["device", "credential", "operators"],
   properties: {
     device: {
       type: "object",
@@ -90,7 +91,10 @@ const stationPairSchema: ResponseSchema = {
       },
     },
     operators: { type: "array", items: stationOperatorSchema },
-    subscription: subscriptionAccessSchema,
+    subscription: {
+      ...subscriptionAccessSchema,
+      description: "Present only when the client sends subscription-state-v1.",
+    },
   },
 };
 

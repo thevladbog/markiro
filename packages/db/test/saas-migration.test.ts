@@ -36,8 +36,10 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await cp(migrationsFolder, legacyMigrations, { recursive: true });
     await rm(join(legacyMigrations, "0030_saas_catalog_subscriptions.sql"));
     await rm(join(legacyMigrations, "0031_platform_auth_runtime_fields.sql"));
+    await rm(join(legacyMigrations, "0032_cute_frank_castle.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -45,7 +47,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     journal.entries = journal.entries.filter(
       (entry) =>
         entry.tag !== "0030_saas_catalog_subscriptions" &&
-        entry.tag !== "0031_platform_auth_runtime_fields",
+        entry.tag !== "0031_platform_auth_runtime_fields" &&
+        entry.tag !== "0032_cute_frank_castle",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 

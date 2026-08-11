@@ -10,6 +10,9 @@ export type PairKioskDto = z.infer<typeof pairKioskSchema>;
 export const createOrderItemSchema = z.object({ rawKm: z.string().min(1) });
 export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
 
+/** PostgreSQL `integer` upper bound for the durable kiosk idempotency key. */
+export const MAX_KIOSK_DEVICE_SEQ = 2_147_483_647;
+
 /**
  * POST /kiosk/orders body. `deviceSeq` is the kiosk's own monotonic counter —
  * together with `(tenantId, kioskId)` it's the idempotency key for offline
@@ -51,13 +54,14 @@ export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
  */
 export const createOrderSchema = z
   .object({
-    deviceSeq: z.number().int().nonnegative(),
+    deviceSeq: z.number().int().nonnegative().max(MAX_KIOSK_DEVICE_SEQ),
     badgeDigest: z.string().refine(isCanonicalDigestB64, "Not a canonical badge digest").optional(),
     badgeCode: z.string().min(1).optional(),
     reason: z.enum(["buy", "writeoff"]),
     writeoffReasonId: z.string().uuid().nullable().optional(),
     items: z.array(createOrderItemSchema),
     createdAt: z.string().datetime().optional(),
+    admissionProof: z.string().min(1).max(2048).optional(),
   })
   // Exactly one, never both: two identifiers for one employee is two answers
   // the server would have to rank, and a body carrying a digest AND the
@@ -105,6 +109,7 @@ export interface CreateOrderResultDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshot;
+  admissionProofs?: { deviceSeq: number; proof: string }[];
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
-import type { INestApplication } from "@nestjs/common";
+import { Logger, type INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -14,6 +14,10 @@ import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
+import {
+  issueKioskAdmissionProof,
+  verifyKioskAdmissionProof,
+} from "../src/modules/pickup-orders/kiosk-admission-proof";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -34,6 +38,10 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
 
   beforeAll(async () => {
     for (const [key, value] of Object.entries(PLATFORM_TEST_ENV)) vi.stubEnv(key, value);
+    vi.stubEnv(
+      "KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL",
+      new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    );
     const env = loadEnv({
       ...process.env,
       ...PLATFORM_TEST_ENV,
@@ -180,6 +188,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const stationBootstrap = await request(app!.getHttpServer())
       .get("/station/identity")
       .set("x-api-key", station.apiKey)
+      .set("x-station-capabilities", "subscription-state-v1")
       .expect(200);
     expect(stationBootstrap.body.subscription).toEqual({
       access: "read_only",
@@ -274,22 +283,23 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       boxId: null,
       operatorId: null,
     });
-    const postBatch = (batchId: string, shiftId: string) =>
+    const postBatch = (batchId: string, shiftId: string, batchItem = item(shiftId)) =>
       request(app!.getHttpServer())
         .post("/station/scans")
         .set("x-api-key", station.apiKey)
-        .send({ batchId, items: [item(shiftId)], boxes: [], exceptions: [] });
+        .send({ batchId, items: [batchItem], boxes: [], exceptions: [] });
 
     const eligibleBatchId = `eligible-${randomUUID()}`;
-    await postBatch(eligibleBatchId, eligibleShiftId).expect(201);
+    const eligibleItem = item(eligibleShiftId);
+    await postBatch(eligibleBatchId, eligibleShiftId, eligibleItem).expect(201);
     await db
       .update(schema.shifts)
       .set({ openedAt: new Date(endsAt.getTime() + 1_000) })
       .where(eq(schema.shifts.id, eligibleShiftId));
-    const replay = await postBatch(eligibleBatchId, eligibleShiftId).expect(201);
+    const replay = await postBatch(eligibleBatchId, eligibleShiftId, eligibleItem).expect(201);
     expect(replay.body).toMatchObject({ applied: 0, alreadyApplied: true });
-    const late = await postBatch(`late-${randomUUID()}`, lateShiftId).expect(403);
-    expect(late.body).toEqual({ code: "subscription_read_only" });
+    const late = await postBatch(`late-${randomUUID()}`, lateShiftId).expect(201);
+    expect(late.body).toEqual({ applied: 0, alreadyApplied: false, conflicts: [] });
 
     const otherAgent = request.agent(app!.getHttpServer());
     const otherTenantId = await signUpAndActivate(otherAgent);
@@ -312,8 +322,216 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       status: "active",
       openedAt: new Date(endsAt.getTime() - 60_000),
     });
-    const foreign = await postBatch(`foreign-${randomUUID()}`, otherShiftId).expect(403);
-    expect(foreign.body).toEqual({ code: "subscription_read_only" });
+    const foreign = await postBatch(`foreign-${randomUUID()}`, otherShiftId).expect(201);
+    expect(foreign.body).toEqual({ applied: 0, alreadyApplied: false, conflicts: [] });
+  });
+
+  it("applies an eligible mixed station subset and durably quarantines late, missing, and foreign records", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const station = await createTestStationDevice(app!, agent, "Mixed recovery station");
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04006381333931",
+      name: "Mixed recovery product",
+      status: "active",
+      boxCapacity: 10,
+      palletCapacity: 5,
+    });
+    const endsAt = new Date(Date.now() - 60_000);
+    const eligibleShiftId = randomUUID();
+    const lateShiftId = randomUUID();
+    await db.insert(schema.shifts).values([
+      {
+        id: eligibleShiftId,
+        tenantId,
+        productId,
+        mode: "validation",
+        status: "active",
+        openedAt: new Date(endsAt.getTime() - 60_000),
+      },
+      {
+        id: lateShiftId,
+        tenantId,
+        productId,
+        mode: "validation",
+        status: "active",
+        openedAt: new Date(endsAt.getTime() + 1_000),
+      },
+    ]);
+
+    const otherAgent = request.agent(app!.getHttpServer());
+    const otherTenantId = await signUpAndActivate(otherAgent);
+    const otherProductId = randomUUID();
+    const foreignShiftId = randomUUID();
+    await db.insert(schema.products).values({
+      id: otherProductId,
+      tenantId: otherTenantId,
+      gtin14: "04607004360017",
+      name: "Foreign recovery product",
+      status: "active",
+      boxCapacity: 10,
+      palletCapacity: 5,
+    });
+    await db.insert(schema.shifts).values({
+      id: foreignShiftId,
+      tenantId: otherTenantId,
+      productId: otherProductId,
+      mode: "validation",
+      status: "active",
+      openedAt: new Date(endsAt.getTime() - 60_000),
+    });
+    await attachPlan(tenantId, {
+      startsAt: new Date(endsAt.getTime() - 86_400_000),
+      endsAt,
+    });
+
+    const missingShiftId = randomUUID();
+    const batchId = `mixed-expiry-${randomUUID()}`;
+    const eligibleRaw = "eligible-invalid-code";
+    const lateRaw = "010400638133393121LATE-RAW-GS1";
+    const body = {
+      batchId,
+      items: [
+        {
+          shiftId: eligibleShiftId,
+          terminalId: "spoofed",
+          raw: eligibleRaw,
+          verdict: "invalid",
+          scannedAt: new Date().toISOString(),
+          code: null,
+          boxId: null,
+          operatorId: null,
+        },
+        {
+          shiftId: lateShiftId,
+          terminalId: "spoofed",
+          raw: lateRaw,
+          verdict: "invalid",
+          scannedAt: new Date().toISOString(),
+          code: null,
+          boxId: null,
+          operatorId: null,
+        },
+      ],
+      boxes: [
+        {
+          boxId: "missing-box",
+          shiftId: missingShiftId,
+          terminalId: "spoofed",
+          sscc: "080000000400000022",
+          closedAt: new Date().toISOString(),
+          operatorId: null,
+          printVerifiedAt: null,
+          printSkippedAt: null,
+        },
+      ],
+      exceptions: [
+        {
+          kind: "clear",
+          boxId: "foreign-box",
+          codeHash: null,
+          targetScannedAt: null,
+          shiftId: foreignShiftId,
+          terminalId: "spoofed",
+          operatorId: null,
+          reason: null,
+          occurredAt: new Date().toISOString(),
+        },
+      ],
+    };
+
+    const first = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", station.apiKey)
+      .set("x-station-capabilities", "station-recovery-v1")
+      .send(body)
+      .expect(201);
+
+    const expectedDenied = [
+      {
+        recordKind: "item",
+        recordIndex: 1,
+        shiftId: lateShiftId,
+        code: "subscription_read_only",
+      },
+      {
+        recordKind: "box",
+        recordIndex: 0,
+        shiftId: missingShiftId,
+        code: "subscription_read_only",
+      },
+      {
+        recordKind: "exception",
+        recordIndex: 0,
+        shiftId: foreignShiftId,
+        code: "subscription_read_only",
+      },
+    ];
+    expect(first.body).toEqual({
+      applied: 1,
+      alreadyApplied: false,
+      conflicts: [],
+      denied: expectedDenied,
+    });
+
+    const eligibleEvents = await db
+      .select({ raw: schema.scanEvents.raw })
+      .from(schema.scanEvents)
+      .where(
+        and(
+          eq(schema.scanEvents.tenantId, tenantId),
+          eq(schema.scanEvents.shiftId, eligibleShiftId),
+        ),
+      );
+    const lateEvents = await db
+      .select({ raw: schema.scanEvents.raw })
+      .from(schema.scanEvents)
+      .where(
+        and(eq(schema.scanEvents.tenantId, tenantId), eq(schema.scanEvents.shiftId, lateShiftId)),
+      );
+    expect(eligibleEvents).toContainEqual({ raw: eligibleRaw });
+    expect(lateEvents).not.toContainEqual({ raw: lateRaw });
+
+    const quarantined = await db.execute<{
+      record_kind: string;
+      record_index: number;
+      reason: string;
+      payload: { raw?: string };
+    }>(sql`
+      select record_kind, record_index, reason, payload
+      from station_sync_quarantine
+      where tenant_id = ${tenantId} and batch_id = ${batchId}
+      order by record_kind, record_index
+    `);
+    expect(quarantined.rows).toHaveLength(3);
+    expect(quarantined.rows).toContainEqual({
+      record_kind: "item",
+      record_index: 1,
+      reason: "subscription_read_only",
+      payload: expect.objectContaining({ raw: lateRaw }),
+    });
+
+    const replay = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", station.apiKey)
+      .set("x-station-capabilities", "station-recovery-v1")
+      .send(body)
+      .expect(201);
+    expect(replay.body).toEqual({
+      applied: 0,
+      alreadyApplied: true,
+      conflicts: [],
+      denied: expectedDenied,
+    });
+    const replayedQuarantine = await db.execute<{ count: string }>(sql`
+      select count(*)::text as count
+      from station_sync_quarantine
+      where tenant_id = ${tenantId} and batch_id = ${batchId}
+    `);
+    expect(replayedQuarantine.rows).toEqual([{ count: "3" }]);
   });
 
   it("continues kiosk queue recovery record-by-record and keeps duplicate retry idempotent", async () => {
@@ -404,5 +622,150 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .set("x-kiosk-token", kioskToken)
       .send({ deviceSeq: 4, badgeCode, reason: "buy", items: [], createdAt: "not-a-date" })
       .expect(400);
+  });
+
+  it("accepts a genuine authenticated kiosk occurrence after seven days and rejects forged identity, sequence, and time claims", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const employeeId = randomUUID();
+    const badgeCode = `badge-${randomUUID()}`;
+    const kioskId = randomUUID();
+    const kioskToken = `kiosk-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: employeeId,
+      tenantId,
+      fullName: "Proof employee",
+      status: "active",
+    });
+    await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode });
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Proof kiosk",
+      deviceTokenHash: hashDeviceToken(kioskToken),
+    });
+    const startsAt = new Date(Date.now() - 10 * 24 * 60 * 60_000);
+    const endsAt = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+    const subscription = await attachPlan(tenantId, { startsAt, endsAt });
+    const createdAt = new Date(startsAt.getTime() + 60 * 60_000);
+    const proof = issueKioskAdmissionProof({
+      secret: loadEnv().KIOSK_ADMISSION_PROOF_SECRET,
+      tenantId,
+      kioskId,
+      subscriptionId: subscription.subscriptionId,
+      deviceSeq: 10,
+      issuedAt: startsAt,
+      notAfter: endsAt,
+    });
+    const post = (body: Record<string, unknown>, token = kioskToken) =>
+      request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", token)
+        .send({ badgeCode, reason: "buy", items: [], createdAt: createdAt.toISOString(), ...body });
+
+    await post({ deviceSeq: 10, admissionProof: proof }).expect(201);
+    await post({ deviceSeq: 11, admissionProof: proof }).expect(403);
+    await post({ deviceSeq: 12, admissionProof: `${proof.slice(0, -1)}x` }).expect(403);
+    await post({
+      deviceSeq: 13,
+      admissionProof: issueKioskAdmissionProof({
+        secret: loadEnv().KIOSK_ADMISSION_PROOF_SECRET,
+        tenantId,
+        kioskId,
+        subscriptionId: subscription.subscriptionId,
+        deviceSeq: 13,
+        issuedAt: startsAt,
+        notAfter: endsAt,
+      }),
+      createdAt: new Date(endsAt.getTime() + 1).toISOString(),
+    }).expect(403);
+
+    const otherKioskId = randomUUID();
+    const otherToken = `other-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: otherKioskId,
+      tenantId,
+      name: "Other proof kiosk",
+      deviceTokenHash: hashDeviceToken(otherToken),
+    });
+    await post({ deviceSeq: 10, admissionProof: proof }, otherToken).expect(403);
+    const audit = vi.spyOn(Logger.prototype, "warn");
+    try {
+      await post({ deviceSeq: 14 }).expect(201);
+      const auditPayload = audit.mock.calls
+        .map(([value]) => (typeof value === "string" ? value : ""))
+        .find((value) => value.includes('"action":"kiosk.legacy_proofless_recovery"'));
+      expect(auditPayload).toBeDefined();
+      const parsedAudit = JSON.parse(auditPayload!) as Record<string, unknown>;
+      expect(parsedAudit).toEqual({
+        action: "kiosk.legacy_proofless_recovery",
+        tenantId,
+        kioskId,
+        deviceSeq: 14,
+        outcome: "accepted",
+      });
+      expect(parsedAudit).not.toHaveProperty("proof");
+      expect(parsedAudit).not.toHaveProperty("token");
+      expect(parsedAudit).not.toHaveProperty("raw");
+    } finally {
+      audit.mockRestore();
+    }
+
+    const configuredSunset = loadEnv().KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL!;
+    vi.stubEnv(
+      "KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL",
+      new Date(Date.now() - 60_000).toISOString(),
+    );
+    try {
+      await post({ deviceSeq: 15 }).expect(403);
+    } finally {
+      vi.stubEnv("KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL", configuredSunset.toISOString());
+    }
+  });
+
+  it("issues kiosk/tenant/subscription/sequence-bound admission proofs from the requested durable sequence", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const kioskId = randomUUID();
+    const kioskToken = `proof-bootstrap-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Admission proof kiosk",
+      deviceTokenHash: hashDeviceToken(kioskToken),
+    });
+    const startsAt = new Date(Date.now() - 60_000);
+    const endsAt = new Date(Date.now() + 86_400_000);
+    const subscription = await attachPlan(tenantId, { startsAt, endsAt });
+
+    const response = await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-next-device-seq", "73")
+      .expect(200);
+    expect(response.body.admissionProofs).toHaveLength(128);
+    expect(response.body.admissionProofs[0].deviceSeq).toBe(73);
+    const generatedAt = new Date(response.body.generatedAt as string);
+    expect(
+      verifyKioskAdmissionProof({
+        secrets: [loadEnv().KIOSK_ADMISSION_PROOF_SECRET],
+        proof: response.body.admissionProofs[0].proof,
+        tenantId,
+        kioskId,
+        subscriptionId: subscription.subscriptionId,
+        deviceSeq: 73,
+        claimedAt: generatedAt,
+        now: generatedAt,
+        expectedEndsAt: endsAt,
+      }),
+    ).toEqual({ ok: true, occurredAt: generatedAt });
+
+    const final = await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", kioskToken)
+      .set("x-kiosk-next-device-seq", "2147483647")
+      .expect(200);
+    expect(final.body.admissionProofs).toHaveLength(1);
+    expect(final.body.admissionProofs[0].deviceSeq).toBe(2_147_483_647);
   });
 });

@@ -22,6 +22,10 @@ import { SecurityAuditService } from "../src/authorization/security-audit.servic
 import { OperatorsService } from "../src/modules/operators/operators.service";
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
+import {
+  preTask8IdentityDecoderAccepts,
+  preTask8PairDecoderAccepts,
+} from "./support/pre-task8-station-decoders";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -236,6 +240,8 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         },
       ],
     });
+    expect(Object.keys(paired.body).sort()).toEqual(["credential", "device", "operators"]);
+    expect(preTask8PairDecoderAccepts(paired.body)).toBe(true);
     expect(paired.body.operators[0]).not.toHaveProperty("pin");
     expect(paired.body.operators[0]).not.toHaveProperty("badgeCode");
 
@@ -262,6 +268,31 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .expect(403);
   });
 
+  it("adds subscription state only when a pairing client negotiates subscription-state-v1", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .set("x-station-capabilities", "subscription-state-v1")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(Object.keys(paired.body).sort()).toEqual([
+      "credential",
+      "device",
+      "operators",
+      "subscription",
+    ]);
+    expect(paired.body.subscription).toEqual({
+      access: "unmanaged",
+      status: "unmanaged",
+      startsAt: null,
+      endsAt: null,
+    });
+  });
+
   it("resolves only the authenticated station identity without echoing its credential", async () => {
     const otherDeviceName = `Other ${randomUUID()}`;
     await otherAgent
@@ -284,6 +315,16 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         organizationName: "Test Plant",
         line: { id: expect.any(String), name: "Packing" },
       },
+    });
+    expect(preTask8IdentityDecoderAccepts(identity.body)).toBe(true);
+
+    const negotiated = await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", apiKey)
+      .set("x-station-capabilities", "subscription-state-v1")
+      .expect(200);
+    expect(negotiated.body).toEqual({
+      device: identity.body.device,
       subscription: {
         access: "unmanaged",
         status: "unmanaged",
