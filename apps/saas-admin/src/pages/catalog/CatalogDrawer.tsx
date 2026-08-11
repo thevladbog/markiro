@@ -41,9 +41,7 @@ export function CatalogDrawer({
       closeLabel={closeLabel}
       onClose={requestClose}
     >
-      <CatalogDrawerCloseContext.Provider
-        value={() => guard.requestProtectedAction(onClose)}
-      >
+      <CatalogDrawerCloseContext.Provider value={() => guard.requestProtectedAction(onClose)}>
         {children}
       </CatalogDrawerCloseContext.Provider>
     </SidePanel>

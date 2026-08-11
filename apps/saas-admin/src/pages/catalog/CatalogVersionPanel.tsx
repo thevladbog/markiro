@@ -202,9 +202,10 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     labelEditorEnabled: item.plan?.labelEditorEnabled ?? false,
     publicApiEnabled: item.plan?.publicApiEnabled ?? false,
     palletsEnabled: item.plan?.palletsEnabled ?? false,
-    addonEffects: savedAddonEffects.length > 0 ? savedAddonEffects : [
-      { rowId: crypto.randomUUID(), key: "stations", value: "1" },
-    ],
+    addonEffects:
+      savedAddonEffects.length > 0
+        ? savedAddonEffects
+        : [{ rowId: crypto.randomUUID(), key: "stations", value: "1" }],
   };
 }
 
@@ -340,8 +341,9 @@ export function CatalogVersionPanel({
   const clone = useMutation({
     mutationFn: () => createCatalogVersion(item.catalogItemCode, catalogVersionToCreateInput(item)),
     onSuccess: (created) => {
-      queryClient.setQueryData<{ items: CatalogVersionDto[] }>(["platform", "catalog"], (current) =>
-        current ? { items: [...current.items, created] } : { items: [created] },
+      queryClient.setQueryData<{ items: CatalogVersionDto[] }>(
+        ["platform", "catalog"],
+        (current) => (current ? { items: [...current.items, created] } : { items: [created] }),
       );
       onVersionCreated?.(created);
     },

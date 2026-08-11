@@ -209,7 +209,9 @@ describe("commercial catalog", () => {
     const addonRender = renderSaasApp();
     const user = userEvent.setup();
     await user.click(await screen.findByRole("tab", { name: "Дополнения" }));
-    await user.click(screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }));
+    await user.click(
+      screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }),
+    );
     await user.click(screen.getByRole("button", { name: "Новая версия" }));
     expect(addonApi.createCalls()[0]?.body).toMatchObject({
       billingMode: "recurring",

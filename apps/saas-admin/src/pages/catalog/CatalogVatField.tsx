@@ -34,7 +34,8 @@ export function CatalogVatField({
   disabled?: boolean;
 }) {
   const { t } = useTranslation();
-  const isPreset = value === null || VAT_PRESET_RATES.includes(value as (typeof VAT_PRESET_RATES)[number]);
+  const isPreset =
+    value === null || VAT_PRESET_RATES.includes(value as (typeof VAT_PRESET_RATES)[number]);
   const [customValue, setCustomValue] = useState(
     value !== null && !isPreset ? percentFromBasisPoints(value) : "",
   );

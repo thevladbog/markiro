@@ -217,9 +217,9 @@ export function CatalogPage() {
             canWrite={principal.capabilities.includes("catalog.write")}
             isSupport={isSupport}
             defaultDemoId={defaultDemo.data?.catalogVersionId ?? null}
-          onClose={() => setSelectedId(null)}
-          onVersionCreated={(created) => setSelectedId(created.id)}
-          onDirtyChange={setDrawerDirty}
+            onClose={() => setSelectedId(null)}
+            onVersionCreated={(created) => setSelectedId(created.id)}
+            onDirtyChange={setDrawerDirty}
           />
         </CatalogDrawer>
       ) : null}

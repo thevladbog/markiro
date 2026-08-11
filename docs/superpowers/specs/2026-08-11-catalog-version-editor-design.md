@@ -1,7 +1,7 @@
 # Catalog version editor design
 
 **Date:** 2026-08-11
-**Status:** Approved
+**Status:** Implemented
 
 ## Goal
 

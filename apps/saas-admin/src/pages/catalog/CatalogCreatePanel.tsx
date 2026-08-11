@@ -35,9 +35,7 @@ export function CatalogCreatePanel({
   const [nameEn, setNameEn] = useState("");
   const [descriptionRu, setDescriptionRu] = useState("");
   const [descriptionEn, setDescriptionEn] = useState("");
-  const [unit, setUnit] = useState(
-    kind === "service" ? "project" : "month",
-  );
+  const [unit, setUnit] = useState(kind === "service" ? "project" : "month");
   const [price, setPrice] = useState("0.00");
   const [vatRateBps, setVatRateBps] = useState<number | null>(2200);
   const [addonEffects, setAddonEffects] = useState<EditableAddonEffect[]>(() => [newAddonEffect()]);
@@ -55,21 +53,21 @@ export function CatalogCreatePanel({
     onDirtyChange?.(
       Boolean(
         code ||
-          nameRu ||
-          nameEn ||
-          descriptionRu ||
-          descriptionEn ||
-          price !== "0.00" ||
-          unit !== (kind === "service" ? "project" : "month") ||
-          vatRateBps !== 2200 ||
-          lines ||
-          stations ||
-          kiosks ||
-          users ||
-          demoDurationDays ||
-          labelEditorEnabled ||
-          publicApiEnabled ||
-          palletsEnabled,
+        nameRu ||
+        nameEn ||
+        descriptionRu ||
+        descriptionEn ||
+        price !== "0.00" ||
+        unit !== (kind === "service" ? "project" : "month") ||
+        vatRateBps !== 2200 ||
+        lines ||
+        stations ||
+        kiosks ||
+        users ||
+        demoDurationDays ||
+        labelEditorEnabled ||
+        publicApiEnabled ||
+        palletsEnabled,
       ),
     );
   }, [

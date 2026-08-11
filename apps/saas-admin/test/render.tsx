@@ -318,9 +318,12 @@ export function installCatalogApi({
         createCalls.push({ itemCode: createMatch[1]!, body: structuredClone(body) });
         const source = catalog.find((item) => item.catalogItemCode === createMatch[1]);
         const nextVersion =
-          Math.max(0, ...catalog
-            .filter((item) => item.catalogItemCode === createMatch[1])
-            .map((item) => item.version)) + 1;
+          Math.max(
+            0,
+            ...catalog
+              .filter((item) => item.catalogItemCode === createMatch[1])
+              .map((item) => item.version),
+          ) + 1;
         createSequence += 1;
         const created = {
           ...structuredClone(source ?? DRAFT_PLAN),

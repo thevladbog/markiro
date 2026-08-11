@@ -41,6 +41,7 @@
 ### Task 1: Standard/custom unit and VAT fields
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/catalog/CatalogUnitField.tsx`
 - Create: `apps/saas-admin/src/pages/catalog/CatalogVatField.tsx`
 - Modify: `apps/saas-admin/src/i18n/ru.json`
@@ -48,6 +49,7 @@
 - Test: `apps/saas-admin/test/catalog.test.tsx`
 
 **Interfaces:**
+
 - Produces: `CatalogUnitField({ kind, value, onChange, error? })` where `kind` is `CatalogVersionDto["kind"]` and `onChange(unit: string): void` always receives the actual API value.
 - Produces: `CatalogVatField({ value, onChange, error? })` where `value` is `number | null` basis points and `onChange(rate: number | null): void` emits exact basis points.
 - Produces: `formatVat(rateBps: number | null, included: boolean, t): string` for read-only details.
@@ -136,6 +138,7 @@ git commit -m "feat(saas-admin): add catalog unit and VAT fields"
 ### Task 2: Explicit shared add-on effect editor
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/catalog/AddonEffectsEditor.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogCreatePanel.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogVersionPanel.tsx`
@@ -144,6 +147,7 @@ git commit -m "feat(saas-admin): add catalog unit and VAT fields"
 - Test: `apps/saas-admin/test/catalog.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `AddonEffect` from `api.ts` and the existing effect translation keys.
 - Produces: `EditableAddonEffect = { rowId: string; key: AddonEffect["key"]; value: string }`.
 - Produces: `AddonEffectsEditor({ effects, onChange, errors?, disabled? })` with controlled immutable updates.
@@ -185,7 +189,7 @@ Render every effect with the themed `Select`, a numeric `Input` only for quota k
 Initialize creation state with one visible row:
 
 ```ts
-[{ rowId: crypto.randomUUID(), key: "stations", value: "1" }]
+[{ rowId: crypto.randomUUID(), key: "stations", value: "1" }];
 ```
 
 Build `addon.effects` only through `toAddonEffects`. Block submission when conversion validation reports a missing, duplicate, zero, negative, fractional, or greater-than-`2147483647` increment.
@@ -215,6 +219,7 @@ git commit -m "feat(saas-admin): expose add-on entitlement effects"
 ### Task 3: Complete create and draft commercial terms
 
 **Files:**
+
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogCreatePanel.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogVersionPanel.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/api.ts`
@@ -223,6 +228,7 @@ git commit -m "feat(saas-admin): expose add-on entitlement effects"
 - Test: `apps/saas-admin/test/render.tsx`
 
 **Interfaces:**
+
 - Consumes: `CatalogUnitField`, `CatalogVatField`, and `AddonEffectsEditor` from Tasks 1–2.
 - Produces: complete `CatalogCreateInput` values for plan, add-on, and service creation.
 - Produces: exact draft patches containing unit and VAT only when changed.
@@ -280,6 +286,7 @@ git commit -m "feat(saas-admin): edit complete catalog terms"
 ### Task 4: Clone an immutable version into the next draft
 
 **Files:**
+
 - Modify: `apps/saas-admin/src/pages/catalog/api.ts`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogVersionPanel.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogPage.tsx`
@@ -289,6 +296,7 @@ git commit -m "feat(saas-admin): edit complete catalog terms"
 - Test: `apps/saas-admin/test/render.tsx`
 
 **Interfaces:**
+
 - Produces: `catalogVersionToCreateInput(item: CatalogVersionDto): CatalogCreateInput` pure function that copies all writable fields without IDs, status, version number, or publication metadata.
 - Produces: `onVersionCreated(created: CatalogVersionDto): void` from the panel to `CatalogPage`.
 
@@ -317,7 +325,7 @@ Implement `catalogVersionToCreateInput` with a discriminated switch on `item.kin
 In `CatalogVersionPanel`, show `Новая версия` only when `canWrite && item.status !== "draft"`. Use `useMutation`, disable the action while pending, and call:
 
 ```ts
-createCatalogVersion(item.catalogItemCode, catalogVersionToCreateInput(item))
+createCatalogVersion(item.catalogItemCode, catalogVersionToCreateInput(item));
 ```
 
 On success, merge by returned `id` into `['platform', 'catalog']` and call `onVersionCreated(created)` so `CatalogPage` selects it.
@@ -345,6 +353,7 @@ git commit -m "feat(saas-admin): clone catalog versions into drafts"
 ### Task 5: Safe drawer dismissal and unsaved-change protection
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/catalog/CatalogDrawer.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogCreatePanel.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogVersionPanel.tsx`
@@ -355,6 +364,7 @@ git commit -m "feat(saas-admin): clone catalog versions into drafts"
 - Test: `apps/saas-admin/test/catalog.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `SidePanel` and `OverlayDismissReason` from `@markiro/ui`.
 - Consumes: `useNavigationGuard(dirty, busy)` from `layout/NavigationGuard.tsx`.
 - Produces: `CatalogDrawer({ title, description?, dirty, busy, onClose, children, footer, status })`.
@@ -412,10 +422,12 @@ git commit -m "fix(saas-admin): protect catalog drawer changes"
 ### Task 6: Final regression and live browser acceptance
 
 **Files:**
+
 - Modify if evidence requires a scoped fix: files from Tasks 1–5 only.
 - Update: `docs/superpowers/specs/2026-08-11-catalog-version-editor-design.md` status to `Implemented` only after all gates pass.
 
 **Interfaces:**
+
 - Consumes: the completed catalog editor and the already running local API/Vite stack.
 - Produces: a clean, committed branch with exact automated and browser evidence.
 
