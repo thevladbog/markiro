@@ -187,9 +187,8 @@ describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
     expect(inviteeUser?.emailVerified).toBe(true);
     expect(inviteeMember?.role).toBe("manager");
 
-    await setup.db.delete(schema.organization).where(eq(schema.organization.id, result.tenantId));
-    await setup.db.delete(schema.user).where(eq(schema.user.id, result.userId));
-    await setup.db.delete(schema.user).where(eq(schema.user.id, inviteeUser!.id));
+    // This smoke runs against a disposable database. Keep append-only audit
+    // history intact instead of deleting the tenant and its referenced users.
   }, 30_000);
 
   async function activeAvatar(userId: string): Promise<{ id: string; objectKey: string }> {
