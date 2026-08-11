@@ -64,6 +64,11 @@ resource "yandex_compute_instance" "app" {
   allow_stopping_for_update = true
   labels                    = var.labels
 
+  lifecycle {
+    # A newer image in the family must not replace the live MVP VM.
+    ignore_changes = [boot_disk[0].initialize_params[0].image_id]
+  }
+
   resources {
     cores         = 2
     memory        = 4
