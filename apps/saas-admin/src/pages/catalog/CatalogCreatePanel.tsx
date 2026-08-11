@@ -6,6 +6,8 @@ import { Alert, Button, Input } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { createCatalogVersion, type CatalogCreateInput, type CatalogVersionDto } from "./api.js";
+import { CatalogUnitField } from "./CatalogUnitField.js";
+import { CatalogVatField } from "./CatalogVatField.js";
 
 export function CatalogCreatePanel({
   kind,
@@ -22,9 +24,10 @@ export function CatalogCreatePanel({
   const [nameRu, setNameRu] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [unit, setUnit] = useState(
-    kind === "plan" ? "month" : kind === "service" ? "project" : "unit",
+    kind === "service" ? "project" : "month",
   );
   const [price, setPrice] = useState("0.00");
+  const [vatRateBps, setVatRateBps] = useState<number | null>(2200);
   const [lines, setLines] = useState("");
   const [stations, setStations] = useState("");
   const [kiosks, setKiosks] = useState("");
@@ -40,8 +43,8 @@ export function CatalogCreatePanel({
         billingMode: kind === "service" ? ("one_time" as const) : ("recurring" as const),
         billingPeriod: kind === "service" ? null : ("month" as const),
         unitPrice: price,
-        vatRateBps: 2000,
-        vatIncluded: true,
+        vatRateBps,
+        vatIncluded: vatRateBps !== null,
       };
       const input: CatalogCreateInput =
         kind === "plan"
@@ -128,12 +131,7 @@ export function CatalogCreatePanel({
               onChange={(event) => setNameEn(event.target.value)}
               required
             />
-            <Input
-              label={t("catalog.form.unit")}
-              value={unit}
-              onChange={(event) => setUnit(event.target.value)}
-              required
-            />
+            <CatalogUnitField kind={kind} value={unit} onChange={setUnit} />
             <Input
               label={t("catalog.form.unitPrice")}
               value={price}
@@ -141,6 +139,7 @@ export function CatalogCreatePanel({
               inputMode="decimal"
               required
             />
+            <CatalogVatField value={vatRateBps} onChange={setVatRateBps} />
           </div>
         </fieldset>
         {kind === "plan" ? (

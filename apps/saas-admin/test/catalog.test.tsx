@@ -67,6 +67,58 @@ describe("commercial catalog", () => {
     expect(api.items()).toHaveLength(1);
   });
 
+  it("submits a custom unit and included custom VAT for a service", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.selectOptions(screen.getByLabelText("Единица учёта"), "__other__");
+    await user.type(screen.getByLabelText("Другая единица"), "license");
+    await user.selectOptions(screen.getByLabelText("НДС"), "custom");
+    await user.type(screen.getByLabelText("Ставка НДС, %"), "12.34");
+    await user.type(screen.getByLabelText("Код позиции"), "service-license");
+    await user.type(screen.getByLabelText("Название на русском"), "Лицензия");
+    await user.type(screen.getByLabelText("Название на английском"), "License");
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+
+    expect(api.createCalls()[0]?.body).toMatchObject({
+      unit: "license",
+      vatRateBps: 1234,
+      vatIncluded: true,
+    });
+  });
+
+  it("submits without VAT explicitly", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.selectOptions(screen.getByLabelText("НДС"), "none");
+    await user.type(screen.getByLabelText("Код позиции"), "service-no-vat");
+    await user.type(screen.getByLabelText("Название на русском"), "Без НДС");
+    await user.type(screen.getByLabelText("Название на английском"), "No VAT");
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+
+    expect(api.createCalls()[0]?.body).toMatchObject({
+      vatRateBps: null,
+      vatIncluded: false,
+    });
+  });
+
+  it("keeps a legacy custom unit visible when editing a draft", async () => {
+    const legacyDraft = { ...structuredClone(DRAFT_PLAN), unit: "station" };
+    installCatalogApi({ items: [legacyDraft] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+
+    expect((screen.getByLabelText("Единица учёта") as HTMLSelectElement).value).toBe("__other__");
+    expect((screen.getByLabelText("Другая единица") as HTMLInputElement).value).toBe("station");
+  });
+
   it("opens a catalog version when clicking any cell in its row", async () => {
     installCatalogApi({ items: [PUBLISHED_PLAN] });
     renderSaasApp();

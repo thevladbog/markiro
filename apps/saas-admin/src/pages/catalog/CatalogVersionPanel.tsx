@@ -20,6 +20,8 @@ import {
   type CatalogVersionPatch,
   type PlanEntitlements,
 } from "./api.js";
+import { CatalogUnitField } from "./CatalogUnitField.js";
+import { CatalogVatField, formatVat } from "./CatalogVatField.js";
 
 interface CatalogFormValues {
   kind: CatalogVersionDto["kind"];
@@ -28,6 +30,8 @@ interface CatalogFormValues {
   nameEn: string;
   unit: string;
   unitPrice: string;
+  vatRateBps: number | null;
+  vatIncluded: boolean;
   maxLines: string;
   maxStations: string;
   maxKiosks: string;
@@ -86,6 +90,8 @@ const catalogFormSchema = z
     nameEn: z.string().trim().min(1, "required").max(300, "nameTooLong"),
     unit: z.string().trim().min(1, "required").max(100, "unitTooLong"),
     unitPrice: z.string(),
+    vatRateBps: z.number().nullable(),
+    vatIncluded: z.boolean(),
     maxLines: z.string(),
     maxStations: z.string(),
     maxKiosks: z.string(),
@@ -175,6 +181,8 @@ function formDefaults(item: CatalogVersionDto): CatalogFormValues {
     nameEn: item.nameEn,
     unit: item.unit,
     unitPrice: item.unitPrice ?? "",
+    vatRateBps: item.vatRateBps ?? null,
+    vatIncluded: item.vatIncluded ?? false,
     maxLines: String(item.plan?.maxLines ?? ""),
     maxStations: String(item.plan?.maxStations ?? ""),
     maxKiosks: String(item.plan?.maxKiosks ?? ""),
@@ -194,7 +202,11 @@ function patchForKind(item: CatalogVersionDto, values: CatalogFormValues): Catal
     nameEn: values.nameEn,
     unit: values.unit,
   };
-  if (item.unitPrice !== undefined) common.unitPrice = values.unitPrice;
+  if (item.unitPrice !== undefined) {
+    common.unitPrice = values.unitPrice;
+    common.vatRateBps = values.vatRateBps;
+    common.vatIncluded = values.vatRateBps !== null && values.vatIncluded;
+  }
   if (item.kind === "plan") {
     const plan: PlanEntitlements = {
       maxLines: numericOrNull(values.maxLines),
@@ -428,21 +440,42 @@ export function CatalogVersionPanel({
                     {...inputErrorProps(form.formState.errors.nameEn, t)}
                     {...form.register("nameEn")}
                   />
-                  <Input
-                    label={t("catalog.form.unit")}
-                    required
-                    {...inputErrorProps(form.formState.errors.unit, t)}
-                    {...form.register("unit")}
+                  <CatalogUnitField
+                    kind={item.kind}
+                    value={form.watch("unit")}
+                    onChange={(value) =>
+                      form.setValue("unit", value, { shouldDirty: true, shouldValidate: true })
+                    }
+                    {...(() => {
+                      const error = fieldError(form.formState.errors.unit, t);
+                      return error ? { error } : {};
+                    })()}
                   />
                   {!isSupport && item.unitPrice !== undefined ? (
-                    <Input
-                      label={t("catalog.form.unitPrice")}
-                      inputMode="decimal"
-                      mono
-                      required
-                      {...inputErrorProps(form.formState.errors.unitPrice, t)}
-                      {...form.register("unitPrice")}
-                    />
+                    <>
+                      <Input
+                        label={t("catalog.form.unitPrice")}
+                        inputMode="decimal"
+                        mono
+                        required
+                        {...inputErrorProps(form.formState.errors.unitPrice, t)}
+                        {...form.register("unitPrice")}
+                      />
+                      <CatalogVatField
+                        value={form.watch("vatRateBps")}
+                        onChange={(value) => {
+                          form.setValue("vatRateBps", value, {
+                            shouldDirty: true,
+                            shouldValidate: true,
+                          });
+                          form.setValue("vatIncluded", value !== null, { shouldDirty: true });
+                        }}
+                        {...(() => {
+                          const error = fieldError(form.formState.errors.vatRateBps, t);
+                          return error ? { error } : {};
+                        })()}
+                      />
+                    </>
                   ) : null}
                 </div>
               </fieldset>
@@ -620,6 +653,18 @@ export function CatalogVersionPanel({
                   <div>
                     <dt>{t("catalog.form.unitPrice")}</dt>
                     <dd className="mono">{t("catalog.money", { value: item.unitPrice })}</dd>
+                  </div>
+                ) : null}
+                {!isSupport && item.unitPrice !== undefined ? (
+                  <div>
+                    <dt>{t("catalog.form.vat")}</dt>
+                    <dd>
+                      {formatVat(
+                        item.vatRateBps ?? null,
+                        item.vatIncluded ?? false,
+                        (key, options) => (options ? t(key, options) : t(key)),
+                      )}
+                    </dd>
                   </div>
                 ) : null}
               </dl>

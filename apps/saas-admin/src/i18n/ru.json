@@ -206,6 +206,26 @@
       "publicApi": "Публичный API",
       "pallets": "Работа с палетами"
     },
+    "units": {
+      "month": "Месяц",
+      "year": "Год",
+      "unit": "Штука",
+      "hour": "Час",
+      "person": "Человек",
+      "person_day": "Человеко-день",
+      "day": "День",
+      "project": "Проект",
+      "session": "Сессия",
+      "package": "Пакет",
+      "other": "Другое"
+    },
+    "vat": {
+      "without": "Без НДС",
+      "option": "НДС {{rate}}%",
+      "customRate": "Другая ставка",
+      "included": "НДС {{rate}}% включён в цену",
+      "includedHint": "НДС включён в указанную цену"
+    },
     "effectNames": {
       "lines": "Линии",
       "stations": "Станции",
@@ -231,7 +251,10 @@
       "nameRu": "Название на русском",
       "nameEn": "Название на английском",
       "unit": "Единица учёта",
+      "customUnit": "Другая единица",
       "unitPrice": "Цена за единицу",
+      "vat": "НДС",
+      "vatRate": "Ставка НДС, %",
       "planLimits": "Лимиты и возможности тарифа",
       "maxLines": "Линии",
       "maxStations": "Станции",

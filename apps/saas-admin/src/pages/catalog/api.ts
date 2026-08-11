@@ -76,7 +76,7 @@ export type CatalogCreateInput = CatalogVersionPatch & {
   billingMode: "one_time" | "recurring";
   billingPeriod: "month" | "year" | null;
   unitPrice: string;
-  vatRateBps: number;
+  vatRateBps: number | null;
   vatIncluded: boolean;
   plan?: PlanEntitlements;
   addon?: { effects: AddonEffect[] };

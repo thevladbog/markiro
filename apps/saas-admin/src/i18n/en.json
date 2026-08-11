@@ -206,6 +206,26 @@
       "publicApi": "Public API",
       "pallets": "Pallet workflows"
     },
+    "units": {
+      "month": "Month",
+      "year": "Year",
+      "unit": "Unit",
+      "hour": "Hour",
+      "person": "Person",
+      "person_day": "Person-day",
+      "day": "Day",
+      "project": "Project",
+      "session": "Session",
+      "package": "Package",
+      "other": "Other"
+    },
+    "vat": {
+      "without": "Without VAT",
+      "option": "VAT {{rate}}%",
+      "customRate": "Custom rate",
+      "included": "VAT {{rate}}% included in price",
+      "includedHint": "VAT is included in the entered price"
+    },
     "effectNames": {
       "lines": "Lines",
       "stations": "Stations",
@@ -231,7 +251,10 @@
       "nameRu": "Russian name",
       "nameEn": "English name",
       "unit": "Billing unit",
+      "customUnit": "Custom unit",
       "unitPrice": "Unit price",
+      "vat": "VAT",
+      "vatRate": "VAT rate, %",
       "planLimits": "Plan limits and features",
       "maxLines": "Lines",
       "maxStations": "Stations",

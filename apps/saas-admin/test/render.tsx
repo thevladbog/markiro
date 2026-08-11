@@ -254,6 +254,11 @@ interface CatalogPatchCall {
   body: unknown;
 }
 
+interface CatalogCreateCall {
+  itemCode: string;
+  body: unknown;
+}
+
 export function installCatalogApi({
   me = ACCOUNTANT_ME,
   items = [DRAFT_PLAN, PUBLISHED_PLAN, ADDON, SERVICE],
@@ -276,6 +281,7 @@ export function installCatalogApi({
   let catalog: CatalogVersionDto[] = items.map((item) => structuredClone(item));
   let demoId = defaultDemoId;
   const patchCalls: CatalogPatchCall[] = [];
+  const createCalls: CatalogCreateCall[] = [];
 
   vi.stubGlobal(
     "fetch",
@@ -308,6 +314,7 @@ export function installCatalogApi({
         const status = createResponses.shift() ?? 201;
         if (status !== 201) return jsonResponse(status, { code: "catalog_item_conflict" });
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+        createCalls.push({ itemCode: createMatch[1]!, body: structuredClone(body) });
         const created = {
           ...structuredClone(DRAFT_PLAN),
           ...body,
@@ -366,6 +373,7 @@ export function installCatalogApi({
     items: () => catalog,
     defaultDemoId: () => demoId,
     patchCalls: () => structuredClone(patchCalls),
+    createCalls: () => structuredClone(createCalls),
   };
 }
 
