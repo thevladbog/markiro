@@ -384,23 +384,23 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         },
       );
 
-    const replaceActiveRelease = (target, operation) =>
-      system.run("ssh", [
+    const replaceActiveRelease = async (target) => {
+      const temporary = `/opt/markiro/active-release.${target.split("/").at(-1)}.new`;
+      await system.run("ssh", [...sshBase, "sudo", "rm", "-f", "--", temporary]);
+      await system.run("ssh", [...sshBase, "sudo", "ln", "-s", "--", target, temporary]);
+      await system.run("ssh", [
         ...sshBase,
         "sudo",
-        "/usr/bin/bash",
-        "-c",
-        'set -euo pipefail; temporary="$2.$$.new"; rm -f -- "$temporary"; ln -s -- "$1" "$temporary"; mv -Tf -- "$temporary" "$2"',
-        operation,
-        target,
+        "mv",
+        "-Tf",
+        "--",
+        temporary,
         "/opt/markiro/active-release",
       ]);
+    };
     const restoreActiveRelease = (candidate) =>
       candidate.previousTag
-        ? replaceActiveRelease(
-            `/opt/markiro/releases/${candidate.previousTag}`,
-            "markiro-restore-active-release",
-          )
+        ? replaceActiveRelease(`/opt/markiro/releases/${candidate.previousTag}`)
         : system.run("ssh", [...sshBase, "sudo", "rm", "-f", "--", "/opt/markiro/active-release"]);
 
     return await deployRelease(
@@ -466,7 +466,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
         },
         async finalize(candidate) {
           const healthy = JSON.parse(await remoteStage("finalize", candidate));
-          await replaceActiveRelease(releaseDirectory, "markiro-active-release");
+          await replaceActiveRelease(releaseDirectory);
           return healthy;
         },
         async rollback(candidate) {
