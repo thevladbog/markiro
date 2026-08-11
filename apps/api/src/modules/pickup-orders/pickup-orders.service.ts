@@ -17,6 +17,7 @@ import {
   inArray,
   isNull,
   lte,
+  max,
   ne,
   notExists,
   sql,
@@ -30,17 +31,27 @@ import { nextOrderNo } from "../../pickup/order-number";
 import { computeTotalPrice } from "../../pickup/total-price";
 import type { PickupSlipData } from "../../pickup/slip";
 import { OperatorsService } from "../operators/operators.service";
-import type {
-  CreateOrderDto,
-  CreateOrderResultDto,
-  KioskBootstrapDto,
-  ListPickupOrdersQueryDto,
-  ListPickupOrdersResponseDto,
-  OrderConflict,
-  PickupOrderDetailDto,
-  PickupOrderRowDto,
-  PickupOrderStatus,
-  ResolvePickupOrderDto,
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
+import {
+  issueOpaqueKioskAdmissionToken,
+  kioskAdmissionTokenHash,
+  kioskOrderPayloadDigest,
+  admissionSequenceWithinWindow,
+} from "./kiosk-admission-proof";
+import {
+  type CreateOrderAdmissionDto,
+  type CreateOrderAdmissionResultDto,
+  type CreateOrderDto,
+  type CreateOrderResultDto,
+  type KioskBootstrapDto,
+  type ListPickupOrdersQueryDto,
+  type ListPickupOrdersResponseDto,
+  type OrderConflict,
+  type PickupOrderDetailDto,
+  type PickupOrderRowDto,
+  type PickupOrderStatus,
+  type ResolvePickupOrderDto,
 } from "./dto";
 
 /** An item that survived KM validation, allowlist resolution and in-request dedup. */
@@ -123,6 +134,7 @@ export class PickupOrdersService {
   constructor(
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /**
@@ -152,6 +164,11 @@ export class PickupOrdersService {
         ),
       );
     if (existing) {
+      // The order is already durable, so any reservation left behind for this
+      // idempotency key has served its only purpose. This also repairs the
+      // crash window where the order committed but an older deployment did
+      // not consume its admission row.
+      await this.consumeKioskAdmission(this.db, tenantId, kioskId, dto.deviceSeq);
       return {
         orderNo: existing.orderNo,
         status: "pending",
@@ -169,7 +186,36 @@ export class PickupOrdersService {
     // minting itself a fresh daily allowance (see its doc comment). Hoisted
     // here rather than left at step 5 purely so the early-throw paths can
     // share it.
-    const when = this.resolveScanTime(dto.createdAt, kioskId);
+    const serverNow = new Date();
+    const access = await this.entitlements.resolveRecovery(tenantId, this.db, serverNow);
+    let when: Date;
+    if (access.access === "read_only") {
+      const claimedAt = dto.createdAt ? new Date(dto.createdAt) : null;
+      if (!access.subscription || !claimedAt || !dto.admissionProof) {
+        throw new SubscriptionReadOnlyException();
+      }
+      const [admission] = await this.db
+        .select({ claimedAt: schema.kioskOrderAdmissions.claimedAt })
+        .from(schema.kioskOrderAdmissions)
+        .where(
+          and(
+            eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+            eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+            eq(schema.kioskOrderAdmissions.deviceSeq, dto.deviceSeq),
+            // The admission row's tenant-scoped FK is the authoritative
+            // subscription binding. A later pending renewal may now be the
+            // resolver's read-only snapshot, but must not invalidate work
+            // reserved under the subscription that was active at issuance.
+            eq(schema.kioskOrderAdmissions.tokenHash, kioskAdmissionTokenHash(dto.admissionProof)),
+            eq(schema.kioskOrderAdmissions.payloadDigest, kioskOrderPayloadDigest(dto)),
+            eq(schema.kioskOrderAdmissions.claimedAt, claimedAt),
+          ),
+        );
+      if (!admission) throw new SubscriptionReadOnlyException();
+      when = admission.claimedAt;
+    } else {
+      when = this.resolveScanTime(dto.createdAt, kioskId, serverNow);
+    }
 
     // 2. Badge -> active employee (badge's revoked_at is null, employee active).
     //
@@ -205,18 +251,22 @@ export class PickupOrdersService {
       // is examined, so without this the codes the worker walked off with
       // leave no trace at all. Codes only: an item-less badge heartbeat
       // lost nothing and must not add noise here.
-      if (dto.items.length > 0) {
-        await this.recordScanRejection(this.db, {
-          tenantId,
-          kioskId,
-          employeeId: null,
-          badgeCode: await this.auditBadgeValue(tenantId, dto),
-          orderId: null,
-          deviceSeq: dto.deviceSeq,
-          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
-          scannedAt: when,
-        });
-      }
+      const badgeCode = dto.items.length > 0 ? await this.auditBadgeValue(tenantId, dto) : null;
+      await this.db.transaction(async (tx) => {
+        if (dto.items.length > 0) {
+          await this.recordScanRejection(tx, {
+            tenantId,
+            kioskId,
+            employeeId: null,
+            badgeCode,
+            orderId: null,
+            deviceSeq: dto.deviceSeq,
+            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
+            scannedAt: when,
+          });
+        }
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
+      });
       throw new UnprocessableEntityException("Unknown or inactive badge");
     }
 
@@ -234,18 +284,21 @@ export class PickupOrdersService {
       // this is `badgeCode: null` -- the mirror image of the badge case.
       // Rethrow unchanged: this call site must not alter the kiosk's
       // response, whichever of `resolveWriteoffReasonId`'s two messages fired.
-      if (dto.items.length > 0) {
-        await this.recordScanRejection(this.db, {
-          tenantId,
-          kioskId,
-          employeeId,
-          badgeCode: null,
-          orderId: null,
-          deviceSeq: dto.deviceSeq,
-          codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
-          scannedAt: when,
-        });
-      }
+      await this.db.transaction(async (tx) => {
+        if (dto.items.length > 0) {
+          await this.recordScanRejection(tx, {
+            tenantId,
+            kioskId,
+            employeeId,
+            badgeCode: null,
+            orderId: null,
+            deviceSeq: dto.deviceSeq,
+            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
+            scannedAt: when,
+          });
+        }
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
+      });
       throw error;
     }
 
@@ -291,6 +344,7 @@ export class PickupOrdersService {
           ),
         );
       if (twin) {
+        await this.consumeKioskAdmission(this.db, tenantId, kioskId, dto.deviceSeq);
         return {
           orderNo: twin.orderNo,
           status: "pending",
@@ -302,15 +356,18 @@ export class PickupOrdersService {
       // `pickup_scan_rejections` is that home: the cabinet would otherwise
       // never learn that a worker's ENTIRE scan session was refused -- the
       // same blind spot `syncConflicts` exists to close, in its worst case.
-      await this.recordScanRejection(this.db, {
-        tenantId,
-        kioskId,
-        employeeId,
-        badgeCode: null,
-        orderId: null,
-        deviceSeq: dto.deviceSeq,
-        codes: conflicts,
-        scannedAt: when,
+      await this.db.transaction(async (tx) => {
+        await this.recordScanRejection(tx, {
+          tenantId,
+          kioskId,
+          employeeId,
+          badgeCode: null,
+          orderId: null,
+          deviceSeq: dto.deviceSeq,
+          codes: conflicts,
+          scannedAt: when,
+        });
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
       });
       // Kept alongside the durable row: cheap, and ops alerting may key on it.
       this.logger.warn(
@@ -342,12 +399,131 @@ export class PickupOrdersService {
     };
   }
 
+  /**
+   * Reserves one exact order while write access is still live. The returned
+   * bearer is opaque and only its hash is persisted; retrying the same device
+   * sequence replaces the prior reservation instead of consuming a finite
+   * bootstrap window.
+   */
+  async attestKioskOrder(
+    tenantId: string,
+    kioskId: string,
+    dto: CreateOrderAdmissionDto,
+  ): Promise<CreateOrderAdmissionResultDto> {
+    return this.db.transaction(async (tx) => {
+      const claimedAt = new Date();
+      const requestedToken = dto.admissionNonce;
+      if (requestedToken) {
+        const [existing] = await tx
+          .select({ claimedAt: schema.kioskOrderAdmissions.claimedAt })
+          .from(schema.kioskOrderAdmissions)
+          .where(
+            and(
+              eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+              eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+              eq(schema.kioskOrderAdmissions.deviceSeq, dto.deviceSeq),
+              eq(schema.kioskOrderAdmissions.tokenHash, kioskAdmissionTokenHash(requestedToken)),
+              eq(schema.kioskOrderAdmissions.payloadDigest, kioskOrderPayloadDigest(dto)),
+            ),
+          );
+        if (existing) {
+          return { claimedAt: existing.claimedAt.toISOString(), admissionProof: requestedToken };
+        }
+      }
+      const access = await this.entitlements.assertWriteAccess(tenantId, tx, claimedAt);
+      const subscription = access.subscription;
+      if (!subscription?.endsAt || claimedAt >= subscription.endsAt) {
+        throw new ConflictException({ code: "kiosk_admission_not_required" });
+      }
+      const token = requestedToken ?? issueOpaqueKioskAdmissionToken();
+      // Serialize reservations for this authenticated device. One deviceSeq
+      // owns one constant-sized row (the request body itself is not stored),
+      // while distinct offline records are bounded by the per-kiosk outstanding
+      // cap: a kiosk that queued a genuine backlog can drain it record-by-record.
+      await tx
+        .select({ id: schema.kiosks.id })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
+        .for("update");
+      const durableRow = (
+        await tx
+          .select({ maxDurableSeq: max(schema.pickupOrders.deviceSeq) })
+          .from(schema.pickupOrders)
+          .where(
+            and(
+              eq(schema.pickupOrders.tenantId, tenantId),
+              eq(schema.pickupOrders.kioskId, kioskId),
+            ),
+          )
+      )[0];
+      const admissionRow = (
+        await tx
+          .select({
+            maxAdmissionSeq: max(schema.kioskOrderAdmissions.deviceSeq),
+            outstandingCount: sql<number>`count(*)`,
+          })
+          .from(schema.kioskOrderAdmissions)
+          .where(
+            and(
+              eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+              eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+            ),
+          )
+      )[0];
+      const durable = Math.max(
+        Number(durableRow?.maxDurableSeq ?? 0),
+        Number(admissionRow?.maxAdmissionSeq ?? 0),
+      );
+      if (
+        !admissionSequenceWithinWindow({
+          maxDurableSeq: durable,
+          outstandingCount: Number(admissionRow?.outstandingCount ?? 0),
+          candidate: dto.deviceSeq,
+        })
+      ) {
+        throw new ConflictException({ code: "kiosk_admission_sequence_gap" });
+      }
+      await tx
+        .insert(schema.kioskOrderAdmissions)
+        .values({
+          tenantId,
+          kioskId,
+          deviceSeq: dto.deviceSeq,
+          subscriptionId: subscription.id,
+          tokenHash: kioskAdmissionTokenHash(token),
+          payloadDigest: kioskOrderPayloadDigest(dto),
+          claimedAt,
+          notAfter: subscription.endsAt,
+        })
+        .onConflictDoUpdate({
+          target: [
+            schema.kioskOrderAdmissions.tenantId,
+            schema.kioskOrderAdmissions.kioskId,
+            schema.kioskOrderAdmissions.deviceSeq,
+          ],
+          set: {
+            subscriptionId: subscription.id,
+            tokenHash: kioskAdmissionTokenHash(token),
+            payloadDigest: kioskOrderPayloadDigest(dto),
+            claimedAt,
+            notAfter: subscription.endsAt,
+            issuedAt: claimedAt,
+          },
+        });
+      return { claimedAt: claimedAt.toISOString(), admissionProof: token };
+    });
+  }
+
   /** Offline-cache payload: everything a kiosk needs to operate without a round-trip per scan. */
   async bootstrap(tenantId: string, kioskId: string): Promise<KioskBootstrapDto> {
     // ONE reading of the clock for the whole payload, so `generatedAt` and the
     // UTC day the per-employee counts below are taken over can never straddle
     // a midnight between two `new Date()` calls.
     const generatedAt = new Date();
+    const resolvedSubscription = await this.db.transaction((tx) =>
+      this.entitlements.resolveRecovery(tenantId, tx, generatedAt),
+    );
+    const subscription = this.entitlements.snapshotFrom(resolvedSubscription);
 
     const [kiosk] = await this.db
       .select({
@@ -411,6 +587,7 @@ export class PickupOrdersService {
 
     return {
       generatedAt: generatedAt.toISOString(),
+      subscription,
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -1437,8 +1614,7 @@ export class PickupOrdersService {
    * is the conservative outcome — the order is kept, and the allowance it
    * spends is today's.
    */
-  private resolveScanTime(createdAt: string | undefined, kioskId: string): Date {
-    const now = new Date();
+  private resolveScanTime(createdAt: string | undefined, kioskId: string, now = new Date()): Date {
     if (!createdAt) return now;
 
     const claimed = new Date(createdAt);
@@ -1670,6 +1846,7 @@ export class PickupOrdersService {
               scannedAt: when,
             });
           }
+          await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
           return { orderNo: order.orderNo, itemCount: order.itemCount };
         });
       } catch (error) {
@@ -1685,6 +1862,7 @@ export class PickupOrdersService {
               ),
             );
           if (!winner) throw error; // shouldn't happen, but avoid looping forever
+          await this.consumeKioskAdmission(this.db, tenantId, kioskId, deviceSeq);
           return { orderNo: winner.orderNo, itemCount: winner.itemCount, conflicts: [] };
         }
 
@@ -1742,5 +1920,22 @@ export class PickupOrdersService {
     const code = err?.code || cause?.code;
     const constraint = err?.constraint || cause?.constraint;
     return code === "23505" && constraint === "pickup_orders_kiosk_device_seq_uq";
+  }
+
+  private async consumeKioskAdmission(
+    db: Pick<Db, "delete">,
+    tenantId: string,
+    kioskId: string,
+    deviceSeq: number,
+  ): Promise<void> {
+    await db
+      .delete(schema.kioskOrderAdmissions)
+      .where(
+        and(
+          eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+          eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+          eq(schema.kioskOrderAdmissions.deviceSeq, deviceSeq),
+        ),
+      );
   }
 }

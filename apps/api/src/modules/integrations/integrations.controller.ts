@@ -17,6 +17,11 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import type { IntegrationChannelType } from "./channel-registry";
@@ -39,7 +44,8 @@ import { IntegrationsService } from "./integrations.service";
 // (docs/device-key-surface.md).
 @ApiTags("integrations")
 @Controller("integrations")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class IntegrationsController {
   constructor(
     private readonly integrations: IntegrationsService,
@@ -62,6 +68,7 @@ export class IntegrationsController {
   }
 
   @Patch(":type")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async update(
     @Req() req: RequestWithTenant,
@@ -95,6 +102,7 @@ export class IntegrationsController {
   // Секрет отдаётся ровно здесь и ровно один раз — ChannelDetailDto его
   // никогда не несёт (docs/device-key-surface.md).
   @Post(":type/credentials")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE, CABINET_CAPABILITY.CREDENTIALS_MANAGE)
   async issueCredentials(
     @Req() req: RequestWithTenant,
@@ -123,6 +131,7 @@ export class IntegrationsController {
 
   @Post(":type/candidates/:id/link")
   @HttpCode(HttpStatus.OK)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async linkCandidate(
     @Req() req: RequestWithTenant,
@@ -135,6 +144,7 @@ export class IntegrationsController {
 
   @Post(":type/candidates/:id/hide")
   @HttpCode(HttpStatus.OK)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async hideCandidate(
     @Req() req: RequestWithTenant,
@@ -146,6 +156,7 @@ export class IntegrationsController {
 
   @Post(":type/candidates/:id/unhide")
   @HttpCode(HttpStatus.OK)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async unhideCandidate(
     @Req() req: RequestWithTenant,
@@ -168,11 +179,12 @@ export class IntegrationsController {
  */
 @ApiTags("products")
 @Controller("products")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 export class ProductExternalLinkController {
   constructor(private readonly integrations: IntegrationsService) {}
 
   @Delete(":id/external-link")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.INTEGRATIONS_WRITE)
   async unlink(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.integrations.unlinkProduct(req.tenantId!, id);

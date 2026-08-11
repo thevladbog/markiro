@@ -36,8 +36,10 @@ const expectedStationSqliteExport = {
   default: "./dist/station-sqlite.js",
 };
 const expectedRootValueExports = [
+  "PLATFORM_ROLES",
   "STATION_MIGRATIONS",
   "buildAuth",
+  "buildPlatformAuth",
   "createDb",
   "ensurePartitions",
   "partitionName",

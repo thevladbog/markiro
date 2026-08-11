@@ -256,6 +256,103 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     expect(await codesCount(tenantId, shiftId)).toBe(1);
   });
 
+  it("rejects reuse of a bound batch id with a changed normalized payload", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const batchId = `bound-changed-${randomUUID()}`;
+
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId, items: [item(shiftId, 1)] })
+      .expect(201);
+    const changed = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({ batchId, items: [item(shiftId, 2)] })
+      .expect(409);
+
+    expect(changed.body).toEqual({ code: "station_batch_mismatch" });
+  });
+
+  it("rejects reuse of a bound batch id by another authenticated station", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const firstKey = await deviceKey(agent);
+    const secondKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const body = {
+      batchId: `bound-device-${randomUUID()}`,
+      items: [item(shiftId, 1)],
+    };
+
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", firstKey)
+      .send(body)
+      .expect(201);
+    const foreignReplay = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", secondKey)
+      .send(body)
+      .expect(409);
+
+    expect(foreignReplay.body).toEqual({ code: "station_batch_mismatch" });
+  });
+
+  it("never lets the first post-0032 caller bind a grandfathered unbound batch", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const originalApiKey = await deviceKey(agent);
+    const foreignApiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const batchId = `grandfathered-${randomUUID()}`;
+    const originalPayload = item(shiftId, 1);
+    const foreignPayload = item(shiftId, 2);
+    await db.insert(schema.syncBatches).values({ tenantId, batchId });
+
+    const foreignFirst = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", foreignApiKey)
+      .set("x-station-capabilities", "station-recovery-v1")
+      .send({ batchId, items: [foreignPayload] })
+      .expect(201);
+    expect(foreignFirst.body).toEqual({
+      applied: 0,
+      alreadyApplied: true,
+      conflicts: [],
+    });
+
+    const originalLater = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", originalApiKey)
+      .set("x-station-capabilities", "station-recovery-v1")
+      .send({ batchId, items: [originalPayload] })
+      .expect(201);
+    expect(originalLater.body).toEqual({ applied: 0, alreadyApplied: true, conflicts: [] });
+
+    const [binding] = await db
+      .select({
+        terminalId: schema.syncBatches.terminalId,
+        payloadDigest: schema.syncBatches.payloadDigest,
+        result: schema.syncBatches.result,
+      })
+      .from(schema.syncBatches)
+      .where(
+        and(eq(schema.syncBatches.tenantId, tenantId), eq(schema.syncBatches.batchId, batchId)),
+      );
+    expect(binding).toEqual({ terminalId: null, payloadDigest: null, result: null });
+    expect(await scanEventsCount(tenantId, shiftId)).toBe(0);
+    const quarantined = await db.execute<{ count: string }>(sql`
+      select count(*)::text as count
+      from station_sync_quarantine
+      where tenant_id = ${tenantId} and batch_id = ${batchId}
+    `);
+    expect(quarantined.rows).toEqual([{ count: "0" }]);
+  });
+
   it("accepts late data for a closed shift and stamps it", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
@@ -865,7 +962,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
   it("is idempotent: replaying a batch changes neither ownership nor conflict count", async () => {
     const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    const tenantId = await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
     const secondApiKey = await deviceKey(agent);
     const shiftId = await openShift(agent);
@@ -887,11 +984,12 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         },
       ],
     };
-    await request(app!.getHttpServer())
+    const applied = await request(app!.getHttpServer())
       .post("/station/scans")
       .set("x-api-key", secondApiKey)
       .send(body)
       .expect(201);
+    const conflictsBeforeReplay = await conflictRows(tenantId, first.code!.codeHash);
     const replay = await request(app!.getHttpServer())
       .post("/station/scans")
       .set("x-api-key", secondApiKey)
@@ -899,7 +997,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       .expect(201);
 
     expect((replay.body as { alreadyApplied: boolean }).alreadyApplied).toBe(true);
-    expect((replay.body as { conflicts: unknown[] }).conflicts).toEqual([]);
+    expect((replay.body as { conflicts: unknown[] }).conflicts).toEqual(applied.body.conflicts);
+    expect(await conflictRows(tenantId, first.code!.codeHash)).toEqual(conflictsBeforeReplay);
   });
 
   /**

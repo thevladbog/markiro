@@ -1,4 +1,6 @@
 import type {
+  CreateOrderAdmissionDto,
+  CreateOrderAdmissionResultDto,
   CreateOrderDto,
   CreateOrderResultDto,
   KioskBootstrapDto,
@@ -7,10 +9,12 @@ import type {
 
 export class KioskApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly code: string | null;
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "KioskApiError";
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -139,17 +143,28 @@ export function isUnreachable(err: unknown): boolean {
   return GATEWAY_STATUSES.has(err.status);
 }
 
-async function readError(res: Response): Promise<string> {
+interface KioskErrorResponse {
+  message: string;
+  code: string | null;
+}
+
+async function readError(res: Response): Promise<KioskErrorResponse> {
   try {
     const body: unknown = await res.json();
-    if (body && typeof body === "object" && "message" in body) {
-      const message = (body as { message?: unknown }).message;
-      if (typeof message === "string") return message;
+    if (body && typeof body === "object") {
+      const response = body as { code?: unknown; message?: unknown };
+      return {
+        message:
+          typeof response.message === "string"
+            ? response.message
+            : res.statusText || `HTTP ${res.status}`,
+        code: typeof response.code === "string" ? response.code : null,
+      };
     }
   } catch {
     // non-JSON body
   }
-  return res.statusText || `HTTP ${res.status}`;
+  return { message: res.statusText || `HTTP ${res.status}`, code: null };
 }
 
 function baseOf(serverUrl: string): string {
@@ -198,7 +213,10 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
 
   const attempt = (async (): Promise<T> => {
     const res = await fetch(url, { ...init, signal: controller.signal });
-    if (!res.ok) throw new KioskApiError(res.status, await readError(res));
+    if (!res.ok) {
+      const error = await readError(res);
+      throw new KioskApiError(res.status, error.message, error.code);
+    }
     return (await res.json()) as T;
   })();
 
@@ -245,6 +263,7 @@ export async function pairKiosk(serverUrl: string, code: string): Promise<PairKi
 
 export interface KioskClient {
   bootstrap(): Promise<KioskBootstrapDto>;
+  attestOrder(body: CreateOrderAdmissionDto): Promise<CreateOrderAdmissionResultDto>;
   submitOrder(body: CreateOrderDto): Promise<CreateOrderResultDto>;
 }
 
@@ -261,7 +280,14 @@ export function createKioskClient(cfg: { token: string; serverUrl: string }): Ki
       `${base}${path}`,
       {
         method,
-        headers: { "Content-Type": "application/json", "x-kiosk-token": cfg.token },
+        headers: {
+          "Content-Type": "application/json",
+          "x-kiosk-token": cfg.token,
+          // Opts into the coded 403 used only by a worker that can quarantine
+          // subscription-expired records without treating every 403 as final.
+          // Older servers ignore unknown request headers.
+          "x-kiosk-capabilities": "subscription-recovery-v1",
+        },
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       },
       timeoutMs,
@@ -272,6 +298,13 @@ export function createKioskClient(cfg: { token: string; serverUrl: string }): Ki
     // Every authenticated call bumps `kiosks.last_seen_at` server-side, so a
     // periodic bootstrap doubles as the heartbeat — there is no separate one.
     bootstrap: () => request<KioskBootstrapDto>("GET", "/kiosk/bootstrap", BOOTSTRAP_TIMEOUT_MS),
+    attestOrder: (body) =>
+      request<CreateOrderAdmissionResultDto>(
+        "POST",
+        "/kiosk/order-admissions",
+        SUBMIT_TIMEOUT_MS,
+        body,
+      ),
     submitOrder: (body) =>
       request<CreateOrderResultDto>("POST", "/kiosk/orders", SUBMIT_TIMEOUT_MS, body),
   };

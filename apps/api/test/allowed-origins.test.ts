@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   kioskAllowedOrigins,
   loadEnv,
+  platformAllowedOrigins,
   sessionAllowedOrigins,
   stationAllowedOrigins,
 } from "../src/env";
@@ -17,9 +18,64 @@ const BASE = {
   DATABASE_URL: "postgres://u:p@localhost:5432/db",
   BETTER_AUTH_SECRET: "0123456789abcdef0123",
   BETTER_AUTH_URL: "http://localhost:3000",
+  PLATFORM_AUTH_SECRET: "0123456789abcdef0123456789abcdef",
+  PLATFORM_AUTH_URL: "http://localhost:3000",
+  SAAS_ADMIN_ORIGIN: "https://saas.example.ru",
   ADMIN_ORIGIN: "https://admin.example.ru",
   PAIRING_CODE_PEPPER: "0123456789abcdef0123",
 } satisfies NodeJS.ProcessEnv;
+
+describe("loadEnv durable kiosk order admission", () => {
+  it("does not expose a rotating proof keyring or a proofless auto-apply sunset", () => {
+    const env = loadEnv({
+      ...BASE,
+      KIOSK_ADMISSION_PROOF_SECRET: "retired-secret-must-not-be-runtime-config",
+      KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET: "retired-previous-secret",
+      KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL: "2099-01-01T00:00:00.000Z",
+    });
+
+    expect(env).not.toHaveProperty("KIOSK_ADMISSION_PROOF_SECRET");
+    expect(env).not.toHaveProperty("KIOSK_ADMISSION_PROOF_PREVIOUS_SECRET");
+    expect(env).not.toHaveProperty("KIOSK_LEGACY_PROOFLESS_RECOVERY_UNTIL");
+  });
+});
+
+describe("platformAllowedOrigins", () => {
+  it("grants only the exact SaaS admin origin and never the customer admin origin", () => {
+    const env = loadEnv(BASE);
+    expect(platformAllowedOrigins(env)).toEqual(["https://saas.example.ru"]);
+    expect(sessionAllowedOrigins(env)).toEqual(["https://admin.example.ru"]);
+  });
+
+  it("canonicalizes the SaaS admin origin but rejects sibling and suffix origins", () => {
+    const env = loadEnv({
+      ...BASE,
+      SAAS_ADMIN_ORIGIN: "https://SAAS.Example.RU:8443/app?a=1#x",
+    });
+    expect(platformAllowedOrigins(env)).toEqual(["https://saas.example.ru:8443"]);
+    expect(platformAllowedOrigins(env)).not.toContain("https://other.example.ru:8443");
+    expect(platformAllowedOrigins(env)).not.toContain("https://saas.example.ru.evil.test:8443");
+  });
+
+  it("requires an independent platform secret of at least 32 characters", () => {
+    expect(() => loadEnv({ ...BASE, PLATFORM_AUTH_SECRET: "short" })).toThrow();
+    expect(() => loadEnv({ ...BASE, PLATFORM_AUTH_SECRET: undefined })).toThrow();
+  });
+
+  it("rejects a platform secret shared with customer authentication", () => {
+    expect(() => loadEnv({ ...BASE, BETTER_AUTH_SECRET: BASE.PLATFORM_AUTH_SECRET })).toThrow();
+  });
+
+  it("rejects customer and platform applications that canonicalize to one origin", () => {
+    expect(() =>
+      loadEnv({
+        ...BASE,
+        ADMIN_ORIGIN: "https://shared.example.ru/customer",
+        SAAS_ADMIN_ORIGIN: "https://SHARED.example.ru/platform?source=test",
+      }),
+    ).toThrow();
+  });
+});
 
 describe("kioskAllowedOrigins", () => {
   it("is just the admin origin when KIOSK_ORIGIN is unset", () => {

@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organization, user } from "./auth.js";
+import { platformUsers } from "./platform-auth.js";
 
 const bytea = customType<{ data: Buffer }>({
   dataType() {
@@ -35,6 +36,7 @@ export const emailDeliveries = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").references(() => organization.id, { onDelete: "cascade" }),
     userId: text("user_id").references(() => user.id, { onDelete: "cascade" }),
+    platformUserId: text("platform_user_id").references(() => platformUsers.id),
     recipient: text("recipient").notNull(),
     kind: text("kind").notNull(),
     sourceId: text("source_id"),
@@ -57,10 +59,11 @@ export const emailDeliveries = pgTable(
   (table) => [
     check(
       "email_deliveries_scope_xor",
-      sql`(${table.tenantId} is null) <> (${table.userId} is null)`,
+      sql`num_nonnulls(${table.tenantId}, ${table.userId}, ${table.platformUserId}) = 1`,
     ),
     index("email_deliveries_tenant_status_idx").on(table.tenantId, table.status),
     index("email_deliveries_user_status_idx").on(table.userId, table.status),
+    index("email_deliveries_platform_user_status_idx").on(table.platformUserId, table.status),
   ],
 );
 

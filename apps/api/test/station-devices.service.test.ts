@@ -5,6 +5,22 @@ import {
   stationDeviceLifecycle,
 } from "../src/modules/station-devices/dto";
 import { StationDevicesService } from "../src/modules/station-devices/station-devices.service";
+import type { EntitlementsService } from "../src/subscriptions/entitlements.service";
+
+const bypassEntitlements = {
+  withQuotaSlot: async (
+    _tx: unknown,
+    _tenantId: string,
+    _key: string,
+    create: () => Promise<unknown>,
+  ) => create(),
+  withQuotaLock: async (
+    _tx: unknown,
+    _tenantId: string,
+    _key: string,
+    action: () => Promise<unknown>,
+  ) => action(),
+} as unknown as EntitlementsService;
 
 describe("StationDevicesService lifecycle", () => {
   it("pre-creates an awaiting station without minting or returning an API key", async () => {
@@ -27,8 +43,9 @@ describe("StationDevicesService lifecycle", () => {
     });
     const db = {
       insert: () => ({ values: insertValues }),
+      transaction: (callback: (tx: Db) => Promise<unknown>) => callback(db as unknown as Db),
     } as unknown as Db;
-    const service = new StationDevicesService(db);
+    const service = new StationDevicesService(db, bypassEntitlements);
 
     expect("create" in service).toBe(true);
     const result = await service.create("tenant-1", { name: "Packing station", lineId: null });
@@ -96,7 +113,7 @@ describe("StationDevicesService lifecycle", () => {
       }),
       update: () => ({ set: updateSet }),
     } as unknown as Db;
-    const service = new StationDevicesService(db);
+    const service = new StationDevicesService(db, bypassEntitlements);
 
     expect("update" in service).toBe(true);
     const result = await service.update("tenant-1", "device-1", { lineId: "line-2" });
@@ -153,7 +170,7 @@ describe("StationDevicesService lifecycle", () => {
       },
       transaction: async (callback: (transaction: typeof tx) => Promise<void>) => callback(tx),
     } as unknown as Db;
-    const service = new StationDevicesService(db);
+    const service = new StationDevicesService(db, bypassEntitlements);
 
     await service.revoke("tenant-1", "device-1");
 
@@ -201,7 +218,7 @@ describe("StationDevicesService lifecycle", () => {
       transaction: async (callback: (transaction: typeof tx) => Promise<void>) => callback(tx),
     } as unknown as Db;
 
-    await new StationDevicesService(db).revoke("tenant-1", "device-1");
+    await new StationDevicesService(db, bypassEntitlements).revoke("tenant-1", "device-1");
 
     expect(updateCalls).toEqual([schema.stationDevices]);
   });

@@ -6,6 +6,7 @@ import { and, eq } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { schema } from "@markiro/db";
+import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
 import { AppModule } from "../src/app.module";
 import { provisionTenantOwner } from "../src/cli/provision-tenant-owner";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -23,6 +24,7 @@ describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
   let setup: AuthSetup;
   let app: INestApplication;
   let jobs: MailJobsService;
+  let defaultDemo: DefaultDemoSettingFixture;
 
   beforeAll(async () => {
     env = loadEnv();
@@ -38,10 +40,53 @@ describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
     await listenOnLoopback(app);
     jobs = app.get(MailJobsService);
     await app.get(ObjectStorageService).ensureBucket();
+
+    defaultDemo = new DefaultDemoSettingFixture(setup.db);
+    await defaultDemo.capture();
+    const itemId = crypto.randomUUID();
+    const versionId = crypto.randomUUID();
+    await setup.db.insert(schema.catalogItems).values({
+      id: itemId,
+      code: `infra-demo-${crypto.randomUUID()}`,
+      nameRu: "Демо",
+      nameEn: "Demo",
+      kind: "plan",
+    });
+    await setup.db.insert(schema.catalogItemVersions).values({
+      id: versionId,
+      catalogItemId: itemId,
+      kind: "plan",
+      version: 1,
+      nameRu: "Демо",
+      nameEn: "Demo",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "0.00",
+      vatIncluded: true,
+      status: "draft",
+    });
+    await setup.db.insert(schema.planEntitlements).values({
+      catalogVersionId: versionId,
+      maxLines: 1,
+      maxStations: 1,
+      maxKiosks: 1,
+      maxCabinetUsers: 2,
+      demoDurationDays: 14,
+    });
+    await setup.db
+      .update(schema.catalogItemVersions)
+      .set({ status: "published", publishedAt: new Date() })
+      .where(eq(schema.catalogItemVersions.id, versionId));
+    await defaultDemo.install(versionId);
   });
 
   afterAll(async () => {
-    await app?.close();
+    try {
+      await defaultDemo?.restore();
+    } finally {
+      await app?.close();
+    }
   });
 
   it("activates an owner, follows an invitation, and manages private avatars", async () => {
@@ -142,9 +187,8 @@ describe.skipIf(!ready)("local Mailpit and MinIO product lifecycle", () => {
     expect(inviteeUser?.emailVerified).toBe(true);
     expect(inviteeMember?.role).toBe("manager");
 
-    await setup.db.delete(schema.organization).where(eq(schema.organization.id, result.tenantId));
-    await setup.db.delete(schema.user).where(eq(schema.user.id, result.userId));
-    await setup.db.delete(schema.user).where(eq(schema.user.id, inviteeUser!.id));
+    // This smoke runs against a disposable database. Keep append-only audit
+    // history intact instead of deleting the tenant and its referenced users.
   }, 30_000);
 
   async function activeAvatar(userId: string): Promise<{ id: string; objectKey: string }> {

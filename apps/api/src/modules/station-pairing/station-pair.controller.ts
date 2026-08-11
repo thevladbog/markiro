@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, Ip, Post, Req, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Header, Headers, Ip, Post, Req, UseGuards } from "@nestjs/common";
 import { ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
@@ -10,7 +10,10 @@ import {
   type StationIdentityResultDto,
 } from "./dto";
 import { StationPairingService } from "./station-pairing.service";
-import { ApiStationPairSecretResponse } from "../device-pairing/secret-response.openapi";
+import {
+  ApiStationPairSecretResponse,
+  subscriptionAccessSchema,
+} from "../device-pairing/secret-response.openapi";
 
 /**
  * `pair` is deliberately unauthenticated because an unpaired station has no
@@ -52,11 +55,22 @@ export class StationPairController {
             },
           },
         },
+        subscription: {
+          ...subscriptionAccessSchema,
+          description: "Present only when the client sends subscription-state-v1.",
+        },
       },
     },
   })
-  identity(@Req() req: RequestWithTenant): Promise<StationIdentityResultDto> {
-    return this.pairing.identity(req.tenantId!, req.deviceId!);
+  identity(
+    @Req() req: RequestWithTenant,
+    @Headers("x-station-capabilities") capabilities: string | undefined,
+  ): Promise<StationIdentityResultDto> {
+    return this.pairing.identity(
+      req.tenantId!,
+      req.deviceId!,
+      hasCapability(capabilities, "subscription-state-v1"),
+    );
   }
 
   @Post("pair")
@@ -65,7 +79,12 @@ export class StationPairController {
   async pair(
     @Body(new ZodValidationPipe(pairStationSchema)) body: PairStationDto,
     @Ip() ip: string,
+    @Headers("x-station-capabilities") capabilities: string | undefined,
   ): Promise<PairStationResultDto> {
-    return this.pairing.redeem(body.code, ip);
+    return this.pairing.redeem(body.code, ip, hasCapability(capabilities, "subscription-state-v1"));
   }
+}
+
+function hasCapability(value: string | undefined, capability: string): boolean {
+  return value?.split(",").some((candidate) => candidate.trim() === capability) ?? false;
 }

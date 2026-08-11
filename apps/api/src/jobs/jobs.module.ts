@@ -22,6 +22,11 @@ import {
 import { MailModule } from "../modules/mail/mail.module";
 import { MailRetentionService } from "../modules/mail/mail-retention.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
+import {
+  MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
+  MATERIALIZE_SUBSCRIPTION_STATUSES_QUEUE,
+  SubscriptionStatusJob,
+} from "../subscriptions/subscription-status.job";
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
 
@@ -79,7 +84,7 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), one delivery worker, and eight schedules on it:
+ * database as the app), one delivery worker, and nine schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -99,6 +104,8 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
  *  - dispatches the transactional email outbox every minute, reconciles lost
  *    or stale delivery jobs every five minutes, and applies mail retention
  *    daily at 02:30 UTC.
+ *  - materializes subscription and add-on activation/expiry reporting status
+ *    every minute while request-time entitlement checks remain authoritative.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -121,6 +128,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly exchangeSessions: ExchangeSessionService,
     private readonly mailJobs: MailJobsService,
     private readonly mailRetention: MailRetentionService,
+    private readonly subscriptionStatus: SubscriptionStatusJob,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -228,7 +236,18 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
-      // Also run all eight maintenance paths once immediately at boot rather
+      await boss.createQueue(MATERIALIZE_SUBSCRIPTION_STATUSES_QUEUE);
+      await boss.schedule(
+        MATERIALIZE_SUBSCRIPTION_STATUSES_QUEUE,
+        MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
+      );
+      this.workerIds.push(
+        await boss.work(MATERIALIZE_SUBSCRIPTION_STATUSES_QUEUE, async () => {
+          await this.subscriptionStatus.run();
+        }),
+      );
+
+      // Also run all nine maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
       await this.runPruneKioskPairAttempts();
@@ -238,6 +257,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.mailJobs.dispatchOutbox(this.mailQueue(boss));
       await this.mailJobs.reconcile(this.mailQueue(boss));
       await this.mailRetention.prune();
+      await this.subscriptionStatus.run();
       this.started = true;
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
@@ -269,7 +289,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 9 ||
+      this.workerIds.length !== 10 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {

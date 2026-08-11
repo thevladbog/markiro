@@ -1,5 +1,6 @@
 name: CI
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -31,6 +32,9 @@ jobs:
       BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
       BETTER_AUTH_URL: http://localhost:3000
       ADMIN_ORIGIN: http://localhost:5173
+      PLATFORM_AUTH_SECRET: insecure-dummy-ci-platform-auth-placeholder-not-a-secret
+      PLATFORM_AUTH_URL: http://localhost:3000
+      SAAS_ADMIN_ORIGIN: http://localhost:5473
       KIOSK_ORIGIN: http://localhost:5373
       PAIRING_CODE_PEPPER: insecure-dummy-ci-pairing-pepper-not-a-secret
     steps:
@@ -57,6 +61,9 @@ jobs:
       BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
       BETTER_AUTH_URL: http://127.0.0.1:3000
       ADMIN_ORIGIN: http://127.0.0.1:5173
+      PLATFORM_AUTH_SECRET: insecure-dummy-ci-platform-auth-placeholder-not-a-secret
+      PLATFORM_AUTH_URL: http://127.0.0.1:3000
+      SAAS_ADMIN_ORIGIN: http://127.0.0.1:5473
       PAIRING_CODE_PEPPER: insecure-dummy-ci-pairing-pepper-not-a-secret
       SMTP_HOST: 127.0.0.1
       SMTP_PORT: "1025"
@@ -89,11 +96,14 @@ jobs:
       - run: pnpm --filter @markiro/db db:migrate
       - name: Build API workspace dependencies
         run: pnpm turbo build --filter '@markiro/api...'
-      - name: Run real SMTP and object-storage smoke
+      - name: Run tenant provisioning and activation tests
         run: >-
           pnpm --filter @markiro/api exec vitest run
           test/provision-tenant-owner.e2e.test.ts
           test/tenant-owner-activation.e2e.test.ts
+      - name: Run real SMTP and object-storage smoke
+        run: >-
+          pnpm --filter @markiro/api exec vitest run
           test/local-infrastructure.e2e.test.ts
       - name: Show infrastructure logs on failure
         if: failure()
@@ -145,6 +155,7 @@ jobs:
         run: |
           set -euo pipefail
           better_auth_secret="$(openssl rand -base64 48)"
+          platform_auth_secret="$(openssl rand -base64 48)"
           pairing_code_pepper="$(openssl rand -hex 32)"
           mail_payload_key="$(openssl rand -base64 32)"
           smtp_user="markiro-ci"
@@ -152,6 +163,7 @@ jobs:
           database_url="postgresql://markiro:markiro@postgres:5432/markiro"
           for credential in \
             "$better_auth_secret" \
+            "$platform_auth_secret" \
             "$pairing_code_pepper" \
             "$mail_payload_key" \
             "$smtp_user" \
@@ -167,6 +179,9 @@ jobs:
             printf '%s\n' "BETTER_AUTH_SECRET=$better_auth_secret"
             printf '%s\n' "BETTER_AUTH_URL=https://localhost:18443"
             printf '%s\n' "ADMIN_ORIGIN=https://localhost:18443"
+            printf '%s\n' "PLATFORM_AUTH_SECRET=$platform_auth_secret"
+            printf '%s\n' "PLATFORM_AUTH_URL=https://localhost:18443"
+            printf '%s\n' "SAAS_ADMIN_ORIGIN=https://saas-admin.localhost:18443"
             printf '%s\n' "KIOSK_ORIGIN=https://kiosk.localhost:18443"
             printf '%s\n' "PAIRING_CODE_PEPPER=$pairing_code_pepper"
             printf '%s\n' "SMTP_HOST=mailpit"

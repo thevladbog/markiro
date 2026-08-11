@@ -30,10 +30,16 @@ import { StationDevicesService } from "./station-devices.service";
 import { type IssueStationPairingCodeResultDto } from "../station-pairing/dto";
 import { StationPairingService } from "../station-pairing/station-pairing.service";
 import { ApiPairingCodeSecretResponse } from "../device-pairing/secret-response.openapi";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 
 @ApiTags("station-devices")
 @Controller("station-devices")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
 export class StationDevicesController {
   constructor(
@@ -48,6 +54,7 @@ export class StationDevicesController {
   }
 
   @Post()
+  @RequireSubscriptionWrite()
   async create(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createStationDeviceSchema)) body: CreateStationDeviceDto,
@@ -63,6 +70,7 @@ export class StationDevicesController {
   }
 
   @Patch(":id")
+  @RequireSubscriptionWrite()
   async update(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -80,6 +88,7 @@ export class StationDevicesController {
 
   @Delete(":id")
   @HttpCode(204)
+  @AllowSubscriptionReadOnly("security")
   async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     try {
       await this.service.revoke(req.tenantId!, id);
@@ -91,6 +100,7 @@ export class StationDevicesController {
   }
 
   @Post(":id/pairing-code")
+  @RequireSubscriptionWrite()
   @Header("Cache-Control", "no-store")
   @ApiPairingCodeSecretResponse()
   async issuePairingCode(

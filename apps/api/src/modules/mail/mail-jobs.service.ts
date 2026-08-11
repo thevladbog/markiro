@@ -19,7 +19,7 @@ export interface MailPgClient {
     text: string,
     values?: readonly unknown[],
   ): Promise<MailQueryResult<Row>>;
-  release(): void;
+  release(error?: Error | boolean): void;
 }
 
 export interface MailPgPool {

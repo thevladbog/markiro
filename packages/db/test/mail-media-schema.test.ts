@@ -4,12 +4,13 @@ import { describe, expect, it } from "vitest";
 import { schema } from "../src/index.js";
 
 describe("mail and media schema", () => {
-  it("requires every delivery to have exactly one tenant or user scope", () => {
+  it("requires every delivery to have exactly one tenant, customer user, or platform user scope", () => {
     expect(getTableName(schema.emailDeliveries)).toBe("email_deliveries");
     expect(Object.keys(schema.emailDeliveries)).toEqual(
       expect.arrayContaining([
         "tenantId",
         "userId",
+        "platformUserId",
         "recipient",
         "kind",
         "status",
@@ -23,6 +24,11 @@ describe("mail and media schema", () => {
     expect(
       getTableConfig(schema.emailDeliveries).checks.map((constraint) => constraint.name),
     ).toContain("email_deliveries_scope_xor");
+    const platformUserForeignKey = getTableConfig(schema.emailDeliveries).foreignKeys.find(
+      (foreignKey) =>
+        foreignKey.getName() === "email_deliveries_platform_user_id_platform_users_id_fk",
+    );
+    expect(getTableName(platformUserForeignKey!.reference().foreignTable)).toBe("platform_users");
   });
 
   it("gives every logical delivery one durable outbox row", () => {

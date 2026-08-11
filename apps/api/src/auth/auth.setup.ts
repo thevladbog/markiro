@@ -28,6 +28,8 @@ export function setupAuth(env: Env): DbConnection & { auth: Auth } {
     // KIOSK_ORIGIN is NOT here: the kiosk calls no /api/auth/* route at all
     // (it authenticates with a device token), so trusting it would only widen
     // what an attacker on that origin can do with an admin's session.
+    // SAAS_ADMIN_ORIGIN is also deliberately absent: platform sessions use a
+    // separate Better Auth instance, cookie prefix, and trusted-origin list.
     trustedOrigins: sessionAllowedOrigins(env),
     sendResetPassword: async ({ user, url }) => {
       await db.transaction((tx) =>

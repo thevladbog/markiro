@@ -15,6 +15,7 @@ import { excludeExchangeRoute } from "../src/modules/exchange/exchange.module";
 import { IMPORT_BATCH_SIZE } from "../src/modules/exchange/exchange.controller";
 import { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import { hashDeviceToken } from "../src/pickup/device-token";
+import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
 
 /** A minimal `<Каталог><Товары><Товар>` document -- one item, one name. */
 function catalogXmlFor(guid: string, name: string): string {
@@ -64,11 +65,11 @@ describe("mode=import", () => {
   let tenantId: string;
 
   beforeAll(async () => {
-    const env = loadEnv();
+    const env = loadEnv({ ...process.env, SUBSCRIPTION_ENFORCEMENT_MODE: "managed_only" });
     const setup: AuthSetup = setupAuth(env);
     db = setup.db;
     const ref = await Test.createTestingModule({
-      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
     }).compile();
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -134,6 +135,11 @@ describe("mode=import", () => {
   }
 
   it("применяет цены сопоставленным товарам и отвечает success", async () => {
+    // This suite deliberately pins the legacy-tenant rollout mode: an
+    // unmanaged tenant remains writable only under `managed_only`.
+    expect(
+      loadEnv({ ...process.env, SUBSCRIPTION_ENFORCEMENT_MODE: "managed_only" }),
+    ).toHaveProperty("SUBSCRIPTION_ENFORCEMENT_MODE", "managed_only");
     // товар с external_ref = guid-1 создан в beforeAll
     const auth = await checkauth();
     await uploadFile(auth, "offers.xml", offersXmlFor("guid-1", "77.50"));
@@ -500,5 +506,122 @@ ${guids.map((guid) => `  <Товар><Ид>${guid}</Ид><Наименовани
     // `ExchangeExceptionFilter.INTERNAL_ERROR_RAW` already holds for its own
     // unhandled-exception catch-all.
     expect(event?.details).toMatchObject({ raw: "failure\ninvalid file" });
+  });
+
+  it("refuses an expired tenant before applying any CommerceML work and journals a stable non-leaking failure", async () => {
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations: null,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+    });
+    const managed = await createManagedSubscription(db, {
+      tenantId,
+      planVersionId,
+      startsAt: new Date(Date.now() - 86_400_000),
+      endsAt: new Date(Date.now() + 86_400_000),
+    });
+    const activeAuth = await checkauth();
+    await uploadFile(activeAuth, "active-offers.xml", offersXmlFor("guid-1", "888.00"));
+    expect(
+      (
+        await request(app!.getHttpServer())
+          .get("/1c_exchange?type=catalog&mode=import&filename=active-offers.xml")
+          .set("Cookie", activeAuth.cookie)
+          .expect(200)
+      ).text,
+    ).toBe("success");
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ endsAt: new Date(Date.now() - 60_000) })
+      .where(eq(schema.tenantSubscriptions.id, managed.subscriptionId));
+    const [before] = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    const auth = await checkauth();
+    await uploadFile(auth, "expired-offers.xml", offersXmlFor("guid-1", "999.00"));
+
+    const response = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=expired-offers.xml")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(response.text).toBe("failure\nsubscription write unavailable");
+    expect(response.text).not.toMatch(/plan|price|tenant|expired|database/i);
+
+    const query = await request(app!.getHttpServer())
+      .get("/1c_exchange?mode=query")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(query.headers["content-type"]).toContain("application/xml");
+    const success = await request(app!.getHttpServer())
+      .post("/1c_exchange?mode=success")
+      .set("Cookie", auth.cookie)
+      .expect(200);
+    expect(success.text).toBe("success");
+    const [after] = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(after).toEqual(before);
+
+    const journal = await agent.get("/integrations/commerceml/journal").expect(200);
+    const denied = journal.body.sessions
+      .flatMap((session: { events: unknown[] }) => session.events)
+      .find((event: { message?: string }) => event.message === "import: subscription write denied");
+    expect(denied).toMatchObject({
+      outcome: "error",
+      details: { filename: "expired-offers.xml", raw: "failure\nsubscription write unavailable" },
+    });
+
+    const brokenItemId = randomUUID();
+    const brokenPlanVersionId = randomUUID();
+    await db.insert(schema.catalogItems).values({
+      id: brokenItemId,
+      code: `broken-commerce-${brokenItemId}`,
+      nameRu: "Broken CommerceML plan",
+      nameEn: "Broken CommerceML plan",
+      kind: "plan",
+    });
+    await db.insert(schema.catalogItemVersions).values({
+      id: brokenPlanVersionId,
+      catalogItemId: brokenItemId,
+      kind: "plan",
+      version: 1,
+      status: "published",
+      publishedAt: new Date(),
+      nameRu: "Broken CommerceML plan",
+      nameEn: "Broken CommerceML plan",
+      unit: "month",
+      billingMode: "recurring",
+      billingPeriod: "month",
+      unitPrice: "1000.00",
+      vatRate: "20.00",
+      vatIncluded: true,
+    });
+    await db
+      .update(schema.tenantSubscriptions)
+      .set({ status: "superseded" })
+      .where(eq(schema.tenantSubscriptions.id, managed.subscriptionId));
+    await db.insert(schema.tenantSubscriptions).values({
+      tenantId,
+      planVersionId: brokenPlanVersionId,
+      status: "active",
+      startsAt: new Date(Date.now() - 60_000),
+      endsAt: new Date(Date.now() + 60_000),
+      source: "manual",
+    });
+    const brokenAuth = await checkauth();
+    await uploadFile(brokenAuth, "broken-managed.xml", offersXmlFor("guid-1", "1000.00"));
+    const broken = await request(app!.getHttpServer())
+      .get("/1c_exchange?type=catalog&mode=import&filename=broken-managed.xml")
+      .set("Cookie", brokenAuth.cookie)
+      .expect(200);
+    expect(broken.text).toBe("failure\nsubscription write unavailable");
+    const [afterBroken] = await db
+      .select({ unitPrice: schema.products.unitPrice })
+      .from(schema.products)
+      .where(eq(schema.products.id, productId));
+    expect(afterBroken).toEqual(after);
   });
 });

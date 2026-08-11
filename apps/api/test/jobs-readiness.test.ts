@@ -6,6 +6,7 @@ import type { ExchangeSessionService } from "../src/modules/exchange/exchange-se
 import type { JournalService } from "../src/modules/integrations/journal.service";
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
+import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -27,7 +28,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 9 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 10 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -100,14 +101,21 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
     processDelivery: vi.fn(async () => undefined),
   } as unknown as MailJobsService;
   const mailRetention = { prune: vi.fn(async () => undefined) } as unknown as MailRetentionService;
-  return new PgBossService(
-    db,
-    "postgres://unused",
-    journal,
-    exchangeSessions,
-    mailJobs,
-    mailRetention,
-  );
+  const subscriptionStatus = {
+    run: vi.fn(async () => undefined),
+  } as unknown as SubscriptionStatusJob;
+  return {
+    service: new PgBossService(
+      db,
+      "postgres://unused",
+      journal,
+      exchangeSessions,
+      mailJobs,
+      mailRetention,
+      subscriptionStatus,
+    ),
+    subscriptionStatus,
+  };
 }
 
 describe("PgBossService readiness", () => {
@@ -115,17 +123,19 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact nine successfully registered active workers", async () => {
+  it("accepts the exact ten successfully registered active workers and runs status materialization", async () => {
     const boss = fakeBoss();
-    const service = serviceWith(boss);
+    const { service, subscriptionStatus } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
+    expect(boss.work).toHaveBeenCalledTimes(10);
+    expect(subscriptionStatus.run).toHaveBeenCalledTimes(1);
   });
 
   it.each([
-    ["a missing worker", WORKER_IDS.slice(0, 8).map((id) => wip(id))],
+    ["a missing worker", WORKER_IDS.slice(0, 9).map((id) => wip(id))],
     [
       "a stopping worker",
       WORKER_IDS.map((id, index) => wip(id, index === 3 ? "stopping" : "active")),
@@ -137,7 +147,7 @@ describe("PgBossService readiness", () => {
     ["a duplicate worker record", [wip(WORKER_IDS[0]!), ...WORKER_IDS.map((id) => wip(id))]],
   ])("rejects readiness with %s", async (_case, wipData) => {
     const boss = fakeBoss();
-    const service = serviceWith(boss);
+    const { service } = serviceWith(boss);
     await service.onModuleInit();
     boss.setWipData(wipData);
 
@@ -146,7 +156,7 @@ describe("PgBossService readiness", () => {
 
   it("rejects readiness when the pg-boss SQL probe fails", async () => {
     const boss = fakeBoss();
-    const service = serviceWith(boss);
+    const { service } = serviceWith(boss);
     await service.onModuleInit();
     boss.failSql(new Error("password=secret postgres://jobs.internal/markiro"));
 
@@ -157,7 +167,7 @@ describe("PgBossService readiness", () => {
 
   it("discards partially captured worker ids after initialization failure", async () => {
     const failedBoss = fakeBoss({ failWorkAt: 4 });
-    const service = serviceWith(failedBoss);
+    const { service } = serviceWith(failedBoss);
 
     await expect(service.onModuleInit()).rejects.toThrow("worker registration failed");
     await expect(service.checkReady()).rejects.toThrow("pg-boss is not started");
@@ -172,7 +182,7 @@ describe("PgBossService readiness", () => {
 
   it("discards captured worker ids when destroyed", async () => {
     const boss = fakeBoss();
-    const service = serviceWith(boss);
+    const { service } = serviceWith(boss);
     await service.onModuleInit();
 
     await service.onModuleDestroy();

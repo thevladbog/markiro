@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "../src/env";
+import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 const base = {
+  ...PLATFORM_TEST_ENV,
   NODE_ENV: "production",
   DATABASE_URL: "postgres://user:pass@localhost/db",
   BETTER_AUTH_SECRET: "insecure-test-placeholder",
@@ -50,6 +52,7 @@ describe("object storage environment", () => {
 
   it("defaults development to private path-style MinIO", () => {
     const env = loadEnv({
+      ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
       BETTER_AUTH_URL: "http://localhost:3000",
@@ -65,6 +68,7 @@ describe("object storage environment", () => {
 
   it("treats blank development storage variables as unset and keeps MinIO defaults", () => {
     const env = loadEnv({
+      ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
       BETTER_AUTH_URL: "http://localhost:3000",

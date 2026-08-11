@@ -10,6 +10,7 @@ import { useAuthClient } from "../auth/client.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { useAvatarUrl, useProfile } from "../pages/profile/api.js";
 import { Header } from "./Header.js";
+import { SubscriptionBanner } from "../subscription/SubscriptionBanner.js";
 
 const C = CABINET_CAPABILITY;
 
@@ -178,6 +179,7 @@ export function AppShell() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <Header />
         <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
+          <SubscriptionBanner />
           <Outlet />
         </main>
       </div>

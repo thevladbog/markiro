@@ -1,5 +1,6 @@
 import { isCanonicalDigestB64 } from "@markiro/domain";
 import { z } from "zod";
+import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
 
 /** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
 export const pairKioskSchema = z.object({ code: z.string().regex(/^\d{8}$/) });
@@ -8,6 +9,9 @@ export type PairKioskDto = z.infer<typeof pairKioskSchema>;
 /** POST /kiosk/orders — one raw scan from the kiosk's scanner. */
 export const createOrderItemSchema = z.object({ rawKm: z.string().min(1) });
 export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
+
+/** PostgreSQL `integer` upper bound for the durable kiosk idempotency key. */
+export const MAX_KIOSK_DEVICE_SEQ = 2_147_483_647;
 
 /**
  * POST /kiosk/orders body. `deviceSeq` is the kiosk's own monotonic counter —
@@ -48,24 +52,42 @@ export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
  * was offline during the upgrade. It can go once no device can still hold a
  * pre-upgrade queue; the device's own seven-day staleness block bounds that.
  */
+const createOrderContentShape = {
+  deviceSeq: z.number().int().nonnegative().max(MAX_KIOSK_DEVICE_SEQ),
+  badgeDigest: z.string().refine(isCanonicalDigestB64, "Not a canonical badge digest").optional(),
+  badgeCode: z.string().min(1).optional(),
+  reason: z.enum(["buy", "writeoff"]),
+  writeoffReasonId: z.string().uuid().nullable().optional(),
+  items: z.array(createOrderItemSchema),
+  admissionNonce: z.string().min(32).max(128).optional(),
+};
+
+const hasExactlyOneBadgeIdentity = (body: {
+  badgeDigest?: string | undefined;
+  badgeCode?: string | undefined;
+}): boolean => (body.badgeDigest === undefined) !== (body.badgeCode === undefined);
+
+export const createOrderAdmissionSchema = z
+  .object(createOrderContentShape)
+  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required");
+export type CreateOrderAdmissionDto = z.infer<typeof createOrderAdmissionSchema>;
+
+export interface CreateOrderAdmissionResultDto {
+  claimedAt: string;
+  admissionProof: string;
+}
+
 export const createOrderSchema = z
   .object({
-    deviceSeq: z.number().int().nonnegative(),
-    badgeDigest: z.string().refine(isCanonicalDigestB64, "Not a canonical badge digest").optional(),
-    badgeCode: z.string().min(1).optional(),
-    reason: z.enum(["buy", "writeoff"]),
-    writeoffReasonId: z.string().uuid().nullable().optional(),
-    items: z.array(createOrderItemSchema),
+    ...createOrderContentShape,
     createdAt: z.string().datetime().optional(),
+    admissionProof: z.string().min(1).max(2048).optional(),
   })
   // Exactly one, never both: two identifiers for one employee is two answers
   // the server would have to rank, and a body carrying a digest AND the
   // plaintext it is meant to replace is the very thing this field exists to
   // stop being persisted.
-  .refine(
-    (body) => (body.badgeDigest === undefined) !== (body.badgeCode === undefined),
-    "Exactly one of badgeDigest or badgeCode is required",
-  );
+  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required");
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 
 /** A scanned item that could not be accepted into the order, and why. */
@@ -103,6 +125,7 @@ export interface CreateOrderResultDto {
  */
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
+  subscription: SubscriptionAccessSnapshot;
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];

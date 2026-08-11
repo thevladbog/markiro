@@ -36,7 +36,12 @@ function safeShape(argv) {
   }
   const renewals = argv.filter((argument) => argument === "--renew-activation").length;
   if (renewals > 1) return false;
-  const values = argv.filter((argument) => argument !== "--renew-activation");
+  const unmanaged = argv.filter((argument) => argument === "--allow-unmanaged-without-demo").length;
+  if (unmanaged > 1) return false;
+  const values = argv.filter(
+    (argument) =>
+      argument !== "--renew-activation" && argument !== "--allow-unmanaged-without-demo",
+  );
   if (values.length % 2 !== 0) return false;
   const allowed = new Set(["--email", "--tenant-name", "--tenant-slug"]);
   const seen = new Set();

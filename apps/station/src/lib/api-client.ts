@@ -57,6 +57,7 @@ export interface StationClientOptions {
  * another turn.
  */
 export const REQUEST_TIMEOUT_MS = 30_000;
+export const STATION_CAPABILITIES = "subscription-state-v1,station-recovery-v1";
 
 /**
  * Sends the one unauthenticated request an unpaired station is allowed to
@@ -83,7 +84,10 @@ export async function postUnauthenticatedStationRequest(
   try {
     return await fetch(`${serverUrl.replace(/\/+$/, "")}${path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-station-capabilities": STATION_CAPABILITIES,
+      },
       credentials: "omit",
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -133,6 +137,7 @@ export function createStationClient(
         method,
         headers: {
           "Content-Type": "application/json",
+          "x-station-capabilities": STATION_CAPABILITIES,
           ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
         },
         signal: controller.signal,

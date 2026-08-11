@@ -5,13 +5,25 @@ import { cn } from "../cn.js";
 /** Порт `design-system/components/display/Card.jsx` — только офисный режим. */
 export interface CardProps extends HTMLAttributes<HTMLDivElement> {
   title?: string;
+  /** Render the visible title as a semantic heading when the page outline requires it. */
+  titleAs?: "h2" | "h3";
   /** Кнопки/иконки в правом углу шапки */
   actions?: ReactNode;
   /** Переопределить внутренний отступ (число px или CSS-строка) */
   padding?: number | string;
 }
 
-export function Card({ title, actions, children, padding, className, style, ...rest }: CardProps) {
+export function Card({
+  title,
+  titleAs,
+  actions,
+  children,
+  padding,
+  className,
+  style,
+  ...rest
+}: CardProps) {
+  const Title = titleAs ?? "span";
   return (
     <div
       className={cn("mk-card", className)}
@@ -38,7 +50,7 @@ export function Card({ title, actions, children, padding, className, style, ...r
             borderBottom: "1px solid var(--line)",
           }}
         >
-          <span style={{ font: "var(--text-h3)", color: "var(--fg-1)" }}>{title}</span>
+          <Title style={{ margin: 0, font: "var(--text-h3)", color: "var(--fg-1)" }}>{title}</Title>
           {actions && <span style={{ display: "flex", gap: 8 }}>{actions}</span>}
         </div>
       )}

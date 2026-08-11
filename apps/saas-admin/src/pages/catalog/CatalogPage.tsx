@@ -1,0 +1,145 @@
+import { useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Alert, Card, PageHeader, Spinner, StatusChip, Table, type TableColumn } from "@markiro/ui";
+
+import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { getDefaultDemoPlan, listCatalogVersions, type CatalogVersionDto } from "./api.js";
+import { CatalogVersionPanel } from "./CatalogVersionPanel.js";
+
+type CatalogKind = CatalogVersionDto["kind"];
+
+const STATUS_TONE = {
+  draft: "warn",
+  published: "ok",
+  retired: "neutral",
+} as const;
+
+export function CatalogPage() {
+  const { t } = useTranslation();
+  const principal = usePlatformPrincipal();
+  const [activeKind, setActiveKind] = useState<CatalogKind>("plan");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const catalog = useQuery({
+    queryKey: ["platform", "catalog"],
+    queryFn: listCatalogVersions,
+  });
+  const defaultDemo = useQuery({
+    queryKey: ["platform", "settings", "demo-plan"],
+    queryFn: getDefaultDemoPlan,
+  });
+  const items = catalog.data?.items ?? [];
+  const visibleItems = useMemo(
+    () => items.filter((item) => item.kind === activeKind),
+    [activeKind, items],
+  );
+  const selected = items.find((item) => item.id === selectedId) ?? null;
+  const isSupport = principal.role === "support";
+
+  const columns: TableColumn<CatalogVersionDto>[] = [
+    {
+      key: "nameRu",
+      title: t("catalog.columns.name"),
+      render: (item) => (
+        <button
+          type="button"
+          className="table-link"
+          aria-label={t("catalog.openVersion", { name: item.nameRu, version: item.version })}
+          onClick={() => setSelectedId(item.id)}
+        >
+          <span>{item.nameRu}</span>
+          <small>{item.catalogItemCode}</small>
+        </button>
+      ),
+    },
+    { key: "version", title: t("catalog.columns.version"), mono: true },
+    {
+      key: "status",
+      title: t("catalog.columns.status"),
+      render: (item) => (
+        <StatusChip status={STATUS_TONE[item.status]} label={t(`catalog.status.${item.status}`)} />
+      ),
+    },
+    ...(isSupport
+      ? []
+      : [
+          {
+            key: "unitPrice",
+            title: t("catalog.columns.price"),
+            align: "right" as const,
+            mono: true,
+            render: (item: CatalogVersionDto) =>
+              item.unitPrice ? t("catalog.money", { value: item.unitPrice }) : "—",
+          },
+        ]),
+  ];
+
+  if (catalog.isPending || defaultDemo.isPending) {
+    return (
+      <section className="catalog-page">
+        <PageHeader title={t("catalog.title")} />
+        <div className="catalog-state" role="status">
+          <Spinner label={t("catalog.loading")} />
+          <span>{t("catalog.loading")}</span>
+        </div>
+      </section>
+    );
+  }
+
+  if (catalog.error || defaultDemo.error) {
+    return (
+      <section className="catalog-page">
+        <PageHeader title={t("catalog.title")} />
+        <Alert tone="error">{t("catalog.loadError")}</Alert>
+      </section>
+    );
+  }
+
+  const tabs: Array<{ kind: CatalogKind; label: string }> = [
+    { kind: "plan", label: t("catalog.tabs.plan") },
+    { kind: "addon", label: t("catalog.tabs.addon") },
+    { kind: "service", label: t("catalog.tabs.service") },
+  ];
+
+  return (
+    <section className="catalog-page">
+      <PageHeader title={t("catalog.title")} />
+      <div className="catalog-coordinate" aria-hidden="true">
+        CATALOG / VERSION CONTROL / {activeKind.toUpperCase()}
+      </div>
+      <Card className="catalog-frame" padding={0}>
+        <div className="catalog-tabs" role="tablist" aria-label={t("catalog.groupLabel")}>
+          {tabs.map((tab) => (
+            <button
+              key={tab.kind}
+              type="button"
+              role="tab"
+              aria-label={tab.label}
+              aria-selected={activeKind === tab.kind}
+              onClick={() => {
+                setActiveKind(tab.kind);
+                setSelectedId(null);
+              }}
+            >
+              <span>{String(tabs.indexOf(tab) + 1).padStart(2, "0")}</span>
+              {tab.label}
+              <b>{items.filter((item) => item.kind === tab.kind).length}</b>
+            </button>
+          ))}
+        </div>
+        <Table columns={columns} rows={visibleItems} empty={t("catalog.empty")} />
+      </Card>
+      {selected ? (
+        <CatalogVersionPanel
+          key={selected.id}
+          item={selected}
+          canWrite={principal.capabilities.includes("catalog.write")}
+          isSupport={isSupport}
+          defaultDemoId={defaultDemo.data?.catalogVersionId ?? null}
+          onClose={() => setSelectedId(null)}
+        />
+      ) : null}
+    </section>
+  );
+}

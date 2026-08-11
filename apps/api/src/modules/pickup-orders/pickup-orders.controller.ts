@@ -19,6 +19,11 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { renderPickupSlipHtml } from "../../pickup/slip";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
+import {
   exportPickupCodesSchema,
   listPickupOrdersQuerySchema,
   resolvePickupOrderSchema,
@@ -37,7 +42,8 @@ import { PickupOrdersService } from "./pickup-orders.service";
 // it (see docs/device-key-surface.md).
 @ApiTags("pickup-orders")
 @Controller("pickup-orders")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class PickupOrdersController {
   constructor(private readonly pickupOrdersService: PickupOrdersService) {}
 
@@ -75,6 +81,7 @@ export class PickupOrdersController {
   @Post(":id/resolve")
   @HttpCode(200)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async resolve(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -86,6 +93,7 @@ export class PickupOrdersController {
   @Post(":id/cancel")
   @HttpCode(200)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async cancel(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<PickupOrderRowDto> {
     return this.pickupOrdersService.cancel(req.tenantId!, id);
   }
@@ -93,6 +101,7 @@ export class PickupOrdersController {
   @Post("export")
   @HttpCode(200)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @AllowSubscriptionReadOnly("export")
   async export(
     @Req() req: RequestWithTenant,
     @Res({ passthrough: true }) res: Response,

@@ -10,6 +10,8 @@ import { parseSscc, ssccSerialCapacity } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 
+type SsccTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 /** Boxes take extension digit 0; 1 is reserved for pallets (06d). */
 export const BOX_EXTENSION_DIGIT = 0;
 
@@ -185,15 +187,19 @@ export class SsccService {
    * that field says who the goods are for, this one says whose numbers they
    * carry, and packing for a client under one's own SSCCs is ordinary.
    */
-  async resolveIssuerPrefix(tenantId: string, shiftId: string): Promise<string> {
-    const [shift] = await this.db
+  async resolveIssuerPrefix(
+    tenantId: string,
+    shiftId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<string> {
+    const [shift] = await executor
       .select({ issuer: schema.shifts.ssccIssuerCounterpartyId })
       .from(schema.shifts)
       .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)));
     if (!shift) throw new BadRequestException("shift not found");
 
     if (shift.issuer) {
-      const [cp] = await this.db
+      const [cp] = await executor
         .select({ gln: schema.counterparties.gln })
         .from(schema.counterparties)
         .where(
@@ -206,7 +212,7 @@ export class SsccService {
       return deriveIssuerPrefix(cp.gln, "sscc issuer counterparty");
     }
 
-    const [profile] = await this.db
+    const [profile] = await executor
       .select({ gln: schema.orgProfiles.gln })
       .from(schema.orgProfiles)
       .where(eq(schema.orgProfiles.tenantId, tenantId));
@@ -270,9 +276,10 @@ export class SsccService {
     extensionDigit: number,
     deviceId: string,
     size: number,
+    transaction?: SsccTransaction,
   ): Promise<SsccBlock> {
     const capacity = ssccSerialCapacity(issuerPrefix);
-    return this.db.transaction(async (tx) => {
+    const perform = async (tx: SsccTransaction): Promise<SsccBlock> => {
       const [row] = await tx
         .insert(schema.ssccCounters)
         .values({ tenantId, issuerPrefix, extensionDigit, nextSerial: size })
@@ -340,7 +347,8 @@ export class SsccService {
       });
 
       return block;
-    });
+    };
+    return transaction ? perform(transaction) : this.db.transaction(perform);
   }
 
   /**
@@ -391,50 +399,55 @@ export class SsccService {
     extensionDigit: number,
     deviceId: string,
     size: number,
+    transaction?: SsccTransaction,
   ): Promise<SsccBlock> {
-    const [existing] = await this.db
-      .select({
-        issuerPrefix: schema.ssccBlocks.issuerPrefix,
-        extensionDigit: schema.ssccBlocks.extensionDigit,
-        fromSerial: schema.ssccBlocks.fromSerial,
-        toSerial: schema.ssccBlocks.toSerial,
-        consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
-      })
-      .from(schema.ssccBlocks)
-      .where(
-        and(
-          eq(schema.ssccBlocks.tenantId, tenantId),
-          eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
-          eq(schema.ssccBlocks.extensionDigit, extensionDigit),
-          eq(schema.ssccBlocks.deviceId, deviceId),
-        ),
-      )
-      .orderBy(desc(schema.ssccBlocks.issuedAt))
-      .limit(1);
+    const perform = async (tx: SsccTransaction): Promise<SsccBlock> => {
+      const [existing] = await tx
+        .select({
+          issuerPrefix: schema.ssccBlocks.issuerPrefix,
+          extensionDigit: schema.ssccBlocks.extensionDigit,
+          fromSerial: schema.ssccBlocks.fromSerial,
+          toSerial: schema.ssccBlocks.toSerial,
+          consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+        })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+            eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+            eq(schema.ssccBlocks.deviceId, deviceId),
+          ),
+        )
+        .orderBy(desc(schema.ssccBlocks.issuedAt))
+        .limit(1);
 
-    // "< toSerial" (i.e. exhausted is ">=", not "==="): consumedThroughSerial
-    // can never legitimately exceed toSerial -- recordConsumedSerial's own
-    // covering-range predicates forbid it -- but if it somehow did (a
-    // defensive concern, not an expected path), the old "!== toSerial" test
-    // would still read that as "not yet fully consumed" and hand back an
-    // INVERTED, empty range (fromSerial > toSerial) as though it were
-    // usable, rather than recognising the block as exhausted and cutting a
-    // fresh one.
-    if (
-      existing &&
-      (existing.consumedThroughSerial == null || existing.consumedThroughSerial < existing.toSerial)
-    ) {
-      return {
-        issuerPrefix: existing.issuerPrefix,
-        extensionDigit: existing.extensionDigit,
-        fromSerial: existing.fromSerial,
-        toSerial: existing.toSerial,
-        consumedThroughSerial: existing.consumedThroughSerial,
-      };
-    }
-    // No block at all yet, OR the held one is fully consumed -- either way,
-    // cut a fresh one rather than hand back a range with nothing left in it.
-    return this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size);
+      // "< toSerial" (i.e. exhausted is ">=", not "==="): consumedThroughSerial
+      // can never legitimately exceed toSerial -- recordConsumedSerial's own
+      // covering-range predicates forbid it -- but if it somehow did (a
+      // defensive concern, not an expected path), the old "!== toSerial" test
+      // would still read that as "not yet fully consumed" and hand back an
+      // INVERTED, empty range (fromSerial > toSerial) as though it were
+      // usable, rather than recognising the block as exhausted and cutting a
+      // fresh one.
+      if (
+        existing &&
+        (existing.consumedThroughSerial == null ||
+          existing.consumedThroughSerial < existing.toSerial)
+      ) {
+        return {
+          issuerPrefix: existing.issuerPrefix,
+          extensionDigit: existing.extensionDigit,
+          fromSerial: existing.fromSerial,
+          toSerial: existing.toSerial,
+          consumedThroughSerial: existing.consumedThroughSerial,
+        };
+      }
+      // No block at all yet, OR the held one is fully consumed -- either way,
+      // cut a fresh one rather than hand back a range with nothing left in it.
+      return this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size, tx);
+    };
+    return transaction ? perform(transaction) : this.db.transaction(perform);
   }
 
   /**

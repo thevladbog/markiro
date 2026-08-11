@@ -57,6 +57,21 @@ describe("createKioskClient", () => {
     expect((init as RequestInit).headers).toMatchObject({ "x-kiosk-token": "tok" });
   });
 
+  it("does not request a finite bootstrap proof window", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse(200, { generatedAt: "2026-07-28T00:00:00Z" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createKioskClient({
+      token: "tok",
+      serverUrl: "http://srv",
+    }).bootstrap();
+
+    const [, init] = fetchMock.mock.calls[0]!;
+    expect((init as RequestInit).headers).not.toHaveProperty("x-kiosk-next-device-seq");
+  });
+
   it("carries the scan time so a late sync is not recorded as happening now", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       jsonResponse(201, { orderNo: "ORD-26-0001", conflicts: [] }),
@@ -73,6 +88,56 @@ describe("createKioskClient", () => {
 
     const body = JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
     expect(body).toMatchObject({ deviceSeq: 3, createdAt: "2026-07-28T06:00:00.000Z" });
+  });
+
+  it("requests a server-time attestation for the exact order content before delivery", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse(201, {
+        claimedAt: "2026-07-28T06:00:00.000Z",
+        admissionProof: "opaque-proof",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const body = {
+      deviceSeq: 129,
+      badgeDigest: "B-1",
+      reason: "buy" as const,
+      items: [{ rawKm: "01..." }],
+    };
+
+    const result = await createKioskClient({ token: "tok", serverUrl: "http://srv" }).attestOrder(
+      body,
+    );
+
+    const [url, init] = fetchMock.mock.calls[0]!;
+    expect(url).toBe("http://srv/kiosk/order-admissions");
+    expect((init as RequestInit).headers).toMatchObject({ "x-kiosk-token": "tok" });
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual(body);
+    expect(result).toEqual({
+      claimedAt: "2026-07-28T06:00:00.000Z",
+      admissionProof: "opaque-proof",
+    });
+  });
+
+  it("retains the server error code needed to classify an expired-subscription refusal", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(403, { code: "subscription_read_only" })),
+    );
+
+    const err = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+      .submitOrder({ deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] })
+      .catch((caught: unknown) => caught);
+
+    expect(err).toBeInstanceOf(KioskApiError);
+    expect(err).toMatchObject({
+      status: 403,
+      code: "subscription_read_only",
+      message: "HTTP 403",
+    });
+    expect((vi.mocked(fetch).mock.calls[0]![1] as RequestInit).headers).toMatchObject({
+      "x-kiosk-capabilities": "subscription-recovery-v1",
+    });
   });
 });
 

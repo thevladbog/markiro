@@ -38,6 +38,7 @@ import { RejectionsPage } from "./pages/pickup/Rejections.js";
 import { PickupPage } from "./pages/pickup/index.js";
 import { ProfilePage } from "./pages/profile/ProfilePage.js";
 import { SettingsPage } from "./pages/settings/index.js";
+import { SubscriptionPage } from "./pages/settings/SubscriptionPage.js";
 import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
@@ -304,6 +305,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.TENANT_SETTINGS_MANAGE}>
               <SettingsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="settings/subscription"
+          element={
+            <RequireCapability capability={C.TENANT_SETTINGS_MANAGE}>
+              <SubscriptionPage />
             </RequireCapability>
           }
         />

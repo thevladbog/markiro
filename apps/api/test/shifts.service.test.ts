@@ -3,6 +3,7 @@ import { schema, type Db } from "@markiro/db";
 import { ShiftsService } from "../src/modules/shifts/shifts.service";
 import type { OperatorsService } from "../src/modules/operators/operators.service";
 import type { SsccService } from "../src/modules/sscc/sscc.service";
+import type { EntitlementsService } from "../src/subscriptions/entitlements.service";
 
 /**
  * A chainable stub covering both shapes `ShiftsService.getBundle` needs:
@@ -13,20 +14,34 @@ import type { SsccService } from "../src/modules/sscc/sscc.service";
  * ignored here, since which row comes back depends only on which TABLE
  * `.from()` was called with, not on the condition.
  */
-function chain(rows: unknown[]) {
-  const node: { leftJoin: () => typeof node; where: () => Promise<unknown[]> } = {
+function chain(rows: unknown[], table: unknown, lockedTables: unknown[]) {
+  const result = Promise.resolve(rows);
+  const node: {
+    leftJoin: () => typeof node;
+    where: () => typeof node;
+    for: (mode: string) => Promise<unknown[]>;
+    then: typeof result.then;
+  } = {
     leftJoin: () => node,
-    where: async () => rows,
+    where: () => node,
+    for: async (mode) => {
+      if (mode === "update") lockedTables.push(table);
+      return rows;
+    },
+    then: result.then.bind(result),
   };
   return node;
 }
 
-function fakeDb(rowsByTable: Map<unknown, unknown[]>): Db {
-  return {
+function fakeDb(rowsByTable: Map<unknown, unknown[]>): { db: Db; lockedTables: unknown[] } {
+  const lockedTables: unknown[] = [];
+  const db = {
     select: () => ({
-      from: (table: unknown) => chain(rowsByTable.get(table) ?? []),
+      from: (table: unknown) => chain(rowsByTable.get(table) ?? [], table, lockedTables),
     }),
+    transaction: async (run: (tx: Db) => Promise<unknown>) => run(db as unknown as Db),
   } as unknown as Db;
+  return { db, lockedTables };
 }
 
 function fakeOperatorsService(): OperatorsService {
@@ -75,7 +90,7 @@ const PRODUCT_ROW = {
 
 describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)", () => {
   it("propagates a non-BadRequestException error from resolveIssuerPrefix instead of degrading to sscc: null", async () => {
-    const db = fakeDb(
+    const { db, lockedTables } = fakeDb(
       new Map<unknown, unknown[]>([
         [schema.shifts, [SHIFT_ROW]],
         [schema.products, [PRODUCT_ROW]],
@@ -98,8 +113,12 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
       },
     } as unknown as SsccService;
 
-    const service = new ShiftsService(db, fakeOperatorsService(), sscc);
+    const entitlements = {
+      resolveRecovery: async () => ({ access: "managed", subscription: null }),
+    } as unknown as EntitlementsService;
+    const service = new ShiftsService(db, fakeOperatorsService(), sscc, entitlements);
 
     await expect(service.getBundle("tenant-1", "shift-1", "device-1")).rejects.toBe(boom);
+    expect(lockedTables).toEqual([schema.shifts]);
   });
 });

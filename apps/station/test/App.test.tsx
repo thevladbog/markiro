@@ -690,6 +690,12 @@ describe("App", () => {
               organizationName: "Factory",
               line: { id: "line-1", name: "Packing" },
             },
+            subscription: {
+              access: "read_only",
+              status: "expired",
+              startsAt: "2026-08-01T00:00:00.000Z",
+              endsAt: "2026-08-10T00:00:00.000Z",
+            },
           }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         );

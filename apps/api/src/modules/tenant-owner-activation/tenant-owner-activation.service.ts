@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { BadRequestException, Inject, Injectable, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from "@nestjs/common";
 import { and, eq, gt, sql } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
 import type { CompleteTenantOwnerActivationDto, TenantOwnerActivationStatusDto } from "./dto";
 import { activationIdentifier } from "./token";
 
@@ -16,7 +23,14 @@ interface ActivationSubject {
 
 @Injectable()
 export class TenantOwnerActivationService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  private readonly subscriptions: SubscriptionLifecycleService;
+
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    @Optional() subscriptions?: SubscriptionLifecycleService,
+  ) {
+    this.subscriptions = subscriptions ?? new SubscriptionLifecycleService(db);
+  }
 
   async getStatus(token: string): Promise<TenantOwnerActivationStatusDto> {
     const subject = await this.requirePending(token);
@@ -75,12 +89,19 @@ export class TenantOwnerActivationService {
       if (hasCredential && input.password) {
         throw new BadRequestException({ code: "existing_credential" });
       }
+      let password: string | undefined;
       if (!hasCredential) {
-        const password = await hashCredentialPassword(input.password!);
+        const passwordInput = input.password;
+        if (!passwordInput) throw new BadRequestException({ code: "password_required" });
+        password = await hashCredentialPassword(passwordInput);
+      }
+      await this.subscriptions.lockTenantTimeline(tx, subject.tenantId);
+      const activatedAt = new Date();
+      if (password) {
         if (credential) {
           await tx
             .update(schema.account)
-            .set({ password, updatedAt: new Date() })
+            .set({ password, updatedAt: activatedAt })
             .where(eq(schema.account.id, credential.id));
         } else {
           await tx.insert(schema.account).values({
@@ -89,13 +110,20 @@ export class TenantOwnerActivationService {
             providerId: "credential",
             userId: subject.userId,
             password,
+            createdAt: activatedAt,
+            updatedAt: activatedAt,
           });
         }
       }
       await tx
         .update(schema.user)
-        .set({ emailVerified: true, updatedAt: new Date() })
+        .set({ emailVerified: true, updatedAt: activatedAt })
         .where(eq(schema.user.id, subject.userId));
+      await this.subscriptions.activatePendingDemo(tx, {
+        tenantId: subject.tenantId,
+        activatedAt,
+        sourceUserId: subject.userId,
+      });
       await tx.delete(schema.verification).where(eq(schema.verification.identifier, identifier));
     });
   }

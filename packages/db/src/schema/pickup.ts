@@ -1,5 +1,6 @@
 import {
   boolean,
+  char,
   check,
   foreignKey,
   index,
@@ -18,6 +19,7 @@ import {
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
 import { products } from "./platform.js";
+import { tenantSubscriptions } from "./saas.js";
 
 export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
 export const kioskStatus = pgEnum("kiosk_status", ["active", "archived"]);
@@ -123,6 +125,50 @@ export const kiosks = pgTable(
     uniqueIndex("kiosks_device_token_uq")
       .on(t.deviceTokenHash)
       .where(sql`device_token_hash is not null`),
+  ],
+);
+
+/**
+ * Server-side reservations for kiosk orders that may be delivered after a
+ * subscription expires. The opaque token itself never reaches Postgres: only
+ * its SHA-256 digest is stored, alongside the exact tenant/device sequence and
+ * canonical business-payload digest it attests.
+ */
+export const kioskOrderAdmissions = pgTable(
+  "kiosk_order_admissions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    kioskId: uuid("kiosk_id").notNull(),
+    deviceSeq: integer("device_seq").notNull(),
+    subscriptionId: uuid("subscription_id").notNull(),
+    tokenHash: char("token_hash", { length: 64 }).notNull(),
+    payloadDigest: char("payload_digest", { length: 64 }).notNull(),
+    claimedAt: timestamp("claimed_at", { withTimezone: true }).notNull(),
+    notAfter: timestamp("not_after", { withTimezone: true }).notNull(),
+    issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("kiosk_order_admissions_tenant_sequence_uq").on(t.tenantId, t.kioskId, t.deviceSeq),
+    uniqueIndex("kiosk_order_admissions_token_hash_uq").on(t.tokenHash),
+    index("kiosk_order_admissions_tenant_expiry_idx").on(t.tenantId, t.notAfter),
+    check("kiosk_order_admissions_device_seq_check", sql`${t.deviceSeq} >= 0`),
+    check("kiosk_order_admissions_token_hash_check", sql`${t.tokenHash} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "kiosk_order_admissions_payload_digest_check",
+      sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    check("kiosk_order_admissions_time_order_check", sql`${t.claimedAt} < ${t.notAfter}`),
+    foreignKey({
+      name: "kiosk_order_admissions_tenant_kiosk_fk",
+      columns: [t.tenantId, t.kioskId],
+      foreignColumns: [kiosks.tenantId, kiosks.id],
+    }),
+    foreignKey({
+      name: "kiosk_order_admissions_tenant_subscription_fk",
+      columns: [t.tenantId, t.subscriptionId],
+      foreignColumns: [tenantSubscriptions.tenantId, tenantSubscriptions.id],
+    }),
   ],
 );
 

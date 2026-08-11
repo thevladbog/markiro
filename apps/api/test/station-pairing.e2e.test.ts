@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { schema, type Auth, type Db } from "@markiro/db";
@@ -21,6 +21,11 @@ import { signUpAndActivate } from "./support/auth";
 import { SecurityAuditService } from "../src/authorization/security-audit.service";
 import { OperatorsService } from "../src/modules/operators/operators.service";
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
+import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
+import {
+  preTask8IdentityDecoderAccepts,
+  preTask8PairDecoderAccepts,
+} from "./support/pre-task8-station-decoders";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -121,6 +126,58 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     return paired.body.credential.apiKey as string;
   }
 
+  async function manageCurrentTenant(maxStations: number): Promise<void> {
+    const planVersionId = await createPublishedPlan(db, {
+      maxLines: null,
+      maxStations,
+      maxKiosks: null,
+      maxCabinetUsers: null,
+    });
+    await createManagedSubscription(db, { tenantId, planVersionId });
+  }
+
+  async function waitForQuotaWaiter(keyOrder: number): Promise<void> {
+    const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const result = await pool.query<{ count: number }>(
+        `select count(*)::int as count
+         from pg_locks
+         where locktype = 'advisory'
+           and database = (select oid from pg_database where datname = current_database())
+           and classid = hashtext($1)::oid
+           and objid = $2::oid
+           and objsubid = 2
+           and not granted`,
+        [`subscription-quota:${tenantId}`, keyOrder],
+      );
+      if ((result.rows[0]?.count ?? 0) >= 1) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Timed out waiting for the stations quota lock");
+  }
+
+  async function waitForExtendedLockWaiter(lockKey: string): Promise<void> {
+    const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const result = await pool.query<{ count: number }>(
+        `select count(*)::int as count
+         from pg_locks
+         where locktype = 'advisory'
+           and database = (select oid from pg_database where datname = current_database())
+           and classid = ((hashtextextended($1, 0) >> 32) & 4294967295)::oid
+           and objid = (hashtextextended($1, 0) & 4294967295)::oid
+           and objsubid = 1
+           and not granted`,
+        [lockKey],
+      );
+      if ((result.rows[0]?.count ?? 0) >= 1) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("Timed out waiting for the station restore barrier");
+  }
+
   it("issues an HMAC-protected 8-digit code and redeems it into one durable station credential", async () => {
     const issued = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
@@ -183,6 +240,8 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         },
       ],
     });
+    expect(Object.keys(paired.body).sort()).toEqual(["credential", "device", "operators"]);
+    expect(preTask8PairDecoderAccepts(paired.body)).toBe(true);
     expect(paired.body.operators[0]).not.toHaveProperty("pin");
     expect(paired.body.operators[0]).not.toHaveProperty("badgeCode");
 
@@ -209,6 +268,31 @@ describe.skipIf(!ready)("station pairing e2e", () => {
       .expect(403);
   });
 
+  it("adds subscription state only when a pairing client negotiates subscription-state-v1", async () => {
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const paired = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .set("x-station-capabilities", "subscription-state-v1")
+      .send({ code: issued.body.code })
+      .expect(201);
+
+    expect(Object.keys(paired.body).sort()).toEqual([
+      "credential",
+      "device",
+      "operators",
+      "subscription",
+    ]);
+    expect(paired.body.subscription).toEqual({
+      access: "unmanaged",
+      status: "unmanaged",
+      startsAt: null,
+      endsAt: null,
+    });
+  });
+
   it("resolves only the authenticated station identity without echoing its credential", async () => {
     const otherDeviceName = `Other ${randomUUID()}`;
     await otherAgent
@@ -230,6 +314,22 @@ describe.skipIf(!ready)("station pairing e2e", () => {
         tenantId,
         organizationName: "Test Plant",
         line: { id: expect.any(String), name: "Packing" },
+      },
+    });
+    expect(preTask8IdentityDecoderAccepts(identity.body)).toBe(true);
+
+    const negotiated = await request(app!.getHttpServer())
+      .get("/station/identity")
+      .set("x-api-key", apiKey)
+      .set("x-station-capabilities", "subscription-state-v1")
+      .expect(200);
+    expect(negotiated.body).toEqual({
+      device: identity.body.device,
+      subscription: {
+        access: "unmanaged",
+        status: "unmanaged",
+        startsAt: null,
+        endsAt: null,
       },
     });
     expect(JSON.stringify(identity.body)).not.toContain(apiKey);
@@ -450,7 +550,171 @@ describe.skipIf(!ready)("station pairing e2e", () => {
     expect(station).toMatchObject({ apiKeyId: expect.any(String), revokedAt: null });
   });
 
+  it("rejects revoked station restoration when another live station filled its slot", async () => {
+    await manageCurrentTenant(1);
+    await agent.delete(`/station-devices/${deviceId}`).expect(204);
+    const [revokedBefore] = await db
+      .select({ revokedAt: schema.stationDevices.revokedAt })
+      .from(schema.stationDevices)
+      .where(eq(schema.stationDevices.id, deviceId));
+    const replacement = await agent
+      .post("/station-devices")
+      .send({ name: "Replacement station", lineId: null })
+      .expect(201);
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const [storedCode] = await db
+      .select({ id: schema.stationPairingCodes.id })
+      .from(schema.stationPairingCodes)
+      .where(
+        eq(
+          schema.stationPairingCodes.codeHash,
+          hashPairingCode(issued.body.code as string, pairingCodePepper),
+        ),
+      );
+    auditSpy.mockClear();
+
+    const rejected = await request(app!.getHttpServer())
+      .post("/station/pair")
+      .send({ code: issued.body.code })
+      .expect(409);
+    expect(rejected.body).toEqual({
+      code: "subscription_limit_reached",
+      entitlement: "stations",
+      used: 1,
+      limit: 1,
+    });
+    expect(auditSpy).toHaveBeenCalledTimes(1);
+    expect(auditSpy).toHaveBeenCalledWith({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: null,
+      action: "station.pair",
+      resourceId: deviceId,
+      outcome: "failed",
+    });
+    await expect(
+      db
+        .select({
+          apiKeyId: schema.stationDevices.apiKeyId,
+          revokedAt: schema.stationDevices.revokedAt,
+        })
+        .from(schema.stationDevices)
+        .where(eq(schema.stationDevices.id, deviceId)),
+    ).resolves.toEqual([{ apiKeyId: null, revokedAt: revokedBefore!.revokedAt }]);
+    await expect(
+      db
+        .select({ usedAt: schema.stationPairingCodes.usedAt })
+        .from(schema.stationPairingCodes)
+        .where(eq(schema.stationPairingCodes.id, storedCode!.id)),
+    ).resolves.toEqual([{ usedAt: null }]);
+    await expect(
+      db
+        .select({ id: schema.apikey.id })
+        .from(schema.apikey)
+        .where(and(eq(schema.apikey.referenceId, tenantId), eq(schema.apikey.configId, "station"))),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select({ id: schema.stationDevices.id })
+        .from(schema.stationDevices)
+        .where(
+          and(
+            eq(schema.stationDevices.tenantId, tenantId),
+            isNull(schema.stationDevices.revokedAt),
+          ),
+        ),
+    ).resolves.toEqual([{ id: replacement.body.id as string }]);
+  });
+
+  it("serializes revoked restoration against final-slot creation", async () => {
+    await manageCurrentTenant(1);
+    await agent.delete(`/station-devices/${deviceId}`).expect(204);
+    const issued = await agent
+      .post(`/station-devices/${deviceId}/pairing-code`)
+      .send({})
+      .expect(201);
+    const pool = app!.get<AuthSetup["pool"]>(DB_POOL);
+    const suffix = randomUUID().replaceAll("-", "_");
+    const lockKey = `station-restore-barrier:${suffix}`;
+    const functionName = `wait_for_station_restore_${suffix}`;
+    const triggerName = `wait_for_station_restore_${suffix}`;
+    const blocker = await pool.connect();
+    let blockerHeld = false;
+    let paired: request.Response | undefined;
+    let created: request.Response | undefined;
+    let createPhase: "waiting" | "settled" | undefined;
+    try {
+      await pool.query(`
+        create function ${functionName}() returns trigger language plpgsql as $$
+        begin
+          perform pg_advisory_xact_lock(hashtextextended('${lockKey}', 0));
+          return new;
+        end
+        $$
+      `);
+      await pool.query(`
+        create trigger ${triggerName}
+        before update of revoked_at on station_devices
+        for each row
+        when (
+          old.id = '${deviceId}'::uuid
+          and old.revoked_at is not null
+          and new.revoked_at is null
+        )
+        execute function ${functionName}()
+      `);
+      await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
+      blockerHeld = true;
+      const pairAttempt = request(app!.getHttpServer())
+        .post("/station/pair")
+        .send({ code: issued.body.code })
+        .then((row) => row);
+      await waitForExtendedLockWaiter(lockKey);
+      const createAttempt = agent
+        .post("/station-devices")
+        .send({ name: "Concurrent final station", lineId: null })
+        .then((row) => row);
+      createPhase = await Promise.race([
+        waitForQuotaWaiter(2).then(() => "waiting" as const),
+        createAttempt.then(() => "settled" as const),
+      ]);
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+      blockerHeld = false;
+      [paired, created] = await Promise.all([pairAttempt, createAttempt]);
+    } finally {
+      if (blockerHeld) {
+        await blocker
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [lockKey])
+          .catch(() => undefined);
+      }
+      blocker.release();
+      await pool.query(`drop trigger if exists ${triggerName} on station_devices`);
+      await pool.query(`drop function if exists ${functionName}()`);
+    }
+
+    expect(createPhase).toBe("waiting");
+    expect(paired?.status).toBe(201);
+    expect(created?.status).toBe(409);
+    expect(created?.body).toEqual({
+      code: "subscription_limit_reached",
+      entitlement: "stations",
+      used: 1,
+      limit: 1,
+    });
+    const live = await db
+      .select({ id: schema.stationDevices.id })
+      .from(schema.stationDevices)
+      .where(
+        and(eq(schema.stationDevices.tenantId, tenantId), isNull(schema.stationDevices.revokedAt)),
+      );
+    expect(live).toEqual([{ id: deviceId }]);
+  });
+
   it("rotates an active station key so only the replacement can reach station routes", async () => {
+    await manageCurrentTenant(1);
     const firstCode = await agent
       .post(`/station-devices/${deviceId}/pairing-code`)
       .send({})

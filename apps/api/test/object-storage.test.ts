@@ -5,8 +5,10 @@ import {
   createS3Client,
   ObjectStorageService,
 } from "../src/modules/storage/object-storage.service";
+import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 const env = loadEnv({
+  ...PLATFORM_TEST_ENV,
   DATABASE_URL: "postgres://user:pass@localhost/db",
   BETTER_AUTH_SECRET: "insecure-test-placeholder",
   BETTER_AUTH_URL: "http://localhost:3000",
@@ -72,6 +74,7 @@ describe("ObjectStorageService", () => {
 
   it("requires production buckets to be provisioned instead of creating them", async () => {
     const productionEnv = loadEnv({
+      ...PLATFORM_TEST_ENV,
       NODE_ENV: "production",
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
