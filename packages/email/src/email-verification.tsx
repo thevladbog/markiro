@@ -1,5 +1,11 @@
-import { Button, Link, Section, Text } from "react-email";
-import { EmailLayout, emailStyles } from "./layout.js";
+import { Text } from "react-email";
+import {
+  EmailAction,
+  EmailExpiryNotice,
+  EmailFallbackLink,
+  EmailLayout,
+  emailStyles,
+} from "./layout.js";
 import { formatRussianMinutes } from "./duration.js";
 
 export interface EmailVerificationEmailProps {
@@ -16,26 +22,18 @@ export function EmailVerificationEmail({
   return (
     <EmailLayout
       preview="Подтвердите адрес электронной почты в Маркиро"
+      eyebrow="Учётная запись"
       heading="Подтвердите email"
     >
-      <Text style={emailStyles.paragraph}>Здравствуйте, {recipientName}!</Text>
+      <Text style={emailStyles.greeting}>Здравствуйте, {recipientName}.</Text>
       <Text style={emailStyles.paragraph}>
         Подтвердите адрес электронной почты, чтобы завершить настройку учётной записи.
       </Text>
-      <Section style={emailStyles.actionSection}>
-        <Button href={actionUrl} style={emailStyles.button}>
-          Подтвердить email
-        </Button>
-      </Section>
-      <Text style={emailStyles.muted}>
-        Ссылка действует {formatRussianMinutes(expiresInMinutes)}.
-      </Text>
-      <Text style={emailStyles.fallback}>
-        Если кнопка не работает, откройте ссылку:{" "}
-        <Link href={actionUrl} style={emailStyles.fallbackLink}>
-          {actionUrl}
-        </Link>
-      </Text>
+      <EmailAction href={actionUrl}>Подтвердить email</EmailAction>
+      <EmailExpiryNotice label="Одноразовая ссылка">
+        Действует {formatRussianMinutes(expiresInMinutes)}.
+      </EmailExpiryNotice>
+      <EmailFallbackLink actionUrl={actionUrl} />
     </EmailLayout>
   );
 }
