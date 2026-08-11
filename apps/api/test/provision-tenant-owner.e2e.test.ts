@@ -620,15 +620,8 @@ describe("tenant owner provisioning CLI arguments", () => {
       expect(Object.keys(output).sort()).toEqual(["deliveryId", "memberId", "tenantId", "userId"]);
       const cleanupConnection = createDb(process.env.DATABASE_URL!);
       try {
-        await cleanupConnection.db
-          .delete(schema.platformAuditEvents)
-          .where(eq(schema.platformAuditEvents.tenantId, output.tenantId as string));
-        await cleanupConnection.db
-          .delete(schema.organization)
-          .where(eq(schema.organization.id, output.tenantId as string));
-        await cleanupConnection.db
-          .delete(schema.user)
-          .where(eq(schema.user.id, output.userId as string));
+        // Audit rows are append-only; the disposable CI database is torn down
+        // after this smoke, so cleanup must not mutate tenant history.
       } finally {
         await cleanupConnection.pool.end();
       }
