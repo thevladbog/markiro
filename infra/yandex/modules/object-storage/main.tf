@@ -123,3 +123,12 @@ resource "yandex_storage_bucket_policy" "media_app" {
     ]
   })
 }
+
+# Object Storage checks IAM before evaluating a bucket policy. Grant the
+# runtime identity the read/upload baseline required to reach the policy, while
+# keeping the policy as the action-level boundary for media objects.
+resource "yandex_storage_bucket_iam_binding" "app_uploader" {
+  bucket  = yandex_storage_bucket.media.bucket
+  role    = "storage.uploader"
+  members = ["serviceAccount:${var.app_service_account_id}"]
+}
