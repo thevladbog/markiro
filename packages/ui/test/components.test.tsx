@@ -57,7 +57,7 @@ beforeAll(() => {
 });
 
 describe("Admin page layout", () => {
-  it("provides a bounded page wrapper while preserving native div props", () => {
+  it("provides a full-width page wrapper while preserving native div props", () => {
     render(
       <AdminPage data-testid="admin-page" className="feature-page">
         <h1>Title</h1>
