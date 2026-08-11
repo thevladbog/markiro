@@ -38,6 +38,7 @@ export {
   MAX_LABEL_CODE_BYTES,
   MAX_LABEL_CODE_COMMANDS,
   MAX_LABEL_CODE_ELEMENTS,
+  parseLabelCode,
 } from "./labels/import.js";
 export type {
   LabelCodeLanguage,
@@ -46,6 +47,8 @@ export type {
   LabelImportWarningCode,
   ParseLabelCodeOptions,
 } from "./labels/import.js";
+export { parseZplLabel } from "./labels/zpl-import.js";
+export { parseTsplLabel } from "./labels/tspl-import.js";
 export {
   buildGfaCommand,
   generateZpl,

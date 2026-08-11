@@ -1,5 +1,7 @@
 import { DomainError } from "../errors.js";
 import { LABEL_FIELDS, type LabelField, type LabelTemplateSpec } from "./model.js";
+import { parseTsplLabel } from "./tspl-import.js";
+import { parseZplLabel } from "./zpl-import.js";
 
 export const MAX_LABEL_CODE_BYTES = 256 * 1024;
 export const MAX_LABEL_CODE_COMMANDS = 2_000;
@@ -65,6 +67,13 @@ export function parseTemplatePayload(
   }
 
   return { kind: "literal", value };
+}
+
+export function parseLabelCode(input: string, options: ParseLabelCodeOptions): LabelImportResult {
+  assertImportInputLimits(input);
+  return options.language === "zpl"
+    ? parseZplLabel(input, options.dpi)
+    : parseTsplLabel(input, options.dpi);
 }
 
 // Concrete language parsers are added in the following implementation tasks.

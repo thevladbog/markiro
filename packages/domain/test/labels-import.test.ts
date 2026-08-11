@@ -7,6 +7,8 @@ import {
   parseTemplatePayload,
 } from "../src/labels/import.js";
 import { parseZplLabel } from "../src/labels/zpl-import.js";
+import { parseTsplLabel } from "../src/labels/tspl-import.js";
+import { parseLabelCode } from "../src/labels/import.js";
 
 describe("label code import contract", () => {
   it("exports one canonical ordered label-field inventory", () => {
@@ -122,6 +124,91 @@ describe("label code import contract", () => {
       expect(() =>
         parseZplLabel("^XA^PW400^LL400^FO1,1^A0R,20,20^FDtext^FS^XZ", 203),
       ).toThrow(expect.objectContaining({ code: "LABEL_CODE_INVALID" }));
+    });
+  });
+
+  describe("TSPL subset", () => {
+    it("imports text, fields, barcodes, line, and box in source order", () => {
+      const source = [
+        "SIZE 100 mm, 50 mm",
+        "GAP 2 mm, 0 mm",
+        "DIRECTION 1",
+        "CLS",
+        'TEXT 80,40,"0",0,12,12,2,"{{product.name}}"',
+        'BARCODE 80,100,"128",80,1,0,2,2,"{{sscc}}"',
+        'DMATRIX 300,40,4,4,"{{km.code}}"',
+        'QRCODE 400,40,M,4,A,0,"https://markiro.app"',
+        "BAR 80,220,160,4",
+        "BOX 300,220,480,300,4",
+        "PRINT 1",
+      ].join("\n");
+
+      const result = parseTsplLabel(source, 203);
+
+      expect(result.spec).toEqual(
+        expect.objectContaining({ widthMm: 100, heightMm: 50, dpi: 203, language: "tspl" }),
+      );
+      expect(result.spec.elements.map((element) => element.kind)).toEqual([
+        "field",
+        "barcode",
+        "barcode",
+        "barcode",
+        "line",
+        "box",
+      ]);
+      expect(result.spec.elements[0]).toEqual(
+        expect.objectContaining({ field: "product.name", align: "center" }),
+      );
+      expect(result.spec.elements[2]).toEqual(
+        expect.objectContaining({ format: "datamatrix", data: "km.code" }),
+      );
+      expect(result.warnings).toEqual([]);
+      expect(result.sourceLineByElementId).toEqual({
+        "import-tspl-1": 5,
+        "import-tspl-2": 6,
+        "import-tspl-3": 7,
+        "import-tspl-4": 8,
+        "import-tspl-5": 9,
+        "import-tspl-6": 10,
+      });
+    });
+
+    it("decodes doubled quotes and reports unsupported bitmap lines", () => {
+      const result = parseTsplLabel(
+        [
+          "SIZE 100 mm, 50 mm",
+          'TEXT 10,10,"0",0,12,12,"He said ""yes"""',
+          "BITMAP 10,100,2,2,1,FF00",
+        ].join("\n"),
+        203,
+      );
+
+      expect(result.spec.elements[0]).toEqual(expect.objectContaining({ text: 'He said "yes"' }));
+      expect(result.warnings).toEqual([
+        expect.objectContaining({ line: 3, source: "BITMAP 10,100,2,2,1,FF00" }),
+      ]);
+    });
+
+    it("rejects missing size, rotation, unsupported fonts, and malformed quotes", () => {
+      expect(() => parseTsplLabel('TEXT 1,1,"0",0,12,12,"x"', 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+      expect(() => parseTsplLabel('SIZE 100 mm, 50 mm\nTEXT 1,1,"0",90,12,12,"x"', 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+      expect(() => parseTsplLabel('SIZE 100 mm, 50 mm\nTEXT 1,1,"1",0,12,12,"x"', 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+      expect(() => parseTsplLabel('SIZE 100 mm, 50 mm\nTEXT 1,1,"0,0,12,12,"x"', 203)).toThrow(
+        expect.objectContaining({ code: "LABEL_CODE_INVALID" }),
+      );
+    });
+
+    it("dispatches by language and preserves selected dpi", () => {
+      const zpl = parseLabelCode("^XA\n^PW799\n^LL400\n^XZ", { language: "zpl", dpi: 300 });
+      const tspl = parseLabelCode("SIZE 100 mm, 50 mm", { language: "tspl", dpi: 300 });
+      expect(zpl.spec).toEqual(expect.objectContaining({ language: "zpl", dpi: 300 }));
+      expect(tspl.spec).toEqual(expect.objectContaining({ language: "tspl", dpi: 300 }));
     });
   });
 });
