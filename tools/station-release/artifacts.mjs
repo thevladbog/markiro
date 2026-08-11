@@ -230,6 +230,7 @@ export async function validateStationReleaseDirectory(directory, expected) {
   ].sort();
   if (checksums.length !== expectedChecksumNames.length) invalid();
   const seenChecksumNames = new Set();
+  const checksumByName = new Map();
   for (const line of checksums) {
     const name = line.slice(66);
     if (
@@ -239,14 +240,21 @@ export async function validateStationReleaseDirectory(directory, expected) {
     )
       invalid();
     seenChecksumNames.add(name);
+    checksumByName.set(name, line.slice(0, 64));
   }
+  for (const name of expectedChecksumNames)
+    if (checksumByName.get(name) !== (await sha256(join(directory, name)))) invalid();
   const evidence = JSON.parse(await readFile(join(directory, names.evidence), "utf8"));
   if (
     !evidence ||
     Object.keys(evidence).sort().join(",") !== "assets,baseSha,publishedAt,releaseSha,version" ||
-    evidence.version !== expected.version
+    evidence.version !== expected.version ||
+    !evidence.assets ||
+    Object.keys(evidence.assets).sort().join(",") !== expectedChecksumNames.join(",")
   )
     invalid();
+  for (const name of expectedChecksumNames)
+    if (evidence.assets[name] !== checksumByName.get(name)) invalid();
   validateSha(evidence.baseSha);
   validateSha(evidence.releaseSha);
   ensureDate(evidence.publishedAt);
@@ -261,14 +269,7 @@ export async function validateStationReleaseDirectory(directory, expected) {
 
 export async function checksumsForDirectory(directory, version) {
   const names = stationAssetNames(version);
-  const files = [
-    names.installer,
-    names.bundle,
-    names.signature,
-    names.manifest,
-    names.notes,
-    names.evidence,
-  ];
+  const files = [names.installer, names.bundle, names.signature, names.manifest];
   return `${(
     await Promise.all(files.map(async (name) => [name, await sha256(join(directory, name))]))
   )

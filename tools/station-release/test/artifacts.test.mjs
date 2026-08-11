@@ -135,3 +135,30 @@ test("stages and validates the canonical release tree", async () => {
   assert.equal(validated.manifest.version, version);
   assert.match(await readFile(join(output, names.checksums), "utf8"), /[0-9a-f]{64}  latest\.json/);
 });
+
+test("rejects checksum text that does not match the downloaded assets", async () => {
+  const input = await mkdtemp(join(tmpdir(), "markiro-station-input-"));
+  const output = await mkdtemp(join(tmpdir(), "markiro-station-output-"));
+  await rm(output, { recursive: true });
+  for (const [name, content] of [
+    [names.installer, "installer"],
+    [names.bundle, "bundle"],
+    [names.signature, "trusted-signature"],
+  ])
+    await writeFile(join(input, name), content);
+  await stageStationRelease({
+    inputDirectory: input,
+    outputDirectory: output,
+    version,
+    pubDate: "2026-08-11T10:00:00.000Z",
+    baseSha: "a".repeat(40),
+    releaseSha: "b".repeat(40),
+  });
+  const checksumPath = join(output, names.checksums);
+  const checksums = await readFile(checksumPath, "utf8");
+  await writeFile(checksumPath, checksums.replace(/^./, "0"));
+  await assert.rejects(
+    validateStationReleaseDirectory(output, { version }),
+    /invalid station release artifacts/,
+  );
+});
