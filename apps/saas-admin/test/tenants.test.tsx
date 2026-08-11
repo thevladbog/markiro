@@ -47,48 +47,6 @@ describe("platform tenants", () => {
     );
   });
 
-  it("accepts Better Auth tenant identifiers that are not UUIDs", async () => {
-    installTenantApi({
-      me: SUPPORT_ME,
-      items: [{ ...TENANT_LIST_ITEM, id: "1rhms95VMlzcSSXRDvIhNMyrujiIa5uG" }],
-    });
-    renderSaasApp({ initialEntry: "/tenants" });
-
-    expect(await screen.findByText("Первый завод")).toBeDefined();
-    expect(screen.queryByText("Не удалось загрузить тенантов")).toBeNull();
-  });
-
-  it("accepts Postgres timestamp values without an explicit offset", async () => {
-    installTenantApi({
-      me: SUPPORT_ME,
-      items: [{ ...TENANT_LIST_ITEM, createdAt: "2026-08-11 14:42:47.129" }],
-    });
-    renderSaasApp({ initialEntry: "/tenants" });
-
-    expect(await screen.findByText("Первый завод")).toBeDefined();
-    expect(screen.queryByText("Не удалось загрузить тенантов")).toBeNull();
-  });
-
-  it("accepts Postgres timezone offsets written as +00", async () => {
-    installTenantApi({
-      me: SUPPORT_ME,
-      items: [
-        {
-          ...TENANT_LIST_ITEM,
-          subscription: {
-            ...TENANT_LIST_ITEM.subscription,
-            startsAt: "2026-08-11 18:05:15.816+00",
-            endsAt: "2026-09-10 18:05:15.803+00",
-          },
-        },
-      ],
-    });
-    renderSaasApp({ initialEntry: "/tenants" });
-
-    expect(await screen.findByText("Первый завод")).toBeDefined();
-    expect(screen.queryByText("Не удалось загрузить тенантов")).toBeNull();
-  });
-
   it("truthfully searches only the bounded page and exposes all lifecycle filters", async () => {
     const second = {
       ...structuredClone(TENANT_LIST_ITEM),

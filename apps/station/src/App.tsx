@@ -47,6 +47,8 @@ import {
   type RunConfigTransition,
 } from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
+import { tauriStationUpdater } from "./lib/tauri-updater.js";
+import { useStationUpdater } from "./lib/use-station-updater.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
@@ -54,9 +56,10 @@ import { ShiftSelection } from "./pages/ShiftSelection.js";
 import { NewShift } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
+import { UpdateCenter } from "./pages/UpdateCenter.js";
 import { FloorShell } from "./ui/FloorShell.js";
 import { FloorFooter } from "./ui/FloorFooter.js";
-import type { ScannerIndicator } from "./ui/StatusBar.js";
+import type { ScannerIndicator, UpdateIndicatorModel } from "./ui/StatusBar.js";
 
 interface ActiveShift {
   id: string;
@@ -187,6 +190,7 @@ export function App() {
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
+  const [showUpdates, setShowUpdates] = useState(false);
   const [credentialRecovery, setCredentialRecovery] = useState<CredentialRecoveryState | null>(
     null,
   );
@@ -563,6 +567,18 @@ export function App() {
     onCredentialRejected,
   });
 
+  // The hook is mounted unconditionally to preserve hook order, but it only
+  // starts discovery after migrations have completed and readConfig has
+  // published a non-null config. Discovery is non-blocking and never changes
+  // the active shift or sync engine.
+  const updater = useStationUpdater({
+    enabled: config !== null,
+    exec: tauriExecutor,
+    activeShift: shift !== null,
+    pendingOutbox: syncState.pending,
+    port: tauriStationUpdater,
+  });
+
   // React runs effects only after committing the recovery render. This is
   // the ordering boundary that guarantees an operator can no longer act on
   // the authenticated floor before roster/reference caches are removed.
@@ -842,6 +858,14 @@ export function App() {
   // from, so it is guaranteed non-null in this branch.
   const activeClient = authenticatedClient ?? legacyGatedClient;
   const floorGeneration = credentialGeneration;
+  const updateIndicator: UpdateIndicatorModel = {
+    severity: updater.severity,
+    glyph: updater.persisted?.available ? "!" : "↻",
+    available: updater.persisted?.available !== null && updater.persisted?.available !== undefined,
+    label: updater.persisted?.available
+      ? t("updates.indicatorAvailable", { version: updater.persisted.available.version })
+      : t("updates.indicatorCurrent"),
+  };
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
   // shift is entered immediately (never blocked on the network), and the
@@ -871,9 +895,18 @@ export function App() {
       syncPending={syncState.pending}
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
+      update={updateIndicator}
+      onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
     >
-      {showSetup ? (
+      {showUpdates ? (
+        <UpdateCenter
+          controller={updater}
+          activeShift={shift !== null}
+          pendingOutbox={syncState.pending}
+          onBack={() => setShowUpdates(false)}
+        />
+      ) : showSetup ? (
         <WorkstationSetup
           hw={tauriHardware}
           exec={tauriExecutor}

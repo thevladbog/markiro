@@ -16,6 +16,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let locked = window
@@ -36,7 +37,6 @@ pub fn run() {
             commands::clear_credential,
             commands::enter_lockdown,
             commands::exit_lockdown,
-            commands::set_update_endpoint,
             scanner::list_serial_ports,
             scanner::open_scanner,
             scanner::close_scanner,

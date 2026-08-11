@@ -93,29 +93,6 @@ pub fn exit_lockdown(app: AppHandle, state: State<'_, LockdownState>) -> Result<
     }
 }
 
-/// Validates an operator-entered updater endpoint URL before it is handed to
-/// the Tauri updater (05b wires the actual check/install). Same discipline as
-/// the config `server_url` (http/https only, no userinfo), plus a rejection
-/// of raw `{`/`}` characters: `{{target}}`-style placeholders are substituted
-/// by Tauri only for the static endpoint baked into `tauri.conf.json` at
-/// build time, so a literal placeholder in an operator-supplied override
-/// almost certainly means an unresolved template was pasted in rather than a
-/// real endpoint (the `url` crate otherwise percent-encodes braces silently
-/// instead of rejecting them, which would defeat the check).
-pub fn validate_endpoint_url(url: &str) -> Result<(), String> {
-    if url.contains('{') || url.contains('}') {
-        return Err("Invalid URL: template placeholders are not allowed".to_string());
-    }
-    crate::config::validate_http_url(url)
-}
-
-/// Updater skeleton: validates + records the endpoint override in memory.
-/// The real check/download/install lands in 05b's updater task.
-#[tauri::command]
-pub fn set_update_endpoint(url: String) -> Result<(), String> {
-    validate_endpoint_url(&url)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,14 +103,6 @@ mod tests {
             hello("Line 1"),
             "Hello, Line 1, from the Markiro station core"
         );
-    }
-
-    #[test]
-    fn validate_endpoint_url_enforces_http_scheme_and_no_userinfo() {
-        assert!(validate_endpoint_url("https://releases.markiro.app/station/{{target}}").is_err());
-        assert!(validate_endpoint_url("https://releases.markiro.app/station/latest.json").is_ok());
-        assert!(validate_endpoint_url("ftp://releases.markiro.app/x").is_err());
-        assert!(validate_endpoint_url("https://user:pass@evil.example.com/x").is_err());
     }
 
     #[test]

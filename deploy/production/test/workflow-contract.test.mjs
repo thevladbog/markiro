@@ -75,6 +75,7 @@ test("all third-party actions in active production workflows are commit pinned",
     ".github/workflows/release-images.yml",
     ".github/workflows/deploy-production.yml",
     ".github/workflows/yandex-infrastructure.yml",
+    ".github/workflows/station-beta-release.yml",
   ]) {
     const source = await read(path);
     for (const match of source.matchAll(/^\s*-?\s*uses:\s*([^\s#]+)/gm)) {

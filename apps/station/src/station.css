@@ -1638,6 +1638,7 @@ body,
 }
 
 .station-status-bar {
+  position: relative;
   display: grid;
   min-width: 0;
   padding: var(--sp-2) var(--sp-4);
@@ -1646,6 +1647,90 @@ body,
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
   font: var(--floor-body);
+}
+
+.station-update-indicator {
+  position: absolute;
+  top: 50%;
+  right: var(--sp-4);
+  display: inline-flex;
+  min-height: 64px;
+  max-width: 180px;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  overflow: hidden;
+  transform: translateY(-50%);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: var(--floor-body-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-update-indicator[data-update-severity="info"] {
+  color: var(--info-fg);
+}
+
+.station-update-indicator[data-update-severity="warn"] {
+  color: var(--warn-fg);
+}
+
+.station-update-indicator[data-update-severity="urgent"] {
+  color: var(--err-fg);
+}
+
+.station-update-center {
+  display: grid;
+  min-height: 100%;
+  align-content: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+}
+
+.station-update-center__version {
+  display: grid;
+  gap: var(--sp-2);
+  margin: 0;
+  font: var(--floor-body);
+}
+
+.station-update-center__version strong {
+  font: var(--floor-title);
+}
+
+.station-update-center__status {
+  margin: 0;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.station-update-center__progress {
+  width: min(720px, 100%);
+  height: 20px;
+}
+
+.station-update-center__confirm {
+  display: grid;
+  gap: var(--sp-3);
+  width: min(720px, 100%);
+  padding: var(--sp-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface-panel);
+}
+
+.station-update-center__confirm h2,
+.station-update-center__confirm p {
+  margin: 0;
+}
+
+.station-update-center__confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
 }
 
 .station-status-group {

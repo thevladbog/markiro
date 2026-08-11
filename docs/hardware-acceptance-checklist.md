@@ -60,6 +60,16 @@ Record the Windows version, station build/commit, display model and native
 resolution, touch controller, scanner and printer models, and whether gloves
 were used. A host browser or macOS Tauri run does not satisfy these checks.
 
+### Manual station beta update
+
+- [ ] Download the immutable Windows installer manually and compare its version
+      and SHA-256 with `SHA256SUMS`; verify the updater bundle signature against
+      `latest.json` separately.
+- [ ] Install beta.1, then beta.2 while no shift is active; confirm installation
+      is blocked during an active shift and pending outbox data is retained.
+- [ ] Record any SmartScreen prompt and operator decision in the beta acceptance
+      table; CI cannot replace this Windows/hardware check.
+
 - [ ] On the target Windows station, production startup enters fullscreen and
       blocks ordinary close/minimize/resize paths. The hidden service workflow
       can leave lockdown, and Done/Back reliably re-enters it.

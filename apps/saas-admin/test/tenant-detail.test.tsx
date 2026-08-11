@@ -509,14 +509,13 @@ describe("tenant subscription detail", () => {
     );
   });
 
-  it("rejects an overlong route tenant identifier at the client boundary", async () => {
+  it("rejects an invalid route UUID at the client boundary without a tenant request", async () => {
     installTenantApi();
-    const invalidId = "x".repeat(129);
-    renderSaasApp({ initialEntry: `/tenants/${invalidId}` });
+    renderSaasApp({ initialEntry: "/tenants/not-a-uuid" });
 
     expect(await screen.findByText("Некорректный идентификатор тенанта")).toBeDefined();
-    expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes(invalidId))).toBe(
-      false,
-    );
+    expect(
+      vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("not-a-uuid")),
+    ).toBe(false);
   });
 });

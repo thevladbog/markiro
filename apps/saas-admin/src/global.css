@@ -282,7 +282,7 @@ textarea {
 .app-header {
   min-height: 72px;
   display: grid;
-  grid-template-columns: minmax(230px, 0.8fr) minmax(0, 1.8fr) auto;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(260px, 1.2fr) auto;
   align-items: stretch;
   border-bottom: 1px solid var(--line-strong);
   background: var(--surface-card);
@@ -318,13 +318,10 @@ textarea {
 .app-nav {
   display: flex;
   align-items: stretch;
-  min-width: 0;
-  overflow-x: auto;
 }
 
 .app-nav a {
-  min-width: 0;
-  flex: 1 1 0;
+  min-width: 160px;
   min-height: 44px;
   display: inline-flex;
   align-items: center;
@@ -334,7 +331,6 @@ textarea {
   color: var(--fg-2);
   text-decoration: none;
   font: 600 14px/20px var(--font-ui);
-  white-space: nowrap;
 }
 
 .app-nav a.active {
@@ -424,11 +420,6 @@ textarea {
   gap: 16px;
 }
 
-.catalog-toolbar {
-  display: flex;
-  justify-content: flex-end;
-}
-
 .catalog-coordinate {
   margin-top: -8px;
   letter-spacing: 0.08em;
@@ -443,11 +434,6 @@ textarea {
 .catalog-frame .mk-table {
   border: 0 !important;
   border-top: 1px solid var(--line-strong) !important;
-}
-
-.catalog-pagination {
-  padding: 12px 16px;
-  border-top: 1px solid var(--line-strong);
 }
 
 .catalog-tabs {
@@ -515,30 +501,8 @@ textarea {
 }
 
 .version-panel {
-  position: fixed;
-  inset: 0 0 0 auto;
-  z-index: 100;
-  width: min(760px, 100vw);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   border: 1px solid var(--line-strong);
   background: var(--surface-card);
-  box-shadow: -16px 0 40px color-mix(in srgb, var(--surface-inverse) 18%, transparent);
-}
-
-.mk-side-panel .version-panel {
-  position: static;
-  inset: auto;
-  z-index: auto;
-  width: auto;
-  min-height: 100%;
-  overflow: visible;
-  border: 0;
-  box-shadow: none;
-}
-
-.catalog-create-panel .catalog-form {
-  padding: 24px;
 }
 
 .version-panel__header {

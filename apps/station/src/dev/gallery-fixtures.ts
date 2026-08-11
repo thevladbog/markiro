@@ -40,6 +40,7 @@ export type GalleryFixtureKind =
   | "setup"
   | "sync"
   | "print"
+  | "updates"
   | "long-copy";
 
 export interface GalleryFixture {
@@ -157,6 +158,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "setup-sound", kind: "setup", variant: "sound", source: "synthetic" },
   { id: "offline", kind: "sync", variant: "offline", source: "synthetic" },
   { id: "sync-stuck", kind: "sync", variant: "stuck", source: "synthetic" },
+  { id: "update-current", kind: "updates", variant: "current", source: "synthetic" },
+  { id: "update-info", kind: "updates", variant: "info", source: "synthetic" },
+  { id: "update-warn", kind: "updates", variant: "warn", source: "synthetic" },
+  { id: "update-urgent", kind: "updates", variant: "urgent", source: "synthetic" },
+  { id: "update-error", kind: "updates", variant: "error", source: "synthetic" },
+  { id: "update-active-shift", kind: "updates", variant: "active-shift", source: "synthetic" },
   { id: "print-verification", kind: "print", variant: "waiting", source: "synthetic" },
   { id: "print-mismatch", kind: "print", variant: "mismatch", source: "synthetic" },
   { id: "print-not-sscc", kind: "print", variant: "not-sscc", source: "synthetic" },
