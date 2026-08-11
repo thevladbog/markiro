@@ -146,6 +146,8 @@ describe("flushQueue", () => {
       expect(client.attestOrder.mock.calls.length + client.submitOrder.mock.calls.length).toBe(1);
     });
     expect(client.attestOrder).toHaveBeenCalledOnce();
+    expect(client.attestOrder).toHaveBeenCalledWith(expect.objectContaining({ admissionNonce: expect.any(String) }));
+    expect((await listQueue())[0]?.admissionNonce).toEqual(expect.any(String));
     expect(client.submitOrder).not.toHaveBeenCalled();
 
     resolveAdmission({

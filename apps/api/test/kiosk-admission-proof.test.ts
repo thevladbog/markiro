@@ -5,6 +5,7 @@ import {
   kioskAdmissionTokenHash,
   kioskOrderPayloadDigest,
 } from "../src/modules/pickup-orders/kiosk-admission-proof";
+import { admissionSequenceWithinWindow } from "../src/modules/pickup-orders/kiosk-admission-proof";
 
 const order = {
   deviceSeq: 17,
@@ -14,6 +15,23 @@ const order = {
 };
 
 describe("durable kiosk order admission", () => {
+  it("rejects a reservation that jumps beyond the durable queue window", () => {
+    expect(admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 2, candidate: 13 })).toBe(
+      true,
+    );
+    expect(admissionSequenceWithinWindow({ maxDurableSeq: 10, outstandingCount: 2, candidate: 14 })).toBe(
+      false,
+    );
+    for (let candidate = 1; candidate <= 129; candidate += 1) {
+      expect(
+        admissionSequenceWithinWindow({
+          maxDurableSeq: candidate - 1,
+          outstandingCount: 0,
+          candidate,
+        }),
+      ).toBe(true);
+    }
+  });
   it("binds the digest to normalized business content and device sequence", () => {
     expect(canonicalKioskOrderContent(order)).toEqual({
       deviceSeq: 17,

@@ -37,6 +37,7 @@ export interface CreateOrderDto {
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];
   createdAt?: string;
+  admissionNonce?: string;
   admissionProof?: string;
 }
 

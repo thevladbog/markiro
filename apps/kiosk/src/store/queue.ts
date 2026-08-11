@@ -34,6 +34,7 @@ export interface QueuedOrder {
    * already been persisted and is safe to submit after a restart.
    */
   admissionState?: "pending_attestation";
+  admissionNonce?: string;
 }
 
 /** Queues one scanned order. `deviceSeq` is the store's `keyPath`, so this is
@@ -66,6 +67,15 @@ export async function attestQueuedOrder(deviceSeq: number, body: CreateOrderDto)
     const completed: QueuedOrder = { ...queued, body };
     delete completed.admissionState;
     return completed;
+  });
+  return updated === 1;
+}
+
+export async function persistAdmissionNonce(deviceSeq: number, nonce: string): Promise<boolean> {
+  const updated = await updateEach(STORE_QUEUE, (value) => {
+    const queued = value as QueuedOrder;
+    if (queued.deviceSeq !== deviceSeq || queued.admissionState !== "pending_attestation") return null;
+    return { ...queued, admissionNonce: nonce };
   });
   return updated === 1;
 }

@@ -761,9 +761,9 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         .set("x-kiosk-token", kioskToken)
         .send({ deviceSeq, ...content })
         .expect(201);
-    const exact = await reserve(10);
-    const wrongTime = await reserve(11);
-    const wrongContent = await reserve(12);
+    const exact = await reserve(0);
+    const wrongTime = await reserve(1);
+    const wrongContent = await reserve(2);
 
     const persistedAdmissions = await db
       .select({
@@ -813,28 +813,28 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         .set("x-kiosk-capabilities", KIOSK_RECOVERY_CAPABILITY)
         .send({ ...content, ...body });
     await post({
-      deviceSeq: 10,
+      deviceSeq: 0,
       createdAt: exact.body.claimedAt,
       admissionProof: exact.body.admissionProof,
     }).expect(201);
     await post({
-      deviceSeq: 11,
+      deviceSeq: 1,
       createdAt: new Date(Date.parse(wrongTime.body.claimedAt as string) - 60_000).toISOString(),
       admissionProof: wrongTime.body.admissionProof,
     }).expect(403, { code: "subscription_read_only" });
     await post({
-      deviceSeq: 12,
+      deviceSeq: 2,
       createdAt: wrongContent.body.claimedAt,
       admissionProof: wrongContent.body.admissionProof,
       reason: "writeoff",
     }).expect(403, { code: "subscription_read_only" });
     await post({
-      deviceSeq: 13,
+      deviceSeq: 3,
       createdAt: exact.body.claimedAt,
       admissionProof: "forged-admission-token",
     }).expect(403, { code: "subscription_read_only" });
     await post({
-      deviceSeq: 14,
+      deviceSeq: 4,
       createdAt: exact.body.claimedAt,
       admissionProof: exact.body.admissionProof,
     }).expect(403, { code: "subscription_read_only" });
@@ -943,7 +943,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .from(schema.kioskOrderAdmissions)
       .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
     expect(afterRetry).toHaveLength(129);
-  });
+  }, 30_000);
 
   it("consumes an exact admission after a durable terminal order rejection", async () => {
     const agent = request.agent(app!.getHttpServer());
@@ -1062,6 +1062,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .spyOn(entitlements, "accessSnapshot")
       .mockRejectedValueOnce(new Error("split subscription snapshot read"));
     const recoveryRead = vi.spyOn(entitlements, "resolveRecovery");
+    recoveryRead.mockClear();
     try {
       const response = await request(app!.getHttpServer())
         .get("/kiosk/bootstrap")

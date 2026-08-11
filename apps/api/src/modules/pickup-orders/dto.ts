@@ -59,6 +59,7 @@ const createOrderContentShape = {
   reason: z.enum(["buy", "writeoff"]),
   writeoffReasonId: z.string().uuid().nullable().optional(),
   items: z.array(createOrderItemSchema),
+  admissionNonce: z.string().min(32).max(128).optional(),
 };
 
 const hasExactlyOneBadgeIdentity = (body: {

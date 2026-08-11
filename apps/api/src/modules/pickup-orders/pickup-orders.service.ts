@@ -17,6 +17,7 @@ import {
   inArray,
   isNull,
   lte,
+  max,
   ne,
   notExists,
   sql,
@@ -36,6 +37,7 @@ import {
   issueOpaqueKioskAdmissionToken,
   kioskAdmissionTokenHash,
   kioskOrderPayloadDigest,
+  admissionSequenceWithinWindow,
 } from "./kiosk-admission-proof";
 import {
   type CreateOrderAdmissionDto,
@@ -410,12 +412,30 @@ export class PickupOrdersService {
   ): Promise<CreateOrderAdmissionResultDto> {
     return this.db.transaction(async (tx) => {
       const claimedAt = new Date();
+      const requestedToken = dto.admissionNonce;
+      if (requestedToken) {
+        const [existing] = await tx
+          .select({ claimedAt: schema.kioskOrderAdmissions.claimedAt })
+          .from(schema.kioskOrderAdmissions)
+          .where(
+            and(
+              eq(schema.kioskOrderAdmissions.tenantId, tenantId),
+              eq(schema.kioskOrderAdmissions.kioskId, kioskId),
+              eq(schema.kioskOrderAdmissions.deviceSeq, dto.deviceSeq),
+              eq(schema.kioskOrderAdmissions.tokenHash, kioskAdmissionTokenHash(requestedToken)),
+              eq(schema.kioskOrderAdmissions.payloadDigest, kioskOrderPayloadDigest(dto)),
+            ),
+          );
+        if (existing) {
+          return { claimedAt: existing.claimedAt.toISOString(), admissionProof: requestedToken };
+        }
+      }
       const access = await this.entitlements.assertWriteAccess(tenantId, tx, claimedAt);
       const subscription = access.subscription;
       if (!subscription?.endsAt || claimedAt >= subscription.endsAt) {
         throw new ConflictException({ code: "kiosk_admission_not_required" });
       }
-      const token = issueOpaqueKioskAdmissionToken();
+      const token = requestedToken ?? issueOpaqueKioskAdmissionToken();
       // Serialize reservations for this authenticated device. One deviceSeq
       // owns one constant-sized row (the request body itself is not stored),
       // while distinct offline records remain uncapped: a kiosk that queued a
@@ -426,6 +446,27 @@ export class PickupOrdersService {
         .from(schema.kiosks)
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
         .for("update");
+      const durableRow = (await tx
+        .select({ maxDurableSeq: max(schema.pickupOrders.deviceSeq) })
+        .from(schema.pickupOrders)
+        .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.kioskId, kioskId))))[0];
+      const admissionRow = (await tx
+        .select({
+          maxAdmissionSeq: max(schema.kioskOrderAdmissions.deviceSeq),
+          outstandingCount: sql<number>`count(*)`,
+        })
+        .from(schema.kioskOrderAdmissions)
+        .where(and(eq(schema.kioskOrderAdmissions.tenantId, tenantId), eq(schema.kioskOrderAdmissions.kioskId, kioskId))))[0];
+      const durable = Math.max(Number(durableRow?.maxDurableSeq ?? 0), Number(admissionRow?.maxAdmissionSeq ?? 0));
+      if (
+        !admissionSequenceWithinWindow({
+          maxDurableSeq: durable,
+          outstandingCount: Number(admissionRow?.outstandingCount ?? 0),
+          candidate: dto.deviceSeq,
+        })
+      ) {
+        throw new ConflictException({ code: "kiosk_admission_sequence_gap" });
+      }
       await tx
         .insert(schema.kioskOrderAdmissions)
         .values({

@@ -11,6 +11,7 @@ import {
   attestQueuedOrder,
   dequeueOrder,
   listQueue,
+  persistAdmissionNonce,
   quarantineOrder,
   type QueuedOrder,
 } from "../store/queue.js";
@@ -549,9 +550,15 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         if (order.admissionState === "pending_attestation") {
           let attestedBody = order.body;
           try {
-            const admission = await client.attestOrder(admissionRequest(order.body));
+            const admissionNonce = order.admissionNonce ?? crypto.randomUUID().replaceAll("-", "");
+            if (!order.admissionNonce && !(await persistAdmissionNonce(order.deviceSeq, admissionNonce))) {
+              continue;
+            }
+            const admission = await client.attestOrder({ ...admissionRequest(order.body), admissionNonce });
+            const submitBody = admissionRequest(order.body);
+            delete submitBody.admissionNonce;
             attestedBody = {
-              ...admissionRequest(order.body),
+              ...submitBody,
               createdAt: admission.claimedAt,
               admissionProof: admission.admissionProof,
             };

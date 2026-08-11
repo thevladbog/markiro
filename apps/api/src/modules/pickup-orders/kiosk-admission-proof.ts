@@ -1,6 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { CreateOrderAdmissionDto, CreateOrderDto } from "./dto";
 
+export function admissionSequenceWithinWindow(input: {
+  maxDurableSeq: number;
+  outstandingCount: number;
+  candidate: number;
+}): boolean {
+  const maxSeen = Math.max(0, input.maxDurableSeq);
+  return input.candidate <= maxSeen + input.outstandingCount + 1;
+}
+
 type CanonicalOrderContent = Pick<CreateOrderAdmissionDto, "deviceSeq" | "reason" | "items"> & {
   badgeDigest: string | null;
   badgeCode: string | null;
