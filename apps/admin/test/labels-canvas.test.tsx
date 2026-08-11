@@ -22,6 +22,7 @@ import { sampleLabelData, type LabelElement, type LabelTemplateSpec } from "@mar
 
 import { DEFAULT_SCALE, hitTest, LabelCanvas } from "../src/pages/labels/editor/LabelCanvas.js";
 import { elementBoundsMm, mulberry32, simpleHash } from "../src/pages/labels/editor/renderer.js";
+import { fitElementWithinLabel, fitSpecElements } from "../src/pages/labels/editor/geometry.js";
 import {
   createEditorState,
   editorReducer,
@@ -251,6 +252,71 @@ describe("elementBoundsMm", () => {
   });
 });
 
+describe("editor geometry containment", () => {
+  const label = { widthMm: 100, heightMm: 100 };
+  const data = sampleLabelData();
+
+  it("clamps every supported element kind by its rendered bounds", () => {
+    const elements: LabelElement[] = [
+      { kind: "text", id: "text", xMm: 99, yMm: 99, text: "Long text", fontSizePt: 12 },
+      { kind: "field", id: "field", xMm: 99, yMm: 99, field: "product.name", fontSizePt: 12 },
+      { kind: "barcode", id: "linear", xMm: 99, yMm: 99, format: "code128", data: "sscc", sizeMm: 5 },
+      { kind: "barcode", id: "matrix", xMm: 99, yMm: 99, format: "qr", data: "sscc", sizeMm: 1 },
+      { kind: "line", id: "line", xMm: 90, yMm: 95, x2Mm: 120, y2Mm: 95, thicknessMm: 1 },
+      { kind: "box", id: "box", xMm: 95, yMm: 95, widthMm: 20, heightMm: 20, thicknessMm: 1 },
+    ];
+
+    for (const element of elements) {
+      const result = fitElementWithinLabel(element, label, data);
+      expect(result.ok, element.id).toBe(true);
+      if (!result.ok) continue;
+      const bounds = elementBoundsMm(result.element, data);
+      expect(bounds.x).toBeGreaterThanOrEqual(0);
+      expect(bounds.y).toBeGreaterThanOrEqual(0);
+      expect(bounds.x + bounds.w).toBeLessThanOrEqual(label.widthMm);
+      expect(bounds.y + bounds.h).toBeLessThanOrEqual(label.heightMm);
+    }
+  });
+
+  it("translates both endpoints of a line and rejects an element larger than the label", () => {
+    const line = fitElementWithinLabel(
+      { kind: "line", id: "line", xMm: 90, yMm: 95, x2Mm: 120, y2Mm: 95, thicknessMm: 1 },
+      label,
+      data,
+    );
+    expect(line).toEqual({
+      ok: true,
+      adjusted: true,
+      element: expect.objectContaining({ xMm: 70, x2Mm: 100, yMm: 95, y2Mm: 95 }),
+    });
+
+    expect(
+      fitElementWithinLabel(
+        { kind: "box", id: "too-large", xMm: 0, yMm: 0, widthMm: 101, heightMm: 10, thicknessMm: 1 },
+        label,
+        data,
+      ),
+    ).toEqual({ ok: false, reason: "ELEMENT_TOO_LARGE" });
+  });
+
+  it("fits a complete spec atomically and reports adjusted ids", () => {
+    const spec = makeSpec([
+      { kind: "box", id: "inside", xMm: 1, yMm: 1, widthMm: 10, heightMm: 10, thicknessMm: 1 },
+      { kind: "box", id: "outside", xMm: 95, yMm: 95, widthMm: 10, heightMm: 10, thicknessMm: 1 },
+    ]);
+    expect(fitSpecElements(spec, data)).toEqual({
+      ok: true,
+      adjustedIds: ["outside"],
+      spec: expect.objectContaining({
+        elements: [
+          expect.objectContaining({ id: "inside", xMm: 1 }),
+          expect.objectContaining({ id: "outside", xMm: 90, yMm: 90 }),
+        ],
+      }),
+    });
+  });
+});
+
 describe("Pattern helper determinism", () => {
   it("simpleHash: same input string produces identical hash every call", () => {
     const text = "test-data";
@@ -383,6 +449,23 @@ describe("editorReducer", () => {
     expect(el.xMm).toBe(Math.round(10 + 0.6));
     expect(el.yMm).toBe(Math.round(10 - 0.2));
     expect(next.history).toEqual([state.spec]);
+  });
+
+  it("moveBy clamps the resulting rendered bounds to the label edge", () => {
+    const state = createEditorState(
+      makeSpec([{ kind: "box", id: "bx1", xMm: 90, yMm: 90, widthMm: 20, heightMm: 20, thicknessMm: 1 }]),
+    );
+    const next = editorReducer(state, { type: "moveBy", id: "bx1", dxMm: 50, dyMm: 50 });
+    expect(next.spec.elements[0]).toEqual(expect.objectContaining({ xMm: 80, yMm: 80 }));
+    expect(next.geometryError).toBeNull();
+  });
+
+  it("setElement rejects an element that cannot fit and preserves its spec", () => {
+    const state = createEditorState(specWithBox());
+    const next = editorReducer(state, { type: "setElement", id: "bx1", patch: { widthMm: 101 } });
+    expect(next.spec).toBe(state.spec);
+    expect(next.history).toHaveLength(0);
+    expect(next.geometryError).toBe("ELEMENT_TOO_LARGE");
   });
 
   it("moveBy: translates a line's second endpoint by the same delta (preserves length/direction)", () => {

@@ -13,6 +13,8 @@ import { useCallback, useReducer } from "react";
 
 import { type LabelElement, type LabelTemplateSpec } from "@markiro/domain";
 
+import { fitElementWithinLabel, fitSpecElements } from "./geometry.js";
+
 /**
  * Maximum number of past specs retained for `undo`. Enforced by
  * `pushHistory` below: pushing past this cap drops the OLDEST entry first
@@ -28,6 +30,7 @@ export interface EditorState {
   history: LabelTemplateSpec[];
   /** Specs undone-away-from, most-recently-undone first; `redo` pops from the front. */
   future: LabelTemplateSpec[];
+  geometryError: "ELEMENT_TOO_LARGE" | null;
 }
 
 export type EditorAction =
@@ -38,11 +41,13 @@ export type EditorAction =
   | { type: "removeElement"; id: string }
   | { type: "undo" }
   | { type: "redo" }
-  | { type: "replaceSpec"; spec: LabelTemplateSpec };
+  | { type: "replaceSpec"; spec: LabelTemplateSpec }
+  | { type: "resizeLabel"; widthMm: number; heightMm: number }
+  | { type: "clearGeometryError" };
 
 /** Fresh editor state for `spec`: nothing selected, empty history/future. */
 export function createEditorState(spec: LabelTemplateSpec): EditorState {
-  return { spec, selectedId: null, history: [], future: [] };
+  return { spec, selectedId: null, history: [], future: [], geometryError: null };
 }
 
 function pushHistory(history: LabelTemplateSpec[], spec: LabelTemplateSpec): LabelTemplateSpec[] {
@@ -78,7 +83,14 @@ function withMutatedSpec(state: EditorState, nextSpec: LabelTemplateSpec): Edito
     selectedId: selectedIdAfter(nextSpec, state.selectedId),
     history: pushHistory(state.history, state.spec),
     future: [],
+    geometryError: null,
   };
+}
+
+function withGeometryError(state: EditorState): EditorState {
+  return state.geometryError === "ELEMENT_TOO_LARGE"
+    ? state
+    : { ...state, geometryError: "ELEMENT_TOO_LARGE" };
 }
 
 /**
@@ -116,7 +128,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         ...state.spec,
         elements: state.spec.elements.map((el) => (el.id === action.id ? moved : el)),
       };
-      return withMutatedSpec(state, nextSpec);
+      const fitted = fitElementWithinLabel(moved, state.spec);
+      if (!fitted.ok) return withGeometryError(state);
+      return withMutatedSpec(state, {
+        ...nextSpec,
+        elements: nextSpec.elements.map((el) => (el.id === action.id ? fitted.element : el)),
+      });
     }
 
     case "setElement": {
@@ -129,17 +146,21 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       // it does not itself guard against a caller patching in a foreign
       // kind's field.
       const patched = { ...element, ...action.patch } as LabelElement;
+      const fitted = fitElementWithinLabel(patched, state.spec);
+      if (!fitted.ok) return withGeometryError(state);
       const nextSpec: LabelTemplateSpec = {
         ...state.spec,
-        elements: state.spec.elements.map((el) => (el.id === action.id ? patched : el)),
+        elements: state.spec.elements.map((el) => (el.id === action.id ? fitted.element : el)),
       };
       return withMutatedSpec(state, nextSpec);
     }
 
     case "addElement": {
+      const fitted = fitElementWithinLabel(action.element, state.spec);
+      if (!fitted.ok) return withGeometryError(state);
       const nextSpec: LabelTemplateSpec = {
         ...state.spec,
-        elements: [...state.spec.elements, action.element],
+        elements: [...state.spec.elements, fitted.element],
       };
       // Newly added elements become selected -- the common editor
       // convention (Figma, etc.): a just-placed element is what the user
@@ -159,6 +180,20 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case "replaceSpec":
       return withMutatedSpec(state, action.spec);
 
+    case "resizeLabel": {
+      const resized: LabelTemplateSpec = {
+        ...state.spec,
+        widthMm: action.widthMm,
+        heightMm: action.heightMm,
+      };
+      const fitted = fitSpecElements(resized);
+      if (!fitted.ok) return withGeometryError(state);
+      return withMutatedSpec(state, fitted.spec);
+    }
+
+    case "clearGeometryError":
+      return state.geometryError === null ? state : { ...state, geometryError: null };
+
     case "undo": {
       if (state.history.length === 0) return state;
       const previous = state.history[state.history.length - 1]!;
@@ -167,6 +202,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         selectedId: selectedIdAfter(previous, state.selectedId),
         history: state.history.slice(0, -1),
         future: [state.spec, ...state.future],
+        geometryError: null,
       };
     }
 
@@ -178,6 +214,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         selectedId: selectedIdAfter(next, state.selectedId),
         history: pushHistory(state.history, state.spec),
         future: state.future.slice(1),
+        geometryError: null,
       };
     }
   }
@@ -214,6 +251,11 @@ export function useEditorState(initialSpec: LabelTemplateSpec) {
     (spec: LabelTemplateSpec) => dispatch({ type: "replaceSpec", spec }),
     [],
   );
+  const resizeLabel = useCallback(
+    (widthMm: number, heightMm: number) => dispatch({ type: "resizeLabel", widthMm, heightMm }),
+    [],
+  );
+  const clearGeometryError = useCallback(() => dispatch({ type: "clearGeometryError" }), []);
 
   return {
     state,
@@ -225,6 +267,8 @@ export function useEditorState(initialSpec: LabelTemplateSpec) {
     undo,
     redo,
     replaceSpec,
+    resizeLabel,
+    clearGeometryError,
     canUndo: state.history.length > 0,
     canRedo: state.future.length > 0,
   };
