@@ -1,7 +1,17 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, Input, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  Card,
+  Input,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import {
   changePlatformRole,
@@ -51,20 +61,13 @@ export function TeamPage() {
       key: "role",
       title: t("team.role"),
       render: (user: PlatformUser) => (
-        <select
+        <Select<PlatformRole>
           aria-label={t("team.roleFor", { email: user.email })}
+          options={roles.map((item) => ({ value: item, label: t(`roles.${item}`) }))}
           value={user.role}
           disabled={!canWrite || changeRole.isPending}
-          onChange={(event) =>
-            void changeRole.mutate({ id: user.id, nextRole: event.target.value as PlatformRole })
-          }
-        >
-          {roles.map((item) => (
-            <option key={item} value={item}>
-              {t(`roles.${item}`)}
-            </option>
-          ))}
-        </select>
+          onValueChange={(nextRole) => void changeRole.mutate({ id: user.id, nextRole })}
+        />
       ),
     },
     {
@@ -110,19 +113,12 @@ export function TeamPage() {
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />
-            <label>
-              {t("team.role")}
-              <select
-                value={role}
-                onChange={(event) => setRole(event.target.value as PlatformRole)}
-              >
-                {roles.map((item) => (
-                  <option key={item} value={item}>
-                    {t(`roles.${item}`)}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <Select<PlatformRole>
+              label={t("team.role")}
+              options={roles.map((item) => ({ value: item, label: t(`roles.${item}`) }))}
+              value={role}
+              onValueChange={setRole}
+            />
             <Button
               loading={invite.isPending}
               disabled={!email.trim()}
