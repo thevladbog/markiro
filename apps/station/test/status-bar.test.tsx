@@ -39,6 +39,27 @@ describe("StatusBar", () => {
     expect(screen.getAllByText("2")).toHaveLength(1);
   });
 
+  it("keeps a semantic update entry point visible with severity metadata", () => {
+    render(
+      <StatusBar
+        {...context}
+        online
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+        update={{ severity: "warn", glyph: "!", label: "Update 0.1.0-beta.2", available: true }}
+        onOpenUpdates={() => {}}
+      />,
+    );
+    expect(
+      screen
+        .getByRole("button", { name: "! Update 0.1.0-beta.2" })
+        .getAttribute("data-update-severity"),
+    ).toBe("warn");
+  });
+
   it("does not invent agent or teammate status without a live source", () => {
     render(
       <StatusBar

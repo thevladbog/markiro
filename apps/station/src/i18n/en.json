@@ -116,6 +116,49 @@
     "setup": "Workstation setup",
     "conflicts": "Conflicts"
   },
+  "updates": {
+    "title": "Station updates",
+    "actions": "Update actions",
+    "back": "Back",
+    "check": "Check for updates",
+    "downloadInstall": "Download and install",
+    "confirm": "Confirm update",
+    "cancel": "Cancel",
+    "confirmTitle": "Install station update?",
+    "confirmBody": "Version {{version}} will be downloaded and the station will restart.",
+    "available": "Available version",
+    "current": "This station is up to date.",
+    "manualOnly": "Downloads and installation are manual.",
+    "indicatorCurrent": "Updates",
+    "indicatorAvailable": "Update {{version}}",
+    "progress": "Update download progress",
+    "activeShift": "Leave the active shift before installing",
+    "pending_one": "{{count}} operation is still waiting to sync",
+    "pending_few": "{{count}} operations are still waiting to sync",
+    "pending_many": "{{count}} operations are still waiting to sync",
+    "pending_other": "{{count}} operations are still waiting to sync",
+    "age": {
+      "none": "No update available",
+      "info": "Released recently",
+      "warn": "This release is more than 7 days old",
+      "urgent": "This release is more than 30 days old; update when convenient"
+    },
+    "phases": {
+      "idle": "Ready",
+      "checking": "Checking for updates…",
+      "downloading": "Downloading update…",
+      "installing": "Installing update…",
+      "restarting": "Restarting station…"
+    },
+    "errors": {
+      "check-failed": "Could not check for updates. Local work continues.",
+      "invalid-metadata": "The update metadata is invalid.",
+      "state-write-failed": "The update reminder could not be saved.",
+      "active-shift": "Leave the active shift before installing",
+      "target-changed": "The available version changed. Check again.",
+      "install-failed": "Installation failed. You can retry later."
+    }
+  },
   "signal": {
     "ok": "ACCEPTED",
     "wrongCode": "WRONG CODE",

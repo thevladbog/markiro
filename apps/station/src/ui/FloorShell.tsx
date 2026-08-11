@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@markiro/ui";
-import { StatusBar, type ScannerIndicator } from "./StatusBar.js";
+import { StatusBar, type ScannerIndicator, type UpdateIndicatorModel } from "./StatusBar.js";
 
 export interface FloorShellProps {
   stationName: string;
@@ -14,6 +14,8 @@ export interface FloorShellProps {
   syncPending: number;
   syncStuck: boolean;
   conflicts: number;
+  update?: UpdateIndicatorModel;
+  onOpenUpdates?: () => void;
   tasks?: ReadonlyArray<{ id: string; label: string }>;
   activeTaskId?: string;
   onSelectTask?: (id: string) => void;
@@ -32,6 +34,8 @@ export function FloorShell({
   syncPending,
   syncStuck,
   conflicts,
+  update,
+  onOpenUpdates,
   tasks = [],
   activeTaskId,
   onSelectTask,
@@ -52,6 +56,8 @@ export function FloorShell({
         syncPending={syncPending}
         syncStuck={syncStuck}
         conflicts={conflicts}
+        {...(update ? { update } : {})}
+        {...(onOpenUpdates ? { onOpenUpdates } : {})}
       />
       {tasks.length > 0 ? (
         <nav aria-label={t("shell.tasks")} className="station-task-nav">
