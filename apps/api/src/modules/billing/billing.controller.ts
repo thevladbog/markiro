@@ -4,11 +4,12 @@ import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-
 import { ZodValidationPipe } from "../../zod.pipe";
 import { BillingService } from "./billing.service";
 import { BillingDocumentsService } from "./billing-documents.service";
+import { BillingApplicationService } from "./billing-application.service";
 import { createInvoiceSchema, invoiceIdSchema, type CreateInvoiceDto } from "./dto";
 
 @Controller("platform/invoices")
 export class BillingController {
-  constructor(private readonly billing: BillingService, private readonly documents: BillingDocumentsService) {}
+  constructor(private readonly billing: BillingService, private readonly documents: BillingDocumentsService, private readonly application: BillingApplicationService) {}
 
   @Get()
   @RequirePlatformCapabilities("billing.read")
@@ -44,6 +45,12 @@ export class BillingController {
   @RequirePlatformCapabilities("billing.read")
   documentUrl(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return this.documents.url(id);
+  }
+
+  @Post(":id/apply")
+  @RequirePlatformCapabilities("billing.write")
+  apply(@Req() req: RequestWithPlatformPrincipal, @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+    return this.application.apply(req.platformPrincipal!, id);
   }
 
   @Post(":id/cancel")
