@@ -233,6 +233,12 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   ]);
   assert.equal(prepare.args.includes("/usr/bin/bash"), false);
   assert.equal(prepare.args.includes("-c"), false);
+  const activation = fixture.commands.find(
+    ({ args }) => args.includes("/opt/markiro/active-release") && args.includes("mv"),
+  );
+  assert.ok(activation, "release activation must use a direct argv-safe mv");
+  assert.equal(activation.args.includes("/usr/bin/bash"), false);
+  assert.equal(activation.args.includes("-c"), false);
   const hostAssets = fixture.commands.find(({ args }) => args.includes("markiro-host-assets"));
   assert.ok(hostAssets);
   const reconcileScript = await readFile(
