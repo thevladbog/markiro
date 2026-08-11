@@ -9,8 +9,14 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, gt, inArray, isNotNull, isNull, or } from "drizzle-orm";
 import { schema, type Auth, type Db } from "@markiro/db";
-import { AUTH, DB } from "../../auth/auth.module";
-import { MailJobsService } from "../mail/mail-jobs.service";
+import type { AuthSetup } from "../../auth/auth.setup";
+import { AUTH, DB, DB_POOL } from "../../auth/auth.module";
+import { subscriptionQuotaLockIdentity } from "../../subscriptions/entitlements.types";
+import { MailJobsService, type MailPgClient } from "../mail/mail-jobs.service";
+import {
+  InvitationAdvisoryLockPool,
+  type InvitationAdvisoryLockClient,
+} from "./invitation-advisory-lock-pool.service";
 import type { PublicInvitationDto, RegisterInvitationDto } from "./dto";
 
 @Injectable()
@@ -19,7 +25,9 @@ export class InvitationsService {
   constructor(
     @Inject(AUTH) private readonly auth: Auth,
     @Inject(DB) private readonly db: Db,
+    @Inject(DB_POOL) private readonly pool: AuthSetup["pool"],
     private readonly mailJobs: MailJobsService,
+    private readonly advisoryLocks: InvitationAdvisoryLockPool,
   ) {}
 
   async getPublic(invitationId: string): Promise<PublicInvitationDto> {
@@ -96,7 +104,7 @@ export class InvitationsService {
       throw new ForbiddenException("Signed-in account is not the invitation recipient");
     }
 
-    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, async () => {
+    return this.withInvitationAcceptanceLocks(invitationId, invitation.organizationId, async () => {
       const response = await this.auth.api.acceptInvitation({
         body: { invitationId },
         headers,
@@ -112,21 +120,22 @@ export class InvitationsService {
     const invitation = await this.requirePending(invitationId);
     const session = await this.auth.api.getSession({ headers });
     if (!session) throw new UnauthorizedException();
+    const sessionId = typeof session.session.id === "string" ? session.session.id : "";
+    if (!sessionId) throw new UnauthorizedException();
     const userEmail = typeof session.user.email === "string" ? session.user.email : "";
     if (userEmail.toLocaleLowerCase("en-US") !== invitation.email) {
       throw new ForbiddenException("Signed-in account is not the invitation recipient");
     }
-    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, async () => {
-      const response = await this.auth.api.rejectInvitation({
-        body: { invitationId },
-        headers,
-        asResponse: true,
-      });
-      if (response.ok) {
-        await this.cleanupRejected(invitationId, invitation.organizationId, session.user.id);
-      }
-      return response;
-    });
+    return this.withInvitationDeliveryLock(invitationId, invitation.organizationId, (client) =>
+      this.rejectAtomically(
+        client,
+        invitationId,
+        invitation.organizationId,
+        session.user.id,
+        userEmail,
+        sessionId,
+      ),
+    );
   }
 
   async finalizeAccepted(invitationId: string, userId: string, email: string): Promise<void> {
@@ -135,18 +144,25 @@ export class InvitationsService {
         .select({
           organizationId: schema.invitation.organizationId,
           status: schema.invitation.status,
-          position: schema.tenantInvitationProfiles.position,
+          role: schema.invitation.role,
         })
         .from(schema.invitation)
-        .leftJoin(
-          schema.tenantInvitationProfiles,
-          eq(schema.tenantInvitationProfiles.invitationId, schema.invitation.id),
-        )
         .where(eq(schema.invitation.id, invitationId))
-        .limit(1);
-      if (!invitation || invitation.status !== "accepted") {
+        .limit(1)
+        .for("update");
+      if (!invitation || invitation.status !== "accepted" || !invitation.role) {
         throw new ConflictException("Invitation acceptance was not persisted");
       }
+      const [invitationProfile] = await tx
+        .select({ position: schema.tenantInvitationProfiles.position })
+        .from(schema.tenantInvitationProfiles)
+        .where(
+          and(
+            eq(schema.tenantInvitationProfiles.organizationId, invitation.organizationId),
+            eq(schema.tenantInvitationProfiles.invitationId, invitationId),
+          ),
+        )
+        .limit(1);
       const [member] = await tx
         .select({ id: schema.member.id })
         .from(schema.member)
@@ -163,7 +179,7 @@ export class InvitationsService {
         .from(schema.tenantMemberProfiles)
         .where(eq(schema.tenantMemberProfiles.memberId, member.id))
         .limit(1);
-      const position = invitation.position ?? existingTenantProfile?.position ?? null;
+      const position = invitationProfile?.position ?? existingTenantProfile?.position ?? null;
       const [user] = await tx
         .select({ name: schema.user.name })
         .from(schema.user)
@@ -199,6 +215,25 @@ export class InvitationsService {
         .update(schema.user)
         .set({ emailVerified: true, updatedAt: new Date() })
         .where(and(eq(schema.user.id, userId), eq(schema.user.email, email)));
+      const deliveries = await tx
+        .select({ id: schema.emailDeliveries.id })
+        .from(schema.emailDeliveries)
+        .where(
+          and(
+            eq(schema.emailDeliveries.tenantId, invitation.organizationId),
+            eq(schema.emailDeliveries.sourceId, invitationId),
+          ),
+        )
+        .orderBy(schema.emailDeliveries.id)
+        .for("update");
+      if (deliveries.length > 0) {
+        await tx.delete(schema.emailOutbox).where(
+          inArray(
+            schema.emailOutbox.deliveryId,
+            deliveries.map((delivery) => delivery.id),
+          ),
+        );
+      }
       await tx
         .update(schema.emailDeliveries)
         .set({
@@ -215,7 +250,7 @@ export class InvitationsService {
           and(
             eq(schema.emailDeliveries.tenantId, invitation.organizationId),
             eq(schema.emailDeliveries.sourceId, invitationId),
-            inArray(schema.emailDeliveries.status, ["queued", "retrying"]),
+            inArray(schema.emailDeliveries.status, ["queued", "sending", "retrying"]),
           ),
         );
       await tx
@@ -226,14 +261,29 @@ export class InvitationsService {
             eq(schema.tenantInvitationProfiles.invitationId, invitationId),
           ),
         );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: invitation.organizationId,
-        actorUserId: userId,
-        action: "team.invitation.accepted",
-        outcome: "success",
-        targetType: "invitation",
-        targetId: invitationId,
-      });
+      const [existingAudit] = await tx
+        .select({ id: schema.tenantAuditEvents.id })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, invitation.organizationId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.accepted"),
+            eq(schema.tenantAuditEvents.targetId, invitationId),
+          ),
+        )
+        .limit(1);
+      if (!existingAudit) {
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: invitation.organizationId,
+          actorUserId: userId,
+          action: "team.invitation.accepted",
+          outcome: "success",
+          targetType: "invitation",
+          targetId: invitationId,
+          before: { status: "pending", role: invitation.role },
+          after: { status: "accepted", role: invitation.role },
+        });
+      }
     });
   }
 
@@ -283,47 +333,202 @@ export class InvitationsService {
     return reconciled;
   }
 
-  private async cleanupRejected(invitationId: string, organizationId: string, userId: string) {
-    await this.db.transaction(async (tx) => {
-      await tx
-        .delete(schema.cabinetEmployeeLinks)
-        .where(eq(schema.cabinetEmployeeLinks.invitationId, invitationId));
-      await tx
-        .delete(schema.tenantInvitationProfiles)
-        .where(eq(schema.tenantInvitationProfiles.invitationId, invitationId));
-      await tx
-        .update(schema.emailDeliveries)
-        .set({
-          status: "canceled",
-          encryptedPayload: null,
-          payloadNonce: null,
-          payloadTag: null,
-          terminalAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(
-          and(
-            eq(schema.emailDeliveries.tenantId, organizationId),
-            eq(schema.emailDeliveries.sourceId, invitationId),
-            inArray(schema.emailDeliveries.status, ["queued", "retrying"]),
-          ),
-        );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId,
-        actorUserId: userId,
-        action: "team.invitation.rejected",
-        outcome: "success",
-        targetType: "invitation",
-        targetId: invitationId,
-      });
-    });
+  private async rejectAtomically(
+    client: MailPgClient,
+    invitationId: string,
+    organizationId: string,
+    userId: string,
+    userEmail: string,
+    sessionId: string,
+  ): Promise<Response> {
+    type InvitationRow = {
+      id: string;
+      organizationId: string;
+      email: string;
+      role: string | null;
+      status: string;
+      expiresAt: Date;
+      createdAt: Date;
+      inviterId: string;
+    };
+    try {
+      await client.query("BEGIN");
+      await client.query("SELECT pg_advisory_xact_lock(hashtext($1), $2)", [
+        `subscription-quota:${organizationId}`,
+        4,
+      ]);
+      const authorized = await client.query<{ role: string | null }>(
+        `SELECT invitation.role
+         FROM invitation
+         INNER JOIN organization ON organization.id = invitation.organization_id
+         INNER JOIN "user" ON "user".id = $3
+         INNER JOIN "session" ON "session".id = $5
+           AND "session".user_id = "user".id
+           AND "session".expires_at > now()
+         WHERE invitation.id = $1
+           AND invitation.organization_id = $2
+           AND invitation.status = 'pending'
+           AND invitation.expires_at > now()
+           AND lower(invitation.email) = lower($4)
+           AND lower("user".email) = lower(invitation.email)
+         FOR UPDATE OF invitation`,
+        [invitationId, organizationId, userId, userEmail, sessionId],
+      );
+      const role = authorized.rows[0]?.role;
+      if (!role) throw new NotFoundException({ code: "invitation_unavailable" });
+
+      await client.query(
+        `SELECT id
+         FROM email_deliveries
+         WHERE tenant_id = $1 AND source_id = $2
+         ORDER BY id
+         FOR UPDATE`,
+        [organizationId, invitationId],
+      );
+      const rejected = await client.query<InvitationRow>(
+        `UPDATE invitation
+         SET status = 'rejected'
+         WHERE id = $1
+           AND organization_id = $2
+           AND status = 'pending'
+           AND expires_at > now()
+         RETURNING id,
+                   organization_id AS "organizationId",
+                   email,
+                   role,
+                   status,
+                   expires_at AS "expiresAt",
+                   created_at AS "createdAt",
+                   inviter_id AS "inviterId"`,
+        [invitationId, organizationId],
+      );
+      const row = rejected.rows[0];
+      if (!row) throw new NotFoundException({ code: "invitation_unavailable" });
+      await client.query(
+        `DELETE FROM email_outbox
+         WHERE delivery_id IN (
+           SELECT id FROM email_deliveries WHERE tenant_id = $1 AND source_id = $2
+         )`,
+        [organizationId, invitationId],
+      );
+      await client.query(
+        `UPDATE email_deliveries
+         SET status = 'canceled',
+             encrypted_payload = null,
+             payload_nonce = null,
+             payload_tag = null,
+             attempt_id = null,
+             attempt_deadline = null,
+             terminal_at = now(),
+             updated_at = now()
+         WHERE tenant_id = $1
+           AND source_id = $2
+           AND status = ANY($3::email_delivery_status[])`,
+        [organizationId, invitationId, ["queued", "sending", "retrying"]],
+      );
+      await client.query(
+        "DELETE FROM cabinet_employee_links WHERE organization_id = $1 AND invitation_id = $2",
+        [organizationId, invitationId],
+      );
+      await client.query(
+        "DELETE FROM tenant_invitation_profiles WHERE organization_id = $1 AND invitation_id = $2",
+        [organizationId, invitationId],
+      );
+      await client.query(
+        `INSERT INTO tenant_audit_events
+           (organization_id, actor_user_id, action, outcome, target_type, target_id, before, after)
+         VALUES ($1, $2, 'team.invitation.rejected', 'success', 'invitation', $3, $4::jsonb, $5::jsonb)`,
+        [
+          organizationId,
+          userId,
+          invitationId,
+          JSON.stringify({ status: "pending", role }),
+          JSON.stringify({ status: "rejected", role }),
+        ],
+      );
+      await client.query("COMMIT");
+      return Response.json({ invitation: row, member: null });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => undefined);
+      throw error;
+    }
   }
 
   private async withInvitationDeliveryLock<T>(
     invitationId: string,
     organizationId: string,
+    action: (client: MailPgClient) => Promise<T>,
+  ): Promise<T> {
+    const delivery = await this.findActiveInvitationDelivery(invitationId, organizationId);
+    if (!delivery) {
+      const client = await this.pool.connect();
+      try {
+        return await action(client);
+      } finally {
+        client.release();
+      }
+    }
+    const result = await this.mailJobs.withDeliveryLock(delivery.id, action);
+    if (!result.acquired) throw new ConflictException({ code: "delivery_in_flight" });
+    return result.value;
+  }
+
+  private async withInvitationAcceptanceLocks<T>(
+    invitationId: string,
+    organizationId: string,
     action: () => Promise<T>,
   ): Promise<T> {
+    const delivery = await this.findActiveInvitationDelivery(invitationId, organizationId);
+    const quotaLock = subscriptionQuotaLockIdentity(organizationId, "cabinetUsers");
+    const client = await this.advisoryLocks.connect();
+    let deliveryAcquired = false;
+    let quotaAcquired = false;
+    let discardClient = false;
+    try {
+      if (delivery) {
+        const result = await client.query<{ locked: boolean }>(
+          "SELECT pg_try_advisory_lock(hashtextextended($1, 0)) AS locked",
+          [delivery.id],
+        );
+        deliveryAcquired = result.rows[0]?.locked === true;
+        if (!deliveryAcquired) {
+          throw new ConflictException({ code: "delivery_in_flight" });
+        }
+      }
+      await client.query("SELECT pg_advisory_lock(hashtext($1), $2)", [
+        quotaLock.namespace,
+        quotaLock.keyOrder,
+      ]);
+      quotaAcquired = true;
+      return await action();
+    } finally {
+      if (quotaAcquired) {
+        const released = await this.releaseAcceptanceLock(
+          client,
+          "SELECT pg_advisory_unlock(hashtext($1), $2) AS unlocked",
+          [quotaLock.namespace, quotaLock.keyOrder],
+          "quota",
+        );
+        discardClient ||= !released;
+      }
+      if (deliveryAcquired && delivery) {
+        const released = await this.releaseAcceptanceLock(
+          client,
+          "SELECT pg_advisory_unlock(hashtextextended($1, 0)) AS unlocked",
+          [delivery.id],
+          "delivery",
+        );
+        discardClient ||= !released;
+      }
+      try {
+        client.release(discardClient);
+      } catch {
+        this.#logger.error("Could not return an invitation advisory-lock connection to its pool");
+      }
+    }
+  }
+
+  private async findActiveInvitationDelivery(invitationId: string, organizationId: string) {
     const [delivery] = await this.db
       .select({ id: schema.emailDeliveries.id })
       .from(schema.emailDeliveries)
@@ -336,10 +541,26 @@ export class InvitationsService {
       )
       .orderBy(desc(schema.emailDeliveries.createdAt))
       .limit(1);
-    if (!delivery) return action();
-    const result = await this.mailJobs.withDeliveryLock(delivery.id, action);
-    if (!result.acquired) throw new ConflictException({ code: "delivery_in_flight" });
-    return result.value;
+    return delivery;
+  }
+
+  private async releaseAcceptanceLock(
+    client: InvitationAdvisoryLockClient,
+    query: string,
+    values: readonly unknown[],
+    kind: "delivery" | "quota",
+  ): Promise<boolean> {
+    try {
+      const result = await client.query<{ unlocked: boolean }>(query, values);
+      if (result.rows[0]?.unlocked !== true) {
+        this.#logger.error(`Invitation ${kind} advisory lock was not owned during cleanup`);
+        return false;
+      }
+      return true;
+    } catch {
+      this.#logger.error(`Could not release an invitation ${kind} advisory lock`);
+      return false;
+    }
   }
 
   private async requirePending(invitationId: string) {

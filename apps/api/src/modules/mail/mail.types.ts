@@ -1,7 +1,10 @@
 import type { EmailTemplateInput, RenderedEmail } from "@markiro/email";
 import type { Db } from "@markiro/db";
 
-export type MailScope = { tenantId: string; userId?: never } | { userId: string; tenantId?: never };
+export type MailScope =
+  | { tenantId: string; userId?: never; platformUserId?: never }
+  | { userId: string; tenantId?: never; platformUserId?: never }
+  | { platformUserId: string; tenantId?: never; userId?: never };
 
 export interface EnqueueMailInput {
   scope: MailScope;

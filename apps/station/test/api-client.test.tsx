@@ -31,6 +31,9 @@ describe("createStationClient", () => {
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe("http://localhost:3000/shifts");
     expect((init!.headers as Record<string, string>)["x-api-key"]).toBe("mk_key");
+    expect((init!.headers as Record<string, string>)["x-station-capabilities"]).toBe(
+      "subscription-state-v1,station-recovery-v1",
+    );
   });
 
   it("throws with the server message on non-2xx", async () => {
@@ -187,6 +190,12 @@ describe("redeemStationPairing", () => {
           },
           credential: { apiKey: "station-credential", serverUrl: "https://station.example" },
           operators: [],
+          subscription: {
+            access: "managed",
+            status: "active",
+            startsAt: "2026-08-01T00:00:00.000Z",
+            endsAt: "2026-09-01T00:00:00.000Z",
+          },
         }),
         { status: 201, headers: { "Content-Type": "application/json" } },
       ),
@@ -206,7 +215,38 @@ describe("redeemStationPairing", () => {
     expect(url).toBe("https://station.example/station/pair");
     expect(init?.method).toBe("POST");
     expect(init?.body).toBe(JSON.stringify({ code: "12345678" }));
-    expect(init?.headers).toEqual({ "Content-Type": "application/json" });
+    expect(init?.headers).toEqual({
+      "Content-Type": "application/json",
+      "x-station-capabilities": "subscription-state-v1,station-recovery-v1",
+    });
+  });
+
+  it("accepts the exact legacy pairing envelope from an old server", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          device: {
+            id: "device-1",
+            name: "Line station",
+            tenantId: "tenant-1",
+            organizationName: "Factory",
+            line: null,
+          },
+          credential: { apiKey: "station-credential", serverUrl: "https://station.example" },
+          operators: [],
+        }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await expect(redeemStationPairing("https://station.example", "12345678")).resolves.toEqual({
+      ok: true,
+      provisioning: expect.objectContaining({
+        deviceId: "device-1",
+        tenantId: "tenant-1",
+        apiKey: "station-credential",
+      }),
+    });
   });
 
   it("maps pairing error codes without exposing an unauthenticated response", async () => {

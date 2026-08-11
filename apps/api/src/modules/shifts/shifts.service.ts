@@ -29,6 +29,8 @@ import type {
   ShiftMode,
   UpdateShiftDto,
 } from "./dto";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
+import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
@@ -49,6 +51,7 @@ export class ShiftsService {
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
     private readonly sscc: SsccService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /** List a tenant's shifts, joined with product/line/counterparty names. */
@@ -109,6 +112,9 @@ export class ShiftsService {
    * one) -- allowed by design; the printing station decides the fallback.
    */
   async createShift(tenantId: string, data: CreateShiftDto): Promise<ShiftDto> {
+    if (data.palletsEnabled === true) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+    }
     const product = await this.findProductRow(tenantId, data.productId);
     if (!product) {
       throw new BadRequestException("Unknown product for this organization");
@@ -166,6 +172,9 @@ export class ShiftsService {
    * (post-patch) values, mirroring the create-time validation.
    */
   async updateShift(tenantId: string, id: string, data: UpdateShiftDto): Promise<ShiftDto> {
+    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+    }
     const current = await this.findRow(tenantId, id);
     if (!current) {
       throw new NotFoundException();
@@ -268,6 +277,13 @@ export class ShiftsService {
     if (current.status !== "active") {
       throw new ConflictException("Shift can only be closed while active");
     }
+    const access = await this.entitlements.resolveRecovery(tenantId);
+    if (access.access === "read_only") {
+      const endsAt = access.subscription?.endsAt;
+      if (!endsAt || current.openedAt === null || current.openedAt >= endsAt) {
+        throw new SubscriptionReadOnlyException();
+      }
+    }
 
     const [row] = await this.db
       .update(schema.shifts)
@@ -293,6 +309,9 @@ export class ShiftsService {
     if (!current) throw new NotFoundException();
     if (current.status !== "planned") {
       throw new ConflictException("Shift can only be opened while planned");
+    }
+    if (current.palletsEnabled) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
     const [row] = await this.db
       .update(schema.shifts)
@@ -437,37 +456,57 @@ export class ShiftsService {
     shiftId: string,
     deviceId: string,
   ): Promise<ShiftBundleDto["sscc"]> {
-    let issuerPrefix: string;
-    try {
-      issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId);
-    } catch (error) {
-      if (!(error instanceof BadRequestException)) throw error;
-      // The station never sees this (the bundle just comes back with
-      // sscc: null, silently, by the design note above), so the server log
-      // is the ONLY place this is ever visible -- it must carry enough to
-      // act on: which tenant, which shift, and resolveIssuerPrefix's own
-      // reason (no org GLN, or no GLN on the shift's named sscc issuer
-      // counterparty).
-      this.logger.warn(
-        `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
-      );
-      return null;
-    }
-    try {
-      return await this.sscc.allocateForBundle(
-        tenantId,
-        issuerPrefix,
-        BOX_EXTENSION_DIGIT,
-        deviceId,
-        BOX_BLOCK_SIZE,
-      );
-    } catch (error) {
-      if (!(error instanceof SsccCapacityExhaustedException)) throw error;
-      this.logger.warn(
-        `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
-      );
-      return null;
-    }
+    return this.db.transaction(async (tx) => {
+      const [shift] = await tx
+        .select({
+          status: schema.shifts.status,
+          mode: schema.shifts.mode,
+          openedAt: schema.shifts.openedAt,
+        })
+        .from(schema.shifts)
+        .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
+        .for("update");
+      if (!shift || shift.status !== "active" || shift.mode !== "aggregation") return null;
+
+      const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
+      if (access.access === "read_only") {
+        const endsAt = access.subscription?.endsAt;
+        if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) return null;
+      }
+
+      let issuerPrefix: string;
+      try {
+        issuerPrefix = await this.sscc.resolveIssuerPrefix(tenantId, shiftId, tx);
+      } catch (error) {
+        if (!(error instanceof BadRequestException)) throw error;
+        // The station never sees this (the bundle just comes back with
+        // sscc: null, silently, by the design note above), so the server log
+        // is the ONLY place this is ever visible -- it must carry enough to
+        // act on: which tenant, which shift, and resolveIssuerPrefix's own
+        // reason (no org GLN, or no GLN on the shift's named sscc issuer
+        // counterparty).
+        this.logger.warn(
+          `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
+        );
+        return null;
+      }
+      try {
+        return await this.sscc.allocateForBundle(
+          tenantId,
+          issuerPrefix,
+          BOX_EXTENSION_DIGIT,
+          deviceId,
+          BOX_BLOCK_SIZE,
+          tx,
+        );
+      } catch (error) {
+        if (!(error instanceof SsccCapacityExhaustedException)) throw error;
+        this.logger.warn(
+          `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
+        );
+        return null;
+      }
+    });
   }
 
   private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {

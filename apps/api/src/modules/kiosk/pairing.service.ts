@@ -20,6 +20,7 @@ import {
   pairAttemptWindowStart,
 } from "../device-pairing/pairing-policy";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 
 /** Bounded retries so a live-code hash collision can never be minted. */
 const MINT_ATTEMPTS = 5;
@@ -57,6 +58,7 @@ export class PairingService {
     private readonly pickupOrdersService: PickupOrdersService,
     private readonly pairAttemptsService: PairAttemptsService,
     private readonly audit: SecurityAuditService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /**
@@ -268,6 +270,7 @@ export class PairingService {
     }
 
     const { tenantId, kioskId } = candidate;
+    await this.entitlements.assertWriteAccess(tenantId, this.db, new Date());
     const token = generateDeviceToken();
     const tokenHash = hashDeviceToken(token);
 

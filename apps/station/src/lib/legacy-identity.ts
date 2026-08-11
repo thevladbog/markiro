@@ -9,6 +9,12 @@ interface StationIdentity {
     organizationName: string;
     line: { id: string; name: string } | null;
   };
+  subscription?: {
+    access: "managed" | "read_only" | "unmanaged";
+    status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
+    startsAt: string | null;
+    endsAt: string | null;
+  };
 }
 
 function exactRecord(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
@@ -23,7 +29,7 @@ function nonEmptyString(value: unknown): value is string {
 }
 
 function decodeStationIdentity(value: unknown): StationIdentity | null {
-  if (!exactRecord(value, ["device"])) return null;
+  if (!exactRecordWithOptional(value, ["device"], ["subscription"])) return null;
   const device = value.device;
   if (
     !exactRecord(device, ["id", "line", "name", "organizationName", "tenantId"]) ||
@@ -34,6 +40,7 @@ function decodeStationIdentity(value: unknown): StationIdentity | null {
   ) {
     return null;
   }
+  if (value.subscription !== undefined && !subscriptionAccess(value.subscription)) return null;
   const line = device.line;
   let decodedLine: { id: string; name: string } | null = null;
   if (line !== null) {
@@ -54,7 +61,39 @@ function decodeStationIdentity(value: unknown): StationIdentity | null {
       organizationName: device.organizationName,
       line: decodedLine,
     },
+    ...(value.subscription !== undefined ? { subscription: value.subscription } : {}),
   };
+}
+
+function subscriptionAccess(value: unknown): value is NonNullable<StationIdentity["subscription"]> {
+  return (
+    exactRecord(value, ["access", "status", "startsAt", "endsAt"]) &&
+    typeof value.access === "string" &&
+    ["managed", "read_only", "unmanaged"].includes(value.access) &&
+    typeof value.status === "string" &&
+    ["unmanaged", "pending_activation", "trial", "active", "expired", "read_only"].includes(
+      value.status,
+    ) &&
+    nullableTimestamp(value.startsAt) &&
+    nullableTimestamp(value.endsAt)
+  );
+}
+
+function nullableTimestamp(value: unknown): value is string | null {
+  return value === null || (typeof value === "string" && Number.isFinite(Date.parse(value)));
+}
+
+function exactRecordWithOptional(
+  value: unknown,
+  required: readonly string[],
+  optional: readonly string[],
+): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  return (
+    required.every((key) => key in value) &&
+    keys.every((key) => required.includes(key) || optional.includes(key))
+  );
 }
 
 /**

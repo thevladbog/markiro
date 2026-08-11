@@ -12,6 +12,7 @@ import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import type { AuthSetup } from "../../auth/auth.setup";
 import { DB, DB_POOL } from "../../auth/auth.module";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
 import { MailJobsService, type MailPgClient } from "../mail/mail-jobs.service";
 import type {
@@ -24,6 +25,8 @@ import type {
 } from "./dto";
 import { canMutateTeamTarget, type TeamActorRole } from "./team-policy";
 
+type TeamExecutor = Pick<Db, "select">;
+
 export const TEAM_INVITATION_BASE_URL = "TEAM_INVITATION_BASE_URL";
 const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const ACTIVE_DELIVERY_STATUSES = ["queued", "sending", "retrying"] as const;
@@ -35,6 +38,7 @@ export class TeamService {
     @Inject(DB_POOL) private readonly pool: AuthSetup["pool"],
     private readonly mailDelivery: MailDeliveryService,
     private readonly mailJobs: MailJobsService,
+    private readonly entitlements: EntitlementsService,
     @Inject(TEAM_INVITATION_BASE_URL) private readonly invitationBaseUrl: string,
   ) {}
 
@@ -254,69 +258,71 @@ export class TeamService {
     const id = randomUUID();
     const expiresAt = new Date(Date.now() + INVITATION_TTL_MS);
     try {
-      await this.db.transaction(async (tx) => {
-        await tx.execute(
-          sql`select pg_advisory_xact_lock(hashtextextended(${`team-invite:${organizationId}:${input.email}`}, 0))`,
-        );
-        const concurrentDuplicate = await tx
-          .select({ id: schema.invitation.id })
-          .from(schema.invitation)
-          .where(
-            and(
-              eq(schema.invitation.organizationId, organizationId),
-              sql`lower(${schema.invitation.email}) = ${input.email}`,
-              eq(schema.invitation.status, "pending"),
-              gt(schema.invitation.expiresAt, new Date()),
-            ),
-          )
-          .limit(1);
-        if (concurrentDuplicate.length) {
-          throw new ConflictException("A pending invitation already exists");
-        }
-        await tx.insert(schema.invitation).values({
-          id,
-          organizationId,
-          email: input.email,
-          role: input.role,
-          status: "pending",
-          expiresAt,
-          inviterId: actorUserId,
-        });
-        await tx.insert(schema.tenantInvitationProfiles).values({
-          invitationId: id,
-          organizationId,
-          position: input.position ?? null,
-        });
-        if (input.employeeId) {
-          await tx.insert(schema.cabinetEmployeeLinks).values({
+      await this.db.transaction((tx) =>
+        this.entitlements.withQuotaSlot(tx, organizationId, "cabinetUsers", async () => {
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`team-invite:${organizationId}:${input.email}`}, 0))`,
+          );
+          const concurrentDuplicate = await tx
+            .select({ id: schema.invitation.id })
+            .from(schema.invitation)
+            .where(
+              and(
+                eq(schema.invitation.organizationId, organizationId),
+                sql`lower(${schema.invitation.email}) = ${input.email}`,
+                eq(schema.invitation.status, "pending"),
+                gt(schema.invitation.expiresAt, new Date()),
+              ),
+            )
+            .limit(1);
+          if (concurrentDuplicate.length) {
+            throw new ConflictException("A pending invitation already exists");
+          }
+          await tx.insert(schema.invitation).values({
+            id,
             organizationId,
-            employeeId: input.employeeId,
-            invitationId: id,
-          });
-        }
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId,
-          actorUserId,
-          action: "team.invitation.created",
-          outcome: "success",
-          targetType: "invitation",
-          targetId: id,
-          after: { role: input.role, position: input.position ?? null },
-        });
-        await this.mailDelivery.enqueue(tx, {
-          scope: { tenantId: organizationId },
-          recipient: input.email,
-          sourceId: id,
-          template: {
-            kind: "organization-invitation",
-            recipientName: "Коллега",
-            organizationName: context.organizationName,
-            inviterName: context.inviterName,
-            actionUrl: new URL(`/invitations/${id}`, this.invitationBaseUrl).toString(),
+            email: input.email,
+            role: input.role,
+            status: "pending",
             expiresAt,
-          },
-        });
-      });
+            inviterId: actorUserId,
+          });
+          await tx.insert(schema.tenantInvitationProfiles).values({
+            invitationId: id,
+            organizationId,
+            position: input.position ?? null,
+          });
+          if (input.employeeId) {
+            await tx.insert(schema.cabinetEmployeeLinks).values({
+              organizationId,
+              employeeId: input.employeeId,
+              invitationId: id,
+            });
+          }
+          await tx.insert(schema.tenantAuditEvents).values({
+            organizationId,
+            actorUserId,
+            action: "team.invitation.created",
+            outcome: "success",
+            targetType: "invitation",
+            targetId: id,
+            after: { role: input.role, position: input.position ?? null },
+          });
+          await this.mailDelivery.enqueue(tx, {
+            scope: { tenantId: organizationId },
+            recipient: input.email,
+            sourceId: id,
+            template: {
+              kind: "organization-invitation",
+              recipientName: "Коллега",
+              organizationName: context.organizationName,
+              inviterName: context.inviterName,
+              actionUrl: new URL(`/invitations/${id}`, this.invitationBaseUrl).toString(),
+              expiresAt,
+            },
+          });
+        }),
+      );
     } catch (error) {
       this.rethrowConstraint(error);
     }
@@ -427,23 +433,32 @@ export class TeamService {
   }
 
   async removeMember(organizationId: string, actorUserId: string, memberId: string): Promise<void> {
-    const { target } = await this.assertMutableTarget(organizationId, actorUserId, memberId);
-    await this.db.transaction(async (tx) => {
-      await tx
-        .delete(schema.member)
-        .where(
-          and(eq(schema.member.organizationId, organizationId), eq(schema.member.id, memberId)),
+    await this.db.transaction((tx) =>
+      this.entitlements.withQuotaLock(tx, organizationId, "cabinetUsers", async () => {
+        const { target } = await this.assertMutableTarget(
+          organizationId,
+          actorUserId,
+          memberId,
+          tx,
         );
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId,
-        actorUserId,
-        action: "team.member.removed",
-        outcome: "success",
-        targetType: "member",
-        targetId: memberId,
-        before: { role: target.role },
-      });
-    });
+        const deleted = await tx
+          .delete(schema.member)
+          .where(
+            and(eq(schema.member.organizationId, organizationId), eq(schema.member.id, memberId)),
+          )
+          .returning({ id: schema.member.id });
+        if (deleted.length !== 1) throw new NotFoundException("Team member not found");
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId,
+          actorUserId,
+          action: "team.member.removed",
+          outcome: "success",
+          targetType: "member",
+          targetId: memberId,
+          before: { role: target.role },
+        });
+      }),
+    );
   }
 
   async resendInvitation(
@@ -557,6 +572,10 @@ export class TeamService {
     const cancel = async (client: MailPgClient) => {
       try {
         await client.query("BEGIN");
+        await client.query("SELECT pg_advisory_xact_lock(hashtext($1), $2)", [
+          `subscription-quota:${organizationId}`,
+          4,
+        ]);
         const result = await client.query(
           "UPDATE invitation SET status = 'canceled' WHERE id = $1 AND organization_id = $2 AND status = 'pending' AND expires_at > now()",
           [invitationId, organizationId],
@@ -638,8 +657,9 @@ export class TeamService {
     organizationId: string,
     actorUserId: string,
     targetMemberId: string,
+    executor: TeamExecutor = this.db,
   ) {
-    const [actor] = await this.db
+    const [actor] = await executor
       .select({ id: schema.member.id, role: schema.member.role })
       .from(schema.member)
       .where(
@@ -649,7 +669,7 @@ export class TeamService {
         ),
       )
       .limit(1);
-    const [target] = await this.db
+    const [target] = await executor
       .select({ id: schema.member.id, role: schema.member.role })
       .from(schema.member)
       .where(

@@ -1471,6 +1471,43 @@ describe("sync engine: pools and closures", () => {
     expect(JSON.parse(lastBody()).serialsLeft).toBe(3);
   });
 
+  it("durably preserves negotiated recovery denials without retaining raw payloads, then acknowledges", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockPost({
+      applied: 0,
+      alreadyApplied: false,
+      conflicts: [],
+      denied: [
+        {
+          recordKind: "item",
+          recordIndex: 0,
+          shiftId: SHIFT,
+          code: "subscription_read_only",
+        },
+      ],
+    });
+
+    await drainOnce();
+
+    expect(await outboxCount(exec)).toBe(0);
+    const rows = await exec.all<{ value: string }>("SELECT value FROM station_meta WHERE key = ?", [
+      "sync_last_recovery_denied",
+    ]);
+    expect(JSON.parse(rows[0]!.value)).toEqual({
+      batchId: expect.any(String),
+      denied: [
+        {
+          recordKind: "item",
+          recordIndex: 0,
+          shiftId: SHIFT,
+          code: "subscription_read_only",
+        },
+      ],
+    });
+    expect(rows[0]!.value).not.toContain("0104006381333931");
+    expect(warn).toHaveBeenCalledWith("station: 1 sync record quarantined by server");
+  });
+
   function exception(overrides: Partial<ExceptionInput> = {}): ExceptionInput {
     return {
       kind: "undo",

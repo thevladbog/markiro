@@ -7,6 +7,11 @@ import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import {
+  AllowSubscriptionReadOnly,
+  RequireFeature,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { ApiKeysService, type ApiKeyIssuedDto, type ApiKeySummaryDto } from "./api-keys.service";
 
 /** POST /integrations/public_api/keys body. */
@@ -26,7 +31,8 @@ type CreateApiKeyDto = z.infer<typeof createApiKeySchema>;
  */
 @ApiTags("integrations")
 @Controller("integrations/public_api/keys")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 @RequirePermissions(CABINET_CAPABILITY.CREDENTIALS_MANAGE)
 export class ApiKeysController {
   constructor(
@@ -42,6 +48,7 @@ export class ApiKeysController {
   // Секрет отдаётся ровно здесь и ровно один раз — ApiKeySummaryDto (list) его
   // никогда не несёт (docs/device-key-surface.md).
   @Post()
+  @RequireFeature("publicApi")
   async create(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createApiKeySchema)) body: CreateApiKeyDto,
@@ -58,6 +65,7 @@ export class ApiKeysController {
   }
 
   @Delete(":id")
+  @AllowSubscriptionReadOnly("security")
   async revoke(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     await this.service.revoke(req.tenantId!, id);
     this.audit.credentialMutation({

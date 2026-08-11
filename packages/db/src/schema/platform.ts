@@ -8,6 +8,7 @@ import {
   foreignKey,
   index,
   integer,
+  jsonb,
   numeric,
   pgEnum,
   pgTable,
@@ -178,20 +179,6 @@ export const shifts = pgTable(
 );
 
 /**
- * Idempotency keys for station sync batches. A batch is applied and its key
- * recorded in ONE transaction, so a retried batch is a no-op in its entirety.
- */
-export const syncBatches = pgTable(
-  "sync_batches",
-  {
-    tenantId: tenantId(),
-    batchId: text("batch_id").notNull(),
-    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [primaryKey({ columns: [t.tenantId, t.batchId] })],
-);
-
-/**
  * The scan that currently OWNS each code, across every terminal. Deliberately
  * unpartitioned and keyed by the code alone: `codes` cannot enforce one row
  * per code, because a unique index on a partitioned table must include the
@@ -338,6 +325,87 @@ export const stationDevices = pgTable(
       name: "station_devices_tenant_line_fk",
       columns: [t.tenantId, t.lineId],
       foreignColumns: [lines.tenantId, lines.id],
+    }),
+  ],
+);
+
+/**
+ * Idempotency keys for station sync batches. Rows created before migration
+ * 0032 remain unbound; every new ingest binds the key to the authenticated
+ * station and a digest of the normalized business payload.
+ */
+export const syncBatches = pgTable(
+  "sync_batches",
+  {
+    tenantId: tenantId(),
+    batchId: text("batch_id").notNull(),
+    terminalId: uuid("terminal_id"),
+    payloadDigest: char("payload_digest", { length: 64 }),
+    result: jsonb("result").$type<Record<string, unknown>>(),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.batchId] }),
+    check(
+      "sync_batches_binding_pair_check",
+      sql`(${t.terminalId} IS NULL) = (${t.payloadDigest} IS NULL)`,
+    ),
+    check(
+      "sync_batches_payload_digest_check",
+      sql`${t.payloadDigest} IS NULL OR ${t.payloadDigest} ~ '^[0-9a-f]{64}$'`,
+    ),
+    foreignKey({
+      name: "sync_batches_tenant_terminal_fk",
+      columns: [t.tenantId, t.terminalId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+  ],
+);
+
+/**
+ * Subscription recovery quarantine for individual station facts. Payloads
+ * are intentionally bounded by their validated DTOs and remain tenant/device
+ * scoped; raw GS1 data is never copied into logs.
+ */
+export const stationSyncQuarantine = pgTable(
+  "station_sync_quarantine",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    batchId: text("batch_id").notNull(),
+    terminalId: uuid("terminal_id").notNull(),
+    payloadDigest: char("payload_digest", { length: 64 }).notNull(),
+    recordKind: text("record_kind").notNull(),
+    recordIndex: integer("record_index").notNull(),
+    shiftId: uuid("shift_id"),
+    reason: text("reason").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull(),
+    quarantinedAt: timestamp("quarantined_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("station_sync_quarantine_record_uq").on(
+      t.tenantId,
+      t.batchId,
+      t.recordKind,
+      t.recordIndex,
+    ),
+    index("station_sync_quarantine_tenant_time_idx").on(t.tenantId, t.quarantinedAt),
+    check("station_sync_quarantine_digest_check", sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "station_sync_quarantine_record_kind_check",
+      sql`${t.recordKind} IN ('item', 'box', 'exception')`,
+    ),
+    check("station_sync_quarantine_record_index_check", sql`${t.recordIndex} >= 0`),
+    check("station_sync_quarantine_reason_check", sql`char_length(${t.reason}) BETWEEN 1 AND 64`),
+    foreignKey({
+      name: "station_sync_quarantine_tenant_batch_fk",
+      columns: [t.tenantId, t.batchId],
+      foreignColumns: [syncBatches.tenantId, syncBatches.batchId],
+    }),
+    foreignKey({
+      name: "station_sync_quarantine_tenant_terminal_fk",
+      columns: [t.tenantId, t.terminalId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
   ],
 );

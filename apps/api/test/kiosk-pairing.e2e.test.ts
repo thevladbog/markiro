@@ -369,6 +369,12 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
       nextDeviceSeq: 0,
       bootstrap: {
         generatedAt: expect.any(String),
+        subscription: {
+          access: "unmanaged",
+          status: "unmanaged",
+          startsAt: null,
+          endsAt: null,
+        },
         config: {
           dayLimitPerEmployee: expect.any(Number),
           showPrices: expect.any(Boolean),

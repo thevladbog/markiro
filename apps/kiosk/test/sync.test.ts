@@ -14,7 +14,7 @@ import {
   STALE_BLOCK_MS,
   STALE_WARN_MS,
 } from "../src/sync/worker.js";
-import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
+import { dequeueOrder, enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
 import * as queueStore from "../src/store/queue.js";
 import * as journalStore from "../src/store/journal.js";
 import * as configStore from "../src/store/config.js";
@@ -49,6 +49,14 @@ function refusingClient(err: unknown) {
       throw err;
     }),
   };
+}
+
+function jsonResponse(status: number, body: unknown): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+  } as Response;
 }
 
 describe("cacheAge", () => {
@@ -106,6 +114,98 @@ describe("cacheAge", () => {
 });
 
 describe("flushQueue", () => {
+  it("serializes a crash-safe pending attestation before submit even when the response crosses expiry", async () => {
+    let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
+    const admission = new Promise<{ claimedAt: string; admissionProof: string }>((resolve) => {
+      resolveAdmission = resolve;
+    });
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [{ rawKm: "01…reserved-before-expiry" }],
+        createdAt: "2026-08-10T11:59:59.000Z",
+      },
+      "e1",
+      "pending_attestation",
+    );
+    const client = {
+      bootstrap: vi.fn(),
+      attestOrder: vi.fn(() => admission),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-26-0001",
+        status: "pending" as const,
+        itemCount: 1,
+        conflicts: [],
+      })),
+    };
+
+    const draining = flushQueue(client, () => new Date("2026-08-10T12:00:01.000Z"));
+    await vi.waitFor(() => {
+      expect(client.attestOrder.mock.calls.length + client.submitOrder.mock.calls.length).toBe(1);
+    });
+    expect(client.attestOrder).toHaveBeenCalledOnce();
+    expect(client.attestOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ admissionNonce: expect.any(String) }),
+    );
+    expect((await listQueue())[0]?.admissionNonce).toEqual(expect.any(String));
+    expect(client.submitOrder).not.toHaveBeenCalled();
+
+    resolveAdmission({
+      claimedAt: "2026-08-10T11:59:59.500Z",
+      admissionProof: "opaque-admission",
+    });
+    await draining;
+
+    expect(client.submitOrder).toHaveBeenCalledWith({
+      deviceSeq: 1,
+      badgeDigest: "B",
+      reason: "buy",
+      items: [{ rawKm: "01…reserved-before-expiry" }],
+      createdAt: "2026-08-10T11:59:59.500Z",
+      admissionProof: "opaque-admission",
+    });
+    expect(await listQueue()).toEqual([]);
+  });
+
+  it("does not submit or resurrect a pending order removed before its delayed attestation arrives", async () => {
+    let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
+    const admission = new Promise<{ claimedAt: string; admissionProof: string }>((resolve) => {
+      resolveAdmission = resolve;
+    });
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [] },
+      "e1",
+      "pending_attestation",
+    );
+    const client = {
+      bootstrap: vi.fn(),
+      attestOrder: vi.fn(() => admission),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "must-not-submit",
+        status: "pending" as const,
+        itemCount: 0,
+        conflicts: [],
+      })),
+    };
+
+    const draining = flushQueue(client, () => new Date());
+    await vi.waitFor(() => {
+      expect(client.attestOrder.mock.calls.length + client.submitOrder.mock.calls.length).toBe(1);
+    });
+    expect(client.attestOrder).toHaveBeenCalledOnce();
+    await dequeueOrder(1);
+    resolveAdmission({
+      claimedAt: "2026-08-10T11:59:59.500Z",
+      admissionProof: "opaque-admission",
+    });
+    await draining;
+
+    expect(client.submitOrder).not.toHaveBeenCalled();
+    expect(await listQueue()).toEqual([]);
+  });
+
   it("submits in deviceSeq order and drops each order only after the server acknowledges it", async () => {
     for (const deviceSeq of [1, 2]) {
       await enqueueOrder({ deviceSeq, badgeDigest: "B", reason: "buy", items: [] }, "e1");
@@ -699,6 +799,99 @@ describe("flushQueue", () => {
     ]);
   });
 
+  it("sets aside one post-expiry order and drains later eligible records", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [{ rawKm: "01…late" }],
+        createdAt: "2026-08-10T12:00:00.000Z",
+      },
+      "e1",
+    );
+    for (const deviceSeq of [2, 3]) {
+      await enqueueOrder(
+        {
+          deviceSeq,
+          badgeDigest: "B",
+          reason: "buy",
+          items: [],
+          createdAt: "2026-08-09T12:00:00.000Z",
+        },
+        "e1",
+      );
+    }
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async (body: { deviceSeq: number }) => {
+        if (body.deviceSeq === 1) {
+          throw new KioskApiError(403, "Subscription is read-only", "subscription_read_only");
+        }
+        return {
+          orderNo: `ORD-26-000${body.deviceSeq}`,
+          status: "pending",
+          itemCount: 0,
+          conflicts: [],
+        };
+      }),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-08-10T12:01:00.000Z"));
+
+    expect(client.submitOrder.mock.calls.map(([body]) => body.deviceSeq)).toEqual([1, 2, 3]);
+    expect(await listQueue()).toEqual([]);
+    expect(await listQuarantine()).toMatchObject([
+      {
+        deviceSeq: 1,
+        status: 403,
+        message: "Subscription is read-only",
+      },
+    ]);
+  });
+
+  it("uses the real API error body to quarantine an expired head and submit the next record", async () => {
+    for (const deviceSeq of [1, 2]) {
+      await enqueueOrder(
+        {
+          deviceSeq,
+          badgeDigest: "B",
+          reason: "buy",
+          items: [],
+          createdAt: `2026-08-0${deviceSeq + 8}T12:00:00.000Z`,
+        },
+        "e1",
+      );
+    }
+    const submitted: number[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (_input, init) => {
+        const body = JSON.parse((init?.body as string) ?? "{}") as { deviceSeq?: number };
+        submitted.push(body.deviceSeq ?? -1);
+        return body.deviceSeq === 1
+          ? jsonResponse(403, { code: "subscription_read_only" })
+          : jsonResponse(201, {
+              orderNo: "ORD-26-0002",
+              status: "pending",
+              itemCount: 0,
+              conflicts: [],
+            });
+      }),
+    );
+
+    await flushQueue(
+      createKioskClient({ token: "tok", serverUrl: "http://srv" }),
+      () => new Date("2026-08-10T12:01:00.000Z"),
+    );
+
+    expect(submitted).toEqual([1, 2]);
+    expect(await listQueue()).toEqual([]);
+    expect(await listQuarantine()).toMatchObject([
+      { deviceSeq: 1, status: 403, message: "HTTP 403" },
+    ]);
+  });
+
   /**
    * 401 IS THE DEVICE, NOT THE ORDER. An archived kiosk answers every request
    * with it, so quarantining on a 401 would empty a whole queue on a
@@ -1102,6 +1295,15 @@ describe("isTerminalRejection", () => {
     expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(false);
   });
 
+  it("treats only the exact subscription read-only 403 as a per-record verdict", () => {
+    expect(
+      isTerminalRejection(
+        new KioskApiError(403, "Subscription is read-only", "subscription_read_only"),
+      ),
+    ).toBe(true);
+    expect(isTerminalRejection(new KioskApiError(403, "Forbidden", "some_other_code"))).toBe(false);
+  });
+
   it("keeps a transport failure retryable — it carries no verdict at all", () => {
     expect(isTerminalRejection(new TypeError("Failed to fetch"))).toBe(false);
     expect(isTerminalRejection(new KioskTimeoutError(15_000))).toBe(false);
@@ -1110,6 +1312,12 @@ describe("isTerminalRejection", () => {
 
 const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
   generatedAt,
+  subscription: {
+    access: "managed",
+    status: "active",
+    startsAt: "2026-07-01T00:00:00.000Z",
+    endsAt: "2026-08-31T00:00:00.000Z",
+  },
   config: { dayLimitPerEmployee: 5, showPrices: true },
   badgeSalt: "c2FsdA==",
   reasons: [],

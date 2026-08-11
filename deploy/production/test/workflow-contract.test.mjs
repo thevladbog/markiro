@@ -13,6 +13,8 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   for (const command of ["test:production-bundle:contract", "test:yandex-runtime"])
     assert.match(source, new RegExp(command.replaceAll(":", "\\:")));
   assert.match(source, /pnpm format:check/);
+  for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
+    assert.match(source, new RegExp(variable));
 });
 
 test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {
@@ -21,12 +23,14 @@ test("release publication is main-only, digest-bound and writes the immutable ma
     read(".github/workflows/release-images.yml"),
   ]);
   assert.deepEqual(workflow.on.push.branches, ["main"]);
-  assert.equal(workflow.jobs.publish.permissions.packages, "write");
+  assert.equal(workflow.jobs["production-bundle"].permissions.contents, "read");
   assert.match(source, /markiro-api/);
   assert.match(source, /markiro-edge/);
-  assert.match(source, /release-manifest\.mjs/);
+  assert.match(source, /release-manifest\.mjs|manifest\.json/);
   assert.match(source, /markiro-release-manifest-\$\{\{/);
   assert.doesNotMatch(source, /:latest\b/);
+  for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
+    assert.match(source, new RegExp(variable));
 });
 
 test("production deploy is one protected manual GitHub-hosted SSH job", async () => {

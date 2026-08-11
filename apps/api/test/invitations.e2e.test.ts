@@ -19,10 +19,11 @@ const ready = Boolean(
 describe.skipIf(!ready)("invitation lifecycle e2e", () => {
   let app: INestApplication | undefined;
   let db: Db;
+  let setup: AuthSetup;
 
   beforeAll(async () => {
     const env = loadEnv();
-    const setup: AuthSetup = setupAuth(env);
+    setup = setupAuth(env);
     db = setup.db;
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
@@ -155,6 +156,411 @@ describe.skipIf(!ready)("invitation lifecycle e2e", () => {
     expect(new Set(memberships.map((row) => row.organizationId))).toEqual(
       new Set([existingOrganizationId, invited.organizationId]),
     );
+  });
+
+  it("rolls back rejection, delivery cleanup, extensions, outbox, and audit atomically", async () => {
+    const invitee = request.agent(app!.getHttpServer());
+    const inviteeOrganizationId = await signUpAndActivate(invitee);
+    const [inviteeMember] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, inviteeOrganizationId));
+    const [inviteeUser] = await db
+      .select({ email: schema.user.email })
+      .from(schema.user)
+      .where(eq(schema.user.id, inviteeMember!.userId));
+    const invited = await invite(inviteeUser!.email, "Reject atomically", true);
+    const [deliveryBefore] = await db
+      .select({
+        id: schema.emailDeliveries.id,
+        status: schema.emailDeliveries.status,
+        encryptedPayload: schema.emailDeliveries.encryptedPayload,
+      })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, invited.invitationId));
+    expect(deliveryBefore?.status).toBe("queued");
+    expect(deliveryBefore?.encryptedPayload).not.toBeNull();
+    await expect(
+      db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveryBefore!.id)),
+    ).resolves.toHaveLength(1);
+
+    if (!/^[a-zA-Z0-9_-]+$/.test(invited.invitationId)) {
+      throw new Error("Unexpected invitation identifier in test fixture");
+    }
+    const suffix = crypto.randomUUID().replaceAll("-", "_");
+    const functionName = `fail_invitation_rejection_${suffix}`;
+    const triggerName = `fail_invitation_rejection_${suffix}`;
+    await setup.pool.query(`
+      create function ${functionName}() returns trigger language plpgsql as $$
+      begin
+        raise exception 'injected rejection audit failure';
+      end
+      $$
+    `);
+    await setup.pool.query(`
+      create trigger ${triggerName}
+      before insert on tenant_audit_events
+      for each row
+      when (
+        new.action = 'team.invitation.rejected'
+        and new.target_id = '${invited.invitationId}'
+      )
+      execute function ${functionName}()
+    `);
+    try {
+      await invitee.post(`/invitations/${invited.invitationId}/reject`).expect(500);
+    } finally {
+      await setup.pool.query(`drop trigger ${triggerName} on tenant_audit_events`);
+      await setup.pool.query(`drop function ${functionName}()`);
+    }
+
+    await expect(
+      db
+        .select({ status: schema.invitation.status })
+        .from(schema.invitation)
+        .where(eq(schema.invitation.id, invited.invitationId)),
+    ).resolves.toEqual([{ status: "pending" }]);
+    await expect(
+      db
+        .select({ status: schema.emailDeliveries.status })
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.id, deliveryBefore!.id)),
+    ).resolves.toEqual([{ status: "queued" }]);
+    await expect(
+      db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveryBefore!.id)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantInvitationProfiles)
+        .where(eq(schema.tenantInvitationProfiles.invitationId, invited.invitationId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select()
+        .from(schema.cabinetEmployeeLinks)
+        .where(eq(schema.cabinetEmployeeLinks.invitationId, invited.invitationId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, invited.organizationId),
+            eq(schema.tenantAuditEvents.targetId, invited.invitationId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.rejected"),
+          ),
+        ),
+    ).resolves.toEqual([]);
+
+    await invitee.post(`/invitations/${invited.invitationId}/reject`).expect(200);
+    await invitee
+      .post(`/invitations/${invited.invitationId}/reject`)
+      .expect(404, { code: "invitation_unavailable" });
+    await expect(
+      db
+        .select({ status: schema.invitation.status })
+        .from(schema.invitation)
+        .where(eq(schema.invitation.id, invited.invitationId)),
+    ).resolves.toEqual([{ status: "rejected" }]);
+    await expect(
+      db
+        .select({
+          status: schema.emailDeliveries.status,
+          encryptedPayload: schema.emailDeliveries.encryptedPayload,
+          payloadNonce: schema.emailDeliveries.payloadNonce,
+          payloadTag: schema.emailDeliveries.payloadTag,
+          attemptId: schema.emailDeliveries.attemptId,
+          attemptDeadline: schema.emailDeliveries.attemptDeadline,
+        })
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.id, deliveryBefore!.id)),
+    ).resolves.toEqual([
+      {
+        status: "canceled",
+        encryptedPayload: null,
+        payloadNonce: null,
+        payloadTag: null,
+        attemptId: null,
+        attemptDeadline: null,
+      },
+    ]);
+    await expect(
+      db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveryBefore!.id)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantInvitationProfiles)
+        .where(eq(schema.tenantInvitationProfiles.invitationId, invited.invitationId)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select()
+        .from(schema.cabinetEmployeeLinks)
+        .where(eq(schema.cabinetEmployeeLinks.invitationId, invited.invitationId)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select({
+          organizationId: schema.tenantAuditEvents.organizationId,
+          actorUserId: schema.tenantAuditEvents.actorUserId,
+          action: schema.tenantAuditEvents.action,
+          outcome: schema.tenantAuditEvents.outcome,
+          targetType: schema.tenantAuditEvents.targetType,
+          targetId: schema.tenantAuditEvents.targetId,
+          before: schema.tenantAuditEvents.before,
+          after: schema.tenantAuditEvents.after,
+        })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, invited.organizationId),
+            eq(schema.tenantAuditEvents.targetId, invited.invitationId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.rejected"),
+          ),
+        ),
+    ).resolves.toEqual([
+      {
+        organizationId: invited.organizationId,
+        actorUserId: inviteeMember!.userId,
+        action: "team.invitation.rejected",
+        outcome: "success",
+        targetType: "invitation",
+        targetId: invited.invitationId,
+        before: { status: "pending", role: "manager" },
+        after: { status: "rejected", role: "manager" },
+      },
+    ]);
+  });
+
+  it("releases acceptance locks after failure and finalizes retry exactly once", async () => {
+    const invitee = request.agent(app!.getHttpServer());
+    const inviteeOrganizationId = await signUpAndActivate(invitee);
+    const [inviteeMember] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, inviteeOrganizationId));
+    const [inviteeUser] = await db
+      .select({ email: schema.user.email })
+      .from(schema.user)
+      .where(eq(schema.user.id, inviteeMember!.userId));
+    const invited = await invite(inviteeUser!.email, "Acceptance retry", true);
+    const [deliveryBefore] = await db
+      .select({ id: schema.emailDeliveries.id })
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, invited.invitationId));
+    if (!deliveryBefore || !/^[a-zA-Z0-9_-]+$/.test(invited.invitationId)) {
+      throw new Error("Unexpected invitation acceptance fixture identifiers");
+    }
+
+    const suffix = crypto.randomUUID().replaceAll("-", "_");
+    const functionName = `fail_invitation_acceptance_${suffix}`;
+    const triggerName = `fail_invitation_acceptance_${suffix}`;
+    const probe = await setup.pool.connect();
+    let quotaProbeHeld = false;
+    let deliveryProbeHeld = false;
+    await setup.pool.query(`
+      create function ${functionName}() returns trigger language plpgsql as $$
+      begin
+        raise exception 'injected acceptance audit failure';
+      end
+      $$
+    `);
+    await setup.pool.query(`
+      create trigger ${triggerName}
+      before insert on tenant_audit_events
+      for each row
+      when (
+        new.action = 'team.invitation.accepted'
+        and new.target_id = '${invited.invitationId}'
+      )
+      execute function ${functionName}()
+    `);
+    try {
+      await invitee.post(`/invitations/${invited.invitationId}/accept`).expect(500);
+      const quotaProbe = await probe.query<{ locked: boolean }>(
+        "select pg_try_advisory_lock(hashtext($1), $2) as locked",
+        [`subscription-quota:${invited.organizationId}`, 4],
+      );
+      quotaProbeHeld = quotaProbe.rows[0]?.locked === true;
+      expect(quotaProbeHeld).toBe(true);
+      const deliveryProbe = await probe.query<{ locked: boolean }>(
+        "select pg_try_advisory_lock(hashtextextended($1, 0)) as locked",
+        [deliveryBefore.id],
+      );
+      deliveryProbeHeld = deliveryProbe.rows[0]?.locked === true;
+      expect(deliveryProbeHeld).toBe(true);
+    } finally {
+      if (deliveryProbeHeld) {
+        await probe
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [deliveryBefore.id])
+          .catch(() => undefined);
+      }
+      if (quotaProbeHeld) {
+        await probe
+          .query("select pg_advisory_unlock(hashtext($1), $2)", [
+            `subscription-quota:${invited.organizationId}`,
+            4,
+          ])
+          .catch(() => undefined);
+      }
+      probe.release();
+      await setup.pool.query(`drop trigger ${triggerName} on tenant_audit_events`);
+      await setup.pool.query(`drop function ${functionName}()`);
+    }
+
+    const [acceptedMember] = await db
+      .select({ id: schema.member.id })
+      .from(schema.member)
+      .where(
+        and(
+          eq(schema.member.organizationId, invited.organizationId),
+          eq(schema.member.userId, inviteeMember!.userId),
+        ),
+      );
+    expect(acceptedMember).toBeDefined();
+    await expect(
+      db
+        .select({ status: schema.invitation.status })
+        .from(schema.invitation)
+        .where(eq(schema.invitation.id, invited.invitationId)),
+    ).resolves.toEqual([{ status: "accepted" }]);
+    await expect(
+      db
+        .select({ status: schema.emailDeliveries.status })
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.id, deliveryBefore.id)),
+    ).resolves.toEqual([{ status: "queued" }]);
+    await expect(
+      db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveryBefore.id)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantInvitationProfiles)
+        .where(eq(schema.tenantInvitationProfiles.invitationId, invited.invitationId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select()
+        .from(schema.cabinetEmployeeLinks)
+        .where(eq(schema.cabinetEmployeeLinks.invitationId, invited.invitationId)),
+    ).resolves.toHaveLength(1);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, invited.organizationId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.accepted"),
+            eq(schema.tenantAuditEvents.targetId, invited.invitationId),
+          ),
+        ),
+    ).resolves.toEqual([]);
+
+    const service = app!.get(InvitationsService);
+    await service.finalizeAccepted(invited.invitationId, inviteeMember!.userId, inviteeUser!.email);
+    await service.finalizeAccepted(invited.invitationId, inviteeMember!.userId, inviteeUser!.email);
+    await invitee
+      .post(`/invitations/${invited.invitationId}/accept`)
+      .expect(404, { code: "invitation_unavailable" });
+
+    await expect(
+      db
+        .select({
+          status: schema.emailDeliveries.status,
+          encryptedPayload: schema.emailDeliveries.encryptedPayload,
+          payloadNonce: schema.emailDeliveries.payloadNonce,
+          payloadTag: schema.emailDeliveries.payloadTag,
+          attemptId: schema.emailDeliveries.attemptId,
+          attemptDeadline: schema.emailDeliveries.attemptDeadline,
+        })
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.id, deliveryBefore.id)),
+    ).resolves.toEqual([
+      {
+        status: "canceled",
+        encryptedPayload: null,
+        payloadNonce: null,
+        payloadTag: null,
+        attemptId: null,
+        attemptDeadline: null,
+      },
+    ]);
+    await expect(
+      db
+        .select()
+        .from(schema.emailOutbox)
+        .where(eq(schema.emailOutbox.deliveryId, deliveryBefore.id)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select()
+        .from(schema.tenantInvitationProfiles)
+        .where(eq(schema.tenantInvitationProfiles.invitationId, invited.invitationId)),
+    ).resolves.toEqual([]);
+    await expect(
+      db
+        .select({
+          invitationId: schema.cabinetEmployeeLinks.invitationId,
+          memberId: schema.cabinetEmployeeLinks.memberId,
+        })
+        .from(schema.cabinetEmployeeLinks)
+        .where(eq(schema.cabinetEmployeeLinks.employeeId, invited.employeeId!)),
+    ).resolves.toEqual([{ invitationId: null, memberId: acceptedMember!.id }]);
+    await expect(
+      db
+        .select({ position: schema.tenantMemberProfiles.position })
+        .from(schema.tenantMemberProfiles)
+        .where(eq(schema.tenantMemberProfiles.memberId, acceptedMember!.id)),
+    ).resolves.toEqual([{ position: "Acceptance retry" }]);
+    await expect(
+      db
+        .select({
+          organizationId: schema.tenantAuditEvents.organizationId,
+          actorUserId: schema.tenantAuditEvents.actorUserId,
+          action: schema.tenantAuditEvents.action,
+          outcome: schema.tenantAuditEvents.outcome,
+          targetType: schema.tenantAuditEvents.targetType,
+          targetId: schema.tenantAuditEvents.targetId,
+          before: schema.tenantAuditEvents.before,
+          after: schema.tenantAuditEvents.after,
+        })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, invited.organizationId),
+            eq(schema.tenantAuditEvents.action, "team.invitation.accepted"),
+            eq(schema.tenantAuditEvents.targetId, invited.invitationId),
+          ),
+        ),
+    ).resolves.toEqual([
+      {
+        organizationId: invited.organizationId,
+        actorUserId: inviteeMember!.userId,
+        action: "team.invitation.accepted",
+        outcome: "success",
+        targetType: "invitation",
+        targetId: invited.invitationId,
+        before: { status: "pending", role: "manager" },
+        after: { status: "accepted", role: "manager" },
+      },
+    ]);
   });
 
   it("does not reveal tenant details for invalid or terminal links", async () => {

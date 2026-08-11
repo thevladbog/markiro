@@ -14,6 +14,11 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -30,7 +35,8 @@ import { LinesService } from "./lines.service";
 @Controller("lines")
 // The station never calls this module. Cabinet authorization keeps a station
 // api-key out even though TenantGuard accepts it for tenant resolution.
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class LinesController {
   constructor(private readonly linesService: LinesService) {}
 
@@ -47,6 +53,7 @@ export class LinesController {
   }
 
   @Post()
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async createLine(
     @Req() req: RequestWithTenant,
@@ -56,6 +63,7 @@ export class LinesController {
   }
 
   @Patch(":id")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateLine(
     @Req() req: RequestWithTenant,
@@ -67,6 +75,7 @@ export class LinesController {
 
   @Delete(":id")
   @HttpCode(204)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async deleteLine(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.linesService.deleteLine(req.tenantId!, id);

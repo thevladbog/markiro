@@ -19,11 +19,14 @@ export class MailDeliveryService {
     const encrypted = this.crypto.encrypt(id, input.template);
     const tenantId = "tenantId" in input.scope ? (input.scope.tenantId ?? null) : null;
     const userId = "userId" in input.scope ? (input.scope.userId ?? null) : null;
+    const platformUserId =
+      "platformUserId" in input.scope ? (input.scope.platformUserId ?? null) : null;
 
     await tx.insert(schema.emailDeliveries).values({
       id,
       tenantId,
       userId,
+      platformUserId,
       recipient,
       kind: input.template.kind,
       sourceId: input.sourceId ?? null,

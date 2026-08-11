@@ -15,6 +15,7 @@ import { StationDevicesService } from "../src/modules/station-devices/station-de
 import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
+import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
 
@@ -147,13 +148,19 @@ describe("self-hosted OpenAPI documentation", () => {
         },
       });
       const schema = responseSchema(response);
-      expectExactObjectFields(schema, ["device"]);
+      expect(Object.keys(schema.properties ?? {}).sort()).toEqual(["device", "subscription"]);
       expectExactObjectFields(schema.properties!.device!, [
         "id",
         "name",
         "tenantId",
         "organizationName",
         "line",
+      ]);
+      expectExactObjectFields(schema.properties!.subscription!, [
+        "access",
+        "status",
+        "startsAt",
+        "endsAt",
       ]);
       expect(JSON.stringify(response)).not.toMatch(/apiKey|credential|secret/i);
     } finally {
@@ -247,11 +254,14 @@ describe("self-hosted OpenAPI documentation", () => {
         { provide: StationDevicesService, useValue: {} },
         { provide: StationPairingService, useValue: {} },
         { provide: SecurityAuditService, useValue: {} },
+        { provide: SubscriptionAccessGuard, useValue: { canActivate: () => true } },
       ],
     })
       .overrideGuard(TenantGuard)
       .useValue({ canActivate: () => true })
       .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
       .useValue({ canActivate: () => true })
       .compile();
     const app = moduleRef.createNestApplication();
@@ -298,7 +308,12 @@ describe("self-hosted OpenAPI documentation", () => {
       );
 
       const station = responseSchema(operationResponse(document, "/station/pair", "201"));
-      expectExactObjectFields(station, ["device", "credential", "operators"]);
+      expect(Object.keys(station.properties ?? {}).sort()).toEqual([
+        "credential",
+        "device",
+        "operators",
+        "subscription",
+      ]);
       const stationDevice = property(station, "device");
       expectExactObjectFields(stationDevice, [
         "id",
@@ -318,6 +333,12 @@ describe("self-hosted OpenAPI documentation", () => {
         "badgeHash",
         "active",
       ]);
+      expectExactObjectFields(property(station, "subscription"), [
+        "access",
+        "status",
+        "startsAt",
+        "endsAt",
+      ]);
 
       const kiosk = responseSchema(operationResponse(document, "/kiosk/pair", "201"));
       expectExactObjectFields(kiosk, ["device", "token", "nextDeviceSeq", "bootstrap"]);
@@ -331,6 +352,7 @@ describe("self-hosted OpenAPI documentation", () => {
         "products",
         "employees",
         "operators",
+        "subscription",
       ]);
       expectExactObjectFields(property(bootstrap, "config"), ["dayLimitPerEmployee", "showPrices"]);
       expectExactObjectFields(arrayItems(property(bootstrap, "reasons")), ["id", "name"]);
@@ -359,6 +381,12 @@ describe("self-hosted OpenAPI documentation", () => {
         "active",
       ]);
       expect(kioskOperator.properties).not.toHaveProperty("operatorId");
+      expectExactObjectFields(property(bootstrap, "subscription"), [
+        "access",
+        "status",
+        "startsAt",
+        "endsAt",
+      ]);
 
       expectExactObjectFields(
         responseSchema(operationResponse(document, "/kiosks/{id}/enroll", "200")),

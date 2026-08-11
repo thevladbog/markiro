@@ -21,6 +21,7 @@ import {
 } from "../device-pairing/pairing-policy";
 import { OperatorsService } from "../operators/operators.service";
 import { SecurityAuditService } from "../../authorization/security-audit.service";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import type {
   IssueStationPairingCodeResultDto,
   PairStationResultDto,
@@ -55,10 +56,16 @@ export class StationPairingService {
     private readonly operators: OperatorsService,
     private readonly pairAttempts: PairAttemptsService,
     private readonly audit: SecurityAuditService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   /** Resolves metadata only from the tenant/device principal proven by TenantGuard. */
-  async identity(tenantId: string, deviceId: string): Promise<StationIdentityResultDto> {
+  async identity(
+    tenantId: string,
+    deviceId: string,
+    includeSubscription = false,
+  ): Promise<StationIdentityResultDto> {
+    const serverNow = new Date();
     const [station] = await this.db
       .select({
         id: schema.stationDevices.id,
@@ -96,6 +103,9 @@ export class StationPairingService {
             ? { id: station.lineId, name: station.lineName }
             : null,
       },
+      ...(includeSubscription
+        ? { subscription: await this.entitlements.accessSnapshot(tenantId, this.db, serverNow) }
+        : {}),
     };
   }
 
@@ -163,7 +173,11 @@ export class StationPairingService {
     throw new Error("Could not mint a unique station pairing code");
   }
 
-  async redeem(code: string, source: string): Promise<PairStationResultDto> {
+  async redeem(
+    code: string,
+    source: string,
+    includeSubscription = false,
+  ): Promise<PairStationResultDto> {
     const now = new Date();
     const windowStart = pairAttemptWindowStart(now);
     const auditContext: StationPairAuditContext = {
@@ -181,7 +195,7 @@ export class StationPairingService {
         }
         throw error;
       }
-      result = await this.attemptRedeem(code, now, auditContext);
+      result = await this.attemptRedeem(code, now, auditContext, includeSubscription);
     } catch (error) {
       this.auditPairing(auditContext, "failed");
       throw error;
@@ -197,6 +211,7 @@ export class StationPairingService {
     code: string,
     now: Date,
     auditContext: StationPairAuditContext,
+    includeSubscription: boolean,
   ): Promise<PairStationResultDto> {
     const codeHash = hashPairingCode(code, loadEnv().PAIRING_CODE_PEPPER);
     const rows = await this.db
@@ -276,6 +291,8 @@ export class StationPairingService {
       );
     if (!station) throw new StationPairingException("PAIR_INVALID");
 
+    await this.entitlements.assertWriteAccess(candidate.tenantId, this.db, new Date());
+
     // Build before the conditional claim. If an operator mirror cannot be
     // prepared, the code stays live and no candidate key exists to clean up.
     const operators = await this.operators.buildRoster(candidate.tenantId);
@@ -293,64 +310,85 @@ export class StationPairingService {
     });
 
     try {
-      await this.db.transaction(async (tx) => {
-        const [lockedStation] = await tx
-          .select({ apiKeyId: schema.stationDevices.apiKeyId })
-          .from(schema.stationDevices)
-          .where(
-            and(
-              eq(schema.stationDevices.tenantId, candidate.tenantId),
-              eq(schema.stationDevices.id, candidate.stationDeviceId),
-            ),
-          )
-          .for("update");
-        if (!lockedStation) throw new PairClaimLostError();
-        auditContext.action = lockedStation.apiKeyId === null ? "station.pair" : "station.repair";
+      await this.db.transaction((tx) =>
+        this.entitlements.withQuotaLock(tx, candidate.tenantId, "stations", async () => {
+          const [lockedStation] = await tx
+            .select({
+              apiKeyId: schema.stationDevices.apiKeyId,
+              revokedAt: schema.stationDevices.revokedAt,
+            })
+            .from(schema.stationDevices)
+            .where(
+              and(
+                eq(schema.stationDevices.tenantId, candidate.tenantId),
+                eq(schema.stationDevices.id, candidate.stationDeviceId),
+              ),
+            )
+            .for("update");
+          if (!lockedStation) throw new PairClaimLostError();
+          auditContext.action = lockedStation.apiKeyId === null ? "station.pair" : "station.repair";
 
-        const [claimed] = await tx
-          .update(schema.stationPairingCodes)
-          .set({ usedAt: new Date() })
-          .where(
-            and(
-              eq(schema.stationPairingCodes.id, candidate.id),
-              eq(schema.stationPairingCodes.tenantId, candidate.tenantId),
-              isNull(schema.stationPairingCodes.usedAt),
-              lt(schema.stationPairingCodes.attempts, PAIR_CODE_MAX_ATTEMPTS),
-              gt(schema.stationPairingCodes.expiresAt, sql`now()`),
-            ),
-          )
-          .returning({ id: schema.stationPairingCodes.id });
-        if (!claimed) throw new PairClaimLostError();
+          const completePairing = async () => {
+            const [claimed] = await tx
+              .update(schema.stationPairingCodes)
+              .set({ usedAt: new Date() })
+              .where(
+                and(
+                  eq(schema.stationPairingCodes.id, candidate.id),
+                  eq(schema.stationPairingCodes.tenantId, candidate.tenantId),
+                  isNull(schema.stationPairingCodes.usedAt),
+                  lt(schema.stationPairingCodes.attempts, PAIR_CODE_MAX_ATTEMPTS),
+                  gt(schema.stationPairingCodes.expiresAt, sql`now()`),
+                ),
+              )
+              .returning({ id: schema.stationPairingCodes.id });
+            if (!claimed) throw new PairClaimLostError();
 
-        // Claiming the code, retiring an old credential, and linking the
-        // candidate are one unit of work. In particular, a code that loses
-        // its claim after candidate provisioning cannot invalidate the
-        // station's existing credential.
-        if (lockedStation.apiKeyId !== null) {
-          const [deleted] = await tx
-            .delete(schema.apikey)
-            .where(eq(schema.apikey.id, lockedStation.apiKeyId))
-            .returning({ id: schema.apikey.id });
-          if (!deleted) {
-            throw new InternalServerErrorException("Station credential cleanup failed");
+            // Claiming the code, retiring an old credential, and linking the
+            // candidate are one unit of work. In particular, a code that loses
+            // its claim after candidate provisioning cannot invalidate the
+            // station's existing credential.
+            if (lockedStation.apiKeyId !== null) {
+              const [deleted] = await tx
+                .delete(schema.apikey)
+                .where(eq(schema.apikey.id, lockedStation.apiKeyId))
+                .returning({ id: schema.apikey.id });
+              if (!deleted) {
+                throw new InternalServerErrorException("Station credential cleanup failed");
+              }
+            }
+
+            const [paired] = await tx
+              .update(schema.stationDevices)
+              .set({ apiKeyId: key.id, pairedAt: new Date(), revokedAt: null })
+              .where(
+                and(
+                  eq(schema.stationDevices.tenantId, candidate.tenantId),
+                  eq(schema.stationDevices.id, candidate.stationDeviceId),
+                  lockedStation.apiKeyId === null
+                    ? isNull(schema.stationDevices.apiKeyId)
+                    : eq(schema.stationDevices.apiKeyId, lockedStation.apiKeyId),
+                  lockedStation.revokedAt === null
+                    ? isNull(schema.stationDevices.revokedAt)
+                    : eq(schema.stationDevices.revokedAt, lockedStation.revokedAt),
+                ),
+              )
+              .returning({ id: schema.stationDevices.id });
+            if (!paired) throw new PairClaimLostError();
+          };
+
+          if (lockedStation.revokedAt !== null) {
+            await this.entitlements.withQuotaSlot(
+              tx,
+              candidate.tenantId,
+              "stations",
+              completePairing,
+            );
+          } else {
+            await completePairing();
           }
-        }
-
-        const [paired] = await tx
-          .update(schema.stationDevices)
-          .set({ apiKeyId: key.id, pairedAt: new Date(), revokedAt: null })
-          .where(
-            and(
-              eq(schema.stationDevices.tenantId, candidate.tenantId),
-              eq(schema.stationDevices.id, candidate.stationDeviceId),
-              lockedStation.apiKeyId === null
-                ? isNull(schema.stationDevices.apiKeyId)
-                : eq(schema.stationDevices.apiKeyId, lockedStation.apiKeyId),
-            ),
-          )
-          .returning({ id: schema.stationDevices.id });
-        if (!paired) throw new PairClaimLostError();
-      });
+        }),
+      );
     } catch (error) {
       await this.deleteCandidateKey(key.id);
       if (error instanceof PairClaimLostError) {
@@ -372,6 +410,9 @@ export class StationPairingService {
       },
       credential: { apiKey: key.key, serverUrl: loadEnv().BETTER_AUTH_URL },
       operators,
+      ...(includeSubscription
+        ? { subscription: await this.entitlements.accessSnapshot(candidate.tenantId) }
+        : {}),
     };
   }
 

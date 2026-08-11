@@ -1,8 +1,18 @@
-import { Body, Controller, ForbiddenException, Post, Req, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Headers,
+  Post,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { syncBatchSchema, type SyncBatchDto, type SyncBatchResponseDto } from "./dto";
 import { StationScansService } from "./station-scans.service";
 
@@ -14,18 +24,33 @@ import { StationScansService } from "./station-scans.service";
  */
 @ApiTags("station")
 @Controller("station")
-@UseGuards(TenantGuard, StationOnlyGuard)
+@UseGuards(TenantGuard, StationOnlyGuard, SubscriptionAccessGuard)
 export class StationScansController {
   constructor(private readonly service: StationScansService) {}
 
   @Post("scans")
+  @AllowSubscriptionRecovery("station")
   async ingest(
     @Req() req: RequestWithTenant,
+    @Headers("x-station-capabilities") capabilities: string | undefined,
     @Body(new ZodValidationPipe(syncBatchSchema)) body: SyncBatchDto,
   ): Promise<SyncBatchResponseDto> {
     if (!req.deviceId) {
       throw new ForbiddenException("Station device authentication required");
     }
-    return this.service.applyBatch(req.tenantId!, body, req.deviceId);
+    const result = await this.service.applyBatch(req.tenantId!, body, req.deviceId);
+    if (
+      capabilities
+        ?.split(",")
+        .map((value) => value.trim())
+        .includes("station-recovery-v1")
+    ) {
+      return result;
+    }
+    return {
+      applied: result.applied,
+      alreadyApplied: result.alreadyApplied,
+      conflicts: result.conflicts,
+    };
   }
 }

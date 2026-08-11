@@ -95,6 +95,14 @@ interface BatchResponse {
   alreadyApplied: boolean;
   conflicts?: BatchConflict[];
   ssccBlock?: BatchSsccBlock;
+  denied?: DeniedStationRecord[];
+}
+
+interface DeniedStationRecord {
+  recordKind: "item" | "box" | "exception";
+  recordIndex: number;
+  shiftId: string;
+  code: "subscription_read_only" | "legacy_unbound_replay";
 }
 
 /**
@@ -117,6 +125,18 @@ function isBatchConflict(value: unknown): value is BatchConflict {
     (typeof c.winningTerminalId === "string" || c.winningTerminalId === null) &&
     typeof c.winningScannedAt === "string" &&
     !Number.isNaN(Date.parse(c.winningScannedAt))
+  );
+}
+
+function isDeniedStationRecord(value: unknown): value is DeniedStationRecord {
+  if (typeof value !== "object" || value === null) return false;
+  const record = value as Record<string, unknown>;
+  return (
+    ["item", "box", "exception"].includes(String(record.recordKind)) &&
+    Number.isInteger(record.recordIndex) &&
+    Number(record.recordIndex) >= 0 &&
+    typeof record.shiftId === "string" &&
+    ["subscription_read_only", "legacy_unbound_replay"].includes(String(record.code))
   );
 }
 
@@ -421,6 +441,7 @@ const CEILING_META_KEY = "sync_pending_ceiling";
 const BOX_CEILING_META_KEY = "sync_pending_box_ceiling";
 const EXCEPTION_CEILING_META_KEY = "sync_pending_exception_ceiling";
 const BATCH_ID_META_KEY = "sync_pending_batch_id";
+const RECOVERY_DENIED_META_KEY = "sync_last_recovery_denied";
 
 async function loadPersistedValue(exec: SqlExecutor, key: string): Promise<string | null> {
   const rows = await exec.all<{ value: string | null }>(
@@ -943,6 +964,25 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 await addRange(deps.exec, res.ssccBlock);
               } catch (err) {
                 console.error("station: applying serial block failed", err);
+              }
+            }
+            const denied = Array.isArray(res.denied)
+              ? res.denied.filter(isDeniedStationRecord)
+              : [];
+            if (denied.length > 0) {
+              try {
+                await savePersistedValue(
+                  deps.exec,
+                  RECOVERY_DENIED_META_KEY,
+                  JSON.stringify({ batchId, denied }),
+                );
+                console.warn(
+                  `station: ${denied.length} sync ${denied.length === 1 ? "record" : "records"} quarantined by server`,
+                );
+              } catch (err) {
+                // The authoritative quarantine is server-side. A damaged local
+                // metadata table must not wedge every later production scan.
+                console.error("station: preserving recovery denials failed", err);
               }
             }
             // `alreadyApplied` is a success: this exact batch is on the

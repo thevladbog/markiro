@@ -21,13 +21,27 @@ import { z } from "zod";
  * `file://` document -- allowlisting it would hand access to every opaque
  * origin at once.
  */
-const browserOriginSchema = z.url().transform((value, ctx) => {
+const canonicalOriginSchema = z.url().transform((value, ctx) => {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     ctx.addIssue({ code: "custom", message: "must be an http(s) origin" });
     return z.NEVER;
   }
   return url.origin;
+});
+
+const canonicalHttpUrlSchema = z.url().transform((value, ctx) => {
+  const url = new URL(value);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    ctx.addIssue({ code: "custom", message: "must be an http(s) URL" });
+    return z.NEVER;
+  }
+  if (url.username || url.password) {
+    ctx.addIssue({ code: "custom", message: "must not include userinfo" });
+    return z.NEVER;
+  }
+  url.hash = "";
+  return url.toString().replace(/\/$/, "");
 });
 
 /**
@@ -96,11 +110,15 @@ const EnvSchema = z
     DATABASE_URL: z.string().min(1),
     BETTER_AUTH_SECRET: z.string().min(16),
     BETTER_AUTH_URL: z.url(),
+    PLATFORM_AUTH_SECRET: z.string().min(32),
+    PLATFORM_AUTH_URL: canonicalHttpUrlSchema,
     // The default is returned as written, not canonicalized: zod's `.default()`
     // short-circuits parsing entirely when the input is undefined, so the
     // transform above never sees it. Harmless only because the literal is
     // already a bare origin -- keep it that way.
-    ADMIN_ORIGIN: browserOriginSchema.default("http://localhost:5173"),
+    ADMIN_ORIGIN: canonicalOriginSchema.default("http://localhost:5173"),
+    SAAS_ADMIN_ORIGIN: canonicalOriginSchema,
+    SUBSCRIPTION_ENFORCEMENT_MODE: z.enum(["managed_only", "all"]).default("managed_only"),
     // Origin the pickup kiosk PWA (apps/kiosk) is served from, when it is
     // served from one at all. OPTIONAL, and deliberately WITHOUT a localhost
     // default, unlike ADMIN_ORIGIN:
@@ -118,7 +136,7 @@ const EnvSchema = z
     // same-origin, so CORS never engages there. It is the on-prem split-host
     // deployment the kiosk's own pairing screen advertises (a server-address
     // field) that needs this set.
-    KIOSK_ORIGIN: browserOriginSchema.optional(),
+    KIOSK_ORIGIN: canonicalOriginSchema.optional(),
     // Exact origin used by the Tauri station shell. This is intentionally
     // optional for existing admin-only deployments; unset means that only the
     // admin origin may reach `/station/*`. Configure an exact HTTP(S) origin
@@ -155,6 +173,20 @@ const EnvSchema = z
     S3_FORCE_PATH_STYLE: explicitBooleanSchema,
   })
   .superRefine((env, ctx) => {
+    if (env.PLATFORM_AUTH_SECRET === env.BETTER_AUTH_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["PLATFORM_AUTH_SECRET"],
+        message: "must differ from BETTER_AUTH_SECRET",
+      });
+    }
+    if (env.SAAS_ADMIN_ORIGIN === env.ADMIN_ORIGIN) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SAAS_ADMIN_ORIGIN"],
+        message: "must differ from ADMIN_ORIGIN",
+      });
+    }
     if (env.SMTP_PORT === 465 && env.SMTP_SECURE === false) {
       ctx.addIssue({
         code: "custom",
@@ -236,6 +268,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
  */
 export function sessionAllowedOrigins(env: Env): string[] {
   return [env.ADMIN_ORIGIN];
+}
+
+/** Exact origin trusted by the separate platform-session surface only. */
+export function platformAllowedOrigins(env: Env): string[] {
+  return [env.SAAS_ADMIN_ORIGIN];
 }
 
 /**

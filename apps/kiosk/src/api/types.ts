@@ -37,6 +37,15 @@ export interface CreateOrderDto {
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];
   createdAt?: string;
+  admissionNonce?: string;
+  admissionProof?: string;
+}
+
+export type CreateOrderAdmissionDto = Omit<CreateOrderDto, "createdAt" | "admissionProof">;
+
+export interface CreateOrderAdmissionResultDto {
+  claimedAt: string;
+  admissionProof: string;
 }
 
 /** A scanned item that could not be accepted into the order, and why. */
@@ -51,6 +60,13 @@ export interface CreateOrderResultDto {
   status: "pending";
   itemCount: number;
   conflicts: OrderConflict[];
+}
+
+export interface SubscriptionAccessSnapshotDto {
+  access: "managed" | "read_only" | "unmanaged";
+  status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
+  startsAt: string | null;
+  endsAt: string | null;
 }
 
 /**
@@ -74,6 +90,7 @@ export interface CreateOrderResultDto {
  */
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
+  subscription: SubscriptionAccessSnapshotDto;
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];

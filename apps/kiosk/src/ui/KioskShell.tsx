@@ -215,11 +215,26 @@ export function KioskShell(): React.JSX.Element {
    */
   const clientFor = useCallback((cfg: KioskConfig | null): KioskClient | null => {
     if (!cfg?.token) return null;
-    const base = createKioskClient({ token: cfg.token, serverUrl: cfg.serverUrl });
+    const base = createKioskClient({
+      token: cfg.token,
+      serverUrl: cfg.serverUrl,
+    });
     return {
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
+      attestOrder: async (body) => {
+        try {
+          const result = await base.attestOrder(body);
+          // The reservation is now the first network step of a delivery, so
+          // it carries the same reachability evidence submit used to own.
+          setOnline(true);
+          return result;
+        } catch (err) {
+          if (isUnreachable(err)) setOnline(false);
+          throw err;
+        }
+      },
       submitOrder: async (body) => {
         try {
           const result = await base.submitOrder(body);
@@ -714,12 +729,15 @@ export function KioskShell(): React.JSX.Element {
       const cfg = configRef.current;
       if (!cfg) return;
       const deviceSeq = cfg.nextDeviceSeq;
-      const body: CreateOrderDto = {
+      const content = {
         deviceSeq,
         badgeDigest: active.badgeDigest,
         reason: state.reason,
         writeoffReasonId: state.writeoffReasonId,
         items: state.items.map((item) => ({ rawKm: item.rawKm })),
+      };
+      const body: CreateOrderDto = {
+        ...content,
         // The scan time, not the sync time: an order queued through an outage
         // replays hours later and must still be filed under when it happened.
         // Read off the SERVER's clock (`scannedAt`), because this stamp is what
@@ -758,7 +776,12 @@ export function KioskShell(): React.JSX.Element {
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
-        await enqueueOrder(body, active.employeeId);
+        await enqueueOrder(body, active.employeeId, "pending_attestation");
+        // Attestation belongs to the same globally serialized drain as submit.
+        // Splitting it here let an interval drain read and submit this durable
+        // proofless record while the reservation request was still in flight.
+        // The worker now persists the attested body before it submits, and a
+        // crash resumes from either explicit pending state.
         // From here on the server's answer for THIS order is worth keeping.
         awaited.current = { deviceSeq, result: null };
         await drain();

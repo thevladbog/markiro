@@ -1,5 +1,11 @@
-import { Button, Link, Section, Text } from "react-email";
-import { EmailLayout, emailStyles } from "./layout.js";
+import { Text } from "react-email";
+import {
+  EmailAction,
+  EmailExpiryNotice,
+  EmailFallbackLink,
+  EmailLayout,
+  emailStyles,
+} from "./layout.js";
 
 export interface OrganizationInvitationEmailProps {
   recipientName: string;
@@ -28,25 +34,20 @@ export function OrganizationInvitationEmail({
   expiresAt,
 }: OrganizationInvitationEmailProps) {
   return (
-    <EmailLayout preview={"Вас пригласили в " + organizationName} heading="Приглашение в команду">
-      <Text style={emailStyles.paragraph}>Здравствуйте, {recipientName}!</Text>
+    <EmailLayout
+      preview={`Вас пригласили в ${organizationName}`}
+      eyebrow={organizationName}
+      heading="Приглашение в команду"
+    >
+      <Text style={emailStyles.greeting}>Здравствуйте, {recipientName}.</Text>
       <Text style={emailStyles.paragraph}>
         {inviterName} приглашает вас присоединиться к {organizationName} в Маркиро.
       </Text>
-      <Section style={emailStyles.actionSection}>
-        <Button href={actionUrl} style={emailStyles.button}>
-          Принять приглашение
-        </Button>
-      </Section>
-      <Text style={emailStyles.muted}>
-        Приглашение действительно до {dateFormatter.format(expiresAt)}.
-      </Text>
-      <Text style={emailStyles.fallback}>
-        Если кнопка не работает, откройте ссылку:{" "}
-        <Link href={actionUrl} style={emailStyles.fallbackLink}>
-          {actionUrl}
-        </Link>
-      </Text>
+      <EmailAction href={actionUrl}>Принять приглашение</EmailAction>
+      <EmailExpiryNotice label="Приглашение действительно до">
+        {dateFormatter.format(expiresAt)}
+      </EmailExpiryNotice>
+      <EmailFallbackLink actionUrl={actionUrl} />
     </EmailLayout>
   );
 }

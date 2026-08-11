@@ -15,6 +15,11 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -33,7 +38,8 @@ import { CounterpartiesService } from "./counterparties.service";
 @Controller("counterparties")
 // The station never calls this module. Cabinet authorization keeps a station
 // api-key out even though TenantGuard accepts it for tenant resolution.
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class CounterpartiesController {
   constructor(private readonly counterpartiesService: CounterpartiesService) {}
 
@@ -53,6 +59,7 @@ export class CounterpartiesController {
   }
 
   @Post()
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async createCounterparty(
     @Req() req: RequestWithTenant,
@@ -62,6 +69,7 @@ export class CounterpartiesController {
   }
 
   @Patch(":id")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateCounterparty(
     @Req() req: RequestWithTenant,
@@ -73,6 +81,7 @@ export class CounterpartiesController {
 
   @Delete(":id")
   @HttpCode(204)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async deleteCounterparty(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.counterpartiesService.deleteCounterparty(req.tenantId!, id);
@@ -85,6 +94,7 @@ export class CounterpartiesController {
   }
 
   @Put(":id/sscc")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async putSscc(
     @Req() req: RequestWithTenant,

@@ -14,6 +14,8 @@ export default defineConfig({
     "./src/schema/media.ts",
     "./src/schema/mail.ts",
     "./src/schema/team.ts",
+    "./src/schema/platform-auth.ts",
+    "./src/schema/saas.ts",
   ],
   out: "./migrations",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },

@@ -6,6 +6,7 @@ import { loadEnv } from "../src/env";
 import { HealthController } from "../src/health.controller";
 import { ReadinessService } from "../src/health/readiness.service";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 describe("GET /health", () => {
   let app: INestApplication;
@@ -69,6 +70,7 @@ describe("env validation", () => {
 
   it("loadEnv parses valid config with PORT default", () => {
     const env = loadEnv({
+      ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
       PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
@@ -80,6 +82,7 @@ describe("env validation", () => {
 
   it("loadEnv defaults TRUST_PROXY_HOPS to 0 (untrusted) when unset", () => {
     const env = loadEnv({
+      ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
       PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
@@ -90,6 +93,7 @@ describe("env validation", () => {
 
   it("loadEnv coerces a numeric TRUST_PROXY_HOPS from the environment", () => {
     const env = loadEnv({
+      ...PLATFORM_TEST_ENV,
       DATABASE_URL: "postgres://user:pass@localhost/db",
       BETTER_AUTH_SECRET: "insecure-test-placeholder",
       PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
@@ -102,6 +106,7 @@ describe("env validation", () => {
   it("loadEnv rejects a negative TRUST_PROXY_HOPS", () => {
     expect(() =>
       loadEnv({
+        ...PLATFORM_TEST_ENV,
         DATABASE_URL: "postgres://user:pass@localhost/db",
         BETTER_AUTH_SECRET: "insecure-test-placeholder",
         PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",
@@ -114,6 +119,7 @@ describe("env validation", () => {
   it("loadEnv rejects a PORT outside the valid 1-65535 range", () => {
     expect(() =>
       loadEnv({
+        ...PLATFORM_TEST_ENV,
         DATABASE_URL: "postgres://user:pass@localhost/db",
         BETTER_AUTH_SECRET: "insecure-test-placeholder",
         PAIRING_CODE_PEPPER: "insecure-test-pairing-pepper",

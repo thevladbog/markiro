@@ -1,6 +1,12 @@
-import { Button, Link, Section, Text } from "react-email";
+import { Text } from "react-email";
 import { formatRussianMinutes } from "./duration.js";
-import { EmailLayout, emailStyles } from "./layout.js";
+import {
+  EmailAction,
+  EmailExpiryNotice,
+  EmailFallbackLink,
+  EmailLayout,
+  emailStyles,
+} from "./layout.js";
 
 export interface TenantOwnerActivationEmailProps {
   recipientName: string;
@@ -18,28 +24,20 @@ export function TenantOwnerActivationEmail({
   return (
     <EmailLayout
       preview={`Доступ к ${organizationName} в Маркиро`}
+      eyebrow={organizationName}
       heading="Добро пожаловать в Маркиро"
       footer="Это автоматическое письмо о создании кабинета организации. Если адрес указан ошибочно, просто удалите письмо."
     >
-      <Text style={emailStyles.paragraph}>Здравствуйте, {recipientName}!</Text>
+      <Text style={emailStyles.greeting}>Здравствуйте, {recipientName}.</Text>
       <Text style={emailStyles.paragraph}>
         Для вас создан кабинет организации {organizationName}. Активируйте доступ по ссылке. Если у
         вас уже есть аккаунт Маркиро, его пароль останется без изменений.
       </Text>
-      <Section style={emailStyles.actionSection}>
-        <Button href={actionUrl} style={emailStyles.button}>
-          Активировать доступ
-        </Button>
-      </Section>
-      <Text style={emailStyles.muted}>
-        Одноразовая ссылка действует {formatRussianMinutes(expiresInMinutes)}.
-      </Text>
-      <Text style={emailStyles.fallback}>
-        Если кнопка не работает, откройте ссылку:{" "}
-        <Link href={actionUrl} style={emailStyles.fallbackLink}>
-          {actionUrl}
-        </Link>
-      </Text>
+      <EmailAction href={actionUrl}>Активировать доступ</EmailAction>
+      <EmailExpiryNotice label="Одноразовая ссылка">
+        Действует {formatRussianMinutes(expiresInMinutes)}.
+      </EmailExpiryNotice>
+      <EmailFallbackLink actionUrl={actionUrl} />
     </EmailLayout>
   );
 }

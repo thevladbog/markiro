@@ -18,6 +18,12 @@ import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  AllowSubscriptionReadOnly,
+  AllowSubscriptionRecovery,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
+import {
   closeShiftSchema,
   createShiftSchema,
   listShiftsQuerySchema,
@@ -34,7 +40,8 @@ import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 
 @ApiTags("shifts")
 @Controller("shifts")
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class ShiftsController {
   constructor(private readonly shiftsService: ShiftsService) {}
 
@@ -62,6 +69,7 @@ export class ShiftsController {
 
   @Post()
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async createShift(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createShiftSchema)) body: CreateShiftDto,
@@ -71,6 +79,7 @@ export class ShiftsController {
 
   @Patch(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async updateShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -82,6 +91,7 @@ export class ShiftsController {
   @Delete(":id")
   @HttpCode(204)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async deleteShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.shiftsService.deleteShift(req.tenantId!, id);
   }
@@ -91,6 +101,7 @@ export class ShiftsController {
   @Post(":id/close")
   @HttpCode(200)
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @AllowSubscriptionRecovery("shift")
   async closeShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -102,12 +113,14 @@ export class ShiftsController {
   @Post(":id/open")
   @HttpCode(200)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
   async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     return this.shiftsService.openShift(req.tenantId!, id);
   }
 
   @Get(":id/bundle")
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @AllowSubscriptionRecovery("shift")
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
     return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
   }

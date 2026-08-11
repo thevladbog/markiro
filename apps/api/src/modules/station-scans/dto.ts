@@ -213,6 +213,13 @@ export interface BatchConflictDto {
   winningScannedAt: string;
 }
 
+export interface DeniedStationRecordDto {
+  recordKind: "item" | "box" | "exception";
+  recordIndex: number;
+  shiftId: string;
+  code: "subscription_read_only" | "legacy_unbound_replay";
+}
+
 export interface SyncBatchResponseDto {
   applied: number;
   alreadyApplied: boolean;
@@ -222,4 +229,6 @@ export interface SyncBatchResponseDto {
    * the cabinet is its backstop.
    */
   conflicts: BatchConflictDto[];
+  /** Present only when the client negotiated station-recovery-v1. */
+  denied?: DeniedStationRecordDto[];
 }

@@ -26,6 +26,7 @@ import { decideApplication, type KnownProduct } from "./commerceml/apply";
 import { parseCommerceMl } from "./commerceml/parse";
 import { parseOrderStatusDocuments, resolveMappedStatus } from "./commerceml/order-status";
 import { buildOrdersDocument, planExport } from "./commerceml/order-export";
+import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import {
   assertUnderCheckauthLimit,
   checkauthWindowStart,
@@ -256,6 +257,7 @@ export class ExchangeController {
     private readonly sessions: ExchangeSessionService,
     private readonly journal: JournalService,
     private readonly pickupOrders: PickupOrdersService,
+    private readonly entitlements: EntitlementsService,
   ) {}
 
   @Get("1c_exchange")
@@ -572,6 +574,24 @@ export class ExchangeController {
         details: { raw: rawFailureBody("missing filename") },
       });
       this.fail(res, "missing filename");
+      return;
+    }
+
+    try {
+      await this.entitlements.assertWriteAccess(session.tenantId, this.db, new Date());
+    } catch {
+      const raw = rawFailureBody("subscription write unavailable");
+      await this.journal.append({
+        tenantId: session.tenantId,
+        channelType: session.channelType,
+        sessionId: session.id,
+        direction: "in",
+        outcome: "error",
+        grain: "session",
+        message: "import: subscription write denied",
+        details: { filename, raw },
+      });
+      this.fail(res, "subscription write unavailable");
       return;
     }
 

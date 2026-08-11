@@ -6,6 +6,23 @@ import { apiFetch } from "../api/client.js";
 export interface AccessDocument {
   roles: CabinetRole[];
   capabilities: CabinetCapability[];
+  subscription?: {
+    access: "managed" | "read_only" | "unmanaged";
+    status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
+    startsAt: string | null;
+    endsAt: string | null;
+    plan: { id: string; version: number; nameRu: string; nameEn: string } | null;
+    addons: Array<{
+      catalogVersionId: string;
+      quantity: number;
+      quotas: Record<string, number>;
+      features: string[];
+    }>;
+  };
+  scheduled?: AccessDocument["subscription"] | null;
+  usage?: { lines: number; stations: number; kiosks: number; cabinetUsers: number };
+  quotas?: Record<string, number | null>;
+  features?: Record<string, boolean>;
 }
 
 /** Gets effective cabinet access for one authenticated user and active organization. */

@@ -37,6 +37,12 @@ import { ProfileModule } from "./modules/profile/profile.module";
 import { TenantOwnerActivationModule } from "./modules/tenant-owner-activation/tenant-owner-activation.module";
 import { MailTransportService } from "./modules/mail/mail-transport.service";
 import { ObjectStorageService } from "./modules/storage/object-storage.service";
+import { PlatformAuthModule } from "./platform-auth/platform-auth.module";
+import { PlatformCatalogModule } from "./modules/platform-catalog/platform-catalog.module";
+import { PlatformTenantsModule } from "./modules/platform-tenants/platform-tenants.module";
+import { PlatformOffersModule } from "./modules/platform-offers/platform-offers.module";
+import type { PlatformAuth } from "@markiro/db";
+import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 
 @Module({})
 export class AppModule {
@@ -52,14 +58,27 @@ export class AppModule {
    * keeping liveness tests independent from external infrastructure.
    */
   static forRoot(
-    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & { databaseUrl: string; env?: Env },
+    setup: Pick<AuthSetup, "auth" | "db" | "pool"> & {
+      platformAuth?: PlatformAuth;
+      databaseUrl: string;
+      env?: Env;
+    },
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
     return {
       module: AppModule,
       imports: [
         AuthModule.forRoot(setup),
+        ...(setup.platformAuth
+          ? [
+              PlatformAuthModule.forRoot(setup.platformAuth, env.SAAS_ADMIN_ORIGIN),
+              PlatformCatalogModule,
+              PlatformTenantsModule.forRoot(env.ADMIN_ORIGIN),
+              PlatformOffersModule,
+            ]
+          : []),
         AuthorizationModule,
+        SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
         JobsModule.forRoot(setup.databaseUrl, env),
         OrgProfileModule,
         CounterpartiesModule,
@@ -87,7 +106,7 @@ export class AppModule {
         BoxExceptionsModule,
         StorageModule.forRoot(env),
         TeamModule.forRoot(env.ADMIN_ORIGIN),
-        InvitationsModule,
+        InvitationsModule.forRoot(setup.databaseUrl),
         ProfileModule,
         TenantOwnerActivationModule,
       ],

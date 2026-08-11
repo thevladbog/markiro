@@ -151,6 +151,36 @@
     "avatarError": "Could not update the photo. The current image was preserved.",
     "openNamed": "Open {{name}} profile"
   },
+  "subscription": {
+    "unmanaged": "No plan",
+    "unlimited": "Unlimited",
+    "status": {
+      "unmanaged": "No plan assigned",
+      "pending_activation": "Waiting for activation",
+      "trial": "Demo",
+      "active": "Active",
+      "expired": "Expired",
+      "read_only": "Read-only"
+    },
+    "quota": {
+      "lines": "Lines",
+      "stations": "Stations",
+      "kiosks": "Kiosks",
+      "cabinetUsers": "Users"
+    },
+    "banner": {
+      "pending": "The demo starts after the owner activates access.",
+      "trial": "The demo ends in {{days}} days.",
+      "expired": "The subscription has expired: writes are disabled.",
+      "overLimit": "A limit is exceeded: new writes are blocked.",
+      "link": "View limits"
+    },
+    "page": {
+      "title": "Subscription and limits",
+      "scheduled": "Next plan",
+      "addons": "Additional features"
+    }
+  },
   "nav": {
     "dashboard": "Overview",
     "catalog": "Catalog",

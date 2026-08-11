@@ -15,6 +15,11 @@ import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
+import {
+  AllowSubscriptionReadOnly,
+  RequireSubscriptionWrite,
+} from "../../subscriptions/subscription-access-policy";
+import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -38,7 +43,8 @@ import { EmployeesService } from "./employees.service";
 // station roster mirror) is meant to prevent. Cabinet authorization keeps a
 // station api-key out even though TenantGuard accepts it for tenant
 // resolution.
-@UseGuards(TenantGuard, AuthorizationGuard)
+@UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
+@AllowSubscriptionReadOnly("read")
 export class EmployeesController {
   constructor(private readonly employeesService: EmployeesService) {}
 
@@ -52,6 +58,7 @@ export class EmployeesController {
   }
 
   @Post()
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async createEmployee(
     @Req() req: RequestWithTenant,
@@ -61,6 +68,7 @@ export class EmployeesController {
   }
 
   @Patch(":id")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateEmployee(
     @Req() req: RequestWithTenant,
@@ -72,12 +80,14 @@ export class EmployeesController {
 
   @Delete(":id")
   @HttpCode(204)
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async archiveEmployee(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
     return this.employeesService.archiveEmployee(req.tenantId!, id);
   }
 
   @Post(":id/badges")
+  @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async issueBadge(
     @Req() req: RequestWithTenant,
@@ -89,6 +99,7 @@ export class EmployeesController {
 
   @Delete(":id/badges/:badgeId")
   @HttpCode(204)
+  @AllowSubscriptionReadOnly("security")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async revokeBadge(
     @Req() req: RequestWithTenant,

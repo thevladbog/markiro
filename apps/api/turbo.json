@@ -9,6 +9,9 @@
         "BETTER_AUTH_SECRET",
         "BETTER_AUTH_URL",
         "ADMIN_ORIGIN",
+        "PLATFORM_AUTH_SECRET",
+        "PLATFORM_AUTH_URL",
+        "SAAS_ADMIN_ORIGIN",
         "KIOSK_ORIGIN",
         "STATION_ORIGIN",
         "PAIRING_CODE_PEPPER"
