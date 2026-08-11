@@ -31,7 +31,8 @@
 .mk-icon-button:focus-visible,
 .mk-date-picker__trigger:focus-visible,
 .mk-date-picker__navigation:focus-visible,
-.mk-date-picker__day:focus-visible {
+.mk-date-picker__day:focus-visible,
+.mk-textarea__control:focus-visible {
   outline: 2px solid var(--focus-ring) !important;
   outline-offset: 2px !important;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-ring) 25%, transparent) !important;
@@ -159,8 +160,11 @@
   flex-direction: column;
   gap: var(--sp-5);
   width: 100%;
-  max-width: 1440px;
-  margin: 0 auto;
+  /* Admin routes share the app shell's full-width content rail. Keep the
+     breathing room as page padding, but do not create a second centered rail
+     inside the shell on wide screens. */
+  max-width: none;
+  margin: 0;
   padding: 28px var(--sp-7) var(--sp-8);
 }
 

@@ -13,6 +13,7 @@ export function SelectOrgPage() {
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const clearAuthQueryCache = useClearAuthQueryCache();
+  const { refetch: refetchSession } = authClient.useSession();
 
   const [organizations, setOrganizations] = useState<OrganizationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export function SelectOrgPage() {
       setSelectingId(null);
       return;
     }
+    await refetchSession?.();
     void navigate("/", { replace: true });
   };
 

@@ -98,9 +98,10 @@ profile, ARL profile, logging, and app target group.
 Add a separate managed Certificate Manager certificate for
 `kiosk.markiro.app`. The existing admin certificate is not replaced. Terraform
 creates the kiosk DNS validation record and waits for the certificate to become
-issued before attaching it to the existing HTTPS listener. The listener serves
-both certificate IDs using SNI. The existing virtual host accepts the exact
-admin and kiosk authorities and forwards both to the same private Caddy backend.
+issued before attaching it to the existing HTTPS listener. The listener keeps
+the admin certificate in its default handler and serves the kiosk certificate
+through a kiosk SNI handler. The existing virtual host accepts the exact admin
+and kiosk authorities and forwards both to the same private Caddy backend.
 
 Add a second application A record for `kiosk.markiro.app`, gated by the same
 `public_dns_enabled` boolean as the admin record. Certificate validation records
@@ -201,8 +202,9 @@ existing rollback and cleanup workflow handles the single atomic edge release.
 
 - Terraform formatting and validation pass with pinned provider `0.215.0`.
 - Contract tests prove one existing ALB, address, backend, VM, SWS, and ARL; two
-  exact authorities; two listener certificates; separate validation records;
-  and two application A records behind one DNS gate.
+  exact authorities; one admin default certificate plus one kiosk SNI
+  certificate handler; separate validation records; and two application A
+  records behind one DNS gate.
 - Contracts reject equal domains, an ungated kiosk A record, replacement of the
   admin certificate, an unprotected kiosk route, or a new public compute path.
 - Alert-spec contracts prove `series_min(...)` covers exactly both certificate

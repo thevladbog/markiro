@@ -474,8 +474,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     .filter((instruction) => instruction.name === "COPY")
     .map((instruction) => instruction.arguments);
   assert.deepEqual(runtimeCopies, [
-    "deploy/production/Caddyfile /etc/caddy/Caddyfile.direct",
-    "deploy/production/Caddyfile.alb /etc/caddy/Caddyfile.alb",
+    "deploy/production/Caddyfile /etc/caddy/Caddyfile",
     "deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint",
     "--from=build /workspace/apps/admin/dist /srv/admin",
     "--from=build /workspace/apps/kiosk/dist /srv/kiosk",
@@ -583,15 +582,9 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
   }
 });
 
-test("direct and ALB Caddy adapters isolate the admin and kiosk authorities", async () => {
-  const [directSource, albSource] = await Promise.all([
-    readFile("deploy/production/Caddyfile", "utf8"),
-    readFile("deploy/production/Caddyfile.alb", "utf8"),
-  ]);
+test("direct Caddy adapter isolates the admin and kiosk authorities", async () => {
+  const directSource = await readFile("deploy/production/Caddyfile", "utf8");
   const direct = assertAuthorityContract(await adaptCaddy(directSource), { alb: false });
-  const alb = assertAuthorityContract(await adaptCaddy(albSource), { alb: true });
-
-  assert.deepEqual(direct, alb);
   assert.deepEqual(direct.adminTransports, [
     {
       protocol: "http",
@@ -735,10 +728,7 @@ test("edge runtime COPY parser rejects unsupported heredoc instructions", async 
 });
 
 test("Caddy contracts reject cross-host and overbroad kiosk mutations", async () => {
-  for (const [file, alb] of [
-    ["deploy/production/Caddyfile", false],
-    ["deploy/production/Caddyfile.alb", true],
-  ]) {
+  for (const [file, alb] of [["deploy/production/Caddyfile", false]]) {
     const source = await readFile(file, "utf8");
     const swappedRoots = mutate(source, "/srv/admin", "/srv/root-swap")
       .replace("/srv/kiosk", "/srv/admin")
@@ -760,10 +750,7 @@ test("Caddy contracts reject cross-host and overbroad kiosk mutations", async ()
 });
 
 test("Caddy contracts reject an application route without an exact Host", async () => {
-  for (const [file, alb] of [
-    ["deploy/production/Caddyfile", false],
-    ["deploy/production/Caddyfile.alb", true],
-  ]) {
+  for (const [file, alb] of [["deploy/production/Caddyfile", false]]) {
     const source = await readFile(file, "utf8");
     const catchAllAddress = alb ? ":8080 {" : ":8443 {";
     const catchAll = `${source}\n${catchAllAddress}\n\timport common_headers\n\timport kiosk_routes\n}\n`;
@@ -776,10 +763,7 @@ test("Caddy contracts reject an application route without an exact Host", async 
 });
 
 test("Caddy contracts reject an unconditional kiosk reverse proxy", async () => {
-  for (const [file, alb] of [
-    ["deploy/production/Caddyfile", false],
-    ["deploy/production/Caddyfile.alb", true],
-  ]) {
+  for (const [file, alb] of [["deploy/production/Caddyfile", false]]) {
     const source = await readFile(file, "utf8");
     const forwardedProto = alb ? "\t\t\t\theader_up X-Forwarded-Proto https\n" : "";
     const unconditionalProxy = mutate(
@@ -795,7 +779,7 @@ test("Caddy contracts reject an unconditional kiosk reverse proxy", async () => 
 });
 
 test("Caddy contracts reject reserved kiosk namespace routing mutations", async () => {
-  for (const file of ["deploy/production/Caddyfile", "deploy/production/Caddyfile.alb"]) {
+  for (const file of ["deploy/production/Caddyfile"]) {
     const source = await readFile(file, "utf8");
     const reservedLine = `\t\t@kioskReserved path ${kioskReservedPatterns.join(" ")}`;
     assert.ok(source.includes(reservedLine), `${file} must contain the reserved matcher`);
@@ -840,47 +824,18 @@ test("Caddy contracts reject reserved kiosk namespace routing mutations", async 
   }
 });
 
-test("ALB mode keeps route parity but owns no certificate", async () => {
-  const direct = await readFile("deploy/production/Caddyfile", "utf8");
-  const alb = await readFile("deploy/production/Caddyfile.alb", "utf8");
-  for (const marker of [
-    "@apiAuth path /api/auth/*",
-    "handle_path /api/*",
-    "@commerceMl path /1c_exchange",
-    "@device path /station/* /kiosk/* /health /health/* /openapi.json /docs /docs/*",
-    "@assets path /assets/*",
-    "@spa method GET HEAD",
-    "@kioskApi path /api/kiosk/*",
-    "@kioskAssets path /assets/*",
-    "@kioskSpa method GET HEAD",
-  ]) {
-    assert.ok(direct.includes(marker));
-    assert.ok(alb.includes(marker));
-  }
-  assert.match(alb, /http:\/\/\{\$MARKIRO_DOMAIN\}:8080/);
-  assert.match(alb, /http:\/\/\{\$MARKIRO_KIOSK_DOMAIN\}:8080/);
-  assert.doesNotMatch(alb, /https:\/\/|ACME_EMAIL|redir https/);
-  assert.match(alb, /header_up X-Forwarded-Proto https/);
-  for (const caddy of [direct, alb]) {
-    assert.match(caddy, /X-Markiro-Release-Sha "\{\$MARKIRO_RELEASE_SHA\}"/);
-  }
-});
-
-test("edge runtime selects a fixed direct or ALB Caddyfile without dynamic evaluation", async () => {
+test("edge runtime accepts only the fixed direct Caddyfile without dynamic evaluation", async () => {
   const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
   const entrypoint = await readFile("deploy/production/edge-entrypoint.sh", "utf8");
 
-  assert.match(dockerfile, /COPY deploy\/production\/Caddyfile \/etc\/caddy\/Caddyfile\.direct/);
-  assert.match(dockerfile, /COPY deploy\/production\/Caddyfile\.alb \/etc\/caddy\/Caddyfile\.alb/);
+  assert.match(dockerfile, /COPY deploy\/production\/Caddyfile \/etc\/caddy\/Caddyfile/);
   assert.match(
     dockerfile,
     /COPY deploy\/production\/edge-entrypoint\.sh \/usr\/bin\/edge-entrypoint/,
   );
   assert.match(dockerfile, /ENTRYPOINT \["\/usr\/bin\/edge-entrypoint"\]/);
-  assert.match(entrypoint, /direct\)/);
-  assert.match(entrypoint, /behind-alb\)/);
-  assert.match(entrypoint, /config=\/etc\/caddy\/Caddyfile\.direct/);
-  assert.match(entrypoint, /config=\/etc\/caddy\/Caddyfile\.alb/);
-  assert.match(entrypoint, /exec caddy run --config "\$config" --adapter caddyfile/);
+  assert.match(entrypoint, /MARKIRO_EDGE_MODE:-direct/);
+  assert.doesNotMatch(entrypoint, /behind-alb|Caddyfile\.alb/);
+  assert.match(entrypoint, /exec caddy run --config \/etc\/caddy\/Caddyfile --adapter caddyfile/);
   assert.doesNotMatch(entrypoint, /\beval\b|\$\(|`/);
 });

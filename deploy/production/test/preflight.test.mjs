@@ -35,7 +35,7 @@ test("documents every digest selector input and output in the preflight interfac
     assert.match(source, new RegExp(`@property \\{string\\} ${output}`));
   assert.match(source, /@property \{string \| undefined\} imageTag/);
   assert.match(source, /@property \{string \| undefined\} acmeEmail/);
-  assert.match(source, /@property \{"direct" \| "behind-alb"\} edgeMode/);
+  assert.match(source, /@property \{"direct"\} edgeMode/);
 });
 
 function dependencies({
@@ -81,30 +81,8 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
   });
 });
 
-test("requires ACME email only in direct edge mode", async () => {
+test("requires ACME email for the only supported direct edge mode", async () => {
   await assertRejected({ ...release, ACME_EMAIL: undefined }, "ACME_EMAIL is invalid");
-  const result = await runPreflight(
-    { ...release, MARKIRO_EDGE_MODE: "behind-alb", ACME_EMAIL: undefined },
-    dependencies(),
-  );
-
-  assert.equal(result.edgeMode, "behind-alb");
-  assert.equal(result.acmeEmail, undefined);
-});
-
-test("behind-alb preflight requires only the edge mode, domain, env file, and image digests", async () => {
-  const result = await runPreflight(
-    {
-      ...release,
-      MARKIRO_EDGE_MODE: "behind-alb",
-      MARKIRO_IMAGE_TAG: undefined,
-      ACME_EMAIL: undefined,
-    },
-    dependencies(),
-  );
-
-  assert.equal(result.imageTag, undefined);
-  assert.equal(result.acmeEmail, undefined);
 });
 
 test("rejects an unknown edge mode without disclosing it", async () => {
@@ -114,34 +92,11 @@ test("rejects an unknown edge mode without disclosing it", async () => {
   );
 });
 
-test("uses the Yandex overlay only for the behind-alb edge mode", async () => {
-  const child = fakeChild();
-  let args;
-  const validation = composeQuiet(
-    { ...release, MARKIRO_EDGE_MODE: "behind-alb", MARKIRO_ENV_FILE: "/private/production.env" },
-    {
-      spawn: (_command, commandArgs) => {
-        args = commandArgs;
-        return child;
-      },
-    },
+test("rejects the retired behind-alb mode", async () => {
+  await assertRejected(
+    { ...release, MARKIRO_EDGE_MODE: "behind-alb" },
+    "MARKIRO_EDGE_MODE is invalid",
   );
-  child.emit("close", 0);
-  await validation;
-
-  assert.deepEqual(args, [
-    "compose",
-    "--project-name",
-    "markiro-production",
-    "--env-file",
-    "/private/production.env",
-    "-f",
-    "compose.production.yml",
-    "-f",
-    "deploy/production/compose.yandex.yml",
-    "config",
-    "--quiet",
-  ]);
 });
 
 test("passes optional host port overrides unchanged to Compose validation", async () => {
@@ -266,7 +221,7 @@ test("accepts only the explicit local direct-mode domain pair", async () => {
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
       MARKIRO_EDGE_MODE: "behind-alb",
     },
-    "MARKIRO_DOMAIN is invalid",
+    "MARKIRO_EDGE_MODE is invalid",
   );
 });
 

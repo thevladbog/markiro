@@ -124,36 +124,11 @@ resource "yandex_storage_bucket_policy" "media_app" {
   })
 }
 
-# The audit identity can write archive objects only; it cannot list, read, or
-# delete them, nor configure the bucket.
-resource "yandex_storage_bucket_policy" "audit_writer" {
-  bucket = yandex_storage_bucket.audit.bucket
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Sid       = "AllowAuditArchiveWrites"
-        Effect    = "Allow"
-        Principal = { CanonicalUser = var.audit_service_account_id }
-        Action    = ["s3:PutObject"]
-        Resource  = ["arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*"]
-      },
-      {
-        Sid       = "AllowTerraformAuditManagement"
-        Effect    = "Allow"
-        Principal = { CanonicalUser = var.terraform_service_account_id }
-        Action    = ["s3:*"]
-        Resource = [
-          "arn:aws:s3:::${yandex_storage_bucket.audit.bucket}",
-          "arn:aws:s3:::${yandex_storage_bucket.audit.bucket}/*",
-        ]
-      },
-    ]
-  })
-}
-
-resource "yandex_storage_bucket_iam_binding" "audit_uploader" {
-  bucket  = yandex_storage_bucket.audit.bucket
+# Object Storage checks IAM before evaluating a bucket policy. Grant the
+# runtime identity the read/upload baseline required to reach the policy, while
+# keeping the policy as the action-level boundary for media objects.
+resource "yandex_storage_bucket_iam_binding" "app_uploader" {
+  bucket  = yandex_storage_bucket.media.bucket
   role    = "storage.uploader"
-  members = ["serviceAccount:${var.audit_service_account_id}"]
+  members = ["serviceAccount:${var.app_service_account_id}"]
 }

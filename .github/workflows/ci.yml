@@ -147,6 +147,8 @@ jobs:
         run: |
           pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
           pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
+      - name: Verify Yandex runtime contracts
+        run: pnpm test:yandex-runtime
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Generate masked test-only environment

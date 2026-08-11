@@ -64,28 +64,6 @@ variable "github_repository_id" {
   }
 }
 
-variable "github_controller_environment" {
-  description = "Exact protected GitHub environment permitted to control the deployment runner."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = var.github_controller_environment == "production-controller"
-    error_message = "github_controller_environment must be exactly production-controller."
-  }
-}
-
-variable "github_cleanup_environment" {
-  description = "Exact protected GitHub environment permitted to clean up the deployment runner."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = var.github_cleanup_environment == "production-cleanup"
-    error_message = "github_cleanup_environment must be exactly production-cleanup."
-  }
-}
-
 variable "github_infrastructure_environment" {
   description = "Exact protected GitHub environment permitted to exchange infrastructure automation tokens."
   type        = string

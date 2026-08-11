@@ -105,11 +105,6 @@ async function probeEdgeTls({ url, headers, timeoutMs }) {
 }
 
 function edgeReadinessProbe(environment) {
-  if (environment.MARKIRO_EDGE_MODE === "behind-alb")
-    return {
-      url: "http://127.0.0.1:8080/health/live",
-      headers: { host: environment.MARKIRO_DOMAIN },
-    };
   return {
     url: new URL("/health/live", productionBaseUrls(environment).admin).href,
     headers: undefined,

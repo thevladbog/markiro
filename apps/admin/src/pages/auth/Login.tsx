@@ -22,6 +22,7 @@ export function LoginPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
+  const { refetch: refetchSession } = authClient.useSession();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [passwordVisible, setPasswordVisible] = useState(false);
 
@@ -38,6 +39,7 @@ export function LoginPage() {
       setSubmitError(error.message ?? t("auth.login.genericError"));
       return;
     }
+    await refetchSession?.();
     void navigate("/", { replace: true });
   });
 

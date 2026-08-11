@@ -1,17 +1,17 @@
 variable "folder_id" {
-  description = "Yandex Cloud folder containing production identities and protected resources."
+  description = "Yandex Cloud folder containing production identities and resources."
   type        = string
   nullable    = false
 }
 
 variable "organization_id" {
-  description = "Yandex Cloud organization that owns the production identity boundary."
+  description = "Yandex Cloud organization owning the infrastructure federation."
   type        = string
   nullable    = false
 }
 
 variable "github_repository" {
-  description = "Exact GitHub owner/repository allowed by the workload credential."
+  description = "Exact GitHub owner/repository allowed by workload identity."
   type        = string
   nullable    = false
 
@@ -22,7 +22,7 @@ variable "github_repository" {
 }
 
 variable "github_repository_owner_id" {
-  description = "Immutable GitHub repository owner ID allowed by the workload credential."
+  description = "Immutable GitHub repository owner ID."
   type        = string
   nullable    = false
 
@@ -33,7 +33,7 @@ variable "github_repository_owner_id" {
 }
 
 variable "github_repository_id" {
-  description = "Immutable GitHub repository ID allowed by the workload credential."
+  description = "Immutable GitHub repository ID."
   type        = string
   nullable    = false
 
@@ -43,30 +43,8 @@ variable "github_repository_id" {
   }
 }
 
-variable "github_controller_environment" {
-  description = "Exact protected GitHub environment allowed to control the deployment runner."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = var.github_controller_environment == "production-controller"
-    error_message = "github_controller_environment must be exactly production-controller."
-  }
-}
-
-variable "github_cleanup_environment" {
-  description = "Exact protected GitHub environment allowed to clean up the deployment runner."
-  type        = string
-  nullable    = false
-
-  validation {
-    condition     = var.github_cleanup_environment == "production-cleanup"
-    error_message = "github_cleanup_environment must be exactly production-cleanup."
-  }
-}
-
 variable "github_infrastructure_environment" {
-  description = "Exact protected GitHub environment allowed to manage Terraform infrastructure."
+  description = "Protected GitHub environment allowed to manage Terraform."
   type        = string
   nullable    = false
 
@@ -83,31 +61,19 @@ variable "state_bucket_name" {
 }
 
 variable "runtime_secret_id" {
-  description = "Lockbox runtime container readable only by the app service account."
-  type        = string
-  nullable    = false
-}
-
-variable "registry_secret_id" {
-  description = "Lockbox registry container readable only by the runner service account."
+  description = "Runtime Lockbox container readable only by the app service account."
   type        = string
   nullable    = false
 }
 
 variable "state_backend_secret_id" {
-  description = "Lockbox state-backend container readable only by Terraform automation."
-  type        = string
-  nullable    = false
-}
-
-variable "runner_registration_secret_id" {
-  description = "Lockbox runner-registration container readable only by the deployment controller."
+  description = "State-backend Lockbox container readable only by Terraform automation."
   type        = string
   nullable    = false
 }
 
 variable "labels" {
-  description = "Common non-secret labels for production identity resources."
+  description = "Common non-secret labels for production identities."
   type        = map(string)
   nullable    = false
 }

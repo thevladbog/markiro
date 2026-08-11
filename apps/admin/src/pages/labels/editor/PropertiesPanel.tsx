@@ -16,20 +16,8 @@
 import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 
-import type { LabelElement, LabelField } from "@markiro/domain";
+import { LABEL_FIELDS, type LabelElement } from "@markiro/domain";
 import { Button, Checkbox, Input, Select } from "@markiro/ui";
-
-const LABEL_FIELDS: LabelField[] = [
-  "product.name",
-  "product.gtin",
-  "km.code",
-  "sscc",
-  "shift.no",
-  "date",
-  "qty",
-  "operator",
-  "counterparty.name",
-];
 
 const ALIGN_OPTIONS: Array<{ value: "left" | "center" | "right"; labelKey: string }> = [
   { value: "left", labelKey: "alignLeft" },
@@ -41,25 +29,33 @@ export interface PropertiesPanelProps {
   element: LabelElement | null;
   onChange: (id: string, patch: Partial<LabelElement>) => void;
   onDelete: (id: string) => void;
+  onCollapse?: () => void;
+  geometryError?: "ELEMENT_TOO_LARGE" | null;
 }
-
-const ROW_STYLE = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 };
-const SECTION_STYLE = { display: "flex", flexDirection: "column" as const, gap: 12 };
 
 function numberFromInput(event: ChangeEvent<HTMLInputElement>): number {
   const value = Number(event.target.value);
   return Number.isFinite(value) ? value : 0;
 }
 
-export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanelProps) {
+export function PropertiesPanel({
+  element,
+  onChange,
+  onDelete,
+  onCollapse,
+  geometryError,
+}: PropertiesPanelProps) {
   const { t } = useTranslation();
 
   if (!element) {
     return (
-      <div style={{ padding: 16 }}>
-        <span style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
-          {t("pages.labels.editor.properties.none")}
-        </span>
+      <div className="label-editor__properties-empty">
+        {t("pages.labels.editor.properties.none")}
+        {geometryError && (
+          <div className="label-editor__geometry-error" role="alert">
+            {t("pages.labels.editor.properties.geometryError")}
+          </div>
+        )}
       </div>
     );
   }
@@ -68,193 +64,208 @@ export function PropertiesPanel({ element, onChange, onDelete }: PropertiesPanel
   const patch = (fields: Partial<LabelElement>) => onChange(element.id, fields);
 
   return (
-    <div style={{ ...SECTION_STYLE, padding: 16 }}>
-      <span
-        style={{
-          font: "500 11px/1 var(--font-ui)",
-          color: "var(--fg-3)",
-          textTransform: "uppercase",
-          letterSpacing: "0.05em",
-        }}
-      >
-        {t("pages.labels.editor.properties.selected", { kind: kindLabel })}
-      </span>
+    <section
+      className="label-editor__properties-panel"
+      aria-labelledby="label-editor-properties-title"
+    >
+      <header className="label-editor__properties-header">
+        <span id="label-editor-properties-title" className="label-editor__eyebrow">
+          {t("pages.labels.editor.properties.selected", { kind: kindLabel })}
+        </span>
+        {onCollapse && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="compact"
+            className="label-editor__collapse-button"
+            onClick={onCollapse}
+          >
+            {t("pages.labels.editor.properties.collapse")}
+          </Button>
+        )}
+      </header>
+      <div className="label-editor__properties-content">
+        <div className="label-editor__property-row">
+          <Input
+            label={t("pages.labels.editor.properties.x")}
+            type="number"
+            mono
+            value={element.xMm}
+            onChange={(event) => patch({ xMm: numberFromInput(event) })}
+          />
+          <Input
+            label={t("pages.labels.editor.properties.y")}
+            type="number"
+            mono
+            value={element.yMm}
+            onChange={(event) => patch({ yMm: numberFromInput(event) })}
+          />
+        </div>
 
-      <div style={ROW_STYLE}>
-        <Input
-          label={t("pages.labels.editor.properties.x")}
-          type="number"
-          mono
-          value={element.xMm}
-          onChange={(event) => patch({ xMm: numberFromInput(event) })}
-        />
-        <Input
-          label={t("pages.labels.editor.properties.y")}
-          type="number"
-          mono
-          value={element.yMm}
-          onChange={(event) => patch({ yMm: numberFromInput(event) })}
-        />
-      </div>
-
-      {(element.kind === "text" || element.kind === "field") && (
-        <div style={SECTION_STYLE}>
-          {element.kind === "text" && (
-            <Input
-              label={t("pages.labels.editor.properties.text")}
-              value={element.text}
-              onChange={(event) => patch({ text: event.target.value })}
+        {(element.kind === "text" || element.kind === "field") && (
+          <div className="label-editor__property-section">
+            {element.kind === "text" && (
+              <Input
+                label={t("pages.labels.editor.properties.text")}
+                value={element.text}
+                onChange={(event) => patch({ text: event.target.value })}
+              />
+            )}
+            {element.kind === "field" && (
+              <Select
+                label={t("pages.labels.editor.properties.field")}
+                options={LABEL_FIELDS.map((field) => ({
+                  value: field,
+                  label: t(`pages.labels.editor.fields.${field}`),
+                }))}
+                value={element.field}
+                onValueChange={(value) => patch({ field: value })}
+              />
+            )}
+            <div className="label-editor__property-row">
+              <Input
+                label={t("pages.labels.editor.properties.fontSize")}
+                type="number"
+                mono
+                value={element.fontSizePt}
+                onChange={(event) => patch({ fontSizePt: numberFromInput(event) })}
+              />
+              <Select
+                label={t("pages.labels.editor.properties.align")}
+                options={ALIGN_OPTIONS.map((option) => ({
+                  value: option.value,
+                  label: t(`pages.labels.editor.properties.${option.labelKey}`),
+                }))}
+                value={element.align ?? "left"}
+                onValueChange={(value) => patch({ align: value })}
+              />
+            </div>
+            <Checkbox
+              label={t("pages.labels.editor.properties.bold")}
+              checked={element.bold ?? false}
+              onCheckedChange={(bold) => patch({ bold })}
             />
-          )}
-          {element.kind === "field" && (
-            <Select
-              label={t("pages.labels.editor.properties.field")}
-              options={LABEL_FIELDS.map((field) => ({
-                value: field,
-                label: t(`pages.labels.editor.fields.${field}`),
-              }))}
-              value={element.field}
-              onValueChange={(value) => patch({ field: value })}
-            />
-          )}
-          <div style={ROW_STYLE}>
             <Input
-              label={t("pages.labels.editor.properties.fontSize")}
+              label={t("pages.labels.editor.properties.maxWidth")}
               type="number"
               mono
-              value={element.fontSizePt}
-              onChange={(event) => patch({ fontSizePt: numberFromInput(event) })}
-            />
-            <Select
-              label={t("pages.labels.editor.properties.align")}
-              options={ALIGN_OPTIONS.map((option) => ({
-                value: option.value,
-                label: t(`pages.labels.editor.properties.${option.labelKey}`),
-              }))}
-              value={element.align ?? "left"}
-              onValueChange={(value) => patch({ align: value })}
+              value={element.maxWidthMm ?? 0}
+              onChange={(event) => {
+                const value = numberFromInput(event);
+                patch({ maxWidthMm: value > 0 ? value : undefined });
+              }}
             />
           </div>
-          <Checkbox
-            label={t("pages.labels.editor.properties.bold")}
-            checked={element.bold ?? false}
-            onCheckedChange={(bold) => patch({ bold })}
-          />
-          <Input
-            label={t("pages.labels.editor.properties.maxWidth")}
-            type="number"
-            mono
-            value={element.maxWidthMm ?? 0}
-            onChange={(event) => {
-              const value = numberFromInput(event);
-              patch({ maxWidthMm: value > 0 ? value : undefined });
-            }}
-          />
-        </div>
-      )}
+        )}
 
-      {element.kind === "barcode" && (
-        <div style={SECTION_STYLE}>
-          <Input
-            label={t("pages.labels.editor.properties.size")}
-            type="number"
-            mono
-            value={element.sizeMm}
-            onChange={(event) => patch({ sizeMm: numberFromInput(event) })}
-          />
-          <Select
-            label={t("pages.labels.editor.properties.source")}
-            options={[
-              { value: "field", label: t("pages.labels.editor.properties.sourceField") },
-              { value: "literal", label: t("pages.labels.editor.properties.sourceLiteral") },
-            ]}
-            value={typeof element.data === "string" ? "field" : "literal"}
-            onValueChange={(value) =>
-              patch({
-                data: value === "field" ? "product.gtin" : { literal: "" },
-              })
-            }
-          />
-          {typeof element.data === "string" ? (
-            <Select
-              label={t("pages.labels.editor.properties.field")}
-              options={LABEL_FIELDS.map((field) => ({
-                value: field,
-                label: t(`pages.labels.editor.fields.${field}`),
-              }))}
-              value={element.data}
-              onValueChange={(value) => patch({ data: value })}
-            />
-          ) : (
+        {element.kind === "barcode" && (
+          <div className="label-editor__property-section">
             <Input
-              label={t("pages.labels.editor.properties.literal")}
-              value={element.data.literal}
-              onChange={(event) => patch({ data: { literal: event.target.value } })}
+              label={t("pages.labels.editor.properties.size")}
+              type="number"
+              mono
+              value={element.sizeMm}
+              onChange={(event) => patch({ sizeMm: numberFromInput(event) })}
             />
-          )}
-        </div>
-      )}
+            <Select
+              label={t("pages.labels.editor.properties.source")}
+              options={[
+                { value: "field", label: t("pages.labels.editor.properties.sourceField") },
+                { value: "literal", label: t("pages.labels.editor.properties.sourceLiteral") },
+              ]}
+              value={typeof element.data === "string" ? "field" : "literal"}
+              onValueChange={(value) =>
+                patch({
+                  data: value === "field" ? "product.gtin" : { literal: "" },
+                })
+              }
+            />
+            {typeof element.data === "string" ? (
+              <Select
+                label={t("pages.labels.editor.properties.field")}
+                options={LABEL_FIELDS.map((field) => ({
+                  value: field,
+                  label: t(`pages.labels.editor.fields.${field}`),
+                }))}
+                value={element.data}
+                onValueChange={(value) => patch({ data: value })}
+              />
+            ) : (
+              <Input
+                label={t("pages.labels.editor.properties.literal")}
+                value={element.data.literal}
+                onChange={(event) => patch({ data: { literal: event.target.value } })}
+              />
+            )}
+          </div>
+        )}
 
-      {element.kind === "line" && (
-        <div style={ROW_STYLE}>
-          <Input
-            label={t("pages.labels.editor.properties.x2")}
-            type="number"
-            mono
-            value={element.x2Mm}
-            onChange={(event) => patch({ x2Mm: numberFromInput(event) })}
-          />
-          <Input
-            label={t("pages.labels.editor.properties.y2")}
-            type="number"
-            mono
-            value={element.y2Mm}
-            onChange={(event) => patch({ y2Mm: numberFromInput(event) })}
-          />
-          <Input
-            label={t("pages.labels.editor.properties.thickness")}
-            type="number"
-            mono
-            value={element.thicknessMm}
-            onChange={(event) => patch({ thicknessMm: numberFromInput(event) })}
-          />
-        </div>
-      )}
+        {element.kind === "line" && (
+          <div className="label-editor__property-row">
+            <Input
+              label={t("pages.labels.editor.properties.x2")}
+              type="number"
+              mono
+              value={element.x2Mm}
+              onChange={(event) => patch({ x2Mm: numberFromInput(event) })}
+            />
+            <Input
+              label={t("pages.labels.editor.properties.y2")}
+              type="number"
+              mono
+              value={element.y2Mm}
+              onChange={(event) => patch({ y2Mm: numberFromInput(event) })}
+            />
+            <Input
+              label={t("pages.labels.editor.properties.thickness")}
+              type="number"
+              mono
+              value={element.thicknessMm}
+              onChange={(event) => patch({ thicknessMm: numberFromInput(event) })}
+            />
+          </div>
+        )}
 
-      {element.kind === "box" && (
-        <div style={ROW_STYLE}>
-          <Input
-            label={t("pages.labels.editor.properties.width")}
-            type="number"
-            mono
-            value={element.widthMm}
-            onChange={(event) => patch({ widthMm: numberFromInput(event) })}
-          />
-          <Input
-            label={t("pages.labels.editor.properties.height")}
-            type="number"
-            mono
-            value={element.heightMm}
-            onChange={(event) => patch({ heightMm: numberFromInput(event) })}
-          />
-          <Input
-            label={t("pages.labels.editor.properties.thickness")}
-            type="number"
-            mono
-            value={element.thicknessMm}
-            onChange={(event) => patch({ thicknessMm: numberFromInput(event) })}
-          />
-        </div>
-      )}
+        {element.kind === "box" && (
+          <div className="label-editor__property-row">
+            <Input
+              label={t("pages.labels.editor.properties.width")}
+              type="number"
+              mono
+              value={element.widthMm}
+              onChange={(event) => patch({ widthMm: numberFromInput(event) })}
+            />
+            <Input
+              label={t("pages.labels.editor.properties.height")}
+              type="number"
+              mono
+              value={element.heightMm}
+              onChange={(event) => patch({ heightMm: numberFromInput(event) })}
+            />
+            <Input
+              label={t("pages.labels.editor.properties.thickness")}
+              type="number"
+              mono
+              value={element.thicknessMm}
+              onChange={(event) => patch({ thicknessMm: numberFromInput(event) })}
+            />
+          </div>
+        )}
 
-      <Button
-        type="button"
-        variant="destructive"
-        size="compact"
-        onClick={() => onDelete(element.id)}
-      >
-        {t("pages.labels.editor.properties.delete")}
-      </Button>
-    </div>
+        <Button
+          type="button"
+          variant="destructive"
+          size="compact"
+          onClick={() => onDelete(element.id)}
+        >
+          {t("pages.labels.editor.properties.delete")}
+        </Button>
+        {geometryError && (
+          <div className="label-editor__geometry-error" role="alert">
+            {t("pages.labels.editor.properties.geometryError")}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

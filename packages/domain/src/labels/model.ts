@@ -2,7 +2,7 @@ import { z } from "zod";
 import { DomainError } from "../errors.js";
 
 /** Data sources a text/field element on a label can be bound to. */
-const LABEL_FIELDS = [
+export const LABEL_FIELDS = [
   "product.name",
   "product.gtin",
   "km.code",

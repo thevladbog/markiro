@@ -4,7 +4,6 @@ output "media_bucket_name" {
 }
 
 output "audit_bucket_name" {
-  description = "Private versioned bucket used for audit archives."
+  description = "Temporarily retained audit archive pending explicit cleanup."
   value       = yandex_storage_bucket.audit.bucket
-  depends_on  = [yandex_storage_bucket_iam_binding.audit_uploader]
 }

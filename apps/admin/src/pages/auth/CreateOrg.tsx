@@ -38,6 +38,7 @@ export function CreateOrgPage() {
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const clearAuthQueryCache = useClearAuthQueryCache();
+  const { refetch: refetchSession } = authClient.useSession();
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [slugTouched, setSlugTouched] = useState(false);
 
@@ -71,6 +72,7 @@ export function CreateOrgPage() {
       return;
     }
     await authClient.organization.setActive({ organizationId: data.id });
+    await refetchSession?.();
     void navigate("/", { replace: true });
   });
 

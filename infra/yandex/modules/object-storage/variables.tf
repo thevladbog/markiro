@@ -49,14 +49,8 @@ variable "app_service_account_id" {
   nullable    = false
 }
 
-variable "audit_service_account_id" {
-  description = "Audit writer identity limited to archive uploads."
-  type        = string
-  nullable    = false
-}
-
 variable "terraform_service_account_id" {
-  description = "Terraform identity allowed to manage the two protected bucket configurations."
+  description = "Terraform identity allowed to manage protected bucket configurations."
   type        = string
   nullable    = false
 }
