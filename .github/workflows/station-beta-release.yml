@@ -1,0 +1,199 @@
+name: Publish station beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Publish a new beta or retry the unpromoted latest beta
+        required: true
+        type: choice
+        default: publish
+        options: [publish, promote-existing]
+      bump:
+        description: Beta version increment
+        required: true
+        type: choice
+        default: next-beta
+        options: [next-beta, next-patch-beta, next-minor-beta]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: station-beta-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    timeout-minutes: 60
+    environment: station-beta
+    permissions:
+      actions: read
+      contents: write
+    env:
+      VITE_STATION_API_URL: https://admin.markiro.app
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+    steps:
+      - name: Checkout the dispatch SHA
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Verify main provenance and successful CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          ci_sha="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --status completed --limit 20 --json conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | select(.conclusion == "success") | .headSha' | head -n 1)"
+          test "$ci_sha" = "$GITHUB_SHA"
+
+      - name: Prepare deterministic beta version
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version_output="$RUNNER_TEMP/station-version-output"
+          node tools/station-release/version.mjs prepare "${{ inputs.bump }}" "$version_output"
+          changed="$(git diff --name-only)"
+          test "$changed" = $'apps/station/src-tauri/Cargo.toml\napps/station/src-tauri/tauri.conf.json'
+          version="$(sed -n 's/^version=//p' "$version_output")"
+          tag="$(sed -n 's/^tag=//p' "$version_output")"
+          test "$tag" = "station-v$version"
+          git config user.name "markiro-release-bot"
+          git config user.email "release-bot@markiro.local"
+          git add apps/station/src-tauri/Cargo.toml apps/station/src-tauri/tauri.conf.json
+          git commit -m "chore(station): prepare $version"
+          release_sha="$(git rev-parse HEAD)"
+          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
+
+      - name: Resolve existing beta for promotion retry
+        if: inputs.mode == 'promote-existing'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${{ inputs.bump }}" = "next-beta" -o "${{ inputs.bump }}" = "next-patch-beta" -o "${{ inputs.bump }}" = "next-minor-beta"
+          tag="$(gh release list --repo "$GITHUB_REPOSITORY" --prerelease --limit 100 --json tagName,isDraft --jq '[.[] | select(.isDraft == false) | select(.tagName | startswith("station-v")) | .tagName] | sort | last')"
+          test -n "$tag"
+          version="${tag#station-v}"
+          release_sha="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json targetCommitish --jq .targetCommitish)"
+          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\ntag=%s\nrelease_sha=%s\n' "$version" "$tag" "$release_sha" >> "$GITHUB_ENV"
+
+      - name: Install locked workspace dependencies
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Build and verify station
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/ui build
+          pnpm --filter @markiro/db build
+          pnpm --filter @markiro/station test
+          pnpm --filter @markiro/station typecheck
+          pnpm --filter @markiro/station lint
+          pnpm --filter @markiro/station build
+          pnpm test:station-release:contract
+          git diff --check
+
+      - name: Build signed Windows NSIS updater artifacts
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm --filter @markiro/station tauri build
+          bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
+          installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
+          bundle="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.nsis.zip' -print -quit)"
+          signature="$bundle.sig"
+          test -f "$installer" -a -f "$bundle" -a -f "$signature"
+          mkdir -p "$RUNNER_TEMP/station-input"
+          cp "$installer" "$RUNNER_TEMP/station-input/markiro-station-${version}-windows-x86_64-setup.exe"
+          cp "$bundle" "$RUNNER_TEMP/station-input/markiro-station-${version}-windows-x86_64.nsis.zip"
+          cp "$signature" "$RUNNER_TEMP/station-input/markiro-station-${version}-windows-x86_64.nsis.zip.sig"
+
+      - name: Stage canonical release assets
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/station-staged"
+          node tools/station-release/artifacts.mjs stage \
+            "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$version" \
+            "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" "$GITHUB_SHA" "$release_sha"
+          node tools/station-release/artifacts.mjs validate "$RUNNER_TEMP/station-staged" "$version"
+
+      - name: Publish immutable version release
+        id: immutable-release
+        if: inputs.mode == 'publish'
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
+          git push origin "HEAD:refs/heads/$candidate_ref"
+          printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_ENV"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease --target "$release_sha" --title "Markiro Station $version" --notes-file "$RUNNER_TEMP/station-staged/release-notes.md"
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-staged"/*
+          rm -rf "$RUNNER_TEMP/station-downloaded"
+          mkdir "$RUNNER_TEMP/station-downloaded"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/station-downloaded"
+          node tools/station-release/artifacts.mjs validate "$RUNNER_TEMP/station-downloaded" "$version"
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          echo "candidate_ref=$candidate_ref" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare existing beta assets for promotion
+        if: inputs.mode == 'promote-existing'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/station-staged"
+          mkdir "$RUNNER_TEMP/station-staged"
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/station-staged"
+          node tools/station-release/artifacts.mjs validate "$RUNNER_TEMP/station-staged" "$version"
+
+      - name: Promote beta channel
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view station-beta-channel --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create station-beta-channel --repo "$GITHUB_REPOSITORY" --title "Markiro Station beta channel" --notes "Mutable beta channel pointer; immutable releases remain versioned."
+          else
+            rm -rf "$RUNNER_TEMP/station-channel-backup"
+            mkdir "$RUNNER_TEMP/station-channel-backup"
+            gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-backup"
+          fi
+          cp "$RUNNER_TEMP/station-staged/latest.json" "$RUNNER_TEMP/station-channel-latest.json"
+          if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-latest.json#latest.json" --clobber; then
+            if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
+              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json#latest.json" --clobber
+            fi
+            exit 1
+          fi
+          mkdir "$RUNNER_TEMP/station-channel-verify"
+          if ! gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-verify" || ! cmp "$RUNNER_TEMP/station-channel-verify/latest.json" "$RUNNER_TEMP/station-staged/latest.json"; then
+            if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
+              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json#latest.json" --clobber
+            fi
+            exit 1
+          fi
+
+      - name: Cleanup owned candidate ref and temporary release material
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
+          gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
+          rm -rf "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$RUNNER_TEMP/station-downloaded" "$RUNNER_TEMP/station-channel-backup" "$RUNNER_TEMP/station-channel-verify" "$RUNNER_TEMP/station-channel-latest.json"

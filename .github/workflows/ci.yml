@@ -278,6 +278,8 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: pnpm install --frozen-lockfile
+      - name: Verify station release contracts
+        run: pnpm test:station-release:contract
       # vite can't resolve `@markiro/ui`/`@markiro/db`/`@markiro/domain`
       # without their `dist/` present, and `tauri build` needs the webview
       # built for the same reason as the `station-rust` job above.

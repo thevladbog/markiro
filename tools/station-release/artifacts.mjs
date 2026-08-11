@@ -279,6 +279,20 @@ export async function checksumsForDirectory(directory, version) {
 
 async function main() {
   const [, , command, ...args] = process.argv;
+  if (command === "stage") {
+    const [inputDirectory, outputDirectory, version, pubDate, baseSha, releaseSha] = args;
+    if (!inputDirectory || !outputDirectory || !version || !pubDate || !baseSha || !releaseSha)
+      invalid();
+    await stageStationRelease({
+      inputDirectory,
+      outputDirectory,
+      version,
+      pubDate,
+      baseSha,
+      releaseSha,
+    });
+    return;
+  }
   if (command === "checksums") {
     const [directory, version] = args;
     if (!directory || !version) invalid();
