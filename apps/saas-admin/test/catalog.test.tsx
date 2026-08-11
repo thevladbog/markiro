@@ -43,6 +43,16 @@ describe("commercial catalog", () => {
     expect(api.items()).toHaveLength(1);
   });
 
+  it("opens a catalog version when clicking any cell in its row", async () => {
+    installCatalogApi({ items: [PUBLISHED_PLAN] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("cell", { name: "1" }));
+
+    expect(await screen.findByRole("region", { name: "Версия 1 · Базовый" })).toBeDefined();
+  });
+
   it("archives a retired catalog position from its open row", async () => {
     const retired = { ...structuredClone(SERVICE), status: "retired" as const };
     installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [retired] });

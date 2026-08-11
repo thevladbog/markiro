@@ -151,7 +151,12 @@ export function CatalogPage() {
             </button>
           ))}
         </div>
-        <Table columns={columns} rows={visibleItems} empty={t("catalog.empty")} />
+        <Table
+          columns={columns}
+          rows={visibleItems}
+          empty={t("catalog.empty")}
+          onRowClick={(item) => setSelectedId(item.id)}
+        />
       </Card>
       {selected ? (
         <CatalogVersionPanel
