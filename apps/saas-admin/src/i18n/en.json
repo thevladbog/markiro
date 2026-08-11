@@ -182,6 +182,12 @@
     "closePanel": "Close version panel",
     "close": "Close",
     "empty": "No versions of this type yet",
+    "pagination": {
+      "label": "Catalog pages",
+      "previous": "Previous",
+      "next": "Next",
+      "page": "Page {{page}} of {{pageCount}}"
+    },
     "money": "RUB {{value}}",
     "effectsLabel": "Version effect",
     "lines": "{{count}} lines",

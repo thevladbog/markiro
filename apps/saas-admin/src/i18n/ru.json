@@ -182,6 +182,12 @@
     "closePanel": "Закрыть панель версии",
     "close": "Закрыть",
     "empty": "Версий этого типа пока нет",
+    "pagination": {
+      "label": "Страницы каталога",
+      "previous": "Предыдущая",
+      "next": "Следующая",
+      "page": "Страница {{page}} из {{pageCount}}"
+    },
     "money": "{{value}} ₽",
     "effectsLabel": "Эффект версии",
     "lines": "{{count}} линии",

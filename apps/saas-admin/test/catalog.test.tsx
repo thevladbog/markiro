@@ -30,6 +30,30 @@ describe("commercial catalog", () => {
     expect(screen.getByRole("tab", { name: "Услуги" })).toBeDefined();
   });
 
+  it("paginates large catalog groups instead of rendering every row", async () => {
+    const plans = Array.from({ length: 55 }, (_, index) => ({
+      ...structuredClone(PUBLISHED_PLAN),
+      id: `plan-version-${index + 1}`,
+      catalogItemId: `plan-item-${index + 1}`,
+      catalogItemCode: `plan-${index + 1}`,
+      nameRu: `Тариф ${index + 1}`,
+      nameEn: `Plan ${index + 1}`,
+    }));
+    installCatalogApi({ items: plans });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    expect(await screen.findByText("Страница 1 из 2")).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /Открыть Тариф/ })).toHaveLength(50);
+    expect(screen.queryByRole("button", { name: "Открыть Тариф 51, версия 1" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Следующая" }));
+
+    expect(await screen.findByText("Страница 2 из 2")).toBeDefined();
+    expect(screen.getAllByRole("button", { name: /Открыть Тариф/ })).toHaveLength(5);
+    expect(screen.getByRole("button", { name: "Открыть Тариф 51, версия 1" })).toBeDefined();
+  });
+
   it("opens a create form and creates a new catalog item", async () => {
     const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
     renderSaasApp();

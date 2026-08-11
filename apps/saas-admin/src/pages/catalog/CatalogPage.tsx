@@ -6,6 +6,7 @@ import {
   Alert,
   Button,
   Card,
+  Pager,
   PageHeader,
   Spinner,
   StatusChip,
@@ -20,6 +21,8 @@ import { CatalogCreatePanel } from "./CatalogCreatePanel.js";
 
 type CatalogKind = CatalogVersionDto["kind"];
 
+const CATALOG_PAGE_SIZE = 50;
+
 const STATUS_TONE = {
   draft: "warn",
   published: "ok",
@@ -30,6 +33,7 @@ export function CatalogPage() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const [activeKind, setActiveKind] = useState<CatalogKind>("plan");
+  const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const catalog = useQuery({
@@ -44,6 +48,12 @@ export function CatalogPage() {
   const visibleItems = useMemo(
     () => items.filter((item) => item.kind === activeKind),
     [activeKind, items],
+  );
+  const pageCount = Math.max(1, Math.ceil(visibleItems.length / CATALOG_PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const pagedItems = visibleItems.slice(
+    (currentPage - 1) * CATALOG_PAGE_SIZE,
+    currentPage * CATALOG_PAGE_SIZE,
   );
   const selected = items.find((item) => item.id === selectedId) ?? null;
   const isSupport = principal.role === "support";
@@ -142,6 +152,7 @@ export function CatalogPage() {
               aria-selected={activeKind === tab.kind}
               onClick={() => {
                 setActiveKind(tab.kind);
+                setPage(1);
                 setCreating(false);
                 setSelectedId(null);
               }}
@@ -154,13 +165,27 @@ export function CatalogPage() {
         </div>
         <Table
           columns={columns}
-          rows={visibleItems}
+          rows={pagedItems}
           empty={t("catalog.empty")}
           onRowClick={(item) => {
             setCreating(false);
             setSelectedId(item.id);
           }}
         />
+        {visibleItems.length > CATALOG_PAGE_SIZE ? (
+          <Pager
+            className="catalog-pagination"
+            page={currentPage}
+            pageCount={pageCount}
+            onPageChange={setPage}
+            ariaLabel={t("catalog.pagination.label")}
+            previousLabel={t("catalog.pagination.previous")}
+            nextLabel={t("catalog.pagination.next")}
+            pageLabel={(activePage, count) =>
+              t("catalog.pagination.page", { page: activePage, pageCount: count })
+            }
+          />
+        ) : null}
       </Card>
       {selected ? (
         <CatalogVersionPanel
