@@ -63,10 +63,7 @@ export type InvoiceApplicationStatus = (typeof INVOICE_APPLICATION_STATUSES)[num
 export const billingProfileKind = pgEnum("billing_profile_kind", BILLING_PROFILE_KINDS);
 export const invoiceStatus = pgEnum("invoice_status", INVOICE_STATUSES);
 export const invoiceLineKind = pgEnum("invoice_line_kind", INVOICE_LINE_KINDS);
-export const invoiceApplicationMode = pgEnum(
-  "invoice_application_mode",
-  INVOICE_APPLICATION_MODES,
-);
+export const invoiceApplicationMode = pgEnum("invoice_application_mode", INVOICE_APPLICATION_MODES);
 export const invoiceActivationPolicy = pgEnum(
   "invoice_activation_policy",
   INVOICE_ACTIVATION_POLICIES,
@@ -170,7 +167,10 @@ export const invoices = pgTable(
     unique("invoices_tenant_id_uq").on(table.tenantId, table.id),
     index("invoices_tenant_status_issued_idx").on(table.tenantId, table.status, table.issuedAt),
     check("invoices_currency_rub_check", sql`${table.currency} = 'RUB'`),
-    check("invoices_totals_nonnegative", sql`${table.subtotal} >= 0 and ${table.vatTotal} >= 0 and ${table.total} >= 0`),
+    check(
+      "invoices_totals_nonnegative",
+      sql`${table.subtotal} >= 0 and ${table.vatTotal} >= 0 and ${table.total} >= 0`,
+    ),
     check(
       "invoices_issued_snapshot_check",
       sql`${table.status} = 'draft' or (${table.issueDate} is not null and ${table.sellerSnapshot} is not null and ${table.buyerSnapshot} is not null)`,
@@ -219,7 +219,10 @@ export const invoiceLines = pgTable(
     }),
     check("invoice_lines_position_positive", sql`${table.position} > 0`),
     check("invoice_lines_quantity_positive", sql`${table.quantity} > 0`),
-    check("invoice_lines_prices_nonnegative", sql`${table.agreedUnitPrice} >= 0 and ${table.lineSubtotal} >= 0 and ${table.lineVat} >= 0 and ${table.lineTotal} >= 0`),
+    check(
+      "invoice_lines_prices_nonnegative",
+      sql`${table.agreedUnitPrice} >= 0 and ${table.lineSubtotal} >= 0 and ${table.lineVat} >= 0 and ${table.lineTotal} >= 0`,
+    ),
     check(
       "invoice_lines_catalog_kind_check",
       sql`(${table.kind} = 'custom' and ${table.catalogVersionId} is null and ${table.catalogKind} is null) or (${table.kind} <> 'custom' and ${table.catalogVersionId} is not null and ${table.catalogKind} is not null)`,
@@ -251,7 +254,11 @@ export const invoiceDocuments = pgTable(
   },
   (table) => [
     unique("invoice_documents_tenant_id_uq").on(table.tenantId, table.id),
-    unique("invoice_documents_invoice_revision_format_uq").on(table.invoiceId, table.revision, table.format),
+    unique("invoice_documents_invoice_revision_format_uq").on(
+      table.invoiceId,
+      table.revision,
+      table.format,
+    ),
     foreignKey({
       name: "invoice_documents_tenant_invoice_fk",
       columns: [table.tenantId, table.invoiceId],
@@ -259,7 +266,10 @@ export const invoiceDocuments = pgTable(
     }),
     check("invoice_documents_revision_positive", sql`${table.revision} > 0`),
     check("invoice_documents_format_check", sql`${table.format} in ('pdf', 'html')`),
-    check("invoice_documents_ready_metadata_check", sql`${table.status} <> 'ready' or (${table.objectKey} is not null and ${table.sha256} is not null and ${table.byteSize} is not null)`),
+    check(
+      "invoice_documents_ready_metadata_check",
+      sql`${table.status} <> 'ready' or (${table.objectKey} is not null and ${table.sha256} is not null and ${table.byteSize} is not null)`,
+    ),
   ],
 );
 
@@ -274,13 +284,18 @@ export const paymentImports = pgTable(
     status: paymentImportStatus("status").notNull().default("processing"),
     rowCount: integer("row_count").notNull().default(0),
     errorCount: integer("error_count").notNull().default(0),
-    createdByPlatformUserId: text("created_by_platform_user_id").notNull().references(() => platformUsers.id),
+    createdByPlatformUserId: text("created_by_platform_user_id")
+      .notNull()
+      .references(() => platformUsers.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("payment_imports_source_checksum_uq").on(table.sourceChecksum),
     check("payment_imports_source_check", sql`${table.source} = 'bank_import'`),
-    check("payment_imports_counts_nonnegative", sql`${table.rowCount} >= 0 and ${table.errorCount} >= 0`),
+    check(
+      "payment_imports_counts_nonnegative",
+      sql`${table.rowCount} >= 0 and ${table.errorCount} >= 0`,
+    ),
   ],
 );
 
@@ -302,8 +317,15 @@ export const paymentImportRows = pgTable(
   },
   (table) => [
     unique("payment_import_rows_import_source_uq").on(table.importId, table.sourceRowId),
-    foreignKey({ name: "payment_import_rows_import_fk", columns: [table.importId], foreignColumns: [paymentImports.id] }),
-    check("payment_import_rows_amount_nonnegative", sql`${table.amount} is null or ${table.amount} >= 0`),
+    foreignKey({
+      name: "payment_import_rows_import_fk",
+      columns: [table.importId],
+      foreignColumns: [paymentImports.id],
+    }),
+    check(
+      "payment_import_rows_amount_nonnegative",
+      sql`${table.amount} is null or ${table.amount} >= 0`,
+    ),
   ],
 );
 
@@ -323,9 +345,20 @@ export const paymentMatches = pgTable(
   },
   (table) => [
     unique("payment_matches_import_row_uq").on(table.importRowId),
-    foreignKey({ name: "payment_matches_import_row_fk", columns: [table.importRowId], foreignColumns: [paymentImportRows.id] }),
-    foreignKey({ name: "payment_matches_tenant_invoice_fk", columns: [table.tenantId, table.invoiceId], foreignColumns: [invoices.tenantId, invoices.id] }),
-    check("payment_matches_score_check", sql`${table.score} is null or (${table.score} >= 0 and ${table.score} <= 100)`),
+    foreignKey({
+      name: "payment_matches_import_row_fk",
+      columns: [table.importRowId],
+      foreignColumns: [paymentImportRows.id],
+    }),
+    foreignKey({
+      name: "payment_matches_tenant_invoice_fk",
+      columns: [table.tenantId, table.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    check(
+      "payment_matches_score_check",
+      sql`${table.score} is null or (${table.score} >= 0 and ${table.score} <= 100)`,
+    ),
   ],
 );
 
@@ -341,7 +374,9 @@ export const billingPayments = pgTable(
     currency: text("currency").notNull().default("RUB"),
     bankReference: text("bank_reference").notNull(),
     importRowId: uuid("import_row_id"),
-    platformUserId: text("platform_user_id").notNull().references(() => platformUsers.id),
+    platformUserId: text("platform_user_id")
+      .notNull()
+      .references(() => platformUsers.id),
     idempotencyKey: text("idempotency_key").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -349,11 +384,22 @@ export const billingPayments = pgTable(
     unique("billing_payments_tenant_id_uq").on(table.tenantId, table.id),
     unique("billing_payments_invoice_uq").on(table.tenantId, table.invoiceId),
     unique("billing_payments_idempotency_uq").on(table.idempotencyKey),
-    foreignKey({ name: "billing_payments_tenant_invoice_fk", columns: [table.tenantId, table.invoiceId], foreignColumns: [invoices.tenantId, invoices.id] }),
-    foreignKey({ name: "billing_payments_import_row_fk", columns: [table.importRowId], foreignColumns: [paymentImportRows.id] }),
+    foreignKey({
+      name: "billing_payments_tenant_invoice_fk",
+      columns: [table.tenantId, table.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: "billing_payments_import_row_fk",
+      columns: [table.importRowId],
+      foreignColumns: [paymentImportRows.id],
+    }),
     check("billing_payments_amount_positive", sql`${table.amount} > 0`),
     check("billing_payments_currency_rub_check", sql`${table.currency} = 'RUB'`),
-    check("billing_payments_source_row_check", sql`(${table.source} = 'manual' and ${table.importRowId} is null) or (${table.source} = 'bank_import' and ${table.importRowId} is not null)`),
+    check(
+      "billing_payments_source_row_check",
+      sql`(${table.source} = 'manual' and ${table.importRowId} is null) or (${table.source} = 'bank_import' and ${table.importRowId} is not null)`,
+    ),
   ],
 );
 
@@ -376,9 +422,21 @@ export const invoiceApplicationEvents = pgTable(
   },
   (table) => [
     unique("invoice_application_events_tenant_id_uq").on(table.tenantId, table.id),
-    unique("invoice_application_events_line_attempt_uq").on(table.tenantId, table.invoiceLineId, table.attempt),
-    foreignKey({ name: "invoice_application_events_tenant_invoice_fk", columns: [table.tenantId, table.invoiceId], foreignColumns: [invoices.tenantId, invoices.id] }),
-    foreignKey({ name: "invoice_application_events_tenant_line_fk", columns: [table.tenantId, table.invoiceLineId], foreignColumns: [invoiceLines.tenantId, invoiceLines.id] }),
+    unique("invoice_application_events_line_attempt_uq").on(
+      table.tenantId,
+      table.invoiceLineId,
+      table.attempt,
+    ),
+    foreignKey({
+      name: "invoice_application_events_tenant_invoice_fk",
+      columns: [table.tenantId, table.invoiceId],
+      foreignColumns: [invoices.tenantId, invoices.id],
+    }),
+    foreignKey({
+      name: "invoice_application_events_tenant_line_fk",
+      columns: [table.tenantId, table.invoiceLineId],
+      foreignColumns: [invoiceLines.tenantId, invoiceLines.id],
+    }),
     check("invoice_application_events_attempt_positive", sql`${table.attempt} > 0`),
   ],
 );
