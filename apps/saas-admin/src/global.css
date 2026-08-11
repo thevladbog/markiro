@@ -526,6 +526,17 @@ textarea {
   box-shadow: -16px 0 40px color-mix(in srgb, var(--surface-inverse) 18%, transparent);
 }
 
+.mk-side-panel .version-panel {
+  position: static;
+  inset: auto;
+  z-index: auto;
+  width: auto;
+  min-height: 100%;
+  overflow: visible;
+  border: 0;
+  box-shadow: none;
+}
+
 .catalog-create-panel .catalog-form {
   padding: 24px;
 }

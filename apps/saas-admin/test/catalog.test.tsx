@@ -245,6 +245,34 @@ describe("commercial catalog", () => {
     expect(screen.getByRole("region", { name: "Версия 1 · Базовый" })).toBeDefined();
   });
 
+  it("closes a clean catalog drawer from its backdrop", async () => {
+    installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    expect(screen.getByRole("dialog", { name: "Новая позиция каталога" })).toBeDefined();
+    const scrim = document.querySelector(".mk-side-panel__scrim");
+    expect(scrim).not.toBeNull();
+    await user.click(scrim!);
+    expect(screen.queryByRole("dialog", { name: "Новая позиция каталога" })).toBeNull();
+  });
+
+  it("protects dirty catalog forms before backdrop dismissal", async () => {
+    installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "dirty-item");
+    await user.click(document.querySelector(".mk-side-panel__scrim")!);
+
+    expect(await screen.findByRole("alertdialog")).toBeDefined();
+    expect(screen.getByRole("dialog", { name: "Новая позиция каталога" })).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Продолжить редактирование" }));
+    expect(screen.getByRole("dialog", { name: "Новая позиция каталога" })).toBeDefined();
+  });
+
   it("opens a catalog version when clicking any cell in its row", async () => {
     installCatalogApi({ items: [PUBLISHED_PLAN] });
     renderSaasApp();

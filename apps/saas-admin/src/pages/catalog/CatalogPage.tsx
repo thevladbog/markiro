@@ -15,9 +15,11 @@ import {
 } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { getDefaultDemoPlan, listCatalogVersions, type CatalogVersionDto } from "./api.js";
 import { CatalogVersionPanel } from "./CatalogVersionPanel.js";
 import { CatalogCreatePanel } from "./CatalogCreatePanel.js";
+import { CatalogDrawer } from "./CatalogDrawer.js";
 
 type CatalogKind = CatalogVersionDto["kind"];
 
@@ -36,6 +38,8 @@ export function CatalogPage() {
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [drawerDirty, setDrawerDirty] = useState(false);
+  const pageGuard = useNavigationGuard(drawerDirty, false);
   const catalog = useQuery({
     queryKey: ["platform", "catalog"],
     queryFn: listCatalogVersions,
@@ -132,10 +136,13 @@ export function CatalogPage() {
       {principal.capabilities.includes("catalog.write") ? (
         <div className="catalog-toolbar">
           <Button
-            onClick={() => {
-              setSelectedId(null);
-              setCreating(true);
-            }}
+            onClick={() =>
+              pageGuard.requestProtectedAction(() => {
+                setSelectedId(null);
+                setDrawerDirty(false);
+                setCreating(true);
+              })
+            }
           >
             {t("catalog.create")}
           </Button>
@@ -150,12 +157,15 @@ export function CatalogPage() {
               role="tab"
               aria-label={tab.label}
               aria-selected={activeKind === tab.kind}
-              onClick={() => {
-                setActiveKind(tab.kind);
-                setPage(1);
-                setCreating(false);
-                setSelectedId(null);
-              }}
+              onClick={() =>
+                pageGuard.requestProtectedAction(() => {
+                  setActiveKind(tab.kind);
+                  setPage(1);
+                  setCreating(false);
+                  setDrawerDirty(false);
+                  setSelectedId(null);
+                })
+              }
             >
               <span>{String(tabs.indexOf(tab) + 1).padStart(2, "0")}</span>
               {tab.label}
@@ -168,8 +178,11 @@ export function CatalogPage() {
           rows={pagedItems}
           empty={t("catalog.empty")}
           onRowClick={(item) => {
-            setCreating(false);
-            setSelectedId(item.id);
+            pageGuard.requestProtectedAction(() => {
+              setCreating(false);
+              setDrawerDirty(false);
+              setSelectedId(item.id);
+            });
           }}
         />
         {visibleItems.length > CATALOG_PAGE_SIZE ? (
@@ -188,22 +201,46 @@ export function CatalogPage() {
         ) : null}
       </Card>
       {selected ? (
-        <CatalogVersionPanel
-          key={selected.id}
-          item={selected}
-          canWrite={principal.capabilities.includes("catalog.write")}
-          isSupport={isSupport}
-          defaultDemoId={defaultDemo.data?.catalogVersionId ?? null}
+        <CatalogDrawer
+          title={t("catalog.panelLabel", { version: selected.version, name: selected.nameRu })}
+          dirty={drawerDirty}
+          busy={false}
+          closeLabel={t("catalog.closePanel")}
+          onClose={() => {
+            setSelectedId(null);
+            setDrawerDirty(false);
+          }}
+        >
+          <CatalogVersionPanel
+            key={selected.id}
+            item={selected}
+            canWrite={principal.capabilities.includes("catalog.write")}
+            isSupport={isSupport}
+            defaultDemoId={defaultDemo.data?.catalogVersionId ?? null}
           onClose={() => setSelectedId(null)}
           onVersionCreated={(created) => setSelectedId(created.id)}
-        />
+          onDirtyChange={setDrawerDirty}
+          />
+        </CatalogDrawer>
       ) : null}
       {creating ? (
-        <CatalogCreatePanel
-          kind={activeKind}
-          onClose={() => setCreating(false)}
-          onCreated={(created) => setSelectedId(created.id)}
-        />
+        <CatalogDrawer
+          title={t("catalog.createTitle")}
+          dirty={drawerDirty}
+          busy={false}
+          closeLabel={t("catalog.closePanel")}
+          onClose={() => {
+            setCreating(false);
+            setDrawerDirty(false);
+          }}
+        >
+          <CatalogCreatePanel
+            kind={activeKind}
+            onClose={() => setCreating(false)}
+            onCreated={(created) => setSelectedId(created.id)}
+            onDirtyChange={setDrawerDirty}
+          />
+        </CatalogDrawer>
       ) : null}
     </section>
   );

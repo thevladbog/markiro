@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm, type FieldError } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -29,6 +29,7 @@ import {
   fromAddonEffects,
   type EditableAddonEffect,
 } from "./AddonEffectsEditor.js";
+import { useCatalogDrawerClose } from "./CatalogDrawer.js";
 
 interface CatalogFormValues {
   kind: CatalogVersionDto["kind"];
@@ -284,6 +285,7 @@ export function CatalogVersionPanel({
   defaultDemoId,
   onClose,
   onVersionCreated,
+  onDirtyChange,
 }: {
   item: CatalogVersionDto;
   canWrite: boolean;
@@ -291,8 +293,10 @@ export function CatalogVersionPanel({
   defaultDemoId: string | null;
   onClose: () => void;
   onVersionCreated?: (created: CatalogVersionDto) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const requestClose = useCatalogDrawerClose(onClose);
   const queryClient = useQueryClient();
   const [publishOpen, setPublishOpen] = useState(false);
   const [retireOpen, setRetireOpen] = useState(false);
@@ -415,6 +419,9 @@ export function CatalogVersionPanel({
     !addonErrorEntries && addonFormErrors && "root" in addonFormErrors && addonFormErrors.root
       ? fieldError(addonFormErrors.root, t)
       : undefined;
+  useEffect(() => {
+    onDirtyChange?.(form.formState.isDirty);
+  }, [form.formState.isDirty, onDirtyChange]);
   const isDefaultDemo = defaultDemoId === item.id;
   const regionLabel = t("catalog.panelLabel", { version: item.version, name: item.nameRu });
 
@@ -452,7 +459,7 @@ export function CatalogVersionPanel({
               {t("catalog.clone")}
             </Button>
           ) : null}
-          <Button variant="secondary" onClick={onClose} aria-label={t("catalog.closePanel")}>
+          <Button variant="secondary" onClick={requestClose} aria-label={t("catalog.closePanel")}>
             {t("catalog.close")}
           </Button>
         </div>

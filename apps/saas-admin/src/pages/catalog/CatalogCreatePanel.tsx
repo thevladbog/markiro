@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Checkbox, Input } from "@markiro/ui";
@@ -14,17 +14,21 @@ import {
 } from "./AddonEffectsEditor.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField } from "./CatalogVatField.js";
+import { useCatalogDrawerClose } from "./CatalogDrawer.js";
 
 export function CatalogCreatePanel({
   kind,
   onClose,
   onCreated,
+  onDirtyChange,
 }: {
   kind: CatalogVersionDto["kind"];
   onClose: () => void;
   onCreated: (item: CatalogVersionDto) => void;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useTranslation();
+  const requestClose = useCatalogDrawerClose(onClose);
   const queryClient = useQueryClient();
   const [code, setCode] = useState("");
   const [nameRu, setNameRu] = useState("");
@@ -46,6 +50,48 @@ export function CatalogCreatePanel({
   const [publicApiEnabled, setPublicApiEnabled] = useState(false);
   const [palletsEnabled, setPalletsEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    onDirtyChange?.(
+      Boolean(
+        code ||
+          nameRu ||
+          nameEn ||
+          descriptionRu ||
+          descriptionEn ||
+          price !== "0.00" ||
+          unit !== (kind === "service" ? "project" : "month") ||
+          vatRateBps !== 2200 ||
+          lines ||
+          stations ||
+          kiosks ||
+          users ||
+          demoDurationDays ||
+          labelEditorEnabled ||
+          publicApiEnabled ||
+          palletsEnabled,
+      ),
+    );
+  }, [
+    code,
+    nameRu,
+    nameEn,
+    descriptionRu,
+    descriptionEn,
+    price,
+    unit,
+    kind,
+    vatRateBps,
+    lines,
+    stations,
+    kiosks,
+    users,
+    demoDurationDays,
+    labelEditorEnabled,
+    publicApiEnabled,
+    palletsEnabled,
+    onDirtyChange,
+  ]);
 
   const create = useMutation({
     mutationFn: () => {
@@ -108,7 +154,7 @@ export function CatalogCreatePanel({
           <span className="panel-coordinate">NEW · {kind.toUpperCase()}</span>
           <h2>{t("catalog.createTitle")}</h2>
         </div>
-        <Button variant="secondary" onClick={onClose}>
+        <Button variant="secondary" onClick={requestClose}>
           {t("catalog.close")}
         </Button>
       </header>
@@ -246,7 +292,7 @@ export function CatalogCreatePanel({
           <Button type="submit" loading={create.isPending}>
             {t("catalog.create")}
           </Button>
-          <Button type="button" variant="secondary" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={requestClose}>
             {t("catalog.cancel")}
           </Button>
         </div>
