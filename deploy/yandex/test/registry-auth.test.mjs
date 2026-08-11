@@ -23,7 +23,7 @@ test("registry envelope carries only the exact credential entries and bounded ch
 
 test("deploy-only registry helper validates Lockbox shape, uses password-stdin, and always cleans up", async () => {
   const calls = [];
-  await withRegistryAuthentication(
+  const result = await withRegistryAuthentication(
     {
       getPayload: async () => ({
         entries: [
@@ -34,7 +34,10 @@ test("deploy-only registry helper validates Lockbox shape, uses password-stdin, 
       makeDirectory: async () => "/run/markiro-registry-auth/session",
       run: async (command, args, options = {}) => {
         calls.push({ command, args, options });
-        return { code: 0 };
+        return {
+          code: 0,
+          stdout: command === "node" ? '{"state":"pending"}\n' : "discarded docker output\n",
+        };
       },
       remove: async (path) => calls.push({ remove: path }),
     },
@@ -52,6 +55,8 @@ test("deploy-only registry helper validates Lockbox shape, uses password-stdin, 
   assert.equal(calls[0].options.input, "sensitive-token");
   assert.equal(calls[1].options.environment.DOCKER_CONFIG, "/run/markiro-registry-auth/session");
   assert.equal(calls[1].options.input, "candidate-input\n");
+  assert.equal(calls[1].options.captureOutput, true);
+  assert.equal(result, '{"state":"pending"}\n');
   assert.deepEqual(calls[2].args, ["logout", "ghcr.io"]);
   assert.deepEqual(calls[3], { remove: "/run/markiro-registry-auth/session" });
   assert.doesNotMatch(JSON.stringify(calls.map(({ options, ...call }) => call)), /sensitive-token/);
@@ -80,4 +85,29 @@ test("deploy-only registry helper rejects extra payload entries before docker lo
     /registry credential payload is invalid/,
   );
   assert.equal(invoked, false);
+});
+
+test("deploy-only registry helper rejects an oversized deployment result and still cleans up", async () => {
+  const removed = [];
+  await assert.rejects(
+    withRegistryAuthentication(
+      {
+        getPayload: async () => ({
+          entries: [
+            { key: "GHCR_USERNAME", textValue: "user" },
+            { key: "GHCR_TOKEN", textValue: "token" },
+          ],
+        }),
+        makeDirectory: async () => "/run/session",
+        run: async (command) => ({
+          code: 0,
+          stdout: command === "node" ? "x".repeat(64 * 1024 + 1) : "",
+        }),
+        remove: async (path) => removed.push(path),
+      },
+      ["node", "deploy/production/deploy.mjs", "prepare"],
+    ),
+    /deployment command output is invalid/,
+  );
+  assert.deepEqual(removed, ["/run/session"]);
 });

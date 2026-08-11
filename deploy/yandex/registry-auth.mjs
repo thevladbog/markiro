@@ -40,15 +40,30 @@ export function parseRegistryEnvelope(value) {
   }
 }
 
-function run(command, args, { input, environment = process.env } = {}) {
+const MAX_COMMAND_OUTPUT_BYTES = 64 * 1024;
+
+function run(command, args, { input, environment = process.env, captureOutput = false } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       env: environment,
       shell: false,
-      stdio: [input === undefined ? "ignore" : "pipe", "ignore", "ignore"],
+      stdio: [input === undefined ? "ignore" : "pipe", captureOutput ? "pipe" : "ignore", "ignore"],
+    });
+    const stdout = [];
+    let stdoutBytes = 0;
+    let outputExceeded = false;
+    child.stdout?.on("data", (chunk) => {
+      stdoutBytes += chunk.length;
+      if (stdoutBytes > MAX_COMMAND_OUTPUT_BYTES) outputExceeded = true;
+      else stdout.push(chunk);
     });
     child.once("error", () => reject(new Error("registry authentication command failed")));
-    child.once("close", (code) => resolve({ code: code ?? 1 }));
+    child.once("close", (code) =>
+      resolve({
+        code: outputExceeded ? 1 : (code ?? 1),
+        stdout: captureOutput && !outputExceeded ? Buffer.concat(stdout).toString("utf8") : "",
+      }),
+    );
     if (input !== undefined) child.stdin.end(input);
   });
 }
@@ -91,8 +106,15 @@ export async function withRegistryAuthentication(supplied, command, commandInput
     const result = await dependencies.run(command[0], command.slice(1), {
       environment: { ...process.env, DOCKER_CONFIG: dockerConfig },
       input: commandInput,
+      captureOutput: true,
     });
     if (result.code !== 0) throw new Error("deployment command failed");
+    if (
+      typeof result.stdout !== "string" ||
+      Buffer.byteLength(result.stdout, "utf8") > MAX_COMMAND_OUTPUT_BYTES
+    )
+      throw new Error("deployment command output is invalid");
+    return result.stdout;
   } catch (error) {
     primaryError = error;
   } finally {
@@ -120,6 +142,7 @@ if (isMainModule(import.meta.url)) {
           commandInput,
         ),
       )
+      .then((output) => process.stdout.write(output))
       .catch(() => {
         process.stderr.write("registry authentication failed\n");
         process.exitCode = 1;
