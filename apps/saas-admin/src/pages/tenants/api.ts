@@ -23,7 +23,10 @@ const billingPeriodSchema = z.enum(["month", "year"]).nullable();
 const nullableQuotaSchema = z.number().int().positive().max(POSTGRES_INTEGER_MAX).nullable();
 const moneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/);
 
-export const tenantIdSchema = z.uuid();
+// Better Auth organization IDs are opaque strings and are not guaranteed to be UUIDs.
+// Keep the same bounds as the backend tenantReferenceSchema while validating all
+// tenant-scoped URLs and response payloads at the client boundary.
+export const tenantIdSchema = z.string().trim().min(1).max(128);
 
 const listPlanVersionSchema = z.object({
   id: z.uuid().nullable(),

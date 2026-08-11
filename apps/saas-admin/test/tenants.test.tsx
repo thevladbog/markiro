@@ -47,6 +47,17 @@ describe("platform tenants", () => {
     );
   });
 
+  it("accepts Better Auth tenant identifiers that are not UUIDs", async () => {
+    installTenantApi({
+      me: SUPPORT_ME,
+      items: [{ ...TENANT_LIST_ITEM, id: "1rhms95VMlzcSSXRDvIhNMyrujiIa5uG" }],
+    });
+    renderSaasApp({ initialEntry: "/tenants" });
+
+    expect(await screen.findByText("Первый завод")).toBeDefined();
+    expect(screen.queryByText("Не удалось загрузить тенантов")).toBeNull();
+  });
+
   it("truthfully searches only the bounded page and exposes all lifecycle filters", async () => {
     const second = {
       ...structuredClone(TENANT_LIST_ITEM),
