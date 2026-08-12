@@ -319,6 +319,101 @@
     "defaultError": "Could not select the demo plan.",
     "mutationStatus": "Version operation status"
   },
+  "documents": {
+    "tenant": "Tenant",
+    "tenantPlaceholder": "Select a tenant",
+    "tenantSearch": "Search tenants by name or slug",
+    "tenantEmpty": "No tenants found",
+    "addPosition": "Add position",
+    "catalogPlaceholder": "Find a catalog position",
+    "catalogSearch": "Search by name, code, or version",
+    "catalogEmpty": "No published positions found",
+    "catalogGroups": {
+      "plan": "Plans",
+      "addon": "Add-ons",
+      "service": "Services"
+    },
+    "linesTitle": "Document lines",
+    "linesRegion": "Document lines",
+    "date": {
+      "invoice": "Due date",
+      "offer": "Valid until"
+    },
+    "applicationMode": {
+      "label": "Application after payment",
+      "automatic": "Automatically",
+      "manual": "Manually"
+    },
+    "columns": {
+      "position": "Position",
+      "quantity": "Quantity",
+      "price": "Price",
+      "vat": "VAT",
+      "policy": "Activation policy",
+      "total": "Total",
+      "actions": "Actions"
+    },
+    "empty": {
+      "title": "Add the first catalog position",
+      "body": "Price, unit, and VAT come from the published version."
+    },
+    "kinds": {
+      "plan": "Plan",
+      "addon": "Add-on",
+      "service": "Service"
+    },
+    "fields": {
+      "quantityNamed": "Quantity for {{name}}",
+      "priceNamed": "Price for {{name}}",
+      "vatNamed": "VAT for {{name}}",
+      "policyNamed": "Activation policy for {{name}}"
+    },
+    "vat": {
+      "none": "No VAT",
+      "included": "{{rate}}% · included",
+      "excluded": "{{rate}}% · added"
+    },
+    "policy": {
+      "none": "Not applicable",
+      "immediate": "Immediately",
+      "immediateAfterPayment": "Immediately after payment",
+      "afterCurrent": "After current subscription",
+      "manual": "Manually"
+    },
+    "actions": {
+      "separate": "Separate line",
+      "separateNamed": "Add {{name}} as a separate line",
+      "moveUpNamed": "Move {{name}} up",
+      "moveDownNamed": "Move {{name}} down",
+      "removeNamed": "Remove {{name}}"
+    },
+    "summary": {
+      "title": "Document summary",
+      "lines": "Lines",
+      "subtotal": "Before VAT",
+      "vat": "VAT",
+      "total": "Total",
+      "blocking": "Fix before submitting"
+    },
+    "submit": {
+      "invoice": "Create invoice draft",
+      "offer": "Create offer draft"
+    },
+    "cancel": "Cancel",
+    "validation": {
+      "tenant_required": "Select a tenant",
+      "at_least_one_line_required": "Add at least one position",
+      "too_many_lines": "A document can contain no more than 100 lines",
+      "quantity_must_be_positive_integer": "Quantity must be an integer of at least 1",
+      "money_must_have_two_decimal_places": "Enter a price with two decimal places",
+      "vat_rate_must_be_between_0_and_10000": "VAT must be between 0 and 100%",
+      "service_activation_policy_must_be_null": "Services do not have an activation policy",
+      "activation_policy_required": "Select an activation policy",
+      "published_catalog_version_required": "The catalog version is no longer published",
+      "offer_manual_activation_policy_unsupported": "Select an automatic activation policy for an offer",
+      "offer_activation_policy_unsupported": "This activation policy is unavailable for the offer"
+    }
+  },
   "tenants": {
     "title": "Tenants",
     "create": "Create tenant",

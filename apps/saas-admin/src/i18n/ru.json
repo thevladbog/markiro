@@ -319,6 +319,101 @@
     "defaultError": "Не удалось назначить демо-план.",
     "mutationStatus": "Статус операции с версией"
   },
+  "documents": {
+    "tenant": "Тенант",
+    "tenantPlaceholder": "Выберите тенант",
+    "tenantSearch": "Поиск тенанта по названию или slug",
+    "tenantEmpty": "Тенанты не найдены",
+    "addPosition": "Добавить позицию",
+    "catalogPlaceholder": "Найдите позицию каталога",
+    "catalogSearch": "Поиск по названию, коду или версии",
+    "catalogEmpty": "Опубликованные позиции не найдены",
+    "catalogGroups": {
+      "plan": "Тарифы",
+      "addon": "Дополнения",
+      "service": "Услуги"
+    },
+    "linesTitle": "Позиции документа",
+    "linesRegion": "Позиции документа",
+    "date": {
+      "invoice": "Срок оплаты",
+      "offer": "Срок действия"
+    },
+    "applicationMode": {
+      "label": "Применение после оплаты",
+      "automatic": "Автоматически",
+      "manual": "Вручную"
+    },
+    "columns": {
+      "position": "Позиция",
+      "quantity": "Количество",
+      "price": "Цена",
+      "vat": "НДС",
+      "policy": "Правило применения",
+      "total": "Сумма",
+      "actions": "Действия"
+    },
+    "empty": {
+      "title": "Добавьте первую позицию из каталога",
+      "body": "Цена, единица и НДС заполнятся из опубликованной версии."
+    },
+    "kinds": {
+      "plan": "Тариф",
+      "addon": "Дополнение",
+      "service": "Услуга"
+    },
+    "fields": {
+      "quantityNamed": "Количество {{name}}",
+      "priceNamed": "Цена {{name}}",
+      "vatNamed": "НДС {{name}}",
+      "policyNamed": "Правило применения {{name}}"
+    },
+    "vat": {
+      "none": "Без НДС",
+      "included": "{{rate}}% · включён",
+      "excluded": "{{rate}}% · сверху"
+    },
+    "policy": {
+      "none": "Не применяется",
+      "immediate": "Сразу",
+      "immediateAfterPayment": "Сразу после оплаты",
+      "afterCurrent": "После текущей подписки",
+      "manual": "Вручную"
+    },
+    "actions": {
+      "separate": "Отдельной строкой",
+      "separateNamed": "Добавить {{name}} отдельной строкой",
+      "moveUpNamed": "Переместить {{name}} вверх",
+      "moveDownNamed": "Переместить {{name}} вниз",
+      "removeNamed": "Удалить {{name}}"
+    },
+    "summary": {
+      "title": "Сводка документа",
+      "lines": "Строк",
+      "subtotal": "Без НДС",
+      "vat": "НДС",
+      "total": "Итого",
+      "blocking": "Нужно исправить"
+    },
+    "submit": {
+      "invoice": "Создать черновик счёта",
+      "offer": "Создать черновик предложения"
+    },
+    "cancel": "Отмена",
+    "validation": {
+      "tenant_required": "Выберите тенант",
+      "at_least_one_line_required": "Добавьте хотя бы одну позицию",
+      "too_many_lines": "В документе может быть не больше 100 строк",
+      "quantity_must_be_positive_integer": "Количество должно быть целым и не меньше 1",
+      "money_must_have_two_decimal_places": "Введите цену с двумя знаками после запятой",
+      "vat_rate_must_be_between_0_and_10000": "Ставка НДС должна быть от 0 до 100%",
+      "service_activation_policy_must_be_null": "Для услуги правило применения недоступно",
+      "activation_policy_required": "Выберите правило применения",
+      "published_catalog_version_required": "Версия каталога больше не опубликована",
+      "offer_manual_activation_policy_unsupported": "Для предложения выберите автоматическое правило применения",
+      "offer_activation_policy_unsupported": "Это правило применения недоступно для предложения"
+    }
+  },
   "tenants": {
     "title": "Тенанты",
     "create": "Создать тенанта",
