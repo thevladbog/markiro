@@ -1,44 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, Input, PageHeader, StatusChip, Table } from "@markiro/ui";
+import { Link, useLocation } from "react-router";
+import { Alert, Button, Card, PageHeader, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
-import {
-  createInvoice,
-  issueInvoice,
-  listInvoices,
-  payInvoice,
-  renderInvoice,
-  type Invoice,
-} from "./api.js";
+import { issueInvoice, listInvoices, payInvoice, renderInvoice, type Invoice } from "./api.js";
 
 export function BillingPage() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const client = useQueryClient();
+  const location = useLocation();
   const invoices = useQuery({ queryKey: ["platform", "invoices"], queryFn: listInvoices });
-  const [tenantId, setTenantId] = useState("");
-  const [amount, setAmount] = useState("0.00");
   const [selected, setSelected] = useState<Invoice | null>(null);
-  const create = useMutation({
-    mutationFn: () =>
-      createInvoice({
-        tenantId,
-        applicationMode: "manual",
-        lines: [
-          {
-            kind: "custom",
-            nameRu: "Услуга",
-            nameEn: "Service",
-            quantity: 1,
-            unit: "шт",
-            agreedUnitPrice: amount,
-            vatIncluded: true,
-          },
-        ],
-      }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "invoices"] }),
-  });
   const issue = useMutation({
     mutationFn: () => issueInvoice(selected!.id),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "invoices"] }),
@@ -48,46 +22,29 @@ export function BillingPage() {
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "invoices"] }),
   });
   const document = useMutation({ mutationFn: () => renderInvoice(selected!.id) });
+  const createAction = principal.capabilities.includes("billing.write") ? (
+    <Link to="/billing/new">{t("billing.create")}</Link>
+  ) : null;
+  const createdNotice =
+    (location.state as { invoiceCreated?: unknown } | null)?.invoiceCreated === true;
   if (invoices.isPending)
     return (
       <section className="catalog-page">
-        <PageHeader title={t("billing.title")} />
+        <PageHeader title={t("billing.title")} actions={createAction} />
         <p>{t("billing.loading")}</p>
       </section>
     );
   if (invoices.error)
     return (
       <section className="catalog-page">
-        <PageHeader title={t("billing.title")} />
+        <PageHeader title={t("billing.title")} actions={createAction} />
         <Alert tone="error">{t("billing.loadError")}</Alert>
       </section>
     );
   return (
     <section className="catalog-page">
-      <PageHeader title={t("billing.title")} />
-      {principal.capabilities.includes("billing.write") ? (
-        <Card title={t("billing.newTitle")}>
-          <div style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-            <Input
-              label={t("billing.tenantId")}
-              value={tenantId}
-              onChange={(e) => setTenantId(e.target.value)}
-            />
-            <Input
-              label={t("billing.amount")}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-            />
-            <Button
-              disabled={!tenantId || amount === "0.00"}
-              loading={create.isPending}
-              onClick={() => void create.mutateAsync()}
-            >
-              {t("billing.create")}
-            </Button>
-          </div>
-        </Card>
-      ) : null}
+      <PageHeader title={t("billing.title")} actions={createAction} />
+      {createdNotice ? <Alert tone="ok">{t("billing.created")}</Alert> : null}
       <Table
         columns={[
           {

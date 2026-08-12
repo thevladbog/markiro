@@ -88,13 +88,20 @@
     "total": "Total",
     "detail": "Offer",
     "lines": "Lines: {{count}}",
-    "create": "Create draft",
+    "create": "Create offer",
+    "created": "Offer created",
+    "createInvoice": "Create invoice",
     "publish": "Publish",
     "bankReference": "Bank reference",
     "pay": "Record payment",
     "empty": "No offers yet",
     "loadError": "Could not load offers",
-    "catalogLink": "Catalog"
+    "catalogLink": "Catalog",
+    "editor": {
+      "title": "New commercial offer",
+      "back": "Back to offers",
+      "createError": "Could not create the offer. Check the lines and try again."
+    }
   },
   "billing": {
     "title": "Invoices and payments",
@@ -104,6 +111,7 @@
     "tenantId": "Tenant ID",
     "amount": "Amount",
     "create": "Create invoice",
+    "created": "Invoice created",
     "number": "Number",
     "tenant": "Tenant",
     "status": "Status",
@@ -112,7 +120,12 @@
     "detail": "Invoice",
     "issue": "Issue",
     "pay": "Record payment",
-    "document": "Generate document"
+    "document": "Generate document",
+    "editor": {
+      "title": "New invoice",
+      "back": "Back to invoices",
+      "createError": "Could not create the invoice. Check the lines and try again."
+    }
   },
   "shell": {
     "routeLoading": "Loading section",
@@ -320,6 +333,8 @@
     "mutationStatus": "Version operation status"
   },
   "documents": {
+    "loadingSources": "Loading tenants and catalog",
+    "loadSourcesError": "Could not load tenants or the published catalog.",
     "tenant": "Tenant",
     "tenantPlaceholder": "Select a tenant",
     "tenantSearch": "Search tenants by name or slug",

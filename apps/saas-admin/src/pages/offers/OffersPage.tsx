@@ -1,38 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { Alert, Button, Card, Input, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
-import { createOffer, listOffers, payOffer, publishOffer, type Offer } from "./api.js";
+import { listOffers, payOffer, publishOffer, type Offer } from "./api.js";
 
 export function OffersPage() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const client = useQueryClient();
+  const location = useLocation();
   const offers = useQuery({ queryKey: ["platform", "offers"], queryFn: listOffers });
-  const [tenantId, setTenantId] = useState("");
-  const [amount, setAmount] = useState("0.00");
   const [bankReference, setBankReference] = useState("");
   const [selected, setSelected] = useState<Offer | null>(null);
-  const create = useMutation({
-    mutationFn: () =>
-      createOffer({
-        tenantId,
-        lines: [
-          {
-            kind: "service",
-            nameRu: "Услуга",
-            nameEn: "Service",
-            quantity: 1,
-            unit: "service",
-            agreedUnitPrice: amount,
-            vatIncluded: true,
-          },
-        ],
-      }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
-  });
   const publish = useMutation({
     mutationFn: () => publishOffer(selected!.id),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
@@ -41,49 +22,35 @@ export function OffersPage() {
     mutationFn: () => payOffer(selected!.id, selected!.total, bankReference, crypto.randomUUID()),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
   });
+  const createAction = principal.capabilities.includes("billing.write") ? (
+    <Link to="/offers/new">{t("offers.create")}</Link>
+  ) : null;
+  const headerActions = (
+    <>
+      {createAction}
+      <Link to="/catalog">{t("offers.catalogLink")}</Link>
+    </>
+  );
+  const createdNotice =
+    (location.state as { offerCreated?: unknown } | null)?.offerCreated === true;
   if (offers.isPending)
     return (
       <section className="catalog-page">
-        <PageHeader title={t("offers.title")} />
+        <PageHeader title={t("offers.title")} actions={headerActions} />
         <Spinner label={t("shell.routeLoading")} />
       </section>
     );
   if (offers.error)
     return (
       <section className="catalog-page">
-        <PageHeader title={t("offers.title")} />
+        <PageHeader title={t("offers.title")} actions={headerActions} />
         <Alert tone="error">{t("offers.loadError")}</Alert>
       </section>
     );
   return (
     <section className="catalog-page">
-      <PageHeader
-        title={t("offers.title")}
-        actions={<Link to="/catalog">{t("offers.catalogLink")}</Link>}
-      />
-      {principal.capabilities.includes("billing.write") ? (
-        <Card title={t("offers.newTitle")}>
-          <div style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-            <Input
-              label={t("offers.tenantId")}
-              value={tenantId}
-              onChange={(event) => setTenantId(event.target.value)}
-            />
-            <Input
-              label={t("offers.amount")}
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-            />
-            <Button
-              onClick={() => void create.mutateAsync()}
-              loading={create.isPending}
-              disabled={!tenantId}
-            >
-              {t("offers.create")}
-            </Button>
-          </div>
-        </Card>
-      ) : null}
+      <PageHeader title={t("offers.title")} actions={headerActions} />
+      {createdNotice ? <Alert tone="ok">{t("offers.created")}</Alert> : null}
       <Table
         columns={[
           {
@@ -114,7 +81,6 @@ export function OffersPage() {
       />
       {selected ? (
         <Card title={`${t("offers.detail")} · ${selected.total} ₽`}>
-          <p>{t("offers.lines", { count: selected.lines.length })}</p>
           {selected.status === "draft" && principal.capabilities.includes("billing.write") ? (
             <Button onClick={() => void publish.mutateAsync()} loading={publish.isPending}>
               {t("offers.publish")}
@@ -122,6 +88,9 @@ export function OffersPage() {
           ) : null}
           {selected.status === "published" && principal.capabilities.includes("billing.write") ? (
             <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
+              <Link to="/billing/new" state={{ sourceOfferId: selected.id }}>
+                {t("offers.createInvoice")}
+              </Link>
               <Input
                 label={t("offers.bankReference")}
                 value={bankReference}

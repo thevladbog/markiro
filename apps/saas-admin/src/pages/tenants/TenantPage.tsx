@@ -96,6 +96,7 @@ export function TenantPage() {
   const renewSending = detail.ownerActivation?.status === "sending";
   const canDirectAssign = principal.role === "platform_admin";
   const financialVisible = principal.role !== "support";
+  const canCreateDocuments = principal.capabilities.includes("billing.write");
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
   const createdNotice =
     (location.state as { tenantCreated?: unknown } | null)?.tenantCreated === true;
@@ -108,10 +109,22 @@ export function TenantPage() {
       <PageHeader
         title={detail.tenant.name}
         actions={
-          <StatusChip
-            status={STATUS_TONE[detail.subscriptionStatus]}
-            label={t(`tenants.status.${detail.subscriptionStatus}`)}
-          />
+          <>
+            {canCreateDocuments ? (
+              <>
+                <Link to={`/billing/new?tenantId=${encodeURIComponent(detail.tenant.id)}`}>
+                  {t("billing.create")}
+                </Link>
+                <Link to={`/offers/new?tenantId=${encodeURIComponent(detail.tenant.id)}`}>
+                  {t("offers.create")}
+                </Link>
+              </>
+            ) : null}
+            <StatusChip
+              status={STATUS_TONE[detail.subscriptionStatus]}
+              label={t(`tenants.status.${detail.subscriptionStatus}`)}
+            />
+          </>
         }
       />
       <div className="tenant-detail-coordinate" aria-hidden="true">
