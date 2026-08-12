@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import { Button, Card } from "@markiro/ui";
@@ -59,6 +67,7 @@ import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { UpdateCenter } from "./pages/UpdateCenter.js";
 import { FloorShell } from "./ui/FloorShell.js";
 import { FloorFooter } from "./ui/FloorFooter.js";
+import { WindowModeControl } from "./ui/WindowModeControl.js";
 import type { ScannerIndicator, UpdateIndicatorModel } from "./ui/StatusBar.js";
 
 interface ActiveShift {
@@ -199,6 +208,20 @@ export function App() {
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
   const lockdown = useMemo(() => createLockdownLifecycle({ dev: import.meta.env.DEV }), []);
+  const subscribeLockdown = useCallback(
+    (listener: () => void) => lockdown.subscribe(listener),
+    [lockdown],
+  );
+  const getLockdownSnapshot = useCallback(() => lockdown.getSnapshot(), [lockdown]);
+  const enterLockdown = useCallback(() => lockdown.enter(), [lockdown]);
+  const exitLockdown = useCallback(() => lockdown.exit(), [lockdown]);
+  const clearLockdownError = useCallback(() => lockdown.clearError(), [lockdown]);
+  const lockdownSnapshot = useSyncExternalStore(
+    subscribeLockdown,
+    getLockdownSnapshot,
+    getLockdownSnapshot,
+  );
+  const restoreLockdownAfterSetup = useRef(false);
   const registerFloorWorkBarrier = useCallback(
     (barrier: FloorWorkBarrier) => floorWorkRegistry.register(barrier),
     [floorWorkRegistry],
@@ -244,9 +267,19 @@ export function App() {
 
   useEffect(() => {
     if (!showSetup) return;
-    void lockdown.exit();
+    let cancelled = false;
+    restoreLockdownAfterSetup.current = false;
+    void (async () => {
+      await lockdown.whenSettled();
+      if (cancelled || lockdown.getSnapshot().mode !== "locked") return;
+      restoreLockdownAfterSetup.current = true;
+      await lockdown.exit();
+    })();
     return () => {
-      void lockdown.enter();
+      cancelled = true;
+      const shouldRestore = restoreLockdownAfterSetup.current;
+      restoreLockdownAfterSetup.current = false;
+      if (shouldRestore) void lockdown.enter();
     };
   }, [lockdown, showSetup]);
 
@@ -710,28 +743,47 @@ export function App() {
     }
   }
 
-  if (!config) {
+  const windowModeControl = (
+    <WindowModeControl
+      snapshot={lockdownSnapshot}
+      activeShift={shift !== null}
+      onEnter={enterLockdown}
+      onExit={exitLockdown}
+      onDismissError={clearLockdownError}
+    />
+  );
+
+  function withWindowChrome(content: ReactNode): ReactNode {
     return (
+      <div className="station-window-frame">
+        {content}
+        <div className="station-window-chrome">{windowModeControl}</div>
+      </div>
+    );
+  }
+
+  if (!config) {
+    return withWindowChrome(
       <main className="station-centered-screen">
         <h1 style={{ fontSize: "2rem" }}>{t("app.booting")}</h1>
-      </main>
+      </main>,
     );
   }
 
   if (legacyKeyedConfig && !legacyApiUrl) {
-    return (
+    return withWindowChrome(
       <main className="station-centered-screen">
         <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
           <p role="alert">{t("legacyIdentity.missingServer")}</p>
         </Card>
-      </main>
+      </main>,
     );
   }
 
   if (credentialRecovery) {
     if (credentialRecovery.phase === "ready") {
-      return (
+      return withWindowChrome(
         <Enrollment
           machineId={config.machineId}
           {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
@@ -740,10 +792,10 @@ export function App() {
           runConfigTransition={runEnrollmentConfigTransition}
           scanSource={scanSource}
           pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
-        />
+        />,
       );
     }
-    return (
+    return withWindowChrome(
       <main className="station-centered-screen">
         <Card style={{ minWidth: 480, padding: 32 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
@@ -766,18 +818,18 @@ export function App() {
             </Button>
           ) : null}
         </Card>
-      </main>
+      </main>,
     );
   }
 
   if (legacyIdentityState === "rejected") {
-    return (
+    return withWindowChrome(
       <main className="station-centered-screen">
         <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
           <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("legacyIdentity.title")}</h1>
           <p role="alert">{t("legacyIdentity.rejected")}</p>
         </Card>
-      </main>
+      </main>,
     );
   }
 
@@ -808,7 +860,7 @@ export function App() {
 
   if (stage === "pairing") {
     if (showSetup) {
-      return (
+      return withWindowChrome(
         <WorkstationSetup
           hw={tauriHardware}
           exec={tauriExecutor}
@@ -819,10 +871,10 @@ export function App() {
             setShowSetup(false);
             setSessionEpoch((epoch) => epoch + 1);
           }}
-        />
+        />,
       );
     }
-    return (
+    return withWindowChrome(
       <Enrollment
         machineId={config.machineId}
         {...(config.deviceId ? { expectedDeviceId: config.deviceId } : {})}
@@ -831,27 +883,25 @@ export function App() {
         onSetup={() => setShowSetup(true)}
         scanSource={scanSource}
         pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
-      />
+      />,
     );
   }
 
   if (stage === "login") {
-    return (
-      <>
-        <OperatorLogin
-          exec={tauriExecutor}
-          source={scanSource}
-          onAuthed={setOperator}
-          notice={legacyNotice}
-        />
-      </>
+    return withWindowChrome(
+      <OperatorLogin
+        exec={tauriExecutor}
+        source={scanSource}
+        onAuthed={setOperator}
+        notice={legacyNotice}
+      />,
     );
   }
 
   // Both floor-routing branches require an authenticated operator. Keep the
   // runtime guard beside the render boundary so future routing changes cannot
   // accidentally expose a floor screen with missing operator context.
-  if (!operator) return null;
+  if (!operator) return withWindowChrome(null);
 
   // stage === "floor" here, which requires `isEnrolled(config)` (apiKey +
   // serverUrl truthy) — the same condition the `client` memo above builds
@@ -885,6 +935,7 @@ export function App() {
   // since it cannot be proven alive without printing to it.
   return (
     <FloorShell
+      windowChrome={windowModeControl}
       stationName={config.deviceName ?? config.deviceId ?? config.machineId}
       lineName={config.lineName ?? null}
       operatorName={operator.name}

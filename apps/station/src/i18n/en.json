@@ -5,6 +5,19 @@
     "stationDescriptor": "Production line station",
     "stationPurpose": "Code verification, aggregation, and label printing on the production line."
   },
+  "windowMode": {
+    "exit": "Exit fullscreen",
+    "enter": "Return to fullscreen",
+    "pending": "Changing window mode…",
+    "confirmTitle": "Exit fullscreen?",
+    "confirmDetail": "Production continues and only the window mode changes. The operator, active shift, and queued work stay in place.",
+    "confirmAction": "Confirm exit fullscreen",
+    "cancel": "Cancel",
+    "exitError": "Could not leave fullscreen. Production continues; try again.",
+    "enterError": "Could not return to fullscreen. Production continues; try again.",
+    "dismiss": "Dismiss",
+    "dismissError": "Dismiss window mode error"
+  },
   "legacyIdentity": {
     "title": "Station service required",
     "resolving": "Updating station identity. Cached offline work remains available.",
