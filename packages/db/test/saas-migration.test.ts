@@ -39,11 +39,13 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0032_cute_frank_castle.sql"));
     await rm(join(legacyMigrations, "0033_common_magdalene.sql"));
     await rm(join(legacyMigrations, "0034_overconfident_harrier.sql"));
+    await rm(join(legacyMigrations, "0035_stormy_ser_duncan.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0033_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0034_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0035_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -54,7 +56,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0031_platform_auth_runtime_fields" &&
         entry.tag !== "0032_cute_frank_castle" &&
         entry.tag !== "0033_common_magdalene" &&
-        entry.tag !== "0034_overconfident_harrier",
+        entry.tag !== "0034_overconfident_harrier" &&
+        entry.tag !== "0035_stormy_ser_duncan",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
