@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -123,6 +123,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   invokeMock.mockClear();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -176,13 +177,24 @@ const operator: OperatorMirrorRecord = {
 
 const OPERATOR_LOGIN = "1001";
 const OPERATOR_PIN = "4242";
+const SECOND_OPERATOR_LOGIN = "1002";
+const SECOND_OPERATOR_PIN = "4343";
+const FIRST_KM = "0104600000000015215Ab1";
+const SECOND_KM = "0104600000000015215Ab2";
 
 /** Row shape `readOperatorsMirror` expects back from `plugin:sql|select`. */
-function operatorMirrorRow(pinHash: string) {
-  return {
-    operator_id: "op1",
+function operatorMirrorRow(
+  pinHash: string,
+  identity: { operatorId: string; name: string; login: string } = {
+    operatorId: "op1",
     name: "Ivan",
     login: OPERATOR_LOGIN,
+  },
+) {
+  return {
+    operator_id: identity.operatorId,
+    name: identity.name,
+    login: identity.login,
     role: "operator",
     pin_hash: pinHash,
     badge_hash: null,
@@ -375,12 +387,12 @@ function clickDigits(value: string) {
 }
 
 /** Drives the real badge-first OperatorLogin fallback to reach the floor stage. */
-async function signInAsOperator() {
+async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
   fireEvent.click(screen.getByRole("button", { name: "Use personnel number" }));
-  clickDigits(OPERATOR_LOGIN);
+  clickDigits(login);
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  clickDigits(OPERATOR_PIN);
+  clickDigits(pin);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
 }
@@ -474,6 +486,159 @@ async function renderAtFloorStage(
   );
   await signInAsOperator();
   return outbox;
+}
+
+async function renderActiveShiftForOperatorSwitch() {
+  lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
+  lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+  const firstPinHash = await hashSecret(OPERATOR_PIN);
+  const secondPinHash = await hashSecret(SECOND_OPERATOR_PIN);
+  const hardwareConfig: HardwareConfig = {
+    scanner: { port: "COM7", baud: 9600 },
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+  };
+  mockInvokeForFloor(firstPinHash, hardwareConfig);
+  const baseInvoke = invokeMock.getMockImplementation();
+  if (!baseInvoke) throw new Error("floor invoke mock is unavailable");
+
+  let releaseFirstJournal!: () => void;
+  let markFirstJournalStarted!: () => void;
+  const firstJournalGate = new Promise<void>((resolve) => {
+    releaseFirstJournal = resolve;
+  });
+  const firstJournalStarted = new Promise<void>((resolve) => {
+    markFirstJournalStarted = resolve;
+  });
+  const journalOperatorIds: string[] = [];
+  const outboxOperatorIds: string[] = [];
+  const postPaths: string[] = [];
+  let boxItemCount = 3;
+
+  invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+    if (cmd === "plugin:sql|select") {
+      const { query } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (/FROM operators_mirror\b/.test(query)) {
+        return Promise.resolve([
+          operatorMirrorRow(firstPinHash),
+          operatorMirrorRow(secondPinHash, {
+            operatorId: "op2",
+            name: "Maria",
+            login: SECOND_OPERATOR_LOGIN,
+          }),
+        ]);
+      }
+      if (query.includes("FROM boxes_mirror") && query.includes("closed_at IS NULL")) {
+        return Promise.resolve([
+          {
+            box_id: "box-open",
+            shift_id: "shift-1",
+            sscc: null,
+            opened_at: "2026-08-13T08:00:00.000Z",
+            closed_at: null,
+            item_count: boxItemCount,
+          },
+        ]);
+      }
+      if (query.includes("FROM boxes_mirror")) return Promise.resolve([]);
+      if (query.includes("product_mirror")) {
+        return Promise.resolve([
+          { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+        ]);
+      }
+      if (query.includes("FROM shift_mirror WHERE")) {
+        return Promise.resolve([
+          {
+            id: "shift-1",
+            status: "active",
+            mode: "aggregation",
+            counterparty_gln: null,
+            label_template_spec: null,
+            box_capacity: 10,
+            issuer_prefix: "460123456",
+            box_label_template_spec: null,
+          },
+        ]);
+      }
+      if (query.includes("FROM codes_mirror")) return Promise.resolve([]);
+    }
+    if (cmd === "plugin:sql|execute") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.includes("INSERT INTO codes_mirror")) boxItemCount += 1;
+      if (query.includes("INSERT INTO scan_events_mirror")) {
+        journalOperatorIds.push(values[5] as string);
+        if (journalOperatorIds.length === 1) {
+          markFirstJournalStarted();
+          return firstJournalGate;
+        }
+      }
+      if (query.includes("INSERT INTO outbox")) outboxOperatorIds.push(values[9] as string);
+    }
+    return baseInvoke(cmd, payload);
+  });
+
+  let scanListener: (raw: string) => void = () => {};
+  hardwareMock.onScan.mockImplementation(async (listener) => {
+    scanListener = listener;
+    return () => {
+      if (scanListener === listener) scanListener = () => {};
+    };
+  });
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      const method = init?.method ?? "GET";
+      if (method === "POST") postPaths.push(path);
+      if (path === "/shifts" && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "shift-1",
+                status: "planned",
+                mode: "aggregation",
+                productName: "Cola",
+                plannedQty: 10,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (path === "/shifts/shift-1/open" && method === "POST") {
+        return new Response(
+          JSON.stringify({ id: "shift-1", status: "active", mode: "aggregation" }),
+          { status: 200 },
+        );
+      }
+      if (path === "/station/scans" && method === "POST") {
+        return new Response(JSON.stringify({ applied: 0, alreadyApplied: false }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    }),
+  );
+
+  render(<App />);
+  await signInAsOperator();
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined());
+  await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("3 / 10"));
+
+  return {
+    emitScan(raw: string) {
+      scanListener(raw);
+    },
+    firstJournalStarted,
+    releaseFirstJournal,
+    journalOperatorIds,
+    outboxOperatorIds,
+    postPaths,
+  };
 }
 
 describe("nextStationView", () => {
@@ -688,6 +853,125 @@ describe("App", () => {
       expect(screen.getByText("Preparing the shift…")).toBeDefined();
       expect(screen.getByText("Ivan")).toBeDefined();
     } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("returns from an idle floor to badge login without clearing credentials or queued work", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
+      lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      const queued = mockInvokeForFloor(
+        pinHash,
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        [outboxRow(1)],
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (new URL(url).pathname === "/station/scans" && init?.method === "POST") {
+            throw new Error("keep durable outbox pending");
+          }
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+      expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
+      expect(queued).toHaveLength(1);
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("drains accepted local work, resumes the same shift and open box, and changes journal attribution", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Change operator?" })).getByRole("button", {
+          name: "Change operator",
+        }),
+      );
+
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByTestId("operator-switch-settling").textContent).toContain(
+        "Saving the current operation…",
+      );
+      floor.releaseFirstJournal();
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+
+      await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
+      expect(await screen.findByRole("button", { name: "Pause / finish" })).toBeDefined();
+      expect(screen.getByText("Maria")).toBeDefined();
+      await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
+      const counters = within(screen.getByRole("region", { name: "Accepted, Rejected" }));
+      expect(counters.getAllByRole("definition")[0]?.textContent).toBe("0");
+
+      act(() => floor.emitScan(SECOND_KM));
+      await waitFor(() => expect(floor.journalOperatorIds).toEqual(["op1", "op2"]));
+      expect(floor.outboxOperatorIds).toEqual(["op1", "op2"]);
+      expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
+      expect(counters.getAllByRole("definition")[0]?.textContent).toBe("1");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps the current operator and durable state recoverable when retirement times out", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      const destructiveBefore = invokeMock.mock.calls.filter(([cmd, payload]) => {
+        if (cmd === "clear_credential") return true;
+        if (cmd !== "plugin:sql|execute") return false;
+        const query = ((payload ?? {}) as { query?: string }).query ?? "";
+        return /^\s*DELETE FROM (outbox|codes_mirror|scan_events_mirror|boxes_mirror|box_exceptions_mirror)/.test(
+          query,
+        );
+      }).length;
+
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+      vi.useFakeTimers();
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Change operator?" })).getByRole("button", {
+          name: "Change operator",
+        }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_001);
+      });
+
+      expect(screen.getByText("Ivan")).toBeDefined();
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Could not change operator. The current operator and local work remain active.",
+      );
+      expect(screen.getByRole("button", { name: "Retry operator change" })).toBeDefined();
+      const destructiveAfter = invokeMock.mock.calls.filter(([cmd, payload]) => {
+        if (cmd === "clear_credential") return true;
+        if (cmd !== "plugin:sql|execute") return false;
+        const query = ((payload ?? {}) as { query?: string }).query ?? "";
+        return /^\s*DELETE FROM (outbox|codes_mirror|scan_events_mirror|boxes_mirror|box_exceptions_mirror)/.test(
+          query,
+        );
+      }).length;
+      expect(destructiveAfter).toBe(destructiveBefore);
+    } finally {
+      vi.useRealTimers();
       consoleErrorSpy.mockRestore();
     }
   });

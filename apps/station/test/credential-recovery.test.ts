@@ -3,7 +3,9 @@ import { describe, expect, it, vi } from "vitest";
 import {
   clearRejectedCredentialState,
   createFloorWorkRegistry,
+  FloorWorkBarrierTimeoutError,
   readSealedWorkSummary,
+  retireFloorWork,
 } from "../src/lib/credential-recovery.js";
 import {
   applyMigrations,
@@ -250,6 +252,51 @@ describe("credential rejection recovery", () => {
     await expect(readSealedWorkSummary(exec, [neverIdle], 5)).rejects.toThrow(
       "floor work barrier timed out",
     );
+  });
+
+  it("closes intake before waiting for accepted floor work", async () => {
+    const order: string[] = [];
+    const barrier = {
+      close: vi.fn(async () => {
+        order.push("close");
+      }),
+      idle: vi.fn(async () => {
+        order.push("idle");
+      }),
+    };
+
+    await retireFloorWork([barrier]);
+
+    expect(order[0]).toBe("close");
+  });
+
+  it("rejects a bounded retirement timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = retireFloorWork(
+        [{ close: () => new Promise<void>(() => {}), idle: async () => {} }],
+        50,
+      );
+      const assertion = expect(pending).rejects.toBeInstanceOf(FloorWorkBarrierTimeoutError);
+
+      await vi.advanceTimersByTimeAsync(51);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("normalizes a synchronous non-Error barrier failure", async () => {
+    const pending = retireFloorWork([
+      {
+        close: () => {
+          throw "close failed";
+        },
+        idle: async () => {},
+      },
+    ]);
+
+    await expect(pending).rejects.toEqual(new Error("close failed"));
   });
 
   it("keeps a StrictMode replacement registration when the simulated cleanup settles late", () => {

@@ -111,6 +111,34 @@ body,
   font: var(--floor-body);
 }
 
+.operator-switch-control {
+  display: grid;
+  max-width: min(520px, calc(100vw - 2 * var(--sp-3)));
+  gap: var(--sp-2);
+  justify-items: end;
+}
+
+.operator-switch-control__error {
+  display: flex;
+  max-width: 520px;
+  padding: var(--sp-2);
+  gap: var(--sp-2);
+  border: 1px solid var(--err-solid);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-2);
+  color: var(--fg-1);
+  font: var(--floor-body);
+  align-items: center;
+}
+
+.operator-switch-control__confirmation {
+  max-width: 760px;
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--floor-body);
+}
+
 .station-enrollment {
   display: grid;
   --control-keypad: 80px;
@@ -2037,6 +2065,23 @@ body,
 }
 
 .station-status-actions .window-mode-control__error > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.station-status-actions .operator-switch-control {
+  max-width: none;
+}
+
+.station-status-actions .operator-switch-control__error {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: stretch;
+}
+
+.station-status-actions .operator-switch-control__error > span {
   min-width: 0;
   overflow-wrap: anywhere;
 }

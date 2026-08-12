@@ -29,6 +29,7 @@ import {
   createFloorWorkRegistry,
   credentialGenerationIsCurrent,
   readSealedWorkSummary,
+  retireFloorWork,
   type CredentialGeneration,
   type CredentialRejectedEvent,
   type FloorWorkBarrier,
@@ -71,6 +72,7 @@ import { WorkScreen } from "./pages/WorkScreen.js";
 import { WorkstationSetup } from "./pages/WorkstationSetup.js";
 import { UpdateCenter } from "./pages/UpdateCenter.js";
 import { FloorShell } from "./ui/FloorShell.js";
+import { OperatorSwitchControl } from "./ui/OperatorSwitchControl.js";
 import { FloorFooter } from "./ui/FloorFooter.js";
 import { WindowModeControl } from "./ui/WindowModeControl.js";
 import type { ScannerIndicator, UpdateIndicatorModel } from "./ui/StatusBar.js";
@@ -206,6 +208,9 @@ export function App() {
   const [showSetup, setShowSetup] = useState(false);
   const [showConflicts, setShowConflicts] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
+  const [operatorSwitchState, setOperatorSwitchState] = useState<"idle" | "settling" | "failed">(
+    "idle",
+  );
   const [credentialRecovery, setCredentialRecovery] = useState<CredentialRecoveryState | null>(
     null,
   );
@@ -766,6 +771,22 @@ export function App() {
     }
   }
 
+  async function switchOperator(): Promise<void> {
+    setOperatorSwitchState("settling");
+    try {
+      await retireFloorWork(floorWorkRegistry.current());
+      setShowSetup(false);
+      setShowConflicts(false);
+      setShowUpdates(false);
+      if (!shift) setFloorView("select");
+      setOperator(null);
+      setOperatorSwitchState("idle");
+    } catch {
+      setOperatorSwitchState("failed");
+      throw new Error("operator switch did not settle");
+    }
+  }
+
   const windowModeControl = (
     <WindowModeControl
       snapshot={lockdownSnapshot}
@@ -941,6 +962,15 @@ export function App() {
       ? t("updates.indicatorAvailable", { version: updater.persisted.available.version })
       : t("updates.indicatorCurrent"),
   };
+  const operatorControl = (
+    <OperatorSwitchControl
+      activeShift={shift !== null}
+      pending={operatorSwitchState === "settling"}
+      error={operatorSwitchState === "failed"}
+      onSwitch={switchOperator}
+      onDismissError={() => setOperatorSwitchState("idle")}
+    />
+  );
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
   // shift is entered immediately (never blocked on the network), and the
@@ -961,6 +991,7 @@ export function App() {
   return (
     <FloorShell
       windowControl={windowModeControl}
+      operatorControl={operatorControl}
       stationName={config.deviceName ?? config.deviceId ?? config.machineId}
       lineName={config.lineName ?? null}
       operatorName={operator.name}
@@ -975,7 +1006,13 @@ export function App() {
       onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
     >
-      {showUpdates ? (
+      {operatorSwitchState === "settling" ? (
+        <main className="station-centered-screen" data-testid="operator-switch-settling">
+          <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
+            <p role="status">{t("operatorSwitch.pending")}</p>
+          </Card>
+        </main>
+      ) : showUpdates ? (
         <UpdateCenter
           controller={updater}
           activeShift={shift !== null}

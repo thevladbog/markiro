@@ -18,6 +18,17 @@
     "dismiss": "Dismiss",
     "dismissError": "Dismiss window mode error"
   },
+  "operatorSwitch": {
+    "action": "Change operator",
+    "pending": "Saving the current operation…",
+    "confirmTitle": "Change operator?",
+    "confirmDetail": "The current shift will remain open. All recorded operations stay saved on this station.",
+    "confirm": "Change operator",
+    "stay": "Stay",
+    "error": "Could not change operator. The current operator and local work remain active.",
+    "retry": "Retry",
+    "retryLabel": "Retry operator change"
+  },
   "legacyIdentity": {
     "title": "Station service required",
     "resolving": "Updating station identity. Cached offline work remains available.",
