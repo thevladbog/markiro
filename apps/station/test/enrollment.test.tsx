@@ -36,7 +36,9 @@ describe("Enrollment", () => {
     );
 
     expect(
-      screen.getByText("Code verification, aggregation, and label printing on the production line."),
+      screen.getByText(
+        "Code verification, aggregation, and label printing on the production line.",
+      ),
     ).toBeDefined();
     expect(screen.getByText("admin.markiro.app")).toBeDefined();
     expect(screen.getByRole("group", { name: "Pairing code keypad" })).toBeDefined();

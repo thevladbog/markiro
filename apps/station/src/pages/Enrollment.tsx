@@ -260,7 +260,8 @@ export function Enrollment({
     }
   }
 
-  const serviceMode = (state === "service" || (busy && serviceInFlight.current)) && !expectedDeviceId;
+  const serviceMode =
+    (state === "service" || (busy && serviceInFlight.current)) && !expectedDeviceId;
   const showRecoveryPanel = error !== null && !serviceMode;
 
   const status = busy ? <p role="status">{t("enroll.redeemingDetail")}</p> : null;
@@ -394,7 +395,9 @@ export function Enrollment({
         <h1 id="station-enrollment-title">{t("enroll.recoveryTitle")}</h1>
       </header>
       {errorNotice}
-      {requiresNewCode ? <p className="station-enrollment__recovery">{t("enroll.cabinetRecovery")}</p> : null}
+      {requiresNewCode ? (
+        <p className="station-enrollment__recovery">{t("enroll.cabinetRecovery")}</p>
+      ) : null}
       <div className="station-enrollment__actions station-enrollment__actions--recovery">
         {canRetry ? (
           <Button size="floor" onClick={() => void redeem()}>

@@ -64,6 +64,7 @@
 ### Task 1: Brand assets and deterministic Tauri icons
 
 **Files:**
+
 - Create: `apps/station/src/assets/markiro-logo-on-dark.svg`
 - Create: `apps/station/src/assets/markiro-app-icon.svg`
 - Create: `apps/station/src/ui/StationBrand.tsx`
@@ -72,6 +73,7 @@
 - Modify: `apps/station/src-tauri/tauri.conf.json`
 
 **Interfaces:**
+
 - Consumes: approved geometry from `apps/admin/src/assets/markiro-logo-on-dark.svg`.
 - Produces: `StationBrand({ descriptor, compact?, className? }): JSX.Element`; deterministic source `markiro-app-icon.svg`; complete Tauri desktop icon set.
 
@@ -132,9 +134,11 @@ export interface StationBrandProps {
 
 export function StationBrand({ descriptor, compact = false, className }: StationBrandProps) {
   return (
-    <div className={["station-brand", compact && "station-brand--compact", className]
-      .filter(Boolean)
-      .join(" ")}>
+    <div
+      className={["station-brand", compact && "station-brand--compact", className]
+        .filter(Boolean)
+        .join(" ")}
+    >
       <img src={logo} alt="Markiro Station" />
       {compact ? null : <span>{descriptor}</span>}
     </div>
@@ -178,6 +182,7 @@ git commit -m "feat(station): add branded application identity"
 ### Task 2: Launch-console pairing experience
 
 **Files:**
+
 - Modify: `apps/station/src/pages/Enrollment.tsx`
 - Modify: `apps/station/src/station.css`
 - Modify: `apps/station/src/i18n/ru.json`
@@ -186,6 +191,7 @@ git commit -m "feat(station): add branded application identity"
 - Modify: `apps/station/test/fixed-viewport-source.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `StationBrand`, existing `PinPad`, `redeemStationPairing`, `ScanSource`, and existing `EnrollmentProps`.
 - Produces: unchanged external `Enrollment(props): JSX.Element`; internal pure `normalizePairingKeyboardInput(current, event): string` only if extracting it improves direct tests.
 
@@ -194,7 +200,9 @@ git commit -m "feat(station): add branded application identity"
 Add tests that assert:
 
 ```ts
-expect(screen.getByText("Code verification, aggregation, and label printing on the production line.")).toBeDefined();
+expect(
+  screen.getByText("Code verification, aggregation, and label printing on the production line."),
+).toBeDefined();
 expect(screen.getByText("admin.markiro.app")).toBeDefined();
 expect(screen.getByRole("group", { name: "Pairing code keypad" })).toBeDefined();
 ```
@@ -289,11 +297,13 @@ git commit -m "feat(station): redesign pairing console"
 ### Task 3: Branded operator sign-in and stable action spacing
 
 **Files:**
+
 - Modify: `apps/station/src/pages/OperatorLogin.tsx`
 - Modify: `apps/station/src/station.css`
 - Modify: `apps/station/test/operator-login.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `StationBrand`, unchanged badge/login/PIN/search state machine.
 - Produces: unchanged `OperatorLogin(props): JSX.Element` with shared product framing.
 
@@ -339,6 +349,7 @@ git commit -m "feat(station): brand operator sign-in"
 ### Task 4: Observable lockdown lifecycle and global window-mode control
 
 **Files:**
+
 - Create: `apps/station/src/ui/WindowModeControl.tsx`
 - Create: `apps/station/test/window-mode-control.test.tsx`
 - Modify: `apps/station/src/lib/lockdown.ts`
@@ -351,6 +362,7 @@ git commit -m "feat(station): brand operator sign-in"
 - Modify: `apps/station/test/App.test.tsx`
 
 **Interfaces:**
+
 - Consumes: Tauri commands `enter_lockdown` and `exit_lockdown`, active shift truth `shift !== null`, `FullScreenDialog`, and `Button`.
 - Produces:
 
@@ -450,6 +462,7 @@ git commit -m "feat(station): add operator window mode control"
 ### Task 5: Correct and continuously verify the Windows pairing origin
 
 **Files:**
+
 - Create: `tools/station-release/verify-api-cors.mjs`
 - Create: `tools/station-release/test/verify-api-cors.test.mjs`
 - Modify: `apps/api/test/allowed-origins.test.ts`
@@ -462,6 +475,7 @@ git commit -m "feat(station): add operator window mode control"
 - Modify: `package.json`
 
 **Interfaces:**
+
 - Consumes: `VITE_STATION_API_URL=https://admin.markiro.app`; API CORS delegate; GitHub release workflow.
 - Produces:
 
@@ -498,10 +512,7 @@ assert.equal(url, "https://admin.markiro.app/station/pair");
 assert.equal(init.method, "OPTIONS");
 assert.equal(init.headers.Origin, "http://tauri.localhost");
 assert.equal(init.headers["Access-Control-Request-Method"], "POST");
-assert.equal(
-  init.headers["Access-Control-Request-Headers"],
-  "content-type,x-station-capabilities",
-);
+assert.equal(init.headers["Access-Control-Request-Headers"], "content-type,x-station-capabilities");
 ```
 
 Cover success, wrong ACAO, missing ACAO, non-204, unsafe/non-canonical API URL, and response bodies that contain a fake secret; thrown messages must not include the body.
@@ -563,11 +574,13 @@ git commit -m "fix(station): verify Windows pairing origin"
 ### Task 6: Integrated regression, runbooks, and beta acceptance handoff
 
 **Files:**
+
 - Modify: `docs/runbooks/station-beta-release.md`
 - Modify: `docs/hardware-acceptance-checklist.md`
 - Modify: `docs/acceptance/station-touch-workplace.md` only if recording a new executed browser matrix; do not mark Windows checks complete from CI.
 
 **Interfaces:**
+
 - Consumes: completed Tasks 1–5 and the existing manual Station beta release workflow.
 - Produces: review-ready branch and an explicit manual Windows acceptance record.
 
