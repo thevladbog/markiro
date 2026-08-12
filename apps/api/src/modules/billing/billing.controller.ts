@@ -42,7 +42,10 @@ export class BillingController {
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
   ) {
-    return this.billing.issue(req.platformPrincipal!, id);
+    return this.billing.issue(req.platformPrincipal!, id).then(async (invoice) => {
+      const documents = await this.documents.renderInvoice(id);
+      return { ...invoice, documents };
+    });
   }
 
   @Post(":id/document")
