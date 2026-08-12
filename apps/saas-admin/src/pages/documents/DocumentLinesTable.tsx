@@ -52,14 +52,14 @@ export function DocumentLinesTable({
   );
 
   return (
-    <div
-      className="document-lines-region"
-      role="region"
-      aria-label={t("documents.linesRegion")}
-      tabIndex={0}
-    >
+    <div className="document-lines-region">
       {lines.length > 0 ? <div className="document-lines__toolbar">{picker}</div> : null}
-      <div className="document-lines__scroll">
+      <div
+        className="document-lines__scroll"
+        role="region"
+        aria-label={t("documents.linesRegion")}
+        tabIndex={0}
+      >
         <table aria-label={t("documents.linesRegion")}>
           <thead>
             <tr>

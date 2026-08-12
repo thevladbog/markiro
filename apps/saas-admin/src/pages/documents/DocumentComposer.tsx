@@ -24,7 +24,8 @@ export interface DocumentComposerProps {
   loadingSources: boolean;
   submitting: boolean;
   submitError?: string;
-  onSubmit: (draft: DocumentDraft) => Promise<void>;
+  /** Resolve `false` when a handled submit failure leaves the draft open. */
+  onSubmit: (draft: DocumentDraft) => Promise<void | false>;
   onCancel: () => void;
 }
 
@@ -53,7 +54,7 @@ function validationMessages(
   t: (key: string) => string,
 ) {
   const messages: Record<string, string> = {};
-  Object.entries(validateDocumentDraft(draft)).forEach(([path, code]) => {
+  Object.entries(validateDocumentDraft(draft, kind)).forEach(([path, code]) => {
     messages[path] = t(`documents.validation.${code}`);
   });
   draft.lines.forEach((line) => {
@@ -64,11 +65,6 @@ function validationMessages(
     ) {
       messages[`lines.${line.id}.catalogVersionId`] = t(
         "documents.validation.published_catalog_version_required",
-      );
-    }
-    if (kind === "offer" && line.activationPolicy === "manual") {
-      messages[`lines.${line.id}.activationPolicy`] = t(
-        "documents.validation.offer_manual_activation_policy_unsupported",
       );
     }
   });
@@ -118,8 +114,8 @@ export function DocumentComposer({
     event.preventDefault();
     const nextErrors = validationMessages(draft, kind, catalog, t);
     if (Object.keys(nextErrors).length > 0 || submitting) return;
-    await onSubmit(draft);
-    guard.allowNextNavigation();
+    const outcome = await onSubmit(draft);
+    if (outcome !== false) guard.allowNextNavigation();
   };
 
   return (
@@ -136,6 +132,7 @@ export function DocumentComposer({
             tenants={tenants}
             value={draft.tenantId}
             loading={loadingSources}
+            disabled={submitting}
             {...(errors.tenantId ? { error: errors.tenantId } : {})}
             onChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
           />

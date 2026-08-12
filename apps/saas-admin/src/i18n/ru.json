@@ -409,6 +409,8 @@
       "vat_rate_must_be_between_0_and_10000": "Ставка НДС должна быть от 0 до 100%",
       "service_activation_policy_must_be_null": "Для услуги правило применения недоступно",
       "activation_policy_required": "Выберите правило применения",
+      "activation_policy_unsupported": "Выбранное правило применения не поддерживается",
+      "offer_addon_activation_policy_must_be_immediate": "Дополнение в предложении должно применяться сразу после оплаты",
       "published_catalog_version_required": "Версия каталога больше не опубликована",
       "offer_manual_activation_policy_unsupported": "Для предложения выберите автоматическое правило применения",
       "offer_activation_policy_unsupported": "Это правило применения недоступно для предложения"

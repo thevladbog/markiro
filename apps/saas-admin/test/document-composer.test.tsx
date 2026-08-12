@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ReactNode } from "react";
-import { createMemoryRouter, RouterProvider } from "react-router";
+import { createMemoryRouter, Link, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -112,6 +112,7 @@ function renderComposer(node: ReactNode) {
           </ThemeProvider>
         ),
       },
+      { path: "/next", element: <div>Следующий экран</div> },
     ],
     { initialEntries: ["/"] },
   );
@@ -151,11 +152,14 @@ describe("DocumentComposer", () => {
       />,
     );
 
-    expect(
-      screen
-        .getAllByRole("region", { name: "Позиции документа" })
-        .some((region) => region.getAttribute("tabindex") === "0"),
-    ).toBe(true);
+    const linesScrollRegion = screen
+      .getAllByRole("region", { name: "Позиции документа" })
+      .find((region) => region.classList.contains("document-lines__scroll"));
+    expect(linesScrollRegion).toBeTruthy();
+    if (!linesScrollRegion) throw new Error("named lines scroll region missing");
+    expect(linesScrollRegion.getAttribute("tabindex")).toBe("0");
+    linesScrollRegion.focus();
+    expect(document.activeElement).toBe(linesScrollRegion);
     expect(screen.getByText("Добавьте первую позицию из каталога")).toBeTruthy();
 
     await user.click(screen.getByRole("combobox", { name: "Тенант" }));
@@ -297,13 +301,21 @@ describe("DocumentComposer", () => {
           loadingSources={false}
           submitting={false}
           {...(submitError ? { submitError } : {})}
-          onSubmit={async () => setSubmitError("Конфликт версии каталога")}
+          onSubmit={async () => {
+            setSubmitError("Конфликт версии каталога");
+            return false;
+          }}
           onCancel={vi.fn()}
         />
       );
     }
 
-    renderComposer(<ServerErrorHarness />);
+    renderComposer(
+      <>
+        <Link to="/next">Перейти дальше</Link>
+        <ServerErrorHarness />
+      </>,
+    );
     const line = rowNamed("Базовый тариф");
     const policy = within(line).getByRole("combobox", {
       name: "Правило применения Базовый тариф",
@@ -327,6 +339,10 @@ describe("DocumentComposer", () => {
     );
     expect(policy.textContent).toContain("После текущей подписки");
     expect(document.querySelector('select:not([aria-hidden="true"])')).toBeNull();
+
+    await user.click(screen.getByRole("link", { name: "Перейти дальше" }));
+    expect(await screen.findByRole("alertdialog")).toBeTruthy();
+    expect(screen.queryByText("Следующий экран")).toBeNull();
   });
 
   it("shows a fixed immediate-after-payment policy for an offer add-on", () => {
@@ -373,5 +389,125 @@ describe("DocumentComposer", () => {
         name: "Правило применения Дополнительные линии",
       }),
     ).toBeNull();
+  });
+
+  it("blocks invalid offer policies with their translated errors", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn(async () => undefined);
+    const invalidOfferDraft: DocumentDraft = {
+      tenantId: tenants[0]!.id,
+      applicationMode: "automatic",
+      date: "",
+      lines: [
+        {
+          id: "invalid-offer-plan",
+          kind: "plan",
+          catalogVersionId: plan.id,
+          catalogItemCode: plan.catalogItemCode,
+          version: plan.version,
+          nameRu: plan.nameRu,
+          nameEn: plan.nameEn,
+          quantity: 1,
+          unit: plan.unit,
+          agreedUnitPrice: plan.unitPrice!,
+          vatRateBps: plan.vatRateBps!,
+          vatIncluded: true,
+          activationPolicy: "manual",
+        },
+        {
+          id: "invalid-offer-addon",
+          kind: "addon",
+          catalogVersionId: addon.id,
+          catalogItemCode: addon.catalogItemCode,
+          version: addon.version,
+          nameRu: addon.nameRu,
+          nameEn: addon.nameEn,
+          quantity: 1,
+          unit: addon.unit,
+          agreedUnitPrice: addon.unitPrice!,
+          vatRateBps: addon.vatRateBps!,
+          vatIncluded: false,
+          activationPolicy: "after_current",
+        },
+      ],
+    };
+
+    renderComposer(
+      <DocumentComposer
+        kind="offer"
+        initialDraft={invalidOfferDraft}
+        tenants={tenants}
+        catalog={catalog}
+        loadingSources={false}
+        submitting={false}
+        onSubmit={onSubmit}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getAllByText("Выбранное правило применения не поддерживается").length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText("Дополнение в предложении должно применяться сразу после оплаты").length,
+    ).toBeGreaterThan(0);
+    const submit = screen.getByRole("button", { name: "Создать черновик предложения" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+    await user.click(submit);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("locks tenant selection while submission is in flight", async () => {
+    const user = userEvent.setup();
+    const validDraft: DocumentDraft = {
+      tenantId: tenants[0]!.id,
+      applicationMode: "automatic",
+      date: "",
+      lines: [
+        {
+          id: "in-flight-plan",
+          kind: "plan",
+          catalogVersionId: plan.id,
+          catalogItemCode: plan.catalogItemCode,
+          version: plan.version,
+          nameRu: plan.nameRu,
+          nameEn: plan.nameEn,
+          quantity: 1,
+          unit: plan.unit,
+          agreedUnitPrice: plan.unitPrice!,
+          vatRateBps: plan.vatRateBps!,
+          vatIncluded: true,
+          activationPolicy: "immediate",
+        },
+      ],
+    };
+
+    function InFlightHarness() {
+      const [submitting, setSubmitting] = useState(false);
+      return (
+        <DocumentComposer
+          kind="invoice"
+          initialDraft={validDraft}
+          tenants={tenants}
+          catalog={catalog}
+          loadingSources={false}
+          submitting={submitting}
+          onSubmit={() => {
+            setSubmitting(true);
+            return new Promise<void>(() => undefined);
+          }}
+          onCancel={vi.fn()}
+        />
+      );
+    }
+
+    renderComposer(<InFlightHarness />);
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    const tenantPicker = screen.getByRole("combobox", { name: "Тенант" });
+    await waitFor(() => expect((tenantPicker as HTMLButtonElement).disabled).toBe(true));
+    await user.click(tenantPicker);
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(tenantPicker.textContent).toContain("Северный завод");
   });
 });

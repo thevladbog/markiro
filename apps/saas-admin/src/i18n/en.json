@@ -409,6 +409,8 @@
       "vat_rate_must_be_between_0_and_10000": "VAT must be between 0 and 100%",
       "service_activation_policy_must_be_null": "Services do not have an activation policy",
       "activation_policy_required": "Select an activation policy",
+      "activation_policy_unsupported": "The selected activation policy is unsupported",
+      "offer_addon_activation_policy_must_be_immediate": "Offer add-ons must activate immediately after payment",
       "published_catalog_version_required": "The catalog version is no longer published",
       "offer_manual_activation_policy_unsupported": "Select an automatic activation policy for an offer",
       "offer_activation_policy_unsupported": "This activation policy is unavailable for the offer"

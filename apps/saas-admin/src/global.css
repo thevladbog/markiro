@@ -1218,7 +1218,7 @@ textarea {
   background: var(--surface-card);
 }
 
-.document-lines-region:focus-visible {
+.document-lines__scroll:focus-visible {
   outline-offset: 3px;
 }
 
