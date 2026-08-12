@@ -74,7 +74,51 @@ const OFFER_DETAIL = {
   ],
 };
 
-function installOfferEditorApi({ offers = [] as unknown[], createStatus = 201 } = {}) {
+const LEGACY_OFFER_DETAIL = {
+  ...OFFER_DETAIL,
+  lines: [
+    {
+      id: "a5111111-1111-4111-8111-111111111111",
+      position: 1,
+      kind: "service",
+      catalogVersionId: null,
+      nameRu: "Архивная консультация",
+      nameEn: "Archived consulting",
+      quantity: 5,
+      unit: "час",
+      agreedUnitPrice: "4444.44",
+      vatRate: "10.00",
+      vatIncluded: true,
+      activationPolicy: null,
+      lineTotal: "22222.20",
+    },
+    {
+      id: "a6111111-1111-4111-8111-111111111111",
+      position: 2,
+      kind: "plan",
+      catalogVersionId: "a7111111-1111-4111-8111-111111111111",
+      nameRu: "Снятый с публикации тариф",
+      nameEn: "Retired plan",
+      quantity: 2,
+      unit: "месяц",
+      agreedUnitPrice: "5555.55",
+      vatRate: null,
+      vatIncluded: false,
+      activationPolicy: "after_current",
+      lineTotal: "11111.10",
+    },
+  ],
+};
+
+function installOfferEditorApi({
+  offers = [] as unknown[],
+  createStatus = 201,
+  offerDetail = OFFER_DETAIL,
+}: {
+  offers?: unknown[];
+  createStatus?: number;
+  offerDetail?: unknown;
+} = {}) {
   const requests: Array<{ url: string; method: string; body?: unknown }> = [];
   vi.stubGlobal(
     "fetch",
@@ -90,7 +134,7 @@ function installOfferEditorApi({ offers = [] as unknown[], createStatus = 201 } 
       if (url.endsWith("/api/platform/offers") && method === "GET")
         return jsonResponse(200, offers);
       if (url.endsWith(`/api/platform/offers/${OFFER_ID}`) && method === "GET")
-        return jsonResponse(200, OFFER_DETAIL);
+        return jsonResponse(200, offerDetail);
       if (url.includes("/api/platform/tenants?") && method === "GET")
         return jsonResponse(200, { items: [TENANT_LIST_ITEM], page: 1, limit: 100, total: 1 });
       if (url.endsWith("/api/platform/catalog/items") && method === "GET")
@@ -254,6 +298,57 @@ describe("offer editor routes", () => {
           quantity: 4,
           unit: "этап",
           agreedUnitPrice: "3333.33",
+          vatRateBps: null,
+          vatIncluded: false,
+          activationPolicy: null,
+        },
+      ],
+    });
+  });
+
+  it("copies catalog-less and retired offer snapshots into supported custom invoice lines", async () => {
+    const user = userEvent.setup();
+    const requests = installOfferEditorApi({
+      offers: [OFFER_SUMMARY],
+      offerDetail: LEGACY_OFFER_DETAIL,
+    });
+    renderSaasApp({ initialEntry: "/offers" });
+
+    await user.click(await screen.findByRole("button", { name: TENANT_ID }));
+    await user.click(screen.getByRole("link", { name: "Создать счёт" }));
+    expect(await screen.findByText("Архивная консультация")).toBeDefined();
+    expect(screen.getByText("Снятый с публикации тариф")).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+    await screen.findByText("Счёт создан");
+
+    const post = requests.find(
+      (request) => request.method === "POST" && request.url.endsWith("/api/platform/invoices"),
+    );
+    expect(post?.body).toEqual({
+      tenantId: TENANT_ID,
+      dueDate: null,
+      applicationMode: "automatic",
+      lines: [
+        {
+          kind: "custom",
+          catalogVersionId: null,
+          nameRu: "Архивная консультация",
+          nameEn: "Archived consulting",
+          quantity: 5,
+          unit: "час",
+          agreedUnitPrice: "4444.44",
+          vatRateBps: 1000,
+          vatIncluded: true,
+          activationPolicy: null,
+        },
+        {
+          kind: "custom",
+          catalogVersionId: null,
+          nameRu: "Снятый с публикации тариф",
+          nameEn: "Retired plan",
+          quantity: 2,
+          unit: "месяц",
+          agreedUnitPrice: "5555.55",
           vatRateBps: null,
           vatIncluded: false,
           activationPolicy: null,

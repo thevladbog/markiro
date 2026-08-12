@@ -375,7 +375,8 @@
     "kinds": {
       "plan": "Plan",
       "addon": "Add-on",
-      "service": "Service"
+      "service": "Service",
+      "custom": "Offer snapshot"
     },
     "fields": {
       "quantityNamed": "Quantity for {{name}}",

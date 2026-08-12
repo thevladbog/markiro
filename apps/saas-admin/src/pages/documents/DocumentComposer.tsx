@@ -59,6 +59,7 @@ function validationMessages(
   });
   draft.lines.forEach((line) => {
     if (
+      line.kind !== "custom" &&
       !catalog.some(
         (version) => version.id === line.catalogVersionId && version.status === "published",
       )

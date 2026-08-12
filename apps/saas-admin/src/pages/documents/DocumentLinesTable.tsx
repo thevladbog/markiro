@@ -101,23 +101,29 @@ export function DocumentLinesTable({
                       </span>
                       <span className="document-line__name">{line.nameRu}</span>
                       <span className="document-line__meta">
-                        {line.catalogItemCode} · v{line.version} · {line.unit}
+                        {line.catalogItemCode !== null && line.version !== null
+                          ? `${line.catalogItemCode} · v${line.version} · ${line.unit}`
+                          : line.unit}
                       </span>
                       {catalogError ? (
                         <span className="document-field-error">{catalogError}</span>
                       ) : null}
-                      <button
-                        type="button"
-                        className="document-line__separate"
-                        disabled={submitting || lines.length >= 100}
-                        aria-label={t("documents.actions.separateNamed", { name: line.nameRu })}
-                        onClick={() => {
-                          const version = catalog.find((item) => item.id === line.catalogVersionId);
-                          if (version) onAdd(version, true);
-                        }}
-                      >
-                        {t("documents.actions.separate")}
-                      </button>
+                      {line.kind !== "custom" ? (
+                        <button
+                          type="button"
+                          className="document-line__separate"
+                          disabled={submitting || lines.length >= 100}
+                          aria-label={t("documents.actions.separateNamed", { name: line.nameRu })}
+                          onClick={() => {
+                            const version = catalog.find(
+                              (item) => item.id === line.catalogVersionId,
+                            );
+                            if (version) onAdd(version, true);
+                          }}
+                        >
+                          {t("documents.actions.separate")}
+                        </button>
+                      ) : null}
                     </td>
                     <td>
                       <label className="document-line__field">
@@ -205,7 +211,7 @@ export function DocumentLinesTable({
                       )}
                     </td>
                     <td>
-                      {line.kind === "service" ? (
+                      {line.kind === "service" || line.kind === "custom" ? (
                         <span className="document-line__fixed-value">
                           {t("documents.policy.none")}
                         </span>

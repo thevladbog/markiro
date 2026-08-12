@@ -13,18 +13,30 @@ const invoiceSchema = z.object({
   paidAt: z.iso.datetime({ offset: true }).nullable().optional(),
 });
 const invoiceListSchema = z.object({ items: z.array(invoiceSchema) });
-const invoiceLineInputSchema = z.object({
-  kind: z.enum(["plan", "addon", "service"]),
-  catalogVersionId: z.uuid(),
-  nameRu: z.string().trim().min(1).max(300),
-  nameEn: z.string().trim().min(1).max(300),
-  quantity: z.number().int().positive(),
-  unit: z.string().trim().min(1).max(100),
-  agreedUnitPrice: moneySchema,
-  vatRateBps: z.number().int().min(0).max(10_000).nullable(),
-  vatIncluded: z.boolean(),
-  activationPolicy: z.enum(["immediate", "after_current", "manual"]).nullable(),
-});
+const invoiceLineInputSchema = z
+  .object({
+    kind: z.enum(["plan", "addon", "service", "custom"]),
+    catalogVersionId: z.uuid().nullable(),
+    nameRu: z.string().trim().min(1).max(300),
+    nameEn: z.string().trim().min(1).max(300),
+    quantity: z.number().int().positive(),
+    unit: z.string().trim().min(1).max(100),
+    agreedUnitPrice: moneySchema,
+    vatRateBps: z.number().int().min(0).max(10_000).nullable(),
+    vatIncluded: z.boolean(),
+    activationPolicy: z.enum(["immediate", "after_current", "manual"]).nullable(),
+  })
+  .superRefine((line, context) => {
+    if (line.kind === "custom" && line.catalogVersionId !== null) {
+      context.addIssue({
+        code: "custom",
+        message: "Custom lines cannot reference catalog versions",
+      });
+    }
+    if (line.kind !== "custom" && line.catalogVersionId === null) {
+      context.addIssue({ code: "custom", message: "Catalog lines require a catalog version" });
+    }
+  });
 const createInvoiceInputSchema = z.object({
   tenantId: z.string().min(1),
   dueDate: z.iso.date().nullable(),

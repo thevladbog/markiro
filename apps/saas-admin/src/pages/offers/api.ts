@@ -5,7 +5,7 @@ import type { CreateOfferInput } from "../documents/documentDraft.js";
 
 const moneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/);
 const nullableIsoDateSchema = z.iso.datetime({ offset: true }).nullable();
-const offerStatusSchema = z.enum(["draft", "published", "paid", "cancelled"]);
+const offerStatusSchema = z.enum(["draft", "published", "paid", "cancelled", "expired"]);
 
 const offerSummarySchema = z.object({
   id: z.uuid(),

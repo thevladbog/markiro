@@ -31,7 +31,7 @@ export function getSupportedActivationPolicies(
   documentKind: DocumentKind,
   lineKind: DocumentLineDraft["kind"],
 ): readonly ActivationPolicy[] {
-  if (lineKind === "service") return [];
+  if (lineKind === "service" || lineKind === "custom") return [];
   if (documentKind === "invoice") return INVOICE_ACTIVATION_POLICIES;
   return lineKind === "plan" ? OFFER_PLAN_ACTIVATION_POLICIES : [];
 }
@@ -194,7 +194,7 @@ export function validateDocumentDraft(
       (!Number.isInteger(line.vatRateBps) || line.vatRateBps < 0 || line.vatRateBps > 10_000)
     )
       errors[`${prefix}.vatRateBps`] = "vat_rate_must_be_between_0_and_10000";
-    if (line.kind === "service") {
+    if (line.kind === "service" || line.kind === "custom") {
       if (line.activationPolicy !== null)
         errors[`${prefix}.activationPolicy`] = "service_activation_policy_must_be_null";
     } else if (line.activationPolicy === null) {
@@ -238,7 +238,7 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
   const activationPolicy = requiredActivationPolicy("invoice", line);
   return {
     kind: line.kind,
-    catalogVersionId: line.catalogVersionId,
+    catalogVersionId: line.kind === "custom" ? null : requiredCatalogVersionId(line),
     nameRu: line.nameRu,
     nameEn: line.nameEn,
     quantity: line.quantity,
@@ -251,9 +251,10 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
 }
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
+  if (line.kind === "custom") throw new Error("custom_offer_line_unsupported");
   const common = {
     kind: line.kind,
-    catalogVersionId: line.catalogVersionId,
+    catalogVersionId: requiredCatalogVersionId(line),
     nameRu: line.nameRu,
     nameEn: line.nameEn,
     quantity: line.quantity,
@@ -280,7 +281,7 @@ function requiredActivationPolicy(
   documentKind: DocumentKind,
   line: DocumentLineDraft,
 ): ActivationPolicy | null {
-  if (line.kind === "service") {
+  if (line.kind === "service" || line.kind === "custom") {
     if (line.activationPolicy !== null) throw new Error("service_activation_policy_must_be_null");
     return null;
   }
@@ -297,6 +298,11 @@ function requiredActivationPolicy(
   )
     throw new Error("offer_addon_after_current_activation_policy_unsupported");
   throw new Error("activation_policy_unsupported");
+}
+
+function requiredCatalogVersionId(line: DocumentLineDraft): string {
+  if (line.catalogVersionId === null) throw new Error("catalog_version_required");
+  return line.catalogVersionId;
 }
 
 function toOfferActivationPolicy(policy: ActivationPolicy | null): "immediately" | "after_current" {

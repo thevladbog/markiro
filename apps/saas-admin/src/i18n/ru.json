@@ -375,7 +375,8 @@
     "kinds": {
       "plan": "Тариф",
       "addon": "Дополнение",
-      "service": "Услуга"
+      "service": "Услуга",
+      "custom": "Снимок предложения"
     },
     "fields": {
       "quantityNamed": "Количество {{name}}",

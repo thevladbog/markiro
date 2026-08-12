@@ -2,13 +2,14 @@ import type { CatalogVersionDto } from "../catalog/api.js";
 
 export type DocumentKind = "invoice" | "offer";
 export type ActivationPolicy = "immediate" | "after_current" | "manual";
+export type DocumentLineKind = "plan" | "addon" | "service" | "custom";
 
 export interface DocumentLineDraft {
   id: string;
-  kind: "plan" | "addon" | "service";
-  catalogVersionId: string;
-  catalogItemCode: string;
-  version: number;
+  kind: DocumentLineKind;
+  catalogVersionId: string | null;
+  catalogItemCode: string | null;
+  version: number | null;
   nameRu: string;
   nameEn: string;
   quantity: number;
@@ -38,7 +39,7 @@ export type DocumentDraftAction =
 
 export interface CreateInvoiceLineInput {
   kind: DocumentLineDraft["kind"];
-  catalogVersionId: string;
+  catalogVersionId: string | null;
   nameRu: string;
   nameEn: string;
   quantity: number;
@@ -57,7 +58,7 @@ export interface CreateInvoiceInput {
 }
 
 export interface CreateOfferLineInput {
-  kind: DocumentLineDraft["kind"];
+  kind: Exclude<DocumentLineDraft["kind"], "custom">;
   catalogVersionId: string;
   nameRu: string;
   nameEn: string;

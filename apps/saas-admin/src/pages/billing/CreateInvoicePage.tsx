@@ -38,12 +38,29 @@ function sourceDraft(
 ): DocumentDraft {
   const lines: DocumentLineDraft[] = source.lines.map((line) => {
     const version = catalog.find((candidate) => candidate.id === line.catalogVersionId);
+    if (!version) {
+      return {
+        id: `source-offer-${line.id}`,
+        kind: "custom",
+        catalogVersionId: null,
+        catalogItemCode: null,
+        version: null,
+        nameRu: line.nameRu,
+        nameEn: line.nameEn,
+        quantity: line.quantity,
+        unit: line.unit,
+        agreedUnitPrice: line.agreedUnitPrice,
+        vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
+        vatIncluded: line.vatIncluded,
+        activationPolicy: null,
+      };
+    }
     return {
       id: `source-offer-${line.id}`,
       kind: line.kind,
-      catalogVersionId: line.catalogVersionId ?? "",
-      catalogItemCode: version?.catalogItemCode ?? "source-offer",
-      version: version?.version ?? 1,
+      catalogVersionId: version.id,
+      catalogItemCode: version.catalogItemCode,
+      version: version.version,
       nameRu: line.nameRu,
       nameEn: line.nameEn,
       quantity: line.quantity,
