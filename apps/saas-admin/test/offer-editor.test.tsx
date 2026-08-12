@@ -125,6 +125,7 @@ describe("offer editor route", () => {
     await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
     await addPosition(user, "Дополнительная", "Дополнительная станция · addon-station · v1");
     await addPosition(user, "Внедрение", "Внедрение · service-implementation · v1");
+    await user.type(screen.getByLabelText("Срок действия"), "2026-09-15");
     await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
 
     expect(api.calls()).toEqual([
@@ -133,7 +134,7 @@ describe("offer editor route", () => {
         path: "/api/platform/offers",
         body: {
           tenantId: TENANT_ID,
-          expiresAt: null,
+          expiresAt: "2026-09-15",
           lines: [
             {
               kind: "plan",

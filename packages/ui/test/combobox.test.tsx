@@ -39,6 +39,7 @@ function renderCombobox(overrides: Partial<React.ComponentProps<typeof Combobox>
       placeholder="Select offer"
       searchPlaceholder="Search offers"
       emptyText="No offers"
+      loadingText="Loading offers…"
       {...overrides}
     />,
   );
@@ -110,6 +111,7 @@ describe("Combobox", () => {
         placeholder="Select offer"
         searchPlaceholder="Search offers"
         emptyText="No offers"
+        loadingText="Loading offers…"
       />,
     );
     await user.type(screen.getByRole("searchbox", { name: "Search offers" }), "missing");

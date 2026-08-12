@@ -1,4 +1,4 @@
-import { Alert, Button, Select } from "@markiro/ui";
+import { Alert, Button, Input, Select } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 
 import type { DocumentDraft, DocumentKind } from "./documentDraft.js";
@@ -11,6 +11,7 @@ export function DocumentSummary({
   submitting,
   submitError,
   onApplicationModeChange,
+  onDateChange,
   onCancel,
 }: {
   kind: DocumentKind;
@@ -20,6 +21,7 @@ export function DocumentSummary({
   submitting: boolean;
   submitError?: string;
   onApplicationModeChange: (mode: DocumentDraft["applicationMode"]) => void;
+  onDateChange: (date: string) => void;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
@@ -45,6 +47,12 @@ export function DocumentSummary({
           </div>
         </dl>
       </div>
+      <Input
+        type="date"
+        label={t(`documents.date.${kind}`)}
+        value={draft.date}
+        onChange={(event) => onDateChange(event.target.value)}
+      />
       {kind === "invoice" ? (
         <Select
           label={t("documents.applicationMode")}

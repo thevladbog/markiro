@@ -21,6 +21,7 @@ export interface ComboboxProps<TValue extends string = string> {
   placeholder: string;
   searchPlaceholder: string;
   emptyText: string;
+  loadingText: string;
   loading?: boolean;
   disabled?: boolean;
   error?: string;
@@ -60,6 +61,7 @@ export function Combobox<TValue extends string = string>({
   placeholder,
   searchPlaceholder,
   emptyText,
+  loadingText,
   loading = false,
   disabled = false,
   error,
@@ -208,7 +210,7 @@ export function Combobox<TValue extends string = string>({
             <div id={listboxId} className="mk-combobox__listbox" role="listbox" aria-label={label}>
               {loading ? (
                 <div className="mk-combobox__status" role="status">
-                  Loading offers…
+                  {loadingText}
                 </div>
               ) : groupedOptions.length === 0 ? (
                 <div className="mk-combobox__status">{emptyText}</div>

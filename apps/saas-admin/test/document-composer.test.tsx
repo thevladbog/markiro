@@ -142,6 +142,7 @@ describe("DocumentComposer", () => {
     const { props, container } = renderComposer();
 
     await selectCombobox(user, "Тенант", "sever", "Завод Север · sever-factory");
+    await user.type(screen.getByLabelText("Срок оплаты"), "2026-09-01");
     await selectCombobox(user, "Добавить позицию", "v3", "Базовый тариф · plan-basic · v3");
     await selectCombobox(user, "Добавить позицию", "plan-basic", "Базовый тариф · plan-basic · v3");
     expect((screen.getByLabelText("Количество Базовый тариф") as HTMLInputElement).value).toBe("2");
@@ -195,7 +196,7 @@ describe("DocumentComposer", () => {
     expect(props.onSubmit).toHaveBeenCalledWith({
       tenantId: tenant.id,
       applicationMode: "automatic",
-      date: "",
+      date: "2026-09-01",
       lines: [
         expect.objectContaining({
           nameRu: "Базовый тариф",

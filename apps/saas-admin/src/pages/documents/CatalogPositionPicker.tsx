@@ -38,6 +38,7 @@ export function CatalogPositionPicker({
         placeholder={t("documents.catalogPlaceholder")}
         searchPlaceholder={t("documents.catalogSearch")}
         emptyText={t("documents.catalogEmpty")}
+        loadingText={t("documents.catalogLoading")}
         loading={loading}
       />
       <Button

@@ -32,6 +32,7 @@ export function TenantPicker({
       placeholder={t("documents.tenantPlaceholder")}
       searchPlaceholder={t("documents.tenantSearch")}
       emptyText={t("documents.tenantEmpty")}
+      loadingText={t("documents.tenantLoading")}
       loading={loading}
       {...(error ? { error } : {})}
     />

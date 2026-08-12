@@ -159,6 +159,7 @@ export function DocumentComposer({
         onApplicationModeChange={(applicationMode) =>
           setDraft((current) => ({ ...current, applicationMode }))
         }
+        onDateChange={(date) => setDraft((current) => ({ ...current, date }))}
         onCancel={() => guard.requestProtectedAction(onCancel)}
       />
     </form>

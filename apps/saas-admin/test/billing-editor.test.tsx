@@ -135,6 +135,7 @@ describe("invoice editor route", () => {
     await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
     await addPosition(user, "Дополнительная", "Дополнительная станция · addon-station · v1");
     await addPosition(user, "Внедрение", "Внедрение · service-implementation · v1");
+    await user.type(screen.getByLabelText("Срок оплаты"), "2026-09-01");
     await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
 
     expect(api.calls()).toEqual([
@@ -143,7 +144,7 @@ describe("invoice editor route", () => {
         path: "/api/platform/invoices",
         body: {
           tenantId: TENANT_ID,
-          dueDate: null,
+          dueDate: "2026-09-01",
           applicationMode: "automatic",
           lines: [
             {
