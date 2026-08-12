@@ -178,7 +178,8 @@ jobs:
         run: |
           set -euo pipefail
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
-          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" push origin "HEAD:refs/heads/$candidate_ref"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
           printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_ENV"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease --target "$release_sha" --title "Markiro Station $version" --notes-file "$RUNNER_TEMP/station-staged/release-notes.md"
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-staged"/*
