@@ -47,7 +47,7 @@ import {
   type ShiftContextRow,
 } from "./lib/mirror.js";
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
-import { syncOperatorRoster } from "./lib/roster-sync.js";
+import { createOperatorRosterRefresher } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
@@ -189,7 +189,7 @@ export function App() {
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
-  const [, setBrowserOnline] = useState(() => navigator.onLine);
+  const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
   const [serverReachability, setServerReachability] = useState<ServerReachability>("checking");
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
   const [shiftContext, setShiftContext] = useState<ShiftContextRow | null>(null);
@@ -603,6 +603,10 @@ export function App() {
     verifiedClient,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
+  const refreshOperatorRoster = useMemo(() => {
+    if (!authenticatedClient || !credentialGeneration) return null;
+    return createOperatorRosterRefresher(authenticatedClient, tauriExecutor, credentialGeneration);
+  }, [authenticatedClient, credentialGeneration]);
 
   // One engine for the life of the app: the outbox belongs to the DEVICE, not
   // to a shift or an operator, so entering or leaving a shift must never stop
@@ -686,26 +690,26 @@ export function App() {
   // sign-in screen has someone to authenticate. Without this a freshly
   // enrolled station shows a PIN pad no PIN can ever satisfy.
   useEffect(() => {
-    if (!authenticatedClient || !credentialGeneration) return;
-    void syncOperatorRoster(authenticatedClient, tauriExecutor, credentialGeneration);
-  }, [authenticatedClient, credentialGeneration]);
+    if (!refreshOperatorRoster) return;
+    void refreshOperatorRoster();
+  }, [refreshOperatorRoster]);
 
   // Retry: the initial sync above runs exactly once, so a device that is
   // briefly offline at that moment would otherwise strand the operator at a
   // PIN pad no PIN can satisfy until the app is restarted. Re-running on
-  // every `online` event is a cheap one-shot retry (`syncOperatorRoster`
-  // never throws), not a polling loop. The sync engine's queue drain is a
-  // second, independent consumer of the same event — one listener, two
-  // reasons to nudge.
+  // every `online` event is a cheap one-shot retry, not a polling loop. The
+  // shared refresher coalesces this with startup or login-driven refreshes.
+  // The sync engine's queue drain is a second, independent consumer of the
+  // same event — one listener, two reasons to nudge.
   useEffect(() => {
-    if (!authenticatedClient || !credentialGeneration) return;
+    if (!refreshOperatorRoster) return;
     const retrySync = () => {
-      void syncOperatorRoster(authenticatedClient, tauriExecutor, credentialGeneration);
+      void refreshOperatorRoster();
       nudgeSync();
     };
     window.addEventListener("online", retrySync);
     return () => window.removeEventListener("online", retrySync);
-  }, [authenticatedClient, credentialGeneration, nudgeSync]);
+  }, [nudgeSync, refreshOperatorRoster]);
 
   async function refreshConfig() {
     await runConfigTransition(readConfig, publishConfig);
@@ -911,6 +915,8 @@ export function App() {
       <OperatorLogin
         exec={tauriExecutor}
         source={scanSource}
+        online={browserOnline}
+        {...(refreshOperatorRoster ? { refreshRoster: refreshOperatorRoster } : {})}
         onAuthed={setOperator}
         notice={legacyNotice}
       />,

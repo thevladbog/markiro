@@ -7,20 +7,33 @@ import { readOperatorsMirror } from "../lib/mirror.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { padShortOperatorLogin, verifyOperatorBadge, verifyOperatorPin } from "../lib/auth.js";
 import type { OperatorSearchResult } from "../lib/operator-search.js";
+import type { OperatorRosterSyncResult } from "../lib/roster-sync.js";
 import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
 import { StationBrand } from "../ui/StationBrand.js";
 
 export interface OperatorLoginProps {
   exec: SqlExecutor;
   source: ScanSource;
+  online: boolean;
+  refreshRoster?: () => Promise<OperatorRosterSyncResult>;
   onAuthed: (operator: OperatorMirrorRecord) => void;
   notice?: ReactNode;
 }
 
 export type LoginStage = "badge" | "login" | "pin" | "search";
+type AuthMessage = { tone: "info" | "error"; text: string } | null;
+type RefreshedLocalResult<T> =
+  { kind: "matched"; value: T } | { kind: "miss" } | { kind: "unavailable" };
 
 /** Badge-first fixed-viewport operator sign-in with bounded offline fallbacks. */
-export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginProps) {
+export function OperatorLogin({
+  exec,
+  source,
+  online,
+  refreshRoster,
+  onAuthed,
+  notice,
+}: OperatorLoginProps) {
   const { t } = useTranslation();
   const [stage, setStage] = useState<LoginStage>("badge");
   const [login, setLogin] = useState("");
@@ -29,13 +42,32 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [roster, setRoster] = useState<OperatorMirrorRecord[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<AuthMessage>(null);
   const [busy, setBusy] = useState(false);
   const authInFlight = useRef(false);
   const admitted = useRef(false);
   const mounted = useRef(true);
-  const live = useRef({ exec, onAuthed, t });
-  live.current = { exec, onAuthed, t };
+  const live = useRef({ exec, online, refreshRoster, onAuthed, stage, t });
+  live.current = { exec, online, refreshRoster, onAuthed, stage, t };
+
+  async function refreshAfterMiss<T>(
+    verifyLocal: () => Promise<T | null>,
+  ): Promise<RefreshedLocalResult<T>> {
+    const current = live.current;
+    if (!current.online || !current.refreshRoster) return { kind: "miss" };
+    if (mounted.current) {
+      setMessage({ tone: "info", text: current.t("login.refreshingRoster") });
+    }
+    const result = await current.refreshRoster();
+    if (result === "unavailable") {
+      if (mounted.current) {
+        setMessage({ tone: "error", text: current.t("login.rosterRefreshUnavailable") });
+      }
+      return { kind: "unavailable" };
+    }
+    const value = await verifyLocal();
+    return value ? { kind: "matched", value } : { kind: "miss" };
+  }
 
   useEffect(() => {
     mounted.current = true;
@@ -56,22 +88,30 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
     const stop = source.start((raw) => {
       if (!mounted.current || !currentSource || admitted.current || authInFlight.current) return;
       authInFlight.current = true;
-      setError(null);
+      setMessage(null);
       setBusy(true);
       void (async () => {
         try {
-          const operator = await verifyOperatorBadge(live.current.exec, raw);
+          let operator = await verifyOperatorBadge(live.current.exec, raw);
           if (!mounted.current || !currentSource) return;
           if (!operator) {
-            setError(live.current.t("login.badgeWrong"));
-            return;
+            const refreshed = await refreshAfterMiss(() =>
+              verifyOperatorBadge(live.current.exec, raw),
+            );
+            if (!mounted.current || !currentSource) return;
+            if (refreshed.kind === "unavailable") return;
+            if (refreshed.kind === "miss") {
+              setMessage({ tone: "error", text: live.current.t("login.badgeWrong") });
+              return;
+            }
+            operator = refreshed.value;
           }
           admitted.current = true;
           live.current.onAuthed(operator);
         } catch (err) {
           console.error("station: verifyOperatorBadge failed", err);
           if (mounted.current && currentSource) {
-            setError(live.current.t("login.badgeWrong"));
+            setMessage({ tone: "error", text: live.current.t("login.badgeWrong") });
           }
         } finally {
           authInFlight.current = false;
@@ -89,15 +129,32 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
     if (admitted.current || authInFlight.current) return;
     authInFlight.current = true;
     source.clearPendingInput?.();
-    setError(null);
+    setMessage(null);
     setBusy(true);
     setStage("search");
     try {
       const operators = await readOperatorsMirror(exec);
-      if (mounted.current) setRoster(operators);
+      if (!mounted.current) return;
+      setRoster(operators);
+      if (online && refreshRoster) {
+        setMessage({ tone: "info", text: t("login.refreshingRoster") });
+        void refreshRoster().then(async (result) => {
+          if (!mounted.current || live.current.stage !== "search") return;
+          if (result === "unavailable") {
+            setMessage({ tone: "error", text: live.current.t("login.rosterRefreshUnavailable") });
+            return;
+          }
+          const refreshed = await readOperatorsMirror(live.current.exec);
+          if (!mounted.current || live.current.stage !== "search") return;
+          setRoster(refreshed);
+          setMessage(null);
+        });
+      }
     } catch (err) {
       console.error("station: readOperatorsMirror failed", err);
-      if (mounted.current) setError(t("login.searchUnavailable"));
+      if (mounted.current) {
+        setMessage({ tone: "error", text: t("login.searchUnavailable") });
+      }
     } finally {
       authInFlight.current = false;
       if (mounted.current && !admitted.current) setBusy(false);
@@ -107,18 +164,20 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
   async function submit() {
     if (admitted.current || authInFlight.current) return;
     authInFlight.current = true;
-    setError(null);
+    setMessage(null);
     setBusy(true);
     try {
-      let operator: OperatorMirrorRecord | null;
-      try {
-        operator = await verifyOperatorPin(exec, login, pin);
-      } catch (err) {
-        // A failed boot migration is presented in the same reserved slot as
-        // any other failed credential check, never as an unhandled rejection.
-        console.error("station: verifyOperatorPin failed", err);
-        operator = null;
-      }
+      const verifyLocal = async () => {
+        try {
+          return await verifyOperatorPin(live.current.exec, login, pin);
+        } catch (err) {
+          // A failed boot migration is presented in the same reserved slot as
+          // any other failed credential check, never as an unhandled rejection.
+          console.error("station: verifyOperatorPin failed", err);
+          return null;
+        }
+      };
+      const operator = await verifyLocal();
       if (operator) {
         if (!mounted.current) return;
         admitted.current = true;
@@ -126,7 +185,16 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
         return;
       }
       if (!mounted.current) return;
-      setError(live.current.t("login.wrong"));
+      const refreshed = await refreshAfterMiss(verifyLocal);
+      if (!mounted.current) return;
+      if (refreshed.kind === "matched") {
+        admitted.current = true;
+        live.current.onAuthed(refreshed.value);
+        return;
+      }
+      if (refreshed.kind === "miss") {
+        setMessage({ tone: "error", text: live.current.t("login.wrong") });
+      }
       setPin("");
     } finally {
       authInFlight.current = false;
@@ -135,7 +203,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
   }
 
   function moveToPin(exactLogin: string, origin: "login" | "search", name: string | null) {
-    setError(null);
+    setMessage(null);
     setPin("");
     setLogin(exactLogin);
     setPinOrigin(origin);
@@ -146,7 +214,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
   function advanceLogin() {
     const exactLogin = padShortOperatorLogin(login);
     if (!exactLogin) {
-      setError(t("login.loginInvalid"));
+      setMessage({ tone: "error", text: t("login.loginInvalid") });
       return;
     }
     moveToPin(exactLogin, "login", null);
@@ -162,7 +230,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
     if (busy) return;
     source.setManualTextEntryActive?.(false);
     source.clearPendingInput?.();
-    setError(null);
+    setMessage(null);
     setPin("");
     if (stage === "pin") {
       setStage(pinOrigin);
@@ -204,13 +272,13 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
         aria-live="polite"
         style={{ minHeight: 64, overflow: "hidden" }}
       >
-        {error ? (
-          <Alert tone="error">
+        {message ? (
+          <Alert tone={message.tone}>
             <span
               className="operator-login__auth-message"
               style={{ font: "var(--floor-body)", fontSize: 18 }}
             >
-              {error}
+              {message.text}
             </span>
           </Alert>
         ) : null}
@@ -323,7 +391,7 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
               onClick={() => {
                 source.setManualTextEntryActive?.(false);
                 source.clearPendingInput?.();
-                setError(null);
+                setMessage(null);
                 setStage("login");
               }}
             >

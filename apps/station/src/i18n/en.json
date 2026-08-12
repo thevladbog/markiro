@@ -99,7 +99,9 @@
     "nameLabel": "Operator name",
     "nameHint": "Enter at least two letters",
     "nameEmpty": "No matching operators",
-    "searchUnavailable": "Operator list is temporarily unavailable"
+    "searchUnavailable": "Operator list is temporarily unavailable",
+    "refreshingRoster": "Refreshing operator list…",
+    "rosterRefreshUnavailable": "Could not refresh the operator list. Check the connection."
   },
   "shifts": {
     "title": "Shifts",

@@ -3,6 +3,8 @@ import type { StationClient } from "./api-client.js";
 import { credentialGenerationIsCurrent, type CredentialGeneration } from "./credential-recovery.js";
 import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
 
+export type OperatorRosterSyncResult = "updated" | "unavailable";
+
 /**
  * Downloads the tenant's operator roster (`GET /station/operators`) into the
  * local mirror. Runs during station initialization — right after the device has
@@ -28,13 +30,31 @@ export async function syncOperatorRoster(
   client: Pick<StationClient, "get">,
   exec: SqlExecutor,
   generation?: CredentialGeneration,
-): Promise<void> {
+): Promise<OperatorRosterSyncResult> {
   try {
     const { items } = await client.get<{ items: OperatorMirrorRecord[] }>("/station/operators");
     await replaceOperatorsMirror(exec, items, {
       ...(generation ? { isCurrent: () => credentialGenerationIsCurrent(generation) } : {}),
     });
-  } catch (err) {
-    console.error("station: operator roster sync failed", err);
+    if (generation && !credentialGenerationIsCurrent(generation)) return "unavailable";
+    return "updated";
+  } catch {
+    console.error("station: operator roster sync failed", { category: "operator_roster_sync" });
+    return "unavailable";
   }
+}
+
+export function createOperatorRosterRefresher(
+  client: Pick<StationClient, "get">,
+  exec: SqlExecutor,
+  generation?: CredentialGeneration,
+): () => Promise<OperatorRosterSyncResult> {
+  let inFlight: Promise<OperatorRosterSyncResult> | null = null;
+  return () => {
+    if (inFlight) return inFlight;
+    inFlight = syncOperatorRoster(client, exec, generation).finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
 }

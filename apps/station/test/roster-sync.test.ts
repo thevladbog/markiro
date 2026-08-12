@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, readOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
-import { syncOperatorRoster } from "../src/lib/roster-sync.js";
+import { createOperatorRosterRefresher, syncOperatorRoster } from "../src/lib/roster-sync.js";
 import {
   clearRejectedCredentialState,
   createCredentialGeneration,
@@ -35,7 +35,7 @@ describe("syncOperatorRoster", () => {
     await applyMigrations(exec);
     const get = vi.fn().mockResolvedValue({ items: [OPERATOR] });
 
-    await syncOperatorRoster({ get }, exec);
+    await expect(syncOperatorRoster({ get }, exec)).resolves.toBe("updated");
 
     expect(get).toHaveBeenCalledWith("/station/operators");
     const rows = await readOperatorsMirror(exec);
@@ -46,14 +46,16 @@ describe("syncOperatorRoster", () => {
   it("replaces the previous set so a removed operator stops authenticating", async () => {
     const exec = makeExec();
     await applyMigrations(exec);
-    await syncOperatorRoster(
-      {
-        get: vi.fn().mockResolvedValue({
-          items: [OPERATOR, { ...OPERATOR, operatorId: "op-2", login: "1043" }],
-        }),
-      },
-      exec,
-    );
+    await expect(
+      syncOperatorRoster(
+        {
+          get: vi.fn().mockResolvedValue({
+            items: [OPERATOR, { ...OPERATOR, operatorId: "op-2", login: "1043" }],
+          }),
+        },
+        exec,
+      ),
+    ).resolves.toBe("updated");
     expect(await readOperatorsMirror(exec)).toHaveLength(2);
 
     await syncOperatorRoster({ get: vi.fn().mockResolvedValue({ items: [OPERATOR] }) }, exec);
@@ -69,8 +71,29 @@ describe("syncOperatorRoster", () => {
 
     await expect(
       syncOperatorRoster({ get: vi.fn().mockRejectedValue(new Error("offline")) }, exec),
-    ).resolves.toBeUndefined();
+    ).resolves.toBe("unavailable");
     expect(await readOperatorsMirror(exec)).toHaveLength(1);
+  });
+
+  it("coalesces concurrent refresh callers onto one request", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    let resolve!: (value: { items: (typeof OPERATOR)[] }) => void;
+    const getCalls = vi.fn();
+    const get = <T>(_path: string) => {
+      getCalls();
+      return new Promise<T>((done) => {
+        resolve = (value) => done(value as T);
+      });
+    };
+    const refresh = createOperatorRosterRefresher({ get }, exec, createCredentialGeneration());
+
+    const first = refresh();
+    const second = refresh();
+
+    expect(getCalls).toHaveBeenCalledTimes(1);
+    resolve({ items: [OPERATOR] });
+    await expect(Promise.all([first, second])).resolves.toEqual(["updated", "updated"]);
   });
 
   it("cannot publish a roster GET that resolves after credential cleanup", async () => {

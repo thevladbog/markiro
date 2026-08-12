@@ -804,6 +804,50 @@ describe("App", () => {
     );
   });
 
+  it("coalesces startup and browser-online roster refreshes through one App refresher", async () => {
+    lockdownMock.start.mockReturnValue(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
+      if (cmd === "read_config") {
+        return Promise.resolve({
+          machine_id: "m1",
+          device_id: "device-1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        });
+      }
+      if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+      if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+      if (cmd === "plugin:sql|select") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    let resolveRoster!: (response: Response) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRoster = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveRoster(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    });
+  });
+
   it("keeps a successful Station API response authoritative after an offline browser hint", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {
@@ -834,10 +878,7 @@ describe("App", () => {
       }
       return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
     });
-    vi.stubGlobal(
-      "fetch",
-      fetchMock,
-    );
+    vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
     await signInAsOperator();
