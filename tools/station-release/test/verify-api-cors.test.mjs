@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { verifyStationCors } from "../verify-api-cors.mjs";
+import { STATION_PREFLIGHTS, verifyStationCors } from "../verify-api-cors.mjs";
 
 const FAILURE = "Station CORS verification failed";
 const STATION_ORIGIN = "http://tauri.localhost";
 const expected = [
   ["/station/pair", "POST", "content-type,x-station-capabilities"],
+  ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
@@ -14,6 +17,24 @@ const expected = [
   ["/products", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/products/gtin-check", "POST", "content-type,x-api-key,x-station-capabilities"],
 ];
+
+test("matches the authoritative API Station CORS surface", async () => {
+  const source = await readFile(
+    new URL("../../../apps/api/test/cors-station-surface.test.ts", import.meta.url),
+    "utf8",
+  );
+  const block = source.match(/const documentedStationSurface = \[([\s\S]*?)\] as const;/)?.[1];
+  assert.ok(block, "API Station CORS surface must remain declarative");
+  const apiSurface = [...block.matchAll(/\["(GET|POST)", "([^"]+)"\]/g)].map(([, method, path]) => [
+    path.replace("/shift-1/", "/cors-probe/"),
+    method,
+  ]);
+
+  assert.deepEqual(
+    STATION_PREFLIGHTS.map(({ path, method }) => [path, method]).toSorted(),
+    apiSurface.toSorted(),
+  );
+});
 
 function response(status, acao, body = "", { allowHeaders, allowMethods } = {}) {
   const headers = acao === undefined ? {} : { "Access-Control-Allow-Origin": acao };
