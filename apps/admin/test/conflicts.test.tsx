@@ -304,9 +304,14 @@ describe("ConflictsPage", () => {
     expect(filters?.getAttribute("aria-label")).toBe("Конфликты");
     expect(within(filters!).getByRole("combobox", { name: "Смена" })).toBeDefined();
     expect(within(filters!).getByRole("combobox", { name: "Статус" })).toBeDefined();
-    expect(filters?.textContent).toContain(
+    const shiftHint = filters?.querySelector<HTMLElement>(".mk-conflicts-filters__hint");
+    expect(shiftHint?.textContent).toContain(
       "Показывает конфликты, где скан этой смены был вытеснён",
     );
+    expect(shiftHint?.id).toBeTruthy();
+    expect(
+      within(filters!).getByRole("combobox", { name: "Смена" }).getAttribute("aria-describedby"),
+    ).toContain(shiftHint?.id);
   });
 
   it("shows a Reviewed badge instead of the review action for an already-reviewed conflict", async () => {

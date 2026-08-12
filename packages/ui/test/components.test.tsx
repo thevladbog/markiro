@@ -356,6 +356,39 @@ describe("Select", () => {
     );
   });
 
+  it("keeps external descriptions alongside the active error for custom and native selects", () => {
+    render(
+      <>
+        <p id="shipping-context">Select a product approved for shipping.</p>
+        <Select
+          label="Custom product"
+          options={["Milk"]}
+          hint="This hint is hidden by the error"
+          error="Choose a product"
+          aria-describedby="shipping-context"
+        />
+        <Select
+          native
+          label="Native product"
+          options={["Milk"]}
+          hint="This hint is hidden by the error"
+          error="Choose a product"
+          aria-describedby="shipping-context"
+        />
+      </>,
+    );
+
+    for (const trigger of screen.getAllByRole("combobox")) {
+      const describedBy = trigger.getAttribute("aria-describedby")?.split(" ") ?? [];
+      expect(describedBy).toContain("shipping-context");
+      expect(describedBy).toHaveLength(2);
+      expect(
+        document.getElementById(describedBy.find((id) => id !== "shipping-context")!)?.textContent,
+      ).toBe("Choose a product");
+    }
+    expect(screen.queryByText("This hint is hidden by the error")).toBeNull();
+  });
+
   it("opens a custom option overlay and calls onValueChange when an option is clicked", async () => {
     const user = userEvent.setup();
     const onValueChange = vi.fn();

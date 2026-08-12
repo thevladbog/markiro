@@ -31,6 +31,7 @@ export interface SelectProps<TValue extends string = string> {
   style?: CSSProperties;
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  "aria-describedby"?: string;
 }
 
 function normalizeOption<TValue extends string>(option: SelectOption<TValue>) {
@@ -55,6 +56,7 @@ export function Select<TValue extends string = string>({
   id,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
 }: SelectProps<TValue>) {
   const overlayPortalContainer = useOverlayPortalContainer();
   const [focus, setFocus] = useState(false);
@@ -62,7 +64,7 @@ export function Select<TValue extends string = string>({
   const selectId = id ?? `mk-select-${autoId}`;
   const hintId = hint ? `${selectId}-hint` : undefined;
   const errorId = error ? `${selectId}-error` : undefined;
-  const describedBy = errorId ?? hintId;
+  const describedBy = [ariaDescribedBy, errorId ?? hintId].filter(Boolean).join(" ") || undefined;
   const normalizedOptions = options.map(normalizeOption);
   const emptyOptionLabel = normalizedOptions.find((option) => option.value === "")?.label;
   const itemOptions = normalizedOptions.map((option) =>

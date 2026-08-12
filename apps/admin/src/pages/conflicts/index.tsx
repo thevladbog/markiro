@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
@@ -36,6 +36,7 @@ export function ConflictsPage() {
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const shiftHintId = useId();
   // Defaults to "unreviewed": without this, the list keeps every conflict
   // ever detected, reviewed or not, forever -- so "mark reviewed" changed
   // only a badge and the list never got shorter. See the spec's testing
@@ -135,9 +136,12 @@ export function ConflictsPage() {
             label={t("pages.conflicts.filters.shiftLabel")}
             options={shiftFilterOptions}
             value={shiftFilter}
+            aria-describedby={shiftHintId}
             onValueChange={setShiftFilter}
           />
-          <p className="mk-conflicts-filters__hint">{t("pages.conflicts.filters.shiftHint")}</p>
+          <p id={shiftHintId} className="mk-conflicts-filters__hint">
+            {t("pages.conflicts.filters.shiftHint")}
+          </p>
         </div>
         <div className="mk-conflicts-filters__field">
           <Select
