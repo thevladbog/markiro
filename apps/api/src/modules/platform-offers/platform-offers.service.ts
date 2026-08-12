@@ -135,18 +135,78 @@ export class PlatformOffersService {
   }
 
   async publish(actor: PlatformPrincipal, id: string) {
-    const [offer] = await this.db
-      .update(schema.commercialOffers)
-      .set({
-        status: "published",
-        publishedAt: new Date(),
-        publishedByPlatformUserId: actor.userId,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
-      .returning();
-    if (!offer) throw new ConflictException({ code: "offer_not_draft" });
-    return this.detail(actor, id);
+    return this.db.transaction(async (tx) => {
+      const [draft] = await tx
+        .select()
+        .from(schema.commercialOffers)
+        .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
+        .for("update");
+      if (!draft) throw new ConflictException({ code: "offer_not_draft" });
+      const [seller] = await tx
+        .select()
+        .from(schema.operatorBillingProfiles)
+        .where(eq(schema.operatorBillingProfiles.isCurrent, true))
+        .limit(1);
+      const [buyer] = await tx
+        .select()
+        .from(schema.tenantBillingProfiles)
+        .where(
+          and(
+            eq(schema.tenantBillingProfiles.tenantId, draft.tenantId),
+            eq(schema.tenantBillingProfiles.isCurrent, true),
+          ),
+        )
+        .limit(1);
+      if (!seller || !buyer) throw new ConflictException({ code: "billing_profile_required" });
+      const [latest] = await tx
+        .select({ number: schema.commercialOffers.number })
+        .from(schema.commercialOffers)
+        .where(
+          eq(
+            schema.commercialOffers.number,
+            `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`,
+          ),
+        )
+        .limit(1);
+      const number = latest
+        ? `KP-${new Date().getFullYear()}-${draft.id.slice(0, 8).toUpperCase()}`
+        : `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`;
+      const [updated] = await tx
+        .update(schema.commercialOffers)
+        .set({
+          status: "published",
+          number,
+          publishedAt: new Date(),
+          publishedByPlatformUserId: actor.userId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
+        .returning();
+      if (!updated) throw new ConflictException({ code: "offer_not_draft" });
+      const lines = await tx
+        .select()
+        .from(schema.commercialOfferLines)
+        .where(eq(schema.commercialOfferLines.offerId, id))
+        .orderBy(asc(schema.commercialOfferLines.position));
+      const terms = normalizeOfferTerms(updated.termsMarkdown);
+      await tx.insert(schema.commercialOfferPrintSnapshots).values({
+        tenantId: updated.tenantId,
+        offerId: updated.id,
+        revision: updated.revision,
+        number,
+        publishedAt: updated.publishedAt ?? new Date(),
+        expiresAt: updated.expiresAt,
+        sellerSnapshot: seller,
+        buyerSnapshot: buyer,
+        linesSnapshot: lines,
+        subtotal: updated.total,
+        vatTotal: "0.00",
+        total: updated.total,
+        termsMarkdown: terms.markdown,
+        termsHtml: terms.html,
+      });
+      return this.detailWith(tx, updated.tenantId, updated.id);
+    });
   }
 
   async cancel(actor: PlatformPrincipal, id: string) {
