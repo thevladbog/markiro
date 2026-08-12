@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import type { ServerReachability } from "../lib/api-client.js";
 
 /** What the station can honestly say about its scanner. */
 export type ScannerIndicator = "keyboard" | "connected" | "disconnected";
@@ -13,11 +14,11 @@ export interface UpdateIndicatorModel {
 }
 
 export function floorConnectivityState(
-  online: boolean,
+  serverReachable: boolean,
   syncStuck: boolean,
 ): FloorConnectivityState {
   if (syncStuck) return "sync-stuck";
-  return online ? "online" : "offline";
+  return serverReachable ? "online" : "offline";
 }
 
 export interface StatusBarProps {
@@ -25,7 +26,7 @@ export interface StatusBarProps {
   lineName: string | null;
   operatorName: string;
   shiftLabel: string | null;
-  online: boolean;
+  serverReachability: ServerReachability;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
   /** Scans queued on this device, not yet accepted by the server. */
@@ -50,7 +51,7 @@ export function StatusBar({
   lineName,
   operatorName,
   shiftLabel,
-  online,
+  serverReachability,
   scanner,
   printerConfigured,
   syncPending,
@@ -75,7 +76,13 @@ export function StatusBar({
       : scanner === "disconnected"
         ? t("shell.scannerDisconnected")
         : t("shell.scannerKeyboard");
-  const connectivityState = floorConnectivityState(online, syncStuck);
+  const connectivityState = floorConnectivityState(serverReachability === "reachable", syncStuck);
+  const serverLabel =
+    serverReachability === "checking"
+      ? t("shell.serverChecking")
+      : serverReachability === "reachable"
+        ? t("shell.serverAvailable")
+        : t("shell.serverUnavailable");
   return (
     <header
       className="station-status-bar"
@@ -94,10 +101,14 @@ export function StatusBar({
       </dl>
       <dl className="station-status-group station-status-group--sync">
         <StatusValue
-          label={t("shell.network")}
-          value={online ? t("shell.online") : t("shell.offline")}
-          tone={online ? "ok" : "warn"}
-          testId="network-status"
+          label={t("shell.server")}
+          value={serverLabel}
+          {...(serverReachability === "reachable"
+            ? { tone: "ok" as const }
+            : serverReachability === "unreachable"
+              ? { tone: "warn" as const }
+              : {})}
+          testId="server-status"
         />
         <StatusValue
           label={t("shell.sync")}

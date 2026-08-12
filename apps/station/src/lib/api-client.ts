@@ -14,6 +14,8 @@ export class StationApiError extends Error {
   }
 }
 
+export type ServerReachability = "checking" | "reachable" | "unreachable";
+
 export function isStationCredentialRejection(error: unknown): error is StationApiError {
   return error instanceof StationApiError && error.status === 401;
 }
@@ -25,6 +27,8 @@ export interface StationClient {
 }
 
 export interface StationClientOptions {
+  /** Reports whether a Station API response was received for a request. */
+  onReachabilityChange?: (state: Exclude<ServerReachability, "checking">) => void;
   /** Present only for the normal, durably enrolled authenticated client. */
   credentialBoundary?: {
     machineId: string;
@@ -132,6 +136,7 @@ export function createStationClient(
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let receivedResponse = false;
     try {
       const res = await fetch(`${base}${path}`, {
         method,
@@ -143,10 +148,13 @@ export function createStationClient(
         signal: controller.signal,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
+      receivedResponse = true;
+      options.onReachabilityChange?.("reachable");
       if (!res.ok) throw new StationApiError(res.status, await readError(res));
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
+      if (!receivedResponse) options.onReachabilityChange?.("unreachable");
       if (credentialBoundary && isStationCredentialRejection(error)) {
         await rejectCredentialGeneration(
           {

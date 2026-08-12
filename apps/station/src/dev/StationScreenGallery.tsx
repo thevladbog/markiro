@@ -64,7 +64,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         lineName={copy.line}
         operatorName={copy.operator}
         shiftLabel={copy.shift}
-        online={syncVariant !== "offline"}
+        serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}

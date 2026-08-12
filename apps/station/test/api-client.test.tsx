@@ -19,12 +19,16 @@ describe("createStationClient", () => {
         headers: { "Content-Type": "application/json" },
       }),
     );
-    const client = createStationClient({
-      machineId: "m1",
-      tenantId: "org_1",
-      apiKey: "mk_key",
-      serverUrl: "http://localhost:3000",
-    });
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      {
+        machineId: "m1",
+        tenantId: "org_1",
+        apiKey: "mk_key",
+        serverUrl: "http://localhost:3000",
+      },
+      { onReachabilityChange },
+    );
 
     await client.get("/shifts");
 
@@ -34,6 +38,32 @@ describe("createStationClient", () => {
     expect((init!.headers as Record<string, string>)["x-station-capabilities"]).toBe(
       "subscription-state-v1,station-recovery-v1",
     );
+    expect(onReachabilityChange).toHaveBeenCalledOnce();
+    expect(onReachabilityChange).toHaveBeenLastCalledWith("reachable");
+  });
+
+  it("reports an HTTP error as reachable before throwing the API error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("forbidden", { status: 403 }));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    await expect(client.get("/shifts")).rejects.toBeInstanceOf(StationApiError);
+    expect(onReachabilityChange).toHaveBeenLastCalledWith("reachable");
+  });
+
+  it("reports fetch and timeout rejection as unreachable", async () => {
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new TypeError("network"));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    await expect(client.get("/shifts")).rejects.toBeDefined();
+    expect(onReachabilityChange).toHaveBeenLastCalledWith("unreachable");
   });
 
   it("throws with the server message on non-2xx", async () => {

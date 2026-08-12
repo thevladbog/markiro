@@ -39,7 +39,7 @@ const status = {
   lineName: "Packing A",
   operatorName: "Alex Morgan",
   shiftLabel: "Shift 17",
-  online: true,
+  serverReachability: "reachable" as const,
   scanner: "connected" as const,
   printerConfigured: true,
   syncPending: 2,

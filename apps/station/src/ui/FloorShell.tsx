@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@markiro/ui";
+import type { ServerReachability } from "../lib/api-client.js";
 import { StatusBar, type ScannerIndicator, type UpdateIndicatorModel } from "./StatusBar.js";
 
 export interface FloorShellProps {
@@ -8,7 +9,7 @@ export interface FloorShellProps {
   lineName: string | null;
   operatorName: string;
   shiftLabel: string | null;
-  online: boolean;
+  serverReachability: ServerReachability;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
   syncPending: number;
@@ -29,7 +30,7 @@ export function FloorShell({
   lineName,
   operatorName,
   shiftLabel,
-  online,
+  serverReachability,
   scanner,
   printerConfigured,
   syncPending,
@@ -53,7 +54,7 @@ export function FloorShell({
         lineName={lineName}
         operatorName={operatorName}
         shiftLabel={shiftLabel}
-        online={online}
+        serverReachability={serverReachability}
         scanner={scanner}
         printerConfigured={printerConfigured}
         syncPending={syncPending}

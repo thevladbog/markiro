@@ -17,7 +17,12 @@ import {
   writeConfig,
   type StationConfig,
 } from "./lib/config.js";
-import { createStationClient, StationApiError, type StationClient } from "./lib/api-client.js";
+import {
+  createStationClient,
+  StationApiError,
+  type ServerReachability,
+  type StationClient,
+} from "./lib/api-client.js";
 import {
   clearRejectedCredentialState,
   createCredentialGeneration,
@@ -184,7 +189,8 @@ export function App() {
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
-  const [online, setOnline] = useState(() => navigator.onLine);
+  const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
+  const [serverReachability, setServerReachability] = useState<ServerReachability>("checking");
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
   const [shiftContext, setShiftContext] = useState<ShiftContextRow | null>(null);
   // Threaded into WorkScreen's box UI (Task 13 review, Finding 1) --
@@ -230,6 +236,10 @@ export function App() {
     configRef.current = next;
     setConfig(next);
   }, []);
+  const reportServerReachability = useCallback(
+    (state: Exclude<ServerReachability, "checking">) => setServerReachability(state),
+    [],
+  );
   const runConfigTransition: RunConfigTransition = useCallback(
     async <T,>(transition: () => Promise<T>, publish: (value: T) => void): Promise<T> => {
       const generation = configTransitions.current.begin();
@@ -436,8 +446,11 @@ export function App() {
   }, [publishConfig]);
 
   useEffect(() => {
-    const goOnline = () => setOnline(true);
-    const goOffline = () => setOnline(false);
+    const goOnline = () => setBrowserOnline(true);
+    const goOffline = () => {
+      setBrowserOnline(false);
+      setServerReachability("unreachable");
+    };
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);
     return () => {
@@ -569,6 +582,7 @@ export function App() {
       return null;
     }
     return createStationClient(config, {
+      onReachabilityChange: reportServerReachability,
       credentialBoundary: {
         machineId: config.machineId,
         generation: credentialGeneration,
@@ -585,6 +599,7 @@ export function App() {
     config?.serverUrl,
     credentialGeneration,
     onCredentialRejected,
+    reportServerReachability,
     verifiedClient,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
@@ -944,7 +959,7 @@ export function App() {
       lineName={config.lineName ?? null}
       operatorName={operator.name}
       shiftLabel={shift ? (shiftContext?.productName ?? shift.id) : null}
-      online={online}
+      serverReachability={browserOnline ? serverReachability : "unreachable"}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
       syncPending={syncState.pending}

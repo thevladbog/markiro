@@ -15,11 +15,31 @@ describe("StatusBar", () => {
     shiftLabel: "Shift 17",
   };
 
+  it.each([
+    ["checking", "Checking"],
+    ["reachable", "Available"],
+    ["unreachable", "No connection"],
+  ] as const)("shows %s server reachability as %s", (serverReachability, expected) => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability={serverReachability}
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+
+    expect(screen.getByTestId("server-status").textContent).toBe(expected);
+  });
+
   it("shows each live context and operational status exactly once", () => {
     render(
       <StatusBar
         {...context}
-        online={false}
+        serverReachability="unreachable"
         scanner="connected"
         printerConfigured
         syncPending={5}
@@ -32,7 +52,7 @@ describe("StatusBar", () => {
     expect(screen.getAllByText("Packing A")).toHaveLength(1);
     expect(screen.getAllByText("Alex Morgan")).toHaveLength(1);
     expect(screen.getAllByText("Shift 17")).toHaveLength(1);
-    expect(screen.getAllByText("Offline")).toHaveLength(1);
+    expect(screen.getAllByText("No connection")).toHaveLength(1);
     expect(screen.getAllByText("Connected")).toHaveLength(1);
     expect(screen.getAllByText("Configured")).toHaveLength(1);
     expect(screen.getAllByText("5")).toHaveLength(1);
@@ -43,7 +63,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -64,7 +84,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -81,7 +101,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -96,7 +116,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="connected"
         printerConfigured
         syncPending={0}
@@ -111,7 +131,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="disconnected"
         printerConfigured
         syncPending={0}
@@ -126,7 +146,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -141,7 +161,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured
         syncPending={0}
@@ -156,7 +176,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={42}
@@ -171,7 +191,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -186,7 +206,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={7}
@@ -201,7 +221,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -216,7 +236,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}

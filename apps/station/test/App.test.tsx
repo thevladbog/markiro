@@ -804,6 +804,41 @@ describe("App", () => {
     );
   });
 
+  it("shows server reachability from Station API responses instead of browser connectivity", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    let rejectShifts!: (reason?: unknown) => void;
+    const shifts = new Promise<Response>((_resolve, reject) => {
+      rejectShifts = reject;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/operators") {
+          return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        if (path === "/shifts") return shifts;
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+
+    expect(screen.getByTestId("server-status").textContent).toBe("Available");
+    rejectShifts(new TypeError("network"));
+    await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("No connection"));
+
+    window.dispatchEvent(new Event("offline"));
+    expect(screen.getByTestId("server-status").textContent).toBe("No connection");
+  });
+
   it("backfills a real legacy config before sync and later recovers a 401 against the same durable device", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {
