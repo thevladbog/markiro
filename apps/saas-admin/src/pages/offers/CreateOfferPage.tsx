@@ -1,8 +1,9 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, PageHeader, Spinner } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 
+import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listCatalogVersions } from "../catalog/api.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
 import { toOfferCreateInput, type DocumentDraft } from "../documents/documentDraft.js";
@@ -26,6 +27,14 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
 }
 
 export function CreateOfferPage() {
+  const principal = usePlatformPrincipal();
+  if (!principal.capabilities.includes("billing.write")) {
+    return <Navigate to="/offers" replace />;
+  }
+  return <OfferEditor />;
+}
+
+function OfferEditor() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [search] = useSearchParams();

@@ -225,19 +225,20 @@ describe("document draft reducer", () => {
       id: "line-addon",
       direction: 1,
     });
-    const removed = documentDraftReducer(bottomStayedPut, { type: "line.removed", id: "line-service" });
+    const removed = documentDraftReducer(bottomStayedPut, {
+      type: "line.removed",
+      id: "line-service",
+    });
 
     expect(topStayedPut.lines.map((line) => line.id)).toEqual([
       "line-plan",
       "line-addon",
       "line-service",
     ]);
-    expect(moved.lines.map((line) => line.id)).toEqual([
-      "line-plan",
-      "line-service",
-      "line-addon",
-    ]);
-    expect(bottomStayedPut.lines.map((line) => line.id)).toEqual(moved.lines.map((line) => line.id));
+    expect(moved.lines.map((line) => line.id)).toEqual(["line-plan", "line-service", "line-addon"]);
+    expect(bottomStayedPut.lines.map((line) => line.id)).toEqual(
+      moved.lines.map((line) => line.id),
+    );
     expect(removed.lines.map((line) => line.id)).toEqual(["line-plan", "line-addon"]);
   });
 
@@ -328,6 +329,34 @@ describe("exact preview totals", () => {
 });
 
 describe("document draft validation and request adapters", () => {
+  it("adapts a legacy catalog-less service as a valid custom invoice line", () => {
+    const legacy = {
+      ...createLineFromCatalog(service, "line-legacy"),
+      kind: "custom" as const,
+      catalogVersionId: null,
+      catalogItemCode: "",
+      version: 0,
+      nameRu: "Архивная настройка",
+      nameEn: "Legacy setup",
+      vatRateBps: 113,
+    };
+
+    expect(toInvoiceCreateInput(draft([legacy])).lines).toEqual([
+      {
+        kind: "custom",
+        catalogVersionId: null,
+        nameRu: "Архивная настройка",
+        nameEn: "Legacy setup",
+        quantity: 1,
+        unit: "час",
+        agreedUnitPrice: "0.10",
+        vatRateBps: 113,
+        vatIncluded: false,
+        activationPolicy: null,
+      },
+    ]);
+  });
+
   it("blocks missing tenant, empty or oversized lines, invalid money, and missing plan or add-on policy", () => {
     const invalidPlan = {
       ...createLineFromCatalog(plan, "line-plan"),
@@ -342,7 +371,9 @@ describe("document draft validation and request adapters", () => {
       ...createLineFromCatalog(service, `line-${index}`),
     }));
 
-    expect(validateDocumentDraft({ ...draft([invalidPlan, invalidAddon]), tenantId: "" })).toMatchObject({
+    expect(
+      validateDocumentDraft({ ...draft([invalidPlan, invalidAddon]), tenantId: "" }),
+    ).toMatchObject({
       tenantId: "tenant_required",
       "lines.line-plan.agreedUnitPrice": "money_must_have_two_decimal_places",
       "lines.line-plan.activationPolicy": "activation_policy_required",
@@ -399,10 +430,7 @@ describe("document draft validation and request adapters", () => {
       "after_current",
       "manual",
     ]);
-    expect(getSupportedActivationPolicies("offer", "plan")).toEqual([
-      "immediate",
-      "after_current",
-    ]);
+    expect(getSupportedActivationPolicies("offer", "plan")).toEqual(["immediate", "after_current"]);
     expect(getSupportedActivationPolicies("offer", "addon")).toEqual(["immediate"]);
     expect(getSupportedActivationPolicies("offer", "service")).toEqual([]);
   });

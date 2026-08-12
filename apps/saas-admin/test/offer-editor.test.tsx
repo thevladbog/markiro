@@ -14,19 +14,32 @@ import {
   renderSaasApp,
 } from "./render.js";
 
+const READ_ONLY_BILLING_ME = {
+  ...ACCOUNTANT_ME,
+  capabilities: ACCOUNTANT_ME.capabilities.filter((capability) => capability !== "billing.write"),
+};
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
 });
 
-function installOfferEditorApi({ createStatus = 201, tenantItems = [TENANT_LIST_ITEM] } = {}) {
+function installOfferEditorApi({
+  createStatus = 201,
+  tenantItems = [TENANT_LIST_ITEM],
+  me = ACCOUNTANT_ME,
+}: {
+  createStatus?: number;
+  tenantItems?: Array<Record<string, unknown>>;
+  me?: Record<string, unknown>;
+} = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input);
       const method = init.method ?? "GET";
-      if (url.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+      if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
       if (url.endsWith("/api/platform/offers") && method === "GET") return jsonResponse(200, []);
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return jsonResponse(200, {
@@ -89,6 +102,15 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
+  it("redirects a direct read-only visit to offers without loading an editable form", async () => {
+    installOfferEditorApi({ me: READ_ONLY_BILLING_ME });
+    renderSaasApp({ initialEntry: "/offers/new" });
+
+    expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Создать черновик предложения" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Тенант" })).toBeNull();
+  });
+
   it("opens from offers and maps each activation policy at the API boundary", async () => {
     const api = installOfferEditorApi();
     const user = userEvent.setup();

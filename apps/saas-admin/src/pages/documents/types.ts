@@ -5,8 +5,8 @@ export type ActivationPolicy = "immediate" | "after_current" | "manual";
 
 export interface DocumentLineDraft {
   id: string;
-  kind: "plan" | "addon" | "service";
-  catalogVersionId: string;
+  kind: "plan" | "addon" | "service" | "custom";
+  catalogVersionId: string | null;
   catalogItemCode: string;
   version: number;
   nameRu: string;
@@ -38,7 +38,7 @@ export type DocumentDraftAction =
 
 export interface CreateInvoiceLineInput {
   kind: DocumentLineDraft["kind"];
-  catalogVersionId: string;
+  catalogVersionId: string | null;
   nameRu: string;
   nameEn: string;
   quantity: number;
@@ -57,8 +57,8 @@ export interface CreateInvoiceInput {
 }
 
 export interface CreateOfferLineInput {
-  kind: DocumentLineDraft["kind"];
-  catalogVersionId: string;
+  kind: "plan" | "addon" | "service";
+  catalogVersionId: string | null;
   nameRu: string;
   nameEn: string;
   quantity: number;

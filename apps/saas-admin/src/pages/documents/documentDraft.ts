@@ -32,7 +32,7 @@ export function getSupportedActivationPolicies(
   documentKind: DocumentKind,
   lineKind: DocumentLineDraft["kind"],
 ): readonly ActivationPolicy[] {
-  if (lineKind === "service") return [];
+  if (lineKind === "service" || lineKind === "custom") return [];
   if (documentKind === "invoice") return INVOICE_ACTIVATION_POLICIES;
   return lineKind === "plan" ? OFFER_PLAN_ACTIVATION_POLICIES : OFFER_ADDON_ACTIVATION_POLICIES;
 }
@@ -98,7 +98,9 @@ export function documentDraftReducer(
       }));
     case "line.policyChanged":
       return updateLineById(draft, action.id, (line) =>
-        line.kind === "service" ? line : { ...line, activationPolicy: action.policy },
+        line.kind === "service" || line.kind === "custom"
+          ? line
+          : { ...line, activationPolicy: action.policy },
       );
     case "line.moved": {
       const index = draft.lines.findIndex((line) => line.id === action.id);
@@ -198,7 +200,7 @@ export function validateDocumentDraft(
       (!Number.isInteger(line.vatRateBps) || line.vatRateBps < 0 || line.vatRateBps > 10_000)
     )
       errors[`${prefix}.vatRateBps`] = "vat_rate_must_be_between_0_and_10000";
-    if (line.kind === "service") {
+    if (line.kind === "service" || line.kind === "custom") {
       if (line.activationPolicy !== null)
         errors[`${prefix}.activationPolicy`] = "service_activation_policy_must_be_null";
     } else if (line.activationPolicy === null) {
@@ -248,6 +250,7 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
 }
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
+  if (line.kind === "custom") throw new Error("offer_custom_line_unsupported");
   const activationPolicy = requiredActivationPolicy("offer", line);
   if (line.kind === "service") {
     return {
@@ -282,7 +285,7 @@ function requiredActivationPolicy(
   documentKind: DocumentKind,
   line: DocumentLineDraft,
 ): ActivationPolicy | null {
-  if (line.kind === "service") {
+  if (line.kind === "service" || line.kind === "custom") {
     if (line.activationPolicy !== null) throw new Error("service_activation_policy_must_be_null");
     return null;
   }

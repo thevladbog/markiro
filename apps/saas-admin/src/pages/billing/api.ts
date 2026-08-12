@@ -7,8 +7,8 @@ const moneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/);
 const uuidSchema = z.uuid();
 const activationPolicySchema = z.enum(["immediate", "after_current", "manual"]);
 const invoiceLineInputSchema = z.object({
-  kind: z.enum(["plan", "addon", "service"]),
-  catalogVersionId: uuidSchema,
+  kind: z.enum(["plan", "addon", "service", "custom"]),
+  catalogVersionId: uuidSchema.nullable(),
   nameRu: z.string().trim().min(1).max(300),
   nameEn: z.string().trim().min(1).max(300),
   quantity: z.number().int().positive(),

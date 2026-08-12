@@ -1,10 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, PageHeader, Spinner } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
-import { useLocation, useNavigate, useSearchParams } from "react-router";
+import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
 
 import { listCatalogVersions } from "../catalog/api.js";
+import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
 import {
   toInvoiceCreateInput,
@@ -33,11 +34,11 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
 
 function vatRateBps(value: string | null): number | null {
   if (value === null) return null;
-  const parsed = Number(value);
-  const bps = parsed * 100;
-  if (!Number.isSafeInteger(bps) || bps < 0 || bps > 10_000)
-    throw new Error("offer_vat_rate_invalid");
-  return bps;
+  const match = /^(\d{1,3})\.(\d{2})$/.exec(value);
+  if (!match) throw new Error("offer_vat_rate_invalid");
+  const bps = BigInt(match[1]!) * 100n + BigInt(match[2]!);
+  if (bps > 10_000n) throw new Error("offer_vat_rate_invalid");
+  return Number(bps);
 }
 
 function copyOfferLines(
@@ -56,10 +57,10 @@ function copyOfferLines(
   }[],
 ): DocumentLineDraft[] {
   return lines.map((line) => {
-    if (!line.catalogVersionId) throw new Error("offer_line_catalog_version_required");
+    const catalogBacked = line.catalogVersionId !== null;
     return {
       id: `offer-line-${line.id}`,
-      kind: line.kind,
+      kind: catalogBacked ? line.kind : "custom",
       catalogVersionId: line.catalogVersionId,
       catalogItemCode: "",
       version: 0,
@@ -70,13 +71,24 @@ function copyOfferLines(
       agreedUnitPrice: line.agreedUnitPrice,
       vatRateBps: vatRateBps(line.vatRate),
       vatIncluded: line.vatIncluded,
-      activationPolicy:
-        line.activationPolicy === "immediately" ? "immediate" : line.activationPolicy,
+      activationPolicy: catalogBacked
+        ? line.activationPolicy === "immediately"
+          ? "immediate"
+          : line.activationPolicy
+        : null,
     };
   });
 }
 
 export function CreateInvoicePage() {
+  const principal = usePlatformPrincipal();
+  if (!principal.capabilities.includes("billing.write")) {
+    return <Navigate to="/billing" replace />;
+  }
+  return <InvoiceEditor />;
+}
+
+function InvoiceEditor() {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
