@@ -10,6 +10,9 @@ export type { TextareaProps } from "./Textarea.js";
 export { Select } from "./Select.js";
 export type { SelectOption, SelectProps, SelectSize } from "./Select.js";
 
+export { Combobox } from "./Combobox.js";
+export type { ComboboxOption, ComboboxProps } from "./Combobox.js";
+
 export { Checkbox } from "./Checkbox.js";
 export type { CheckboxProps } from "./Checkbox.js";
 
