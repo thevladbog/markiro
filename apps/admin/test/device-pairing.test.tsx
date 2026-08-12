@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
@@ -42,6 +43,33 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   await i18n.changeLanguage("ru");
+});
+
+it("uses custom device type and line controls without native selects", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/lines")
+        return response({ items: [{ id: "line-1", name: "Линия 1" }] });
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }),
+  );
+
+  renderDrawer();
+  await screen.findByRole("combobox", { name: "Линия" });
+
+  expect(document.querySelectorAll("select")).toHaveLength(0);
+  expect(screen.getByRole("combobox", { name: "Тип" }).tagName).toBe("BUTTON");
+  await user.click(screen.getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Киоск" }));
+  expect(screen.getByLabelText("Расположение")).toBeDefined();
+
+  await user.click(screen.getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Станция" }));
+  await user.click(await screen.findByRole("combobox", { name: "Линия" }));
+  await user.click(screen.getByRole("option", { name: "Линия 1" }));
+  expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Линия 1");
 });
 
 it("keeps the one-time pairing secret only in the active drawer and clears its mutation state on close", async () => {

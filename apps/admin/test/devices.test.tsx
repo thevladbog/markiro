@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -79,6 +80,7 @@ it("keeps kiosk settings reachable from the unified device row", async () => {
 });
 
 it("sends filter and pager state to the bounded devices endpoint", async () => {
+  const user = userEvent.setup();
   const requests: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -129,7 +131,10 @@ it("sends filter and pager state to the bounded devices endpoint", async () => {
     </QueryClientProvider>,
   );
   await screen.findByText("Packing");
-  fireEvent.change(screen.getByLabelText("Тип"), { target: { value: "kiosk" } });
+  expect(document.querySelectorAll("select")).toHaveLength(0);
+  expect(screen.getByRole("combobox", { name: "Тип" }).tagName).toBe("BUTTON");
+  await user.click(screen.getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Киоск" }));
   await waitFor(() => expect(requests).toContain("/api/devices?page=1&pageSize=8&type=kiosk"));
   await screen.findByText("Packing");
   fireEvent.click(screen.getByRole("button", { name: "Следующая страница" }));
@@ -137,6 +142,7 @@ it("sends filter and pager state to the bounded devices endpoint", async () => {
 });
 
 it("hydrates and clears URL filters independently while resetting the page", async () => {
+  const user = userEvent.setup();
   const requests: string[] = [];
   vi.stubGlobal(
     "fetch",
@@ -167,11 +173,13 @@ it("hydrates and clears URL filters independently while resetting the page", asy
   await waitFor(() =>
     expect(requests).toContain("/api/devices?page=2&pageSize=8&type=kiosk&status=offline"),
   );
-  expect((screen.getByLabelText("Тип") as HTMLSelectElement).value).toBe("kiosk");
-  expect((screen.getByLabelText("Статус") as HTMLSelectElement).value).toBe("offline");
-  fireEvent.change(screen.getByLabelText("Тип"), { target: { value: "" } });
+  expect(screen.getByRole("combobox", { name: "Тип" }).textContent).toContain("Киоск");
+  expect(screen.getByRole("combobox", { name: "Статус" }).textContent).toContain("Не в сети");
+  await user.click(screen.getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Все типы" }));
   await waitFor(() => expect(requests).toContain("/api/devices?page=1&pageSize=8&status=offline"));
-  fireEvent.change(screen.getByLabelText("Статус"), { target: { value: "" } });
+  await user.click(screen.getByRole("combobox", { name: "Статус" }));
+  await user.click(screen.getByRole("option", { name: "Все статусы" }));
   await waitFor(() => expect(requests).toContain("/api/devices?page=1&pageSize=8"));
 });
 
@@ -246,7 +254,7 @@ it("lets a credentials-only operator create and pair a station without operation
   await screen.findByText("Устройства не добавлены");
   fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
   const drawer = await screen.findByRole("dialog", { name: "Новое устройство" });
-  expect((within(drawer).getByLabelText("Тип") as HTMLSelectElement).value).toBe("station");
+  expect(within(drawer).getByRole("combobox", { name: "Тип" }).textContent).toContain("Станция");
   expect(within(drawer).queryByRole("option", { name: "Киоск" })).toBeNull();
   fireEvent.change(within(drawer).getByLabelText("Название"), {
     target: { value: "Packing station" },
@@ -303,7 +311,7 @@ it("lets an operations-only user create a kiosk without issuing a pairing code",
   await screen.findByText("Устройства не добавлены");
   fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
   const drawer = await screen.findByRole("dialog", { name: "Новое устройство" });
-  expect((within(drawer).getByLabelText("Тип") as HTMLSelectElement).value).toBe("kiosk");
+  expect(within(drawer).getByRole("combobox", { name: "Тип" }).textContent).toContain("Киоск");
   expect(within(drawer).queryByRole("option", { name: "Станция" })).toBeNull();
   fireEvent.change(within(drawer).getByLabelText("Название"), { target: { value: "Ops kiosk" } });
   fireEvent.click(within(drawer).getByRole("button", { name: "Создать" }));
@@ -312,6 +320,7 @@ it("lets an operations-only user create a kiosk without issuing a pairing code",
 });
 
 it("keeps the drawer open in its code stage after creating a kiosk", async () => {
+  const user = userEvent.setup();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -355,7 +364,8 @@ it("keeps the drawer open in its code stage after creating a kiosk", async () =>
   await screen.findByText("Устройства не добавлены");
   fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
   const dialog = await screen.findByRole("dialog", { name: "Новое устройство" });
-  fireEvent.change(within(dialog).getByLabelText("Тип"), { target: { value: "kiosk" } });
+  await user.click(within(dialog).getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Киоск" }));
   expect(within(dialog).getByLabelText("Расположение")).toBeDefined();
   fireEvent.change(within(dialog).getByLabelText("Название"), { target: { value: "Lobby kiosk" } });
   fireEvent.click(within(dialog).getByRole("button", { name: "Создать" }));

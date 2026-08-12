@@ -12,6 +12,7 @@ import { formatCreatedAt, formatScanTime } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useShifts, type ShiftDto } from "../shifts/api.js";
 import { useConflicts, useReviewConflict, type ConflictDto } from "./api.js";
+import "./conflicts.css";
 
 type ReviewedFilter = "unreviewed" | "reviewed" | "all";
 
@@ -128,17 +129,17 @@ export function ConflictsPage() {
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader title={t("pages.conflicts.title")} />
 
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <div style={{ width: 260 }}>
+      <section className="mk-conflicts-filters" aria-label={t("pages.conflicts.title")}>
+        <div className="mk-conflicts-filters__field mk-conflicts-filters__shift">
           <Select
             label={t("pages.conflicts.filters.shiftLabel")}
             options={shiftFilterOptions}
             value={shiftFilter}
-            hint={t("pages.conflicts.filters.shiftHint")}
             onValueChange={setShiftFilter}
           />
+          <p className="mk-conflicts-filters__hint">{t("pages.conflicts.filters.shiftHint")}</p>
         </div>
-        <div style={{ width: 200 }}>
+        <div className="mk-conflicts-filters__field">
           <Select
             label={t("pages.conflicts.filters.reviewedLabel")}
             options={reviewedFilterOptions}
@@ -146,7 +147,7 @@ export function ConflictsPage() {
             onValueChange={setReviewedFilter}
           />
         </div>
-      </div>
+      </section>
 
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>

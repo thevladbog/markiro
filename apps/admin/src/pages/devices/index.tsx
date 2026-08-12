@@ -143,7 +143,6 @@ export function DevicesPage() {
       />
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
         <Select
-          native
           label={t("pages.devices.typeLabel")}
           value={type ?? ""}
           onValueChange={(value) => setFilters({ type: parseType(value) ?? null, page: 1 })}
@@ -153,7 +152,6 @@ export function DevicesPage() {
           ]}
         />
         <Select
-          native
           label={t("pages.devices.statusLabel")}
           value={status ?? ""}
           onValueChange={(value) => setFilters({ status: parseStatus(value) ?? null, page: 1 })}

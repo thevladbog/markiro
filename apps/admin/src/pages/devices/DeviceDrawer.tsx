@@ -266,7 +266,6 @@ export function DeviceDrawer({
           {mode === "create" ? (
             <>
               <Select
-                native
                 label={t("pages.devices.typeLabel")}
                 value={type}
                 onValueChange={(value) => {
@@ -285,7 +284,6 @@ export function DeviceDrawer({
           ) : null}
           {type === "station" ? (
             <Select
-              native
               label={t("pages.devices.lineLabel")}
               value={place}
               onValueChange={setPlace}
