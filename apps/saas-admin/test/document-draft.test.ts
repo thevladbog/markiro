@@ -374,7 +374,7 @@ describe("document draft validation and request adapters", () => {
       expiresAt: "2026-09-01",
       lines: [
         expect.objectContaining({ kind: "plan", activationPolicy: "immediately" }),
-        expect.objectContaining({ kind: "addon", activationPolicy: "immediately" }),
+        expect.objectContaining({ kind: "addon", activationPolicy: null }),
         expect.objectContaining({ kind: "service", activationPolicy: null }),
       ],
     });
@@ -403,7 +403,7 @@ describe("document draft validation and request adapters", () => {
       "immediate",
       "after_current",
     ]);
-    expect(getSupportedActivationPolicies("offer", "addon")).toEqual(["immediate"]);
+    expect(getSupportedActivationPolicies("offer", "addon")).toEqual([]);
     expect(getSupportedActivationPolicies("offer", "service")).toEqual([]);
   });
 
@@ -434,30 +434,24 @@ describe("document draft validation and request adapters", () => {
     );
   });
 
-  it("rejects offer add-on after-current and every non-representable policy state", () => {
+  it("does not serialize offer add-on policy and validates its fixed immediate behavior", () => {
     const afterCurrentAddon = draft([
       { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: "after_current" },
     ]);
-    const missingAddonPolicy = draft([
-      { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: null },
+    const manualAddon = draft([
+      { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: "manual" },
     ]);
-    const servicePolicy = draft([
-      { ...createLineFromCatalog(service, "line-service"), activationPolicy: "immediate" },
-    ]);
-    const unknownPolicy = draft([
-      {
-        ...createLineFromCatalog(plan, "line-plan"),
-        activationPolicy: "later" as unknown as "immediate",
-      },
-    ]);
+    const baselineAddon = draft([createLineFromCatalog(addon, "line-addon")]);
 
-    expect(() => toOfferCreateInput(afterCurrentAddon)).toThrow(
-      "offer_addon_after_current_activation_policy_unsupported",
-    );
-    expect(() => toOfferCreateInput(missingAddonPolicy)).toThrow("activation_policy_required");
-    expect(() => toOfferCreateInput(servicePolicy)).toThrow(
-      "service_activation_policy_must_be_null",
-    );
-    expect(() => toOfferCreateInput(unknownPolicy)).toThrow("activation_policy_unsupported");
+    expect(toOfferCreateInput(afterCurrentAddon).lines[0]?.activationPolicy).toBeNull();
+    expect(toOfferCreateInput(manualAddon).lines[0]?.activationPolicy).toBeNull();
+    expect(toOfferCreateInput(baselineAddon).lines[0]?.activationPolicy).toBeNull();
+    expect(validateDocumentDraft(afterCurrentAddon, "offer")).toMatchObject({
+      "lines.line-addon.activationPolicy": "offer_addon_activation_policy_must_be_immediate",
+    });
+    expect(validateDocumentDraft(manualAddon, "offer")).toMatchObject({
+      "lines.line-addon.activationPolicy": "offer_addon_activation_policy_must_be_immediate",
+    });
+    expect(validateDocumentDraft(baselineAddon, "offer")).toEqual({});
   });
 });

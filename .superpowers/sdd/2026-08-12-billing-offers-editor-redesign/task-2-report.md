@@ -189,3 +189,51 @@ PASS
   add-on policy is constrained to the single behavior the backend fulfils.
 - No server, database, or browser surface changed; these pure-model tests do
   not prove end-to-end request handling.
+
+## Fix round 3 — offer add-on fulfilment policy
+
+### Root cause and RED evidence
+
+`PlatformOffersService.create` stores `activationPolicy` only when a line is a
+plan. Its paid-offer fulfilment creates add-ons at `payment.paidAt`, regardless
+of any add-on policy. The previous client contract was therefore too strict and
+could send a meaningless add-on policy.
+
+After updating the contract assertions, the focused suite failed in three
+places: the offer adapter emitted `"immediately"` for the baseline add-on,
+offer add-on exposed `"immediate"` as a selectable policy, and an
+`after_current` add-on was rejected instead of being omitted from the payload.
+
+```text
+CI=true pnpm --filter @markiro/saas-admin exec vitest run test/document-draft.test.ts
+FAIL 18 tests | 3 failed
+```
+
+### Fix and GREEN evidence
+
+- Offer policy controls are now supported for plans only; offer add-ons and
+  services expose no selectable policy.
+- `validateDocumentDraft(draft, "offer")` accepts the fixed add-on baseline
+  `immediate` and reports non-immediate add-on values as
+  `offer_addon_activation_policy_must_be_immediate`.
+- `toOfferCreateInput` serializes `activationPolicy: null` for every add-on and
+  service. Plan policies alone remain required and map to the offer backend
+  values.
+
+```text
+CI=true pnpm --filter @markiro/saas-admin exec vitest run test/document-draft.test.ts
+PASS 1 file, 18 tests
+
+pnpm --filter @markiro/saas-admin typecheck
+PASS
+
+pnpm --filter @markiro/saas-admin lint
+PASS
+
+git diff --check
+PASS
+```
+
+### Commit
+
+- `72770a85 fix(saas-admin): omit offer addon policies`

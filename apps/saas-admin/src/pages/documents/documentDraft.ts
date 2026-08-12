@@ -26,7 +26,6 @@ const MONEY_PATTERN = /^\d{1,12}\.\d{2}$/;
 const MAX_LINES = 100;
 const INVOICE_ACTIVATION_POLICIES = ["immediate", "after_current", "manual"] as const;
 const OFFER_PLAN_ACTIVATION_POLICIES = ["immediate", "after_current"] as const;
-const OFFER_ADDON_ACTIVATION_POLICIES = ["immediate"] as const;
 
 export function getSupportedActivationPolicies(
   documentKind: DocumentKind,
@@ -34,9 +33,7 @@ export function getSupportedActivationPolicies(
 ): readonly ActivationPolicy[] {
   if (lineKind === "service") return [];
   if (documentKind === "invoice") return INVOICE_ACTIVATION_POLICIES;
-  return lineKind === "plan"
-    ? OFFER_PLAN_ACTIVATION_POLICIES
-    : OFFER_ADDON_ACTIVATION_POLICIES;
+  return lineKind === "plan" ? OFFER_PLAN_ACTIVATION_POLICIES : [];
 }
 
 export function createLineFromCatalog(version: CatalogVersionDto, id: string): DocumentLineDraft {
@@ -177,7 +174,10 @@ export function calculateDocumentTotals(
   return { subtotal: formatMoney(subtotal), vatTotal: formatMoney(vatTotal), total: formatMoney(total) };
 }
 
-export function validateDocumentDraft(draft: DocumentDraft): Record<string, string> {
+export function validateDocumentDraft(
+  draft: DocumentDraft,
+  documentKind: DocumentKind = "invoice",
+): Record<string, string> {
   const errors: Record<string, string> = {};
   if (!draft.tenantId.trim()) errors.tenantId = "tenant_required";
   if (draft.lines.length === 0) errors.lines = "at_least_one_line_required";
@@ -200,6 +200,17 @@ export function validateDocumentDraft(draft: DocumentDraft): Record<string, stri
     } else if (line.activationPolicy === null) {
       errors[`${prefix}.activationPolicy`] = "activation_policy_required";
     } else if (!isActivationPolicy(line.activationPolicy)) {
+      errors[`${prefix}.activationPolicy`] = "activation_policy_unsupported";
+    } else if (
+      documentKind === "offer" &&
+      line.kind === "addon" &&
+      line.activationPolicy !== "immediate"
+    ) {
+      errors[`${prefix}.activationPolicy`] = "offer_addon_activation_policy_must_be_immediate";
+    } else if (
+      !(documentKind === "offer" && line.kind === "addon") &&
+      !getSupportedActivationPolicies(documentKind, line.kind).includes(line.activationPolicy)
+    ) {
       errors[`${prefix}.activationPolicy`] = "activation_policy_unsupported";
     }
   }
@@ -240,23 +251,7 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
 }
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
-  const activationPolicy = requiredActivationPolicy("offer", line);
-  if (line.kind === "service") {
-    return {
-      kind: line.kind,
-      catalogVersionId: line.catalogVersionId,
-      nameRu: line.nameRu,
-      nameEn: line.nameEn,
-      quantity: line.quantity,
-      unit: line.unit,
-      agreedUnitPrice: line.agreedUnitPrice,
-      vatRateBps: line.vatRateBps,
-      vatIncluded: line.vatIncluded,
-      activationPolicy: null,
-    };
-  }
-
-  return {
+  const common = {
     kind: line.kind,
     catalogVersionId: line.catalogVersionId,
     nameRu: line.nameRu,
@@ -266,6 +261,17 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     agreedUnitPrice: line.agreedUnitPrice,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
+  };
+  if (line.kind !== "plan") {
+    return {
+      ...common,
+      activationPolicy: null,
+    };
+  }
+
+  const activationPolicy = requiredActivationPolicy("offer", line);
+  return {
+    ...common,
     activationPolicy: toOfferActivationPolicy(activationPolicy),
   };
 }
