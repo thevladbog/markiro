@@ -3,6 +3,7 @@ import { Alert, PageHeader, Spinner } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 
+import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { listCatalogVersions } from "../catalog/api.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
@@ -56,7 +57,24 @@ function OfferEditor() {
     queryFn: () => getTenant(selectedTenantId!),
     enabled: needsTenantPrefetch,
   });
-  const create = useMutation({ mutationFn: createOffer });
+  const create = useMutation({
+    mutationFn: async (draft: DocumentDraft) => {
+      const refreshedCatalog = await catalog.refetch();
+      const publishedIds = new Set(
+        (refreshedCatalog.data?.items ?? [])
+          .filter((version) => version.status === "published")
+          .map((version) => version.id),
+      );
+      if (
+        draft.lines.some(
+          (line) => line.catalogVersionId !== null && !publishedIds.has(line.catalogVersionId),
+        )
+      ) {
+        throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
+      }
+      return createOffer(toOfferCreateInput(draft));
+    },
+  });
 
   if (
     tenants.isPending ||
@@ -101,9 +119,17 @@ function OfferEditor() {
       catalog={(catalog.data?.items ?? []).filter((version) => version.status === "published")}
       loadingSources={false}
       submitting={create.isPending}
-      {...(create.error ? { submitError: t("documents.errors.createOffer") } : {})}
+      {...(create.error
+        ? {
+            submitError:
+              create.error instanceof ApiRequestError &&
+              create.error.code === "catalog_version_stale"
+                ? t("documents.errors.catalogVersionStale")
+                : t("documents.errors.createOffer"),
+          }
+        : {})}
       onSubmit={async (draft) => {
-        await create.mutateAsync(toOfferCreateInput(draft));
+        await create.mutateAsync(draft);
       }}
       onSuccess={() => void navigate("/offers", { state: { createdDocument: "offer" } })}
       onCancel={() => void navigate("/offers")}

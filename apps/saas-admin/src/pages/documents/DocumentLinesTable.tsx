@@ -81,7 +81,7 @@ export function DocumentLinesTable({
                     value={String(line.quantity)}
                     inputMode="numeric"
                     {...(errors[`${prefix}.quantity`]
-                      ? { error: errors[`${prefix}.quantity`] }
+                      ? { error: t(`documents.errors.${errors[`${prefix}.quantity`]}`) }
                       : {})}
                     onChange={(event) => onQuantityChange(line, Number(event.target.value))}
                   />
@@ -93,7 +93,7 @@ export function DocumentLinesTable({
                     inputMode="decimal"
                     mono
                     {...(errors[`${prefix}.agreedUnitPrice`]
-                      ? { error: errors[`${prefix}.agreedUnitPrice`] }
+                      ? { error: t(`documents.errors.${errors[`${prefix}.agreedUnitPrice`]}`) }
                       : {})}
                     onChange={(event) => onPriceChange(line, event.target.value)}
                   />
@@ -126,7 +126,9 @@ export function DocumentLinesTable({
                       }))}
                       {...(line.activationPolicy ? { value: line.activationPolicy } : {})}
                       {...(errors[`${prefix}.activationPolicy`]
-                        ? { error: errors[`${prefix}.activationPolicy`] }
+                        ? {
+                            error: t(`documents.errors.${errors[`${prefix}.activationPolicy`]}`),
+                          }
                         : {})}
                       onValueChange={(policy) => onPolicyChange(line, policy)}
                     />

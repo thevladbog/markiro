@@ -26,14 +26,17 @@ afterEach(() => {
 
 function installOfferEditorApi({
   createStatus = 201,
+  retireOnRefresh = false,
   tenantItems = [TENANT_LIST_ITEM],
   me = ACCOUNTANT_ME,
 }: {
   createStatus?: number;
+  retireOnRefresh?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   me?: Record<string, unknown>;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
+  let catalogFetches = 0;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -53,7 +56,16 @@ function installOfferEditorApi({
         return jsonResponse(200, TENANT_DETAIL);
       }
       if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
-        return jsonResponse(200, { items: [PUBLISHED_PLAN, ADDON, SERVICE] });
+        catalogFetches += 1;
+        return jsonResponse(200, {
+          items: [
+            retireOnRefresh && catalogFetches > 1
+              ? { ...PUBLISHED_PLAN, status: "retired" }
+              : PUBLISHED_PLAN,
+            ADDON,
+            SERVICE,
+          ],
+        });
       }
       if (url.endsWith("/api/platform/offers") && method === "POST") {
         const body = JSON.parse(String(init.body)) as {
@@ -179,8 +191,8 @@ describe("offer editor route", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Предложение создано");
   });
 
-  it("keeps the offer draft intact after a 409 conflict", async () => {
-    installOfferEditorApi({ createStatus: 409 });
+  it("refreshes the catalog and keeps the offer draft when a version was retired", async () => {
+    const api = installOfferEditorApi({ retireOnRefresh: true });
     const user = userEvent.setup();
     renderSaasApp({ initialEntry: `/offers/new?tenantId=${TENANT_ID}` });
 
@@ -189,8 +201,9 @@ describe("offer editor route", () => {
     await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
 
     expect((await screen.findByRole("alert")).textContent).toContain(
-      "Не удалось создать предложение",
+      "одна из выбранных версий больше не опубликована",
     );
+    expect(api.calls()).toEqual([]);
     expect(screen.getByRole("combobox", { name: "Тенант" }).textContent).toContain("Первый завод");
     expect(screen.getByDisplayValue("15000.00")).toBeDefined();
   });

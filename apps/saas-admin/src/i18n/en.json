@@ -172,6 +172,7 @@
       "loadOfferEditor": "Could not load offer data",
       "createInvoice": "Could not create invoice",
       "createOffer": "Could not create offer",
+      "catalogVersionStale": "The catalog was refreshed: a selected version is no longer published. Review the positions and try again.",
       "tenant_required": "Choose a tenant",
       "at_least_one_line_required": "Add at least one position",
       "too_many_lines": "Too many lines",

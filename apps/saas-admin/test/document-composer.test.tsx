@@ -340,7 +340,8 @@ describe("DocumentComposer", () => {
       await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
 
       expect(props.onSubmit).not.toHaveBeenCalled();
-      expect(screen.getByText("Политика активации недоступна")).toBeDefined();
+      expect(screen.getAllByText("Политика активации недоступна").length).toBeGreaterThanOrEqual(2);
+      expect(screen.queryByText("activation_policy_unsupported")).toBeNull();
     },
   );
 

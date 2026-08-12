@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Navigate, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
 
+import { ApiRequestError } from "../../api/client.js";
 import { listCatalogVersions } from "../catalog/api.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
@@ -119,7 +120,32 @@ function InvoiceEditor() {
     queryFn: () => getTenant(selectedTenantId!),
     enabled: needsTenantPrefetch,
   });
-  const create = useMutation({ mutationFn: createInvoice });
+  const create = useMutation({
+    mutationFn: async (draft: DocumentDraft) => {
+      const refreshedCatalog = await catalog.refetch();
+      const publishedIds = new Set(
+        (refreshedCatalog.data?.items ?? [])
+          .filter((version) => version.status === "published")
+          .map((version) => version.id),
+      );
+      if (
+        draft.lines.some(
+          (line) => line.catalogVersionId !== null && !publishedIds.has(line.catalogVersionId),
+        )
+      ) {
+        throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
+      }
+      try {
+        return await createInvoice(toInvoiceCreateInput(draft));
+      } catch (error) {
+        if (error instanceof ApiRequestError && error.code === "invoice_catalog_version_invalid") {
+          await catalog.refetch();
+          throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
+        }
+        throw error;
+      }
+    },
+  });
 
   if (
     tenants.isPending ||
@@ -170,9 +196,17 @@ function InvoiceEditor() {
       catalog={(catalog.data?.items ?? []).filter((version) => version.status === "published")}
       loadingSources={false}
       submitting={create.isPending}
-      {...(create.error ? { submitError: t("documents.errors.createInvoice") } : {})}
+      {...(create.error
+        ? {
+            submitError:
+              create.error instanceof ApiRequestError &&
+              create.error.code === "catalog_version_stale"
+                ? t("documents.errors.catalogVersionStale")
+                : t("documents.errors.createInvoice"),
+          }
+        : {})}
       onSubmit={async (draft) => {
-        await create.mutateAsync(toInvoiceCreateInput(draft));
+        await create.mutateAsync(draft);
       }}
       onSuccess={() => void navigate("/billing", { state: { createdDocument: "invoice" } })}
       onCancel={() => void navigate("/billing")}

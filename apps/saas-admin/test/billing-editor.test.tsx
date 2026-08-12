@@ -81,7 +81,9 @@ function installInvoiceEditorApi({
       if (url.endsWith("/api/platform/invoices") && method === "POST") {
         const body = JSON.parse(String(init.body));
         calls.push({ method, path: url, body });
-        if (createStatus === 409) return jsonResponse(409, { code: "invoice_conflict" });
+        if (createStatus === 400) {
+          return jsonResponse(400, { code: "invoice_catalog_version_invalid" });
+        }
         return jsonResponse(201, {
           id: "91111111-1111-4111-8111-111111111111",
           number: "INV-000001",
@@ -190,8 +192,8 @@ describe("invoice editor route", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("Счёт создан");
   });
 
-  it("keeps the invoice draft intact after a 409 conflict", async () => {
-    installInvoiceEditorApi({ createStatus: 409 });
+  it("refreshes the catalog and keeps the invoice draft after the API rejects a retired version", async () => {
+    installInvoiceEditorApi({ createStatus: 400 });
     const user = userEvent.setup();
     renderSaasApp({ initialEntry: `/billing/new?tenantId=${TENANT_ID}` });
 
@@ -199,7 +201,9 @@ describe("invoice editor route", () => {
     await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
     await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
 
-    expect((await screen.findByRole("alert")).textContent).toContain("Не удалось создать счёт");
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "одна из выбранных версий больше не опубликована",
+    );
     expect(screen.getByRole("combobox", { name: "Тенант" }).textContent).toContain("Первый завод");
     expect(screen.getByDisplayValue("15000.00")).toBeDefined();
   });
