@@ -14,7 +14,9 @@ export interface DocumentLineDraft {
   nameEn: string;
   quantity: number;
   unit: string;
+  catalogUnitPrice: string | null;
   agreedUnitPrice: string;
+  priceOverrideReason: string | null;
   vatRateBps: number | null;
   vatIncluded: boolean;
   activationPolicy: ActivationPolicy | null;
@@ -32,6 +34,7 @@ export type DocumentDraftAction =
   | { type: "catalog.added"; version: CatalogVersionDto; separate?: boolean; id: string }
   | { type: "line.quantityChanged"; id: string; quantity: number }
   | { type: "line.priceChanged"; id: string; price: string }
+  | { type: "line.priceOverrideReasonChanged"; id: string; reason: string }
   | { type: "line.vatIncludedChanged"; id: string; included: boolean }
   | { type: "line.policyChanged"; id: string; policy: ActivationPolicy }
   | { type: "line.moved"; id: string; direction: -1 | 1 }
@@ -64,7 +67,9 @@ export interface CreateOfferLineInput {
   nameEn: string;
   quantity: number;
   unit: string;
+  catalogUnitPrice: string | null;
   agreedUnitPrice: string;
+  priceOverrideReason: string | null;
   vatRateBps: number | null;
   vatIncluded: boolean;
   activationPolicy: "immediately" | "after_current" | null;

@@ -677,6 +677,7 @@ export function SubscriptionPanel({
                 placeholder={t("tenants.assignment.selectVersion")}
                 searchPlaceholder={t("tenants.assignment.selectVersion")}
                 emptyText={t("tenants.assignment.selectVersion")}
+                loadingText={t("tenants.assignment.loading")}
                 {...(form.formState.errors.catalogVersionId?.message
                   ? { error: form.formState.errors.catalogVersionId.message }
                   : {})}

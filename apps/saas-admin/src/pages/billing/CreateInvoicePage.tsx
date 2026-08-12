@@ -38,7 +38,13 @@ function sourceDraft(
 ): DocumentDraft {
   const lines: DocumentLineDraft[] = source.lines.map((line) => {
     const version = catalog.find((candidate) => candidate.id === line.catalogVersionId);
-    if (!version) {
+    if (
+      !version ||
+      version.kind !== line.kind ||
+      version.nameRu !== line.nameRu ||
+      version.nameEn !== line.nameEn ||
+      version.unit !== line.unit
+    ) {
       return {
         id: `source-offer-${line.id}`,
         kind: "custom",
@@ -49,7 +55,9 @@ function sourceDraft(
         nameEn: line.nameEn,
         quantity: line.quantity,
         unit: line.unit,
+        catalogUnitPrice: null,
         agreedUnitPrice: line.agreedUnitPrice,
+        priceOverrideReason: null,
         vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
         vatIncluded: line.vatIncluded,
         activationPolicy: null,
@@ -65,7 +73,9 @@ function sourceDraft(
       nameEn: line.nameEn,
       quantity: line.quantity,
       unit: line.unit,
+      catalogUnitPrice: version.unitPrice ?? null,
       agreedUnitPrice: line.agreedUnitPrice,
+      priceOverrideReason: null,
       vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
       vatIncluded: line.vatIncluded,
       activationPolicy:

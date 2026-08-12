@@ -282,7 +282,9 @@ describe("DocumentComposer", () => {
           nameEn: plan.nameEn,
           quantity: 1,
           unit: plan.unit,
+          catalogUnitPrice: plan.unitPrice!,
           agreedUnitPrice: "0.03",
+          priceOverrideReason: "Test discount",
           vatRateBps: 2000,
           vatIncluded: false,
           activationPolicy: "immediate",
@@ -361,7 +363,9 @@ describe("DocumentComposer", () => {
           nameEn: addon.nameEn,
           quantity: 1,
           unit: addon.unit,
+          catalogUnitPrice: addon.unitPrice!,
           agreedUnitPrice: addon.unitPrice!,
+          priceOverrideReason: null,
           vatRateBps: addon.vatRateBps!,
           vatIncluded: false,
           activationPolicy: "immediate",
@@ -391,6 +395,45 @@ describe("DocumentComposer", () => {
     ).toBeNull();
   });
 
+  it("associates quantity, price, and override-reason errors with their exact inputs", async () => {
+    const user = userEvent.setup();
+    renderComposer(
+      <DocumentComposer
+        kind="offer"
+        tenants={tenants}
+        catalog={catalog}
+        loadingSources={false}
+        submitting={false}
+        onSubmit={vi.fn(async () => undefined)}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    await chooseCombobox(user, "Добавить позицию", "plan-basic", "Базовый тариф");
+    const line = rowNamed("Базовый тариф");
+    const quantity = within(line).getByRole("spinbutton", { name: /Количество/i });
+    const price = within(line).getByRole("textbox", { name: /^Цена/i });
+    await user.clear(quantity);
+    await user.clear(price);
+    await user.type(price, "99");
+
+    const reason = within(line).getByRole("textbox", { name: /Причина изменения цены/i });
+    for (const input of [quantity, price, reason]) {
+      const describedBy = input.getAttribute("aria-describedby");
+      expect(describedBy).toBeTruthy();
+      expect(document.getElementById(describedBy!)).toBeTruthy();
+    }
+    expect(document.getElementById(quantity.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Количество должно быть целым и не меньше 1",
+    );
+    expect(document.getElementById(price.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Введите цену с двумя знаками после запятой",
+    );
+    expect(document.getElementById(reason.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Укажите причину отличия согласованной цены от каталога",
+    );
+  });
+
   it("blocks invalid offer policies with their translated errors", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => undefined);
@@ -409,7 +452,9 @@ describe("DocumentComposer", () => {
           nameEn: plan.nameEn,
           quantity: 1,
           unit: plan.unit,
+          catalogUnitPrice: plan.unitPrice!,
           agreedUnitPrice: plan.unitPrice!,
+          priceOverrideReason: null,
           vatRateBps: plan.vatRateBps!,
           vatIncluded: true,
           activationPolicy: "manual",
@@ -424,7 +469,9 @@ describe("DocumentComposer", () => {
           nameEn: addon.nameEn,
           quantity: 1,
           unit: addon.unit,
+          catalogUnitPrice: addon.unitPrice!,
           agreedUnitPrice: addon.unitPrice!,
+          priceOverrideReason: null,
           vatRateBps: addon.vatRateBps!,
           vatIncluded: false,
           activationPolicy: "after_current",
@@ -474,7 +521,9 @@ describe("DocumentComposer", () => {
           nameEn: plan.nameEn,
           quantity: 1,
           unit: plan.unit,
+          catalogUnitPrice: plan.unitPrice!,
           agreedUnitPrice: plan.unitPrice!,
+          priceOverrideReason: null,
           vatRateBps: plan.vatRateBps!,
           vatIncluded: true,
           activationPolicy: "immediate",

@@ -34,6 +34,7 @@ export function CatalogPositionPicker({
       placeholder={t("documents.catalogPlaceholder")}
       searchPlaceholder={t("documents.catalogSearch")}
       emptyText={t("documents.catalogEmpty")}
+      loadingText={t("documents.loadingCatalog")}
       onValueChange={(id) => {
         const version = available.find((candidate) => candidate.id === id);
         if (version) onAdd(version);

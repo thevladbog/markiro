@@ -39,6 +39,7 @@ function renderCombobox(overrides: Partial<React.ComponentProps<typeof Combobox>
       placeholder="Select offer"
       searchPlaceholder="Search offers"
       emptyText="No offers"
+      loadingText="Loading offers"
       {...overrides}
     />,
   );
@@ -99,7 +100,7 @@ describe("Combobox", () => {
     const { rerender } = renderCombobox({ loading: true });
 
     await user.click(screen.getByRole("combobox", { name: "Offer" }));
-    expect(screen.getByText("Loading offers…")).toBeDefined();
+    expect(screen.getByText("Loading offers")).toBeDefined();
     expect(screen.queryByText("No offers")).toBeNull();
 
     rerender(
@@ -110,12 +111,13 @@ describe("Combobox", () => {
         placeholder="Select offer"
         searchPlaceholder="Search offers"
         emptyText="No offers"
+        loadingText="Loading offers"
       />,
     );
     await user.type(screen.getByRole("searchbox", { name: "Search offers" }), "missing");
 
     expect(screen.getByText("No offers")).toBeDefined();
-    expect(screen.queryByText("Loading offers…")).toBeNull();
+    expect(screen.queryByText("Loading offers")).toBeNull();
   });
 
   it("associates the error message with its combobox trigger", () => {

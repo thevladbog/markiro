@@ -199,16 +199,22 @@ describe("offer editor routes", () => {
         expect.objectContaining({
           kind: "plan",
           catalogVersionId: PUBLISHED_PLAN.id,
+          catalogUnitPrice: PUBLISHED_PLAN.unitPrice,
+          priceOverrideReason: null,
           activationPolicy: "after_current",
         }),
         expect.objectContaining({
           kind: "addon",
           catalogVersionId: ADDON.id,
+          catalogUnitPrice: ADDON.unitPrice,
+          priceOverrideReason: null,
           activationPolicy: null,
         }),
         expect.objectContaining({
           kind: "service",
           catalogVersionId: SERVICE.id,
+          catalogUnitPrice: SERVICE.unitPrice,
+          priceOverrideReason: null,
           activationPolicy: null,
         }),
       ],
@@ -222,7 +228,7 @@ describe("offer editor routes", () => {
 
   it("retains an offer draft after a handled 409", async () => {
     const user = userEvent.setup();
-    installOfferEditorApi({ createStatus: 409 });
+    const requests = installOfferEditorApi({ createStatus: 409 });
     renderSaasApp({ initialEntry: `/offers/new?tenantId=${TENANT_ID}` });
 
     await screen.findByRole("combobox", { name: "Тенант" });
@@ -230,6 +236,10 @@ describe("offer editor routes", () => {
     const price = screen.getByRole("textbox", { name: /Цена.*Базовый/i });
     await user.clear(price);
     await user.type(price, "9999.99");
+    await user.type(
+      screen.getByRole("textbox", { name: /Причина изменения цены.*Базовый/i }),
+      "Согласованная скидка",
+    );
     await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
 
     expect(
@@ -237,9 +247,21 @@ describe("offer editor routes", () => {
     ).toBeDefined();
     expect((price as HTMLInputElement).value).toBe("9999.99");
     expect(screen.getByText("Базовый", { selector: ".document-line__name" })).toBeDefined();
+    const post = requests.find(
+      (request) => request.method === "POST" && request.url.endsWith("/api/platform/offers"),
+    );
+    expect(post?.body).toMatchObject({
+      lines: [
+        {
+          catalogUnitPrice: PUBLISHED_PLAN.unitPrice,
+          agreedUnitPrice: "9999.99",
+          priceOverrideReason: "Согласованная скидка",
+        },
+      ],
+    });
   });
 
-  it("opens a published offer as an invoice source and copies every detail line literally", async () => {
+  it("maps changed published-catalog offer snapshots to custom invoice lines", async () => {
     const user = userEvent.setup();
     const requests = installOfferEditorApi({ offers: [OFFER_SUMMARY] });
     renderSaasApp({ initialEntry: "/offers" });
@@ -267,8 +289,8 @@ describe("offer editor routes", () => {
       applicationMode: "automatic",
       lines: [
         {
-          kind: "plan",
-          catalogVersionId: PUBLISHED_PLAN.id,
+          kind: "custom",
+          catalogVersionId: null,
           nameRu: "Согласованный тариф",
           nameEn: "Agreed plan",
           quantity: 2,
@@ -276,11 +298,11 @@ describe("offer editor routes", () => {
           agreedUnitPrice: "11111.11",
           vatRateBps: 2000,
           vatIncluded: false,
-          activationPolicy: "immediate",
+          activationPolicy: null,
         },
         {
-          kind: "addon",
-          catalogVersionId: ADDON.id,
+          kind: "custom",
+          catalogVersionId: null,
           nameRu: "Согласованное дополнение",
           nameEn: "Agreed addon",
           quantity: 3,
@@ -288,11 +310,11 @@ describe("offer editor routes", () => {
           agreedUnitPrice: "2222.22",
           vatRateBps: 2000,
           vatIncluded: true,
-          activationPolicy: "immediate",
+          activationPolicy: null,
         },
         {
-          kind: "service",
-          catalogVersionId: SERVICE.id,
+          kind: "custom",
+          catalogVersionId: null,
           nameRu: "Согласованная услуга",
           nameEn: "Agreed service",
           quantity: 4,

@@ -90,8 +90,12 @@ export function DocumentLinesTable({
               lines.map((line, index) => {
                 const quantityError = errors[`lines.${line.id}.quantity`];
                 const priceError = errors[`lines.${line.id}.agreedUnitPrice`];
+                const priceOverrideReasonError = errors[`lines.${line.id}.priceOverrideReason`];
                 const policyError = errors[`lines.${line.id}.activationPolicy`];
                 const catalogError = errors[`lines.${line.id}.catalogVersionId`];
+                const quantityErrorId = `document-line-${line.id}-quantity-error`;
+                const priceErrorId = `document-line-${line.id}-price-error`;
+                const priceOverrideReasonErrorId = `document-line-${line.id}-price-override-reason-error`;
                 return (
                   <tr key={line.id} className="document-line">
                     <td className="document-line__index">{index + 1}</td>
@@ -126,7 +130,7 @@ export function DocumentLinesTable({
                       ) : null}
                     </td>
                     <td>
-                      <label className="document-line__field">
+                      <div className="document-line__field">
                         <span className="document-line__mobile-label">
                           {t("documents.columns.quantity")}
                         </span>
@@ -138,6 +142,7 @@ export function DocumentLinesTable({
                           disabled={submitting}
                           aria-label={t("documents.fields.quantityNamed", { name: line.nameRu })}
                           aria-invalid={quantityError ? true : undefined}
+                          aria-describedby={quantityError ? quantityErrorId : undefined}
                           onChange={(event) =>
                             dispatch({
                               type: "line.quantityChanged",
@@ -147,12 +152,14 @@ export function DocumentLinesTable({
                           }
                         />
                         {quantityError ? (
-                          <span className="document-field-error">{quantityError}</span>
+                          <span id={quantityErrorId} className="document-field-error">
+                            {quantityError}
+                          </span>
                         ) : null}
-                      </label>
+                      </div>
                     </td>
                     <td>
-                      <label className="document-line__field">
+                      <div className="document-line__field">
                         <span className="document-line__mobile-label">
                           {t("documents.columns.price")}
                         </span>
@@ -163,6 +170,7 @@ export function DocumentLinesTable({
                           disabled={submitting}
                           aria-label={t("documents.fields.priceNamed", { name: line.nameRu })}
                           aria-invalid={priceError ? true : undefined}
+                          aria-describedby={priceError ? priceErrorId : undefined}
                           onChange={(event) =>
                             dispatch({
                               type: "line.priceChanged",
@@ -172,9 +180,49 @@ export function DocumentLinesTable({
                           }
                         />
                         {priceError ? (
-                          <span className="document-field-error">{priceError}</span>
+                          <span id={priceErrorId} className="document-field-error">
+                            {priceError}
+                          </span>
                         ) : null}
-                      </label>
+                        {kind === "offer" &&
+                        line.catalogUnitPrice !== null &&
+                        line.agreedUnitPrice !== line.catalogUnitPrice ? (
+                          <label className="document-line__override-reason">
+                            <span>
+                              {t("documents.fields.priceOverrideReasonNamed", {
+                                name: line.nameRu,
+                              })}
+                            </span>
+                            <input
+                              type="text"
+                              value={line.priceOverrideReason ?? ""}
+                              disabled={submitting}
+                              aria-label={t("documents.fields.priceOverrideReasonNamed", {
+                                name: line.nameRu,
+                              })}
+                              aria-invalid={priceOverrideReasonError ? true : undefined}
+                              aria-describedby={
+                                priceOverrideReasonError ? priceOverrideReasonErrorId : undefined
+                              }
+                              onChange={(event) =>
+                                dispatch({
+                                  type: "line.priceOverrideReasonChanged",
+                                  id: line.id,
+                                  reason: event.currentTarget.value,
+                                })
+                              }
+                            />
+                            {priceOverrideReasonError ? (
+                              <span
+                                id={priceOverrideReasonErrorId}
+                                className="document-field-error"
+                              >
+                                {priceOverrideReasonError}
+                              </span>
+                            ) : null}
+                          </label>
+                        ) : null}
+                      </div>
                     </td>
                     <td>
                       {line.vatRateBps === null ? (

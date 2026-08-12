@@ -112,7 +112,9 @@ describe("document draft reducer", () => {
         nameEn: "Basic",
         quantity: 1,
         unit: "месяц",
+        catalogUnitPrice: "120.00",
         agreedUnitPrice: "120.00",
+        priceOverrideReason: null,
         vatRateBps: 2000,
         vatIncluded: true,
         activationPolicy: "immediate",
@@ -225,19 +227,20 @@ describe("document draft reducer", () => {
       id: "line-addon",
       direction: 1,
     });
-    const removed = documentDraftReducer(bottomStayedPut, { type: "line.removed", id: "line-service" });
+    const removed = documentDraftReducer(bottomStayedPut, {
+      type: "line.removed",
+      id: "line-service",
+    });
 
     expect(topStayedPut.lines.map((line) => line.id)).toEqual([
       "line-plan",
       "line-addon",
       "line-service",
     ]);
-    expect(moved.lines.map((line) => line.id)).toEqual([
-      "line-plan",
-      "line-service",
-      "line-addon",
-    ]);
-    expect(bottomStayedPut.lines.map((line) => line.id)).toEqual(moved.lines.map((line) => line.id));
+    expect(moved.lines.map((line) => line.id)).toEqual(["line-plan", "line-service", "line-addon"]);
+    expect(bottomStayedPut.lines.map((line) => line.id)).toEqual(
+      moved.lines.map((line) => line.id),
+    );
     expect(removed.lines.map((line) => line.id)).toEqual(["line-plan", "line-addon"]);
   });
 
@@ -281,6 +284,26 @@ describe("document draft reducer", () => {
       { id: "line-addon", activationPolicy: "immediate" },
       { id: "line-service", activationPolicy: null },
     ]);
+  });
+
+  it("keeps the catalog price while editing an offer price and records an explicit reason", () => {
+    const initial = draft([createLineFromCatalog(plan, "line-plan")]);
+    const repriced = documentDraftReducer(initial, {
+      type: "line.priceChanged",
+      id: "line-plan",
+      price: "99.00",
+    });
+    const explained = documentDraftReducer(repriced, {
+      type: "line.priceOverrideReasonChanged",
+      id: "line-plan",
+      reason: "Annual commitment",
+    });
+
+    expect(explained.lines[0]).toMatchObject({
+      catalogUnitPrice: "120.00",
+      agreedUnitPrice: "99.00",
+      priceOverrideReason: "Annual commitment",
+    });
   });
 });
 
@@ -342,7 +365,9 @@ describe("document draft validation and request adapters", () => {
       ...createLineFromCatalog(service, `line-${index}`),
     }));
 
-    expect(validateDocumentDraft({ ...draft([invalidPlan, invalidAddon]), tenantId: "" })).toMatchObject({
+    expect(
+      validateDocumentDraft({ ...draft([invalidPlan, invalidAddon]), tenantId: "" }),
+    ).toMatchObject({
       tenantId: "tenant_required",
       "lines.line-plan.agreedUnitPrice": "money_must_have_two_decimal_places",
       "lines.line-plan.activationPolicy": "activation_policy_required",
@@ -373,10 +398,47 @@ describe("document draft validation and request adapters", () => {
       tenantId: source.tenantId,
       expiresAt: "2026-09-01",
       lines: [
-        expect.objectContaining({ kind: "plan", activationPolicy: "immediately" }),
-        expect.objectContaining({ kind: "addon", activationPolicy: null }),
-        expect.objectContaining({ kind: "service", activationPolicy: null }),
+        expect.objectContaining({
+          kind: "plan",
+          catalogUnitPrice: "120.00",
+          priceOverrideReason: null,
+          activationPolicy: "immediately",
+        }),
+        expect.objectContaining({
+          kind: "addon",
+          catalogUnitPrice: "100.00",
+          priceOverrideReason: null,
+          activationPolicy: null,
+        }),
+        expect.objectContaining({
+          kind: "service",
+          catalogUnitPrice: "0.10",
+          priceOverrideReason: null,
+          activationPolicy: null,
+        }),
       ],
+    });
+  });
+
+  it("requires and serializes an offer price override reason when catalog price differs", () => {
+    const unexplained = draft([
+      { ...createLineFromCatalog(plan, "line-plan"), agreedUnitPrice: "99.00" },
+    ]);
+    const explained = draft([
+      {
+        ...unexplained.lines[0]!,
+        priceOverrideReason: "Annual commitment",
+      },
+    ]);
+
+    expect(validateDocumentDraft(unexplained, "offer")).toMatchObject({
+      "lines.line-plan.priceOverrideReason": "price_override_reason_required",
+    });
+    expect(() => toOfferCreateInput(unexplained)).toThrow("price_override_reason_required");
+    expect(toOfferCreateInput(explained).lines[0]).toMatchObject({
+      catalogUnitPrice: "120.00",
+      agreedUnitPrice: "99.00",
+      priceOverrideReason: "Annual commitment",
     });
   });
 
@@ -399,10 +461,7 @@ describe("document draft validation and request adapters", () => {
       "after_current",
       "manual",
     ]);
-    expect(getSupportedActivationPolicies("offer", "plan")).toEqual([
-      "immediate",
-      "after_current",
-    ]);
+    expect(getSupportedActivationPolicies("offer", "plan")).toEqual(["immediate", "after_current"]);
     expect(getSupportedActivationPolicies("offer", "addon")).toEqual([]);
     expect(getSupportedActivationPolicies("offer", "service")).toEqual([]);
   });

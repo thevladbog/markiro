@@ -50,7 +50,9 @@ export function createLineFromCatalog(version: CatalogVersionDto, id: string): D
     nameEn: version.nameEn,
     quantity: 1,
     unit: version.unit,
+    catalogUnitPrice: version.unitPrice,
     agreedUnitPrice: version.unitPrice,
+    priceOverrideReason: null,
     vatRateBps,
     vatIncluded: vatRateBps !== null && version.vatIncluded === true,
     activationPolicy: version.kind === "service" ? null : "immediate",
@@ -86,7 +88,15 @@ export function documentDraftReducer(
     case "line.quantityChanged":
       return updateLineById(draft, action.id, (line) => ({ ...line, quantity: action.quantity }));
     case "line.priceChanged":
-      return updateLineById(draft, action.id, (line) => ({ ...line, agreedUnitPrice: action.price }));
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        agreedUnitPrice: action.price,
+      }));
+    case "line.priceOverrideReasonChanged":
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        priceOverrideReason: action.reason,
+      }));
     case "line.vatIncludedChanged":
       return updateLineById(draft, action.id, (line) => ({
         ...line,
@@ -137,12 +147,9 @@ export function calculateDocumentTotals(
   vatTotal: string;
   total: string;
 } {
-  const kind =
-    typeof linesOrKind === "string" ? linesOrKind : (kindOrLines as DocumentKind);
+  const kind = typeof linesOrKind === "string" ? linesOrKind : (kindOrLines as DocumentKind);
   const lines =
-    typeof linesOrKind === "string"
-      ? (kindOrLines as readonly DocumentLineDraft[])
-      : linesOrKind;
+    typeof linesOrKind === "string" ? (kindOrLines as readonly DocumentLineDraft[]) : linesOrKind;
   let subtotal = 0n;
   let vatTotal = 0n;
   let total = 0n;
@@ -158,12 +165,11 @@ export function calculateDocumentTotals(
         : line.vatIncluded
           ? gross
           : gross + (gross * rate) / 10_000n;
-    const vat =
-      line.vatIncluded
-        ? (gross * rate) / (10_000n + rate)
-        : kind === "offer"
-          ? lineTotal - gross
-          : (gross * rate) / 10_000n;
+    const vat = line.vatIncluded
+      ? (gross * rate) / (10_000n + rate)
+      : kind === "offer"
+        ? lineTotal - gross
+        : (gross * rate) / 10_000n;
     const lineSubtotal = line.vatIncluded ? gross - vat : gross;
 
     subtotal += lineSubtotal;
@@ -171,7 +177,11 @@ export function calculateDocumentTotals(
     total += lineTotal;
   }
 
-  return { subtotal: formatMoney(subtotal), vatTotal: formatMoney(vatTotal), total: formatMoney(total) };
+  return {
+    subtotal: formatMoney(subtotal),
+    vatTotal: formatMoney(vatTotal),
+    total: formatMoney(total),
+  };
 }
 
 export function validateDocumentDraft(
@@ -189,6 +199,13 @@ export function validateDocumentDraft(
       errors[`${prefix}.quantity`] = "quantity_must_be_positive_integer";
     if (!MONEY_PATTERN.test(line.agreedUnitPrice))
       errors[`${prefix}.agreedUnitPrice`] = "money_must_have_two_decimal_places";
+    if (
+      documentKind === "offer" &&
+      line.catalogUnitPrice !== null &&
+      line.agreedUnitPrice !== line.catalogUnitPrice &&
+      !line.priceOverrideReason?.trim()
+    )
+      errors[`${prefix}.priceOverrideReason`] = "price_override_reason_required";
     if (
       line.vatRateBps !== null &&
       (!Number.isInteger(line.vatRateBps) || line.vatRateBps < 0 || line.vatRateBps > 10_000)
@@ -252,6 +269,12 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
   if (line.kind === "custom") throw new Error("custom_offer_line_unsupported");
+  if (
+    line.catalogUnitPrice !== null &&
+    line.agreedUnitPrice !== line.catalogUnitPrice &&
+    !line.priceOverrideReason?.trim()
+  )
+    throw new Error("price_override_reason_required");
   const common = {
     kind: line.kind,
     catalogVersionId: requiredCatalogVersionId(line),
@@ -259,7 +282,9 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     nameEn: line.nameEn,
     quantity: line.quantity,
     unit: line.unit,
+    catalogUnitPrice: line.catalogUnitPrice,
     agreedUnitPrice: line.agreedUnitPrice,
+    priceOverrideReason: line.priceOverrideReason?.trim() || null,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
   };
@@ -338,11 +363,16 @@ function updateLineById(
   id: string,
   update: (line: DocumentLineDraft) => DocumentLineDraft,
 ): DocumentDraft {
-  return updateLine(draft, draft.lines.findIndex((line) => line.id === id), update);
+  return updateLine(
+    draft,
+    draft.lines.findIndex((line) => line.id === id),
+    update,
+  );
 }
 
 function positiveInteger(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 1) throw new Error("quantity_must_be_positive_integer");
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw new Error("quantity_must_be_positive_integer");
   return value;
 }
 

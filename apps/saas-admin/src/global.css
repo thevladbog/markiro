@@ -1314,6 +1314,17 @@ textarea {
   gap: 5px;
 }
 
+.document-line__override-reason {
+  display: grid;
+  gap: 5px;
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.document-line .document-line__override-reason input {
+  width: 180px;
+}
+
 .document-line__mobile-label {
   color: var(--fg-3);
   font: var(--text-meta);

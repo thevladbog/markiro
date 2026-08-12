@@ -21,6 +21,7 @@ export interface ComboboxProps<TValue extends string = string> {
   placeholder: string;
   searchPlaceholder: string;
   emptyText: string;
+  loadingText: string;
   loading?: boolean;
   disabled?: boolean;
   error?: string;
@@ -60,6 +61,7 @@ export function Combobox<TValue extends string = string>({
   placeholder,
   searchPlaceholder,
   emptyText,
+  loadingText,
   loading = false,
   disabled = false,
   error,
@@ -193,7 +195,9 @@ export function Combobox<TValue extends string = string>({
               role="searchbox"
               aria-label={searchPlaceholder}
               aria-controls={listboxId}
-              aria-activedescendant={activeOption ? `${listboxId}-${activeOption.value}` : undefined}
+              aria-activedescendant={
+                activeOption ? `${listboxId}-${activeOption.value}` : undefined
+              }
               className="mk-combobox__search"
               value={query}
               placeholder={searchPlaceholder}
@@ -206,7 +210,7 @@ export function Combobox<TValue extends string = string>({
             <div id={listboxId} className="mk-combobox__listbox" role="listbox" aria-label={label}>
               {loading ? (
                 <div className="mk-combobox__status" role="status">
-                  Loading offers…
+                  {loadingText}
                 </div>
               ) : groupedOptions.length === 0 ? (
                 <div className="mk-combobox__status">{emptyText}</div>
@@ -218,7 +222,9 @@ export function Combobox<TValue extends string = string>({
                     role={group.label ? "group" : undefined}
                     aria-label={group.label || undefined}
                   >
-                    {group.label ? <div className="mk-combobox__group-label">{group.label}</div> : null}
+                    {group.label ? (
+                      <div className="mk-combobox__group-label">{group.label}</div>
+                    ) : null}
                     {group.options.map((option) => {
                       const optionIndex = enabledOptions.findIndex(
                         (enabledOption) => enabledOption.value === option.value,

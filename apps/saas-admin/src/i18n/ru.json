@@ -334,6 +334,8 @@
   },
   "documents": {
     "loadingSources": "Загружаем тенантов и каталог",
+    "loadingTenants": "Загружаем тенантов",
+    "loadingCatalog": "Загружаем позиции каталога",
     "loadSourcesError": "Не удалось загрузить тенантов или опубликованный каталог.",
     "tenant": "Тенант",
     "tenantPlaceholder": "Выберите тенант",
@@ -381,6 +383,7 @@
     "fields": {
       "quantityNamed": "Количество {{name}}",
       "priceNamed": "Цена {{name}}",
+      "priceOverrideReasonNamed": "Причина изменения цены {{name}}",
       "vatNamed": "НДС {{name}}",
       "policyNamed": "Правило применения {{name}}"
     },
@@ -422,6 +425,7 @@
       "too_many_lines": "В документе может быть не больше 100 строк",
       "quantity_must_be_positive_integer": "Количество должно быть целым и не меньше 1",
       "money_must_have_two_decimal_places": "Введите цену с двумя знаками после запятой",
+      "price_override_reason_required": "Укажите причину отличия согласованной цены от каталога",
       "vat_rate_must_be_between_0_and_10000": "Ставка НДС должна быть от 0 до 100%",
       "service_activation_policy_must_be_null": "Для услуги правило применения недоступно",
       "activation_policy_required": "Выберите правило применения",

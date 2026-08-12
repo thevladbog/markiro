@@ -1,4 +1,10 @@
-import { Inject, Injectable, ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Inject,
+  Injectable,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -21,6 +27,25 @@ export class PlatformOffersService {
       })),
     );
     return this.db.transaction(async (tx) => {
+      for (const line of input.lines) {
+        if (!line.catalogVersionId) {
+          if (line.kind !== "service") {
+            throw new BadRequestException({ code: "offer_catalog_version_invalid" });
+          }
+          continue;
+        }
+        const [version] = await tx
+          .select({
+            kind: schema.catalogItemVersions.kind,
+            status: schema.catalogItemVersions.status,
+          })
+          .from(schema.catalogItemVersions)
+          .where(eq(schema.catalogItemVersions.id, line.catalogVersionId))
+          .for("share");
+        if (!version || version.kind !== line.kind || version.status !== "published") {
+          throw new BadRequestException({ code: "offer_catalog_version_invalid" });
+        }
+      }
       const [offer] = await tx
         .insert(schema.commercialOffers)
         .values({

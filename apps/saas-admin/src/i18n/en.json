@@ -334,6 +334,8 @@
   },
   "documents": {
     "loadingSources": "Loading tenants and catalog",
+    "loadingTenants": "Loading tenants",
+    "loadingCatalog": "Loading catalog positions",
     "loadSourcesError": "Could not load tenants or the published catalog.",
     "tenant": "Tenant",
     "tenantPlaceholder": "Select a tenant",
@@ -381,6 +383,7 @@
     "fields": {
       "quantityNamed": "Quantity for {{name}}",
       "priceNamed": "Price for {{name}}",
+      "priceOverrideReasonNamed": "Price change reason for {{name}}",
       "vatNamed": "VAT for {{name}}",
       "policyNamed": "Activation policy for {{name}}"
     },
@@ -422,6 +425,7 @@
       "too_many_lines": "A document can contain no more than 100 lines",
       "quantity_must_be_positive_integer": "Quantity must be an integer of at least 1",
       "money_must_have_two_decimal_places": "Enter a price with two decimal places",
+      "price_override_reason_required": "Explain why the agreed price differs from the catalog",
       "vat_rate_must_be_between_0_and_10000": "VAT must be between 0 and 100%",
       "service_activation_policy_must_be_null": "Services do not have an activation policy",
       "activation_policy_required": "Select an activation policy",
