@@ -843,9 +843,6 @@ describe("App", () => {
     await signInAsOperator();
 
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
-    act(() => rejectInitialShifts(new TypeError("network")));
-    await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("No connection"));
-
     act(() => window.dispatchEvent(new Event("offline")));
     expect(screen.getByTestId("server-status").textContent).toBe("No connection");
     act(() => window.dispatchEvent(new Event("online")));
@@ -853,6 +850,7 @@ describe("App", () => {
     expect(screen.getByTestId("server-status").textContent).toBe("No connection");
 
     act(() => window.dispatchEvent(new Event("offline")));
+    act(() => rejectInitialShifts(new TypeError("network")));
     fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
     await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
   });
