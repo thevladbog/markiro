@@ -55,6 +55,14 @@ function caddyPathMatches(pattern, path) {
   return pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
 }
 
+function caddyHeaderMatches(pattern, value) {
+  return new RegExp(`^${pattern.split("*").map(escapeRegExp).join(".*")}$`).test(value);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[|\\{}()[\]^$+*?.]/g, "\\$&");
+}
+
 function stationDevicePathMatches(caddy, path) {
   const devicePatterns =
     caddy
@@ -167,13 +175,21 @@ function kioskOrderedRouteTable(route) {
   return tables[0].routes;
 }
 
-function adaptedRouteMatches(route, { method, path }) {
+function adaptedRouteMatches(route, { method, path, headers = {} }) {
   if (!Array.isArray(route.match)) return true;
   return route.match.some(
     (matcher) =>
       (!Array.isArray(matcher.method) || matcher.method.includes(method)) &&
       (!Array.isArray(matcher.path) ||
-        matcher.path.some((pattern) => caddyPathMatches(pattern, path))),
+        matcher.path.some((pattern) => caddyPathMatches(pattern, path))) &&
+      (matcher.path_regexp === undefined || new RegExp(matcher.path_regexp.pattern).test(path)) &&
+      (matcher.header === undefined ||
+        Object.entries(matcher.header).every(([name, patterns]) => {
+          const value = headers[name.toLowerCase()];
+          return (
+            value !== undefined && patterns.some((pattern) => caddyHeaderMatches(pattern, value))
+          );
+        })),
   );
 }
 
@@ -200,6 +216,23 @@ function assertOnlyPlain404(route, request) {
     objects.every((candidate) => candidate.file === undefined),
     `${request.method} ${request.path} must not reach try_files`,
   );
+}
+
+function applicationOrderedRouteTable(route) {
+  const routeTable = nestedObjects(route).find(
+    (candidate) =>
+      Array.isArray(candidate.routes) &&
+      candidate.routes.some((entry) =>
+        nestedObjects(entry).some((value) => value.handler === "reverse_proxy"),
+      ) &&
+      candidate.routes
+        .at(-1)
+        ?.handle?.some(
+          (handler) => handler.handler === "static_response" && handler.status_code === 404,
+        ),
+  )?.routes;
+  assert.ok(routeTable, "application must have an ordered route table");
+  return routeTable;
 }
 
 function assertKioskRoutingBoundary(route) {
@@ -269,19 +302,7 @@ function assertKioskRoutingBoundary(route) {
 }
 
 function assertPlainFallback(route, host) {
-  const routeTable = nestedObjects(route).find(
-    (candidate) =>
-      Array.isArray(candidate.routes) &&
-      candidate.routes.some((entry) =>
-        nestedObjects(entry).some((value) => value.handler === "reverse_proxy"),
-      ) &&
-      candidate.routes
-        .at(-1)
-        ?.handle?.some(
-          (handler) => handler.handler === "static_response" && handler.status_code === 404,
-        ),
-  )?.routes;
-  assert.ok(routeTable, `${host} must have an ordered route table`);
+  const routeTable = applicationOrderedRouteTable(route);
   const fallback = routeTable
     .at(-1)
     .handle.filter((candidate) => candidate.handler === "static_response");
@@ -368,7 +389,11 @@ function assertAuthorityContract(adapted, { alb }) {
     const methods = nestedObjects(route)
       .filter((candidate) => Array.isArray(candidate.method))
       .map((candidate) => candidate.method);
-    assert.deepEqual(methods, [["GET", "HEAD"]], `${host} must not serve the SPA for mutations`);
+    assert.deepEqual(
+      methods,
+      host === adminHost ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]] : [["GET", "HEAD"]],
+      `${host} must reserve mutations for API handlers instead of the SPA`,
+    );
     assertPlainFallback(route, host);
   }
 
@@ -378,13 +403,15 @@ function assertAuthorityContract(adapted, { alb }) {
     ["/1c_exchange"],
     ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
     ["/shifts", "/products", "/products/gtin-check"],
+    ["/shifts", "/products", "/products/gtin-check"],
+    ["^/shifts/[^/]+/(open|bundle)$"],
     ["^/shifts/[^/]+/(open|bundle)$"],
   ];
   const adminProxies = proxyRoutes(admin);
   const adminReverseProxies = nestedObjects(admin).filter(
     (candidate) => candidate.handler === "reverse_proxy",
   );
-  assert.equal(adminReverseProxies.length, 6);
+  assert.equal(adminReverseProxies.length, 8);
   assert.deepEqual(
     adminProxies.map(({ paths }) => paths),
     expectedAdminPaths,
@@ -535,7 +562,7 @@ function mutate(source, search, replacement) {
   return changed;
 }
 
-test("device proxy matcher accepts only the approved station API boundary", async () => {
+test("device proxy matcher retains exact infrastructure boundaries", async () => {
   const caddy = await readFile("deploy/production/Caddyfile", "utf8");
   const patterns = caddy
     .match(/^\s*@device path (.+)$/m)?.[1]
@@ -551,11 +578,6 @@ test("device proxy matcher accepts only the approved station API boundary", asyn
     "/docs",
     "/docs/*",
   ]);
-  assert.match(caddy, /@stationRoot path \/shifts \/products \/products\/gtin-check/);
-  assert.match(
-    caddy,
-    /@stationShift path_regexp stationShift \^\/shifts\/\[\^\/\]\+\/\(open\|bundle\)\$/,
-  );
   for (const path of [
     "/station/bootstrap",
     "/kiosk/bootstrap",
@@ -564,23 +586,10 @@ test("device proxy matcher accepts only the approved station API boundary", asyn
     "/openapi.json",
     "/docs",
     "/docs/swagger-ui.css",
-    "/shifts",
-    "/products",
-    "/products/gtin-check",
-    "/shifts/id/open",
-    "/shifts/id/bundle",
   ]) {
     assert.ok(stationDevicePathMatches(caddy, path), `${path} must proxy`);
   }
-  for (const path of [
-    "/healthful",
-    "/health-check",
-    "/docs-old",
-    "/docs2",
-    "/shifts/id/close",
-    "/shifts/id",
-    "/products/id",
-  ]) {
+  for (const path of ["/healthful", "/health-check", "/docs-old", "/docs2"]) {
     assert.ok(!stationDevicePathMatches(caddy, path), `${path} must remain a SPA path`);
   }
 });
@@ -591,10 +600,10 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
     (match) => match[1],
   );
 
-  assert.equal(reverseProxies.length, 7);
+  assert.equal(reverseProxies.length, 9);
   assert.equal(
     reverseProxies.filter((block) => /import standard_api_transport/.test(block)).length,
-    6,
+    8,
   );
   assert.equal(
     reverseProxies.filter((block) => /import commerce_ml_transport/.test(block)).length,
@@ -656,7 +665,84 @@ test("direct Caddy adapter isolates the admin and kiosk authorities", async () =
       response_header_timeout: 30_000_000_000,
       write_timeout: 60_000_000_000,
     },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
   ]);
+});
+
+test("direct Caddy adapter keeps bare admin routes static and routes exact Station requests", async () => {
+  const admin = applicationRoute(
+    await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8")),
+    adminHost,
+  );
+  const routeTable = applicationOrderedRouteTable(admin);
+
+  for (const path of ["/shifts", "/products"]) {
+    const request = { method: "GET", path };
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.ok(
+      nestedObjects(selected).some((candidate) => candidate.handler === "file_server"),
+      `bare admin GET ${path} must remain an SPA navigation`,
+    );
+    assert.ok(
+      nestedObjects(selected).every((candidate) => candidate.handler !== "reverse_proxy"),
+      `bare admin GET ${path} must not proxy to the Station API`,
+    );
+  }
+
+  for (const request of [
+    { method: "GET", path: "/shifts", headers: { "x-api-key": "station-test-key" } },
+    { method: "POST", path: "/shifts", headers: { "x-api-key": "station-test-key" } },
+    { method: "GET", path: "/products", headers: { "x-api-key": "station-test-key" } },
+    {
+      method: "POST",
+      path: "/products/gtin-check",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "POST",
+      path: "/shifts/shift-1/open",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "GET",
+      path: "/shifts/shift-1/bundle",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    { method: "OPTIONS", path: "/shifts" },
+    { method: "OPTIONS", path: "/products" },
+    { method: "OPTIONS", path: "/products/gtin-check" },
+    { method: "OPTIONS", path: "/shifts/shift-1/open" },
+    { method: "OPTIONS", path: "/shifts/shift-1/bundle" },
+  ]) {
+    const selected = selectedAdaptedRoute(routeTable, request);
+    assert.equal(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "reverse_proxy").length,
+      1,
+      `${request.method} ${request.path} must proxy exactly once`,
+    );
+    assert.ok(
+      nestedObjects(selected).every((candidate) => candidate.handler !== "file_server"),
+      `${request.method} ${request.path} must not select the SPA`,
+    );
+  }
+
+  const forbidden = {
+    method: "POST",
+    path: "/shifts/shift-1/close",
+    headers: { "x-api-key": "station-test-key" },
+  };
+  assertOnlyPlain404(selectedAdaptedRoute(routeTable, forbidden), forbidden);
 });
 
 test("production edge preserves its image and routing contract", async () => {

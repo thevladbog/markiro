@@ -15,9 +15,20 @@ const expected = [
   ["/products/gtin-check", "POST", "content-type,x-api-key,x-station-capabilities"],
 ];
 
-function response(status, acao, body = "") {
+function response(status, acao, body = "", { allowHeaders, allowMethods } = {}) {
   const headers = acao === undefined ? {} : { "Access-Control-Allow-Origin": acao };
+  if (allowMethods !== undefined) headers["Access-Control-Allow-Methods"] = allowMethods;
+  if (allowHeaders !== undefined) headers["Access-Control-Allow-Headers"] = allowHeaders;
   return new Response(status === 204 && body === "" ? undefined : body, { status, headers });
+}
+
+function approvedPreflightHeaders(index) {
+  const [, method, headers] = expected[index];
+  return { allowMethods: method.toLowerCase(), allowHeaders: headers.toUpperCase() };
+}
+
+function approvedResponse(index) {
+  return response(204, STATION_ORIGIN, "", approvedPreflightHeaders(index));
 }
 
 test("sends the exact ordered Windows station API preflight inventory", async () => {
@@ -28,7 +39,7 @@ test("sends the exact ordered Windows station API preflight inventory", async ()
       calls.push({ url, init });
       assert.equal(init.method, "OPTIONS");
       assert.equal(init.headers.Origin, STATION_ORIGIN);
-      return response(204, STATION_ORIGIN);
+      return approvedResponse(calls.length - 1);
     },
   });
   assert.deepEqual(
@@ -55,10 +66,10 @@ test("fails closed for every invalid station API preflight without disclosing re
             apiUrl: "https://admin.markiro.app",
             fetchImpl: async () => {
               const current = call++;
-              if (current !== index) return response(204, STATION_ORIGIN);
+              if (current !== index) return approvedResponse(current);
               return failure === "wrong-origin"
-                ? response(204, "https://station.example.ru")
-                : response(403, STATION_ORIGIN, fakeSecret);
+                ? response(204, "https://station.example.ru", "", approvedPreflightHeaders(index))
+                : response(403, STATION_ORIGIN, fakeSecret, approvedPreflightHeaders(index));
             },
           }),
           (error) => {
@@ -72,12 +83,44 @@ test("fails closed for every invalid station API preflight without disclosing re
   }
 });
 
+test("fails closed when any Station preflight omits or mismatches allowed methods or headers", async (t) => {
+  for (const [name, invalidHeaders] of [
+    ["missing allow-methods", (method, headers) => ({ allowHeaders: headers })],
+    [
+      "wrong allow-methods",
+      (method, headers) => ({
+        allowMethods: method === "GET" ? "POST" : "GET",
+        allowHeaders: headers,
+      }),
+    ],
+    ["missing allow-headers", (method) => ({ allowMethods: method })],
+    ["wrong allow-headers", (method) => ({ allowMethods: method, allowHeaders: "content-type" })],
+  ]) {
+    for (const [index, [path, method, headers]] of expected.entries()) {
+      await t.test(`${name}: ${path}`, async () => {
+        let call = 0;
+        await assert.rejects(
+          verifyStationCors({
+            apiUrl: "https://admin.markiro.app",
+            fetchImpl: async () => {
+              const current = call++;
+              if (current !== index) return approvedResponse(current);
+              return response(204, STATION_ORIGIN, "", invalidHeaders(method, headers));
+            },
+          }),
+          { message: FAILURE },
+        );
+      });
+    }
+  }
+});
+
 test("fails closed on a non-204 response without exposing its body", async () => {
   const fakeSecret = "fake-secret-body-value";
   await assert.rejects(
     verifyStationCors({
       apiUrl: "https://admin.markiro.app",
-      fetchImpl: async () => response(403, STATION_ORIGIN, fakeSecret),
+      fetchImpl: async () => response(403, STATION_ORIGIN, fakeSecret, approvedPreflightHeaders(0)),
     }),
     (error) => {
       assert.equal(error.message, FAILURE);

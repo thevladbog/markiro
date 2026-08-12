@@ -65,15 +65,41 @@
 			}
 		}
 
-		@stationRoot path /shifts /products /products/gtin-check
+		@stationRoot {
+			path /shifts /products /products/gtin-check
+			header X-Api-Key *
+		}
 		handle @stationRoot {
 			reverse_proxy api:3000 {
 				import standard_api_transport
 			}
 		}
 
-		@stationShift path_regexp stationShift ^/shifts/[^/]+/(open|bundle)$
+		@stationRootPreflight {
+			path /shifts /products /products/gtin-check
+			method OPTIONS
+		}
+		handle @stationRootPreflight {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationShift {
+			path_regexp stationShift ^/shifts/[^/]+/(open|bundle)$
+			header X-Api-Key *
+		}
 		handle @stationShift {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationShiftPreflight {
+			path_regexp stationShiftPreflight ^/shifts/[^/]+/(open|bundle)$
+			method OPTIONS
+		}
+		handle @stationShiftPreflight {
 			reverse_proxy api:3000 {
 				import standard_api_transport
 			}

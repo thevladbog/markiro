@@ -54,6 +54,28 @@ function canonicalProductionOrigin(apiUrl) {
   return url.origin;
 }
 
+function allowsCommaSeparatedValue(value, required) {
+  return value
+    ?.split(",")
+    .some((candidate) => candidate.trim().toLowerCase() === required.toLowerCase());
+}
+
+function allowsPreflight(response, preflight) {
+  return (
+    response.status === 204 &&
+    response.headers.get("access-control-allow-origin") === WINDOWS_STATION_ORIGIN &&
+    allowsCommaSeparatedValue(
+      response.headers.get("access-control-allow-methods"),
+      preflight.method,
+    ) &&
+    preflight.headers
+      .split(",")
+      .every((header) =>
+        allowsCommaSeparatedValue(response.headers.get("access-control-allow-headers"), header),
+      )
+  );
+}
+
 export async function verifyStationCors({ apiUrl, fetchImpl = fetch }) {
   try {
     const origin = canonicalProductionOrigin(apiUrl);
@@ -68,10 +90,7 @@ export async function verifyStationCors({ apiUrl, fetchImpl = fetch }) {
         },
       });
 
-      if (
-        response.status !== 204 ||
-        response.headers.get("access-control-allow-origin") !== WINDOWS_STATION_ORIGIN
-      ) {
+      if (!allowsPreflight(response, preflight)) {
         fail();
       }
     }

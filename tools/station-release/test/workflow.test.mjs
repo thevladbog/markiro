@@ -134,7 +134,13 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
       assert.equal(init.headers.Origin, "http://tauri.localhost");
       return new Response(undefined, {
         status: 204,
-        headers: { "Access-Control-Allow-Origin": "http://tauri.localhost" },
+        headers: {
+          "Access-Control-Allow-Origin": "http://tauri.localhost",
+          "Access-Control-Allow-Methods":
+            init.headers["Access-Control-Request-Method"].toLowerCase(),
+          "Access-Control-Allow-Headers":
+            init.headers["Access-Control-Request-Headers"].toUpperCase(),
+        },
       });
     },
   });
