@@ -115,6 +115,7 @@ export function createStationClient(
 ): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
   const credentialBoundary = options.credentialBoundary;
+  let latestRequestSequence = 0;
 
   async function request<T>(
     method: "GET" | "POST",
@@ -125,6 +126,10 @@ export function createStationClient(
     if (credentialBoundary?.generation.sealed) {
       throw new Error("station credential generation is sealed");
     }
+    const requestSequence = ++latestRequestSequence;
+    const reportReachability = (state: Exclude<ServerReachability, "checking">) => {
+      if (requestSequence === latestRequestSequence) options.onReachabilityChange?.(state);
+    };
     // One `AbortController` per attempt, cleared in `finally` so the timer
     // never leaks on the success path (nor on an ordinary HTTP-error path —
     // both go through the same `finally`). `controller.abort()` makes the
@@ -149,12 +154,12 @@ export function createStationClient(
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
       receivedResponse = true;
-      options.onReachabilityChange?.("reachable");
+      reportReachability("reachable");
       if (!res.ok) throw new StationApiError(res.status, await readError(res));
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
-      if (!receivedResponse) options.onReachabilityChange?.("unreachable");
+      if (!receivedResponse) reportReachability("unreachable");
       if (credentialBoundary && isStationCredentialRejection(error)) {
         await rejectCredentialGeneration(
           {

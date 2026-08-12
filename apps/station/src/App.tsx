@@ -589,7 +589,14 @@ export function App() {
       return null;
     }
     return createStationClient(config, {
-      onReachabilityChange: reportServerReachability,
+      onReachabilityChange: (state) => {
+        // A request from a replaced credential/client may settle after the
+        // new session has already proved its own reachability. Only the
+        // generation that currently owns authenticated work may publish.
+        if (currentCredentialGeneration.current === credentialGeneration) {
+          reportServerReachability(state);
+        }
+      },
       credentialBoundary: {
         machineId: config.machineId,
         generation: credentialGeneration,

@@ -1273,6 +1273,79 @@ describe("App", () => {
     await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
   });
 
+  it("ignores a late reachability outcome from the client replaced by credential re-pairing", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "old-key",
+      server_url: "https://api.factory.example",
+    };
+    mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    let rejectOldShift!: (reason?: unknown) => void;
+    const oldShift = new Promise<Response>((_resolve, reject) => {
+      rejectOldShift = reject;
+    });
+    let shiftRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/pair") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                device: {
+                  id: "device-1",
+                  name: "Packing station",
+                  tenantId: "tenant-1",
+                  organizationName: "Factory",
+                  line: null,
+                },
+                credential: { apiKey: "new-key", serverUrl: "https://api.factory.example" },
+                operators: [],
+              }),
+              { status: 201, headers: { "Content-Type": "application/json" } },
+            ),
+          );
+        }
+        if (path === "/shifts") {
+          shiftRequests += 1;
+          return shiftRequests === 1
+            ? oldShift
+            : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    await waitFor(() => expect(shiftRequests).toBe(1));
+    expect(screen.getByTestId("server-status").textContent).toBe("Available");
+
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+    await screen.findByText("Connect station");
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    await signInAsOperator();
+    await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
+
+    await act(async () => {
+      rejectOldShift(new TypeError("late old-client failure"));
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("server-status").textContent).toBe("Available");
+  });
+
   it("backfills a real legacy config before sync and later recovers a 401 against the same durable device", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     const persistedConfig: Record<string, unknown> = {

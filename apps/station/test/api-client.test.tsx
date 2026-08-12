@@ -66,6 +66,62 @@ describe("createStationClient", () => {
     expect(onReachabilityChange).toHaveBeenLastCalledWith("unreachable");
   });
 
+  it("ignores an older transport failure after a newer request received an HTTP response", async () => {
+    let rejectOlder!: (reason?: unknown) => void;
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(
+        new Promise<Response>((_resolve, reject) => {
+          rejectOlder = reject;
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    const older = client.get("/station/operators");
+    await client.get("/shifts");
+    rejectOlder(new TypeError("late network failure"));
+    await expect(older).rejects.toBeDefined();
+
+    expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
+  });
+
+  it("ignores an older HTTP success after a newer request failed to reach the server", async () => {
+    let resolveOlder!: (response: Response) => void;
+    vi.spyOn(globalThis, "fetch")
+      .mockReturnValueOnce(
+        new Promise<Response>((resolve) => {
+          resolveOlder = resolve;
+        }),
+      )
+      .mockRejectedValueOnce(new TypeError("newer network failure"));
+    const onReachabilityChange = vi.fn();
+    const client = createStationClient(
+      { apiKey: "key", serverUrl: "https://station.example" },
+      { onReachabilityChange },
+    );
+
+    const older = client.get("/station/operators");
+    await expect(client.get("/shifts")).rejects.toBeDefined();
+    resolveOlder(
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    await older;
+
+    expect(onReachabilityChange.mock.calls).toEqual([["unreachable"]]);
+  });
+
   it("throws with the server message on non-2xx", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ message: "nope" }), {
