@@ -188,7 +188,6 @@ export function TenantsPage() {
           onChange={(event) => setSearch(event.target.value)}
         />
         <Select
-          native
           className="tenant-status-filter"
           label={t("tenants.filters.status")}
           options={statusOptions}

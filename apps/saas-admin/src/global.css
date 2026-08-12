@@ -9,7 +9,6 @@ body {
 button,
 a,
 input,
-select,
 textarea {
   -webkit-tap-highlight-color: transparent;
 }
@@ -265,7 +264,6 @@ textarea {
 .saas-admin .mk-input,
 .saas-admin .mk-input__control,
 .saas-admin .mk-select__control,
-.saas-admin .native-field select,
 .saas-admin textarea {
   min-height: 44px !important;
 }
@@ -591,14 +589,6 @@ textarea {
 .native-field__error {
   color: var(--err-fg) !important;
   font: var(--text-body-sm) !important;
-}
-
-.native-field select {
-  padding: 0 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-2);
-  background: var(--surface-card);
-  color: var(--fg-1);
 }
 
 .addon-effects {
