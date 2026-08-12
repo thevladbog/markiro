@@ -1372,10 +1372,24 @@ body,
   align-items: center;
 }
 
-.operator-login__badge-panel p {
+.operator-login__badge-copy {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.operator-login__badge-copy h2,
+.operator-login__badge-copy p {
   margin: 0;
+}
+
+.operator-login__badge-copy h2 {
   color: var(--fg-1);
   font: var(--floor-body-strong);
+}
+
+.operator-login__badge-copy p {
+  color: var(--fg-2);
+  font: var(--text-body);
 }
 
 .badge-scan-illustration {

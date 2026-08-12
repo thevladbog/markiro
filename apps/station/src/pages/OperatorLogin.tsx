@@ -309,13 +309,13 @@ export function OperatorLogin({
             </div>
             <div className="operator-login__keypad-zone">
               {stage === "badge" ? (
-                <section
-                  className="operator-login__badge-panel"
-                  aria-label={t("login.badgeIllustration")}
-                >
+                <div className="operator-login__badge-panel">
                   <BadgeScanIllustration />
-                  <p>{t("login.badgeInstruction")}</p>
-                </section>
+                  <div className="operator-login__badge-copy">
+                    <h2>{t("login.badgeInstruction")}</h2>
+                    <p>{t("login.badgeExplanation")}</p>
+                  </div>
+                </div>
               ) : (
                 <PinPad
                   value={stage === "login" ? login : pin}

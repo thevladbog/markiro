@@ -121,7 +121,13 @@ describe("OperatorLogin", () => {
 
     expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
     expect(screen.getByText("Hold the badge near the scanner")).toBeDefined();
+    expect(
+      screen.getByText(
+        "The station recognizes the code automatically. If the operator was just added, the roster will refresh from the server.",
+      ),
+    ).toBeDefined();
     expect(screen.getByTestId("badge-scan-illustration")).toBeDefined();
+    expect(screen.queryByRole("region", { name: "Badge scan illustration" })).toBeNull();
     expect(container.textContent).not.toContain("▣");
     expect(stationCss).not.toMatch(/operator-login__badge-panel[^}]*dashed/s);
     expect(screen.queryByRole("button", { name: "1" })).toBeNull();
