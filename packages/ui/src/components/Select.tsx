@@ -70,6 +70,7 @@ export function Select<TValue extends string = string>({
   const itemOptions = normalizedOptions.map((option) =>
     option.value === "" ? { ...option, value: EMPTY_OPTION_VALUE } : option,
   );
+  const customValue = value === "" && emptyOptionLabel !== undefined ? EMPTY_OPTION_VALUE : value;
 
   if (size === "floor" || native) {
     const floor = size === "floor";
@@ -188,7 +189,7 @@ export function Select<TValue extends string = string>({
         </label>
       )}
       <RadixSelect.Root
-        {...(value === undefined ? {} : { value })}
+        {...(customValue === undefined ? {} : { value: customValue })}
         {...(onValueChange === undefined
           ? {}
           : {
@@ -196,7 +197,7 @@ export function Select<TValue extends string = string>({
                 onValueChange((nextValue === EMPTY_OPTION_VALUE ? "" : nextValue) as TValue),
             })}
         {...(disabled === undefined ? {} : { disabled })}
-        {...(name === undefined ? {} : { name })}
+        {...(name === undefined || value !== undefined ? {} : { name })}
         {...(required === undefined ? {} : { required })}
       >
         <RadixSelect.Trigger
@@ -232,8 +233,10 @@ export function Select<TValue extends string = string>({
             opacity: disabled ? 0.45 : 1,
           }}
         >
-          <RadixSelect.Value placeholder={emptyOptionLabel ?? placeholder} />
-          <RadixSelect.Icon aria-hidden="true">
+          <span className="mk-select__value">
+            <RadixSelect.Value placeholder={emptyOptionLabel ?? placeholder} />
+          </span>
+          <RadixSelect.Icon className="mk-select__icon" aria-hidden="true">
             <svg
               width="16"
               height="16"
@@ -286,7 +289,9 @@ export function Select<TValue extends string = string>({
                     opacity: option.disabled ? 0.45 : 1,
                   }}
                 >
-                  <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
+                  <span className="mk-select__item-text">
+                    <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
+                  </span>
                   <RadixSelect.ItemIndicator
                     aria-hidden="true"
                     style={{
@@ -313,6 +318,9 @@ export function Select<TValue extends string = string>({
           </RadixSelect.Content>
         </RadixSelect.Portal>
       </RadixSelect.Root>
+      {name !== undefined && value !== undefined ? (
+        <input type="hidden" name={name} value={value} disabled={disabled} />
+      ) : null}
       {(error || hint) && (
         <span
           id={error ? errorId : hintId}

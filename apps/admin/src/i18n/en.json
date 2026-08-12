@@ -713,7 +713,7 @@
       "deleteConfirmTitle": "Delete line?",
       "deleteConfirmBody": "The production line will be permanently deleted.",
       "deleteConfirmAction": "Delete",
-      "deleteReferencedError": "This line is used by shifts and cannot be deleted.",
+      "deleteReferencedError": "This line is used by shifts or assigned to one or more stations. Remove those references and try again.",
       "retry": "Retry",
       "table": {
         "name": "Name",

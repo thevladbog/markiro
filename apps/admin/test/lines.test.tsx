@@ -162,6 +162,7 @@ describe("LinesPage states and permissions", () => {
     expect(screen.queryByRole("button", { name: "Создать линию" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+    expect(screen.queryByRole("columnheader", { name: "Действия" })).toBeNull();
   });
 
   it("keeps the same line-management copy available in English", async () => {
@@ -194,6 +195,10 @@ describe("line create and rename panels", () => {
 
     const input = await screen.findByLabelText("Название линии");
     const submit = screen.getByRole("button", { name: "Создать" });
+    expect((input as HTMLInputElement).required).toBe(true);
+    expect(document.getElementById(input.getAttribute("aria-describedby")!)?.textContent).toBe(
+      "Укажите название линии",
+    );
     expect((submit as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.change(input, { target: { value: "   " } });
@@ -333,6 +338,80 @@ describe("line create and rename panels", () => {
     },
   );
 
+  it.each([
+    {
+      language: "ru",
+      mode: "create",
+      initialEntries: ["/lines/new"],
+      inputLabel: "Название линии",
+      submitLabel: "Создать",
+      panelTitle: "Новая линия",
+      method: "POST",
+      fallback: "Не удалось создать линию",
+    },
+    {
+      language: "en",
+      mode: "create",
+      initialEntries: ["/lines/new"],
+      inputLabel: "Line name",
+      submitLabel: "Create",
+      panelTitle: "New line",
+      method: "POST",
+      fallback: "Could not create the line",
+    },
+    {
+      language: "ru",
+      mode: "update",
+      initialEntries: ["/lines/line-1/edit"],
+      inputLabel: "Название линии",
+      submitLabel: "Сохранить",
+      panelTitle: "Изменить линию",
+      method: "PATCH",
+      fallback: "Не удалось обновить линию",
+    },
+    {
+      language: "en",
+      mode: "update",
+      initialEntries: ["/lines/line-1/edit"],
+      inputLabel: "Line name",
+      submitLabel: "Save",
+      panelTitle: "Edit line",
+      method: "PATCH",
+      fallback: "Could not update the line",
+    },
+  ])(
+    "uses localized $mode fallback copy for an unmapped API error in $language",
+    async ({
+      language,
+      mode,
+      initialEntries,
+      inputLabel,
+      submitLabel,
+      panelTitle,
+      method,
+      fallback,
+    }) => {
+      await i18n.changeLanguage(language);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) =>
+          init?.method === method
+            ? jsonResponse(500, { message: "Database connection failed" })
+            : jsonResponse(200, { items: mode === "create" ? [] : [LINE] }),
+        ),
+      );
+      renderPage({ initialEntries });
+
+      const input = await screen.findByLabelText(inputLabel);
+      fireEvent.change(input, { target: { value: mode === "create" ? "Розлив" : "Фасовка" } });
+      fireEvent.click(screen.getByRole("button", { name: submitLabel }));
+
+      expect(await screen.findByText(fallback)).toBeDefined();
+      expect(screen.queryByText("Database connection failed")).toBeNull();
+      expect(screen.getByRole("dialog", { name: panelTitle })).toBeDefined();
+    },
+  );
+
   it("guards dirty dismissal until the user confirms discard", async () => {
     vi.stubGlobal(
       "fetch",
@@ -406,24 +485,78 @@ describe("line deletion", () => {
     expect(await screen.findByText("Производственные линии не добавлены")).toBeDefined();
   });
 
-  it("maps a 409 to referenced-line copy and keeps the confirmation open", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) =>
-        init?.method === "DELETE"
-          ? jsonResponse(409, { message: "Line is referenced" })
-          : jsonResponse(200, { items: [LINE] }),
-      ),
-    );
-    renderPage();
+  it.each([
+    {
+      language: "ru",
+      deleteLabel: "Удалить",
+      dialogTitle: "Удалить линию?",
+      expected:
+        "Линия используется в сменах или назначена одной или нескольким станциям. Снимите назначения и повторите удаление.",
+    },
+    {
+      language: "en",
+      deleteLabel: "Delete",
+      dialogTitle: "Delete line?",
+      expected:
+        "This line is used by shifts or assigned to one or more stations. Remove those references and try again.",
+    },
+  ])(
+    "maps a 409 to truthful recovery copy in $language and keeps the confirmation open",
+    async ({ language, deleteLabel, dialogTitle, expected }) => {
+      await i18n.changeLanguage(language);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) =>
+          init?.method === "DELETE"
+            ? jsonResponse(409, { message: "Line is referenced" })
+            : jsonResponse(200, { items: [LINE] }),
+        ),
+      );
+      renderPage();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Удалить" }));
-    const dialog = await screen.findByRole("alertdialog", { name: "Удалить линию?" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
+      fireEvent.click(await screen.findByRole("button", { name: deleteLabel }));
+      const dialog = await screen.findByRole("alertdialog", { name: dialogTitle });
+      fireEvent.click(within(dialog).getByRole("button", { name: deleteLabel }));
 
-    expect(
-      await within(dialog).findByText("Линия используется в сменах и не может быть удалена."),
-    ).toBeDefined();
-    expect(screen.getByRole("alertdialog", { name: "Удалить линию?" })).toBeDefined();
-  });
+      expect(await within(dialog).findByText(expected)).toBeDefined();
+      expect(screen.getByRole("alertdialog", { name: dialogTitle })).toBeDefined();
+    },
+  );
+
+  it.each([
+    {
+      language: "ru",
+      deleteLabel: "Удалить",
+      dialogTitle: "Удалить линию?",
+      fallback: "Не удалось удалить линию",
+    },
+    {
+      language: "en",
+      deleteLabel: "Delete",
+      dialogTitle: "Delete line?",
+      fallback: "Could not delete the line",
+    },
+  ])(
+    "uses localized delete fallback copy for an unmapped API error in $language",
+    async ({ language, deleteLabel, dialogTitle, fallback }) => {
+      await i18n.changeLanguage(language);
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) =>
+          init?.method === "DELETE"
+            ? jsonResponse(500, { message: "Database connection failed" })
+            : jsonResponse(200, { items: [LINE] }),
+        ),
+      );
+      renderPage();
+
+      fireEvent.click(await screen.findByRole("button", { name: deleteLabel }));
+      const dialog = await screen.findByRole("alertdialog", { name: dialogTitle });
+      fireEvent.click(within(dialog).getByRole("button", { name: deleteLabel }));
+
+      expect(await within(dialog).findByText(fallback)).toBeDefined();
+      expect(within(dialog).queryByText("Database connection failed")).toBeNull();
+      expect(screen.getByRole("alertdialog", { name: dialogTitle })).toBeDefined();
+    },
+  );
 });

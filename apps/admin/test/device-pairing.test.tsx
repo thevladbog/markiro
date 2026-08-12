@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
@@ -16,6 +16,10 @@ function response(body: unknown): Response {
 
 function activeExpiry(offsetMs = 60_000): string {
   return new Date(Date.now() + offsetMs).toISOString();
+}
+
+function LocationProbe() {
+  return <output data-testid="location-path">{useLocation().pathname}</output>;
 }
 
 function renderDrawer(
@@ -33,6 +37,7 @@ function renderDrawer(
             organizationName="Markiro"
             onClose={vi.fn()}
           />
+          <LocationProbe />
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
@@ -80,6 +85,9 @@ it("explains how a selected line sets the station default workplace", async () =
   await user.click(await screen.findByRole("combobox", { name: "Линия" }));
   await user.click(screen.getByRole("option", { name: "Линия 1" }));
   expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Линия 1");
+
+  await user.click(screen.getByRole("link", { name: "Управлять линиями" }));
+  expect(screen.getByTestId("location-path").textContent).toBe("/lines");
 });
 
 it("keeps the one-time pairing secret only in the active drawer and clears its mutation state on close", async () => {
@@ -108,6 +116,15 @@ it("keeps the one-time pairing secret only in the active drawer and clears its m
   fireEvent.click(screen.getByRole("button", { name: "Создать" }));
 
   await screen.findAllByText("1234 5678");
+  const barcode = await screen.findByRole(
+    "img",
+    { name: "Штрихкод кода привязки 12345678" },
+    { timeout: 3000 },
+  );
+  expect(barcode.style.background).toBe("rgb(255, 255, 255)");
+  expect(barcode.style.padding).toBe("8px");
+  expect(barcode.style.boxSizing).toBe("content-box");
+  expect(barcode.style.border).toBe("1px solid var(--line)");
   expect(localStorage.length).toBe(0);
   expect(sessionStorage.length).toBe(0);
   expect(document.location.search).not.toContain("12345678");

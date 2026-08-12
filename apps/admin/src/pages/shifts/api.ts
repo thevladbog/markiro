@@ -9,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
+import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
 import { apiFetch } from "../../api/client.js";
 
 export type ShiftMode = "validation" | "aggregation";
@@ -244,7 +245,12 @@ export function useCreateLine(): UseMutationResult<LineDto, Error, CreateLineInp
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postLine,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: CABINET_ACCESS_QUERY_KEY }),
+      ]);
+    },
   });
 }
 
@@ -262,6 +268,11 @@ export function useDeleteLine(): UseMutationResult<void, Error, string> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: removeLine,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: CABINET_ACCESS_QUERY_KEY }),
+      ]);
+    },
   });
 }

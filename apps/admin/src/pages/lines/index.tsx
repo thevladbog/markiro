@@ -59,9 +59,7 @@ function AuthorizedLineRowActions({ line }: { line: LineDto }) {
       setDeleteError(
         cause instanceof ApiRequestError && cause.status === 409
           ? t("pages.lines.deleteReferencedError")
-          : cause instanceof ApiRequestError
-            ? cause.message
-            : t("pages.lines.toasts.deleteError"),
+          : t("pages.lines.toasts.deleteError"),
       );
     }
   };
@@ -116,8 +114,8 @@ export function LinesPage() {
   const query = useLines();
   const items = query.data ?? [];
 
-  const columns: TableColumn<LineDto>[] = useMemo(
-    () => [
+  const columns: TableColumn<LineDto>[] = useMemo(() => {
+    const referenceColumns: TableColumn<LineDto>[] = [
       { key: "name", title: t("pages.lines.table.name") },
       {
         key: "createdAt",
@@ -127,15 +125,19 @@ export function LinesPage() {
           <time dateTime={line.createdAt}>{formatCreatedAt(line.createdAt, i18n.language)}</time>
         ),
       },
-      {
-        key: "actions",
-        title: t("pages.lines.table.actions"),
-        align: "right",
-        render: (line) => (canWrite ? <AuthorizedLineRowActions line={line} /> : null),
-      },
-    ],
-    [canWrite, t],
-  );
+    ];
+    return canWrite
+      ? [
+          ...referenceColumns,
+          {
+            key: "actions",
+            title: t("pages.lines.table.actions"),
+            align: "right",
+            render: (line) => <AuthorizedLineRowActions line={line} />,
+          },
+        ]
+      : referenceColumns;
+  }, [canWrite, t]);
 
   return (
     <AdminPage className="mk-lines-page" data-testid="lines-page">

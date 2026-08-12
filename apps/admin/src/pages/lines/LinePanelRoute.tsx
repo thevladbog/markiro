@@ -103,7 +103,7 @@ function requestError(cause: unknown, fallback: string, subscriptionLimitReached
     return subscriptionLimitReached;
   }
 
-  return cause instanceof ApiRequestError ? cause.message : fallback;
+  return fallback;
 }
 
 function CreateLinePanel() {

@@ -85,8 +85,13 @@ export function LineForm({
           label={t("pages.lines.form.nameLabel")}
           value={name}
           disabled={submitting}
+          required
+          maxLength={200}
           autoFocus
           {...errorProp(validationError)}
+          {...(!validationError && trimmedName.length === 0
+            ? { hint: t("pages.lines.form.errors.nameRequired") }
+            : {})}
           onChange={(event) => {
             setName(event.currentTarget.value);
             if (validationError) setValidationError(undefined);

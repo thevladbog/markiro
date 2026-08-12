@@ -296,7 +296,8 @@ describe("Input", () => {
 });
 
 describe("Select", () => {
-  it("shows the empty option label for an initial empty value", () => {
+  it("opens with a controlled empty option selected", async () => {
+    const user = userEvent.setup();
     render(
       <Select
         label="Линия"
@@ -309,10 +310,16 @@ describe("Select", () => {
     );
 
     expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Без линии");
+    await user.click(screen.getByRole("combobox", { name: "Линия" }));
+
+    const emptyOption = screen.getByRole("option", { name: "Без линии" });
+    expect(emptyOption.getAttribute("data-state")).toBe("checked");
+    expect(emptyOption.querySelector("svg")).not.toBeNull();
   });
 
-  it("shows the empty option label after clearing a selected value", async () => {
+  it("maps a selected empty option back to the public empty string", async () => {
     const user = userEvent.setup();
+    const onValueChange = vi.fn();
 
     function SelectHarness() {
       const [value, setValue] = useState("line-1");
@@ -325,7 +332,10 @@ describe("Select", () => {
             { value: "line-1", label: "Линия 1" },
           ]}
           value={value}
-          onValueChange={setValue}
+          onValueChange={(nextValue) => {
+            onValueChange(nextValue);
+            setValue(nextValue);
+          }}
         />
       );
     }
@@ -336,6 +346,43 @@ describe("Select", () => {
     await user.click(screen.getByRole("option", { name: "Без линии" }));
 
     expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Без линии");
+    expect(onValueChange).toHaveBeenCalledWith("");
+  });
+
+  it("submits a controlled empty option as an empty form value", () => {
+    render(
+      <form data-testid="line-form">
+        <Select
+          label="Линия"
+          name="lineId"
+          options={[
+            { value: "", label: "Без линии" },
+            { value: "line-1", label: "Линия 1" },
+          ]}
+          value=""
+        />
+      </form>,
+    );
+
+    const data = new FormData(screen.getByTestId("line-form") as HTMLFormElement);
+    expect(data.get("lineId")).toBe("");
+  });
+
+  it("omits a disabled controlled custom select from form data", () => {
+    render(
+      <form data-testid="disabled-line-form">
+        <Select
+          label="Линия"
+          name="lineId"
+          options={[{ value: "line-1", label: "Линия 1" }]}
+          value="line-1"
+          disabled
+        />
+      </form>,
+    );
+
+    const data = new FormData(screen.getByTestId("disabled-line-form") as HTMLFormElement);
+    expect(data.has("lineId")).toBe(false);
   });
 
   it("uses its public placeholder when no value is selected", () => {
@@ -417,6 +464,37 @@ describe("Select", () => {
     await user.click(screen.getByRole("option", { name: "Вода" }));
 
     expect(onValueChange).toHaveBeenCalledWith("Вода");
+  });
+
+  it("contains a long option label inside the bounded menu", async () => {
+    const user = userEvent.setup();
+    const longLabel = "UnbrokenProductionLineName".repeat(8);
+    render(
+      <Select label="Линия" options={[{ value: "line-1", label: longLabel }]} value="line-1" />,
+    );
+
+    const trigger = screen.getByRole("combobox", { name: "Линия" });
+    const triggerValue = trigger.querySelector<HTMLElement>(".mk-select__value");
+    expect(triggerValue).not.toBeNull();
+    expect(getComputedStyle(triggerValue!).overflow).toBe("hidden");
+    expect(getComputedStyle(triggerValue!).textOverflow).toBe("ellipsis");
+
+    await user.click(trigger);
+    const content = screen.getByRole("listbox").closest<HTMLElement>("[data-mk-nested-overlay]");
+    const viewport = content?.querySelector<HTMLElement>(".mk-select__viewport");
+    const option = screen.getByRole("option", { name: longLabel });
+    const optionText = option.querySelector<HTMLElement>(".mk-select__item-text");
+
+    expect(content).not.toBeNull();
+    expect(getComputedStyle(content!).boxSizing).toBe("border-box");
+    expect(viewport).not.toBeNull();
+    expect(getComputedStyle(viewport!).boxSizing).toBe("border-box");
+    expect(getComputedStyle(viewport!).overflowX).toBe("hidden");
+    expect(getComputedStyle(option).minWidth).toBe("0px");
+    expect(optionText).not.toBeNull();
+    expect(getComputedStyle(optionText!).overflow).toBe("hidden");
+    expect(getComputedStyle(optionText!).textOverflow).toBe("ellipsis");
+    expect(getComputedStyle(optionText!).whiteSpace).toBe("nowrap");
   });
 
   it("selects the next enabled option with ArrowDown and Enter", async () => {
