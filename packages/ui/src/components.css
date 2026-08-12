@@ -26,6 +26,20 @@
   background: var(--surface-panel);
 }
 
+.mk-select__content {
+  min-width: var(--radix-select-trigger-width);
+  max-width: min(28rem, var(--radix-select-content-available-width));
+  max-height: var(--radix-select-content-available-height);
+  overflow: hidden;
+}
+
+.mk-select__viewport {
+  max-height: min(20rem, var(--radix-select-content-available-height));
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 .mk-checkbox__control:focus-visible,
 .mk-radio-group__control:focus-visible,
 .mk-icon-button:focus-visible,

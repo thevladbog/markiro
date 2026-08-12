@@ -249,9 +249,13 @@ export function Select<TValue extends string = string>({
         >
           <RadixSelect.Content
             data-mk-nested-overlay=""
+            data-position="popper"
+            position="popper"
+            sideOffset={4}
+            collisionPadding={8}
+            className="mk-select__content mk-select__viewport"
             style={{
               zIndex: "var(--z-overlay-popover)",
-              overflow: "hidden",
               border: "1px solid var(--line-strong)",
               borderRadius: "var(--r-2)",
               background: "var(--surface-card)",
@@ -259,7 +263,7 @@ export function Select<TValue extends string = string>({
               boxShadow: "0 12px 32px color-mix(in srgb, var(--fg-1) 18%, transparent)",
             }}
           >
-            <RadixSelect.Viewport style={{ padding: 4 }}>
+            <RadixSelect.Viewport className="mk-select__viewport">
               {itemOptions.map((option) => (
                 <RadixSelect.Item
                   key={option.value}
