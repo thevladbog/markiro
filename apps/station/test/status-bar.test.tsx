@@ -35,6 +35,24 @@ describe("StatusBar", () => {
     expect(screen.getByTestId("server-status").textContent).toBe(expected);
   });
 
+  it("announces server reachability changes politely", () => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability="unreachable"
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+
+    const serverStatus = screen.getByTestId("server-status");
+    expect(serverStatus.getAttribute("role")).toBe("status");
+    expect(serverStatus.getAttribute("aria-live")).toBe("polite");
+  });
+
   it("shows each live context and operational status exactly once", () => {
     render(
       <StatusBar

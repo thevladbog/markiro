@@ -109,6 +109,7 @@ export function StatusBar({
               ? { tone: "warn" as const }
               : {})}
           testId="server-status"
+          live="polite"
         />
         <StatusValue
           label={t("shell.sync")}
@@ -156,13 +157,19 @@ interface StatusValueProps {
   value: string;
   testId: string;
   tone?: "ok" | "warn";
+  live?: "polite";
 }
 
-function StatusValue({ label, value, testId, tone }: StatusValueProps) {
+function StatusValue({ label, value, testId, tone, live }: StatusValueProps) {
   return (
     <div className="station-status-item" data-tone={tone}>
       <dt>{label}</dt>
-      <dd data-testid={testId}>{value}</dd>
+      <dd
+        data-testid={testId}
+        {...(live ? { role: "status", "aria-live": live } : {})}
+      >
+        {value}
+      </dd>
     </div>
   );
 }

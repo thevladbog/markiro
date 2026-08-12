@@ -189,7 +189,7 @@ export function App() {
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
-  const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
+  const [, setBrowserOnline] = useState(() => navigator.onLine);
   const [serverReachability, setServerReachability] = useState<ServerReachability>("checking");
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
   const [shiftContext, setShiftContext] = useState<ShiftContextRow | null>(null);
@@ -959,7 +959,7 @@ export function App() {
       lineName={config.lineName ?? null}
       operatorName={operator.name}
       shiftLabel={shift ? (shiftContext?.productName ?? shift.id) : null}
-      serverReachability={browserOnline ? serverReachability : "unreachable"}
+      serverReachability={serverReachability}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
       syncPending={syncState.pending}
