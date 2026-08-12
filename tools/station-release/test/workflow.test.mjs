@@ -43,11 +43,18 @@ test("station beta publication is protected, serialized, main-only and channel-l
   const corsStep = workflow.jobs.release.steps.find(
     (step) => step.name === "Verify production station pairing CORS",
   );
-  assert.equal(corsStep.if, "inputs.mode == 'publish'");
+  assert.equal(corsStep.if, "inputs.mode == 'publish' || inputs.mode == 'promote-existing'");
   assert.equal(corsStep.run, "pnpm verify:station-production-cors");
   assert.ok(
     workflow.jobs.release.steps.indexOf(corsStep) <
       workflow.jobs.release.steps.indexOf(signingStep),
+  );
+  const promoteStep = workflow.jobs.release.steps.find(
+    (step) => step.name === "Promote beta channel",
+  );
+  assert.ok(
+    workflow.jobs.release.steps.indexOf(corsStep) <
+      workflow.jobs.release.steps.indexOf(promoteStep),
   );
   assert.equal(workflow.jobs.release.env.VITE_STATION_API_URL, "https://admin.markiro.app");
   assert.equal(

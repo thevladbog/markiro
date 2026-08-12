@@ -133,7 +133,7 @@ jobs:
           git diff --check
 
       - name: Verify production station pairing CORS
-        if: inputs.mode == 'publish'
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
         run: pnpm verify:station-production-cors
 
       - name: Build signed Windows NSIS updater artifacts
