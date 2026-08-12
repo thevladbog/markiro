@@ -7,11 +7,12 @@ import {
   Alert,
   Button,
   Card,
+  Combobox,
   ConfirmDialog,
   Input,
   Select,
   StatusChip,
-  type SelectOption,
+  type ComboboxOption,
 } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
@@ -285,13 +286,16 @@ export function SubscriptionPanel({
   const planSuccessorExists = detail.scheduledSubscription !== null;
   const publishedVersions = catalog.data?.items.filter((item) => item.status === "published") ?? [];
   const choices = publishedVersions.filter((item) => item.kind === kind);
-  const versionOptions: SelectOption<string>[] = [
-    { value: "", label: t("tenants.assignment.selectVersion") },
-    ...choices.map((version) => ({
-      value: version.id,
-      label: versionLabel(version, language),
-    })),
-  ];
+  const versionOptions: ComboboxOption[] = choices.map((version) => ({
+    value: version.id,
+    label: versionLabel(version, language),
+    keywords: [
+      version.nameRu,
+      version.nameEn,
+      version.catalogItemCode ?? "",
+      `v${version.version}`,
+    ],
+  }));
 
   const prepareConfirmation = form.handleSubmit(async (values) => {
     form.clearErrors();
@@ -659,7 +663,6 @@ export function SubscriptionPanel({
               onSubmit={(event) => void prepareConfirmation(event)}
             >
               <Select<AssignmentKind>
-                native
                 label={t("tenants.assignment.kind")}
                 options={[
                   { value: "plan", label: t("tenants.assignment.plan") },
@@ -672,8 +675,7 @@ export function SubscriptionPanel({
                   form.clearErrors();
                 }}
               />
-              <Select
-                native
+              <Combobox
                 label={t(`tenants.assignment.${kind}Version`)}
                 options={versionOptions}
                 value={form.watch("catalogVersionId")}
@@ -686,9 +688,12 @@ export function SubscriptionPanel({
                     shouldValidate: true,
                   })
                 }
+                placeholder={t("tenants.assignment.selectVersion")}
+                searchPlaceholder={t("tenants.assignment.selectVersion")}
+                emptyText={t("tenants.assignment.selectVersion")}
+                loadingText={t("tenants.assignment.loading")}
               />
               <Select<ActivationPolicy>
-                native
                 label={t("tenants.assignment.policy")}
                 options={[
                   { value: "immediate", label: t("tenants.assignment.immediate") },

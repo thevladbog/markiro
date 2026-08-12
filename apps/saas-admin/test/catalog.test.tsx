@@ -19,6 +19,15 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function chooseOption(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string,
+) {
+  await user.click(await screen.findByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("commercial catalog", () => {
   it("groups the platform catalog into plans, add-ons, and services", async () => {
     installCatalogApi();
@@ -73,9 +82,9 @@ describe("commercial catalog", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
-    await user.selectOptions(screen.getByLabelText("Единица учёта"), "__other__");
+    await chooseOption(user, "Единица учёта", "Другое");
     await user.type(screen.getByLabelText("Другая единица"), "license");
-    await user.selectOptions(screen.getByLabelText("НДС"), "custom");
+    await chooseOption(user, "НДС", "Другая ставка");
     await user.type(screen.getByLabelText("Ставка НДС, %"), "12.34");
     await user.type(screen.getByLabelText("Код позиции"), "service-license");
     await user.type(screen.getByLabelText("Название на русском"), "Лицензия");
@@ -95,7 +104,7 @@ describe("commercial catalog", () => {
     const user = userEvent.setup();
 
     await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
-    await user.selectOptions(screen.getByLabelText("НДС"), "none");
+    await chooseOption(user, "НДС", "Без НДС");
     await user.type(screen.getByLabelText("Код позиции"), "service-no-vat");
     await user.type(screen.getByLabelText("Название на русском"), "Без НДС");
     await user.type(screen.getByLabelText("Название на английском"), "No VAT");
@@ -115,7 +124,7 @@ describe("commercial catalog", () => {
 
     await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
 
-    expect((screen.getByLabelText("Единица учёта") as HTMLSelectElement).value).toBe("__other__");
+    expect(screen.getByRole("combobox", { name: "Единица учёта" }).textContent).toContain("Другое");
     expect((screen.getByLabelText("Другая единица") as HTMLInputElement).value).toBe("station");
   });
 
@@ -128,13 +137,15 @@ describe("commercial catalog", () => {
     await user.click(screen.getByRole("button", { name: "Создать позицию" }));
 
     expect(screen.getByRole("group", { name: "Что расширяет дополнение" })).toBeDefined();
-    expect((screen.getByLabelText("Тип эффекта 1") as HTMLSelectElement).value).toBe("stations");
+    expect(screen.getByRole("combobox", { name: "Тип эффекта 1" }).textContent).toContain(
+      "Станции",
+    );
     expect((screen.getByLabelText("Прибавка к квоте 1") as HTMLInputElement).value).toBe("1");
-    await user.selectOptions(screen.getByLabelText("Тип эффекта 1"), "kiosks");
+    await chooseOption(user, "Тип эффекта 1", "Киоски");
     await user.clear(screen.getByLabelText("Прибавка к квоте 1"));
     await user.type(screen.getByLabelText("Прибавка к квоте 1"), "3");
     await user.click(screen.getByRole("button", { name: "Добавить эффект" }));
-    await user.selectOptions(screen.getByLabelText("Тип эффекта 2"), "publicApi");
+    await chooseOption(user, "Тип эффекта 2", "Публичный API");
     await user.type(screen.getByLabelText("Код позиции"), "addon-kiosk");
     await user.type(screen.getByLabelText("Название на русском"), "Киоски");
     await user.type(screen.getByLabelText("Название на английском"), "Kiosks");
@@ -369,8 +380,10 @@ describe("commercial catalog", () => {
       screen.getByRole("button", { name: "Открыть Дополнительная станция, версия 1" }),
     );
     expect(screen.getAllByRole("combobox", { name: /Тип эффекта/ })).toHaveLength(2);
+    await user.click(screen.getAllByRole("combobox", { name: /Тип эффекта/ })[0]!);
     expect(screen.getAllByRole("option", { name: "Станции" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("option", { name: /\{\{count\}\}/ })).toBeNull();
+    await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Добавить эффект" }));
     expect(screen.getAllByRole("combobox", { name: /Тип эффекта/ })).toHaveLength(3);
     await user.click(screen.getByRole("button", { name: "Удалить эффект 3" }));

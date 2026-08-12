@@ -85,7 +85,6 @@ export function AddonEffectsEditor({
           <div className="addon-effect-row" key={effect.rowId}>
             <Select
               label={t("catalog.form.effectKeyIndexed", { index: index + 1 })}
-              native
               value={effect.key}
               options={EFFECT_KEYS.map((key) => ({
                 value: key,

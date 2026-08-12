@@ -61,7 +61,6 @@ export function CatalogVatField({
     <div className="catalog-vat-field">
       <Select
         label={t("catalog.form.vat")}
-        native
         value={selected}
         options={[
           { value: NONE, label: t("catalog.vat.without") },
