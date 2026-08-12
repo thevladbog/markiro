@@ -45,6 +45,7 @@ import { ShiftsPage } from "./pages/shifts/index.js";
 import { ShiftPanelRoute } from "./pages/shifts/ShiftPanelRoute.js";
 import { ShellPage } from "./pages/Shell.js";
 import { TeamPage } from "./pages/team/TeamPage.js";
+import { InvoiceDetailPage, InvoicesPage } from "./pages/billing/InvoicesPage.js";
 
 /**
  * The data router is used even though route data is fetched through React
@@ -351,6 +352,8 @@ function appRouteElements() {
             </RequireCapability>
           }
         />
+        <Route path="billing/invoices" element={<InvoicesPage />} />
+        <Route path="billing/invoices/:id" element={<InvoiceDetailPage />} />
       </Route>
     </>
   );
