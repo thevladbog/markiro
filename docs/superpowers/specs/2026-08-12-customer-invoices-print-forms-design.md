@@ -84,12 +84,12 @@ iframe, inline styles, event handlers и небезопасных URL-схем. 
 
 ## Доступ
 
-| Действие | Оператор | КА |
-| --- | --- | --- |
-| Просмотр/скачивание счета | Да, по billing capability | Только issued/paid/cancelled своего tenant |
-| Просмотр/скачивание КП | Да, по billing capability | Нет |
-| Retry рендера | Да, по billing capability | Нет |
-| Банковские данные, audit, import | Да согласно capability | Нет |
+| Действие                         | Оператор                  | КА                                         |
+| -------------------------------- | ------------------------- | ------------------------------------------ |
+| Просмотр/скачивание счета        | Да, по billing capability | Только issued/paid/cancelled своего tenant |
+| Просмотр/скачивание КП           | Да, по billing capability | Нет                                        |
+| Retry рендера                    | Да, по billing capability | Нет                                        |
+| Банковские данные, audit, import | Да согласно capability    | Нет                                        |
 
 Контроллеры загружают tenant из аутентифицированного customer session, а не из
 клиентского параметра. Неготовый документ не скачивается; tenant из другого
