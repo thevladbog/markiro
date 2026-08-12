@@ -27,17 +27,23 @@ export class PlatformOffersService {
       })),
     );
     return this.db.transaction(async (tx) => {
+      const catalogSnapshots: Array<{
+        catalogUnitPrice: string | null;
+        priceOverrideReason: string | null;
+      }> = [];
       for (const line of input.lines) {
         if (!line.catalogVersionId) {
           if (line.kind !== "service") {
             throw new BadRequestException({ code: "offer_catalog_version_invalid" });
           }
+          catalogSnapshots.push({ catalogUnitPrice: null, priceOverrideReason: null });
           continue;
         }
         const [version] = await tx
           .select({
             kind: schema.catalogItemVersions.kind,
             status: schema.catalogItemVersions.status,
+            unitPrice: schema.catalogItemVersions.unitPrice,
           })
           .from(schema.catalogItemVersions)
           .where(eq(schema.catalogItemVersions.id, line.catalogVersionId))
@@ -45,6 +51,15 @@ export class PlatformOffersService {
         if (!version || version.kind !== line.kind || version.status !== "published") {
           throw new BadRequestException({ code: "offer_catalog_version_invalid" });
         }
+        const priceOverrideReason = line.priceOverrideReason?.trim() || null;
+        if (line.agreedUnitPrice !== version.unitPrice && !priceOverrideReason) {
+          throw new BadRequestException({ code: "offer_price_override_reason_required" });
+        }
+        catalogSnapshots.push({
+          catalogUnitPrice: version.unitPrice,
+          priceOverrideReason:
+            line.agreedUnitPrice === version.unitPrice ? null : priceOverrideReason,
+        });
       }
       const [offer] = await tx
         .insert(schema.commercialOffers)
@@ -71,14 +86,14 @@ export class PlatformOffersService {
           descriptionEn: line.descriptionEn ?? null,
           quantity: line.quantity,
           unit: line.unit,
-          catalogUnitPrice: line.catalogUnitPrice ?? null,
+          catalogUnitPrice: catalogSnapshots[index]!.catalogUnitPrice,
           agreedUnitPrice: line.agreedUnitPrice,
           vatRate:
             line.vatRateBps === null || line.vatRateBps === undefined
               ? null
               : String(line.vatRateBps / 100),
           vatIncluded: line.vatIncluded,
-          priceOverrideReason: line.priceOverrideReason ?? null,
+          priceOverrideReason: catalogSnapshots[index]!.priceOverrideReason,
           activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
           lineTotal: (Number(line.agreedUnitPrice) * line.quantity).toFixed(2),
         })),

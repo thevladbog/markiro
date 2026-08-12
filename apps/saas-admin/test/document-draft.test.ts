@@ -110,6 +110,8 @@ describe("document draft reducer", () => {
         version: 3,
         nameRu: "Базовый",
         nameEn: "Basic",
+        descriptionRu: null,
+        descriptionEn: null,
         quantity: 1,
         unit: "месяц",
         catalogUnitPrice: "120.00",
@@ -400,19 +402,16 @@ describe("document draft validation and request adapters", () => {
       lines: [
         expect.objectContaining({
           kind: "plan",
-          catalogUnitPrice: "120.00",
           priceOverrideReason: null,
           activationPolicy: "immediately",
         }),
         expect.objectContaining({
           kind: "addon",
-          catalogUnitPrice: "100.00",
           priceOverrideReason: null,
           activationPolicy: null,
         }),
         expect.objectContaining({
           kind: "service",
-          catalogUnitPrice: "0.10",
           priceOverrideReason: null,
           activationPolicy: null,
         }),
@@ -436,7 +435,6 @@ describe("document draft validation and request adapters", () => {
     });
     expect(() => toOfferCreateInput(unexplained)).toThrow("price_override_reason_required");
     expect(toOfferCreateInput(explained).lines[0]).toMatchObject({
-      catalogUnitPrice: "120.00",
       agreedUnitPrice: "99.00",
       priceOverrideReason: "Annual commitment",
     });

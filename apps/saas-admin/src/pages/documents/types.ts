@@ -12,6 +12,8 @@ export interface DocumentLineDraft {
   version: number | null;
   nameRu: string;
   nameEn: string;
+  descriptionRu: string | null;
+  descriptionEn: string | null;
   quantity: number;
   unit: string;
   catalogUnitPrice: string | null;
@@ -45,8 +47,11 @@ export interface CreateInvoiceLineInput {
   catalogVersionId: string | null;
   nameRu: string;
   nameEn: string;
+  descriptionRu: string | null;
+  descriptionEn: string | null;
   quantity: number;
   unit: string;
+  catalogUnitPrice?: string | null;
   agreedUnitPrice: string;
   vatRateBps: number | null;
   vatIncluded: boolean;
@@ -67,7 +72,6 @@ export interface CreateOfferLineInput {
   nameEn: string;
   quantity: number;
   unit: string;
-  catalogUnitPrice: string | null;
   agreedUnitPrice: string;
   priceOverrideReason: string | null;
   vatRateBps: number | null;

@@ -48,6 +48,8 @@ export function createLineFromCatalog(version: CatalogVersionDto, id: string): D
     version: version.version,
     nameRu: version.nameRu,
     nameEn: version.nameEn,
+    descriptionRu: version.descriptionRu,
+    descriptionEn: version.descriptionEn,
     quantity: 1,
     unit: version.unit,
     catalogUnitPrice: version.unitPrice,
@@ -253,11 +255,13 @@ export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput {
 
 function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
   const activationPolicy = requiredActivationPolicy("invoice", line);
-  return {
+  const result: CreateInvoiceLineInput = {
     kind: line.kind,
     catalogVersionId: line.kind === "custom" ? null : requiredCatalogVersionId(line),
     nameRu: line.nameRu,
     nameEn: line.nameEn,
+    descriptionRu: line.descriptionRu,
+    descriptionEn: line.descriptionEn,
     quantity: line.quantity,
     unit: line.unit,
     agreedUnitPrice: line.agreedUnitPrice,
@@ -265,6 +269,7 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
     vatIncluded: line.vatIncluded,
     activationPolicy,
   };
+  return line.kind === "custom" ? { ...result, catalogUnitPrice: line.catalogUnitPrice } : result;
 }
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
@@ -282,7 +287,6 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     nameEn: line.nameEn,
     quantity: line.quantity,
     unit: line.unit,
-    catalogUnitPrice: line.catalogUnitPrice,
     agreedUnitPrice: line.agreedUnitPrice,
     priceOverrideReason: line.priceOverrideReason?.trim() || null,
     vatRateBps: line.vatRateBps,

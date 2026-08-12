@@ -38,12 +38,20 @@ function sourceDraft(
 ): DocumentDraft {
   const lines: DocumentLineDraft[] = source.lines.map((line) => {
     const version = catalog.find((candidate) => candidate.id === line.catalogVersionId);
+    const sourceVatRateBps = line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100);
     if (
       !version ||
       version.kind !== line.kind ||
       version.nameRu !== line.nameRu ||
       version.nameEn !== line.nameEn ||
-      version.unit !== line.unit
+      version.unit !== line.unit ||
+      version.descriptionRu !== line.descriptionRu ||
+      version.descriptionEn !== line.descriptionEn ||
+      version.unitPrice !== line.catalogUnitPrice ||
+      version.vatRateBps === undefined ||
+      version.vatRateBps !== sourceVatRateBps ||
+      version.vatIncluded === undefined ||
+      version.vatIncluded !== line.vatIncluded
     ) {
       return {
         id: `source-offer-${line.id}`,
@@ -53,12 +61,14 @@ function sourceDraft(
         version: null,
         nameRu: line.nameRu,
         nameEn: line.nameEn,
+        descriptionRu: line.descriptionRu,
+        descriptionEn: line.descriptionEn,
         quantity: line.quantity,
         unit: line.unit,
-        catalogUnitPrice: null,
+        catalogUnitPrice: line.catalogUnitPrice,
         agreedUnitPrice: line.agreedUnitPrice,
         priceOverrideReason: null,
-        vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
+        vatRateBps: sourceVatRateBps,
         vatIncluded: line.vatIncluded,
         activationPolicy: null,
       };
@@ -71,12 +81,14 @@ function sourceDraft(
       version: version.version,
       nameRu: line.nameRu,
       nameEn: line.nameEn,
+      descriptionRu: line.descriptionRu,
+      descriptionEn: line.descriptionEn,
       quantity: line.quantity,
       unit: line.unit,
       catalogUnitPrice: version.unitPrice ?? null,
       agreedUnitPrice: line.agreedUnitPrice,
       priceOverrideReason: null,
-      vatRateBps: line.vatRate === null ? null : Math.round(Number(line.vatRate) * 100),
+      vatRateBps: sourceVatRateBps,
       vatIncluded: line.vatIncluded,
       activationPolicy:
         line.kind === "service"

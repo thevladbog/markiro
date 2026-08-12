@@ -18,7 +18,7 @@ function resolvedQuery<T>(rows: T[]) {
 }
 
 describe("BillingService offer snapshots", () => {
-  it("persists a source-offer custom line without replacing its literal name or unit", async () => {
+  it("persists a source-offer custom line with literal descriptions and explicit no-VAT intent", async () => {
     const insertedValues: unknown[] = [];
     const invoice = {
       id: "31111111-1111-4111-8111-111111111111",
@@ -68,8 +68,11 @@ describe("BillingService offer snapshots", () => {
           catalogVersionId: null,
           nameRu: "Согласованный тариф",
           nameEn: "Agreed plan",
+          descriptionRu: "Особые условия поставки",
+          descriptionEn: "Special delivery terms",
           quantity: 2,
           unit: "лицензия",
+          catalogUnitPrice: "120.00",
           agreedUnitPrice: "49.50",
           vatRateBps: null,
           vatIncluded: false,
@@ -84,8 +87,16 @@ describe("BillingService offer snapshots", () => {
       catalogKind: null,
       nameRu: "Согласованный тариф",
       nameEn: "Agreed plan",
+      descriptionRu: "Особые условия поставки",
+      descriptionEn: "Special delivery terms",
       unit: "лицензия",
+      catalogUnitPrice: "120.00",
       agreedUnitPrice: "49.50",
+      vatRate: null,
+      vatIncluded: false,
+      lineSubtotal: "99.00",
+      lineVat: "0.00",
+      lineTotal: "99.00",
     });
   });
 });

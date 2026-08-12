@@ -21,9 +21,13 @@ const offerLineSchema = z.object({
   catalogVersionId: z.uuid().nullable(),
   nameRu: z.string().min(1),
   nameEn: z.string().min(1),
+  descriptionRu: z.string().nullable(),
+  descriptionEn: z.string().nullable(),
   quantity: z.number().int().positive(),
   unit: z.string().min(1),
+  catalogUnitPrice: moneySchema.nullable(),
   agreedUnitPrice: moneySchema,
+  priceOverrideReason: z.string().nullable(),
   vatRate: z.string().nullable(),
   vatIncluded: z.boolean(),
   activationPolicy: z.enum(["immediately", "after_current"]).nullable(),
@@ -35,20 +39,21 @@ const offerDetailSchema = offerSummarySchema.extend({
   lines: z.array(offerLineSchema),
 });
 
-const createOfferLineInputSchema = z.object({
-  kind: z.enum(["plan", "addon", "service"]),
-  catalogVersionId: z.uuid(),
-  nameRu: z.string().trim().min(1).max(300),
-  nameEn: z.string().trim().min(1).max(300),
-  quantity: z.number().int().positive(),
-  unit: z.string().trim().min(1).max(100),
-  catalogUnitPrice: moneySchema.nullable(),
-  agreedUnitPrice: moneySchema,
-  priceOverrideReason: z.string().trim().max(1000).nullable(),
-  vatRateBps: z.number().int().min(0).max(10_000).nullable(),
-  vatIncluded: z.boolean(),
-  activationPolicy: z.enum(["immediately", "after_current"]).nullable(),
-});
+const createOfferLineInputSchema = z
+  .object({
+    kind: z.enum(["plan", "addon", "service"]),
+    catalogVersionId: z.uuid(),
+    nameRu: z.string().trim().min(1).max(300),
+    nameEn: z.string().trim().min(1).max(300),
+    quantity: z.number().int().positive(),
+    unit: z.string().trim().min(1).max(100),
+    agreedUnitPrice: moneySchema,
+    priceOverrideReason: z.string().trim().max(1000).nullable(),
+    vatRateBps: z.number().int().min(0).max(10_000).nullable(),
+    vatIncluded: z.boolean(),
+    activationPolicy: z.enum(["immediately", "after_current"]).nullable(),
+  })
+  .strict();
 const createOfferInputSchema = z.object({
   tenantId: z.string().min(1),
   expiresAt: z.iso.date().nullable(),

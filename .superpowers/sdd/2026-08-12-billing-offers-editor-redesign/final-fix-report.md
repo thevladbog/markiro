@@ -90,3 +90,71 @@ borrowing credentials or database state from another checkout.
   in this final-fix wave. Route payload and interaction behavior are covered by
   the real-component Vitest suites; backend boundary behavior is covered by the
   focused service tests.
+
+## Final fix round 2 — authoritative prices and literal invoice snapshots
+
+### Status
+
+`DONE_WITH_CONCERNS`
+
+Both P1 review findings against `83bad1d9` were reproduced with focused failing
+tests and fixed without a database schema change.
+
+### Behavior changed
+
+- The create-offer contract no longer accepts `catalogUnitPrice`; its strict
+  line DTO rejects both null and forged client baselines. Inside the creation
+  transaction, `PlatformOffersService` locks and loads the published catalog
+  version's `unitPrice`, uses it as the persisted baseline, requires a nonblank
+  reason when the agreed price differs, trims a valid reason, and persists a
+  null reason when prices match.
+- Offer detail parsing now retains descriptions, catalog baseline, and override
+  reason. Source-offer invoice mapping compares kind, both names, unit, both
+  descriptions, catalog baseline, VAT rate, and VAT-included intent against the
+  current published version. Any mismatch becomes a custom line with a null
+  catalog reference.
+- Invoice draft/input handling now carries both descriptions and the literal
+  catalog-price snapshot for custom source lines. `BillingService` distinguishes
+  an explicitly null VAT rate from an omitted rate, persists null rather than
+  `0.00`, and retains literal custom-line descriptions, baseline, prices, and
+  totals. Newly selected catalog lines remain catalog-backed and continue to
+  use server catalog authority.
+
+### TDD evidence
+
+- Offer authority RED: 7 focused failures proved null/forged client baselines
+  were accepted, missing/null/blank reasons reached insertion, and inserted
+  baselines/reasons came from the client. GREEN: the API focused run passes 9/9.
+- Literal snapshot RED: the backend persisted explicit null VAT as `0.00`, the
+  source-offer route retained a catalog reference despite distinct descriptions
+  and null VAT, and the converted custom line dropped descriptions and catalog
+  baseline. GREEN: the focused API and SaaS-admin runs pass.
+
+### Automated verification
+
+| Command | Result |
+| --- | --- |
+| `CI=true pnpm --filter @markiro/api exec vitest run test/platform-offers.service.test.ts test/billing-offer-snapshot.test.ts` | PASS — 2 files, 9 tests |
+| `CI=true pnpm --filter @markiro/saas-admin exec vitest run test/document-draft.test.ts test/document-composer.test.tsx test/offer-editor.test.tsx` | PASS — 3 files, 31 tests |
+| `CI=true pnpm --filter @markiro/saas-admin test` | PASS — 12 files, 103 tests |
+| `pnpm --filter @markiro/api typecheck` | PASS |
+| `pnpm --filter @markiro/saas-admin typecheck` | PASS |
+| affected package lints | PASS — API and SaaS-admin |
+| affected package builds | PASS — API and SaaS-admin |
+| scoped Prettier check for changed source/test files | PASS |
+| `git diff --check` | PASS |
+
+The full API package run was not green in this environment: 55 files / 514
+tests passed and 57 files / 706 tests skipped; seven suites failed because the
+isolated worktree has no required database/auth environment, and the health and
+OpenAPI loopback suites were denied with `listen EPERM`. These failures match the
+prior final-fix environment limitation and did not reach changed product assertions.
+
+### Remaining concerns and external checks
+
+- No authenticated database-backed API e2e or live browser pass was available
+  in this round. The affected server behavior is covered through real service
+  and DTO code with a controlled transaction executor; the route flow is covered
+  by the real-component SaaS-admin suite.
+- Repository-wide formatting still has the four unrelated pre-existing
+  plan/spec failures listed above; all round-two changed files are formatted.
