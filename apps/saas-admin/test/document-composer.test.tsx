@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -210,6 +210,19 @@ describe("DocumentComposer", () => {
         expect.objectContaining({ nameRu: "Дополнительные линии", activationPolicy: "immediate" }),
       ],
     });
+  });
+
+  it("protects an edited document from an unload", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    renderComposer();
+
+    await selectCombobox(user, "Добавить позицию", "v3", "Базовый тариф · plan-basic · v3");
+
+    const unload = new Event("beforeunload", { cancelable: true });
+    fireEvent(window, unload);
+
+    expect(unload.defaultPrevented).toBe(true);
   });
 
   it("limits offer policies and preserves every initial value after a submission error", async () => {
