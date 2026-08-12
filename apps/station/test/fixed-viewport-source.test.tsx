@@ -41,12 +41,29 @@ describe("fixed station viewport source contract", () => {
       /@media \(max-width: 1023px\), \(max-height: 767px\)\s*\{[\s\S]*?\.station-enrollment__keypad\s*\{[^}]*--control-keypad:\s*64px;/s,
     );
     expect(css).toMatch(
-      /\.station-enrollment__actions--pairing\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+      /\.station-enrollment__actions--pairing\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
     );
     expect(css).toMatch(
       /\.station-enrollment__actions--service\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
     );
     expect(stationSource("pages/Enrollment.tsx")).toContain("const recoveryPanel");
+  });
+
+  it("gives the pairing card breathing room and a clear action hierarchy", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /\.station-enrollment__entry\s*\{[^}]*padding:\s*var\(--sp-4\);[^}]*gap:\s*var\(--sp-3\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-enrollment__code-field\s*\{[^}]*flex-direction:\s*column !important;[^}]*align-items:\s*stretch;/s,
+    );
+    expect(css).toMatch(
+      /\.station-enrollment__actions--pairing\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-enrollment__actions--pairing\s*>\s*:first-child\s*\{[^}]*grid-column:\s*1 \/ -1;/s,
+    );
   });
 
   it("keeps shared alert copy at floor-readable size inside the station application", () => {
