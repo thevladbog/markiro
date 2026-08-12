@@ -55,6 +55,24 @@ function caddyPathMatches(pattern, path) {
   return pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
 }
 
+function stationDevicePathMatches(caddy, path) {
+  const devicePatterns =
+    caddy
+      .match(/^\s*@device path (.+)$/m)?.[1]
+      ?.trim()
+      .split(/\s+/) ?? [];
+  const rootPatterns =
+    caddy
+      .match(/^\s*@stationRoot path (.+)$/m)?.[1]
+      ?.trim()
+      .split(/\s+/) ?? [];
+  const shiftPattern = caddy.match(/^\s*@stationShift path_regexp stationShift (.+)$/m)?.[1];
+  return (
+    [...devicePatterns, ...rootPatterns].some((pattern) => caddyPathMatches(pattern, path)) ||
+    (shiftPattern !== undefined && new RegExp(shiftPattern).test(path))
+  );
+}
+
 function nestedObjects(value) {
   if (value === null || typeof value !== "object") return [];
   return [value, ...Object.values(value).flatMap(nestedObjects)];
@@ -126,7 +144,9 @@ function proxyRoutes(route) {
   return nestedObjects(route)
     .filter((candidate) => Array.isArray(candidate.match))
     .map((candidate) => ({
-      paths: candidate.match.flatMap((matcher) => matcher.path ?? []),
+      paths: candidate.match.flatMap(
+        (matcher) => matcher.path ?? (matcher.path_regexp ? [matcher.path_regexp.pattern] : []),
+      ),
       proxies: nestedObjects(candidate.handle).filter(
         (handler) => handler.handler === "reverse_proxy",
       ),
@@ -357,12 +377,14 @@ function assertAuthorityContract(adapted, { alb }) {
     ["/api/*"],
     ["/1c_exchange"],
     ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
+    ["/shifts", "/products", "/products/gtin-check"],
+    ["^/shifts/[^/]+/(open|bundle)$"],
   ];
   const adminProxies = proxyRoutes(admin);
   const adminReverseProxies = nestedObjects(admin).filter(
     (candidate) => candidate.handler === "reverse_proxy",
   );
-  assert.equal(adminReverseProxies.length, 4);
+  assert.equal(adminReverseProxies.length, 6);
   assert.deepEqual(
     adminProxies.map(({ paths }) => paths),
     expectedAdminPaths,
@@ -513,7 +535,7 @@ function mutate(source, search, replacement) {
   return changed;
 }
 
-test("device proxy matcher accepts exact and nested health/docs boundaries only", async () => {
+test("device proxy matcher accepts only the approved station API boundary", async () => {
   const caddy = await readFile("deploy/production/Caddyfile", "utf8");
   const patterns = caddy
     .match(/^\s*@device path (.+)$/m)?.[1]
@@ -529,6 +551,11 @@ test("device proxy matcher accepts exact and nested health/docs boundaries only"
     "/docs",
     "/docs/*",
   ]);
+  assert.match(caddy, /@stationRoot path \/shifts \/products \/products\/gtin-check/);
+  assert.match(
+    caddy,
+    /@stationShift path_regexp stationShift \^\/shifts\/\[\^\/\]\+\/\(open\|bundle\)\$/,
+  );
   for (const path of [
     "/station/bootstrap",
     "/kiosk/bootstrap",
@@ -537,17 +564,24 @@ test("device proxy matcher accepts exact and nested health/docs boundaries only"
     "/openapi.json",
     "/docs",
     "/docs/swagger-ui.css",
+    "/shifts",
+    "/products",
+    "/products/gtin-check",
+    "/shifts/id/open",
+    "/shifts/id/bundle",
   ]) {
-    assert.ok(
-      patterns.some((pattern) => caddyPathMatches(pattern, path)),
-      `${path} must proxy`,
-    );
+    assert.ok(stationDevicePathMatches(caddy, path), `${path} must proxy`);
   }
-  for (const path of ["/healthful", "/health-check", "/docs-old", "/docs2"]) {
-    assert.ok(
-      patterns.every((pattern) => !caddyPathMatches(pattern, path)),
-      `${path} must remain a SPA path`,
-    );
+  for (const path of [
+    "/healthful",
+    "/health-check",
+    "/docs-old",
+    "/docs2",
+    "/shifts/id/close",
+    "/shifts/id",
+    "/products/id",
+  ]) {
+    assert.ok(!stationDevicePathMatches(caddy, path), `${path} must remain a SPA path`);
   }
 });
 
@@ -557,10 +591,10 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
     (match) => match[1],
   );
 
-  assert.equal(reverseProxies.length, 5);
+  assert.equal(reverseProxies.length, 7);
   assert.equal(
     reverseProxies.filter((block) => /import standard_api_transport/.test(block)).length,
-    4,
+    6,
   );
   assert.equal(
     reverseProxies.filter((block) => /import commerce_ml_transport/.test(block)).length,
@@ -603,6 +637,18 @@ test("direct Caddy adapter isolates the admin and kiosk authorities", async () =
       read_timeout: 300_000_000_000,
       response_header_timeout: 300_000_000_000,
       write_timeout: 300_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
+    },
+    {
+      protocol: "http",
+      read_timeout: 60_000_000_000,
+      response_header_timeout: 30_000_000_000,
+      write_timeout: 60_000_000_000,
     },
     {
       protocol: "http",

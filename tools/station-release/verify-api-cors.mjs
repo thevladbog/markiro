@@ -1,7 +1,34 @@
 import { pathToFileURL } from "node:url";
 
-const FAILURE_MESSAGE = "Station pairing CORS verification failed";
+const FAILURE_MESSAGE = "Station CORS verification failed";
 const WINDOWS_STATION_ORIGIN = "http://tauri.localhost";
+
+export const STATION_PREFLIGHTS = Object.freeze([
+  { path: "/station/pair", method: "POST", headers: "content-type,x-station-capabilities" },
+  {
+    path: "/station/operators",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  { path: "/shifts", method: "GET", headers: "content-type,x-api-key,x-station-capabilities" },
+  { path: "/shifts", method: "POST", headers: "content-type,x-api-key,x-station-capabilities" },
+  {
+    path: "/shifts/cors-probe/open",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/cors-probe/bundle",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  { path: "/products", method: "GET", headers: "content-type,x-api-key,x-station-capabilities" },
+  {
+    path: "/products/gtin-check",
+    method: "POST",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+]);
 
 function fail() {
   throw new Error(FAILURE_MESSAGE);
@@ -30,21 +57,23 @@ function canonicalProductionOrigin(apiUrl) {
 export async function verifyStationCors({ apiUrl, fetchImpl = fetch }) {
   try {
     const origin = canonicalProductionOrigin(apiUrl);
-    const response = await fetchImpl(`${origin}/station/pair`, {
-      method: "OPTIONS",
-      redirect: "error",
-      headers: {
-        Origin: WINDOWS_STATION_ORIGIN,
-        "Access-Control-Request-Method": "POST",
-        "Access-Control-Request-Headers": "content-type,x-station-capabilities",
-      },
-    });
+    for (const preflight of STATION_PREFLIGHTS) {
+      const response = await fetchImpl(`${origin}${preflight.path}`, {
+        method: "OPTIONS",
+        redirect: "error",
+        headers: {
+          Origin: WINDOWS_STATION_ORIGIN,
+          "Access-Control-Request-Method": preflight.method,
+          "Access-Control-Request-Headers": preflight.headers,
+        },
+      });
 
-    if (
-      response.status !== 204 ||
-      response.headers.get("access-control-allow-origin") !== WINDOWS_STATION_ORIGIN
-    ) {
-      fail();
+      if (
+        response.status !== 204 ||
+        response.headers.get("access-control-allow-origin") !== WINDOWS_STATION_ORIGIN
+      ) {
+        fail();
+      }
     }
   } catch {
     fail();

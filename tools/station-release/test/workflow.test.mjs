@@ -116,10 +116,21 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
   );
 
   const { verifyStationCors } = await import("../verify-api-cors.mjs");
+  const expectedPreflights = [
+    ["/station/pair", "POST", "content-type,x-station-capabilities"],
+    ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
+    ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
+    ["/shifts/cors-probe/bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/products", "GET", "content-type,x-api-key,x-station-capabilities"],
+    ["/products/gtin-check", "POST", "content-type,x-api-key,x-station-capabilities"],
+  ];
+  const calls = [];
   await verifyStationCors({
     apiUrl: "https://admin.markiro.app",
     fetchImpl: async (url, init) => {
-      assert.equal(url, "https://admin.markiro.app/station/pair");
+      calls.push({ url, init });
       assert.equal(init.headers.Origin, "http://tauri.localhost");
       return new Response(undefined, {
         status: 204,
@@ -127,4 +138,12 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
       });
     },
   });
+  assert.deepEqual(
+    calls.map(({ url, init }) => [
+      new URL(url).pathname,
+      init.headers["Access-Control-Request-Method"],
+      init.headers["Access-Control-Request-Headers"],
+    ]),
+    expectedPreflights,
+  );
 });

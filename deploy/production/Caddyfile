@@ -65,6 +65,20 @@
 			}
 		}
 
+		@stationRoot path /shifts /products /products/gtin-check
+		handle @stationRoot {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@stationShift path_regexp stationShift ^/shifts/[^/]+/(open|bundle)$
+		handle @stationShift {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
 		@assets path /assets/*
 		handle @assets {
 			header Cache-Control "public, max-age=31536000, immutable"
