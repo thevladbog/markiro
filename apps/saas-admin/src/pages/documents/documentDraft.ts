@@ -1,5 +1,6 @@
 import type { CatalogVersionDto } from "../catalog/api.js";
 import type {
+  ActivationPolicy,
   CreateInvoiceInput,
   CreateInvoiceLineInput,
   CreateOfferInput,
@@ -23,6 +24,20 @@ export type { DocumentKind } from "./types.js";
 
 const MONEY_PATTERN = /^\d{1,12}\.\d{2}$/;
 const MAX_LINES = 100;
+const INVOICE_ACTIVATION_POLICIES = ["immediate", "after_current", "manual"] as const;
+const OFFER_PLAN_ACTIVATION_POLICIES = ["immediate", "after_current"] as const;
+const OFFER_ADDON_ACTIVATION_POLICIES = ["immediate"] as const;
+
+export function getSupportedActivationPolicies(
+  documentKind: DocumentKind,
+  lineKind: DocumentLineDraft["kind"],
+): readonly ActivationPolicy[] {
+  if (lineKind === "service") return [];
+  if (documentKind === "invoice") return INVOICE_ACTIVATION_POLICIES;
+  return lineKind === "plan"
+    ? OFFER_PLAN_ACTIVATION_POLICIES
+    : OFFER_ADDON_ACTIVATION_POLICIES;
+}
 
 export function createLineFromCatalog(version: CatalogVersionDto, id: string): DocumentLineDraft {
   if (!version.unitPrice) throw new Error("catalog_version_financial_terms_missing");
@@ -184,6 +199,8 @@ export function validateDocumentDraft(draft: DocumentDraft): Record<string, stri
         errors[`${prefix}.activationPolicy`] = "service_activation_policy_must_be_null";
     } else if (line.activationPolicy === null) {
       errors[`${prefix}.activationPolicy`] = "activation_policy_required";
+    } else if (!isActivationPolicy(line.activationPolicy)) {
+      errors[`${prefix}.activationPolicy`] = "activation_policy_unsupported";
     }
   }
   return errors;
@@ -207,6 +224,7 @@ export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput {
 }
 
 function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
+  const activationPolicy = requiredActivationPolicy("invoice", line);
   return {
     kind: line.kind,
     catalogVersionId: line.catalogVersionId,
@@ -217,15 +235,27 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
     agreedUnitPrice: line.agreedUnitPrice,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
-    activationPolicy: line.kind === "service" ? null : line.activationPolicy,
+    activationPolicy,
   };
 }
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
-  if (line.kind !== "service" && line.activationPolicy === "manual")
-    throw new Error("offer_manual_activation_policy_unsupported");
-  if (line.kind !== "service" && line.activationPolicy === null)
-    throw new Error("activation_policy_required");
+  const activationPolicy = requiredActivationPolicy("offer", line);
+  if (line.kind === "service") {
+    return {
+      kind: line.kind,
+      catalogVersionId: line.catalogVersionId,
+      nameRu: line.nameRu,
+      nameEn: line.nameEn,
+      quantity: line.quantity,
+      unit: line.unit,
+      agreedUnitPrice: line.agreedUnitPrice,
+      vatRateBps: line.vatRateBps,
+      vatIncluded: line.vatIncluded,
+      activationPolicy: null,
+    };
+  }
+
   return {
     kind: line.kind,
     catalogVersionId: line.catalogVersionId,
@@ -236,13 +266,47 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     agreedUnitPrice: line.agreedUnitPrice,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
-    activationPolicy:
-      line.kind === "service"
-        ? null
-        : line.activationPolicy === "after_current"
-          ? "after_current"
-          : "immediately",
+    activationPolicy: toOfferActivationPolicy(activationPolicy),
   };
+}
+
+function requiredActivationPolicy(
+  documentKind: DocumentKind,
+  line: DocumentLineDraft,
+): ActivationPolicy | null {
+  if (line.kind === "service") {
+    if (line.activationPolicy !== null) throw new Error("service_activation_policy_must_be_null");
+    return null;
+  }
+  if (line.activationPolicy === null) throw new Error("activation_policy_required");
+  if (!isActivationPolicy(line.activationPolicy)) throw new Error("activation_policy_unsupported");
+  if (getSupportedActivationPolicies(documentKind, line.kind).includes(line.activationPolicy))
+    return line.activationPolicy;
+  if (documentKind === "offer" && line.kind === "plan" && line.activationPolicy === "manual")
+    throw new Error("offer_manual_activation_policy_unsupported");
+  if (
+    documentKind === "offer" &&
+    line.kind === "addon" &&
+    line.activationPolicy === "after_current"
+  )
+    throw new Error("offer_addon_after_current_activation_policy_unsupported");
+  throw new Error("activation_policy_unsupported");
+}
+
+function toOfferActivationPolicy(policy: ActivationPolicy | null): "immediately" | "after_current" {
+  switch (policy) {
+    case "immediate":
+      return "immediately";
+    case "after_current":
+      return "after_current";
+    case "manual":
+    case null:
+      throw new Error("activation_policy_unsupported");
+  }
+}
+
+function isActivationPolicy(value: unknown): value is ActivationPolicy {
+  return value === "immediate" || value === "after_current" || value === "manual";
 }
 
 function updateLine(

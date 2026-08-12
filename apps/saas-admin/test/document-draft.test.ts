@@ -5,6 +5,7 @@ import {
   calculateDocumentTotals,
   createLineFromCatalog,
   documentDraftReducer,
+  getSupportedActivationPolicies,
   toInvoiceCreateInput,
   toOfferCreateInput,
   validateDocumentDraft,
@@ -354,7 +355,7 @@ describe("document draft validation and request adapters", () => {
   it("maps invoice and offer policies at their backend boundary while keeping services null", () => {
     const source = draft([
       { ...createLineFromCatalog(plan, "line-plan"), activationPolicy: "immediate" },
-      { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: "after_current" },
+      { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: "immediate" },
       createLineFromCatalog(service, "line-service"),
     ]);
 
@@ -364,7 +365,7 @@ describe("document draft validation and request adapters", () => {
       applicationMode: "automatic",
       lines: [
         expect.objectContaining({ kind: "plan", activationPolicy: "immediate" }),
-        expect.objectContaining({ kind: "addon", activationPolicy: "after_current" }),
+        expect.objectContaining({ kind: "addon", activationPolicy: "immediate" }),
         expect.objectContaining({ kind: "service", activationPolicy: null }),
       ],
     });
@@ -373,7 +374,7 @@ describe("document draft validation and request adapters", () => {
       expiresAt: "2026-09-01",
       lines: [
         expect.objectContaining({ kind: "plan", activationPolicy: "immediately" }),
-        expect.objectContaining({ kind: "addon", activationPolicy: "after_current" }),
+        expect.objectContaining({ kind: "addon", activationPolicy: "immediately" }),
         expect.objectContaining({ kind: "service", activationPolicy: null }),
       ],
     });
@@ -385,5 +386,78 @@ describe("document draft validation and request adapters", () => {
     ]);
 
     expect(() => toOfferCreateInput(source)).toThrow("offer_manual_activation_policy_unsupported");
+  });
+
+  it("exposes exactly the policies each document line can support", () => {
+    expect(getSupportedActivationPolicies("invoice", "plan")).toEqual([
+      "immediate",
+      "after_current",
+      "manual",
+    ]);
+    expect(getSupportedActivationPolicies("invoice", "addon")).toEqual([
+      "immediate",
+      "after_current",
+      "manual",
+    ]);
+    expect(getSupportedActivationPolicies("offer", "plan")).toEqual([
+      "immediate",
+      "after_current",
+    ]);
+    expect(getSupportedActivationPolicies("offer", "addon")).toEqual(["immediate"]);
+    expect(getSupportedActivationPolicies("offer", "service")).toEqual([]);
+  });
+
+  it("rejects unsupported runtime policy strings during draft validation", () => {
+    const source = draft([
+      {
+        ...createLineFromCatalog(plan, "line-plan"),
+        activationPolicy: "later" as unknown as "immediate",
+      },
+    ]);
+
+    expect(validateDocumentDraft(source)).toMatchObject({
+      "lines.line-plan.activationPolicy": "activation_policy_unsupported",
+    });
+  });
+
+  it("rejects policy states that an invoice adapter cannot represent", () => {
+    const missingPlanPolicy = draft([
+      { ...createLineFromCatalog(plan, "line-plan"), activationPolicy: null },
+    ]);
+    const servicePolicy = draft([
+      { ...createLineFromCatalog(service, "line-service"), activationPolicy: "immediate" },
+    ]);
+
+    expect(() => toInvoiceCreateInput(missingPlanPolicy)).toThrow("activation_policy_required");
+    expect(() => toInvoiceCreateInput(servicePolicy)).toThrow(
+      "service_activation_policy_must_be_null",
+    );
+  });
+
+  it("rejects offer add-on after-current and every non-representable policy state", () => {
+    const afterCurrentAddon = draft([
+      { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: "after_current" },
+    ]);
+    const missingAddonPolicy = draft([
+      { ...createLineFromCatalog(addon, "line-addon"), activationPolicy: null },
+    ]);
+    const servicePolicy = draft([
+      { ...createLineFromCatalog(service, "line-service"), activationPolicy: "immediate" },
+    ]);
+    const unknownPolicy = draft([
+      {
+        ...createLineFromCatalog(plan, "line-plan"),
+        activationPolicy: "later" as unknown as "immediate",
+      },
+    ]);
+
+    expect(() => toOfferCreateInput(afterCurrentAddon)).toThrow(
+      "offer_addon_after_current_activation_policy_unsupported",
+    );
+    expect(() => toOfferCreateInput(missingAddonPolicy)).toThrow("activation_policy_required");
+    expect(() => toOfferCreateInput(servicePolicy)).toThrow(
+      "service_activation_policy_must_be_null",
+    );
+    expect(() => toOfferCreateInput(unknownPolicy)).toThrow("activation_policy_unsupported");
   });
 });
