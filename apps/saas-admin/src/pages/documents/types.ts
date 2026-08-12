@@ -28,7 +28,7 @@ export interface DocumentDraft {
 
 export type DocumentDraftAction =
   | { type: "tenant.selected"; tenantId: string }
-  | { type: "catalog.added"; version: CatalogVersionDto; separate?: boolean; id?: string }
+  | { type: "catalog.added"; version: CatalogVersionDto; separate?: boolean; id: string }
   | { type: "line.quantityChanged"; id: string; quantity: number }
   | { type: "line.priceChanged"; id: string; price: string }
   | { type: "line.vatIncludedChanged"; id: string; included: boolean }

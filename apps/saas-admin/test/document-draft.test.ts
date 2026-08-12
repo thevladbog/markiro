@@ -160,6 +160,49 @@ describe("document draft reducer", () => {
     ]);
   });
 
+  it("keeps separate version lines uniquely addressable after removing an earlier line", () => {
+    const first = documentDraftReducer(draft(), {
+      type: "catalog.added",
+      version: plan,
+      separate: true,
+      id: "plan-v1",
+    });
+    const second = documentDraftReducer(first, {
+      type: "catalog.added",
+      version: plan,
+      separate: true,
+      id: "plan-v2",
+    });
+    const afterRemoval = documentDraftReducer(second, { type: "line.removed", id: "plan-v1" });
+    const third = documentDraftReducer(afterRemoval, {
+      type: "catalog.added",
+      version: plan,
+      separate: true,
+      id: "plan-v3",
+    });
+    const edited = documentDraftReducer(third, {
+      type: "line.priceChanged",
+      id: "plan-v2",
+      price: "99.99",
+    });
+
+    expect(third.lines.map((line) => line.id)).toEqual(["plan-v2", "plan-v3"]);
+    expect(edited.lines).toMatchObject([
+      { id: "plan-v2", agreedUnitPrice: "99.99" },
+      { id: "plan-v3", agreedUnitPrice: "120.00" },
+    ]);
+  });
+
+  it("rejects an added catalog line without an action-boundary identity", () => {
+    const missingId = {
+      type: "catalog.added",
+      version: plan,
+      separate: true,
+    } as unknown as Parameters<typeof documentDraftReducer>[1];
+
+    expect(() => documentDraftReducer(draft(), missingId)).toThrow("document_line_id_required");
+  });
+
   it("removes a line and only moves it inside the visible boundaries", () => {
     const initial = draft([
       createLineFromCatalog(plan, "line-plan"),
@@ -254,6 +297,19 @@ describe("exact preview totals", () => {
       subtotal: "100.00",
       vatTotal: "20.00",
       total: "120.00",
+    });
+  });
+
+  it("uses offer backend half-up rounding for a 0.03 VAT-excluded price", () => {
+    const offerLine = {
+      ...createLineFromCatalog(addon, "line-addon"),
+      agreedUnitPrice: "0.03",
+    };
+
+    expect(calculateDocumentTotals("offer", [offerLine])).toEqual({
+      subtotal: "0.03",
+      vatTotal: "0.01",
+      total: "0.04",
     });
   });
 

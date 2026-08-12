@@ -4,6 +4,7 @@ import type {
   CreateInvoiceLineInput,
   CreateOfferInput,
   CreateOfferLineInput,
+  DocumentKind,
   DocumentDraft,
   DocumentDraftAction,
   DocumentLineDraft,
@@ -62,8 +63,13 @@ export function documentDraftReducer(
         }));
       }
       if (draft.lines.length >= MAX_LINES) return draft;
-      const id = action.id ?? nextDeterministicLineId(draft, action.version.id);
-      return { ...draft, lines: [...draft.lines, createLineFromCatalog(action.version, id)] };
+      if (!action.id) throw new Error("document_line_id_required");
+      if (draft.lines.some((line) => line.id === action.id))
+        throw new Error("document_line_id_duplicate");
+      return {
+        ...draft,
+        lines: [...draft.lines, createLineFromCatalog(action.version, action.id)],
+      };
     }
     case "line.quantityChanged":
       return updateLineById(draft, action.id, (line) => ({ ...line, quantity: action.quantity }));
@@ -95,11 +101,36 @@ export function documentDraftReducer(
   }
 }
 
-export function calculateDocumentTotals(lines: readonly DocumentLineDraft[]): {
+export function calculateDocumentTotals(
+  lines: readonly DocumentLineDraft[],
+  kind?: DocumentKind,
+): {
+  subtotal: string;
+  vatTotal: string;
+  total: string;
+};
+export function calculateDocumentTotals(
+  kind: DocumentKind,
+  lines: readonly DocumentLineDraft[],
+): {
+  subtotal: string;
+  vatTotal: string;
+  total: string;
+};
+export function calculateDocumentTotals(
+  linesOrKind: readonly DocumentLineDraft[] | DocumentKind,
+  kindOrLines: DocumentKind | readonly DocumentLineDraft[] = "invoice",
+): {
   subtotal: string;
   vatTotal: string;
   total: string;
 } {
+  const kind =
+    typeof linesOrKind === "string" ? linesOrKind : (kindOrLines as DocumentKind);
+  const lines =
+    typeof linesOrKind === "string"
+      ? (kindOrLines as readonly DocumentLineDraft[])
+      : linesOrKind;
   let subtotal = 0n;
   let vatTotal = 0n;
   let total = 0n;
@@ -109,9 +140,19 @@ export function calculateDocumentTotals(lines: readonly DocumentLineDraft[]): {
     const price = parseMoney(line.agreedUnitPrice);
     const rate = vatRate(line.vatRateBps);
     const gross = price * quantity;
-    const vat = line.vatIncluded ? (gross * rate) / (10_000n + rate) : (gross * rate) / 10_000n;
+    const lineTotal =
+      kind === "offer"
+        ? offerLineTotal(gross, rate, line.vatIncluded, line.vatRateBps)
+        : line.vatIncluded
+          ? gross
+          : gross + (gross * rate) / 10_000n;
+    const vat =
+      line.vatIncluded
+        ? (gross * rate) / (10_000n + rate)
+        : kind === "offer"
+          ? lineTotal - gross
+          : (gross * rate) / 10_000n;
     const lineSubtotal = line.vatIncluded ? gross - vat : gross;
-    const lineTotal = line.vatIncluded ? gross : gross + vat;
 
     subtotal += lineSubtotal;
     vatTotal += vat;
@@ -224,10 +265,6 @@ function updateLineById(
   return updateLine(draft, draft.lines.findIndex((line) => line.id === id), update);
 }
 
-function nextDeterministicLineId(draft: DocumentDraft, catalogVersionId: string): string {
-  return `${catalogVersionId}:${draft.lines.filter((line) => line.catalogVersionId === catalogVersionId).length + 1}`;
-}
-
 function positiveInteger(value: number): number {
   if (!Number.isSafeInteger(value) || value < 1) throw new Error("quantity_must_be_positive_integer");
   return value;
@@ -238,6 +275,16 @@ function vatRate(value: number | null): bigint {
   if (!Number.isSafeInteger(value) || value < 0 || value > 10_000)
     throw new Error("vat_rate_must_be_between_0_and_10000");
   return BigInt(value);
+}
+
+function offerLineTotal(
+  gross: bigint,
+  rate: bigint,
+  vatIncluded: boolean,
+  vatRateBps: number | null,
+): bigint {
+  if (vatIncluded || vatRateBps === null) return gross;
+  return (gross * (10_000n + rate) + 5_000n) / 10_000n;
 }
 
 function parseMoney(value: string): bigint {
