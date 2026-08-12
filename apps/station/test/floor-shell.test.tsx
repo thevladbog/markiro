@@ -93,6 +93,29 @@ describe("FloorShell", () => {
     expect(activeScreen.textContent).toContain("Current work");
   });
 
+  it("reserves a normal-flow floor chrome row above status at supported viewport sizes", () => {
+    const stylesheet = document.createElement("style");
+    stylesheet.textContent = stationCss;
+    document.head.append(stylesheet);
+
+    const { container } = render(
+      <FloorShell {...status} windowChrome={<button>Window mode</button>}>
+        <CurrentFloorScreen />
+      </FloorShell>,
+    );
+    const chrome = container.querySelector(".station-floor-window-chrome");
+    const statusBar = screen.getByRole("banner", { name: "Station status" });
+
+    expect(chrome).not.toBeNull();
+    expect(chrome?.nextElementSibling).toBe(statusBar);
+    expect(getComputedStyle(chrome as Element).position).toBe("static");
+    expect(getComputedStyle(chrome as Element).width).toBe("100%");
+    expect(getComputedStyle(chrome as Element).minHeight).toBe("72px");
+    expect(getComputedStyle(chrome as Element).flexShrink).toBe("0");
+
+    stylesheet.remove();
+  });
+
   it("does not render an empty task navigation", () => {
     render(
       <FloorShell {...status} tasks={[]} activeTaskId="" onSelectTask={vi.fn()}>

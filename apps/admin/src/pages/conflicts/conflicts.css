@@ -1,0 +1,28 @@
+.mk-conflicts-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 260px) minmax(0, 200px);
+  gap: 12px;
+  align-items: start;
+}
+
+.mk-conflicts-filters__field {
+  min-width: 0;
+}
+
+.mk-conflicts-filters__shift {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mk-conflicts-filters__hint {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+@media (max-width: 42rem) {
+  .mk-conflicts-filters {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

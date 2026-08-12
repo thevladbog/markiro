@@ -25,6 +25,7 @@
 ### Task 1: Billing schema, profiles, and immutable facts
 
 **Files:**
+
 - Create: `packages/db/src/schema/billing.ts`
 - Modify: `packages/db/src/schema.ts`
 - Create: `packages/db/migrations/0034_tenant_billing_documents.sql`
@@ -32,6 +33,7 @@
 - Modify: `packages/db/test/migration-runtime.test.ts`
 
 **Interfaces:**
+
 - Produces enums and tables exported through `schema.billing`:
   `billingProfileKind`, `invoiceStatus`, `invoiceLineKind`, `invoiceApplicationMode`,
   `invoiceActivationPolicy`, `documentStatus`, `paymentSource`, `paymentMatchStatus`.
@@ -42,8 +44,8 @@
   snapshots are written only by the issue transition.
 
 - [ ] **Step 1: Write failing schema tests** for profile-kind checks, one current operator profile,
-  one current tenant profile, invoice number uniqueness, issued snapshot presence, immutable event
-  uniqueness, tenant composite foreign keys, document revision uniqueness, and payment-match status.
+      one current tenant profile, invoice number uniqueness, issued snapshot presence, immutable event
+      uniqueness, tenant composite foreign keys, document revision uniqueness, and payment-match status.
 - [ ] **Step 2: Run the focused DB test** with `pnpm --filter @markiro/db exec vitest run test/billing-schema.test.ts`; confirm it fails because the schema/migration is absent.
 - [ ] **Step 3: Add the Drizzle tables and enums** with explicit checks for money scale, nonnegative VAT, line quantities, snapshot requirements, and tenant-scoped foreign keys.
 - [ ] **Step 4: Generate and inspect migration 0034**, including indexes for `(tenant_id, status, issued_at)`, invoice number, import checksum, source row identity, and document lookup.
@@ -53,6 +55,7 @@
 ### Task 2: Billing profiles API and address normalization boundary
 
 **Files:**
+
 - Create: `apps/api/src/modules/billing-profiles/billing-profiles.module.ts`
 - Create: `apps/api/src/modules/billing-profiles/billing-profiles.controller.ts`
 - Create: `apps/api/src/modules/billing-profiles/billing-profiles.service.ts`
@@ -61,6 +64,7 @@
 - Modify: `apps/api/src/app.module.ts`
 
 **Interfaces:**
+
 - Platform endpoints: `GET/PUT /api/platform/billing/operator-profile` and
   `GET/PUT /api/platform/tenants/:tenantId/billing-profile`.
 - Customer endpoint: `GET /api/tenant/billing-profile` returns only that tenant's confirmed profile.
@@ -79,6 +83,7 @@
 ### Task 3: Direct invoice creation and issue lifecycle
 
 **Files:**
+
 - Create: `apps/api/src/modules/billing/billing.module.ts`
 - Create: `apps/api/src/modules/billing/invoices.controller.ts`
 - Create: `apps/api/src/modules/billing/invoices.service.ts`
@@ -88,6 +93,7 @@
 - Modify: `apps/api/src/app.module.ts`
 
 **Interfaces:**
+
 - Platform endpoints: `POST /api/platform/tenants/:tenantId/invoices`,
   `GET /api/platform/invoices`, `GET /api/platform/invoices/:id`,
   `POST /api/platform/invoices/:id/issue`, and `POST /api/platform/invoices/:id/cancel`.
@@ -107,6 +113,7 @@
 ### Task 4: PDF/HTML rendering and private document storage
 
 **Files:**
+
 - Create: `apps/api/src/modules/billing/invoice-renderer.ts`
 - Create: `apps/api/src/modules/billing/invoice-document.service.ts`
 - Create: `apps/api/src/modules/billing/invoice-render.job.ts`
@@ -116,6 +123,7 @@
 - Modify: `apps/api/src/modules/storage/object-storage.service.ts` only if a bounded read helper is required
 
 **Interfaces:**
+
 - `InvoiceRenderer.renderHtml(snapshot): Promise<string>` produces deterministic printable HTML.
 - `InvoiceRenderer.renderPdf(snapshot): Promise<Buffer>` produces a PDF from the same snapshot.
 - `InvoiceDocumentService.enqueueIssuedInvoice(invoiceId)`, `retry(invoiceId, format)`,
@@ -133,6 +141,7 @@
 ### Task 5: Manual payments, 1C import, and matching registry
 
 **Files:**
+
 - Create: `apps/api/src/modules/billing-payments/billing-payments.module.ts`
 - Create: `apps/api/src/modules/billing-payments/payments.controller.ts`
 - Create: `apps/api/src/modules/billing-payments/payments.service.ts`
@@ -143,6 +152,7 @@
 - Modify: `apps/api/src/app.module.ts`
 
 **Interfaces:**
+
 - Platform endpoints: `POST /api/platform/payments/manual`,
   `POST /api/platform/payment-imports`, `GET /api/platform/payment-imports/:id`,
   `POST /api/platform/payment-matches/:id/confirm`, and `POST /api/platform/payment-matches/:id/reject`.
@@ -162,12 +172,14 @@
 ### Task 6: Per-invoice application of plans, add-ons, and services
 
 **Files:**
+
 - Create: `apps/api/src/modules/billing/invoice-application.service.ts`
 - Create: `apps/api/test/invoice-application.e2e.test.ts`
 - Modify: `apps/api/src/modules/platform-offers/platform-offers.service.ts` only to extract/reuse safe fulfilment primitives
 - Modify: `apps/api/src/subscriptions/subscription-lifecycle.service.ts` only where an explicit invoice source/event hook is needed
 
 **Interfaces:**
+
 - `InvoiceApplicationService.applyPaidInvoice(invoiceId, mode)` is idempotent per invoice line.
 - Plan policy `immediate` replaces current plan; `after_current` schedules a successor when current
   is live; `manual` creates pending application rows only.
@@ -184,6 +196,7 @@
 ### Task 7: Platform billing UI
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/billing/InvoicesPage.tsx`
 - Create: `apps/saas-admin/src/pages/billing/InvoiceEditorPanel.tsx`
 - Create: `apps/saas-admin/src/pages/billing/InvoiceDetailPage.tsx`
@@ -193,6 +206,7 @@
 - Modify: `apps/saas-admin/src/app.tsx`, navigation, i18n, and styles
 
 **Interfaces:**
+
 - Routes: `/billing/invoices`, `/billing/invoices/new`, `/billing/invoices/:id`, `/billing/payments`.
 - UI supports line type/catalog version selection, custom rows, VAT, application mode/policy,
   issue/cancel, document download, manual payment, import upload, match review, and manual apply.
@@ -207,6 +221,7 @@
 ### Task 8: Customer cabinet billing UI
 
 **Files:**
+
 - Create: `apps/admin/src/pages/billing/InvoicesPage.tsx`
 - Create: `apps/admin/src/pages/billing/InvoiceDetailPage.tsx`
 - Create: `apps/admin/src/pages/billing/api.ts`
@@ -214,6 +229,7 @@
 - Modify: `apps/admin/src/app.tsx`, navigation, i18n, and styles
 
 **Interfaces:**
+
 - Customer routes: `/billing/invoices` and `/billing/invoices/:id`.
 - Customer view exposes only issued/paid/cancelled invoice summaries, line snapshots, totals, status,
   and document download; it never exposes bank import rows, platform actors, or internal audit.
@@ -226,6 +242,7 @@
 ### Task 9: Integrated verification and documentation
 
 **Files:**
+
 - Create: `apps/api/test/billing-flow.e2e.test.ts`
 - Modify: `docs/superpowers/specs/2026-08-11-tenant-billing-documents-design.md` only for accepted implementation clarifications
 - Create: `.superpowers/sdd/2026-08-11-tenant-billing-documents/task-report.md` (ignored report convention)

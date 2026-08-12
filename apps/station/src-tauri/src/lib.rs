@@ -5,6 +5,10 @@ mod scanner;
 
 use tauri::Manager;
 
+// Set the runtime window icon as well as the bundle icon so Windows does not
+// fall back to a cached/default process icon in the taskbar.
+const STATION_ICON: tauri::image::Image<'_> = tauri::include_image!("./icons/128x128.png");
+
 /// Builds and runs the Tauri application. Plugins mirror the idento kiosk
 /// baseline: single-instance (one station per machine), sql (SQLite mirror),
 /// updater (release-channel updates). Hardware/config/lockdown commands are
@@ -17,6 +21,12 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        .setup(|app| {
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_icon(STATION_ICON.clone())?;
+            }
+            Ok(())
+        })
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 let locked = window

@@ -132,6 +132,10 @@ jobs:
           pnpm test:station-release:contract
           git diff --check
 
+      - name: Verify production station pairing CORS
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+        run: pnpm verify:station-production-cors
+
       - name: Build signed Windows NSIS updater artifacts
         if: inputs.mode == 'publish'
         env:
@@ -149,7 +153,8 @@ jobs:
           pnpm --filter @markiro/station tauri build
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
           installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
-          bundle="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.nsis.zip' -print -quit)"
+          # Tauri 2.10 emits the signed NSIS installer itself as the updater payload.
+          bundle="$installer"
           signature="$bundle.sig"
           test -f "$installer" -a -f "$bundle" -a -f "$signature"
           mkdir -p "$RUNNER_TEMP/station-input"
@@ -177,7 +182,8 @@ jobs:
         run: |
           set -euo pipefail
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
-          git -c http.extraheader="AUTHORIZATION: bearer $GH_TOKEN" push origin "HEAD:refs/heads/$candidate_ref"
+          auth_header="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.extraheader=$auth_header" push origin "HEAD:refs/heads/$candidate_ref"
           printf 'candidate_ref=%s\n' "$candidate_ref" >> "$GITHUB_ENV"
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --draft --prerelease --target "$release_sha" --title "Markiro Station $version" --notes-file "$RUNNER_TEMP/station-staged/release-notes.md"
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-staged"/*
@@ -212,19 +218,19 @@ jobs:
           else
             rm -rf "$RUNNER_TEMP/station-channel-backup"
             mkdir "$RUNNER_TEMP/station-channel-backup"
-            gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-backup"
+            gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-backup" || true
           fi
-          cp "$RUNNER_TEMP/station-staged/latest.json" "$RUNNER_TEMP/station-channel-latest.json"
-          if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-latest.json#latest.json" --clobber; then
+          cp "$RUNNER_TEMP/station-staged/latest.json" "$RUNNER_TEMP/latest.json"
+          if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/latest.json" --clobber; then
             if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
-              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json#latest.json" --clobber
+              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json" --clobber
             fi
             exit 1
           fi
           mkdir "$RUNNER_TEMP/station-channel-verify"
           if ! gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-verify" || ! cmp "$RUNNER_TEMP/station-channel-verify/latest.json" "$RUNNER_TEMP/station-staged/latest.json"; then
             if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
-              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json#latest.json" --clobber
+              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json" --clobber
             fi
             exit 1
           fi
@@ -238,4 +244,4 @@ jobs:
           set +e
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
-          rm -rf "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$RUNNER_TEMP/station-downloaded" "$RUNNER_TEMP/station-channel-backup" "$RUNNER_TEMP/station-channel-verify" "$RUNNER_TEMP/station-channel-latest.json"
+          rm -rf "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$RUNNER_TEMP/station-downloaded" "$RUNNER_TEMP/station-channel-backup" "$RUNNER_TEMP/station-channel-verify" "$RUNNER_TEMP/latest.json"

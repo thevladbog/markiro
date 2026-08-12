@@ -317,13 +317,15 @@ describe("one-time pairing reveal", () => {
     expect(toastMock).toHaveBeenCalledWith("ok", "Код привязки сформирован");
     expect(JSON.stringify(toastMock.mock.calls)).not.toContain("12345678");
     expect(within(panel).getByRole("group", { name: "12345678" })).toBeDefined();
-    expect(
-      await within(panel).findByRole(
-        "img",
-        { name: "Штрихкод кода привязки 12345678" },
-        { timeout: 3000 },
-      ),
-    ).toBeDefined();
+    const barcode = await within(panel).findByRole(
+      "img",
+      { name: "Штрихкод кода привязки 12345678" },
+      { timeout: 3000 },
+    );
+    expect(barcode.style.background).toBe("rgb(255, 255, 255)");
+    expect(barcode.style.padding).toBe("8px");
+    expect(barcode.style.boxSizing).toBe("content-box");
+    expect(barcode.style.border).toBe("1px solid var(--line)");
     await user.click(within(panel).getByRole("button", { name: "Скопировать" }));
     expect(copy).toHaveBeenCalledWith("12345678");
     expect(

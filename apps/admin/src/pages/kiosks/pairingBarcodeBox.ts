@@ -33,5 +33,8 @@ export const pairingBarcodeBoxStyle: CSSProperties = {
   justifyContent: "center",
   width: PAIRING_BARCODE_WIDTH,
   height: PAIRING_BARCODE_HEIGHT,
-  padding: "4px 0",
+  boxSizing: "content-box",
+  padding: 8,
+  border: "1px solid var(--line)",
+  background: "#fff",
 };

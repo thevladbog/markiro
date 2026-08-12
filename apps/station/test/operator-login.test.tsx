@@ -84,6 +84,33 @@ function cssRule(selector: string): string {
 }
 
 describe("OperatorLogin", () => {
+  it("keeps Markiro Station framing and spaced bounded actions across sign-in stages", async () => {
+    render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
+
+    expect(screen.getByRole("img", { name: "Markiro Station" })).toBeDefined();
+    expect(document.querySelector(".operator-login__actions")).not.toBeNull();
+
+    openNumericFallback();
+    expect(screen.getByRole("img", { name: "Markiro Station" })).toBeDefined();
+    expect(document.querySelector(".operator-login__actions")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    expect(screen.getByRole("img", { name: "Markiro Station" })).toBeDefined();
+    expect(document.querySelector(".operator-login__actions")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    await screen.findByRole("textbox", { name: "Operator name" });
+    expect(screen.getByRole("img", { name: "Markiro Station" })).toBeDefined();
+    expect(document.querySelector(".operator-login__actions")).not.toBeNull();
+
+    expect(stationCss).toMatch(/\.operator-login__actions\s*\{[^}]*gap:\s*var\(--sp-3\)/s);
+    expect(stationCss).toMatch(
+      /\.operator-login__actions\s*\{[^}]*grid-template-columns:\s*repeat\([^,]+,\s*minmax\(0,\s*[^)]+\)\)/s,
+    );
+  });
+
   it("starts in a badge-first state and opens the numeric fallback on a deliberate touch", () => {
     render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
 

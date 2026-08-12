@@ -33,6 +33,8 @@ import { KioskCreatePanelRoute, KioskEditPanelRoute } from "./pages/kiosks/Kiosk
 import { ReasonsPage } from "./pages/kiosks/ReasonsPage.js";
 import { LabelEditorPage } from "./pages/labels/editor/index.js";
 import { LabelTemplatesPage } from "./pages/labels/index.js";
+import { LinesPage } from "./pages/lines/index.js";
+import { LinePanelRoute } from "./pages/lines/LinePanelRoute.js";
 import { OrderDetailPage } from "./pages/pickup/OrderDetail.js";
 import { RejectionsPage } from "./pages/pickup/Rejections.js";
 import { PickupPage } from "./pages/pickup/index.js";
@@ -117,6 +119,31 @@ function appRouteElements() {
             element={
               <RequireCapability capability={C.OPERATIONS_WRITE}>
                 <ShiftPanelRoute mode="edit" />
+              </RequireCapability>
+            }
+          />
+        </Route>
+        <Route
+          path="lines"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <LinesPage />
+            </RequireCapability>
+          }
+        >
+          <Route
+            path="new"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <LinePanelRoute mode="create" />
+              </RequireCapability>
+            }
+          />
+          <Route
+            path=":lineId/edit"
+            element={
+              <RequireCapability capability={C.OPERATIONS_WRITE}>
+                <LinePanelRoute mode="edit" />
               </RequireCapability>
             }
           />

@@ -4,6 +4,39 @@
 станциях не выполняется: оператор сам запускает установщик после проверки окна
 смены и состояния outbox.
 
+## Обязательный порядок beta-релиза
+
+Не запускайте workflow и не устанавливайте beta, пока не выполнен предыдущий
+пункт. Успешная CI-сборка не заменяет live preflight или ручную проверку на
+Windows.
+
+1. В production runtime secret должно быть точное значение
+   `STATION_ORIGIN=http://tauri.localhost`. Создайте новую версию секрета по
+   процедуре [Yandex secrets](yandex-secrets.md), сохранив все существующие
+   ключи; не печатайте и не переносите их в терминал, issue или release notes.
+   Материализуйте эту версию через штатный deployment workflow.
+2. На уже применённой production-конфигурации выполните live preflight:
+
+   ```bash
+   pnpm verify:station-production-cors
+   ```
+
+   Продолжать можно только при успешном результате. Проверка посылает точный
+   Windows origin к `https://admin.markiro.app/station/pair`; её нельзя заменить
+   browser/CI-проверкой или предположением о значении секрета.
+
+3. Только после preflight запустите `Publish station beta` из `main` для
+   проверенного commit SHA. Workflow собирает Windows installer; при `publish`
+   или `promote-existing` он сам повторяет live preflight до продвижения
+   immutable release или канала.
+4. Проверьте опубликованные immutable installer, `SHA256SUMS`, updater bundle,
+   подпись, `latest.json` и commit digest. Лишь затем допускается скачивание
+   пакета на станцию.
+5. Установите пакет вручную на целевую Windows-станцию и зафиксируйте результаты
+   из `docs/hardware-acceptance-checklist.md`: иконки, production pairing,
+   touch/keyboard/scanner input, viewport и fullscreen. Это отдельное
+   acceptance; workflow не закрывает эти пункты.
+
 ## Перед запуском
 
 - Workflow `Publish station beta` запускается только из `main` после успешного
@@ -13,6 +46,9 @@
   `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Приватный
   ключ хранится в зашифрованном офлайн-резерве; его нельзя печатать в логи,
   коммитить или копировать на станцию.
+- `STATION_ORIGIN` — production runtime secret, а не signing secret environment:
+  перед beta он обязан быть равен `http://tauri.localhost`. Значение
+  `tauri://localhost` не является Windows origin для этой сборки.
 - Публичный ключ зашит в Tauri-конфигурацию. Потеря приватного ключа или пароля
   останавливает обновления; ротация выполняется через bridge-релиз.
 
@@ -44,6 +80,14 @@
 предупреждение для новой неподписанной или ещё не имеющей репутации сборки.
 Не обходите его вслепую: при расхождении отмените установку и сообщите release
 owner. Тихой автоматической установки нет.
+
+До допуска beta к смене отметьте ручные результаты в hardware checklist: у
+installer, taskbar и окна — новые Markiro icons (без старого белого круга);
+pairing выполнен настоящим кодом из `admin.markiro.app`; touch keypad,
+физическая клавиатура и scanner вводят данные; 1280×800 не имеет scroll/clip;
+fullscreen выходит и возвращается обратно. При активной смене выход из
+fullscreen требует явного подтверждения; после отмены, выхода и повторного
+входа состояние смены и очередь не должны теряться.
 
 ## Откат и ротация ключа
 
