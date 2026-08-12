@@ -209,7 +209,14 @@ it("keeps Radix child portals in the panel and lets each child consume Escape fi
   );
 
   await user.click(screen.getByRole("combobox", { name: "Product" }));
-  expect(screen.getByRole("listbox").closest(".mk-overlay-layer--panel")).not.toBeNull();
+  const listbox = screen.getByRole("listbox");
+  const content = listbox.closest<HTMLElement>("[data-mk-nested-overlay]");
+  const viewport = content?.querySelector<HTMLElement>("[data-radix-select-viewport]");
+  expect(listbox.closest(".mk-overlay-layer--panel")).not.toBeNull();
+  expect(content?.getAttribute("data-position")).toBe("popper");
+  expect(content?.classList.contains("mk-select__content")).toBe(true);
+  expect(content?.classList.contains("mk-select__viewport")).toBe(false);
+  expect(viewport?.classList.contains("mk-select__viewport")).toBe(true);
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("listbox")).toBeNull();
   expect(onClose).not.toHaveBeenCalled();

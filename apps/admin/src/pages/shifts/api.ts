@@ -1,9 +1,7 @@
 /**
  * Typed fetchers + TanStack Query hooks for the shifts endpoints (Task 7:
  * `GET /shifts`, `POST /shifts`, `PATCH /shifts/:id`, `DELETE /shifts/:id`,
- * `POST /shifts/:id/close`), plus a tiny read-only mini-api for `GET /lines`
- * (just enough to populate the shift form's line `Select` -- creating lines
- * is out of scope for this task; see the brief). Thin wrapper over
+ * `POST /shifts/:id/close`), plus a small lines client. Thin wrapper over
  * `../../api/client.ts`'s `apiFetch` -- see that module for the shared base
  * URL, credentials, and error-message parsing. Mirrors the shape of
  * `../catalog/api.ts` (Task 12) / `../counterparties/api.ts` (Task 11).
@@ -11,6 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
+import { CABINET_ACCESS_QUERY_KEY } from "../../access/api.js";
 import { apiFetch } from "../../api/client.js";
 
 export type ShiftMode = "validation" | "aggregation";
@@ -189,16 +188,21 @@ export function useCloseShift(): UseMutationResult<
 }
 
 // --- Lines mini-api ---------------------------------------------------------
-// Read-only on purpose: the plan calls a create-capable line select "over-scope"
-// for this task -- a plain `GET /lines` list feeds the shift form's line
-// `Select`; the UI notes when the list is empty (create via the API or a
-// future settings screen) rather than offering inline creation here.
 
 /** Mirrors `apps/api/src/modules/lines/dto.ts`'s `LineDto`. */
 export interface LineDto {
   id: string;
   name: string;
   createdAt: string;
+}
+
+export interface CreateLineInput {
+  name: string;
+}
+
+export interface UpdateLineVariables {
+  id: string;
+  input: CreateLineInput;
 }
 
 interface ListLinesResponse {
@@ -213,7 +217,62 @@ async function fetchLines(): Promise<LineDto[]> {
   return response.items;
 }
 
+function postLine(input: CreateLineInput): Promise<LineDto> {
+  return apiFetch<LineDto>("/lines", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+function patchLine(id: string, input: CreateLineInput): Promise<LineDto> {
+  return apiFetch<LineDto>(`/lines/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+function removeLine(id: string): Promise<void> {
+  return apiFetch<void>(`/lines/${id}`, { method: "DELETE" });
+}
+
 /** `GET /lines` -- the active tenant's production lines. */
 export function useLines(): UseQueryResult<LineDto[]> {
   return useQuery({ queryKey: LINES_QUERY_KEY, queryFn: fetchLines });
+}
+
+/** `POST /lines`. Invalidates the lines list on success. */
+export function useCreateLine(): UseMutationResult<LineDto, Error, CreateLineInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: postLine,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: CABINET_ACCESS_QUERY_KEY }),
+      ]);
+    },
+  });
+}
+
+/** `PATCH /lines/:id`. Invalidates the lines list on success. */
+export function useUpdateLine(): UseMutationResult<LineDto, Error, UpdateLineVariables> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }) => patchLine(id, input),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+  });
+}
+
+/** `DELETE /lines/:id`. Invalidates the lines list on success. */
+export function useDeleteLine(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: removeLine,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: CABINET_ACCESS_QUERY_KEY }),
+      ]);
+    },
+  });
 }

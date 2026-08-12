@@ -144,6 +144,7 @@ describe("app shell layout", () => {
       ["Обзор", "/"],
       ["Каталог", "/catalog"],
       ["Смены", "/shifts"],
+      ["Линии", "/lines"],
       ["Контрагенты", "/counterparties"],
       ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],
@@ -159,6 +160,11 @@ describe("app shell layout", () => {
     expect(screen.queryByText("Организация")).toBeNull();
     expect(screen.queryByRole("link", { name: "Интеграции" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Настройки" })).toBeNull();
+
+    const shiftsLink = screen.getByRole("link", { name: "Смены" });
+    const linesLink = screen.getByRole("link", { name: "Линии" });
+    const navLinks = screen.getAllByRole("link");
+    expect(navLinks.indexOf(linesLink)).toBe(navLinks.indexOf(shiftsLink) + 1);
   });
 
   it("dashboard guides a new organization to its first product", async () => {
@@ -208,6 +214,7 @@ describe("app shell layout", () => {
 
     await waitFor(() => {
       expect(screen.getByRole("link", { name: "Overview" })).toBeDefined();
+      expect(screen.getByRole("link", { name: "Lines" })).toBeDefined();
     });
   });
 });

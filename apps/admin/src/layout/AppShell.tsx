@@ -33,6 +33,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.OPERATIONS_READ,
   },
   {
+    to: "/lines",
+    key: "nav.lines",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
     to: "/boxes",
     key: "nav.boxes",
     sectionKey: "shell.sections.production",

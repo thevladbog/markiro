@@ -31,6 +31,7 @@ export interface SelectProps<TValue extends string = string> {
   style?: CSSProperties;
   "aria-label"?: string;
   "aria-labelledby"?: string;
+  "aria-describedby"?: string;
 }
 
 function normalizeOption<TValue extends string>(option: SelectOption<TValue>) {
@@ -55,6 +56,7 @@ export function Select<TValue extends string = string>({
   id,
   "aria-label": ariaLabel,
   "aria-labelledby": ariaLabelledBy,
+  "aria-describedby": ariaDescribedBy,
 }: SelectProps<TValue>) {
   const overlayPortalContainer = useOverlayPortalContainer();
   const [focus, setFocus] = useState(false);
@@ -62,12 +64,13 @@ export function Select<TValue extends string = string>({
   const selectId = id ?? `mk-select-${autoId}`;
   const hintId = hint ? `${selectId}-hint` : undefined;
   const errorId = error ? `${selectId}-error` : undefined;
-  const describedBy = errorId ?? hintId;
+  const describedBy = [ariaDescribedBy, errorId ?? hintId].filter(Boolean).join(" ") || undefined;
   const normalizedOptions = options.map(normalizeOption);
   const emptyOptionLabel = normalizedOptions.find((option) => option.value === "")?.label;
   const itemOptions = normalizedOptions.map((option) =>
     option.value === "" ? { ...option, value: EMPTY_OPTION_VALUE } : option,
   );
+  const customValue = value === "" && emptyOptionLabel !== undefined ? EMPTY_OPTION_VALUE : value;
 
   if (size === "floor" || native) {
     const floor = size === "floor";
@@ -186,7 +189,7 @@ export function Select<TValue extends string = string>({
         </label>
       )}
       <RadixSelect.Root
-        {...(value === undefined ? {} : { value })}
+        {...(customValue === undefined ? {} : { value: customValue })}
         {...(onValueChange === undefined
           ? {}
           : {
@@ -194,7 +197,7 @@ export function Select<TValue extends string = string>({
                 onValueChange((nextValue === EMPTY_OPTION_VALUE ? "" : nextValue) as TValue),
             })}
         {...(disabled === undefined ? {} : { disabled })}
-        {...(name === undefined ? {} : { name })}
+        {...(name === undefined || value !== undefined ? {} : { name })}
         {...(required === undefined ? {} : { required })}
       >
         <RadixSelect.Trigger
@@ -230,8 +233,10 @@ export function Select<TValue extends string = string>({
             opacity: disabled ? 0.45 : 1,
           }}
         >
-          <RadixSelect.Value placeholder={emptyOptionLabel ?? placeholder} />
-          <RadixSelect.Icon aria-hidden="true">
+          <span className="mk-select__value">
+            <RadixSelect.Value placeholder={emptyOptionLabel ?? placeholder} />
+          </span>
+          <RadixSelect.Icon className="mk-select__icon" aria-hidden="true">
             <svg
               width="16"
               height="16"
@@ -249,9 +254,13 @@ export function Select<TValue extends string = string>({
         >
           <RadixSelect.Content
             data-mk-nested-overlay=""
+            data-position="popper"
+            position="popper"
+            sideOffset={4}
+            collisionPadding={8}
+            className="mk-select__content"
             style={{
               zIndex: "var(--z-overlay-popover)",
-              overflow: "hidden",
               border: "1px solid var(--line-strong)",
               borderRadius: "var(--r-2)",
               background: "var(--surface-card)",
@@ -259,7 +268,7 @@ export function Select<TValue extends string = string>({
               boxShadow: "0 12px 32px color-mix(in srgb, var(--fg-1) 18%, transparent)",
             }}
           >
-            <RadixSelect.Viewport style={{ padding: 4 }}>
+            <RadixSelect.Viewport className="mk-select__viewport">
               {itemOptions.map((option) => (
                 <RadixSelect.Item
                   key={option.value}
@@ -280,7 +289,9 @@ export function Select<TValue extends string = string>({
                     opacity: option.disabled ? 0.45 : 1,
                   }}
                 >
-                  <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
+                  <span className="mk-select__item-text">
+                    <RadixSelect.ItemText>{option.label}</RadixSelect.ItemText>
+                  </span>
                   <RadixSelect.ItemIndicator
                     aria-hidden="true"
                     style={{
@@ -307,6 +318,9 @@ export function Select<TValue extends string = string>({
           </RadixSelect.Content>
         </RadixSelect.Portal>
       </RadixSelect.Root>
+      {name !== undefined && value !== undefined ? (
+        <input type="hidden" name={name} value={value} disabled={disabled} />
+      ) : null}
       {(error || hint) && (
         <span
           id={error ? errorId : hintId}

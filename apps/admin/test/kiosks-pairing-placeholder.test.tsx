@@ -53,6 +53,10 @@ describe("pairing code barcode placeholder", () => {
     expect(box).not.toBeNull();
     expect((box as HTMLElement).style.width).toBe(`${PAIRING_BARCODE_WIDTH}px`);
     expect((box as HTMLElement).style.height).toBe(`${PAIRING_BARCODE_HEIGHT}px`);
+    expect((box as HTMLElement).style.background).toBe("rgb(255, 255, 255)");
+    expect((box as HTMLElement).style.padding).toBe("8px");
+    expect((box as HTMLElement).style.boxSizing).toBe("content-box");
+    expect((box as HTMLElement).style.border).toBe("1px solid var(--line)");
   });
 
   it("keeps the digits and the countdown usable while the barcode is pending", async () => {

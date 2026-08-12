@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Badge, Button, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
@@ -12,6 +12,7 @@ import { formatCreatedAt, formatScanTime } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useShifts, type ShiftDto } from "../shifts/api.js";
 import { useConflicts, useReviewConflict, type ConflictDto } from "./api.js";
+import "./conflicts.css";
 
 type ReviewedFilter = "unreviewed" | "reviewed" | "all";
 
@@ -35,6 +36,7 @@ export function ConflictsPage() {
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
 
   const [shiftFilter, setShiftFilter] = useState<string>("all");
+  const shiftHintId = useId();
   // Defaults to "unreviewed": without this, the list keeps every conflict
   // ever detected, reviewed or not, forever -- so "mark reviewed" changed
   // only a badge and the list never got shorter. See the spec's testing
@@ -128,17 +130,20 @@ export function ConflictsPage() {
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader title={t("pages.conflicts.title")} />
 
-      <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <div style={{ width: 260 }}>
+      <section className="mk-conflicts-filters" aria-label={t("pages.conflicts.title")}>
+        <div className="mk-conflicts-filters__field mk-conflicts-filters__shift">
           <Select
             label={t("pages.conflicts.filters.shiftLabel")}
             options={shiftFilterOptions}
             value={shiftFilter}
-            hint={t("pages.conflicts.filters.shiftHint")}
+            aria-describedby={shiftHintId}
             onValueChange={setShiftFilter}
           />
+          <p id={shiftHintId} className="mk-conflicts-filters__hint">
+            {t("pages.conflicts.filters.shiftHint")}
+          </p>
         </div>
-        <div style={{ width: 200 }}>
+        <div className="mk-conflicts-filters__field">
           <Select
             label={t("pages.conflicts.filters.reviewedLabel")}
             options={reviewedFilterOptions}
@@ -146,7 +151,7 @@ export function ConflictsPage() {
             onValueChange={setReviewedFilter}
           />
         </div>
-      </div>
+      </section>
 
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
