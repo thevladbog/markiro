@@ -96,6 +96,24 @@
     "loadError": "Could not load offers",
     "catalogLink": "Catalog"
   },
+  "billing": {
+    "title": "Invoices and payments",
+    "loading": "Loading invoices",
+    "loadError": "Could not load invoices",
+    "newTitle": "New invoice",
+    "tenantId": "Tenant ID",
+    "amount": "Amount",
+    "create": "Create invoice",
+    "number": "Number",
+    "tenant": "Tenant",
+    "status": "Status",
+    "total": "Total",
+    "empty": "No invoices yet",
+    "detail": "Invoice",
+    "issue": "Issue",
+    "pay": "Record payment",
+    "document": "Generate document"
+  },
   "shell": {
     "routeLoading": "Loading section",
     "skip": "Skip to content",
@@ -103,6 +121,7 @@
     "tenants": "Tenants",
     "catalog": "Catalog",
     "offers": "Offers",
+    "billing": "Invoices",
     "team": "Team",
     "audit": "Audit",
     "language": "Interface language",

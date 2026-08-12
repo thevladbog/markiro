@@ -239,6 +239,13 @@
       "when": 1786435464742,
       "tag": "0033_common_magdalene",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1786481010105,
+      "tag": "0034_overconfident_harrier",
+      "breakpoints": true
     }
   ]
 }

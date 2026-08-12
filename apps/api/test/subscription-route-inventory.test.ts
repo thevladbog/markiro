@@ -223,6 +223,33 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "BillingController.create": platform(
+    "platform invoice creation is guarded by platform billing capabilities",
+  ),
+  "BillingController.issue": platform(
+    "platform invoice issuance is guarded by platform billing capabilities",
+  ),
+  "BillingController.document": platform(
+    "platform invoice document rendering is guarded by platform billing capabilities",
+  ),
+  "BillingController.apply": platform(
+    "platform invoice application is guarded by platform billing capabilities",
+  ),
+  "BillingController.cancel": platform(
+    "platform invoice cancellation is guarded by platform billing capabilities",
+  ),
+  "BillingPaymentsController.record": platform(
+    "platform payment recording is guarded by platform billing capabilities",
+  ),
+  "BillingPaymentsController.import": platform(
+    "platform bank import is guarded by platform billing capabilities",
+  ),
+  "BillingProfilesController.setOperator": platform(
+    "operator billing profile mutation is guarded by platform billing capabilities",
+  ),
+  "BillingProfilesController.setTenant": platform(
+    "tenant billing profile mutation is guarded by platform billing capabilities",
+  ),
   "PlatformOffersController.create": platform(
     "platform billing offer creation is guarded by platform capabilities",
   ),
