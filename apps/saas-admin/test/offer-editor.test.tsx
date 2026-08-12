@@ -27,11 +27,13 @@ afterEach(() => {
 function installOfferEditorApi({
   createStatus = 201,
   retireOnRefresh = false,
+  failCatalogRefresh = false,
   tenantItems = [TENANT_LIST_ITEM],
   me = ACCOUNTANT_ME,
 }: {
   createStatus?: number;
   retireOnRefresh?: boolean;
+  failCatalogRefresh?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   me?: Record<string, unknown>;
 } = {}) {
@@ -57,6 +59,9 @@ function installOfferEditorApi({
       }
       if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
         catalogFetches += 1;
+        if (failCatalogRefresh && catalogFetches > 1) {
+          return jsonResponse(503, { code: "catalog_unavailable" });
+        }
         return jsonResponse(200, {
           items: [
             retireOnRefresh && catalogFetches > 1
@@ -205,6 +210,22 @@ describe("offer editor route", () => {
     );
     expect(api.calls()).toEqual([]);
     expect(screen.getByRole("combobox", { name: "Тенант" }).textContent).toContain("Первый завод");
+    expect(screen.getByDisplayValue("15000.00")).toBeDefined();
+  });
+
+  it("fails closed without posting when the submit-time catalog refresh fails", async () => {
+    const api = installOfferEditorApi({ failCatalogRefresh: true });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/offers/new?tenantId=${TENANT_ID}` });
+
+    await screen.findByRole("combobox", { name: "Тенант" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Не удалось создать предложение",
+    );
+    expect(api.calls()).toEqual([]);
     expect(screen.getByDisplayValue("15000.00")).toBeDefined();
   });
 

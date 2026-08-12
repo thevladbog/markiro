@@ -60,6 +60,9 @@ function OfferEditor() {
   const create = useMutation({
     mutationFn: async (draft: DocumentDraft) => {
       const refreshedCatalog = await catalog.refetch();
+      if (refreshedCatalog.isError) {
+        throw new ApiRequestError(503, "Catalog refresh failed", "catalog_refresh_failed");
+      }
       const publishedIds = new Set(
         (refreshedCatalog.data?.items ?? [])
           .filter((version) => version.status === "published")
@@ -88,7 +91,11 @@ function OfferEditor() {
       </section>
     );
   }
-  if (tenants.error || catalog.error || (needsTenantPrefetch && prefetchedTenant.error)) {
+  if (
+    tenants.error ||
+    (catalog.error && !catalog.data) ||
+    (needsTenantPrefetch && prefetchedTenant.error)
+  ) {
     return (
       <section className="catalog-page">
         <PageHeader title="" />

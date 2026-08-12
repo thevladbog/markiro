@@ -123,6 +123,9 @@ function InvoiceEditor() {
   const create = useMutation({
     mutationFn: async (draft: DocumentDraft) => {
       const refreshedCatalog = await catalog.refetch();
+      if (refreshedCatalog.isError) {
+        throw new ApiRequestError(503, "Catalog refresh failed", "catalog_refresh_failed");
+      }
       const publishedIds = new Set(
         (refreshedCatalog.data?.items ?? [])
           .filter((version) => version.status === "published")
@@ -162,7 +165,7 @@ function InvoiceEditor() {
   }
   if (
     tenants.error ||
-    catalog.error ||
+    (catalog.error && !catalog.data) ||
     (sourceOfferId !== undefined && sourceOffer.error) ||
     (needsTenantPrefetch && prefetchedTenant.error)
   ) {
