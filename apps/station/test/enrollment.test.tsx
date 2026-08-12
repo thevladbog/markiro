@@ -208,6 +208,31 @@ describe("Enrollment", () => {
     expect(onEnrolled).not.toHaveBeenCalled();
   });
 
+  it("keeps an unavailable code for the compact recovery retry without the keypad", async () => {
+    pairingMock.redeemStationPairing.mockResolvedValue({ ok: false, error: "unavailable" });
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Try again" })).toBeDefined());
+    expect(screen.queryByRole("group", { name: "Pairing code keypad" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(pairingMock.redeemStationPairing).toHaveBeenCalledTimes(2));
+    expect(pairingMock.redeemStationPairing).toHaveBeenLastCalledWith(
+      "https://api.factory.example",
+      "12345678",
+      expect.any(AbortSignal),
+    );
+  });
+
   it("accepts an eight-digit scanner capture into the same pairing field", () => {
     let listener: ScanListener | null = null;
     const scanSource: ScanSource = {
@@ -249,10 +274,9 @@ describe("Enrollment", () => {
     render(<Enrollment machineId="machine-1" onEnrolled={() => {}} pairingServerUrl={null} />);
 
     expect(screen.getByText("Station API setup is required before pairing.")).toBeDefined();
-    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
-    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
-
     expect(pairingMock.redeemStationPairing).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to pairing" }));
+    expect(screen.getByLabelText("Pairing code")).toBeDefined();
   });
 
   it("does not persist or publish a code response that resolves after unmount", async () => {
@@ -410,7 +434,11 @@ describe("Enrollment", () => {
     );
     fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Pairing…" })).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(
+        "Checking the code and loading station settings…",
+      ),
+    );
 
     view.rerender(
       <Enrollment

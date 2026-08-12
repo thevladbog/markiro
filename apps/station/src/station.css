@@ -105,9 +105,9 @@ body,
   display: grid;
   min-width: 0;
   min-height: 0;
-  padding: var(--sp-4);
-  overflow: visible;
-  gap: var(--sp-1);
+  padding-inline: var(--sp-1);
+  overflow: hidden;
+  gap: 2px;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-3);
   background: var(--surface-card);
@@ -127,7 +127,11 @@ body,
   margin: 0;
 }
 
-.station-enrollment__panel-heading h1,
+.station-enrollment__panel-heading h1 {
+  margin-top: 0;
+  font: var(--floor-title);
+}
+
 .station-enrollment__success h1 {
   margin-top: var(--sp-2);
   font: var(--floor-title);
@@ -143,14 +147,64 @@ body,
 
 .station-enrollment__keypad {
   display: grid;
-  padding-block: var(--sp-1);
   place-items: center;
+}
+
+.station-enrollment__code-field {
+  flex-direction: row !important;
+  gap: var(--sp-2) !important;
+  align-items: center;
+}
+
+.station-enrollment__code-field > label {
+  flex: 0 0 120px;
+}
+
+.station-enrollment__code-field > .mk-input {
+  flex: 1;
 }
 
 .station-enrollment__actions {
   display: grid;
   gap: var(--sp-2);
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.station-enrollment__actions--pairing {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.station-enrollment__actions--service {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.station-enrollment__actions--recovery {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.station-enrollment__recovery-panel,
+.station-enrollment__busy {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-content: center;
+}
+
+.station-enrollment__busy {
+  text-align: center;
+}
+
+.station-enrollment__busy h1,
+.station-enrollment__busy p {
+  margin: 0;
+}
+
+.station-enrollment__busy h1 {
+  font: var(--floor-title);
+}
+
+.station-enrollment__busy p {
+  color: var(--fg-2);
+  font: var(--floor-body);
 }
 
 .station-enrollment__success {

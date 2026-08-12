@@ -261,6 +261,7 @@ export function Enrollment({
   }
 
   const serviceMode = (state === "service" || (busy && serviceInFlight.current)) && !expectedDeviceId;
+  const showRecoveryPanel = error !== null && !serviceMode;
 
   const status = busy ? <p role="status">{t("enroll.redeemingDetail")}</p> : null;
   const errorNotice = error ? <Alert tone="error">{t(`enroll.errors.${error}`)}</Alert> : null;
@@ -268,9 +269,7 @@ export function Enrollment({
   const pairingPanel = (
     <>
       <header className="station-enrollment__panel-heading">
-        <p className="station-enrollment__eyebrow">{t("enroll.codeLabel")}</p>
         <h1 id="station-enrollment-title">{t("enroll.title")}</h1>
-        <p>{t("enroll.codePrompt")}</p>
       </header>
       {sealedWork ? (
         <Alert tone="warn">
@@ -283,10 +282,9 @@ export function Enrollment({
           </p>
         </Alert>
       ) : null}
-      {errorNotice}
-      {requiresNewCode ? <p className="station-enrollment__recovery">{t("enroll.cabinetRecovery")}</p> : null}
       {status}
       <Input
+        className="station-enrollment__code-field"
         size="floor"
         label={t("enroll.code")}
         value={code}
@@ -311,7 +309,7 @@ export function Enrollment({
           clearLabel={t("enroll.clear")}
         />
       </div>
-      <div className="station-enrollment__actions">
+      <div className="station-enrollment__actions station-enrollment__actions--pairing">
         <Button
           size="floor"
           onClick={() => void redeem()}
@@ -319,11 +317,6 @@ export function Enrollment({
         >
           {busy ? t("enroll.redeeming") : t("enroll.submit")}
         </Button>
-        {canRetry ? (
-          <Button size="floor" variant="secondary" onClick={() => void redeem()} disabled={busy}>
-            {t("enroll.retry")}
-          </Button>
-        ) : null}
         {onSetup ? (
           <Button size="floor" variant="secondary" onClick={onSetup} disabled={busy}>
             {t("enroll.setup")}
@@ -372,7 +365,7 @@ export function Enrollment({
         autoComplete="off"
         disabled={busy}
       />
-      <div className="station-enrollment__actions">
+      <div className="station-enrollment__actions station-enrollment__actions--service">
         <Button
           size="floor"
           onClick={() => void serviceConnect()}
@@ -393,6 +386,46 @@ export function Enrollment({
         </Button>
       </div>
     </>
+  );
+
+  const recoveryPanel = (
+    <div className="station-enrollment__recovery-panel">
+      <header className="station-enrollment__panel-heading">
+        <h1 id="station-enrollment-title">{t("enroll.recoveryTitle")}</h1>
+      </header>
+      {errorNotice}
+      {requiresNewCode ? <p className="station-enrollment__recovery">{t("enroll.cabinetRecovery")}</p> : null}
+      <div className="station-enrollment__actions station-enrollment__actions--recovery">
+        {canRetry ? (
+          <Button size="floor" onClick={() => void redeem()}>
+            {t("enroll.retry")}
+          </Button>
+        ) : null}
+        {requiresNewCode ? (
+          <Button
+            size="floor"
+            variant="secondary"
+            onClick={() => {
+              setCode("");
+              setError(null);
+            }}
+          >
+            {t("enroll.enterNewCode")}
+          </Button>
+        ) : (
+          <Button size="floor" variant="secondary" onClick={() => setError(null)}>
+            {t("enroll.returnToPairing")}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
+  const redeemingPanel = (
+    <div className="station-enrollment__busy" role="status">
+      <h1 id="station-enrollment-title">{t("enroll.title")}</h1>
+      <p>{t("enroll.redeemingDetail")}</p>
+    </div>
   );
 
   return (
@@ -419,8 +452,12 @@ export function Enrollment({
               }`}</p>
             ) : null}
           </div>
+        ) : busy ? (
+          redeemingPanel
         ) : serviceMode ? (
           servicePanel
+        ) : showRecoveryPanel ? (
+          recoveryPanel
         ) : (
           pairingPanel
         )}

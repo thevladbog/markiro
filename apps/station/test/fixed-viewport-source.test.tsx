@@ -41,11 +41,12 @@ describe("fixed station viewport source contract", () => {
       /@media \(max-width: 1023px\), \(max-height: 767px\)\s*\{[\s\S]*?\.station-enrollment__keypad\s*\{[^}]*--control-keypad:\s*64px;/s,
     );
     expect(css).toMatch(
-      /\.station-enrollment__entry\s*\{[^}]*overflow:\s*visible;[^}]*align-content:\s*center;/s,
+      /\.station-enrollment__actions--pairing\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
     );
     expect(css).toMatch(
-      /\.station-enrollment__actions\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/s,
+      /\.station-enrollment__actions--service\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
     );
+    expect(stationSource("pages/Enrollment.tsx")).toContain("const recoveryPanel");
   });
 
   it("keeps shared alert copy at floor-readable size inside the station application", () => {
