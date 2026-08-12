@@ -149,7 +149,8 @@ jobs:
           pnpm --filter @markiro/station tauri build
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
           installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
-          bundle="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.nsis.zip' -print -quit)"
+          # Tauri 2.10 emits the signed NSIS installer itself as the updater payload.
+          bundle="$installer"
           signature="$bundle.sig"
           test -f "$installer" -a -f "$bundle" -a -f "$signature"
           mkdir -p "$RUNNER_TEMP/station-input"
