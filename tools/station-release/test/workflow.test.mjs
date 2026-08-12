@@ -66,6 +66,15 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.match(text, /actions\/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020/);
   assert.match(text, /dtolnay\/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4/);
   assert.match(text, /gh release create station-beta-channel[^\n]*--prerelease/);
+  assert.match(
+    text,
+    /cp \"\$RUNNER_TEMP\/station-staged\/latest\.json\" \"\$RUNNER_TEMP\/latest\.json\"/,
+  );
+  assert.match(
+    text,
+    /gh release upload station-beta-channel[^\n]*\"\$RUNNER_TEMP\/latest\.json\" --clobber/,
+  );
+  assert.match(text, /gh release download station-beta-channel[^\n]*\|\| true/);
   assert.ok(
     text.indexOf("Publish immutable version release") < text.indexOf("Promote beta channel"),
   );
