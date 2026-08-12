@@ -115,11 +115,15 @@ describe("OperatorLogin", () => {
   });
 
   it("starts in a badge-first state and opens the numeric fallback on a deliberate touch", () => {
-    render(
+    const { container } = render(
       <OperatorLogin online={false} exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />,
     );
 
     expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
+    expect(screen.getByText("Hold the badge near the scanner")).toBeDefined();
+    expect(screen.getByTestId("badge-scan-illustration")).toBeDefined();
+    expect(container.textContent).not.toContain("▣");
+    expect(stationCss).not.toMatch(/operator-login__badge-panel[^}]*dashed/s);
     expect(screen.queryByRole("button", { name: "1" })).toBeNull();
 
     openNumericFallback();

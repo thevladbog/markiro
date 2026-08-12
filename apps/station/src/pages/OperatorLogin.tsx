@@ -8,6 +8,7 @@ import type { ScanSource } from "../lib/scan-source.js";
 import { padShortOperatorLogin, verifyOperatorBadge, verifyOperatorPin } from "../lib/auth.js";
 import type { OperatorSearchResult } from "../lib/operator-search.js";
 import type { OperatorRosterSyncResult } from "../lib/roster-sync.js";
+import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
 import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
 import { StationBrand } from "../ui/StationBrand.js";
 
@@ -308,9 +309,13 @@ export function OperatorLogin({
             </div>
             <div className="operator-login__keypad-zone">
               {stage === "badge" ? (
-                <div className="operator-login__badge-panel" aria-hidden="true">
-                  <span>▣</span>
-                </div>
+                <section
+                  className="operator-login__badge-panel"
+                  aria-label={t("login.badgeIllustration")}
+                >
+                  <BadgeScanIllustration />
+                  <p>{t("login.badgeInstruction")}</p>
+                </section>
               ) : (
                 <PinPad
                   value={stage === "login" ? login : pin}

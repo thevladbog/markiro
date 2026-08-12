@@ -1358,19 +1358,49 @@ body,
 
 .operator-login__badge-panel {
   display: grid;
-  width: min(360px, 42vw);
+  width: min(560px, 64vw);
   min-width: 240px;
   height: min(260px, 100%);
   min-height: 180px;
-  border: 2px dashed var(--line-strong);
+  padding: var(--sp-4);
+  border: 1px solid var(--line-strong);
   border-radius: var(--r-3);
   background: var(--surface-panel);
   color: var(--fg-2);
-  place-items: center;
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.75fr);
+  align-items: center;
 }
 
-.operator-login__badge-panel span {
-  font-size: 72px;
+.operator-login__badge-panel p {
+  margin: 0;
+  color: var(--fg-1);
+  font: var(--floor-body-strong);
+}
+
+.badge-scan-illustration {
+  display: block;
+  width: min(100%, 280px);
+  max-height: 180px;
+  color: var(--fg-2);
+  justify-self: center;
+}
+
+.badge-scan-illustration__badge,
+.badge-scan-illustration__barcode,
+.badge-scan-illustration__scanner {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 4;
+}
+
+.badge-scan-illustration__beam {
+  fill: none;
+  stroke: var(--accent-module);
+  stroke-linecap: round;
+  stroke-width: 5;
 }
 
 .operator-login__actions {

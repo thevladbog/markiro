@@ -76,6 +76,8 @@
     "title": "Operator sign-in",
     "badgePrimary": "Scan your badge to sign in",
     "badgeReady": "Badge scanner ready",
+    "badgeIllustration": "Badge scan illustration",
+    "badgeInstruction": "Hold the badge near the scanner",
     "loginPrompt": "Enter your personnel number",
     "loginLabel": "Personnel number",
     "loginInvalid": "Enter 1 to 12 digits",
@@ -128,6 +130,7 @@
     "modeLabel": "Shift mode",
     "start": "Start",
     "actionFailed": "Action failed. Please try again.",
+    "serverUnavailable": "Could not load shifts. Check server access.",
     "active": "Shift active",
     "forCounterparty": "for:",
     "preparing": "Preparing the shift…"
