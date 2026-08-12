@@ -16,6 +16,6 @@ export const listAuditEvents = (params: { limit?: number; offset?: number } = {}
   query.set("limit", String(params.limit ?? 50));
   query.set("offset", String(params.offset ?? 0));
   return platformApiFetch<{ items: AuditEvent[]; nextOffset: number | null }>(
-    `/platform/audit?${query.toString()}`,
+    `/audit?${query.toString()}`,
   );
 };

@@ -59,8 +59,23 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/main"
           [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
           git merge-base --is-ancestor "$GITHUB_SHA" origin/main
-          ci_sha="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --status completed --limit 20 --json conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | select(.conclusion == "success") | .headSha' | head -n 1)"
-          test "$ci_sha" = "$GITHUB_SHA"
+          ci_ok=false
+          for attempt in {1..90}; do
+            ci_state="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --limit 20 --json status,conclusion,headSha --jq '.[] | select(.headSha == "'"$GITHUB_SHA"'") | [.status, (.conclusion // "")] | @tsv' | head -n 1)"
+            ci_status="${ci_state%%$'\t'*}"
+            ci_conclusion="${ci_state#*$'\t'}"
+            if [ "$ci_status" = "completed" ]; then
+              if [ "$ci_conclusion" = "success" ]; then
+                ci_ok=true
+                break
+              fi
+              echo "CI for $GITHUB_SHA completed with conclusion: ${ci_conclusion:-unknown}" >&2
+              exit 1
+            fi
+            echo "Waiting for CI for $GITHUB_SHA (attempt $attempt/90; status: ${ci_status:-not found})"
+            sleep 20
+          done
+          test "$ci_ok" = true
 
       - name: Prepare deterministic beta version
         if: inputs.mode == 'publish'
@@ -125,6 +140,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo 'Decode Tauri updater signing key'
+          normalized_key="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | node tools/station-release/normalize-signing-key.mjs)"
+          normalized_key_file="$RUNNER_TEMP/station-updater.key"
+          trap 'rm -f "$normalized_key_file"' EXIT
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$normalized_key_file"
+          export TAURI_SIGNING_PRIVATE_KEY="$normalized_key_file"
           pnpm --filter @markiro/station tauri build
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
           installer="$(find "$bundle_dir" -maxdepth 1 -type f -name '*.exe' -print -quit)"
