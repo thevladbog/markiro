@@ -122,13 +122,13 @@ const b = (v: boolean) => (v ? 1 : 0);
  * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
  * calls does not actually group these statements — see `journal.ts`'s
  * `recordScan` doc comment for the full story. These are therefore
- * individual statements: the shift upsert, then the product upsert, then
- * `replaceOperatorsMirror`. A failure during the shift or product upsert
- * leaves that half applied until the next successful sync repairs it.
- * Operators no longer share that risk: `replaceOperatorsMirror` publishes
- * the roster atomically on its own (see its doc comment), so a failure
- * partway through it never exposes a removed or deactivated operator to
- * offline sign-in.
+ * individual statements: the shift upsert, then the product upsert. A failure
+ * during either upsert leaves that half applied until the next successful
+ * sync repairs it. `bundle.operators` is deliberately ignored: the live
+ * `/station/operators` sync and initial pairing are the authoritative roster
+ * publishers. Letting an unversioned bundle response publish too would allow
+ * a request captured earlier to overwrite a newer removal, deactivation, or
+ * credential rotation when it finishes later.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
   await upsertBundleBody(exec, bundle);
@@ -210,8 +210,6 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       p.defaultLabelTemplateId,
     ],
   );
-
-  await replaceOperatorsMirror(exec, bundle.operators);
 }
 
 const ACTIVE_SLOT_KEY = "operators_slot";
@@ -244,9 +242,7 @@ async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
 /**
  * Serializes publishes so two overlapping refreshes can never both resolve
  * the same INACTIVE slot as their target. `App.tsx` fires `syncOperatorRoster`
- * unawaited on mount AND again on every `online` event, and `upsertBundle` is
- * a third entry point (see `journal.ts`'s doc comment for the same kind of
- * overlap observed on real devices). Without this, a second refresh that
+ * unawaited on mount AND again on every `online` event. Without this, a second refresh that
  * starts before the first has flipped `station_meta` would resolve the same
  * target slot, race its DELETE/INSERT against the first's, and could end up
  * inserting into what has since become the LIVE slot.

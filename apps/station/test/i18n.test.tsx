@@ -23,4 +23,13 @@ describe("i18n lockstep", () => {
       "Станция распознает код автоматически. Если сотрудник добавлен только что, список обновится с сервера.",
     );
   });
+
+  it("tells operators that previously synchronized sign-in remains available after refresh failure", () => {
+    expect(en.login.rosterRefreshUnavailable).toBe(
+      "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+    );
+    expect(ru.login.rosterRefreshUnavailable).toBe(
+      "Не удалось обновить список операторов. Проверьте связь или войдите с ранее синхронизированными данными.",
+    );
+  });
 });

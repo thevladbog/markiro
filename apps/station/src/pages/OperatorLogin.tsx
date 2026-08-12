@@ -139,17 +139,33 @@ export function OperatorLogin({
       setRoster(operators);
       if (online && refreshRoster) {
         setMessage({ tone: "info", text: t("login.refreshingRoster") });
-        void refreshRoster().then(async (result) => {
-          if (!mounted.current || live.current.stage !== "search") return;
-          if (result === "unavailable") {
-            setMessage({ tone: "error", text: live.current.t("login.rosterRefreshUnavailable") });
-            return;
+        void (async () => {
+          try {
+            const result = await refreshRoster();
+            if (!mounted.current || live.current.stage !== "search") return;
+            if (result === "unavailable") {
+              setMessage({
+                tone: "error",
+                text: live.current.t("login.rosterRefreshUnavailable"),
+              });
+              return;
+            }
+            const refreshed = await readOperatorsMirror(live.current.exec);
+            if (!mounted.current || live.current.stage !== "search") return;
+            setRoster(refreshed);
+            setMessage(null);
+          } catch {
+            console.error("station: background operator roster refresh failed", {
+              category: "operator_roster_refresh",
+            });
+            if (mounted.current && live.current.stage === "search") {
+              setMessage({
+                tone: "error",
+                text: live.current.t("login.rosterRefreshUnavailable"),
+              });
+            }
           }
-          const refreshed = await readOperatorsMirror(live.current.exec);
-          if (!mounted.current || live.current.stage !== "search") return;
-          setRoster(refreshed);
-          setMessage(null);
-        });
+        })();
       }
     } catch (err) {
       console.error("station: readOperatorsMirror failed", err);

@@ -843,7 +843,9 @@ describe("OperatorLogin", () => {
     act(() => scanner.scan("UNKNOWN-BADGE"));
 
     expect(
-      await screen.findByText("Could not refresh the operator list. Check the connection."),
+      await screen.findByText(
+        "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+      ),
     ).toBeDefined();
     expect(screen.queryByText("Badge not recognized")).toBeNull();
   });
@@ -981,6 +983,59 @@ describe("OperatorLogin", () => {
 
     expect(await screen.findByRole("button", { name: "Alex New" })).toBeDefined();
     expect(screen.queryByRole("button", { name: "Alex Old" })).toBeNull();
+  });
+
+  it("keeps cached name results recoverable when the post-refresh mirror reread fails", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-cached",
+        name: "Alex Cached",
+        login: "1001",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    let rosterReads = 0;
+    const failingReread: SqlExecutor = {
+      run: (sql, params) => exec.run(sql, params),
+      all: (sql, params) => {
+        if (/FROM operators_mirror\b/.test(sql) && ++rosterReads === 2) {
+          return Promise.reject(new Error("post-publication reread failed"));
+        }
+        return exec.all(sql, params);
+      },
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(
+        <OperatorLogin
+          exec={failingReread}
+          source={silentSource}
+          online
+          refreshRoster={vi.fn(async () => "updated" as const)}
+          onAuthed={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+      const search = await screen.findByRole("textbox", { name: "Operator name" });
+      fireEvent.change(search, { target: { value: "al" } });
+
+      expect(await screen.findByRole("button", { name: "Alex Cached" })).toBeDefined();
+      expect(
+        await screen.findByText(
+          "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+        ),
+      ).toBeDefined();
+      expect((search as HTMLInputElement).disabled).toBe(false);
+      expect(screen.getByRole("button", { name: "Alex Cached" })).toBeDefined();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it("does not authenticate from a retained badge callback after unmount during refresh", async () => {
