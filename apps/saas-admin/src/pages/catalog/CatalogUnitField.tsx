@@ -39,7 +39,6 @@ export function CatalogUnitField({
     <div className="catalog-unit-field">
       <Select
         label={t("catalog.form.unit")}
-        native
         value={selected}
         options={[
           ...presets.map((unit) => ({ value: unit, label: t(`catalog.units.${unit}`) })),

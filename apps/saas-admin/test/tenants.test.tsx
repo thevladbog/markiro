@@ -16,6 +16,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function chooseStatus(user: ReturnType<typeof userEvent.setup>, option: string) {
+  await user.click(screen.getByRole("combobox", { name: "Статус подписки" }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 describe("platform tenants", () => {
   it("renders distinct loading, empty, and error list states", async () => {
     vi.stubGlobal(
@@ -66,8 +71,10 @@ describe("platform tenants", () => {
     ).toBeDefined();
     expect(await screen.findByText("На странице: 2 из 2 · Всего: 101")).toBeDefined();
     const statusFilter = screen.getByLabelText("Статус подписки");
-    expect(within(statusFilter).getByRole("option", { name: "Заменена" })).toBeDefined();
-    expect(within(statusFilter).getByRole("option", { name: "Отменена" })).toBeDefined();
+    await user.click(statusFilter);
+    expect(await screen.findByRole("option", { name: "Заменена" })).toBeDefined();
+    expect(screen.getByRole("option", { name: "Отменена" })).toBeDefined();
+    await user.keyboard("[Escape]");
     expect(screen.getByText("Страница 1 из 3")).toBeDefined();
 
     await user.type(screen.getByLabelText("Поиск"), "северная");
@@ -80,7 +87,7 @@ describe("platform tenants", () => {
     expect(screen.getByText("На странице: 0 из 2 · Всего: 101")).toBeDefined();
     expect(screen.getByText("Страница 1 из 3")).toBeDefined();
 
-    await user.selectOptions(statusFilter, "pending_activation");
+    await chooseStatus(user, "Ожидает активации");
 
     expect(
       vi
@@ -99,7 +106,7 @@ describe("platform tenants", () => {
       screen.getByText("Создайте первый тенант и отправьте владельцу письмо активации."),
     ).toBeDefined();
 
-    await user.selectOptions(screen.getByLabelText("Статус подписки"), "active");
+    await chooseStatus(user, "Активна");
 
     expect(await screen.findByText("Нет тенантов с выбранным статусом")).toBeDefined();
     expect(screen.getByText("Выберите другой статус, чтобы продолжить поиск")).toBeDefined();

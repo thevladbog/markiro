@@ -22,6 +22,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function chooseControl(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+  option: string | RegExp,
+) {
+  await user.click(await screen.findByRole("combobox", { name: label }));
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
+const PRODUCTION_PLAN_OPTION = /^Производственный · plan-production · версия 3/;
+const STATION_ADDON_OPTION = /^Дополнительная станция · addon-station · версия 1/;
+
 describe("tenant subscription detail", () => {
   it("renders exact current, scheduled, add-on, usage, and reasoned history facts", async () => {
     installTenantApi();
@@ -82,12 +94,9 @@ describe("tenant subscription detail", () => {
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
     const user = userEvent.setup();
 
-    await user.selectOptions(await screen.findByLabelText("Тип операции"), "plan");
-    await user.selectOptions(
-      screen.getByLabelText("Версия тарифа"),
-      "91111111-1111-4111-8111-111111111111",
-    );
-    await user.selectOptions(screen.getByLabelText("Начало действия"), "after_current");
+    await chooseControl(user, "Тип операции", "Тариф");
+    await chooseControl(user, "Версия тарифа", PRODUCTION_PLAN_OPTION);
+    await chooseControl(user, "Начало действия", "После текущего тарифа");
     await user.click(screen.getByRole("button", { name: "Проверить назначение" }));
     expect(await screen.findByText("Укажите причину изменения")).toBeDefined();
     expect(api.mutationCalls()).toEqual([]);
@@ -122,8 +131,8 @@ describe("tenant subscription detail", () => {
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
     const user = userEvent.setup();
 
-    await user.selectOptions(await screen.findByLabelText("Тип операции"), "addon");
-    await user.selectOptions(screen.getByLabelText("Версия дополнения"), ADDON.id);
+    await chooseControl(user, "Тип операции", "Дополнение");
+    await chooseControl(user, "Версия дополнения", STATION_ADDON_OPTION);
     await user.clear(screen.getByLabelText("Количество"));
     await user.type(screen.getByLabelText("Количество"), "2");
     await user.type(screen.getByLabelText("Причина"), "Две дополнительные станции");
@@ -151,9 +160,9 @@ describe("tenant subscription detail", () => {
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
     const user = userEvent.setup();
 
-    await user.selectOptions(await screen.findByLabelText("Тип операции"), "addon");
-    await user.selectOptions(screen.getByLabelText("Версия дополнения"), ADDON.id);
-    await user.selectOptions(screen.getByLabelText("Начало действия"), "after_current");
+    await chooseControl(user, "Тип операции", "Дополнение");
+    await chooseControl(user, "Версия дополнения", STATION_ADDON_OPTION);
+    await chooseControl(user, "Начало действия", "После текущего тарифа");
     await user.clear(screen.getByLabelText("Количество"));
     await user.type(screen.getByLabelText("Количество"), "2");
     await user.type(screen.getByLabelText("Причина"), "Дополнение следующего тарифа");
@@ -200,12 +209,9 @@ describe("tenant subscription detail", () => {
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
     const user = userEvent.setup();
 
-    await user.selectOptions(await screen.findByLabelText("Тип операции"), "plan");
-    await user.selectOptions(
-      screen.getByLabelText("Версия тарифа"),
-      "91111111-1111-4111-8111-111111111111",
-    );
-    await user.selectOptions(screen.getByLabelText("Начало действия"), "after_current");
+    await chooseControl(user, "Тип операции", "Тариф");
+    await chooseControl(user, "Версия тарифа", PRODUCTION_PLAN_OPTION);
+    await chooseControl(user, "Начало действия", "После текущего тарифа");
     await user.type(screen.getByLabelText("Причина"), "Переход после завершения");
     await user.click(screen.getByRole("button", { name: "Проверить назначение" }));
 
@@ -215,20 +221,22 @@ describe("tenant subscription detail", () => {
       ),
     ).toHaveLength(2);
     expect(screen.queryByRole("alertdialog")).toBeNull();
+    await user.click(screen.getByRole("combobox", { name: "Начало действия" }));
     expect(
-      (screen.getByRole("option", { name: "После текущего тарифа" }) as HTMLOptionElement).disabled,
-    ).toBe(true);
+      screen.getByRole("option", { name: "После текущего тарифа" }).getAttribute("aria-disabled"),
+    ).toBe("true");
     expect(api.mutationCalls()).toEqual([]);
   });
 
   it("does not offer another after-current plan when a successor already exists", async () => {
     const api = installTenantApi({ me: PLATFORM_ADMIN_ME });
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+    const user = userEvent.setup();
 
-    await screen.findByLabelText("Тип операции");
+    await user.click(await screen.findByRole("combobox", { name: "Начало действия" }));
     expect(
-      (screen.getByRole("option", { name: "После текущего тарифа" }) as HTMLOptionElement).disabled,
-    ).toBe(true);
+      screen.getByRole("option", { name: "После текущего тарифа" }).getAttribute("aria-disabled"),
+    ).toBe("true");
     expect(
       screen.getByText(
         "Следующий тариф уже запланирован. Изменить его можно только немедленным назначением.",
@@ -242,11 +250,8 @@ describe("tenant subscription detail", () => {
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
     const user = userEvent.setup();
 
-    await user.selectOptions(await screen.findByLabelText("Тип операции"), "plan");
-    await user.selectOptions(
-      screen.getByLabelText("Версия тарифа"),
-      "91111111-1111-4111-8111-111111111111",
-    );
+    await chooseControl(user, "Тип операции", "Тариф");
+    await chooseControl(user, "Версия тарифа", PRODUCTION_PLAN_OPTION);
     await user.type(screen.getByLabelText("Причина"), "Ограниченный срок");
     await user.type(screen.getByLabelText("Окончание действия"), "2037-01-01T12:00");
     await user.click(screen.getByRole("button", { name: "Проверить назначение" }));
@@ -354,11 +359,8 @@ describe("tenant subscription detail", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Отмена" }),
     );
 
-    await user.selectOptions(screen.getByLabelText("Тип операции"), "plan");
-    await user.selectOptions(
-      screen.getByLabelText("Версия тарифа"),
-      "91111111-1111-4111-8111-111111111111",
-    );
+    await chooseControl(user, "Тип операции", "Тариф");
+    await chooseControl(user, "Версия тарифа", PRODUCTION_PLAN_OPTION);
     await user.type(screen.getByLabelText("Причина"), "Проверка конфликта тарифа");
     await user.click(screen.getByRole("button", { name: "Проверить назначение" }));
     await user.click(
@@ -375,8 +377,8 @@ describe("tenant subscription detail", () => {
       within(screen.getByRole("alertdialog")).getByRole("button", { name: "Отмена" }),
     );
 
-    await user.selectOptions(screen.getByLabelText("Тип операции"), "addon");
-    await user.selectOptions(screen.getByLabelText("Версия дополнения"), ADDON.id);
+    await chooseControl(user, "Тип операции", "Дополнение");
+    await chooseControl(user, "Версия дополнения", STATION_ADDON_OPTION);
     await user.click(screen.getByRole("button", { name: "Проверить назначение" }));
     await user.click(
       within(await screen.findByRole("alertdialog")).getByRole("button", {
