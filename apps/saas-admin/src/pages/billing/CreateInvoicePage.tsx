@@ -5,14 +5,10 @@ import { Navigate, useLocation, useNavigate, useSearchParams } from "react-route
 import { z } from "zod";
 
 import { ApiRequestError } from "../../api/client.js";
-import { listCatalogVersions, type CatalogVersionDto } from "../catalog/api.js";
+import { listCatalogVersions } from "../catalog/api.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
-import {
-  toInvoiceCreateInput,
-  type DocumentDraft,
-  type DocumentLineDraft,
-} from "../documents/documentDraft.js";
+import { toInvoiceCreateInput, type DocumentDraft } from "../documents/documentDraft.js";
 import {
   getTenant,
   listTenants,
@@ -21,7 +17,10 @@ import {
   type TenantListItem,
 } from "../tenants/api.js";
 import { createInvoice } from "./api.js";
-import { getOffer, type OfferDetail } from "../offers/api.js";
+import { getOffer } from "../offers/api.js";
+import { sourceOfferDraft } from "./sourceOfferDraft.js";
+
+export { sourceOfferDraft } from "./sourceOfferDraft.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -31,61 +30,6 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
     createdAt: detail.tenant.createdAt,
     subscriptionStatus: detail.subscriptionStatus,
   };
-}
-
-function vatRateBps(value: string | null): number | null {
-  if (value === null) return null;
-  const match = /^(\d{1,3})\.(\d{2})$/.exec(value);
-  if (!match) throw new Error("offer_vat_rate_invalid");
-  const bps = BigInt(match[1]!) * 100n + BigInt(match[2]!);
-  if (bps > 10_000n) throw new Error("offer_vat_rate_invalid");
-  return Number(bps);
-}
-
-export function sourceOfferDraft(
-  source: Pick<OfferDetail, "tenantId" | "lines">,
-  catalog: readonly CatalogVersionDto[],
-): DocumentDraft {
-  const lines: DocumentLineDraft[] = source.lines.map((line) => {
-    const version = catalog.find((candidate) => candidate.id === line.catalogVersionId);
-    const sourceVatRateBps = vatRateBps(line.vatRate);
-    const catalogBacked =
-      version !== undefined &&
-      version.kind === line.kind &&
-      version.nameRu === line.nameRu &&
-      version.nameEn === line.nameEn &&
-      version.descriptionRu === (line.descriptionRu ?? null) &&
-      version.descriptionEn === (line.descriptionEn ?? null) &&
-      version.unit === line.unit &&
-      (version.unitPrice ?? null) === (line.catalogUnitPrice ?? null) &&
-      (version.vatRateBps ?? null) === sourceVatRateBps &&
-      (version.vatIncluded ?? false) === line.vatIncluded;
-    return {
-      id: `offer-line-${line.id}`,
-      kind: catalogBacked ? line.kind : "custom",
-      catalogVersionId: catalogBacked ? line.catalogVersionId : null,
-      catalogItemCode: catalogBacked ? version.catalogItemCode : "",
-      version: catalogBacked ? version.version : 0,
-      nameRu: line.nameRu,
-      nameEn: line.nameEn,
-      descriptionRu: line.descriptionRu ?? null,
-      descriptionEn: line.descriptionEn ?? null,
-      quantity: line.quantity,
-      unit: line.unit,
-      catalogUnitPrice: catalogBacked
-        ? (version.unitPrice ?? null)
-        : (line.catalogUnitPrice ?? null),
-      agreedUnitPrice: line.agreedUnitPrice,
-      vatRateBps: sourceVatRateBps,
-      vatIncluded: line.vatIncluded,
-      activationPolicy: catalogBacked
-        ? line.activationPolicy === "immediately"
-          ? "immediate"
-          : line.activationPolicy
-        : null,
-    };
-  });
-  return { tenantId: source.tenantId, applicationMode: "automatic", date: "", lines };
 }
 
 export function CreateInvoicePage() {

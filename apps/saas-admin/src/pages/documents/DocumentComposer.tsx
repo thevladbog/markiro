@@ -138,6 +138,9 @@ export function DocumentComposer({
             onPriceChange={(line, price) =>
               dispatch({ type: "line.priceChanged", id: line.id, price })
             }
+            onPriceOverrideReasonChange={(line, reason) =>
+              dispatch({ type: "line.priceOverrideReasonChanged", id: line.id, reason })
+            }
             onVatIncludedChange={(line, included) =>
               dispatch({ type: "line.vatIncludedChanged", id: line.id, included })
             }

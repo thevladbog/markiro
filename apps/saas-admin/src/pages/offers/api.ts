@@ -46,6 +46,7 @@ const createOfferInputSchema = z.object({
         quantity: z.number().int().positive(),
         unit: z.string().trim().min(1).max(100),
         agreedUnitPrice: moneySchema,
+        priceOverrideReason: z.string().trim().max(1000).nullable().optional(),
         vatRateBps: z.number().int().min(0).max(10_000).nullable(),
         vatIncluded: z.boolean(),
         activationPolicy: z.enum(["immediately", "after_current"]).nullable(),

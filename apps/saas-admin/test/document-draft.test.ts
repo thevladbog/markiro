@@ -363,6 +363,21 @@ describe("document draft validation and request adapters", () => {
     ]);
   });
 
+  it("includes a documented discounted-offer reason in the create payload", () => {
+    const discounted = {
+      ...createLineFromCatalog(plan, "line-discounted"),
+      agreedUnitPrice: "99.00",
+      priceOverrideReason: "Годовой контракт",
+    };
+
+    expect(toOfferCreateInput(draft([discounted])).lines).toEqual([
+      expect.objectContaining({
+        agreedUnitPrice: "99.00",
+        priceOverrideReason: "Годовой контракт",
+      }),
+    ]);
+  });
+
   it("blocks missing tenant, empty or oversized lines, invalid money, and missing plan or add-on policy", () => {
     const invalidPlan = {
       ...createLineFromCatalog(plan, "line-plan"),

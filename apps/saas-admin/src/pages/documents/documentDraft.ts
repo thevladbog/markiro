@@ -94,6 +94,11 @@ export function documentDraftReducer(
         ...line,
         agreedUnitPrice: action.price,
       }));
+    case "line.priceOverrideReasonChanged":
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        priceOverrideReason: action.reason,
+      }));
     case "line.vatIncludedChanged":
       return updateLineById(draft, action.id, (line) => ({
         ...line,
@@ -273,6 +278,7 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
       quantity: line.quantity,
       unit: line.unit,
       agreedUnitPrice: line.agreedUnitPrice,
+      priceOverrideReason: line.priceOverrideReason?.trim() || null,
       vatRateBps: line.vatRateBps,
       vatIncluded: line.vatIncluded,
       activationPolicy: null,
@@ -287,6 +293,7 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     quantity: line.quantity,
     unit: line.unit,
     agreedUnitPrice: line.agreedUnitPrice,
+    priceOverrideReason: line.priceOverrideReason?.trim() || null,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
     activationPolicy: toOfferActivationPolicy(activationPolicy),

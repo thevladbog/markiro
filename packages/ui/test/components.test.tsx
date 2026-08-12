@@ -303,9 +303,13 @@ describe("Select", () => {
       </form>,
     );
 
-    const proxy = container.querySelector("select[aria-hidden='true']");
-    expect(proxy).not.toBeNull();
-    expect((proxy?.parentElement as HTMLElement).style.position).toBe("relative");
+    const field = container.querySelector(".mk-field");
+    const proxy = field?.querySelector("select[aria-hidden='true']");
+    expect(field).toBeInstanceOf(HTMLElement);
+    expect(proxy).toBeInstanceOf(HTMLSelectElement);
+    if (!(field instanceof HTMLElement) || !(proxy instanceof HTMLSelectElement)) return;
+    expect(field.contains(proxy)).toBe(true);
+    expect(field.style.position).toBe("relative");
   });
 
   it("opens with a controlled empty option selected", async () => {

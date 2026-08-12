@@ -27,7 +27,8 @@ export class PlatformOffersService {
       })),
     );
     return this.db.transaction(async (tx) => {
-      const catalogSnapshots: Array<{
+      const validatedLines: Array<{
+        line: CreateOfferDto["lines"][number];
         catalogUnitPrice: string | null;
         priceOverrideReason: string | null;
       }> = [];
@@ -36,7 +37,7 @@ export class PlatformOffersService {
           if (line.kind !== "service") {
             throw new BadRequestException({ code: "offer_catalog_version_invalid" });
           }
-          catalogSnapshots.push({ catalogUnitPrice: null, priceOverrideReason: null });
+          validatedLines.push({ line, catalogUnitPrice: null, priceOverrideReason: null });
           continue;
         }
         const [version] = await tx
@@ -55,7 +56,8 @@ export class PlatformOffersService {
         if (line.agreedUnitPrice !== version.unitPrice && !priceOverrideReason) {
           throw new BadRequestException({ code: "offer_price_override_reason_required" });
         }
-        catalogSnapshots.push({
+        validatedLines.push({
+          line,
           catalogUnitPrice: version.unitPrice,
           priceOverrideReason:
             line.agreedUnitPrice === version.unitPrice ? null : priceOverrideReason,
@@ -74,7 +76,7 @@ export class PlatformOffersService {
         .returning();
       if (!offer) throw new Error("offer insert failed");
       await tx.insert(schema.commercialOfferLines).values(
-        input.lines.map((line, index) => ({
+        validatedLines.map(({ line, catalogUnitPrice, priceOverrideReason }, index) => ({
           tenantId: input.tenantId,
           offerId: offer.id,
           position: index + 1,
@@ -86,14 +88,14 @@ export class PlatformOffersService {
           descriptionEn: line.descriptionEn ?? null,
           quantity: line.quantity,
           unit: line.unit,
-          catalogUnitPrice: catalogSnapshots[index]!.catalogUnitPrice,
+          catalogUnitPrice,
           agreedUnitPrice: line.agreedUnitPrice,
           vatRate:
             line.vatRateBps === null || line.vatRateBps === undefined
               ? null
               : String(line.vatRateBps / 100),
           vatIncluded: line.vatIncluded,
-          priceOverrideReason: catalogSnapshots[index]!.priceOverrideReason,
+          priceOverrideReason,
           activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
           lineTotal: (Number(line.agreedUnitPrice) * line.quantity).toFixed(2),
         })),

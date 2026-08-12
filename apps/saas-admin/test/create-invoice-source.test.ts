@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { CatalogVersionDto } from "../src/pages/catalog/api.js";
-import { sourceOfferDraft } from "../src/pages/billing/CreateInvoicePage.js";
+import { sourceOfferDraft } from "../src/pages/billing/sourceOfferDraft.js";
 
 const catalogVersion = {
   id: "11111111-1111-4111-8111-111111111111",

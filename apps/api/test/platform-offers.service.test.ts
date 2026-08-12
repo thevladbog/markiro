@@ -34,7 +34,10 @@ const input: CreateOfferDto = {
 const inputLine = input.lines[0]!;
 
 function serviceHarness(
-  version: { kind: "plan"; status: "published" | "retired"; unitPrice: string } = {
+  version:
+    | { kind: "plan" | "addon" | "service"; status: "published" | "retired"; unitPrice: string }
+    | null
+    | undefined = {
     kind: "plan",
     status: "published",
     unitPrice: "120.00",
@@ -51,17 +54,17 @@ function serviceHarness(
         const query = {
           from: vi.fn(() => query),
           where: vi.fn(() => query),
-          for: vi.fn(async () => [version]),
+          for: vi.fn(async () => (version === null ? [] : [version])),
+          limit: vi.fn(async () => [offer]),
+          orderBy: vi.fn(async () => []),
         };
         return query;
       }
-      const rows = selectCount === 2 ? [offer] : [];
-      const promise = Promise.resolve(rows);
       const query = {
         from: vi.fn(() => query),
         where: vi.fn(() => query),
-        limit: vi.fn(() => promise),
-        orderBy: vi.fn(() => promise),
+        limit: vi.fn(async () => (selectCount === 2 ? [offer] : [])),
+        orderBy: vi.fn(async () => []),
       };
       return query;
     }),
@@ -81,6 +84,65 @@ function serviceHarness(
 }
 
 describe("PlatformOffersService catalog validation", () => {
+  it.each([
+    [null, "plan", "offer_catalog_version_invalid"],
+    [
+      { kind: "plan", status: "retired", unitPrice: "120.00" },
+      "plan",
+      "offer_catalog_version_invalid",
+    ],
+    [
+      { kind: "addon", status: "published", unitPrice: "120.00" },
+      "plan",
+      "offer_catalog_version_invalid",
+    ],
+  ] as const)("rejects invalid catalog state %#", async (version, kind, code) => {
+    const { service, insert } = serviceHarness(version);
+    const failure = await service
+      .create(actor, { ...input, lines: [{ ...inputLine, kind }] })
+      .catch((error) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect((failure as BadRequestException).getResponse()).toEqual({ code });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it.each(["plan", "addon"] as const)("rejects an unversioned %s line", async (kind) => {
+    const { service, insert } = serviceHarness();
+    const failure = await service
+      .create(actor, {
+        ...input,
+        lines: [{ ...inputLine, kind, catalogVersionId: null }],
+      })
+      .catch((error) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect((failure as BadRequestException).getResponse()).toEqual({
+      code: "offer_catalog_version_invalid",
+    });
+    expect(insert).not.toHaveBeenCalled();
+  });
+
+  it("accepts an unversioned service line", async () => {
+    const { service, insertedValues } = serviceHarness();
+    await service.create(actor, {
+      ...input,
+      lines: [
+        {
+          ...inputLine,
+          kind: "service",
+          catalogVersionId: null,
+          agreedUnitPrice: "120.00",
+          priceOverrideReason: null,
+          activationPolicy: null,
+        },
+      ],
+    });
+    expect(insertedValues[1]).toEqual([
+      expect.objectContaining({ catalogVersionId: null, catalogUnitPrice: null }),
+    ]);
+  });
+
   it.each([null, "1.00"])(
     "rejects a client-supplied catalog baseline of %s at the request boundary",
     (catalogUnitPrice) => {

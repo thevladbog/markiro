@@ -143,6 +143,7 @@
     },
     "quantityFor": "Количество {{name}}",
     "priceFor": "Цена {{name}}",
+    "priceOverrideReasonFor": "Причина изменения цены {{name}}",
     "vatFor": "НДС {{name}}",
     "vatIncluded": "Включён",
     "vatExcluded": "Сверху",
