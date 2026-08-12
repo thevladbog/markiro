@@ -24,14 +24,16 @@ function renderDrawer(
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
-        <DeviceDrawer
-          open
-          allowStation
-          allowKiosk
-          canIssueKiosk
-          organizationName="Markiro"
-          onClose={vi.fn()}
-        />
+        <MemoryRouter>
+          <DeviceDrawer
+            open
+            allowStation
+            allowKiosk
+            canIssueKiosk
+            organizationName="Markiro"
+            onClose={vi.fn()}
+          />
+        </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -45,7 +47,7 @@ afterEach(async () => {
   await i18n.changeLanguage("ru");
 });
 
-it("uses custom device type and line controls without native selects", async () => {
+it("explains how a selected line sets the station default workplace", async () => {
   const user = userEvent.setup();
   vi.stubGlobal(
     "fetch",
@@ -59,6 +61,14 @@ it("uses custom device type and line controls without native selects", async () 
   renderDrawer();
   await screen.findByRole("combobox", { name: "Линия" });
 
+  expect(
+    await screen.findByText(
+      "Выбранная линия задаёт для станции рабочее место по умолчанию и группирует её смены.",
+    ),
+  ).toBeDefined();
+  expect(screen.getByRole("link", { name: "Управлять линиями" }).getAttribute("href")).toBe(
+    "/lines",
+  );
   expect(document.querySelectorAll("select")).toHaveLength(0);
   expect(screen.getByRole("combobox", { name: "Тип" }).tagName).toBe("BUTTON");
   await user.click(screen.getByRole("combobox", { name: "Тип" }));

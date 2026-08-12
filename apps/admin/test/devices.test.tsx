@@ -205,6 +205,23 @@ it("hides Add device when the grant cannot create either type", async () => {
   expect(screen.queryByRole("button", { name: "Добавить устройство" })).toBeNull();
 });
 
+it("keeps a station unassigned and directs operators to Production -> Lines when no lines exist", async () => {
+  renderPage();
+  await screen.findByText("Entrance kiosk");
+
+  fireEvent.click(screen.getByRole("button", { name: "Добавить устройство" }));
+  const drawer = await screen.findByRole("dialog", { name: "Новое устройство" });
+  expect(within(drawer).getByRole("combobox", { name: "Линия" }).textContent).toContain(
+    "Без линии",
+  );
+  expect(
+    await within(drawer).findByText("Линии создаются в разделе «Производство -> Линии»."),
+  ).toBeDefined();
+  expect(within(drawer).getByRole("link", { name: "Управлять линиями" }).getAttribute("href")).toBe(
+    "/lines",
+  );
+});
+
 it("lets a credentials-only operator create and pair a station without operations.write", async () => {
   const requests: Array<{ url: string; method?: string }> = [];
   vi.stubGlobal(
