@@ -15,6 +15,12 @@ interface LockdownLifecycleOptions extends LockdownEnvironment {
   logError?: (message: string) => void;
 }
 
+export interface LockdownSnapshot {
+  mode: "locked" | "windowed";
+  pending: boolean;
+  error: "enter" | "exit" | null;
+}
+
 export interface LockdownLifecycle {
   /** Starts the production floor lifecycle. Safe under React StrictMode. */
   start(): () => void;
@@ -22,6 +28,12 @@ export interface LockdownLifecycle {
   enter(): Promise<void>;
   /** Leaves lockdown for the explicit service workflow. */
   exit(): Promise<void>;
+  /** Notifies React and other observers after confirmed lifecycle changes. */
+  subscribe(listener: () => void): () => void;
+  /** Returns the current immutable, confirmed window-mode snapshot. */
+  getSnapshot(): LockdownSnapshot;
+  /** Dismisses the operator-safe error without changing the confirmed mode. */
+  clearError(): void;
   /** Resolves after all commands requested so far have settled. */
   whenSettled(): Promise<void>;
 }
@@ -45,6 +57,13 @@ export function createLockdownLifecycle({
   let applied: boolean | null = false;
   let requested: boolean | null = null;
   let settled = Promise.resolve();
+  let snapshot: LockdownSnapshot = { mode: "windowed", pending: false, error: null };
+  const listeners = new Set<() => void>();
+
+  function publish(next: LockdownSnapshot): void {
+    snapshot = next;
+    listeners.forEach((listener) => listener());
+  }
 
   function request(next: boolean): Promise<void> {
     if (!enabled) return Promise.resolve();
@@ -54,9 +73,11 @@ export function createLockdownLifecycle({
     const command: LockdownCommand = next ? "enter_lockdown" : "exit_lockdown";
     settled = settled.then(async () => {
       if (applied === next) return;
+      publish({ mode: snapshot.mode, pending: true, error: null });
       try {
         await invoke(command);
         applied = next;
+        publish({ mode: next ? "locked" : "windowed", pending: false, error: null });
       } catch {
         applied = null;
         // A later service/floor request supersedes this one. Only clear the
@@ -64,6 +85,7 @@ export function createLockdownLifecycle({
         if (requested === next) requested = null;
         // IPC errors may contain device configuration. Keep the diagnostic
         // actionable while deliberately omitting the thrown value.
+        publish({ mode: snapshot.mode, pending: false, error: next ? "enter" : "exit" });
         logError(`station: ${command} failed`);
       }
     });
@@ -81,6 +103,15 @@ export function createLockdownLifecycle({
     },
     enter: () => request(true),
     exit: () => request(false),
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    getSnapshot: () => snapshot,
+    clearError() {
+      if (snapshot.error === null) return;
+      publish({ mode: snapshot.mode, pending: snapshot.pending, error: null });
+    },
     whenSettled: () => settled,
   };
 }

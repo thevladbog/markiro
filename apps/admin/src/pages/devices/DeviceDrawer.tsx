@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "react-router";
 
 import { Alert, Button, Drawer, Input, Select } from "@markiro/ui";
 
@@ -266,7 +267,6 @@ export function DeviceDrawer({
           {mode === "create" ? (
             <>
               <Select
-                native
                 label={t("pages.devices.typeLabel")}
                 value={type}
                 onValueChange={(value) => {
@@ -284,16 +284,21 @@ export function DeviceDrawer({
             </>
           ) : null}
           {type === "station" ? (
-            <Select
-              native
-              label={t("pages.devices.lineLabel")}
-              value={place}
-              onValueChange={setPlace}
-              options={[
-                { value: "", label: t("pages.devices.noLine") },
-                ...(lines.data ?? []).map((line) => ({ value: line.id, label: line.name })),
-              ]}
-            />
+            <div style={{ display: "flex", flexDirection: "column", gap: "var(--sp-2)" }}>
+              <Select
+                label={t("pages.devices.lineLabel")}
+                value={place}
+                onValueChange={setPlace}
+                hint={t(
+                  lines.data?.length === 0 ? "pages.devices.noLinesHint" : "pages.devices.lineHint",
+                )}
+                options={[
+                  { value: "", label: t("pages.devices.noLine") },
+                  ...(lines.data ?? []).map((line) => ({ value: line.id, label: line.name })),
+                ]}
+              />
+              <Link to="/lines">{t("pages.devices.manageLines")}</Link>
+            </div>
           ) : (
             <Input
               label={t("pages.devices.locationLabel")}

@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@markiro/ui";
 
@@ -17,20 +18,27 @@ function activeExpiry(offsetMs = 60_000): string {
   return new Date(Date.now() + offsetMs).toISOString();
 }
 
+function LocationProbe() {
+  return <output data-testid="location-path">{useLocation().pathname}</output>;
+}
+
 function renderDrawer(
   queryClient = new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
 ) {
   const view = render(
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
-        <DeviceDrawer
-          open
-          allowStation
-          allowKiosk
-          canIssueKiosk
-          organizationName="Markiro"
-          onClose={vi.fn()}
-        />
+        <MemoryRouter>
+          <DeviceDrawer
+            open
+            allowStation
+            allowKiosk
+            canIssueKiosk
+            organizationName="Markiro"
+            onClose={vi.fn()}
+          />
+          <LocationProbe />
+        </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,
   );
@@ -42,6 +50,44 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   vi.useRealTimers();
   await i18n.changeLanguage("ru");
+});
+
+it("explains how a selected line sets the station default workplace", async () => {
+  const user = userEvent.setup();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === "/api/lines")
+        return response({ items: [{ id: "line-1", name: "Линия 1" }] });
+      throw new Error(`Unexpected request: ${String(input)}`);
+    }),
+  );
+
+  renderDrawer();
+  await screen.findByRole("combobox", { name: "Линия" });
+
+  expect(
+    await screen.findByText(
+      "Выбранная линия задаёт для станции рабочее место по умолчанию и группирует её смены.",
+    ),
+  ).toBeDefined();
+  expect(screen.getByRole("link", { name: "Управлять линиями" }).getAttribute("href")).toBe(
+    "/lines",
+  );
+  expect(document.querySelectorAll("select")).toHaveLength(0);
+  expect(screen.getByRole("combobox", { name: "Тип" }).tagName).toBe("BUTTON");
+  await user.click(screen.getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Киоск" }));
+  expect(screen.getByLabelText("Расположение")).toBeDefined();
+
+  await user.click(screen.getByRole("combobox", { name: "Тип" }));
+  await user.click(screen.getByRole("option", { name: "Станция" }));
+  await user.click(await screen.findByRole("combobox", { name: "Линия" }));
+  await user.click(screen.getByRole("option", { name: "Линия 1" }));
+  expect(screen.getByRole("combobox", { name: "Линия" }).textContent).toContain("Линия 1");
+
+  await user.click(screen.getByRole("link", { name: "Управлять линиями" }));
+  expect(screen.getByTestId("location-path").textContent).toBe("/lines");
 });
 
 it("keeps the one-time pairing secret only in the active drawer and clears its mutation state on close", async () => {
@@ -70,6 +116,15 @@ it("keeps the one-time pairing secret only in the active drawer and clears its m
   fireEvent.click(screen.getByRole("button", { name: "Создать" }));
 
   await screen.findAllByText("1234 5678");
+  const barcode = await screen.findByRole(
+    "img",
+    { name: "Штрихкод кода привязки 12345678" },
+    { timeout: 3000 },
+  );
+  expect(barcode.style.background).toBe("rgb(255, 255, 255)");
+  expect(barcode.style.padding).toBe("8px");
+  expect(barcode.style.boxSizing).toBe("content-box");
+  expect(barcode.style.border).toBe("1px solid var(--line)");
   expect(localStorage.length).toBe(0);
   expect(sessionStorage.length).toBe(0);
   expect(document.location.search).not.toContain("12345678");

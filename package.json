@@ -14,6 +14,7 @@
     "format:check": "prettier --check .",
     "test:yandex-runtime": "node --test deploy/yandex/test/*.test.mjs",
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
+    "verify:station-production-cors": "node tools/station-release/verify-api-cors.mjs https://admin.markiro.app",
     "test:yandex-runbooks:contract": "node --test infra/yandex/test/runbook-contract.test.mjs",
     "test:production-bundle:contract": "node --test deploy/production/test/*.test.mjs",
     "test:production-docs:browser": "pnpm --dir tools/production-browser --ignore-workspace test",

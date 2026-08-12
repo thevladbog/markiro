@@ -25,13 +25,16 @@ export interface AccessDocument {
   features?: Record<string, boolean>;
 }
 
+/** Shared cache-key prefix for the active cabinet access and subscription usage. */
+export const CABINET_ACCESS_QUERY_KEY = ["cabinet-access"] as const;
+
 /** Gets effective cabinet access for one authenticated user and active organization. */
 export function useAccessDocument(
   userId: string,
   activeOrganizationId: string,
 ): UseQueryResult<AccessDocument> {
   return useQuery({
-    queryKey: ["cabinet-access", userId, activeOrganizationId],
+    queryKey: [...CABINET_ACCESS_QUERY_KEY, userId, activeOrganizationId],
     queryFn: () => apiFetch<AccessDocument>("/access/me"),
     retry: false,
     staleTime: 0,

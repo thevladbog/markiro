@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, PinPad } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
@@ -8,6 +8,7 @@ import type { ScanSource } from "../lib/scan-source.js";
 import { padShortOperatorLogin, verifyOperatorBadge, verifyOperatorPin } from "../lib/auth.js";
 import type { OperatorSearchResult } from "../lib/operator-search.js";
 import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
+import { StationBrand } from "../ui/StationBrand.js";
 
 export interface OperatorLoginProps {
   exec: SqlExecutor;
@@ -186,9 +187,16 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
       className={`operator-login${notice ? " operator-login--with-notice" : ""}`}
       aria-labelledby="operator-login-title"
     >
-      <header className="operator-login__prompt">
-        <h1 id="operator-login-title">{t("login.title")}</h1>
-        <p>{prompt}</p>
+      <header className="operator-login__header">
+        <StationBrand
+          compact
+          className="operator-login__brand"
+          descriptor={t("app.stationDescriptor")}
+        />
+        <div className="operator-login__prompt">
+          <h1 id="operator-login-title">{t("login.title")}</h1>
+          <p>{prompt}</p>
+        </div>
       </header>
 
       <div
@@ -252,7 +260,14 @@ export function OperatorLogin({ exec, source, onAuthed, notice }: OperatorLoginP
         )}
       </div>
 
-      <div className="operator-login__actions">
+      <div
+        className="operator-login__actions"
+        style={
+          {
+            "--operator-login-action-columns": stage === "login" ? 3 : 2,
+          } as CSSProperties
+        }
+      >
         {stage === "badge" ? (
           <>
             <Button

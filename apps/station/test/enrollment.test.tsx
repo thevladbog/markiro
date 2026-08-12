@@ -26,6 +26,57 @@ afterEach(() => {
 });
 
 describe("Enrollment", () => {
+  it("provides the launch-console context and controlled pairing keypad", () => {
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+
+    expect(
+      screen.getByText(
+        "Code verification, aggregation, and label printing on the production line.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByText("admin.markiro.app")).toBeDefined();
+    expect(screen.getByRole("group", { name: "Pairing code keypad" })).toBeDefined();
+
+    const code = screen.getByLabelText("Pairing code") as HTMLInputElement;
+    fireEvent.click(screen.getByRole("button", { name: "1" }));
+    fireEvent.click(screen.getByRole("button", { name: "0" }));
+    expect(code.value).toBe("10");
+    fireEvent.click(screen.getByRole("button", { name: "Backspace" }));
+    expect(code.value).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "Clear" }));
+    expect(code.value).toBe("");
+  });
+
+  it("accepts keyboard correction keys and submits once at eight digits", async () => {
+    pairingMock.redeemStationPairing.mockResolvedValue({ ok: false, error: "invalid" });
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+
+    const code = screen.getByLabelText("Pairing code");
+    fireEvent.keyDown(code, { key: "1" });
+    fireEvent.keyDown(code, { key: "0" });
+    fireEvent.keyDown(code, { key: "Backspace" });
+    fireEvent.keyDown(code, { key: "Delete" });
+    expect((code as HTMLInputElement).value).toBe("");
+
+    for (const digit of "12345678") fireEvent.keyDown(code, { key: digit });
+    fireEvent.keyDown(code, { key: "Enter" });
+    fireEvent.keyDown(code, { key: "Enter" });
+
+    await waitFor(() => expect(pairingMock.redeemStationPairing).toHaveBeenCalledTimes(1));
+  });
+
   it("uses floor-sized controls for pairing and service setup", () => {
     render(
       <Enrollment
@@ -90,7 +141,7 @@ describe("Enrollment", () => {
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
 
     await waitFor(() => expect(pairingMock.persistStationProvisioning).toHaveBeenCalledTimes(1));
-    expect(onEnrolled).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onEnrolled).toHaveBeenCalledTimes(1), { timeout: 1200 });
     expect(pairingMock.redeemStationPairing).toHaveBeenCalledWith(
       "https://api.factory.example",
       "12345678",
@@ -159,6 +210,31 @@ describe("Enrollment", () => {
     expect(onEnrolled).not.toHaveBeenCalled();
   });
 
+  it("keeps an unavailable code for the compact recovery retry without the keypad", async () => {
+    pairingMock.redeemStationPairing.mockResolvedValue({ ok: false, error: "unavailable" });
+    render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Try again" })).toBeDefined());
+    expect(screen.queryByRole("group", { name: "Pairing code keypad" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(pairingMock.redeemStationPairing).toHaveBeenCalledTimes(2));
+    expect(pairingMock.redeemStationPairing).toHaveBeenLastCalledWith(
+      "https://api.factory.example",
+      "12345678",
+      expect.any(AbortSignal),
+    );
+  });
+
   it("accepts an eight-digit scanner capture into the same pairing field", () => {
     let listener: ScanListener | null = null;
     const scanSource: ScanSource = {
@@ -200,10 +276,9 @@ describe("Enrollment", () => {
     render(<Enrollment machineId="machine-1" onEnrolled={() => {}} pairingServerUrl={null} />);
 
     expect(screen.getByText("Station API setup is required before pairing.")).toBeDefined();
-    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
-    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
-
     expect(pairingMock.redeemStationPairing).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Back to pairing" }));
+    expect(screen.getByLabelText("Pairing code")).toBeDefined();
   });
 
   it("does not persist or publish a code response that resolves after unmount", async () => {
@@ -361,7 +436,11 @@ describe("Enrollment", () => {
     );
     fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
-    await waitFor(() => expect(screen.getByRole("button", { name: "Pairing…" })).toBeDefined());
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toContain(
+        "Checking the code and loading station settings…",
+      ),
+    );
 
     view.rerender(
       <Enrollment
@@ -396,7 +475,7 @@ describe("Enrollment", () => {
       expect.objectContaining({ deviceId: "new-device", apiKey: "new-key" }),
       expect.objectContaining({ machineId: "new-machine" }),
     );
-    expect(newEnrolled).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(newEnrolled).toHaveBeenCalledTimes(1), { timeout: 1200 });
   });
 
   it("resets pending service state and clears secret inputs on a normal lifecycle change", async () => {

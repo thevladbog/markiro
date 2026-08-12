@@ -62,13 +62,45 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
 
 ### Manual station beta update
 
+- [ ] Before the workflow, the applied production runtime secret has the exact
+      `STATION_ORIGIN=http://tauri.localhost` value. Record the deployment
+      version/reference only; do not copy or record the secret payload. The
+      Windows Station origin is not `tauri://localhost`.
+- [ ] After that deployment and before the beta workflow, run
+      `pnpm verify:station-production-cors` against production and record a
+      PASS. The live preflight must prove the exact Windows `Origin` and Station
+      capability header for `https://admin.markiro.app/station/pair`; CI or a
+      browser run is not a substitute.
+- [ ] Only after the preceding preflight passes, run `Publish station beta` from
+      `main` for the approved commit SHA. Record the workflow URL and result;
+      the build must not be treated as Windows acceptance.
 - [ ] Download the immutable Windows installer manually and compare its version
       and SHA-256 with `SHA256SUMS`; verify the updater bundle signature against
-      `latest.json` separately.
+      `latest.json`, its immutable release URL, and the recorded commit digest
+      separately.
 - [ ] Install beta.1, then beta.2 while no shift is active; confirm installation
       is blocked during an active shift and pending outbox data is retained.
 - [ ] Record any SmartScreen prompt and operator decision in the beta acceptance
       table; CI cannot replace this Windows/hardware check.
+- [ ] After manual installation, installer shortcut, taskbar and application
+      window all show the branded Markiro Station icon. The old white-circle icon
+      is absent from every shipped icon surface.
+- [ ] Pair the packaged Windows Tauri WebView with a real, currently valid code
+      issued by `admin.markiro.app`; record only the outcome and release/station
+      identity, never the pairing code. Confirm waiting, redeeming, error and
+      success/recovery states remain actionable.
+- [ ] Enter the pairing/login flow with the touch keypad, a physical keyboard,
+      and the production scanner (including keyboard-wedge input when used).
+      Each method must reach the intended field/action without a mouse-only
+      dependency or unintended duplicate entry.
+- [ ] At 1280×800, confirm the packaged app has no document/nested scroll or
+      clipped primary action in pairing, login and the active-shift console;
+      record 1024×768 and 1280×1024 observations where the target display
+      supports them.
+- [ ] From the live console, exit fullscreen with no active shift and re-enter
+      it. With an active shift, confirm the exit warning requires an explicit
+      confirmation; cancel, confirmed exit, and re-entry must preserve the
+      shift state and pending outbox/queues.
 
 - [ ] On the target Windows station, production startup enters fullscreen and
       blocks ordinary close/minimize/resize paths. The hidden service workflow
