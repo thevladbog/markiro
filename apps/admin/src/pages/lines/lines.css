@@ -1,0 +1,33 @@
+.mk-lines-page {
+  min-width: 0;
+}
+
+.mk-lines-description,
+.mk-lines-result {
+  margin: 0;
+  color: var(--fg-3);
+}
+
+.mk-lines-description {
+  max-width: 760px;
+  font: var(--text-body);
+}
+
+.mk-lines-result {
+  min-height: 20px;
+  font: var(--text-body-sm);
+}
+
+.mk-line-form,
+.mk-line-section-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.mk-line-panel-skeleton {
+  display: flex;
+  min-height: 240px;
+  align-items: center;
+  justify-content: center;
+}

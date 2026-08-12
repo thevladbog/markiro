@@ -189,6 +189,16 @@ it("allows a manager to open the catalog directly", async () => {
   expect(screen.queryByTestId("forbidden-page")).toBeNull();
 });
 
+it("allows operations readers to open production lines and forbids users without read access", async () => {
+  const reader = renderAccessRoute("/lines", OPERATIONS_READ_ONLY);
+  expect(await screen.findByRole("heading", { name: "Производственные линии" })).toBeDefined();
+  expect(screen.queryByTestId("forbidden-page")).toBeNull();
+  reader.unmount();
+
+  renderAccessRoute("/lines", INTEGRATIONS_ONLY_ACCESS);
+  expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+});
+
 it("keeps kiosk management separate from the unified devices page", async () => {
   const { requests } = renderAccessRoute("/kiosks", MANAGER_ACCESS);
 
@@ -228,6 +238,16 @@ it.each(["/counterparties/new", "/counterparties/p1/edit"])(
 
 it.each(["/shifts/new", "/shifts/s1/edit"])(
   "forbids the direct shift write route %s for a read-only operator",
+  async (path) => {
+    renderAccessRoute(path, OPERATIONS_READ_ONLY);
+
+    expect(await screen.findByTestId("forbidden-page")).toBeDefined();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  },
+);
+
+it.each(["/lines/new", "/lines/line-1/edit"])(
+  "forbids the direct line write route %s for a read-only operator",
   async (path) => {
     renderAccessRoute(path, OPERATIONS_READ_ONLY);
 
@@ -283,6 +303,7 @@ it.each([
   ["/employees/1/edit", "Изменить сотрудника"],
   ["/kiosks/new", "Новый киоск"],
   ["/kiosks/k1/edit", "Изменить киоск"],
+  ["/lines/new", "Новая линия"],
 ])("opens the direct write route %s for a write-capable operator", async (path, title) => {
   renderAccessRoute(path, MANAGER_ACCESS);
 
