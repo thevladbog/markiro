@@ -27,6 +27,7 @@
 ### Task 1: Accessible searchable Combobox in `@markiro/ui`
 
 **Files:**
+
 - Create: `packages/ui/src/components/Combobox.tsx`
 - Modify: `packages/ui/src/components/index.ts`
 - Modify: `packages/ui/src/index.ts`
@@ -34,6 +35,7 @@
 - Create: `packages/ui/test/combobox.test.tsx`
 
 **Interfaces:**
+
 - Produces:
   ```ts
   export interface ComboboxOption<TValue extends string = string> {
@@ -69,14 +71,17 @@
 - [ ] **Step 2: Run the focused test and verify RED**
 
   Run:
+
   ```bash
   CI=true pnpm --filter @markiro/ui exec vitest run test/combobox.test.tsx
   ```
+
   Expected: FAIL because `Combobox` is not exported.
 
 - [ ] **Step 3: Implement the minimal component**
 
   Use Radix Popover plus a semantic input/listbox implementation. Keep filter state internal and emit only a value:
+
   ```tsx
   <button role="combobox" aria-expanded={open} aria-controls={listboxId}>…</button>
   <input role="searchbox" value={query} onChange={…} />
@@ -86,6 +91,7 @@
     ))}
   </div>
   ```
+
   Implement roving active option, Enter selection, Escape close, and focus restoration without adding dependencies.
 
 - [ ] **Step 4: Add intentional UI styling**
@@ -95,13 +101,16 @@
 - [ ] **Step 5: Verify and commit**
 
   Run:
+
   ```bash
   CI=true pnpm --filter @markiro/ui test
   CI=true pnpm --filter @markiro/ui typecheck
   CI=true pnpm --filter @markiro/ui lint
   CI=true pnpm --filter @markiro/ui build
   ```
+
   Commit only Task 1 files:
+
   ```bash
   git commit -m "feat(ui): add searchable combobox"
   ```
@@ -111,12 +120,15 @@
 ### Task 2: Pure document draft model and exact preview totals
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/documents/types.ts`
 - Create: `apps/saas-admin/src/pages/documents/documentDraft.ts`
 - Create: `apps/saas-admin/test/document-draft.test.ts`
 
 **Interfaces:**
+
 - Produces:
+
   ```ts
   export type DocumentKind = "invoice" | "offer";
   export type ActivationPolicy = "immediate" | "after_current" | "manual";
@@ -154,7 +166,10 @@
     | { type: "line.moved"; id: string; direction: -1 | 1 }
     | { type: "line.removed"; id: string };
 
-  export function documentDraftReducer(draft: DocumentDraft, action: DocumentDraftAction): DocumentDraft;
+  export function documentDraftReducer(
+    draft: DocumentDraft,
+    action: DocumentDraftAction,
+  ): DocumentDraft;
   export function calculateDocumentTotals(lines: readonly DocumentLineDraft[]): {
     subtotal: string;
     vatTotal: string;
@@ -170,9 +185,11 @@
 - [ ] **Step 2: Run focused tests and verify RED**
 
   Run:
+
   ```bash
   CI=true pnpm --filter @markiro/saas-admin exec vitest run test/document-draft.test.ts
   ```
+
   Expected: FAIL because the document draft module does not exist.
 
 - [ ] **Step 3: Implement reducer and integer-cent helpers**
@@ -182,15 +199,18 @@
 - [ ] **Step 4: Implement validation and payload adapters**
 
   Add:
+
   ```ts
   export function toInvoiceCreateInput(draft: DocumentDraft): CreateInvoiceInput;
   export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput;
   ```
+
   The invoice maps `immediate` directly; the offer adapter maps `immediate` to backend `immediately`. Service policies are `null`.
 
 - [ ] **Step 5: Verify and commit**
 
   Run the focused file and SaaS-admin typecheck. Commit:
+
   ```bash
   git commit -m "feat(saas-admin): add document draft model"
   ```
@@ -200,6 +220,7 @@
 ### Task 3: Shared multi-line DocumentComposer
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/documents/DocumentComposer.tsx`
 - Create: `apps/saas-admin/src/pages/documents/DocumentLinesTable.tsx`
 - Create: `apps/saas-admin/src/pages/documents/DocumentSummary.tsx`
@@ -211,8 +232,10 @@
 - Create: `apps/saas-admin/test/document-composer.test.tsx`
 
 **Interfaces:**
+
 - Consumes `Combobox`, `DocumentDraft`, reducer, totals, validation, `TenantListItem[]`, and `CatalogVersionDto[]`.
 - Produces:
+
   ```ts
   export interface DocumentComposerProps {
     kind: "invoice" | "offer";
@@ -234,20 +257,24 @@
 - [ ] **Step 2: Run test and verify RED**
 
   Run:
+
   ```bash
   CI=true pnpm --filter @markiro/saas-admin exec vitest run test/document-composer.test.tsx
   ```
+
   Expected: FAIL because `DocumentComposer` is missing.
 
 - [ ] **Step 3: Implement semantic editor structure**
 
   Use:
+
   ```tsx
   <form className="document-composer" onSubmit={…}>
     <section className="document-composer__workspace" aria-labelledby="document-lines-title">…</section>
     <aside className="document-summary" aria-labelledby="document-summary-title">…</aside>
   </form>
   ```
+
   Use `TenantPicker` and `CatalogPositionPicker` comboboxes. Use the shared `Select` without `native` for application mode, line policy, and VAT preset.
 
 - [ ] **Step 4: Implement the line table and empty state**
@@ -265,6 +292,7 @@
 - [ ] **Step 7: Verify and commit**
 
   Run focused composer/draft tests, typecheck, lint, and build. Commit:
+
   ```bash
   git commit -m "feat(saas-admin): add multi-line document composer"
   ```
@@ -274,6 +302,7 @@
 ### Task 4: Invoice and offer creation routes
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/billing/CreateInvoicePage.tsx`
 - Create: `apps/saas-admin/src/pages/offers/CreateOfferPage.tsx`
 - Modify: `apps/saas-admin/src/pages/billing/BillingPage.tsx`
@@ -288,6 +317,7 @@
 - Create: `apps/saas-admin/test/offer-editor.test.tsx`
 
 **Interfaces:**
+
 - Routes:
   ```tsx
   <Route path="/billing/new" element={<CreateInvoicePage />} />
@@ -307,9 +337,11 @@
 - [ ] **Step 3: Run both files and verify RED**
 
   Run:
+
   ```bash
   CI=true pnpm --filter @markiro/saas-admin exec vitest run test/billing-editor.test.tsx test/offer-editor.test.tsx
   ```
+
   Expected: FAIL because the creation routes/components do not exist.
 
 - [ ] **Step 4: Implement typed API boundaries and routes**
@@ -323,6 +355,7 @@
 - [ ] **Step 6: Verify and commit**
 
   Run both focused files plus existing billing/offers/tenant tests, typecheck, lint, and build. Commit:
+
   ```bash
   git commit -m "feat(saas-admin): add invoice and offer creation routes"
   ```
@@ -332,6 +365,7 @@
 ### Task 5: Remove native selects across SaaS-admin
 
 **Files:**
+
 - Modify: `apps/saas-admin/src/pages/team/TeamPage.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogVatField.tsx`
 - Modify: `apps/saas-admin/src/pages/catalog/CatalogUnitField.tsx`
@@ -346,6 +380,7 @@
 - Create: `apps/saas-admin/test/custom-controls.test.tsx`
 
 **Interfaces:**
+
 - Short lists use `Select` with Radix defaults.
 - Tenant and catalog search use `Combobox` from Task 1.
 - No production SaaS-admin component renders a native `select`.
@@ -357,22 +392,27 @@
 - [ ] **Step 2: Run focused tests and verify RED**
 
   Run:
+
   ```bash
   CI=true pnpm --filter @markiro/saas-admin exec vitest run test/custom-controls.test.tsx
   ```
+
   Expected: FAIL with native selects found.
 
 - [ ] **Step 3: Replace direct `<select>` and `native` usages**
 
   Replace the two team selectors and remove every `native` prop found by:
+
   ```bash
   rg -n '<select|<Select[^>]*native|native\s*$|native=' apps/saas-admin/src -g '*.tsx'
   ```
+
   Preserve labels, disabled/loading behavior, exact values, and mutation calls. Remove obsolete `.native-field select` CSS only after no consumer remains.
 
 - [ ] **Step 4: Verify affected suites and commit**
 
   Run team, catalog, tenants, tenant-detail, and custom-control tests; typecheck and lint. Commit:
+
   ```bash
   git commit -m "refactor(saas-admin): replace native selects"
   ```
@@ -382,9 +422,11 @@
 ### Task 6: Final validation and browser acceptance
 
 **Files:**
+
 - Modify only files required by defects found during validation.
 
 **Interfaces:**
+
 - No new interfaces. This task verifies the complete design contract.
 
 - [ ] **Step 1: Run complete package gates**
@@ -417,6 +459,7 @@
 - [ ] **Step 5: Commit validation fixes**
 
   Stage explicit affected paths, inspect `git diff --cached`, and commit:
+
   ```bash
   git commit -m "fix(saas-admin): polish document editor workflows"
   ```

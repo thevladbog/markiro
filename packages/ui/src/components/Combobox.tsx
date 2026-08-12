@@ -193,7 +193,9 @@ export function Combobox<TValue extends string = string>({
               role="searchbox"
               aria-label={searchPlaceholder}
               aria-controls={listboxId}
-              aria-activedescendant={activeOption ? `${listboxId}-${activeOption.value}` : undefined}
+              aria-activedescendant={
+                activeOption ? `${listboxId}-${activeOption.value}` : undefined
+              }
               className="mk-combobox__search"
               value={query}
               placeholder={searchPlaceholder}
@@ -218,7 +220,9 @@ export function Combobox<TValue extends string = string>({
                     role={group.label ? "group" : undefined}
                     aria-label={group.label || undefined}
                   >
-                    {group.label ? <div className="mk-combobox__group-label">{group.label}</div> : null}
+                    {group.label ? (
+                      <div className="mk-combobox__group-label">{group.label}</div>
+                    ) : null}
                     {group.options.map((option) => {
                       const optionIndex = enabledOptions.findIndex(
                         (enabledOption) => enabledOption.value === option.value,
