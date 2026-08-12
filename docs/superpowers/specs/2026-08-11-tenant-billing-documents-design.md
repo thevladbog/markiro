@@ -59,12 +59,12 @@ in place after they are used by an issued invoice.
 
 Supported profile kinds:
 
-| Kind | Required MVP fields |
-| --- | --- |
-| `individual` | display name, INN when supplied, address, bank details, contact |
-| `self_employed` | full name, INN, address, bank details, contact |
-| `sole_proprietor` | full name, INN, OGRNIP, address, bank details, contact |
-| `legal_entity` | legal name, INN, KPP, OGRN, legal address, bank details, contact |
+| Kind              | Required MVP fields                                              |
+| ----------------- | ---------------------------------------------------------------- |
+| `individual`      | display name, INN when supplied, address, bank details, contact  |
+| `self_employed`   | full name, INN, address, bank details, contact                   |
+| `sole_proprietor` | full name, INN, OGRNIP, address, bank details, contact           |
+| `legal_entity`    | legal name, INN, KPP, OGRN, legal address, bank details, contact |
 
 The schema uses nullable type-specific fields plus validation rules at the API boundary. It keeps
 the original address string and a normalized address object; an external DaData adapter can fill
