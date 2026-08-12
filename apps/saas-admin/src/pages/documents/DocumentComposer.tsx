@@ -24,6 +24,7 @@ export interface DocumentComposerProps {
   submitting: boolean;
   submitError?: string;
   onSubmit: (draft: DocumentDraft) => Promise<void>;
+  onSuccess?: () => void;
   onCancel: () => void;
 }
 
@@ -44,6 +45,7 @@ export function DocumentComposer({
   submitting,
   submitError,
   onSubmit,
+  onSuccess,
   onCancel,
 }: DocumentComposerProps) {
   const { t } = useTranslation();
@@ -73,7 +75,13 @@ export function DocumentComposer({
     const nextErrors = validateDocumentDraft(draft, kind);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-    await onSubmit(draft);
+    try {
+      await onSubmit(draft);
+    } catch {
+      return;
+    }
+    guard.allowNextNavigation();
+    onSuccess?.();
   };
 
   const addCatalogPosition = (version: CatalogVersionDto) => {

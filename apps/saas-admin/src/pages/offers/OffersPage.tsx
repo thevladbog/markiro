@@ -1,44 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { Alert, Button, Card, Input, PageHeader, Spinner, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
-import { createOffer, listOffers, payOffer, publishOffer, type Offer } from "./api.js";
+import { getOffer, listOffers, payOffer, publishOffer, type Offer } from "./api.js";
 
 export function OffersPage() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const client = useQueryClient();
+  const location = useLocation();
+  const navigate = useNavigate();
   const offers = useQuery({ queryKey: ["platform", "offers"], queryFn: listOffers });
-  const [tenantId, setTenantId] = useState("");
-  const [amount, setAmount] = useState("0.00");
   const [bankReference, setBankReference] = useState("");
-  const [selected, setSelected] = useState<Offer | null>(null);
-  const create = useMutation({
-    mutationFn: () =>
-      createOffer({
-        tenantId,
-        lines: [
-          {
-            kind: "service",
-            nameRu: "Услуга",
-            nameEn: "Service",
-            quantity: 1,
-            unit: "service",
-            agreedUnitPrice: amount,
-            vatIncluded: true,
-          },
-        ],
-      }),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const selected = useQuery({
+    queryKey: ["platform", "offers", selectedId],
+    queryFn: () => getOffer(selectedId!),
+    enabled: selectedId !== null,
   });
   const publish = useMutation({
-    mutationFn: () => publishOffer(selected!.id),
+    mutationFn: () => publishOffer(selected.data!.id),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
   });
   const pay = useMutation({
-    mutationFn: () => payOffer(selected!.id, selected!.total, bankReference, crypto.randomUUID()),
+    mutationFn: () =>
+      payOffer(selected.data!.id, selected.data!.total, bankReference, crypto.randomUUID()),
     onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "offers"] }),
   });
   if (offers.isPending)
@@ -59,30 +47,17 @@ export function OffersPage() {
     <section className="catalog-page">
       <PageHeader
         title={t("offers.title")}
-        actions={<Link to="/catalog">{t("offers.catalogLink")}</Link>}
+        actions={
+          <>
+            <Link to="/catalog">{t("offers.catalogLink")}</Link>
+            {principal.capabilities.includes("billing.write") ? (
+              <Link to="/offers/new">{t("offers.create")}</Link>
+            ) : null}
+          </>
+        }
       />
-      {principal.capabilities.includes("billing.write") ? (
-        <Card title={t("offers.newTitle")}>
-          <div style={{ display: "grid", gap: 10, maxWidth: 520 }}>
-            <Input
-              label={t("offers.tenantId")}
-              value={tenantId}
-              onChange={(event) => setTenantId(event.target.value)}
-            />
-            <Input
-              label={t("offers.amount")}
-              value={amount}
-              onChange={(event) => setAmount(event.target.value)}
-            />
-            <Button
-              onClick={() => void create.mutateAsync()}
-              loading={create.isPending}
-              disabled={!tenantId}
-            >
-              {t("offers.create")}
-            </Button>
-          </div>
-        </Card>
+      {(location.state as { createdDocument?: unknown } | null)?.createdDocument === "offer" ? (
+        <Alert tone="ok">{t("offers.created")}</Alert>
       ) : null}
       <Table
         columns={[
@@ -90,7 +65,7 @@ export function OffersPage() {
             key: "tenantId",
             title: t("offers.tenant"),
             render: (offer: Offer) => (
-              <button type="button" className="table-link" onClick={() => setSelected(offer)}>
+              <button type="button" className="table-link" onClick={() => setSelectedId(offer.id)}>
                 {offer.tenantId}
               </button>
             ),
@@ -112,16 +87,25 @@ export function OffersPage() {
         rows={offers.data ?? []}
         empty={t("offers.empty")}
       />
-      {selected ? (
-        <Card title={`${t("offers.detail")} · ${selected.total} ₽`}>
-          <p>{t("offers.lines", { count: selected.lines.length })}</p>
-          {selected.status === "draft" && principal.capabilities.includes("billing.write") ? (
+      {selected.data ? (
+        <Card title={`${t("offers.detail")} · ${selected.data.total} ₽`}>
+          <p>{t("offers.lines", { count: selected.data.lines.length })}</p>
+          {selected.data.status === "draft" && principal.capabilities.includes("billing.write") ? (
             <Button onClick={() => void publish.mutateAsync()} loading={publish.isPending}>
               {t("offers.publish")}
             </Button>
           ) : null}
-          {selected.status === "published" && principal.capabilities.includes("billing.write") ? (
+          {selected.data.status === "published" &&
+          principal.capabilities.includes("billing.write") ? (
             <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void navigate("/billing/new", { state: { sourceOfferId: selected.data.id } })
+                }
+              >
+                {t("offers.createInvoice")}
+              </Button>
               <Input
                 label={t("offers.bankReference")}
                 value={bankReference}
@@ -137,6 +121,8 @@ export function OffersPage() {
             </div>
           ) : null}
         </Card>
+      ) : selected.isPending ? (
+        <Spinner label={t("shell.routeLoading")} />
       ) : null}
     </section>
   );

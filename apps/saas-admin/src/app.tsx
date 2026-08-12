@@ -40,6 +40,16 @@ const OffersPage = lazy(() =>
 const BillingPage = lazy(() =>
   import("./pages/billing/BillingPage.js").then((module) => ({ default: module.BillingPage })),
 );
+const CreateInvoicePage = lazy(() =>
+  import("./pages/billing/CreateInvoicePage.js").then((module) => ({
+    default: module.CreateInvoicePage,
+  })),
+);
+const CreateOfferPage = lazy(() =>
+  import("./pages/offers/CreateOfferPage.js").then((module) => ({
+    default: module.CreateOfferPage,
+  })),
+);
 const TeamPage = lazy(() =>
   import("./pages/team/TeamPage.js").then((module) => ({ default: module.TeamPage })),
 );
@@ -75,7 +85,9 @@ export const appRoutes = createRoutesFromElements(
       <Route element={<AppShell />}>
         <Route path="/catalog" element={<CatalogPage />} />
         <Route path="/offers" element={<OffersPage />} />
+        <Route path="/offers/new" element={<CreateOfferPage />} />
         <Route path="/billing" element={<BillingPage />} />
+        <Route path="/billing/new" element={<CreateInvoicePage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/tenants" element={<TenantsPage />} />

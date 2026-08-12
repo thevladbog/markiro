@@ -108,10 +108,22 @@ export function TenantPage() {
       <PageHeader
         title={detail.tenant.name}
         actions={
-          <StatusChip
-            status={STATUS_TONE[detail.subscriptionStatus]}
-            label={t(`tenants.status.${detail.subscriptionStatus}`)}
-          />
+          <>
+            <StatusChip
+              status={STATUS_TONE[detail.subscriptionStatus]}
+              label={t(`tenants.status.${detail.subscriptionStatus}`)}
+            />
+            {principal.capabilities.includes("billing.write") ? (
+              <>
+                <Link to={`/billing/new?tenantId=${detail.tenant.id}`}>
+                  {t("tenants.detail.createInvoice")}
+                </Link>
+                <Link to={`/offers/new?tenantId=${detail.tenant.id}`}>
+                  {t("tenants.detail.createOffer")}
+                </Link>
+              </>
+            ) : null}
+          </>
         }
       />
       <div className="tenant-detail-coordinate" aria-hidden="true">
