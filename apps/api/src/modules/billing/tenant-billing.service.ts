@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
@@ -15,7 +15,12 @@ export class TenantBillingService {
     const rows = await this.db
       .select()
       .from(schema.invoices)
-      .where(and(eq(schema.invoices.tenantId, tenantId), eq(schema.invoices.status, "issued")))
+      .where(
+        and(
+          eq(schema.invoices.tenantId, tenantId),
+          inArray(schema.invoices.status, ["issued", "paid", "cancelled"]),
+        ),
+      )
       .orderBy(desc(schema.invoices.issuedAt));
     return {
       items: rows.map((invoice) => ({
@@ -38,7 +43,7 @@ export class TenantBillingService {
         and(
           eq(schema.invoices.tenantId, tenantId),
           eq(schema.invoices.id, id),
-          eq(schema.invoices.status, "issued"),
+          inArray(schema.invoices.status, ["issued", "paid", "cancelled"]),
         ),
       )
       .limit(1);
