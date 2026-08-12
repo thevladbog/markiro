@@ -27,6 +27,7 @@ export interface DocumentDraft {
   tenantId: string;
   applicationMode: "manual" | "automatic";
   date: string;
+  termsMarkdown?: string | null;
   lines: DocumentLineDraft[];
 }
 
@@ -83,5 +84,6 @@ export interface CreateOfferLineInput {
 export interface CreateOfferInput {
   tenantId: string;
   expiresAt: string | null;
+  termsMarkdown?: string | null;
   lines: CreateOfferLineInput[];
 }

@@ -23,6 +23,7 @@ export const createOfferSchema = z
   .object({
     tenantId: z.string().min(1),
     expiresAt: z.coerce.date().nullable().optional(),
+    termsMarkdown: z.string().max(20_000).nullable().optional(),
     lines: z.array(line).min(1).max(100),
   })
   .strict();

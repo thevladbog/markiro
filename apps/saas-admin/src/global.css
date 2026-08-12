@@ -1378,6 +1378,41 @@ textarea {
   background: var(--surface-card);
 }
 
+.offer-editor {
+  display: grid;
+  gap: 20px;
+}
+
+.offer-terms-editor {
+  display: grid;
+  gap: 12px;
+  padding: clamp(16px, 3vw, 28px);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+}
+
+.offer-terms-editor__heading h2,
+.offer-terms-editor__heading p {
+  margin: 0;
+}
+
+.offer-terms-editor__heading h2 {
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+.offer-terms-editor__heading p {
+  margin-top: 5px;
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.offer-terms-editor .mdxeditor {
+  border: 1px solid var(--line-strong);
+  color: var(--fg-1);
+  background: var(--surface-panel);
+}
+
 .document-composer__workspace {
   min-width: 0;
   padding: clamp(16px, 3vw, 32px);

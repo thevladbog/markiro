@@ -234,11 +234,13 @@ export function toInvoiceCreateInput(draft: DocumentDraft): CreateInvoiceInput {
 }
 
 export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput {
-  return {
+  const input: CreateOfferInput = {
     tenantId: draft.tenantId,
     expiresAt: optionalDate(draft.date),
     lines: draft.lines.map(toOfferLine),
   };
+  const termsMarkdown = draft.termsMarkdown?.trim();
+  return termsMarkdown ? { ...input, termsMarkdown } : input;
 }
 
 function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
