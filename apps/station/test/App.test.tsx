@@ -929,12 +929,51 @@ describe("App", () => {
     }
   });
 
-  it("keeps the current operator and durable state recoverable when retirement times out", async () => {
+  it("disables every floor header action while accepted local work settles", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const floor = await renderActiveShiftForOperatorSwitch();
       act(() => floor.emitScan(FIRST_KM));
       await floor.firstJournalStarted;
+      lockdownMock.exit.mockClear();
+
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Change operator?" })).getByRole("button", {
+          name: "Change operator",
+        }),
+      );
+
+      const update = screen.getByRole("button", { name: "↻ Updates" });
+      const operatorSwitch = screen.getByRole("button", {
+        name: "Saving the current operation…",
+      });
+      const windowMode = screen.getByRole("button", { name: "Exit fullscreen" });
+      expect((update as HTMLButtonElement).disabled).toBe(true);
+      expect((operatorSwitch as HTMLButtonElement).disabled).toBe(true);
+      expect((windowMode as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(update);
+      fireEvent.click(operatorSwitch);
+      fireEvent.click(windowMode);
+      expect(screen.queryByRole("heading", { name: "Station updates" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Exit fullscreen?" })).toBeNull();
+      expect(lockdownMock.exit).not.toHaveBeenCalled();
+
+      floor.releaseFirstJournal();
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps one retired queue closed through timeout and retry until its write settles", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      const scannerSubscriptionsBeforeSwitch = hardwareMock.onScan.mock.calls.length;
       const destructiveBefore = invokeMock.mock.calls.filter(([cmd, payload]) => {
         if (cmd === "clear_credential") return true;
         if (cmd !== "plugin:sql|execute") return false;
@@ -961,6 +1000,19 @@ describe("App", () => {
         "Could not change operator. The current operator and local work remain active.",
       );
       expect(screen.getByRole("button", { name: "Retry operator change" })).toBeDefined();
+      expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
+      expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry operator change" }));
+      expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
+      expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
+      act(() => floor.emitScan(SECOND_KM));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(floor.journalOperatorIds).toEqual(["op1"]);
+
       const destructiveAfter = invokeMock.mock.calls.filter(([cmd, payload]) => {
         if (cmd === "clear_credential") return true;
         if (cmd !== "plugin:sql|execute") return false;
@@ -970,6 +1022,13 @@ describe("App", () => {
         );
       }).length;
       expect(destructiveAfter).toBe(destructiveBefore);
+      floor.releaseFirstJournal();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      vi.useRealTimers();
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+      expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
     } finally {
       vi.useRealTimers();
       consoleErrorSpy.mockRestore();

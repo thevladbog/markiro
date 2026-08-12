@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import {
+  beginFloorWorkRetirement,
   clearRejectedCredentialState,
   createFloorWorkRegistry,
   FloorWorkBarrierTimeoutError,
@@ -281,6 +282,33 @@ describe("credential rejection recovery", () => {
 
       await vi.advanceTimersByTimeAsync(51);
       await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reuses one close promise when a timed-out retirement is retried", async () => {
+    vi.useFakeTimers();
+    try {
+      let release!: () => void;
+      const close = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const retirement = beginFloorWorkRetirement([{ close, idle: async () => {} }]);
+
+      const firstWait = retirement.wait(50);
+      const firstAssertion = expect(firstWait).rejects.toBeInstanceOf(FloorWorkBarrierTimeoutError);
+      await vi.advanceTimersByTimeAsync(51);
+      await firstAssertion;
+
+      const retry = retirement.wait(50);
+      expect(close).toHaveBeenCalledTimes(1);
+      release();
+      await retry;
+      expect(close).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

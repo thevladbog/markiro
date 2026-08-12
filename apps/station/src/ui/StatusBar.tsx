@@ -42,6 +42,7 @@ export interface StatusBarProps {
   conflicts: number;
   update?: UpdateIndicatorModel;
   onOpenUpdates?: () => void;
+  actionsDisabled?: boolean;
   operatorControl?: ReactNode;
   windowControl?: ReactNode;
 }
@@ -62,6 +63,7 @@ export function StatusBar({
   conflicts,
   update,
   onOpenUpdates,
+  actionsDisabled = false,
   operatorControl,
   windowControl,
 }: StatusBarProps) {
@@ -95,6 +97,7 @@ export function StatusBar({
         className="station-update-indicator"
         data-update-severity={update.severity}
         aria-label={`${update.glyph} ${update.label}`}
+        disabled={actionsDisabled}
         onClick={onOpenUpdates}
       >
         <span aria-hidden="true">{update.glyph}</span>

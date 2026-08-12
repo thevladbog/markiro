@@ -164,6 +164,10 @@ export class FloorWorkBarrierTimeoutError extends Error {
 
 export const FLOOR_WORK_BARRIER_TIMEOUT_MS = 5_000;
 
+export interface FloorWorkRetirement {
+  wait(timeoutMs?: number): Promise<void>;
+}
+
 async function waitForPendingFloorWork(pending: Promise<void>[], timeoutMs: number): Promise<void> {
   if (pending.length === 0) return;
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -190,10 +194,9 @@ async function waitForFloorWork(
 }
 
 /** Stops new floor intake, then waits for every already accepted local write. */
-export async function retireFloorWork(
+export function beginFloorWorkRetirement(
   barriers: Iterable<FloorWorkBarrier>,
-  timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS,
-): Promise<void> {
+): FloorWorkRetirement {
   const snapshot = [...barriers];
   const pending = snapshot.map((barrier) => {
     try {
@@ -202,7 +205,20 @@ export async function retireFloorWork(
       return Promise.reject(error instanceof Error ? error : new Error(String(error)));
     }
   });
-  await waitForPendingFloorWork(pending, timeoutMs);
+  const settled = Promise.all(pending).then(() => undefined);
+  return {
+    wait(timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS) {
+      return waitForPendingFloorWork([settled], timeoutMs);
+    },
+  };
+}
+
+/** Stops new floor intake, then waits for every already accepted local write. */
+export async function retireFloorWork(
+  barriers: Iterable<FloorWorkBarrier>,
+  timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS,
+): Promise<void> {
+  await beginFloorWorkRetirement(barriers).wait(timeoutMs);
 }
 
 /** Counts only facts that have not yet received a server acknowledgement. */

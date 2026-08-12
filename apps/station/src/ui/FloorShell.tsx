@@ -17,6 +17,7 @@ export interface FloorShellProps {
   conflicts: number;
   update?: UpdateIndicatorModel;
   onOpenUpdates?: () => void;
+  actionsDisabled?: boolean;
   tasks?: ReadonlyArray<{ id: string; label: string }>;
   activeTaskId?: string;
   onSelectTask?: (id: string) => void;
@@ -39,6 +40,7 @@ export function FloorShell({
   conflicts,
   update,
   onOpenUpdates,
+  actionsDisabled = false,
   tasks = [],
   activeTaskId,
   onSelectTask,
@@ -63,6 +65,7 @@ export function FloorShell({
         conflicts={conflicts}
         {...(update ? { update } : {})}
         {...(onOpenUpdates ? { onOpenUpdates } : {})}
+        actionsDisabled={actionsDisabled}
         {...(operatorControl ? { operatorControl } : {})}
         {...(windowControl ? { windowControl } : {})}
       />

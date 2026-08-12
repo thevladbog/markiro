@@ -6,6 +6,7 @@ import type { LockdownSnapshot } from "../lib/lockdown.js";
 export interface WindowModeControlProps {
   snapshot: LockdownSnapshot;
   activeShift: boolean;
+  disabled?: boolean;
   onEnter: () => void | Promise<void>;
   onExit: () => void | Promise<void>;
   onDismissError: () => void;
@@ -14,6 +15,7 @@ export interface WindowModeControlProps {
 export function WindowModeControl({
   snapshot,
   activeShift,
+  disabled = false,
   onEnter,
   onExit,
   onDismissError,
@@ -25,7 +27,7 @@ export function WindowModeControl({
     : t(snapshot.mode === "locked" ? "windowMode.exit" : "windowMode.enter");
 
   function handleAction(): void {
-    if (snapshot.pending) return;
+    if (disabled || snapshot.pending) return;
     if (snapshot.mode === "windowed") {
       void onEnter();
     } else if (activeShift) {
@@ -41,7 +43,7 @@ export function WindowModeControl({
         size="floor"
         variant="secondary"
         className="window-mode-control__action"
-        disabled={snapshot.pending}
+        disabled={disabled || snapshot.pending}
         aria-label={actionLabel}
         onClick={handleAction}
         icon={

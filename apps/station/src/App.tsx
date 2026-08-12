@@ -25,14 +25,15 @@ import {
 } from "./lib/api-client.js";
 import {
   clearRejectedCredentialState,
+  beginFloorWorkRetirement,
   createCredentialGeneration,
   createFloorWorkRegistry,
   credentialGenerationIsCurrent,
   readSealedWorkSummary,
-  retireFloorWork,
   type CredentialGeneration,
   type CredentialRejectedEvent,
   type FloorWorkBarrier,
+  type FloorWorkRetirement,
   type SealedWorkSummary,
 } from "./lib/credential-recovery.js";
 import {
@@ -218,6 +219,7 @@ export function App() {
   const legacyIdentityAttempt = useRef<Promise<unknown> | null>(null);
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
+  const operatorRetirement = useRef<FloorWorkRetirement | null>(null);
   const lockdown = useMemo(() => createLockdownLifecycle({ dev: import.meta.env.DEV }), []);
   const subscribeLockdown = useCallback(
     (listener: () => void) => lockdown.subscribe(listener),
@@ -773,8 +775,12 @@ export function App() {
 
   async function switchOperator(): Promise<void> {
     setOperatorSwitchState("settling");
+    const retirement =
+      operatorRetirement.current ?? beginFloorWorkRetirement(floorWorkRegistry.current());
+    operatorRetirement.current = retirement;
     try {
-      await retireFloorWork(floorWorkRegistry.current());
+      await retirement.wait();
+      operatorRetirement.current = null;
       setShowSetup(false);
       setShowConflicts(false);
       setShowUpdates(false);
@@ -791,6 +797,7 @@ export function App() {
     <WindowModeControl
       snapshot={lockdownSnapshot}
       activeShift={shift !== null}
+      disabled={operatorSwitchState !== "idle"}
       onEnter={enterLockdown}
       onExit={exitLockdown}
       onDismissError={clearLockdownError}
@@ -968,7 +975,9 @@ export function App() {
       pending={operatorSwitchState === "settling"}
       error={operatorSwitchState === "failed"}
       onSwitch={switchOperator}
-      onDismissError={() => setOperatorSwitchState("idle")}
+      onDismissError={() => {
+        if (operatorRetirement.current === null) setOperatorSwitchState("idle");
+      }}
     />
   );
 
@@ -1003,13 +1012,20 @@ export function App() {
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
       update={updateIndicator}
+      actionsDisabled={operatorSwitchState !== "idle"}
       onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
     >
-      {operatorSwitchState === "settling" ? (
+      {operatorSwitchState !== "idle" ? (
         <main className="station-centered-screen" data-testid="operator-switch-settling">
           <Card style={{ width: "min(720px, calc(100vw - 64px))", padding: 32 }}>
-            <p role="status">{t("operatorSwitch.pending")}</p>
+            <p role="status">
+              {t(
+                operatorSwitchState === "failed"
+                  ? "operatorSwitch.error"
+                  : "operatorSwitch.pending",
+              )}
+            </p>
           </Card>
         </main>
       ) : showUpdates ? (

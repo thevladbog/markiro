@@ -30,7 +30,7 @@ export function OperatorSwitchControl({
   }
 
   function requestSwitch(): void {
-    if (pending) return;
+    if (pending || error) return;
     if (activeShift) setConfirming(true);
     else void runSwitch();
   }
@@ -41,7 +41,7 @@ export function OperatorSwitchControl({
         type="button"
         size="floor"
         variant="secondary"
-        disabled={pending}
+        disabled={pending || error}
         aria-label={t(pending ? "operatorSwitch.pending" : "operatorSwitch.action")}
         onClick={requestSwitch}
       >
