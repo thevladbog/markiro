@@ -253,7 +253,7 @@ export function Select<TValue extends string = string>({
             position="popper"
             sideOffset={4}
             collisionPadding={8}
-            className="mk-select__content mk-select__viewport"
+            className="mk-select__content"
             style={{
               zIndex: "var(--z-overlay-popover)",
               border: "1px solid var(--line-strong)",

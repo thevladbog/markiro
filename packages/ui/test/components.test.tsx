@@ -374,10 +374,12 @@ describe("Select", () => {
     await user.click(trigger);
     const listbox = screen.getByRole("listbox");
     const content = listbox.closest<HTMLElement>("[data-mk-nested-overlay]");
+    const viewport = content?.querySelector<HTMLElement>("[data-radix-select-viewport]");
     expect(content).not.toBeNull();
     expect(content?.getAttribute("data-position")).toBe("popper");
     expect(content?.classList.contains("mk-select__content")).toBe(true);
-    expect(listbox.classList.contains("mk-select__viewport")).toBe(true);
+    expect(content?.classList.contains("mk-select__viewport")).toBe(false);
+    expect(viewport?.classList.contains("mk-select__viewport")).toBe(true);
     expect(content?.style.zIndex).toBe("var(--z-overlay-popover)");
     await user.click(screen.getByRole("option", { name: "Вода" }));
 
