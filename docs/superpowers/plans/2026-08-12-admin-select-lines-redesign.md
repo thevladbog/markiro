@@ -103,7 +103,8 @@ git commit -m "fix(ui): bound custom select menus"
 - Modify: apps/admin/test/devices.test.tsx
 - Modify: apps/admin/test/device-pairing.test.tsx
 - Modify: apps/admin/test/conflicts.test.tsx
-- Modify: apps/admin/test/kiosk-pairing-panel.test.tsx
+- Modify: apps/admin/test/kiosk-pairing.test.tsx
+- Modify: apps/admin/test/kiosks-pairing-placeholder.test.tsx
 
 **Interfaces:**
 
@@ -128,7 +129,7 @@ Require a .mk-conflicts-filters region containing both comboboxes and a separate
 - [ ] **Step 3: Run RED**
 
 ```bash
-corepack pnpm --filter @markiro/admin exec vitest run test/devices.test.tsx test/device-pairing.test.tsx test/conflicts.test.tsx test/kiosk-pairing-panel.test.tsx
+corepack pnpm --filter @markiro/admin exec vitest run test/devices.test.tsx test/device-pairing.test.tsx test/conflicts.test.tsx test/kiosk-pairing.test.tsx test/kiosks-pairing-placeholder.test.tsx
 ```
 
 Expected: FAIL on native elements, missing layout hooks, and transparent barcode background.
@@ -152,7 +153,7 @@ Run Step 3. Expected: all selected suites PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add apps/admin/src/pages/devices apps/admin/src/pages/conflicts apps/admin/src/pages/kiosks/pairingBarcodeBox.ts apps/admin/src/pages/kiosks/PairingBarcode.tsx apps/admin/test/devices.test.tsx apps/admin/test/device-pairing.test.tsx apps/admin/test/conflicts.test.tsx apps/admin/test/kiosk-pairing-panel.test.tsx
+git add apps/admin/src/pages/devices apps/admin/src/pages/conflicts apps/admin/src/pages/kiosks/pairingBarcodeBox.ts apps/admin/src/pages/kiosks/PairingBarcode.tsx apps/admin/test/devices.test.tsx apps/admin/test/device-pairing.test.tsx apps/admin/test/conflicts.test.tsx apps/admin/test/kiosk-pairing.test.tsx apps/admin/test/kiosks-pairing-placeholder.test.tsx
 git commit -m "fix(admin): polish selects conflicts and pairing barcode"
 ```
 
