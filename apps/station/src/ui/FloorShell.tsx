@@ -21,7 +21,8 @@ export interface FloorShellProps {
   activeTaskId?: string;
   onSelectTask?: (id: string) => void;
   footer?: ReactNode;
-  windowChrome?: ReactNode;
+  operatorControl?: ReactNode;
+  windowControl?: ReactNode;
   children: ReactNode;
 }
 
@@ -42,13 +43,13 @@ export function FloorShell({
   activeTaskId,
   onSelectTask,
   footer,
-  windowChrome,
+  operatorControl,
+  windowControl,
   children,
 }: FloorShellProps) {
   const { t } = useTranslation();
   return (
     <div className="station-root">
-      {windowChrome ? <div className="station-floor-window-chrome">{windowChrome}</div> : null}
       <StatusBar
         stationName={stationName}
         lineName={lineName}
@@ -62,6 +63,8 @@ export function FloorShell({
         conflicts={conflicts}
         {...(update ? { update } : {})}
         {...(onOpenUpdates ? { onOpenUpdates } : {})}
+        {...(operatorControl ? { operatorControl } : {})}
+        {...(windowControl ? { windowControl } : {})}
       />
       {tasks.length > 0 ? (
         <nav aria-label={t("shell.tasks")} className="station-task-nav">

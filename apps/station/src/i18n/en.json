@@ -137,6 +137,7 @@
   },
   "shell": {
     "statusBar": "Station status",
+    "stationActions": "Station actions",
     "activeScreen": "Active station screen",
     "station": "Station",
     "line": "Line",

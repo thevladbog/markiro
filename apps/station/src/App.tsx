@@ -960,7 +960,7 @@ export function App() {
   // since it cannot be proven alive without printing to it.
   return (
     <FloorShell
-      windowChrome={windowModeControl}
+      windowControl={windowModeControl}
       stationName={config.deviceName ?? config.deviceId ?? config.machineId}
       lineName={config.lineName ?? null}
       operatorName={operator.name}

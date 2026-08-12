@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ServerReachability } from "../lib/api-client.js";
 
@@ -41,6 +42,8 @@ export interface StatusBarProps {
   conflicts: number;
   update?: UpdateIndicatorModel;
   onOpenUpdates?: () => void;
+  operatorControl?: ReactNode;
+  windowControl?: ReactNode;
 }
 
 // Persistent floor status bar. Scanner/printer indicators reflect the live
@@ -59,6 +62,8 @@ export function StatusBar({
   conflicts,
   update,
   onOpenUpdates,
+  operatorControl,
+  windowControl,
 }: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
@@ -83,6 +88,20 @@ export function StatusBar({
       : serverReachability === "reachable"
         ? t("shell.serverAvailable")
         : t("shell.serverUnavailable");
+  const updateButton =
+    update && onOpenUpdates ? (
+      <button
+        type="button"
+        className="station-update-indicator"
+        data-update-severity={update.severity}
+        aria-label={`${update.glyph} ${update.label}`}
+        onClick={onOpenUpdates}
+      >
+        <span aria-hidden="true">{update.glyph}</span>
+        <span>{update.label}</span>
+      </button>
+    ) : null;
+
   return (
     <header
       className="station-status-bar"
@@ -136,18 +155,11 @@ export function StatusBar({
           testId="printer-status"
         />
       </dl>
-      {update && onOpenUpdates ? (
-        <button
-          type="button"
-          className="station-update-indicator"
-          data-update-severity={update.severity}
-          aria-label={`${update.glyph} ${update.label}`}
-          onClick={onOpenUpdates}
-        >
-          <span aria-hidden="true">{update.glyph}</span>
-          <span>{update.label}</span>
-        </button>
-      ) : null}
+      <div className="station-status-actions" role="group" aria-label={t("shell.stationActions")}>
+        {updateButton}
+        {operatorControl}
+        {windowControl}
+      </div>
     </header>
   );
 }
@@ -164,10 +176,7 @@ function StatusValue({ label, value, testId, tone, live }: StatusValueProps) {
   return (
     <div className="station-status-item" data-tone={tone}>
       <dt>{label}</dt>
-      <dd
-        data-testid={testId}
-        {...(live ? { role: "status", "aria-live": live } : {})}
-      >
+      <dd data-testid={testId} {...(live ? { role: "status", "aria-live": live } : {})}>
         {value}
       </dd>
     </div>

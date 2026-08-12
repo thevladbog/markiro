@@ -88,4 +88,22 @@ describe("fixed station viewport source contract", () => {
       /#root :where\(button, \[role="button"\], a\[href\]\):is\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*transform:\s*none;/s,
     );
   });
+
+  it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /\.station-update-indicator\s*\{[^}]*position:\s*static;[^}]*min-height:\s*64px;/s,
+    );
+    expect(css).not.toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*absolute;/s);
+    expect(css).toMatch(
+      /\.station-status-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*64px;/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1179px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+    );
+  });
 });

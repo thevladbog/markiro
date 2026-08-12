@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
@@ -96,6 +96,32 @@ describe("StatusBar", () => {
         .getByRole("button", { name: "! Update 0.1.0-beta.2" })
         .getAttribute("data-update-severity"),
     ).toBe("warn");
+  });
+
+  it("owns update, operator, and window controls inside one labelled action rail", () => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability="reachable"
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+        update={{ severity: "info", glyph: "↻", label: "Current version", available: false }}
+        onOpenUpdates={() => {}}
+        operatorControl={<button type="button">Change operator</button>}
+        windowControl={<button type="button">Window mode</button>}
+      />,
+    );
+
+    const header = screen.getByRole("banner", { name: "Station status" });
+    const actions = within(header).getByRole("group", { name: "Station actions" });
+    expect(
+      within(actions)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["↻Current version", "Change operator", "Window mode"]);
   });
 
   it("does not invent agent or teammate status without a live source", () => {

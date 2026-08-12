@@ -137,6 +137,7 @@
   },
   "shell": {
     "statusBar": "Состояние станции",
+    "stationActions": "Действия станции",
     "activeScreen": "Рабочий экран станции",
     "station": "Станция",
     "line": "Линия",

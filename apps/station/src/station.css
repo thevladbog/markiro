@@ -48,19 +48,6 @@ body,
   right: var(--sp-3);
 }
 
-.station-floor-window-chrome {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  min-height: 72px;
-  padding: var(--sp-1) var(--sp-4);
-  flex: 0 0 auto;
-  align-items: flex-start;
-  justify-content: flex-end;
-  border-bottom: 1px solid var(--line);
-  background: var(--surface-panel);
-}
-
 .window-mode-control {
   display: grid;
   max-width: min(420px, calc(100vw - 2 * var(--sp-3)));
@@ -2003,29 +1990,47 @@ body,
 }
 
 .station-status-bar {
-  position: relative;
   display: grid;
   min-width: 0;
   padding: var(--sp-2) var(--sp-4);
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr) minmax(320px, 1.45fr);
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
   font: var(--floor-body);
 }
 
+.station-status-actions {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-2);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: stretch;
+}
+
+.station-status-actions > * {
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  max-width: 100%;
+}
+
+.station-status-actions :where(button, [role="button"]) {
+  width: 100%;
+  min-width: 0;
+  min-height: 64px;
+  max-width: 100%;
+  overflow: hidden;
+}
+
 .station-update-indicator {
-  position: absolute;
-  top: 50%;
-  right: var(--sp-4);
+  position: static;
   display: inline-flex;
   min-height: 64px;
-  max-width: 180px;
   align-items: center;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
   overflow: hidden;
-  transform: translateY(-50%);
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface-panel);
@@ -2142,6 +2147,17 @@ body,
   color: var(--warn-fg);
 }
 
+@media (max-width: 1179px) {
+  .station-status-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .station-status-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1100px) {
   .operator-login {
     --control-keypad: 80px;
@@ -2150,7 +2166,6 @@ body,
   .station-status-bar {
     padding-inline: var(--sp-3);
     gap: var(--sp-2);
-    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1.2fr) minmax(0, 0.9fr);
   }
 
   .station-status-group {
