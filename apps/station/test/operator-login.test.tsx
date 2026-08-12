@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
+import * as crypto from "../src/lib/crypto.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { createKeyboardWedgeSource } from "../src/lib/scan-source.js";
@@ -1012,5 +1013,153 @@ describe("OperatorLogin", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(onAuthed).not.toHaveBeenCalled();
+  });
+
+  it("does not admit a removed operator when the roster changes during badge verification", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-revoked",
+        name: "Revoked Operator",
+        login: "1001",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("BADGE-OLD"),
+        active: true,
+      },
+    ]);
+    let announceVerification!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      announceVerification = resolve;
+    });
+    let resumeVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => {
+      resumeVerification = resolve;
+    });
+    const realVerifyBadge = crypto.verifyBadge;
+    const verifyBadgeSpy = vi.spyOn(crypto, "verifyBadge").mockImplementation(async (code, phc) => {
+      announceVerification();
+      await verificationGate;
+      return realVerifyBadge(code, phc);
+    });
+    const scanner = manualSource();
+    const onAuthed = vi.fn();
+    try {
+      render(
+        <OperatorLogin exec={exec} source={scanner.source} online={false} onAuthed={onAuthed} />,
+      );
+
+      act(() => scanner.scan("BADGE-OLD"));
+      await verificationStarted;
+      await replaceOperatorsMirror(exec, []);
+      resumeVerification();
+
+      expect(await screen.findByText("Badge not recognized")).toBeDefined();
+      expect(onAuthed).not.toHaveBeenCalled();
+    } finally {
+      resumeVerification();
+      verifyBadgeSpy.mockRestore();
+    }
+  });
+
+  it("does not admit a deactivated operator when the roster changes during PIN verification", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const operator = {
+      operatorId: "op-deactivated",
+      name: "Deactivated Operator",
+      login: "1002",
+      role: "operator",
+      pinHash: await hashSecret("4821"),
+      badgeHash: null,
+      active: true,
+    };
+    await replaceOperatorsMirror(exec, [operator]);
+    let announceVerification!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      announceVerification = resolve;
+    });
+    let resumeVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => {
+      resumeVerification = resolve;
+    });
+    const realVerifyPin = crypto.verifyPin;
+    const verifyPinSpy = vi.spyOn(crypto, "verifyPin").mockImplementation(async (pin, phc) => {
+      announceVerification();
+      await verificationGate;
+      return realVerifyPin(pin, phc);
+    });
+    const onAuthed = vi.fn();
+    try {
+      render(
+        <OperatorLogin exec={exec} source={silentSource} online={false} onAuthed={onAuthed} />,
+      );
+      openNumericFallback();
+      for (const digit of "1002") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await verificationStarted;
+      await replaceOperatorsMirror(exec, [{ ...operator, active: false }]);
+      resumeVerification();
+
+      expect(await screen.findByText("Wrong personnel number or PIN")).toBeDefined();
+      expect(onAuthed).not.toHaveBeenCalled();
+    } finally {
+      resumeVerification();
+      verifyPinSpy.mockRestore();
+    }
+  });
+
+  it("does not admit an old PIN when its verifier rotates during authentication", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const operator = {
+      operatorId: "op-rotated",
+      name: "Rotated Operator",
+      login: "1003",
+      role: "operator",
+      pinHash: await hashSecret("4821"),
+      badgeHash: null,
+      active: true,
+    };
+    await replaceOperatorsMirror(exec, [operator]);
+    let announceVerification!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      announceVerification = resolve;
+    });
+    let resumeVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => {
+      resumeVerification = resolve;
+    });
+    const realVerifyPin = crypto.verifyPin;
+    const verifyPinSpy = vi.spyOn(crypto, "verifyPin").mockImplementation(async (pin, phc) => {
+      announceVerification();
+      await verificationGate;
+      return realVerifyPin(pin, phc);
+    });
+    const onAuthed = vi.fn();
+    try {
+      render(
+        <OperatorLogin exec={exec} source={silentSource} online={false} onAuthed={onAuthed} />,
+      );
+      openNumericFallback();
+      for (const digit of "1003") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await verificationStarted;
+      await replaceOperatorsMirror(exec, [{ ...operator, pinHash: await hashSecret("8642") }]);
+      resumeVerification();
+
+      expect(await screen.findByText("Wrong personnel number or PIN")).toBeDefined();
+      expect(onAuthed).not.toHaveBeenCalled();
+    } finally {
+      resumeVerification();
+      verifyPinSpy.mockRestore();
+    }
   });
 });

@@ -471,6 +471,29 @@ export async function readShiftContext(
   };
 }
 
+export interface OperatorRosterSnapshot {
+  operators: OperatorMirrorRecord[];
+  generation: string;
+}
+
+function operatorRosterGeneration(operators: OperatorMirrorRecord[]): string {
+  return JSON.stringify(
+    [...operators]
+      .sort((left, right) =>
+        left.operatorId < right.operatorId ? -1 : left.operatorId > right.operatorId ? 1 : 0,
+      )
+      .map((operator) => [
+        operator.operatorId,
+        operator.name,
+        operator.login,
+        operator.role,
+        operator.pinHash,
+        operator.badgeHash,
+        operator.active,
+      ]),
+  );
+}
+
 /**
  * Reads the currently active roster.
  *
@@ -506,8 +529,15 @@ export async function readShiftContext(
  * this upgrade path works before migrations have run. The table names come
  * from `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
  * `publishOperatorsMirror` use — never caller input.
+ * It also derives a content generation from every
+ * field that can affect authentication or the admitted operator identity.
+ * The generation never leaves the device; callers can use it to reject a
+ * credential result if a concurrent double-slot publication changed the
+ * roster while PBKDF2 was running.
  */
-export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+export async function readOperatorRosterSnapshot(
+  exec: SqlExecutor,
+): Promise<OperatorRosterSnapshot> {
   const rows = await exec.all<{
     operator_id: string;
     name: string;
@@ -528,7 +558,7 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
         AND COALESCE((SELECT value FROM station_meta WHERE key = ?), '0') <> '1'`,
     [ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY, ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY],
   );
-  return rows.map((r) => ({
+  const operators = rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,
     // Legacy rows (mirrored before the column existed) read as "", which never
@@ -540,4 +570,9 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     badgeHash: r.badge_hash,
     active: r.active === 1,
   }));
+  return { operators, generation: operatorRosterGeneration(operators) };
+}
+
+export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+  return (await readOperatorRosterSnapshot(exec)).operators;
 }
