@@ -1360,3 +1360,236 @@ textarea {
     transition-duration: 0.01ms !important;
   }
 }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.document-composer {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.34fr);
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+}
+
+.document-composer__workspace {
+  min-width: 0;
+  padding: clamp(16px, 3vw, 32px);
+}
+
+.document-composer__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(16rem, 0.45fr);
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.document-composer__header p,
+.document-composer__header h1,
+.document-summary h2,
+.document-composer__onboarding {
+  margin: 0;
+}
+
+.document-composer__header p {
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.document-composer__header h1,
+.document-summary h2 {
+  margin-top: 6px;
+  color: var(--fg-1);
+  font: var(--text-h2);
+}
+
+.document-catalog-picker {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 20px;
+}
+
+.document-catalog-picker .mk-combobox {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.document-catalog-picker .mk-btn[aria-pressed="true"] {
+  border-color: var(--ok-border);
+  box-shadow: inset 3px 0 var(--ok-solid);
+}
+
+.document-composer__onboarding {
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.document-lines-table {
+  min-width: 0;
+  overflow-x: auto;
+  border-top: 1px solid var(--line-strong);
+}
+
+.document-lines-table table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.document-lines-table th,
+.document-lines-table td {
+  padding: 12px 10px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+  text-align: left;
+}
+
+.document-lines-table thead th {
+  color: var(--fg-3);
+  font: var(--text-meta);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.document-lines-table tbody th strong,
+.document-lines-table tbody th span {
+  display: block;
+}
+
+.document-lines-table tbody th strong {
+  color: var(--fg-1);
+  font: 600 14px/20px var(--font-ui);
+}
+
+.document-lines-table tbody th span,
+.document-lines-table__muted {
+  margin-top: 3px;
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.document-lines-table__row {
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.document-lines-table__row:hover {
+  background: color-mix(in srgb, var(--accent-module) 5%, transparent);
+  box-shadow: inset 3px 0 var(--ok-solid);
+}
+
+.document-lines-table .mk-input,
+.document-lines-table .mk-field {
+  min-width: 120px;
+}
+
+.document-line-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.document-line-actions .mk-btn {
+  min-width: 32px;
+  padding-inline: 8px !important;
+}
+
+.document-summary {
+  min-width: 0;
+  align-self: start;
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 18px;
+  padding: clamp(16px, 3vw, 32px);
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface-panel);
+}
+
+.document-summary__totals p,
+.document-summary__totals dl,
+.document-summary__totals dd {
+  margin: 0;
+}
+
+.document-summary__totals p {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.document-summary__totals dl {
+  display: grid;
+  gap: 8px;
+}
+
+.document-summary__totals dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.document-summary__totals dd {
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.document-summary__totals dl div:last-child {
+  padding-top: 8px;
+  border-top: 1px solid var(--line-strong);
+  color: var(--fg-1);
+  font-weight: 700;
+}
+
+.document-summary__actions {
+  display: grid;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .document-composer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .document-summary {
+    position: static;
+    border-top: 1px solid var(--line-strong);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 390px) {
+  .document-composer__workspace,
+  .document-summary {
+    padding: 14px;
+  }
+
+  .document-composer__header {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .document-catalog-picker {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .document-catalog-picker .mk-btn {
+    width: 100%;
+  }
+}
