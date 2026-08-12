@@ -144,7 +144,7 @@ jobs:
           normalized_key="$(printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" | node tools/station-release/normalize-signing-key.mjs)"
           normalized_key_file="$RUNNER_TEMP/station-updater.key"
           trap 'rm -f "$normalized_key_file"' EXIT
-          printf '%s' "$normalized_key" > "$normalized_key_file"
+          printf '%s' "$TAURI_SIGNING_PRIVATE_KEY" > "$normalized_key_file"
           export TAURI_SIGNING_PRIVATE_KEY="$normalized_key_file"
           pnpm --filter @markiro/station tauri build
           bundle_dir="apps/station/src-tauri/target/release/bundle/nsis"
