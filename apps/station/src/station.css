@@ -34,6 +34,8 @@ body,
 
 .station-enrollment {
   display: grid;
+  --control-keypad: 80px;
+
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -45,8 +47,7 @@ body,
   background: var(--surface-page);
 }
 
-.station-enrollment__context,
-.station-enrollment__entry {
+.station-enrollment__context {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -102,7 +103,11 @@ body,
 
 .station-enrollment__entry {
   display: grid;
+  min-width: 0;
+  min-height: 0;
   padding: var(--sp-4);
+  overflow: visible;
+  gap: var(--sp-1);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-3);
   background: var(--surface-card);
@@ -138,14 +143,14 @@ body,
 
 .station-enrollment__keypad {
   display: grid;
-  padding-block: var(--sp-3);
-  overflow: hidden;
+  padding-block: var(--sp-1);
   place-items: center;
 }
 
 .station-enrollment__actions {
   display: grid;
   gap: var(--sp-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .station-enrollment__success {
@@ -155,7 +160,7 @@ body,
   place-content: center;
 }
 
-@media (max-width: 1100px), (max-height: 800px) {
+@media (max-width: 1023px), (max-height: 767px) {
   .station-enrollment {
     padding: var(--sp-3);
     gap: var(--sp-3);
