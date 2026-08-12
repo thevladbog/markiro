@@ -271,8 +271,12 @@ export function App() {
     restoreLockdownAfterSetup.current = false;
     void (async () => {
       await lockdown.whenSettled();
-      if (cancelled || lockdown.getSnapshot().mode !== "locked") return;
-      restoreLockdownAfterSetup.current = true;
+      if (cancelled) return;
+      restoreLockdownAfterSetup.current = lockdown.getSnapshot().mode === "locked";
+      // Even a confirmed windowed snapshot cannot prove the OS window is
+      // fully restored after a partial enter failure (`applied === null` in
+      // the lifecycle). Always request exit; the lifecycle de-duplicates the
+      // already-confirmed windowed case and retries the uncertain one.
       await lockdown.exit();
     })();
     return () => {

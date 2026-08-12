@@ -81,7 +81,11 @@ describe("WindowModeControl", () => {
     );
     expect(document.body.textContent).not.toContain("secret-device-key");
 
-    fireEvent.click(screen.getByRole("button", { name: "Dismiss window mode error" }));
+    const dismiss = screen.getByRole("button", { name: "Dismiss window mode error" });
+    expect(dismiss.className).toContain("mk-btn--floor");
+    expect(dismiss.style.height).toBe("var(--control-floor)");
+    expect(dismiss.style.minWidth).toBe("var(--control-floor)");
+    fireEvent.click(dismiss);
     expect(onDismissError).toHaveBeenCalledTimes(1);
   });
 

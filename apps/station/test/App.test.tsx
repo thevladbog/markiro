@@ -583,9 +583,35 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
 
-    expect(lockdownMock.exit).not.toHaveBeenCalled();
+    expect(lockdownMock.exit).toHaveBeenCalledTimes(1);
     expect(lockdownMock.enter).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined();
+  });
+
+  it("still exits for setup after a failed enter may have partially changed the OS window", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+    lockdownMock.snapshot = { mode: "windowed", pending: false, error: "enter" };
+
+    render(<App />);
+    await signInAsOperator();
+    lockdownMock.enter.mockClear();
+    lockdownMock.exit.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+
+    await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    expect(lockdownMock.enter).not.toHaveBeenCalled();
   });
 
   it("renders Enrollment when readConfig resolves an un-enrolled config", async () => {

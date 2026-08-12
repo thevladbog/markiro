@@ -60,7 +60,7 @@ export function WindowModeControl({
             {t(snapshot.error === "exit" ? "windowMode.exitError" : "windowMode.enterError")}
           </span>
           <Button
-            size="compact"
+            size="floor"
             variant="secondary"
             aria-label={t("windowMode.dismissError")}
             onClick={onDismissError}

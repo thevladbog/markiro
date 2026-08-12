@@ -47,7 +47,7 @@ export function FloorShell({
   const { t } = useTranslation();
   return (
     <div className="station-root">
-      {windowChrome ? <div className="station-window-chrome">{windowChrome}</div> : null}
+      {windowChrome ? <div className="station-floor-window-chrome">{windowChrome}</div> : null}
       <StatusBar
         stationName={stationName}
         lineName={lineName}
