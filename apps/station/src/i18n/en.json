@@ -1,5 +1,10 @@
 {
-  "app": { "title": "Markiro — Station", "booting": "Loading station…" },
+  "app": {
+    "title": "Markiro — Station",
+    "booting": "Loading station…",
+    "stationDescriptor": "Production line station",
+    "stationPurpose": "Code verification, aggregation, and label printing on the production line."
+  },
   "legacyIdentity": {
     "title": "Station service required",
     "resolving": "Updating station identity. Cached offline work remains available.",
@@ -10,11 +15,27 @@
   },
   "enroll": {
     "title": "Connect station",
+    "codeLabel": "Station onboarding",
+    "codePrompt": "Enter the eight-digit code from the cabinet or scan it with the configured scanner.",
     "code": "Pairing code",
     "serverUrl": "Server URL",
     "apiKey": "Device key",
     "submit": "Pair station",
     "redeeming": "Pairing…",
+    "redeemingDetail": "Checking the code and loading station settings…",
+    "keypad": "Pairing code keypad",
+    "backspace": "Backspace",
+    "clear": "Clear",
+    "retry": "Try again",
+    "cabinetAddress": "admin.markiro.app",
+    "cabinetRecovery": "Create a new pairing code in the cabinet, then enter it here.",
+    "serviceTitle": "Service connection",
+    "serviceWarning": "Use this only with service-provided credentials. It does not replace ordinary pairing.",
+    "steps": {
+      "one": "Open the station page in the administrator cabinet.",
+      "two": "Create an eight-digit pairing code for this production line.",
+      "three": "Enter or scan the code here."
+    },
     "setup": "Equipment setup",
     "serviceMode": "Service setup",
     "serviceConnect": "Connect service credentials",

@@ -32,6 +32,150 @@ body,
   place-items: center;
 }
 
+.station-enrollment {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  padding: var(--sp-5);
+  overflow: hidden;
+  gap: var(--sp-5);
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 560px);
+  background: var(--surface-page);
+}
+
+.station-enrollment__context,
+.station-enrollment__entry {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.station-enrollment__context {
+  display: grid;
+  padding: var(--sp-4);
+  gap: var(--sp-5);
+  align-content: center;
+}
+
+.station-brand {
+  display: grid;
+  gap: var(--sp-2);
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.station-brand img {
+  width: 220px;
+  max-width: 100%;
+  height: auto;
+}
+
+.station-enrollment__intro,
+.station-enrollment__steps {
+  max-width: 620px;
+  margin: 0;
+  font: var(--floor-body);
+}
+
+.station-enrollment__intro p {
+  margin: 0;
+}
+
+.station-enrollment__cabinet,
+.station-enrollment__eyebrow {
+  color: var(--fg-2);
+  font: var(--floor-body-strong);
+}
+
+.station-enrollment__cabinet {
+  margin-top: var(--sp-3) !important;
+  font-family: var(--font-mono);
+}
+
+.station-enrollment__steps {
+  display: grid;
+  padding-left: var(--sp-4);
+  gap: var(--sp-3);
+}
+
+.station-enrollment__entry {
+  display: grid;
+  padding: var(--sp-4);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-2);
+  align-content: center;
+}
+
+.station-enrollment__entry > * {
+  min-width: 0;
+}
+
+.station-enrollment__panel-heading h1,
+.station-enrollment__panel-heading p,
+.station-enrollment__success h1,
+.station-enrollment__success p,
+.station-enrollment__recovery {
+  margin: 0;
+}
+
+.station-enrollment__panel-heading h1,
+.station-enrollment__success h1 {
+  margin-top: var(--sp-2);
+  font: var(--floor-title);
+}
+
+.station-enrollment__panel-heading > p:last-child,
+.station-enrollment__success p,
+.station-enrollment__recovery {
+  margin-top: var(--sp-2);
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.station-enrollment__keypad {
+  display: grid;
+  padding-block: var(--sp-3);
+  overflow: hidden;
+  place-items: center;
+}
+
+.station-enrollment__actions {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.station-enrollment__success {
+  display: grid;
+  min-height: 180px;
+  text-align: center;
+  place-content: center;
+}
+
+@media (max-width: 1100px), (max-height: 800px) {
+  .station-enrollment {
+    padding: var(--sp-3);
+    gap: var(--sp-3);
+    grid-template-columns: minmax(300px, 1fr) minmax(420px, 520px);
+  }
+
+  .station-enrollment__context,
+  .station-enrollment__entry {
+    padding: var(--sp-3);
+  }
+
+  .station-enrollment__context {
+    gap: var(--sp-3);
+  }
+
+  .station-enrollment__keypad {
+    --control-keypad: 64px;
+  }
+}
+
 #root .mk-alert > span,
 #root .mk-alert > div > span,
 #root .mk-alert > div > div {

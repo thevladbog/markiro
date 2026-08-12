@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, Input } from "@markiro/ui";
+import { Alert, Button, Input, PinPad } from "@markiro/ui";
 import { createStationClient } from "../lib/api-client.js";
 import { writeConfig } from "../lib/config.js";
 import {
@@ -11,6 +11,7 @@ import {
 import { tauriExecutor } from "../lib/sqlite.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { SealedWorkSummary } from "../lib/credential-recovery.js";
+import { StationBrand } from "../ui/StationBrand.js";
 
 export interface EnrollmentProps {
   machineId: string;
@@ -40,7 +41,19 @@ interface EnrollmentLifecycleIdentity {
   readonly runConfigTransition: (transition: () => Promise<void>) => Promise<void>;
 }
 
+interface EnrollmentSuccessSummary {
+  readonly organizationName: string;
+  readonly lineName?: string;
+}
+
 const directConfigTransition = (transition: () => Promise<void>): Promise<void> => transition();
+
+export function normalizePairingKeyboardInput(current: string, key: string): string {
+  if (/^\d$/.test(key)) return `${current}${key}`.slice(0, 8);
+  if (key === "Backspace") return current.slice(0, -1);
+  if (key === "Delete") return "";
+  return current;
+}
 
 /**
  * First-run pairing is deliberately code-first. The legacy URL/key path is a
@@ -65,8 +78,13 @@ export function Enrollment({
   );
   const [serverUrl, setServerUrl] = useState(() => pairingServerUrl ?? "");
   const [apiKey, setApiKey] = useState("");
+  const [successSummary, setSuccessSummary] = useState<EnrollmentSuccessSummary | null>(null);
   const operationSequence = useRef(0);
   const activeOperation = useRef<EnrollmentOperation | null>(null);
+  const redeemInFlight = useRef(false);
+  const serviceInFlight = useRef(false);
+  const successTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const successSequence = useRef(0);
   const lifecycleIdentity = useRef<EnrollmentLifecycleIdentity>({
     machineId,
     expectedDeviceId,
@@ -75,6 +93,22 @@ export function Enrollment({
   });
 
   const busy = state === "redeeming";
+  const requiresNewCode = error === "invalid" || error === "expired" || error === "locked";
+  const canRetry = error === "unavailable";
+
+  function clearSuccessTransition(): void {
+    successSequence.current += 1;
+    if (successTimeout.current !== null) clearTimeout(successTimeout.current);
+    successTimeout.current = null;
+  }
+
+  function scheduleEnrolled(): void {
+    clearSuccessTransition();
+    const sequence = successSequence.current;
+    successTimeout.current = setTimeout(() => {
+      if (successSequence.current === sequence) onEnrolled();
+    }, 900);
+  }
 
   function beginOperation(): EnrollmentOperation {
     activeOperation.current?.controller.abort();
@@ -108,14 +142,21 @@ export function Enrollment({
       runConfigTransition,
     };
     if (changed) {
+      clearSuccessTransition();
+      redeemInFlight.current = false;
+      serviceInFlight.current = false;
       setCode("");
       setState("waiting");
       setError(pairingServerUrl ? null : "setup_required");
       setServerUrl("");
       setApiKey("");
+      setSuccessSummary(null);
     }
     return () => {
+      clearSuccessTransition();
       operationSequence.current += 1;
+      redeemInFlight.current = false;
+      serviceInFlight.current = false;
       activeOperation.current?.controller.abort();
       activeOperation.current = null;
     };
@@ -127,16 +168,17 @@ export function Enrollment({
   useEffect(() => {
     if (!scanSource) return;
     return scanSource.start((raw) => {
-      if (/^\d{8}$/.test(raw)) setCode(raw);
+      if (!busy && /^\d{8}$/.test(raw)) setCode(raw);
     });
-  }, [scanSource]);
+  }, [busy, scanSource]);
 
   async function redeem() {
-    if (busy || !/^\d{8}$/.test(code)) return;
+    if (busy || redeemInFlight.current || !/^\d{8}$/.test(code)) return;
     if (!pairingServerUrl) {
       setError("setup_required");
       return;
     }
+    redeemInFlight.current = true;
     const operation = beginOperation();
     setState("redeeming");
     setError(null);
@@ -161,8 +203,12 @@ export function Enrollment({
         }),
       );
       if (!operationIsCurrent(operation)) return;
+      setSuccessSummary({
+        organizationName: result.provisioning.organizationName,
+        ...(result.provisioning.lineName ? { lineName: result.provisioning.lineName } : {}),
+      });
       setState("success");
-      onEnrolled();
+      scheduleEnrolled();
     } catch {
       if (!operationIsCurrent(operation)) return;
       // A roster/config failure is deliberately indistinguishable from a
@@ -170,12 +216,14 @@ export function Enrollment({
       setError("unavailable");
       setState("waiting");
     } finally {
+      redeemInFlight.current = false;
       finishOperation(operation);
     }
   }
 
   async function serviceConnect() {
     if (expectedDeviceId || busy || !serverUrl || !apiKey) return;
+    serviceInFlight.current = true;
     const operation = beginOperation();
     setState("redeeming");
     setError(null);
@@ -185,113 +233,198 @@ export function Enrollment({
       if (!operationIsCurrent(operation)) return;
       await runConfigTransition(() => writeConfig({ machineId, apiKey, serverUrl }));
       if (!operationIsCurrent(operation)) return;
+      setSuccessSummary(null);
       setState("success");
-      onEnrolled();
+      scheduleEnrolled();
     } catch {
       if (!operationIsCurrent(operation)) return;
       setError("service");
       setState("service");
     } finally {
+      serviceInFlight.current = false;
       finishOperation(operation);
     }
   }
 
-  const serviceMode = state === "service" && !expectedDeviceId;
+  function handleCodeKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    if (busy) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      void redeem();
+      return;
+    }
+    const next = normalizePairingKeyboardInput(code, event.key);
+    if (next !== code) {
+      event.preventDefault();
+      setCode(next);
+    }
+  }
+
+  const serviceMode = (state === "service" || (busy && serviceInFlight.current)) && !expectedDeviceId;
+
+  const status = busy ? <p role="status">{t("enroll.redeemingDetail")}</p> : null;
+  const errorNotice = error ? <Alert tone="error">{t(`enroll.errors.${error}`)}</Alert> : null;
+
+  const pairingPanel = (
+    <>
+      <header className="station-enrollment__panel-heading">
+        <p className="station-enrollment__eyebrow">{t("enroll.codeLabel")}</p>
+        <h1 id="station-enrollment-title">{t("enroll.title")}</h1>
+        <p>{t("enroll.codePrompt")}</p>
+      </header>
+      {sealedWork ? (
+        <Alert tone="warn">
+          <p data-testid="sealed-work-summary">
+            {t("enroll.sealedWork", {
+              scans: sealedWork.scans,
+              boxes: sealedWork.boxes,
+              exceptions: sealedWork.exceptions,
+            })}
+          </p>
+        </Alert>
+      ) : null}
+      {errorNotice}
+      {requiresNewCode ? <p className="station-enrollment__recovery">{t("enroll.cabinetRecovery")}</p> : null}
+      {status}
+      <Input
+        size="floor"
+        label={t("enroll.code")}
+        value={code}
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={8}
+        autoComplete="one-time-code"
+        mono
+        disabled={busy}
+        onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
+        onKeyDown={handleCodeKeyDown}
+      />
+      <div className="station-enrollment__keypad">
+        <PinPad
+          value={code}
+          onChange={setCode}
+          maxLength={8}
+          size="floor"
+          disabled={busy}
+          ariaLabel={t("enroll.keypad")}
+          backspaceLabel={t("enroll.backspace")}
+          clearLabel={t("enroll.clear")}
+        />
+      </div>
+      <div className="station-enrollment__actions">
+        <Button
+          size="floor"
+          onClick={() => void redeem()}
+          disabled={busy || code.length !== 8 || !pairingServerUrl}
+        >
+          {busy ? t("enroll.redeeming") : t("enroll.submit")}
+        </Button>
+        {canRetry ? (
+          <Button size="floor" variant="secondary" onClick={() => void redeem()} disabled={busy}>
+            {t("enroll.retry")}
+          </Button>
+        ) : null}
+        {onSetup ? (
+          <Button size="floor" variant="secondary" onClick={onSetup} disabled={busy}>
+            {t("enroll.setup")}
+          </Button>
+        ) : null}
+        {expectedDeviceId ? null : (
+          <Button
+            size="floor"
+            variant="secondary"
+            onClick={() => {
+              setError(null);
+              setState("service");
+            }}
+            disabled={busy}
+          >
+            {t("enroll.serviceMode")}
+          </Button>
+        )}
+      </div>
+    </>
+  );
+
+  const servicePanel = (
+    <>
+      <header className="station-enrollment__panel-heading">
+        <p className="station-enrollment__eyebrow">{t("enroll.serviceMode")}</p>
+        <h1 id="station-enrollment-title">{t("enroll.serviceTitle")}</h1>
+      </header>
+      <Alert tone="warn">{t("enroll.serviceWarning")}</Alert>
+      {errorNotice}
+      {status}
+      <Input
+        size="floor"
+        label={t("enroll.serverUrl")}
+        value={serverUrl}
+        onChange={(event) => setServerUrl(event.target.value)}
+        autoComplete="url"
+        disabled={busy}
+      />
+      <Input
+        size="floor"
+        label={t("enroll.apiKey")}
+        type="password"
+        value={apiKey}
+        onChange={(event) => setApiKey(event.target.value)}
+        autoComplete="off"
+        disabled={busy}
+      />
+      <div className="station-enrollment__actions">
+        <Button
+          size="floor"
+          onClick={() => void serviceConnect()}
+          disabled={busy || !serverUrl || !apiKey}
+        >
+          {t("enroll.serviceConnect")}
+        </Button>
+        <Button
+          size="floor"
+          variant="secondary"
+          onClick={() => {
+            setError(pairingServerUrl ? null : "setup_required");
+            setState("waiting");
+          }}
+          disabled={busy}
+        >
+          {t("enroll.backToPairing")}
+        </Button>
+      </div>
+    </>
+  );
 
   return (
-    <main className="station-centered-screen">
-      <Card style={{ minWidth: 480, padding: 32 }}>
-        <h1 style={{ fontSize: "2rem", marginBottom: 24 }}>{t("enroll.title")}</h1>
-        {sealedWork ? (
-          <Alert tone="warn">
-            <p data-testid="sealed-work-summary">
-              {t("enroll.sealedWork", {
-                scans: sealedWork.scans,
-                boxes: sealedWork.boxes,
-                exceptions: sealedWork.exceptions,
-              })}
-            </p>
-          </Alert>
-        ) : null}
-        {error ? <Alert tone="error">{t(`enroll.errors.${error}`)}</Alert> : null}
-        {state === "success" ? <p role="status">{t("enroll.success")}</p> : null}
-        {serviceMode ? (
-          <>
-            <Input
-              size="floor"
-              label={t("enroll.serverUrl")}
-              value={serverUrl}
-              onChange={(event) => setServerUrl(event.target.value)}
-              autoComplete="url"
-            />
-            <Input
-              size="floor"
-              label={t("enroll.apiKey")}
-              type="password"
-              value={apiKey}
-              onChange={(event) => setApiKey(event.target.value)}
-              autoComplete="off"
-            />
-            <Button
-              size="floor"
-              onClick={() => void serviceConnect()}
-              disabled={busy || !serverUrl || !apiKey}
-            >
-              {t("enroll.serviceConnect")}
-            </Button>
-            <Button
-              size="floor"
-              variant="secondary"
-              onClick={() => setState("waiting")}
-              disabled={busy}
-            >
-              {t("enroll.backToPairing")}
-            </Button>
-          </>
-        ) : (
-          <>
-            <Input
-              size="floor"
-              label={t("enroll.code")}
-              value={code}
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={8}
-              autoComplete="one-time-code"
-              mono
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 8))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void redeem();
-                }
-              }}
-            />
-            <Button
-              size="floor"
-              onClick={() => void redeem()}
-              disabled={busy || code.length !== 8 || !pairingServerUrl}
-            >
-              {busy ? t("enroll.redeeming") : t("enroll.submit")}
-            </Button>
-            {onSetup ? (
-              <Button size="floor" variant="secondary" onClick={onSetup} disabled={busy}>
-                {t("enroll.setup")}
-              </Button>
+    <main className="station-enrollment" aria-labelledby="station-enrollment-title">
+      <aside className="station-enrollment__context">
+        <StationBrand descriptor={t("app.stationDescriptor")} />
+        <div className="station-enrollment__intro">
+          <p>{t("app.stationPurpose")}</p>
+          <p className="station-enrollment__cabinet">{t("enroll.cabinetAddress")}</p>
+        </div>
+        <ol className="station-enrollment__steps">
+          <li>{t("enroll.steps.one")}</li>
+          <li>{t("enroll.steps.two")}</li>
+          <li>{t("enroll.steps.three")}</li>
+        </ol>
+      </aside>
+      <section className="station-enrollment__entry">
+        {state === "success" ? (
+          <div className="station-enrollment__success" role="status">
+            <h1 id="station-enrollment-title">{t("enroll.success")}</h1>
+            {successSummary ? (
+              <p>{`${successSummary.organizationName}${
+                successSummary.lineName ? ` — ${successSummary.lineName}` : ""
+              }`}</p>
             ) : null}
-            {expectedDeviceId ? null : (
-              <Button
-                size="floor"
-                variant="secondary"
-                onClick={() => setState("service")}
-                disabled={busy}
-              >
-                {t("enroll.serviceMode")}
-              </Button>
-            )}
-          </>
+          </div>
+        ) : serviceMode ? (
+          servicePanel
+        ) : (
+          pairingPanel
         )}
-      </Card>
+      </section>
     </main>
   );
 }

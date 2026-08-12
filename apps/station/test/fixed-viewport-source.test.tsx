@@ -19,6 +19,17 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
+  it("lays out enrollment as a bounded two-column console without inline page styling", () => {
+    const css = stationSource("station.css");
+    const enrollment = stationSource("pages/Enrollment.tsx");
+
+    expect(enrollment).toContain('className="station-enrollment"');
+    expect(enrollment).not.toContain("style={{");
+    expect(css).toMatch(
+      /\.station-enrollment\s*\{[^}]*display:\s*grid;[^}]*overflow:\s*hidden;[^}]*gap:\s*var\(--sp-[^)]*\);[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(420px, 560px\);/s,
+    );
+  });
+
   it("keeps shared alert copy at floor-readable size inside the station application", () => {
     expect(stationSource("station.css")).toMatch(
       /#root \.mk-alert > span,[^{]+\{[^}]*font-size:\s*18px !important;[^}]*line-height:\s*26px !important;/s,
