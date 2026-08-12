@@ -23,6 +23,7 @@ export function DocumentLinesTable({
   errors,
   onQuantityChange,
   onPriceChange,
+  onPriceOverrideReasonChange,
   onVatIncludedChange,
   onPolicyChange,
   onMove,
@@ -33,6 +34,7 @@ export function DocumentLinesTable({
   errors: Record<string, string>;
   onQuantityChange: (line: DocumentLineDraft, quantity: number) => void;
   onPriceChange: (line: DocumentLineDraft, price: string) => void;
+  onPriceOverrideReasonChange: (line: DocumentLineDraft, reason: string) => void;
   onVatIncludedChange: (line: DocumentLineDraft, included: boolean) => void;
   onPolicyChange: (
     line: DocumentLineDraft,
@@ -97,6 +99,13 @@ export function DocumentLinesTable({
                       : {})}
                     onChange={(event) => onPriceChange(line, event.target.value)}
                   />
+                  {kind === "offer" ? (
+                    <Input
+                      label={t("documents.priceOverrideReasonFor", { name: line.nameRu })}
+                      value={line.priceOverrideReason ?? ""}
+                      onChange={(event) => onPriceOverrideReasonChange(line, event.target.value)}
+                    />
+                  ) : null}
                 </td>
                 <td>
                   {line.vatRateBps === null ? (

@@ -143,6 +143,7 @@
     },
     "quantityFor": "Quantity for {{name}}",
     "priceFor": "Price for {{name}}",
+    "priceOverrideReasonFor": "Price change reason for {{name}}",
     "vatFor": "VAT for {{name}}",
     "vatIncluded": "Included",
     "vatExcluded": "Added",

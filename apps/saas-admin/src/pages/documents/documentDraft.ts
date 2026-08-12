@@ -49,8 +49,11 @@ export function createLineFromCatalog(version: CatalogVersionDto, id: string): D
     version: version.version,
     nameRu: version.nameRu,
     nameEn: version.nameEn,
+    descriptionRu: version.descriptionRu,
+    descriptionEn: version.descriptionEn,
     quantity: 1,
     unit: version.unit,
+    catalogUnitPrice: version.unitPrice ?? null,
     agreedUnitPrice: version.unitPrice,
     vatRateBps,
     vatIncluded: vatRateBps !== null && version.vatIncluded === true,
@@ -90,6 +93,11 @@ export function documentDraftReducer(
       return updateLineById(draft, action.id, (line) => ({
         ...line,
         agreedUnitPrice: action.price,
+      }));
+    case "line.priceOverrideReasonChanged":
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        priceOverrideReason: action.reason,
       }));
     case "line.vatIncludedChanged":
       return updateLineById(draft, action.id, (line) => ({
@@ -235,11 +243,17 @@ export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput {
 
 function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
   const activationPolicy = requiredActivationPolicy("invoice", line);
-  return {
+  const result: CreateInvoiceLineInput = {
     kind: line.kind,
     catalogVersionId: line.catalogVersionId,
     nameRu: line.nameRu,
     nameEn: line.nameEn,
+    ...(line.kind === "custom" && line.descriptionRu !== undefined
+      ? { descriptionRu: line.descriptionRu }
+      : {}),
+    ...(line.kind === "custom" && line.descriptionEn !== undefined
+      ? { descriptionEn: line.descriptionEn }
+      : {}),
     quantity: line.quantity,
     unit: line.unit,
     agreedUnitPrice: line.agreedUnitPrice,
@@ -247,6 +261,9 @@ function toInvoiceLine(line: DocumentLineDraft): CreateInvoiceLineInput {
     vatIncluded: line.vatIncluded,
     activationPolicy,
   };
+  return line.kind === "custom" && line.catalogUnitPrice !== undefined
+    ? { ...result, catalogUnitPrice: line.catalogUnitPrice }
+    : result;
 }
 
 function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
@@ -261,6 +278,7 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
       quantity: line.quantity,
       unit: line.unit,
       agreedUnitPrice: line.agreedUnitPrice,
+      priceOverrideReason: line.priceOverrideReason?.trim() || null,
       vatRateBps: line.vatRateBps,
       vatIncluded: line.vatIncluded,
       activationPolicy: null,
@@ -275,6 +293,7 @@ function toOfferLine(line: DocumentLineDraft): CreateOfferLineInput {
     quantity: line.quantity,
     unit: line.unit,
     agreedUnitPrice: line.agreedUnitPrice,
+    priceOverrideReason: line.priceOverrideReason?.trim() || null,
     vatRateBps: line.vatRateBps,
     vatIncluded: line.vatIncluded,
     activationPolicy: toOfferActivationPolicy(activationPolicy),

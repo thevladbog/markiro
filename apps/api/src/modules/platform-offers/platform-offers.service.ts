@@ -1,4 +1,10 @@
-import { Inject, Injectable, ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -21,6 +27,42 @@ export class PlatformOffersService {
       })),
     );
     return this.db.transaction(async (tx) => {
+      const validatedLines: Array<{
+        line: CreateOfferDto["lines"][number];
+        catalogUnitPrice: string | null;
+        priceOverrideReason: string | null;
+      }> = [];
+      for (const line of input.lines) {
+        if (!line.catalogVersionId) {
+          if (line.kind !== "service") {
+            throw new BadRequestException({ code: "offer_catalog_version_invalid" });
+          }
+          validatedLines.push({ line, catalogUnitPrice: null, priceOverrideReason: null });
+          continue;
+        }
+        const [version] = await tx
+          .select({
+            kind: schema.catalogItemVersions.kind,
+            status: schema.catalogItemVersions.status,
+            unitPrice: schema.catalogItemVersions.unitPrice,
+          })
+          .from(schema.catalogItemVersions)
+          .where(eq(schema.catalogItemVersions.id, line.catalogVersionId))
+          .for("share");
+        if (!version || version.kind !== line.kind || version.status !== "published") {
+          throw new BadRequestException({ code: "offer_catalog_version_invalid" });
+        }
+        const priceOverrideReason = line.priceOverrideReason?.trim() || null;
+        if (line.agreedUnitPrice !== version.unitPrice && !priceOverrideReason) {
+          throw new BadRequestException({ code: "offer_price_override_reason_required" });
+        }
+        validatedLines.push({
+          line,
+          catalogUnitPrice: version.unitPrice,
+          priceOverrideReason:
+            line.agreedUnitPrice === version.unitPrice ? null : priceOverrideReason,
+        });
+      }
       const [offer] = await tx
         .insert(schema.commercialOffers)
         .values({
@@ -34,7 +76,7 @@ export class PlatformOffersService {
         .returning();
       if (!offer) throw new Error("offer insert failed");
       await tx.insert(schema.commercialOfferLines).values(
-        input.lines.map((line, index) => ({
+        validatedLines.map(({ line, catalogUnitPrice, priceOverrideReason }, index) => ({
           tenantId: input.tenantId,
           offerId: offer.id,
           position: index + 1,
@@ -46,14 +88,14 @@ export class PlatformOffersService {
           descriptionEn: line.descriptionEn ?? null,
           quantity: line.quantity,
           unit: line.unit,
-          catalogUnitPrice: line.catalogUnitPrice ?? null,
+          catalogUnitPrice,
           agreedUnitPrice: line.agreedUnitPrice,
           vatRate:
             line.vatRateBps === null || line.vatRateBps === undefined
               ? null
               : String(line.vatRateBps / 100),
           vatIncluded: line.vatIncluded,
-          priceOverrideReason: line.priceOverrideReason ?? null,
+          priceOverrideReason,
           activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
           lineTotal: (Number(line.agreedUnitPrice) * line.quantity).toFixed(2),
         })),
