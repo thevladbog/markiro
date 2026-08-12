@@ -131,11 +131,11 @@ describe("stationAllowedOrigins", () => {
     expect(stationAllowedOrigins(loadEnv(BASE))).toEqual(["https://admin.example.ru"]);
   });
 
-  it("includes an exact HTTP(S) station origin", () => {
-    const env = loadEnv({ ...BASE, STATION_ORIGIN: "https://station.example.ru/" });
+  it("includes the exact Windows Tauri webview origin", () => {
+    const env = loadEnv({ ...BASE, STATION_ORIGIN: "http://tauri.localhost" });
     expect(stationAllowedOrigins(env)).toEqual([
       "https://admin.example.ru",
-      "https://station.example.ru",
+      "http://tauri.localhost",
     ]);
   });
 
@@ -215,6 +215,12 @@ describe("loadEnv STATION_ORIGIN", () => {
       loadEnv({ ...BASE, STATION_ORIGIN: "https://Station.Example.RU:5273/pair?a=1#x" })
         .STATION_ORIGIN,
     ).toBe("https://station.example.ru:5273");
+  });
+
+  it("preserves the exact Windows Tauri webview origin", () => {
+    expect(loadEnv({ ...BASE, STATION_ORIGIN: "http://tauri.localhost" }).STATION_ORIGIN).toBe(
+      "http://tauri.localhost",
+    );
   });
 
   it("permits tauri://localhost but never the opaque null origin", () => {

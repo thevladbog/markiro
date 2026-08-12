@@ -27,7 +27,7 @@ const FOREIGN_ORIGIN = "https://evil.example";
  * be absent. A literal also keeps it provably distinct from ADMIN_ORIGIN.
  */
 const KIOSK_ORIGIN = "https://kiosk.markiro.test";
-const STATION_ORIGIN = "https://station.markiro.test";
+const STATION_ORIGIN = "http://tauri.localhost";
 
 describe.skipIf(!ready)("cors e2e", () => {
   let app: INestApplication | undefined;
@@ -148,11 +148,12 @@ describe.skipIf(!ready)("cors e2e", () => {
       .options("/station/pair")
       .set("Origin", STATION_ORIGIN)
       .set("Access-Control-Request-Method", "POST")
-      .set("Access-Control-Request-Headers", "content-type")
+      .set("Access-Control-Request-Headers", "content-type,x-station-capabilities")
       .expect(204);
 
     expect(res.headers["access-control-allow-origin"]).toBe(STATION_ORIGIN);
     expect(res.headers["access-control-allow-credentials"]).toBe("true");
+    expect(res.headers["access-control-allow-headers"]).toBe("content-type,x-station-capabilities");
   });
 
   /**
@@ -259,7 +260,7 @@ describe.skipIf(!ready)("cors e2e", () => {
       }
     });
 
-    it("refuses adjacent methods, cabinet paths, kiosk/auth paths, and unknown routes", async () => {
+    it("refuses adjacent methods, cabinet, auth, platform, kiosk, and unknown routes", async () => {
       for (const [method, path] of [
         ["GET", "/station/pair"],
         ["POST", "/station/identity"],
@@ -274,6 +275,7 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["GET", "/kiosk/bootstrap"],
         ["GET", "/counterparties"],
         ["POST", "/api/auth/sign-in/email"],
+        ["POST", "/api/platform-auth/sign-in/email"],
         ["GET", "/stations"],
         ["GET", "/station-devices"],
         ["GET", "/unknown"],
