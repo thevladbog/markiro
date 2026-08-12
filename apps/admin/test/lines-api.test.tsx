@@ -32,6 +32,15 @@ function successfulJsonResponse(body: unknown): Response {
   });
 }
 
+function pendingInvalidation(invalidateQueries: ReturnType<typeof vi.fn>) {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  invalidateQueries.mockReturnValue(promise);
+  return { resolve };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -41,47 +50,77 @@ describe("line mutation hooks", () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulJsonResponse(CREATED_LINE));
     vi.stubGlobal("fetch", fetchMock);
     const { result, invalidateQueries } = renderLineMutationHook(() => useCreateLine());
+    const invalidation = pendingInvalidation(invalidateQueries);
 
-    await act(() => result.current.mutateAsync({ name: "Розлив" }));
+    let mutation!: Promise<unknown>;
+    act(() => {
+      mutation = result.current.mutateAsync({ name: "Розлив" });
+    });
+
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: LINES_QUERY_KEY }),
+    );
+    expect(result.current.isPending).toBe(true);
+
+    invalidation.resolve();
+    await act(() => mutation);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/lines",
       expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "Розлив" }) }),
     );
-    await waitFor(() =>
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: LINES_QUERY_KEY }),
-    );
+    await waitFor(() => expect(result.current.isPending).toBe(false));
   });
 
   it("updates a line and invalidates its list", async () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulJsonResponse(CREATED_LINE));
     vi.stubGlobal("fetch", fetchMock);
     const { result, invalidateQueries } = renderLineMutationHook(() => useUpdateLine());
+    const invalidation = pendingInvalidation(invalidateQueries);
 
-    await act(() => result.current.mutateAsync({ id: "line-1", input: { name: "Розлив" } }));
+    let mutation!: Promise<unknown>;
+    act(() => {
+      mutation = result.current.mutateAsync({ id: "line-1", input: { name: "Розлив" } });
+    });
+
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: LINES_QUERY_KEY }),
+    );
+    expect(result.current.isPending).toBe(true);
+
+    invalidation.resolve();
+    await act(() => mutation);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/lines/line-1",
       expect.objectContaining({ method: "PATCH", body: JSON.stringify({ name: "Розлив" }) }),
     );
-    await waitFor(() =>
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: LINES_QUERY_KEY }),
-    );
+    await waitFor(() => expect(result.current.isPending).toBe(false));
   });
 
   it("deletes a line and invalidates its list", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
     const { result, invalidateQueries } = renderLineMutationHook(() => useDeleteLine());
+    const invalidation = pendingInvalidation(invalidateQueries);
 
-    await act(() => result.current.mutateAsync("line-1"));
+    let mutation!: Promise<unknown>;
+    act(() => {
+      mutation = result.current.mutateAsync("line-1");
+    });
+
+    await waitFor(() =>
+      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: LINES_QUERY_KEY }),
+    );
+    expect(result.current.isPending).toBe(true);
+
+    invalidation.resolve();
+    await act(() => mutation);
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/lines/line-1",
       expect.objectContaining({ method: "DELETE" }),
     );
-    await waitFor(() =>
-      expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: LINES_QUERY_KEY }),
-    );
+    await waitFor(() => expect(result.current.isPending).toBe(false));
   });
 });

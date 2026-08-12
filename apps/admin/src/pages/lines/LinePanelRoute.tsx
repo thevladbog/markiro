@@ -98,7 +98,11 @@ function DiscardDialog({
   ) : null;
 }
 
-function requestError(cause: unknown, fallback: string): string {
+function requestError(cause: unknown, fallback: string, subscriptionLimitReached: string): string {
+  if (cause instanceof ApiRequestError && cause.code === "subscription_limit_reached") {
+    return subscriptionLimitReached;
+  }
+
   return cause instanceof ApiRequestError ? cause.message : fallback;
 }
 
@@ -126,7 +130,13 @@ function CreateLinePanel() {
             toast("ok", t("pages.lines.toasts.createSuccess"));
             guard.finish();
           } catch (cause) {
-            setError(requestError(cause, t("pages.lines.toasts.createError")));
+            setError(
+              requestError(
+                cause,
+                t("pages.lines.toasts.createError"),
+                t("pages.lines.form.errors.subscriptionLimitReached"),
+              ),
+            );
           }
         }}
       />
@@ -180,7 +190,13 @@ function EditLinePanel() {
             toast("ok", t("pages.lines.toasts.updateSuccess"));
             guard.finish();
           } catch (cause) {
-            setError(requestError(cause, t("pages.lines.toasts.updateError")));
+            setError(
+              requestError(
+                cause,
+                t("pages.lines.toasts.updateError"),
+                t("pages.lines.form.errors.subscriptionLimitReached"),
+              ),
+            );
           }
         }}
       />

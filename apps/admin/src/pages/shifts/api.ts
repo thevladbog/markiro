@@ -244,9 +244,7 @@ export function useCreateLine(): UseMutationResult<LineDto, Error, CreateLineInp
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: postLine,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
   });
 }
 
@@ -255,9 +253,7 @@ export function useUpdateLine(): UseMutationResult<LineDto, Error, UpdateLineVar
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({ id, input }) => patchLine(id, input),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
   });
 }
 
@@ -266,8 +262,6 @@ export function useDeleteLine(): UseMutationResult<void, Error, string> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: removeLine,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: LINES_QUERY_KEY }),
   });
 }

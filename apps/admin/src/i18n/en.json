@@ -714,6 +714,7 @@
       "deleteConfirmBody": "The production line will be permanently deleted.",
       "deleteConfirmAction": "Delete",
       "deleteReferencedError": "This line is used by shifts and cannot be deleted.",
+      "retry": "Retry",
       "table": {
         "name": "Name",
         "createdAt": "Created",
@@ -734,7 +735,8 @@
         "submitUpdate": "Save",
         "errors": {
           "nameRequired": "Enter a line name",
-          "nameTooLong": "200 characters or fewer"
+          "nameTooLong": "200 characters or fewer",
+          "subscriptionLimitReached": "The subscription's production line limit has been reached. Increase the limit or delete an unused line."
         }
       },
       "toasts": {

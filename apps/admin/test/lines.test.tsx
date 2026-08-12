@@ -82,11 +82,13 @@ describe("LinesPage states and permissions", () => {
     expect(screen.queryByText("Производственные линии не добавлены")).toBeNull();
   });
 
-  it("shows an explicit error state without the empty state", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(500, { message: "Unavailable" })),
+  it("shows an explicit error state and retries the line list", async () => {
+    const fetchMock = vi.fn(async () =>
+      fetchMock.mock.calls.length === 1
+        ? jsonResponse(500, { message: "Unavailable" })
+        : jsonResponse(200, { items: [LINE] }),
     );
+    vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
 
@@ -94,6 +96,14 @@ describe("LinesPage states and permissions", () => {
       await screen.findByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
     ).toBeDefined();
     expect(screen.queryByText("Производственные линии не добавлены")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+
+    expect(await screen.findByText(LINE.name)).toBeDefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(
+      screen.queryByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
+    ).toBeNull();
   });
 
   it("explains the empty state and exposes create only to a writer", async () => {
@@ -196,14 +206,15 @@ describe("line create and rename panels", () => {
   });
 
   it("trims create payload, blocks duplicate pending submit, refetches, and closes on success", async () => {
-    let resolveCreate!: (response: Response) => void;
-    const createResponse = new Promise<Response>((resolve) => {
-      resolveCreate = resolve;
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
     });
-    let didCreate = false;
+    let listRequests = 0;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "POST") return createResponse;
-      return jsonResponse(200, { items: didCreate ? [LINE] : [] });
+      if (init?.method === "POST") return jsonResponse(201, LINE);
+      listRequests += 1;
+      return listRequests === 1 ? jsonResponse(200, { items: [] }) : refetchResponse;
     });
     vi.stubGlobal("fetch", fetchMock);
     const { router } = renderPage({ initialEntries: ["/lines/new"] });
@@ -221,9 +232,11 @@ describe("line create and rename panels", () => {
     fireEvent.click(submit);
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
 
-    didCreate = true;
-    resolveCreate(jsonResponse(201, LINE));
+    await waitFor(() => expect(listRequests).toBe(2));
+    expect(router.state.location.pathname).toBe("/lines/new");
+    expect(screen.getByRole("dialog", { name: "Новая линия" })).toBeDefined();
 
+    resolveRefetch(jsonResponse(200, { items: [LINE] }));
     await waitFor(() => expect(router.state.location.pathname).toBe("/lines"));
     await waitFor(() =>
       expect(
@@ -240,13 +253,15 @@ describe("line create and rename panels", () => {
 
   it("trims the rename payload and closes after the shared list refetches", async () => {
     const renamed = { ...LINE, name: "Фасовка" };
-    let didRename = false;
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    let listRequests = 0;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (init?.method === "PATCH") {
-        didRename = true;
-        return jsonResponse(200, renamed);
-      }
-      return jsonResponse(200, { items: didRename ? [renamed] : [LINE] });
+      if (init?.method === "PATCH") return jsonResponse(200, renamed);
+      listRequests += 1;
+      return listRequests === 1 ? jsonResponse(200, { items: [LINE] }) : refetchResponse;
     });
     vi.stubGlobal("fetch", fetchMock);
     const { router } = renderPage({ initialEntries: ["/lines/line-1/edit"] });
@@ -255,7 +270,9 @@ describe("line create and rename panels", () => {
     fireEvent.change(input, { target: { value: "  Фасовка  " } });
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
-    await waitFor(() => expect(router.state.location.pathname).toBe("/lines"));
+    await waitFor(() => expect(listRequests).toBe(2));
+    expect(router.state.location.pathname).toBe("/lines/line-1/edit");
+    expect(screen.getByRole("dialog", { name: "Изменить линию" })).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/lines/line-1",
       expect.objectContaining({
@@ -263,28 +280,58 @@ describe("line create and rename panels", () => {
         body: JSON.stringify({ name: "Фасовка" }),
       }),
     );
+
+    resolveRefetch(jsonResponse(200, { items: [renamed] }));
+    await waitFor(() => expect(router.state.location.pathname).toBe("/lines"));
     await waitFor(() => expect(screen.getByText("Фасовка")).toBeDefined());
   });
 
-  it("keeps server errors inline and preserves the entered value", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (_url: string, init?: RequestInit) =>
-        init?.method === "POST"
-          ? jsonResponse(422, { message: "Line quota exceeded" })
-          : jsonResponse(200, { items: [] }),
-      ),
-    );
-    renderPage({ initialEntries: ["/lines/new"] });
+  it.each([
+    {
+      language: "ru",
+      inputLabel: "Название линии",
+      submitLabel: "Создать",
+      panelTitle: "Новая линия",
+      expected:
+        "Достигнут лимит производственных линий по подписке. Увеличьте лимит или удалите неиспользуемую линию.",
+    },
+    {
+      language: "en",
+      inputLabel: "Line name",
+      submitLabel: "Create",
+      panelTitle: "New line",
+      expected:
+        "The subscription's production line limit has been reached. Increase the limit or delete an unused line.",
+    },
+  ])(
+    "maps the message-less subscription quota response to localized inline copy in $language",
+    async ({ language, inputLabel, submitLabel, panelTitle, expected }) => {
+      await i18n.changeLanguage(language);
+      const quotaResponse = {
+        code: "subscription_limit_reached",
+        entitlement: "lines",
+        used: 2,
+        limit: 2,
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (_url: string, init?: RequestInit) =>
+          init?.method === "POST"
+            ? jsonResponse(409, quotaResponse)
+            : jsonResponse(200, { items: [] }),
+        ),
+      );
+      renderPage({ initialEntries: ["/lines/new"] });
 
-    const input = await screen.findByLabelText("Название линии");
-    fireEvent.change(input, { target: { value: "Розлив" } });
-    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+      const input = await screen.findByLabelText(inputLabel);
+      fireEvent.change(input, { target: { value: "Розлив" } });
+      fireEvent.click(screen.getByRole("button", { name: submitLabel }));
 
-    expect(await screen.findByText("Line quota exceeded")).toBeDefined();
-    expect((input as HTMLInputElement).value).toBe("Розлив");
-    expect(screen.getByRole("dialog", { name: "Новая линия" })).toBeDefined();
-  });
+      expect(await screen.findByText(expected)).toBeDefined();
+      expect((input as HTMLInputElement).value).toBe("Розлив");
+      expect(screen.getByRole("dialog", { name: panelTitle })).toBeDefined();
+    },
+  );
 
   it("guards dirty dismissal until the user confirms discard", async () => {
     vi.stubGlobal(
@@ -329,13 +376,15 @@ describe("line create and rename panels", () => {
 
 describe("line deletion", () => {
   it("deletes the exact line ID and closes the confirmation after refetch", async () => {
-    let deleted = false;
+    let resolveRefetch!: (response: Response) => void;
+    const refetchResponse = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    let listRequests = 0;
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
-      if (init?.method === "DELETE") {
-        deleted = true;
-        return jsonResponse(204, undefined);
-      }
-      return jsonResponse(200, { items: deleted ? [] : [LINE] });
+      if (init?.method === "DELETE") return jsonResponse(204, undefined);
+      listRequests += 1;
+      return listRequests === 1 ? jsonResponse(200, { items: [LINE] }) : refetchResponse;
     });
     vi.stubGlobal("fetch", fetchMock);
     renderPage();
@@ -345,11 +394,15 @@ describe("line deletion", () => {
     expect(within(dialog).getByText(LINE.name)).toBeDefined();
     fireEvent.click(within(dialog).getByRole("button", { name: "Удалить" }));
 
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() => expect(listRequests).toBe(2));
+    expect(screen.getByRole("alertdialog", { name: "Удалить линию?" })).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/lines/line-1",
       expect.objectContaining({ method: "DELETE" }),
     );
+
+    resolveRefetch(jsonResponse(200, { items: [] }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(await screen.findByText("Производственные линии не добавлены")).toBeDefined();
   });
 

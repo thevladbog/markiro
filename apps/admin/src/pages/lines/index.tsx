@@ -156,7 +156,12 @@ export function LinesPage() {
           <Spinner label={t("common.loading")} />
         </div>
       ) : query.isError ? (
-        <Alert tone="error">{t("common.loadError")}</Alert>
+        <div className="mk-line-section-state">
+          <Alert tone="error">{t("common.loadError")}</Alert>
+          <Button type="button" variant="secondary" onClick={() => void query.refetch()}>
+            {t("pages.lines.retry")}
+          </Button>
+        </div>
       ) : items.length === 0 ? (
         <EmptyState
           title={t("pages.lines.emptyTitle")}
