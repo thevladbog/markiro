@@ -39,5 +39,15 @@ describe("Station brand assets", () => {
       "icons/icon.icns",
       "icons/icon.ico",
     ]);
+    expect(config.app.security.csp).toContain("img-src 'self' data:");
+  });
+
+  it("assigns the branded icon to the native window at startup", async () => {
+    const source = await readFile(resolve(stationRoot, "src-tauri/src/lib.rs"), "utf8");
+
+    expect(source).toContain('tauri::include_image!("./icons/128x128.png")');
+    expect(source).toMatch(
+      /get_webview_window\("main"\)[\s\S]*set_icon\(STATION_ICON\.clone\(\)\)/,
+    );
   });
 });
