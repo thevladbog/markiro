@@ -70,7 +70,7 @@ export function DocumentComposer({
   };
 
   const submit = async () => {
-    const nextErrors = validateDocumentDraft(draft);
+    const nextErrors = validateDocumentDraft(draft, kind);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     await onSubmit(draft);

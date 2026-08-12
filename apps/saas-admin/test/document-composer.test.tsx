@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createMemoryRouter, RouterProvider } from "react-router";
@@ -10,6 +12,8 @@ import { NavigationGuardProvider } from "../src/layout/NavigationGuard.js";
 import { DocumentComposer } from "../src/pages/documents/DocumentComposer.js";
 import type { CatalogVersionDto } from "../src/pages/catalog/api.js";
 import type { TenantListItem } from "../src/pages/tenants/api.js";
+
+const globalCss = readFileSync("src/global.css", "utf8");
 
 afterEach(() => {
   cleanup();
@@ -282,5 +286,80 @@ describe("DocumentComposer", () => {
       "100.00",
     );
     expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { version: plan, activationPolicy: "manual" as const },
+    { version: addon, activationPolicy: "after_current" as const },
+  ])(
+    "blocks an offer submit when an initial $version.kind uses $activationPolicy",
+    async ({ version, activationPolicy }) => {
+      await i18n.changeLanguage("ru");
+      const user = userEvent.setup();
+      const { props } = renderComposer({
+        kind: "offer",
+        initialDraft: {
+          tenantId: tenant.id,
+          applicationMode: "manual",
+          date: "",
+          lines: [
+            {
+              id: `invalid-${version.kind}`,
+              kind: version.kind,
+              catalogVersionId: version.id,
+              catalogItemCode: version.catalogItemCode,
+              version: version.version,
+              nameRu: version.nameRu,
+              nameEn: version.nameEn,
+              quantity: 1,
+              unit: version.unit,
+              agreedUnitPrice: "120.00",
+              vatRateBps: 2000,
+              vatIncluded: true,
+              activationPolicy,
+            },
+          ],
+        },
+      });
+
+      await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+      expect(props.onSubmit).not.toHaveBeenCalled();
+      expect(screen.getByText("Политика активации недоступна")).toBeDefined();
+    },
+  );
+
+  it("keeps every line action at the 44px touch target", async () => {
+    await i18n.changeLanguage("ru");
+    renderComposer({
+      initialDraft: {
+        tenantId: tenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [
+          {
+            id: "action-plan",
+            kind: "plan",
+            catalogVersionId: plan.id,
+            catalogItemCode: plan.catalogItemCode,
+            version: plan.version,
+            nameRu: plan.nameRu,
+            nameEn: plan.nameEn,
+            quantity: 1,
+            unit: plan.unit,
+            agreedUnitPrice: "120.00",
+            vatRateBps: 2000,
+            vatIncluded: true,
+            activationPolicy: "immediate",
+          },
+        ],
+      },
+    });
+
+    const action = screen.getByRole("button", { name: "Переместить Базовый тариф вверх" });
+
+    expect(action.classList.contains("document-line__action")).toBe(true);
+    expect(globalCss).toMatch(/\.document-line__action\s*\{[^}]*width:\s*44px;/);
+    expect(globalCss).toMatch(/\.document-line__action\s*\{[^}]*min-width:\s*44px;/);
   });
 });

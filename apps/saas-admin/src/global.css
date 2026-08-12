@@ -1503,9 +1503,10 @@ textarea {
   gap: 6px;
 }
 
-.document-line-actions .mk-btn {
-  min-width: 32px;
-  padding-inline: 8px !important;
+.document-line__action {
+  width: 44px;
+  min-width: 44px;
+  padding-inline: 0 !important;
 }
 
 .document-summary {

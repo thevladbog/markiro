@@ -34,9 +34,7 @@ export function getSupportedActivationPolicies(
 ): readonly ActivationPolicy[] {
   if (lineKind === "service") return [];
   if (documentKind === "invoice") return INVOICE_ACTIVATION_POLICIES;
-  return lineKind === "plan"
-    ? OFFER_PLAN_ACTIVATION_POLICIES
-    : OFFER_ADDON_ACTIVATION_POLICIES;
+  return lineKind === "plan" ? OFFER_PLAN_ACTIVATION_POLICIES : OFFER_ADDON_ACTIVATION_POLICIES;
 }
 
 export function createLineFromCatalog(version: CatalogVersionDto, id: string): DocumentLineDraft {
@@ -89,7 +87,10 @@ export function documentDraftReducer(
     case "line.quantityChanged":
       return updateLineById(draft, action.id, (line) => ({ ...line, quantity: action.quantity }));
     case "line.priceChanged":
-      return updateLineById(draft, action.id, (line) => ({ ...line, agreedUnitPrice: action.price }));
+      return updateLineById(draft, action.id, (line) => ({
+        ...line,
+        agreedUnitPrice: action.price,
+      }));
     case "line.vatIncludedChanged":
       return updateLineById(draft, action.id, (line) => ({
         ...line,
@@ -140,12 +141,9 @@ export function calculateDocumentTotals(
   vatTotal: string;
   total: string;
 } {
-  const kind =
-    typeof linesOrKind === "string" ? linesOrKind : (kindOrLines as DocumentKind);
+  const kind = typeof linesOrKind === "string" ? linesOrKind : (kindOrLines as DocumentKind);
   const lines =
-    typeof linesOrKind === "string"
-      ? (kindOrLines as readonly DocumentLineDraft[])
-      : linesOrKind;
+    typeof linesOrKind === "string" ? (kindOrLines as readonly DocumentLineDraft[]) : linesOrKind;
   let subtotal = 0n;
   let vatTotal = 0n;
   let total = 0n;
@@ -161,12 +159,11 @@ export function calculateDocumentTotals(
         : line.vatIncluded
           ? gross
           : gross + (gross * rate) / 10_000n;
-    const vat =
-      line.vatIncluded
-        ? (gross * rate) / (10_000n + rate)
-        : kind === "offer"
-          ? lineTotal - gross
-          : (gross * rate) / 10_000n;
+    const vat = line.vatIncluded
+      ? (gross * rate) / (10_000n + rate)
+      : kind === "offer"
+        ? lineTotal - gross
+        : (gross * rate) / 10_000n;
     const lineSubtotal = line.vatIncluded ? gross - vat : gross;
 
     subtotal += lineSubtotal;
@@ -174,10 +171,17 @@ export function calculateDocumentTotals(
     total += lineTotal;
   }
 
-  return { subtotal: formatMoney(subtotal), vatTotal: formatMoney(vatTotal), total: formatMoney(total) };
+  return {
+    subtotal: formatMoney(subtotal),
+    vatTotal: formatMoney(vatTotal),
+    total: formatMoney(total),
+  };
 }
 
-export function validateDocumentDraft(draft: DocumentDraft): Record<string, string> {
+export function validateDocumentDraft(
+  draft: DocumentDraft,
+  documentKind: DocumentKind = "invoice",
+): Record<string, string> {
   const errors: Record<string, string> = {};
   if (!draft.tenantId.trim()) errors.tenantId = "tenant_required";
   if (draft.lines.length === 0) errors.lines = "at_least_one_line_required";
@@ -200,6 +204,10 @@ export function validateDocumentDraft(draft: DocumentDraft): Record<string, stri
     } else if (line.activationPolicy === null) {
       errors[`${prefix}.activationPolicy`] = "activation_policy_required";
     } else if (!isActivationPolicy(line.activationPolicy)) {
+      errors[`${prefix}.activationPolicy`] = "activation_policy_unsupported";
+    } else if (
+      !getSupportedActivationPolicies(documentKind, line.kind).includes(line.activationPolicy)
+    ) {
       errors[`${prefix}.activationPolicy`] = "activation_policy_unsupported";
     }
   }
@@ -326,11 +334,16 @@ function updateLineById(
   id: string,
   update: (line: DocumentLineDraft) => DocumentLineDraft,
 ): DocumentDraft {
-  return updateLine(draft, draft.lines.findIndex((line) => line.id === id), update);
+  return updateLine(
+    draft,
+    draft.lines.findIndex((line) => line.id === id),
+    update,
+  );
 }
 
 function positiveInteger(value: number): number {
-  if (!Number.isSafeInteger(value) || value < 1) throw new Error("quantity_must_be_positive_integer");
+  if (!Number.isSafeInteger(value) || value < 1)
+    throw new Error("quantity_must_be_positive_integer");
   return value;
 }
 

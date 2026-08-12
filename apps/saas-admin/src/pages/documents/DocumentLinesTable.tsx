@@ -137,6 +137,7 @@ export function DocumentLinesTable({
                     <Button
                       type="button"
                       variant="secondary"
+                      className="document-line__action"
                       aria-label={t("documents.moveUp", { name: line.nameRu })}
                       disabled={index === 0}
                       onClick={() => onMove(line, -1)}
@@ -146,6 +147,7 @@ export function DocumentLinesTable({
                     <Button
                       type="button"
                       variant="secondary"
+                      className="document-line__action"
                       aria-label={t("documents.moveDown", { name: line.nameRu })}
                       disabled={index === draft.lines.length - 1}
                       onClick={() => onMove(line, 1)}
@@ -155,6 +157,7 @@ export function DocumentLinesTable({
                     <Button
                       type="button"
                       variant="destructive"
+                      className="document-line__action"
                       aria-label={t("documents.remove", { name: line.nameRu })}
                       onClick={() => onRemove(line)}
                     >
