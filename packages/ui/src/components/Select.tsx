@@ -181,7 +181,7 @@ export function Select<TValue extends string = string>({
   return (
     <div
       className={cn("mk-field", className)}
-      style={{ display: "flex", flexDirection: "column", gap: 6, ...style }}
+      style={{ position: "relative", display: "flex", flexDirection: "column", gap: 6, ...style }}
     >
       {label && (
         <label htmlFor={selectId} style={{ font: "var(--text-caption)", color: "var(--fg-2)" }}>

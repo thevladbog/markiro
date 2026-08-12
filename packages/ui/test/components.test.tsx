@@ -296,6 +296,18 @@ describe("Input", () => {
 });
 
 describe("Select", () => {
+  it("contains the Radix form proxy within the field instead of the viewport", () => {
+    const { container } = render(
+      <form>
+        <Select label="Группа" options={["Пиво", "Вода"]} value="Пиво" />
+      </form>,
+    );
+
+    const proxy = container.querySelector("select[aria-hidden='true']");
+    expect(proxy).not.toBeNull();
+    expect((proxy?.parentElement as HTMLElement).style.position).toBe("relative");
+  });
+
   it("opens with a controlled empty option selected", async () => {
     const user = userEvent.setup();
     render(

@@ -5,7 +5,7 @@ import { Navigate, useLocation, useNavigate, useSearchParams } from "react-route
 import { z } from "zod";
 
 import { ApiRequestError } from "../../api/client.js";
-import { listCatalogVersions } from "../catalog/api.js";
+import { listCatalogVersions, type CatalogVersionDto } from "../catalog/api.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
 import {
@@ -21,7 +21,7 @@ import {
   type TenantListItem,
 } from "../tenants/api.js";
 import { createInvoice } from "./api.js";
-import { getOffer } from "../offers/api.js";
+import { getOffer, type OfferDetail } from "../offers/api.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -42,35 +42,41 @@ function vatRateBps(value: string | null): number | null {
   return Number(bps);
 }
 
-function copyOfferLines(
-  lines: readonly {
-    id: string;
-    kind: "plan" | "addon" | "service";
-    catalogVersionId: string | null;
-    nameRu: string;
-    nameEn: string;
-    quantity: number;
-    unit: string;
-    agreedUnitPrice: string;
-    vatRate: string | null;
-    vatIncluded: boolean;
-    activationPolicy: "immediately" | "after_current" | null;
-  }[],
-): DocumentLineDraft[] {
-  return lines.map((line) => {
-    const catalogBacked = line.catalogVersionId !== null;
+export function sourceOfferDraft(
+  source: Pick<OfferDetail, "tenantId" | "lines">,
+  catalog: readonly CatalogVersionDto[],
+): DocumentDraft {
+  const lines: DocumentLineDraft[] = source.lines.map((line) => {
+    const version = catalog.find((candidate) => candidate.id === line.catalogVersionId);
+    const sourceVatRateBps = vatRateBps(line.vatRate);
+    const catalogBacked =
+      version !== undefined &&
+      version.kind === line.kind &&
+      version.nameRu === line.nameRu &&
+      version.nameEn === line.nameEn &&
+      version.descriptionRu === (line.descriptionRu ?? null) &&
+      version.descriptionEn === (line.descriptionEn ?? null) &&
+      version.unit === line.unit &&
+      (version.unitPrice ?? null) === (line.catalogUnitPrice ?? null) &&
+      (version.vatRateBps ?? null) === sourceVatRateBps &&
+      (version.vatIncluded ?? false) === line.vatIncluded;
     return {
       id: `offer-line-${line.id}`,
       kind: catalogBacked ? line.kind : "custom",
-      catalogVersionId: line.catalogVersionId,
-      catalogItemCode: "",
-      version: 0,
+      catalogVersionId: catalogBacked ? line.catalogVersionId : null,
+      catalogItemCode: catalogBacked ? version.catalogItemCode : "",
+      version: catalogBacked ? version.version : 0,
       nameRu: line.nameRu,
       nameEn: line.nameEn,
+      descriptionRu: line.descriptionRu ?? null,
+      descriptionEn: line.descriptionEn ?? null,
       quantity: line.quantity,
       unit: line.unit,
+      catalogUnitPrice: catalogBacked
+        ? (version.unitPrice ?? null)
+        : (line.catalogUnitPrice ?? null),
       agreedUnitPrice: line.agreedUnitPrice,
-      vatRateBps: vatRateBps(line.vatRate),
+      vatRateBps: sourceVatRateBps,
       vatIncluded: line.vatIncluded,
       activationPolicy: catalogBacked
         ? line.activationPolicy === "immediately"
@@ -79,6 +85,7 @@ function copyOfferLines(
         : null,
     };
   });
+  return { tenantId: source.tenantId, applicationMode: "automatic", date: "", lines };
 }
 
 export function CreateInvoicePage() {
@@ -184,12 +191,9 @@ function InvoiceEditor() {
   ) {
     pickerTenants.push(toTenantListItem(prefetchedTenant.data));
   }
-  const initialDraft: DocumentDraft = {
-    tenantId: selectedTenantId ?? "",
-    applicationMode: "automatic",
-    date: "",
-    lines: sourceOffer.data ? copyOfferLines(sourceOffer.data.lines) : [],
-  };
+  const initialDraft: DocumentDraft = sourceOffer.data
+    ? sourceOfferDraft(sourceOffer.data, catalog.data?.items ?? [])
+    : { tenantId: selectedTenantId ?? "", applicationMode: "automatic", date: "", lines: [] };
 
   return (
     <DocumentComposer
