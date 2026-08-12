@@ -246,6 +246,13 @@
       "when": 1786481010105,
       "tag": "0034_overconfident_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786565510430,
+      "tag": "0035_stormy_ser_duncan",
+      "breakpoints": true
     }
   ]
 }
