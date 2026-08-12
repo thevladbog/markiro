@@ -633,6 +633,9 @@ async function renderActiveShiftForOperatorSwitch() {
     emitScan(raw: string) {
       scanListener(raw);
     },
+    captureScanListener() {
+      return scanListener;
+    },
     firstJournalStarted,
     releaseFirstJournal,
     journalOperatorIds,
@@ -973,6 +976,11 @@ describe("App", () => {
       const floor = await renderActiveShiftForOperatorSwitch();
       act(() => floor.emitScan(FIRST_KM));
       await floor.firstJournalStarted;
+      act(() => {
+        lockdownMock.publish({ mode: "locked", pending: false, error: "exit" });
+      });
+      lockdownMock.clearError.mockClear();
+      const staleScannerListener = floor.captureScanListener();
       const scannerSubscriptionsBeforeSwitch = hardwareMock.onScan.mock.calls.length;
       const destructiveBefore = invokeMock.mock.calls.filter(([cmd, payload]) => {
         if (cmd === "clear_credential") return true;
@@ -996,10 +1004,34 @@ describe("App", () => {
 
       expect(screen.getByText("Ivan")).toBeDefined();
       expect(screen.queryByText("Operator sign-in")).toBeNull();
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Could not change operator. The current operator and local work remain active.",
-      );
-      expect(screen.getByRole("button", { name: "Retry operator change" })).toBeDefined();
+      expect(
+        screen
+          .getAllByRole("alert")
+          .some((alert) =>
+            alert.textContent?.includes(
+              "Could not change operator. The current operator and local work remain active.",
+            ),
+          ),
+      ).toBe(true);
+      const retryOperatorSwitch = screen.getByRole("button", {
+        name: "Retry operator change",
+      });
+      expect((retryOperatorSwitch as HTMLButtonElement).disabled).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "Change operator" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      const dismissWindowError = screen.getByRole("button", {
+        name: "Dismiss window mode error",
+      });
+      expect((dismissWindowError as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(dismissWindowError);
+      expect(lockdownMock.clearError).not.toHaveBeenCalled();
       expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
       expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
       expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
@@ -1007,7 +1039,7 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Retry operator change" }));
       expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
       expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
-      act(() => floor.emitScan(SECOND_KM));
+      act(() => staleScannerListener(SECOND_KM));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(0);
       });
@@ -1028,6 +1060,8 @@ describe("App", () => {
       });
       vi.useRealTimers();
       await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+      expect(floor.journalOperatorIds).toEqual(["op1"]);
+      expect(floor.outboxOperatorIds).toEqual(["op1"]);
       expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
     } finally {
       vi.useRealTimers();
