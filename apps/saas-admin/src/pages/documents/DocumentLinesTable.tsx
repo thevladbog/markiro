@@ -48,7 +48,7 @@ export function DocumentLinesTable({
       className="document-lines-table"
       role="region"
       aria-labelledby="document-lines-title"
-      tabIndex={-1}
+      tabIndex={0}
     >
       <table>
         <thead>

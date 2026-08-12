@@ -157,6 +157,7 @@ describe("DocumentComposer", () => {
     await selectCombobox(user, "Добавить позицию", "Запуск", "Запуск · service-launch · v3");
 
     expect(container.querySelector("select:not([aria-hidden])")).toBeNull();
+    expect(container.querySelector(".document-lines-table")?.getAttribute("tabindex")).toBe("0");
     expect(screen.getAllByRole("combobox", { name: /Политика активации/ })).toHaveLength(3);
     expect(screen.getByText("400.10 ₽")).toBeDefined();
     expect(screen.getByText("80.00 ₽")).toBeDefined();
