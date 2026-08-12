@@ -214,19 +214,19 @@ jobs:
           else
             rm -rf "$RUNNER_TEMP/station-channel-backup"
             mkdir "$RUNNER_TEMP/station-channel-backup"
-            gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-backup"
+            gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-backup" || true
           fi
-          cp "$RUNNER_TEMP/station-staged/latest.json" "$RUNNER_TEMP/station-channel-latest.json"
-          if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-latest.json#latest.json" --clobber; then
+          cp "$RUNNER_TEMP/station-staged/latest.json" "$RUNNER_TEMP/latest.json"
+          if ! gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/latest.json" --clobber; then
             if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
-              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json#latest.json" --clobber
+              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json" --clobber
             fi
             exit 1
           fi
           mkdir "$RUNNER_TEMP/station-channel-verify"
           if ! gh release download station-beta-channel --repo "$GITHUB_REPOSITORY" --pattern latest.json --dir "$RUNNER_TEMP/station-channel-verify" || ! cmp "$RUNNER_TEMP/station-channel-verify/latest.json" "$RUNNER_TEMP/station-staged/latest.json"; then
             if [ -f "$RUNNER_TEMP/station-channel-backup/latest.json" ]; then
-              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json#latest.json" --clobber
+              gh release upload station-beta-channel --repo "$GITHUB_REPOSITORY" "$RUNNER_TEMP/station-channel-backup/latest.json" --clobber
             fi
             exit 1
           fi
@@ -240,4 +240,4 @@ jobs:
           set +e
           candidate_ref="station-release-candidate-${GITHUB_RUN_ID}"
           gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/heads/$candidate_ref"
-          rm -rf "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$RUNNER_TEMP/station-downloaded" "$RUNNER_TEMP/station-channel-backup" "$RUNNER_TEMP/station-channel-verify" "$RUNNER_TEMP/station-channel-latest.json"
+          rm -rf "$RUNNER_TEMP/station-input" "$RUNNER_TEMP/station-staged" "$RUNNER_TEMP/station-downloaded" "$RUNNER_TEMP/station-channel-backup" "$RUNNER_TEMP/station-channel-verify" "$RUNNER_TEMP/latest.json"
