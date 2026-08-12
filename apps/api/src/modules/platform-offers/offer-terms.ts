@@ -28,8 +28,12 @@ const allowedTags = [
 ] as const;
 
 function stripUnsupportedMarkdown(source: string): string {
-  return source
-    .replaceAll(/<[^>]*>/g, "")
+  const withoutHtml = sanitizeHtml(source, {
+    allowedTags: [],
+    allowedAttributes: {},
+    disallowedTagsMode: "discard",
+  });
+  return withoutHtml
     .replaceAll(/!\[[^\]]*\]\([^)]*\)/g, "")
     .replaceAll(/\[([^\]]*)\]\(\s*(?:javascript|data|vbscript):[^)]*\)/gi, "$1");
 }
