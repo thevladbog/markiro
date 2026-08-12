@@ -2,6 +2,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, readOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
 import { createOperatorRosterRefresher, syncOperatorRoster } from "../src/lib/roster-sync.js";
+import { StationApiError } from "../src/lib/api-client.js";
 import {
   clearRejectedCredentialState,
   createCredentialGeneration,
@@ -75,6 +76,27 @@ describe("syncOperatorRoster", () => {
     expect(await readOperatorsMirror(exec)).toHaveLength(1);
   });
 
+  it("logs only sanitized API failure fields", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failure = new StationApiError(503, "temporarily unavailable");
+    try {
+      await expect(
+        syncOperatorRoster({ get: vi.fn().mockRejectedValue(failure) }, exec),
+      ).resolves.toBe("unavailable");
+
+      expect(consoleError).toHaveBeenCalledWith("station: operator roster sync failed", {
+        category: "operator_roster_sync",
+        status: 503,
+        message: "temporarily unavailable",
+      });
+      expect(consoleError.mock.calls.flat()).not.toContain(failure);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("coalesces concurrent refresh callers onto one request", async () => {
     const exec = makeExec();
     await applyMigrations(exec);
@@ -94,6 +116,11 @@ describe("syncOperatorRoster", () => {
     expect(getCalls).toHaveBeenCalledTimes(1);
     resolve({ items: [OPERATOR] });
     await expect(Promise.all([first, second])).resolves.toEqual(["updated", "updated"]);
+
+    const third = refresh();
+    expect(getCalls).toHaveBeenCalledTimes(2);
+    resolve({ items: [OPERATOR] });
+    await expect(third).resolves.toBe("updated");
   });
 
   it("cannot publish a roster GET that resolves after credential cleanup", async () => {

@@ -72,29 +72,32 @@ function stationDevicePathMatches(caddy, path) {
       .split(/\s+/) ?? [];
   const rootPatterns =
     caddy
-      .match(/^\s*@stationRoot path (.+)$/m)?.[1]
+      .match(/@stationRoot \{[\s\S]*?^\s*path (.+)$/m)?.[1]
       ?.trim()
       .split(/\s+/) ?? [];
-  const shiftPattern = caddy.match(/^\s*@stationShift path_regexp stationShift (.+)$/m)?.[1];
+  const shiftPattern = caddy.match(
+    /@stationShift \{[\s\S]*?^\s*path_regexp stationShift (.+)$/m,
+  )?.[1];
   return (
     [...devicePatterns, ...rootPatterns].some((pattern) => caddyPathMatches(pattern, path)) ||
     (shiftPattern !== undefined && new RegExp(shiftPattern).test(path))
   );
 }
 
-assert.match(caddy, /@stationRoot path \/shifts \/products \/products\/gtin-check/);
+assert.match(caddy, /@stationRoot \{[\s\S]*?path \/shifts \/products \/products\/gtin-check/);
 assert.match(
   caddy,
-  /@stationShift path_regexp stationShift \^\/shifts\/\[\^\/\]\+\/\(open\|bundle\)\$/,
+  /@stationShift \{[\s\S]*?path_regexp stationShift \^\/shifts\/\[\^\/\]\+\/\(open\|bundle\)\$/,
 );
 for (const forbidden of ["/shifts/id/close", "/shifts/id", "/products/id"]) {
   assert.equal(stationDevicePathMatches(caddy, forbidden), false, `${forbidden} must not proxy`);
 }
 ```
 
-The helper must recognize the existing `@device path` list, the exact
-`@stationRoot path` list, and only `^/shifts/[^/]+/(open|bundle)$` for the
-regexp matcher.
+The helper must recognize the existing `@device path` list, the exact root
+matcher path list, and only `^/shifts/[^/]+/(open|bundle)$` for the shift-action
+regexp. The route contract must also distinguish authenticated requests from
+ordinary admin SPA navigation and cover the parallel OPTIONS matchers.
 
 - [ ] **Step 2: Run the edge contract and confirm RED**
 
@@ -113,7 +116,9 @@ Replace the one-call assertion with an exact ordered inventory:
 ```js
 const expected = [
   ["/station/pair", "POST", "content-type,x-station-capabilities"],
+  ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
@@ -141,29 +146,61 @@ Run:
 node --test tools/station-release/test/verify-api-cors.test.mjs tools/station-release/test/workflow.test.mjs
 ```
 
-Expected: FAIL because the verifier sends only `/station/pair` and uses the pairing-only error.
+Expected: FAIL because the verifier omits routes from the complete Station API
+inventory and uses the pairing-only error.
 
 - [ ] **Step 5: Implement exact Caddy matchers**
 
-Keep the infrastructure matcher unchanged and add two separately handled API matchers before the SPA handler:
+Keep the infrastructure matcher unchanged and add separately handled
+authenticated and OPTIONS matchers for root and shift-action routes before the
+SPA handler:
 
 ```caddyfile
-@stationRoot path /shifts /products /products/gtin-check
+@stationRoot {
+	path /shifts /products /products/gtin-check
+	header X-Api-Key *
+}
 handle @stationRoot {
 	reverse_proxy api:3000 {
 		import standard_api_transport
 	}
 }
 
-@stationShift path_regexp stationShift ^/shifts/[^/]+/(open|bundle)$
+@stationRootPreflight {
+	path /shifts /products /products/gtin-check
+	method OPTIONS
+}
+handle @stationRootPreflight {
+	reverse_proxy api:3000 {
+		import standard_api_transport
+	}
+}
+
+@stationShift {
+	path_regexp stationShift ^/shifts/[^/]+/(open|bundle)$
+	header X-Api-Key *
+}
 handle @stationShift {
+	reverse_proxy api:3000 {
+		import standard_api_transport
+	}
+}
+
+@stationShiftPreflight {
+	path_regexp stationShiftPreflight ^/shifts/[^/]+/(open|bundle)$
+	method OPTIONS
+}
+handle @stationShiftPreflight {
 	reverse_proxy api:3000 {
 		import standard_api_transport
 	}
 }
 ```
 
-Update reverse-proxy-count assertions in `edge-contract.test.mjs` from five to seven, standard transports from four to six, and append two standard transport entries to the adapted-Caddy expected list. Do not proxy `/shifts/*` or `/products/*` broadly.
+Update `edge-contract.test.mjs` to expect nine total API proxies and eight
+`standard_api_transport` imports (plus the one CommerceML transport). The
+adapted-Caddy expected admin transport list must contain the corresponding eight
+standard transports. Do not proxy `/shifts/*` or `/products/*` broadly.
 
 - [ ] **Step 6: Implement the declarative preflight loop**
 
@@ -173,8 +210,18 @@ Use this public inventory and fail on the first non-204/wrong-origin response:
 export const STATION_PREFLIGHTS = Object.freeze([
   { path: "/station/pair", method: "POST", headers: "content-type,x-station-capabilities" },
   {
+    path: "/station/identity",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/operators",
     method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/scans",
+    method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   { path: "/shifts", method: "GET", headers: "content-type,x-api-key,x-station-capabilities" },

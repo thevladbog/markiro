@@ -211,8 +211,8 @@ export function OperatorLogin({
       }
       if (refreshed.kind === "miss") {
         setMessage({ tone: "error", text: live.current.t("login.wrong") });
+        setPin("");
       }
-      setPin("");
     } finally {
       authInFlight.current = false;
       if (mounted.current && !admitted.current) setBusy(false);

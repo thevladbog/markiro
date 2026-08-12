@@ -366,25 +366,16 @@ production work.
 No database migration is required. Existing enrolled configurations continue
 using their stored `https://admin.markiro.app` server URL.
 
-## Validation record (2026-08-13)
+## Validation record (pending)
 
-The automatic release evidence is incomplete, so this design remains approved
-pending final validation and must not be treated as a production deployment or
-Windows acceptance record.
+This design remains approved pending final validation. Record outcomes only when
+the release candidate is executed; this section is not a production deployment
+or Windows acceptance record.
 
-- The local pnpm wrapper did not dispatch either the Station test gate or the
-  production-bundle contract: each produced no output and did not start a
-  script after 60 seconds. Other exact pnpm wrappers were not treated as passed;
-  repair the pnpm/Corepack metadata before relying on them.
-- Supplementary local equivalents passed: Station Vitest 60 files / 663 tests;
-  TypeScript typecheck; ESLint; Vite production build; and host Cargo tests 27
-  tests. Cargo is host evidence only, not Windows/WebView2 or hardware evidence.
-- `node --test tools/station-release/test/*.test.mjs` passed 74 tests.
-- The production-bundle Node equivalent completed 260 of 261 tests. The sole
-  failure is `deploy/production/test/dependency-isolation.test.mjs`: the current
-  `@markiro/api` production dependency graph reaches `@opentelemetry/api`.
-  This Station slice changes no dependency manifest or lockfile, so that
-  production dependency failure requires its own scoped remediation.
-- Direct Prettier verification passed. No live deployment, live CORS preflight,
-  Windows installer, WebView2, scanner, printer, touchscreen, or taskbar check
-  was run; the related checklist items remain unchecked.
+- Run the exact Station test, typecheck, lint, and production-build gates from a
+  lockfile-frozen install, plus the host Cargo tests.
+- Run the complete Station release and production-bundle contract suites.
+- Run formatting and diff-hygiene checks on the candidate commit.
+- Keep live deployment, live CORS preflight, Windows/WebView2, scanner, printer,
+  touchscreen, and taskbar acceptance explicitly pending until exercised on the
+  target environment; host Cargo evidence cannot satisfy those checks.

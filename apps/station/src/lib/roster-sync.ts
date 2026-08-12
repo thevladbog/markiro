@@ -1,5 +1,5 @@
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
-import type { StationClient } from "./api-client.js";
+import { StationApiError, type StationClient } from "./api-client.js";
 import { credentialGenerationIsCurrent, type CredentialGeneration } from "./credential-recovery.js";
 import { replaceOperatorsMirror, type SqlExecutor } from "./mirror.js";
 
@@ -38,8 +38,12 @@ export async function syncOperatorRoster(
     });
     if (generation && !credentialGenerationIsCurrent(generation)) return "unavailable";
     return "updated";
-  } catch {
-    console.error("station: operator roster sync failed", { category: "operator_roster_sync" });
+  } catch (error) {
+    console.error("station: operator roster sync failed", {
+      category: "operator_roster_sync",
+      status: error instanceof StationApiError ? error.status : null,
+      message: error instanceof Error ? error.message : "unknown error",
+    });
     return "unavailable";
   }
 }

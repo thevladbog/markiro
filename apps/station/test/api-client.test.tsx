@@ -67,7 +67,7 @@ describe("createStationClient", () => {
   });
 
   it("ignores an older transport failure after a newer request received an HTTP response", async () => {
-    let rejectOlder!: (reason?: unknown) => void;
+    let rejectOlder: ((reason?: unknown) => void) | undefined;
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(
         new Promise<Response>((_resolve, reject) => {
@@ -88,14 +88,14 @@ describe("createStationClient", () => {
 
     const older = client.get("/station/operators");
     await client.get("/shifts");
-    rejectOlder(new TypeError("late network failure"));
+    rejectOlder?.(new TypeError("late network failure"));
     await expect(older).rejects.toBeDefined();
 
     expect(onReachabilityChange.mock.calls).toEqual([["reachable"]]);
   });
 
   it("ignores an older HTTP success after a newer request failed to reach the server", async () => {
-    let resolveOlder!: (response: Response) => void;
+    let resolveOlder: ((response: Response) => void) | undefined;
     vi.spyOn(globalThis, "fetch")
       .mockReturnValueOnce(
         new Promise<Response>((resolve) => {
@@ -111,7 +111,7 @@ describe("createStationClient", () => {
 
     const older = client.get("/station/operators");
     await expect(client.get("/shifts")).rejects.toBeDefined();
-    resolveOlder(
+    resolveOlder?.(
       new Response(JSON.stringify({ items: [] }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

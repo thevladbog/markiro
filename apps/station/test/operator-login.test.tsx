@@ -4,7 +4,12 @@ import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
-import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
+import {
+  applyMigrations,
+  replaceOperatorsMirror,
+  SLOT_TABLES,
+  type SqlExecutor,
+} from "../src/lib/mirror.js";
 import * as crypto from "../src/lib/crypto.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
@@ -800,7 +805,7 @@ describe("OperatorLogin", () => {
 
     expect(await screen.findByText("Refreshing operator list…")).toBeDefined();
     await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
-    expect(onAuthed.mock.calls[0]![0]).toMatchObject({ operatorId: "op-new" });
+    expect(onAuthed.mock.calls[0]?.[0]).toMatchObject({ operatorId: "op-new" });
     expect(refreshRoster).toHaveBeenCalledTimes(1);
   });
 
@@ -886,6 +891,35 @@ describe("OperatorLogin", () => {
 
     expect(await screen.findByText("Refreshing operator list…")).toBeDefined();
     await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    expect(refreshRoster).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the entered PIN when the roster refresh is unavailable", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const refreshRoster = vi.fn(async () => "unavailable" as const);
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={silentSource}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={vi.fn()}
+      />,
+    );
+
+    openNumericFallback();
+    for (const digit of "1002") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(
+      await screen.findByText(
+        "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByLabelText("pin").textContent).toBe("••••");
     expect(refreshRoster).toHaveBeenCalledTimes(1);
   });
 
@@ -1003,7 +1037,7 @@ describe("OperatorLogin", () => {
     const failingReread: SqlExecutor = {
       run: (sql, params) => exec.run(sql, params),
       all: (sql, params) => {
-        if (/FROM operators_mirror\b/.test(sql) && ++rosterReads === 2) {
+        if (new RegExp(`FROM ${SLOT_TABLES.a}\\b`).test(sql) && ++rosterReads === 2) {
           return Promise.reject(new Error("post-publication reread failed"));
         }
         return exec.all(sql, params);

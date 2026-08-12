@@ -213,7 +213,7 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
 }
 
 const ACTIVE_SLOT_KEY = "operators_slot";
-const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
+export const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
 type RosterSlot = keyof typeof SLOT_TABLES;
 
 function otherSlot(slot: RosterSlot): RosterSlot {

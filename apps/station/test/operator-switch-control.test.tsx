@@ -38,6 +38,26 @@ describe("OperatorSwitchControl", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("starts only one switch while the first request is in flight", async () => {
+    let resolveSwitch: (() => void) | undefined;
+    const onSwitch = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveSwitch = resolve;
+        }),
+    );
+    renderControl({ onSwitch });
+
+    const action = screen.getByRole("button", { name: "Change operator" });
+    fireEvent.click(action);
+    fireEvent.click(action);
+
+    expect(onSwitch).toHaveBeenCalledTimes(1);
+    expect((action as HTMLButtonElement).disabled).toBe(true);
+    resolveSwitch?.();
+    await waitFor(() => expect((action as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it("requires confirmation while a shift is active and Stay cancels it", () => {
     const onSwitch = vi.fn(async () => {});
     renderControl({ activeShift: true, onSwitch });

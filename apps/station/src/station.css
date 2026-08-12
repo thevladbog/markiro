@@ -1419,7 +1419,7 @@ body,
 .badge-scan-illustration__barcode,
 .badge-scan-illustration__scanner {
   fill: none;
-  stroke: currentColor;
+  stroke: currentcolor;
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 4;

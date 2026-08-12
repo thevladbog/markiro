@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
 
@@ -19,18 +19,27 @@ export function OperatorSwitchControl({
 }: OperatorSwitchControlProps) {
   const { t } = useTranslation();
   const [confirming, setConfirming] = useState(false);
+  const [inFlight, setInFlight] = useState(false);
+  const inFlightRef = useRef(false);
+  const switchPending = pending || inFlight;
 
   async function runSwitch(): Promise<void> {
+    if (pending || inFlightRef.current) return;
+    inFlightRef.current = true;
+    setInFlight(true);
     setConfirming(false);
     try {
       await onSwitch();
     } catch {
       // App owns the retryable, translated failure state.
+    } finally {
+      inFlightRef.current = false;
+      setInFlight(false);
     }
   }
 
   function requestSwitch(): void {
-    if (pending || error) return;
+    if (switchPending || error) return;
     if (activeShift) setConfirming(true);
     else void runSwitch();
   }
@@ -41,11 +50,11 @@ export function OperatorSwitchControl({
         type="button"
         size="floor"
         variant="secondary"
-        disabled={pending || error}
-        aria-label={t(pending ? "operatorSwitch.pending" : "operatorSwitch.action")}
+        disabled={switchPending || error}
+        aria-label={t(switchPending ? "operatorSwitch.pending" : "operatorSwitch.action")}
         onClick={requestSwitch}
       >
-        {t(pending ? "operatorSwitch.pending" : "operatorSwitch.action")}
+        {t(switchPending ? "operatorSwitch.pending" : "operatorSwitch.action")}
       </Button>
 
       {error ? (
@@ -55,6 +64,7 @@ export function OperatorSwitchControl({
             type="button"
             size="floor"
             variant="secondary"
+            disabled={switchPending}
             aria-label={t("operatorSwitch.retryLabel")}
             onClick={() => {
               onDismissError();
@@ -72,7 +82,7 @@ export function OperatorSwitchControl({
         backLabel={t("operatorSwitch.stay")}
         onClose={() => setConfirming(false)}
         footer={
-          <Button size="floor" onClick={() => void runSwitch()}>
+          <Button size="floor" disabled={switchPending} onClick={() => void runSwitch()}>
             {t("operatorSwitch.confirm")}
           </Button>
         }

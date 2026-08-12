@@ -290,7 +290,7 @@ describe("credential rejection recovery", () => {
   it("reuses one close promise when a timed-out retirement is retried", async () => {
     vi.useFakeTimers();
     try {
-      let release!: () => void;
+      let release: (() => void) | undefined;
       const close = vi.fn(
         () =>
           new Promise<void>((resolve) => {
@@ -306,7 +306,7 @@ describe("credential rejection recovery", () => {
 
       const retry = retirement.wait(50);
       expect(close).toHaveBeenCalledTimes(1);
-      release();
+      release?.();
       await retry;
       expect(close).toHaveBeenCalledTimes(1);
     } finally {
