@@ -19,6 +19,36 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
+  it("lays out enrollment as a bounded two-column console without inline page styling", () => {
+    const css = stationSource("station.css");
+    const enrollment = stationSource("pages/Enrollment.tsx");
+
+    expect(enrollment).toContain('className="station-enrollment"');
+    expect(enrollment).not.toContain("style={{");
+    expect(css).toMatch(
+      /\.station-enrollment\s*\{[^}]*display:\s*grid;[^}]*overflow:\s*hidden;[^}]*gap:\s*var\(--sp-[^)]*\);[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(420px, 560px\);/s,
+    );
+  });
+
+  it("keeps 1280×800 pairing keys floor-sized and makes recovery actions fit the panel", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /\.station-enrollment\s*\{[^}]*--control-keypad:\s*80px;[^}]*grid-template-columns:/s,
+    );
+    expect(css).not.toMatch(/@media[^{]*max-height:\s*800px/s);
+    expect(css).toMatch(
+      /@media \(max-width: 1023px\), \(max-height: 767px\)\s*\{[\s\S]*?\.station-enrollment__keypad\s*\{[^}]*--control-keypad:\s*64px;/s,
+    );
+    expect(css).toMatch(
+      /\.station-enrollment__actions--pairing\s*\{[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-enrollment__actions--service\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);/s,
+    );
+    expect(stationSource("pages/Enrollment.tsx")).toContain("const recoveryPanel");
+  });
+
   it("keeps shared alert copy at floor-readable size inside the station application", () => {
     expect(stationSource("station.css")).toMatch(
       /#root \.mk-alert > span,[^{]+\{[^}]*font-size:\s*18px !important;[^}]*line-height:\s*26px !important;/s,

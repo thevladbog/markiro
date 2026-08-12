@@ -1,5 +1,23 @@
 {
-  "app": { "title": "Markiro — Station", "booting": "Loading station…" },
+  "app": {
+    "title": "Markiro — Station",
+    "booting": "Loading station…",
+    "stationDescriptor": "Production line station",
+    "stationPurpose": "Code verification, aggregation, and label printing on the production line."
+  },
+  "windowMode": {
+    "exit": "Exit fullscreen",
+    "enter": "Return to fullscreen",
+    "pending": "Changing window mode…",
+    "confirmTitle": "Exit fullscreen?",
+    "confirmDetail": "Production continues and only the window mode changes. The operator, active shift, and queued work stay in place.",
+    "confirmAction": "Confirm exit fullscreen",
+    "cancel": "Cancel",
+    "exitError": "Could not leave fullscreen. Production continues; try again.",
+    "enterError": "Could not return to fullscreen. Production continues; try again.",
+    "dismiss": "Dismiss",
+    "dismissError": "Dismiss window mode error"
+  },
   "legacyIdentity": {
     "title": "Station service required",
     "resolving": "Updating station identity. Cached offline work remains available.",
@@ -10,11 +28,30 @@
   },
   "enroll": {
     "title": "Connect station",
+    "codeLabel": "Station onboarding",
+    "codePrompt": "Enter the eight-digit code from the cabinet or scan it with the configured scanner.",
     "code": "Pairing code",
     "serverUrl": "Server URL",
     "apiKey": "Device key",
     "submit": "Pair station",
     "redeeming": "Pairing…",
+    "redeemingDetail": "Checking the code and loading station settings…",
+    "keypad": "Pairing code keypad",
+    "backspace": "Backspace",
+    "clear": "Clear",
+    "retry": "Try again",
+    "recoveryTitle": "Pairing needs attention",
+    "enterNewCode": "Enter a new code",
+    "returnToPairing": "Back to pairing",
+    "cabinetAddress": "admin.markiro.app",
+    "cabinetRecovery": "Create a new pairing code in the cabinet, then enter it here.",
+    "serviceTitle": "Service connection",
+    "serviceWarning": "Use this only with service-provided credentials. It does not replace ordinary pairing.",
+    "steps": {
+      "one": "Open the station page in the administrator cabinet.",
+      "two": "Create an eight-digit pairing code for this production line.",
+      "three": "Enter or scan the code here."
+    },
     "setup": "Equipment setup",
     "serviceMode": "Service setup",
     "serviceConnect": "Connect service credentials",

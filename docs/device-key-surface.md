@@ -38,6 +38,12 @@ the shared `/shifts` and `/products` routes; it is not added to adjacent
 cabinet-only methods, cabinet-session routes, or kiosk routes. Preflight is
 classified by `Access-Control-Request-Method`, while path matching ignores a
 query string and normalizes a trailing slash in the same way as the router.
+The shipped Windows Tauri 2 webview origin is exactly
+`http://tauri.localhost`; `tauri://localhost` is retained only for non-Windows
+Tauri platforms and is not the deployed Windows value. Before a Windows
+Station release, `pnpm verify:station-production-cors` must confirm that
+`https://admin.markiro.app/station/pair` returns HTTP 204 and echoes the
+Windows origin for the real pairing preflight.
 
 An authenticated station `401` seals its current credential generation before
 recovery is shown. The station keeps its machine/device IDs and every local

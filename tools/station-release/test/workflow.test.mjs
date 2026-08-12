@@ -6,6 +6,7 @@ import { normalizeTauriSigningKey } from "../normalize-signing-key.mjs";
 
 const root = new URL("../../../", import.meta.url);
 const source = () => readFile(new URL(".github/workflows/station-beta-release.yml", root), "utf8");
+const packageSource = () => readFile(new URL("package.json", root), "utf8");
 
 test("station beta publication is protected, serialized, main-only and channel-last", async () => {
   const text = await source();
@@ -39,6 +40,23 @@ test("station beta publication is protected, serialized, main-only and channel-l
   const signingStep = workflow.jobs.release.steps.find(
     (step) => step.name === "Build signed Windows NSIS updater artifacts",
   );
+  const corsStep = workflow.jobs.release.steps.find(
+    (step) => step.name === "Verify production station pairing CORS",
+  );
+  assert.equal(corsStep.if, "inputs.mode == 'publish' || inputs.mode == 'promote-existing'");
+  assert.equal(corsStep.run, "pnpm verify:station-production-cors");
+  assert.ok(
+    workflow.jobs.release.steps.indexOf(corsStep) <
+      workflow.jobs.release.steps.indexOf(signingStep),
+  );
+  const promoteStep = workflow.jobs.release.steps.find(
+    (step) => step.name === "Promote beta channel",
+  );
+  assert.ok(
+    workflow.jobs.release.steps.indexOf(corsStep) <
+      workflow.jobs.release.steps.indexOf(promoteStep),
+  );
+  assert.equal(workflow.jobs.release.env.VITE_STATION_API_URL, "https://admin.markiro.app");
   assert.equal(
     signingStep.env.TAURI_SIGNING_PRIVATE_KEY,
     "${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}",
@@ -88,4 +106,25 @@ test("normalizes raw and base64-wrapped Tauri keys and rejects invalid input", a
   const wrapped = Buffer.from(raw, "utf8").toString("base64");
   assert.equal(normalizeTauriSigningKey(wrapped), raw);
   assert.throws(() => normalizeTauriSigningKey("not-a-signing-key"), /not a Tauri rsign/);
+});
+
+test("the workflow CORS gate pins the production API and Windows webview origin", async () => {
+  const packageJson = JSON.parse(await packageSource());
+  assert.equal(
+    packageJson.scripts["verify:station-production-cors"],
+    "node tools/station-release/verify-api-cors.mjs https://admin.markiro.app",
+  );
+
+  const { verifyStationCors } = await import("../verify-api-cors.mjs");
+  await verifyStationCors({
+    apiUrl: "https://admin.markiro.app",
+    fetchImpl: async (url, init) => {
+      assert.equal(url, "https://admin.markiro.app/station/pair");
+      assert.equal(init.headers.Origin, "http://tauri.localhost");
+      return new Response(undefined, {
+        status: 204,
+        headers: { "Access-Control-Allow-Origin": "http://tauri.localhost" },
+      });
+    },
+  });
 });

@@ -74,10 +74,19 @@ const hardwareMock = vi.hoisted(() => ({
 }));
 
 const lockdownMock = vi.hoisted(() => ({
+  snapshot: { mode: "locked", pending: false, error: null } as LockdownModule.LockdownSnapshot,
+  listeners: new Set<() => void>(),
   start: vi.fn<() => () => void>(() => () => {}),
-  enter: vi.fn<() => Promise<void>>(async () => {}),
-  exit: vi.fn<() => Promise<void>>(async () => {}),
+  enter: vi.fn<() => Promise<void>>(),
+  exit: vi.fn<() => Promise<void>>(),
+  subscribe: vi.fn<(listener: () => void) => () => void>(),
+  getSnapshot: vi.fn<() => LockdownModule.LockdownSnapshot>(),
+  clearError: vi.fn<() => void>(),
   whenSettled: vi.fn<() => Promise<void>>(async () => {}),
+  publish(next: LockdownModule.LockdownSnapshot) {
+    this.snapshot = next;
+    this.listeners.forEach((listener) => listener());
+  },
 }));
 
 vi.mock("../src/lib/lockdown.js", async (importOriginal) => {
@@ -124,8 +133,21 @@ afterEach(() => {
   hardwareMock.onScannerStatus.mockReset().mockResolvedValue(() => {});
   hardwareMock.print.mockReset().mockResolvedValue(undefined);
   lockdownMock.start.mockReset().mockReturnValue(() => {});
-  lockdownMock.enter.mockReset().mockResolvedValue(undefined);
-  lockdownMock.exit.mockReset().mockResolvedValue(undefined);
+  lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
+  lockdownMock.enter.mockReset().mockImplementation(async () => {
+    lockdownMock.publish({ mode: "locked", pending: false, error: null });
+  });
+  lockdownMock.exit.mockReset().mockImplementation(async () => {
+    lockdownMock.publish({ mode: "windowed", pending: false, error: null });
+  });
+  lockdownMock.subscribe.mockReset().mockImplementation((listener) => {
+    lockdownMock.listeners.add(listener);
+    return () => lockdownMock.listeners.delete(listener);
+  });
+  lockdownMock.getSnapshot.mockReset().mockImplementation(() => lockdownMock.snapshot);
+  lockdownMock.clearError.mockReset().mockImplementation(() => {
+    lockdownMock.publish({ ...lockdownMock.snapshot, error: null });
+  });
   lockdownMock.whenSettled.mockReset().mockResolvedValue(undefined);
 });
 
@@ -502,7 +524,7 @@ describe("pairingServerUrl", () => {
 });
 
 describe("App", () => {
-  it("leaves lockdown only for workstation service setup and re-enters on return", async () => {
+  it("shows window control on the floor, restores setup lockdown, and changes no operator state", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {
       scanner: null,
@@ -519,15 +541,81 @@ describe("App", () => {
     await signInAsOperator();
 
     expect(lockdownMock.start).toHaveBeenCalled();
-    expect(screen.queryByRole("button", { name: /exit.*lockdown/i })).toBeNull();
+    expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
     await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined();
 
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
     await waitFor(() => expect(lockdownMock.enter).toHaveBeenCalledTimes(1));
+    expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
+    expect(screen.getByText("Ivan")).toBeDefined();
+
+    lockdownMock.exit.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+    expect(lockdownMock.exit).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined();
+    expect(screen.getByText("Ivan")).toBeDefined();
+  });
+
+  it("does not re-enter after setup when the operator had already selected windowed mode", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined(),
+    );
+    lockdownMock.enter.mockClear();
+    lockdownMock.exit.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+
+    expect(lockdownMock.exit).toHaveBeenCalledTimes(1);
+    expect(lockdownMock.enter).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined();
+  });
+
+  it("still exits for setup after a failed enter may have partially changed the OS window", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }), { status: 200 })),
+    );
+    lockdownMock.snapshot = { mode: "windowed", pending: false, error: "enter" };
+
+    render(<App />);
+    await signInAsOperator();
+    lockdownMock.enter.mockClear();
+    lockdownMock.exit.mockClear();
+
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+
+    await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
+    fireEvent.click(await screen.findByRole("button", { name: "Done" }));
+    expect(lockdownMock.enter).not.toHaveBeenCalled();
   });
 
   it("renders Enrollment when readConfig resolves an un-enrolled config", async () => {
+    vi.stubEnv("VITE_STATION_API_URL", "https://api.factory.example");
     invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
       if (cmd === "read_config") return Promise.resolve({ machine_id: "m1" });
       if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
@@ -542,6 +630,66 @@ describe("App", () => {
     render(<App />);
 
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+    expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
+  });
+
+  it("confirms active-shift exit without replacing the shift screen", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      mockInvokeForFloor(pinHash, {
+        scanner: null,
+        printer: null,
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          const path = new URL(url).pathname;
+          if (path === "/shifts" && init?.method !== "POST") {
+            return new Response(
+              JSON.stringify({
+                items: [
+                  {
+                    id: "shift-1",
+                    status: "planned",
+                    mode: "validation",
+                    productName: "Product",
+                    plannedQty: 10,
+                  },
+                ],
+              }),
+              { status: 200 },
+            );
+          }
+          if (path === "/shifts/shift-1/open" && init?.method === "POST") {
+            return new Response(
+              JSON.stringify({ id: "shift-1", status: "active", mode: "validation" }),
+              { status: 200 },
+            );
+          }
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+      await waitFor(() => expect(screen.getByText("Preparing the shift…")).toBeDefined());
+      lockdownMock.exit.mockClear();
+
+      fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+      expect(lockdownMock.exit).not.toHaveBeenCalled();
+      expect(screen.getByRole("dialog", { name: "Exit fullscreen?" })).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: "Confirm exit fullscreen" }));
+      expect(lockdownMock.exit).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("Preparing the shift…")).toBeDefined();
+      expect(screen.getByText("Ivan")).toBeDefined();
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
   });
 
   it("drives the real pairing success path to OperatorLogin, not back to pairing", async () => {

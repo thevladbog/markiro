@@ -44,12 +44,17 @@ URL. After a credential is cleared, the persisted trusted `server_url` is used
 for re-pairing instead.
 
 Set the API deployment's `STATION_ORIGIN` to the exact station webview origin.
-The API allows that origin only on `/station` and `/station/*`, never on
-session/auth or kiosk endpoints. Tauri v2's documented non-opaque custom
-protocol origin is `tauri://localhost`; Windows builds can instead use the
-documented `http://tauri.localhost` origin. Configure whichever exact origin
-the shipped platform uses, or an exact HTTP(S) origin for a hosted webview;
-never configure opaque `null`.
+The shipped Windows Tauri 2 build uses `http://tauri.localhost`; this exact
+value must be present in the production API runtime before a Station release.
+The API allows it only on the documented station method/path pairs, never on
+cabinet, auth, platform, or kiosk endpoints. `tauri://localhost` is the
+non-opaque custom-protocol origin used by other Tauri platforms, not the
+deployed Windows value. Never configure opaque `null`.
+
+Before building or publishing the Windows installer, verify the deployed API
+with `pnpm verify:station-production-cors`. The check sends the real pairing
+preflight to `https://admin.markiro.app/station/pair` and fails unless the API
+returns HTTP 204 and echoes `http://tauri.localhost` exactly.
 
 `clear_credential` retains the machine, device, and trusted server identities
 but removes the API key and tenant/place metadata. It deliberately does not

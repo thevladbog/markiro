@@ -132,6 +132,10 @@ jobs:
           pnpm test:station-release:contract
           git diff --check
 
+      - name: Verify production station pairing CORS
+        if: inputs.mode == 'publish' || inputs.mode == 'promote-existing'
+        run: pnpm verify:station-production-cors
+
       - name: Build signed Windows NSIS updater artifacts
         if: inputs.mode == 'publish'
         env:
