@@ -10,3 +10,4 @@ export * from "./schema/mail.js";
 export * from "./schema/team.js";
 export * from "./schema/platform-auth.js";
 export * from "./schema/saas.js";
+export * from "./schema/billing.js";
