@@ -1994,7 +1994,7 @@ body,
   min-width: 0;
   padding: var(--sp-2) var(--sp-4);
   gap: var(--sp-3);
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr) minmax(320px, 1.45fr);
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr) minmax(960px, 2fr);
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
   font: var(--floor-body);
@@ -2023,11 +2023,30 @@ body,
   overflow: hidden;
 }
 
+.station-status-actions .window-mode-control__action {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.station-status-actions .window-mode-control__error {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  align-items: stretch;
+}
+
+.station-status-actions .window-mode-control__error > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .station-update-indicator {
   position: static;
   display: inline-flex;
   min-height: 64px;
   align-items: center;
+  justify-content: center;
   gap: var(--sp-1);
   padding: var(--sp-1) var(--sp-2);
   overflow: hidden;
@@ -2036,8 +2055,9 @@ body,
   background: var(--surface-panel);
   color: var(--fg-1);
   font: var(--floor-body-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .station-update-indicator[data-update-severity="info"] {
@@ -2147,14 +2167,20 @@ body,
   color: var(--warn-fg);
 }
 
-@media (max-width: 1179px) {
+@media (max-width: 1439px) {
   .station-status-bar {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr);
   }
 
   .station-status-actions {
     grid-column: 1 / -1;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1179px) {
+  .station-status-bar {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 

@@ -5,6 +5,7 @@ import i18n from "../i18n/index.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
 import { StationScreen } from "../ui/StationScreen.js";
+import { WindowModeControl } from "../ui/WindowModeControl.js";
 import {
   getGalleryFixture,
   resolveGalleryRequest,
@@ -31,6 +32,12 @@ const COPY = {
     line: "Тестовая линия А",
     operator: "Оператор Тестов",
     shift: "Смена ДЕМО-01",
+    longStation: "Станция упаковки готовой продукции 01",
+    longLine: "Линия сериализации и агрегации готовой продукции А",
+    longOperator: "Александрова-Романовская Екатерина Владимировна",
+    longShift: "Смена производства маркированной продукции ДЕМО-01",
+    update: "Доступно критическое обновление 0.1.0-beta.123",
+    changeOperator: "Сменить оператора",
   },
   en: {
     back: "Back",
@@ -40,6 +47,12 @@ const COPY = {
     line: "Test line A",
     operator: "Sample Operator",
     shift: "Shift DEMO-01",
+    longStation: "Finished goods packaging station 01",
+    longLine: "Finished goods serialization and aggregation line A",
+    longOperator: "Alexandria Montgomery-Wellington the Third",
+    longShift: "Marked goods production shift DEMO-01",
+    update: "Critical update 0.1.0-beta.123 is available",
+    changeOperator: "Change operator",
   },
 } as const;
 
@@ -52,6 +65,36 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   }, [request.locale]);
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
+  const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
+  const headerControls =
+    headerVariant === null
+      ? null
+      : {
+          update: {
+            severity: "urgent" as const,
+            glyph: "!" as const,
+            available: true,
+            label: copy.update,
+          },
+          operatorControl: (
+            <Button size="floor" variant="secondary">
+              {copy.changeOperator}
+            </Button>
+          ),
+          windowControl: (
+            <WindowModeControl
+              snapshot={{
+                mode: "locked",
+                pending: false,
+                error: headerVariant === "window-error" ? "exit" : null,
+              }}
+              activeShift
+              onEnter={() => undefined}
+              onExit={() => undefined}
+              onDismissError={() => undefined}
+            />
+          ),
+        };
   return (
     <div
       className="station-gallery-capture"
@@ -60,16 +103,24 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
       data-gallery-locale={request.locale}
     >
       <FloorShell
-        stationName={copy.station}
-        lineName={copy.line}
-        operatorName={copy.operator}
-        shiftLabel={copy.shift}
+        stationName={headerControls ? copy.longStation : copy.station}
+        lineName={headerControls ? copy.longLine : copy.line}
+        operatorName={headerControls ? copy.longOperator : copy.operator}
+        shiftLabel={headerControls ? copy.longShift : copy.shift}
         serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
         syncStuck={syncVariant === "stuck"}
         conflicts={fixture.kind === "conflicts" ? 4 : 0}
+        {...(headerControls
+          ? {
+              update: headerControls.update,
+              onOpenUpdates: () => undefined,
+              operatorControl: headerControls.operatorControl,
+              windowControl: headerControls.windowControl,
+            }
+          : {})}
       >
         <GalleryState fixture={fixture} locale={request.locale} />
       </FloorShell>
@@ -115,9 +166,26 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <PrintFixture variant={fixture.variant} locale={locale} />;
     case "updates":
       return <UpdateFixture variant={fixture.variant} locale={locale} />;
+    case "floor-header":
+      return <FloorHeaderFixture locale={locale} />;
     case "long-copy":
       return <LongCopyFixture locale={fixture.variant === "en" ? "en" : "ru"} />;
   }
+}
+
+function FloorHeaderFixture({ locale }: { locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  return (
+    <StationScreen title={ru ? "Проверка верхней панели" : "Floor header review"}>
+      <div className="gallery-centered-card">
+        <p className="gallery-state-message">
+          {ru
+            ? "Проверьте читаемость действий и отсутствие перекрытий во всех поддерживаемых разрешениях."
+            : "Check action readability and absence of overlap at every supported viewport."}
+        </p>
+      </div>
+    </StationScreen>
+  );
 }
 
 function SystemFixture({ locale }: { locale: GalleryLocale }) {

@@ -103,7 +103,22 @@ describe("fixed station viewport source contract", () => {
       /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*64px;/s,
     );
     expect(css).toMatch(
-      /@media \(max-width: 1179px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+      /\.station-status-bar\s*\{[^}]*grid-template-columns:[^;}]*minmax\(960px, 2fr\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1439px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2fr\) minmax\(0, 1\.35fr\) minmax\(0, 1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1179px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-actions \.window-mode-control__action\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,
+    );
+    expect(css).toMatch(
+      /\.station-update-indicator\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-actions \.window-mode-control__error\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
     );
   });
 });
