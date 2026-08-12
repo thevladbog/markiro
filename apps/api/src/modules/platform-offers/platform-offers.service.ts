@@ -11,6 +11,7 @@ import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
 import { calculateOfferTotals } from "./offer-totals";
+import { normalizeOfferTerms } from "./offer-terms";
 import type { CreateOfferDto, PaymentDto } from "./dto";
 
 @Injectable()
@@ -18,6 +19,15 @@ export class PlatformOffersService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async create(actor: PlatformPrincipal, input: CreateOfferDto) {
+    let termsMarkdown: string | null;
+    try {
+      termsMarkdown = normalizeOfferTerms(input.termsMarkdown).markdown;
+    } catch (error) {
+      if (error instanceof Error && error.message === "offer_terms_too_long") {
+        throw new BadRequestException({ code: error.message });
+      }
+      throw error;
+    }
     const total = calculateOfferTotals(
       input.lines.map((line) => ({
         quantity: line.quantity,
@@ -71,6 +81,7 @@ export class PlatformOffersService {
           status: "draft",
           total: total.total,
           expiresAt: input.expiresAt ?? null,
+          termsMarkdown,
           createdByPlatformUserId: actor.userId,
         })
         .returning();

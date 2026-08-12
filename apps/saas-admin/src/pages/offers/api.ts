@@ -34,6 +34,7 @@ const offerDetailSchema = offerSummarySchema.extend({ lines: z.array(offerLineSc
 const createOfferInputSchema = z.object({
   tenantId: z.string().min(1),
   expiresAt: z.string().date().nullable(),
+  termsMarkdown: z.string().max(20_000).nullable().optional(),
   lines: z
     .array(
       z.object({

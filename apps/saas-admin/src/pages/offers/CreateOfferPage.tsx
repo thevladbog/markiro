@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, PageHeader, Spinner } from "@markiro/ui";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 
@@ -16,6 +17,7 @@ import {
   type TenantListItem,
 } from "../tenants/api.js";
 import { createOffer } from "./api.js";
+import { OfferTermsEditor } from "./OfferTermsEditor.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -39,6 +41,7 @@ function OfferEditor() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [search] = useSearchParams();
+  const [termsMarkdown, setTermsMarkdown] = useState<string | null>(null);
   const selectedTenantId = tenantIdSchema.safeParse(search.get("tenantId")).data;
   const tenants = useQuery({
     queryKey: ["platform", "tenants", "document-picker"],
@@ -75,7 +78,8 @@ function OfferEditor() {
       ) {
         throw new ApiRequestError(409, "Catalog version unavailable", "catalog_version_stale");
       }
-      return createOffer(toOfferCreateInput(draft));
+      const input = toOfferCreateInput(draft);
+      return createOffer(termsMarkdown ? { ...input, termsMarkdown } : input);
     },
   });
 
@@ -119,27 +123,34 @@ function OfferEditor() {
   };
 
   return (
-    <DocumentComposer
-      kind="offer"
-      initialDraft={initialDraft}
-      tenants={pickerTenants}
-      catalog={(catalog.data?.items ?? []).filter((version) => version.status === "published")}
-      loadingSources={false}
-      submitting={create.isPending}
-      {...(create.error
-        ? {
-            submitError:
-              create.error instanceof ApiRequestError &&
-              create.error.code === "catalog_version_stale"
-                ? t("documents.errors.catalogVersionStale")
-                : t("documents.errors.createOffer"),
-          }
-        : {})}
-      onSubmit={async (draft) => {
-        await create.mutateAsync(draft);
-      }}
-      onSuccess={() => void navigate("/offers", { state: { createdDocument: "offer" } })}
-      onCancel={() => void navigate("/offers")}
-    />
+    <div className="offer-editor">
+      <OfferTermsEditor
+        value={termsMarkdown}
+        onChange={setTermsMarkdown}
+        label={t("offers.terms.label")}
+      />
+      <DocumentComposer
+        kind="offer"
+        initialDraft={initialDraft}
+        tenants={pickerTenants}
+        catalog={(catalog.data?.items ?? []).filter((version) => version.status === "published")}
+        loadingSources={false}
+        submitting={create.isPending}
+        {...(create.error
+          ? {
+              submitError:
+                create.error instanceof ApiRequestError &&
+                create.error.code === "catalog_version_stale"
+                  ? t("documents.errors.catalogVersionStale")
+                  : t("documents.errors.createOffer"),
+            }
+          : {})}
+        onSubmit={async (draft) => {
+          await create.mutateAsync(draft);
+        }}
+        onSuccess={() => void navigate("/offers", { state: { createdDocument: "offer" } })}
+        onCancel={() => void navigate("/offers")}
+      />
+    </div>
   );
 }
