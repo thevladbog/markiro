@@ -49,6 +49,7 @@ describe("Confirmation", () => {
         cart={cart([bottle(1), bottle(2), box])}
         showPrices
         reasonName={null}
+        pending={false}
         onBack={vi.fn()}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
@@ -69,6 +70,7 @@ describe("Confirmation", () => {
         cart={cart(Array.from({ length: 6 }, (_, index) => bottle(index + 1)))}
         showPrices={false}
         reasonName={null}
+        pending={false}
         onBack={vi.fn()}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
@@ -89,6 +91,7 @@ describe("Confirmation", () => {
         cart={cart([bottle(1), box])}
         showPrices
         reasonName={null}
+        pending={false}
         onBack={vi.fn()}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
@@ -101,6 +104,7 @@ describe("Confirmation", () => {
         cart={cart([bottle(1), bottle(2, null)])}
         showPrices
         reasonName={null}
+        pending={false}
         onBack={vi.fn()}
         onConfirm={vi.fn()}
         onCancel={vi.fn()}
@@ -121,6 +125,7 @@ describe("Confirmation", () => {
         cart={cart([bottle(1)])}
         showPrices
         reasonName={null}
+        pending={false}
         onBack={vi.fn()}
         onConfirm={onConfirm}
         onCancel={vi.fn()}
@@ -144,6 +149,7 @@ describe("Confirmation", () => {
         cart={cart([bottle(1)], "writeoff")}
         showPrices
         reasonName={null}
+        pending={false}
         onBack={vi.fn()}
         onConfirm={onConfirm}
         onCancel={vi.fn()}
@@ -153,5 +159,32 @@ describe("Confirmation", () => {
       (screen.getByRole("button", { name: "Подтвердить 1 бутылку" }) as HTMLButtonElement).disabled,
     ).toBe(true);
     expect(screen.getByRole("alert").textContent).toContain("Причина списания больше недоступна");
+  });
+
+  it("disables back and cancel while the reducer says submission is pending", () => {
+    portrait();
+    const onBack = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <Confirmation
+        cart={cart([bottle(1)])}
+        showPrices
+        reasonName={null}
+        pending
+        onBack={onBack}
+        onConfirm={vi.fn()}
+        onCancel={onCancel}
+      />,
+    );
+
+    const header = document.querySelector(".kiosk-flow__header") as HTMLElement;
+    expect((header.querySelector(".kiosk-flow__back") as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Отменить операцию" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(header.querySelector(".kiosk-flow__back") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Отменить операцию" }));
+    expect(onBack).not.toHaveBeenCalled();
+    expect(onCancel).not.toHaveBeenCalled();
   });
 });

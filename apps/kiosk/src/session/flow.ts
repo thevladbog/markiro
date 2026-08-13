@@ -33,15 +33,22 @@ export interface ActiveKioskSession {
   cart: CartState;
 }
 
-type ActiveScreen = "cart" | "operation" | "reason" | "confirmation";
+type ActiveScreen = "cart" | "operation" | "reason";
 type ActiveKioskFlowState = {
   [Screen in ActiveScreen]: { screen: Screen; session: ActiveKioskSession };
 }[ActiveScreen];
+
+export interface ConfirmedKioskFlowState {
+  screen: "confirmation";
+  session: ActiveKioskSession;
+  submitting: boolean;
+}
 
 export type KioskFlowState =
   | { screen: "pairing" }
   | { screen: "login" }
   | ActiveKioskFlowState
+  | ConfirmedKioskFlowState
   | {
       screen: "outcome";
       session: ActiveKioskSession;
@@ -50,17 +57,13 @@ export type KioskFlowState =
       outcome: KioskOutcome;
     };
 
-export interface ConfirmedKioskFlowState {
-  screen: "confirmation";
-  session: ActiveKioskSession;
-}
-
 export type KioskFlowAction =
   | { type: "paired" }
   | { type: "unpaired" }
   | { type: "sessionStarted"; session: ActiveKioskSession }
   | { type: "cartChanged"; cart: CartState }
   | { type: "legacySubmit"; cart: CartState }
+  | { type: "submissionStarted" }
   | { type: "submitFailed" }
   | { type: "continue" }
   | { type: "chooseOperation"; reason: "buy" | "writeoff" }
@@ -186,6 +189,13 @@ function withSession(
 /** Pure screen/session state machine. Scanner, storage, clocks and network stay outside it. */
 export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction): KioskFlowState {
   if (action.type === "unpaired") return { screen: "pairing" };
+  if (
+    state.screen === "confirmation" &&
+    state.submitting &&
+    action.type !== "submitted" &&
+    action.type !== "submitFailed"
+  )
+    return state;
 
   switch (action.type) {
     case "paired":
@@ -204,6 +214,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
       if (cart.reason === "writeoff" && cart.writeoffReasonId === null) return state;
       return {
         screen: "confirmation",
+        submitting: false,
         session: {
           ...state.session,
           cart:
@@ -213,8 +224,14 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
         },
       };
     }
+    case "submissionStarted":
+      return state.screen === "confirmation" && !state.submitting
+        ? { ...state, submitting: true }
+        : state;
     case "submitFailed":
-      return state.screen === "confirmation" ? { screen: "cart", session: state.session } : state;
+      return state.screen === "confirmation" && state.submitting
+        ? { screen: "cart", session: state.session }
+        : state;
     case "continue":
       if (!("session" in state)) return state;
       if (state.screen === "cart") {
@@ -223,6 +240,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
           ? { screen: "operation", session: state.session }
           : {
               screen: "confirmation",
+              submitting: false,
               session: {
                 ...state.session,
                 cart: { ...state.session.cart, reason: "buy", writeoffReasonId: null },
@@ -235,7 +253,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
           state.session.cart.writeoffReasonId === null
         )
           return state;
-        return { screen: "confirmation", session: state.session };
+        return { screen: "confirmation", session: state.session, submitting: false };
       }
       return state;
     case "chooseOperation":
@@ -252,6 +270,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
       }
       return {
         screen: "confirmation",
+        submitting: false,
         session: {
           ...state.session,
           cart: { ...state.session.cart, reason: "buy", writeoffReasonId: null },
@@ -290,7 +309,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
       }
       return state;
     case "submitted":
-      return state.screen === "confirmation"
+      return state.screen === "confirmation" && state.submitting
         ? {
             screen: "outcome",
             session: state.session,

@@ -2,7 +2,7 @@
 
 ## Verdict
 
-**CHANGES REQUESTED.** Commit `628d5249` correctly separates cart, operation, reason and confirmation routing and preserves the canonical mixed cart, but one Important submission race can file the same visible cart more than once. One Minor custom-radio accessibility issue also remains.
+**APPROVED after fix.** Commit `628d5249` correctly separates cart, operation, reason and confirmation routing and preserves the canonical mixed cart. The follow-up fix closes the Important submission race and the Minor custom-radio accessibility issue below.
 
 ## Important finding
 
@@ -14,6 +14,8 @@ Therefore a worker can press Confirm and immediately press Back or confirm Cance
 
 Required correction: make submission an authoritative reducer state/flag entered synchronously before async work. While it is active, `back`, `cancelConfirmed`, reason invalidation and any other navigation away from that confirmation must be no-ops, and Back/Cancel must render disabled. `submitted` and `submitFailed` are the only exits. Keep the component-local ref so two clicks in one render tick are still blocked. Add integration coverage for Confirm→Back and Confirm→Cancel while enqueue/POST is held, proving one queued/order record and no stale cart or login transition before settlement; also cover device revocation/source changes so a stale screen callback cannot resurrect a session.
 
+Resolution: `submissionStarted` now moves confirmation into an explicit pending reducer state before the asynchronous store/network path starts. Navigation, cancellation, logout, idle reset, reason changes and repeated starts are rejected while pending; only pending success/failure can settle, while unpairing still overrides the session. The shell submits the pinned state returned by that transition. Back, Cancel (including the modal confirmation), and the primary action render disabled, while the local ref keeps same-tick taps closed. A deferred App test proves one queue/body and an unchanged confirmation until settlement.
+
 ## Minor finding
 
 ### M1 — Writeoff reasons expose standalone custom radios without radio-group keyboard semantics
@@ -21,6 +23,8 @@ Required correction: make submission an authoritative reducer state/flag entered
 Each reason is a button overwritten with `role="radio"`, but the containing section is not a `radiogroup` and there is no arrow-key selection/focus behavior (`apps/kiosk/src/screens/WriteoffReason.tsx:35-59`). Tab plus activation remains possible and focus styling is visible, but assistive technology receives unrelated radios rather than one labelled choice set, and the standard radio keyboard model is absent.
 
 Required correction: give the bounded reason set a labelled `radiogroup` and implement the expected roving/arrow-key behavior, or use native same-name radio inputs styled as the existing >=48 px cards. Retain paging and selected-reason focus when changing pages.
+
+Resolution: the six-item bounded section is now a labelled `radiogroup`; cards retain `radio` state with roving tab focus. Arrow Left/Up and Right/Down wrap through active reasons, update selection, switch the controlled page when required and restore focus to the selected card.
 
 ## Reviewed behavior without findings
 
@@ -41,3 +45,11 @@ Required correction: give the bounded reason set a labelled `radiogroup` and imp
 - `git diff --check 628d5249^..628d5249`: passed.
 - Implementer evidence reports complete kiosk suite 103/103 files, 572/572 tests, ESLint, PWA build and Prettier passing.
 - No browser, tablet, physical scanner or installed-PWA acceptance was performed or inferred.
+
+## Fix verification
+
+- RED: 4 focused failures / 25 passes reproduced missing reducer lock, non-pending settlement, pending navigation controls, and radiogroup keyboard behavior.
+- Focused GREEN: 3 files / 29 tests passed.
+- Deferred App integration: passed with one durable queue entry and one order POST while Back, Cancel and repeated confirmation were attempted before settlement.
+- Complete kiosk suite: 103/103 files, 572/572 tests passed; direct kiosk TypeScript check passed.
+- Browser/device acceptance remains unperformed and is not inferred.

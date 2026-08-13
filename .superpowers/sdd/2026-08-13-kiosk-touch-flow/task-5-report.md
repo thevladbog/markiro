@@ -11,6 +11,7 @@ The cart now continues into reducer-owned operation, writeoff-reason and confirm
 - Confirmation shows the operation once, positions, bottles, loose/box composition, and a paged 5-portrait/3-landscape summary without exposing box members. Money is absent when prices are hidden or any line is unpriced.
 - The Russian CTA is pluralized as `Подтвердить N бутылку/бутылки/бутылок`; no submit action says `Отправить`.
 - Confirmation locks synchronously on the first click through the enqueue/drain settlement, with an additional shell guard. Durable local failure returns the preserved cart. Scanner listeners are mounted only by the cart among the post-login flow screens.
+- The reducer now owns that in-flight lock: `submissionStarted` pins the confirmed session and rejects Back, cancel, logout, idle reset and repeated submission until success/failure. Revocation/unpair still overrides it. Reasons form a labelled radio group with arrow-key selection and focus across pages.
 
 ## TDD and verification
 
@@ -19,6 +20,7 @@ The cart now continues into reducer-owned operation, writeoff-reason and confirm
 - Integrated Task 5, App, Cart, reducer and i18n: 8 files / 135 tests, then direct no-writeoff integration 48/48.
 - Complete kiosk suite: 103 files / 572 tests passed.
 - Kiosk TypeScript, full `src test` ESLint with zero warnings, Vite PWA build, Prettier and `git diff --check` passed.
+- Review-fix RED: 4 failures / 25 passes; fix GREEN 29/29 plus the deferred App submission integration. Re-run complete kiosk suite remained 103/103 files and 572/572 tests; direct TypeScript check passed.
 
 ## External checks not performed
 

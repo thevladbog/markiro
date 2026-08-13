@@ -1370,7 +1370,7 @@ describe("KioskShell", () => {
    * with `Cart` — and its live button — still on screen. A second tap now would
    * file a genuine second order for one worker's bottles.
    */
-  it("ignores a second tap that lands while the first order is still in flight", async () => {
+  it("keeps confirmation authoritative while the first order is still in flight", async () => {
     await pair();
     render(<App />);
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
@@ -1386,12 +1386,30 @@ describe("KioskShell", () => {
 
     await takeOneBottle();
     await settle(async () => expect((await readConfig())?.nextDeviceSeq).toBe(6));
+    const postedOrders = () =>
+      (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+        ([input]) => String(input).endsWith("/kiosk/orders"),
+      );
+    await settle(() => expect(postedOrders()).toHaveLength(1));
     await act(async () => {
-      const button = document.querySelector(".kiosk-flow__primary");
-      if (!(button instanceof HTMLButtonElement)) throw new Error("confirmation CTA missing");
-      fireEvent.click(button);
+      const primary = document.querySelector(".kiosk-flow__primary");
+      const back = document.querySelector(".kiosk-flow__back");
+      const cancel = document.querySelector(".kiosk-flow__cancel");
+      if (!(primary instanceof HTMLButtonElement)) throw new Error("confirmation CTA missing");
+      if (!(back instanceof HTMLButtonElement)) throw new Error("confirmation back missing");
+      if (!(cancel instanceof HTMLButtonElement)) throw new Error("confirmation cancel missing");
+      expect(primary.disabled).toBe(true);
+      expect(back.disabled).toBe(true);
+      expect(cancel.disabled).toBe(true);
+      fireEvent.click(back);
+      fireEvent.click(cancel);
+      fireEvent.click(primary);
+      fireEvent.click(primary);
     });
-    deliver();
+    expect(screen.getByRole("heading", { name: "Подтверждение" })).toBeDefined();
+    expect(await listQueue()).toHaveLength(1);
+    expect(postedOrders()).toHaveLength(1);
+    await act(async () => deliver());
 
     await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
     expect(server.orders.map((order) => order.deviceSeq)).toEqual([5]);

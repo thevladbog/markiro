@@ -12,6 +12,7 @@ export interface ConfirmationProps {
   cart: CartState;
   showPrices: boolean;
   reasonName: string | null;
+  pending: boolean;
   onBack: () => void;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
@@ -25,6 +26,7 @@ export function Confirmation({
   cart,
   showPrices,
   reasonName,
+  pending,
   onBack,
   onConfirm,
   onCancel,
@@ -34,7 +36,7 @@ export function Confirmation({
   const [pageSize, setPageSize] = useState(() =>
     pageSizeFor(window.innerWidth, window.innerHeight),
   );
-  const [pending, setPending] = useState(false);
+  const [locallyPending, setLocallyPending] = useState(false);
   const locked = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
@@ -52,28 +54,33 @@ export function Confirmation({
   const reasonValid = cart.reason === "buy" || reasonName !== null;
   const money = moneyFormat(i18n.language);
   const confirm = async () => {
-    if (locked.current || !reasonValid) return;
+    if (locked.current || pending || !reasonValid) return;
     locked.current = true;
-    setPending(true);
+    setLocallyPending(true);
     try {
       await onConfirm();
     } finally {
       locked.current = false;
-      if (mounted.current) setPending(false);
+      if (mounted.current) setLocallyPending(false);
     }
   };
 
   return (
     <main className="kiosk-screen kiosk-flow kiosk-confirmation">
       <header className="kiosk-flow__header">
-        <button className="kiosk-control kiosk-flow__back" type="button" onClick={onBack}>
+        <button
+          className="kiosk-control kiosk-flow__back"
+          type="button"
+          disabled={pending || locallyPending}
+          onClick={onBack}
+        >
           {t("flow.back")}
         </button>
         <div>
           <span className="kiosk-flow__eyebrow">{t("confirmation.eyebrow")}</span>
           <h1>{t("confirmation.title")}</h1>
         </div>
-        <CancelOperation onConfirm={onCancel} />
+        <CancelOperation disabled={pending || locallyPending} onConfirm={onCancel} />
       </header>
 
       <div className="kiosk-confirmation__workspace">
@@ -143,10 +150,12 @@ export function Confirmation({
         <button
           className="kiosk-control kiosk-flow__primary"
           type="button"
-          disabled={pending || !reasonValid}
+          disabled={pending || locallyPending || !reasonValid}
           onClick={() => void confirm()}
         >
-          {pending ? t("confirmation.saving") : t("confirmation.confirm", { count: bottles })}
+          {pending || locallyPending
+            ? t("confirmation.saving")
+            : t("confirmation.confirm", { count: bottles })}
         </button>
       </footer>
     </main>

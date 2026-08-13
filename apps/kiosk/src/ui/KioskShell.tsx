@@ -1079,6 +1079,7 @@ export function KioskShell(): React.JSX.Element {
         cart={flow.session.cart}
         showPrices={snapshot.bootstrap.config.showPrices}
         reasonName={reasonName}
+        pending={flow.submitting}
         onBack={() => dispatchFlow({ type: "back" })}
         onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
         onConfirm={() => {
@@ -1091,8 +1092,11 @@ export function KioskShell(): React.JSX.Element {
             return;
           }
           if (submitting.current) return;
+          const pendingFlow = kioskFlowReducer(flow, { type: "submissionStarted" });
+          if (pendingFlow.screen !== "confirmation" || !pendingFlow.submitting) return;
           submitting.current = true;
-          return submitCart(flow).finally(() => {
+          dispatchFlow({ type: "submissionStarted" });
+          return submitCart(pendingFlow).finally(() => {
             submitting.current = false;
           });
         }}

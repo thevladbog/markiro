@@ -4,9 +4,13 @@ import { Modal } from "@markiro/ui";
 
 export interface CancelOperationProps {
   onConfirm: () => void;
+  disabled?: boolean;
 }
 
-export function CancelOperation({ onConfirm }: CancelOperationProps): React.JSX.Element {
+export function CancelOperation({
+  onConfirm,
+  disabled = false,
+}: CancelOperationProps): React.JSX.Element {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
@@ -15,6 +19,7 @@ export function CancelOperation({ onConfirm }: CancelOperationProps): React.JSX.
       <button
         className="kiosk-control kiosk-flow__cancel"
         type="button"
+        disabled={disabled}
         onClick={() => setOpen(true)}
       >
         {t("flow.cancel")}
@@ -34,7 +39,12 @@ export function CancelOperation({ onConfirm }: CancelOperationProps): React.JSX.
             >
               {t("flow.keepWorking")}
             </button>
-            <button className="kiosk-control kiosk-flow__danger" type="button" onClick={onConfirm}>
+            <button
+              className="kiosk-control kiosk-flow__danger"
+              type="button"
+              disabled={disabled}
+              onClick={onConfirm}
+            >
               {t("flow.cancelConfirm")}
             </button>
           </div>

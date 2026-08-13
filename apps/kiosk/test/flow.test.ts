@@ -42,7 +42,10 @@ const active = (canWriteoff: boolean): ActiveKioskSession => ({
 const at = (
   screen: Exclude<KioskFlowState["screen"], "pairing" | "login" | "outcome">,
   canWriteoff = true,
-): KioskFlowState => ({ screen, session: active(canWriteoff) });
+): KioskFlowState =>
+  screen === "confirmation"
+    ? { screen, session: active(canWriteoff), submitting: false }
+    : { screen, session: active(canWriteoff) };
 
 describe("kioskFlowReducer", () => {
   it("moves pairing to login and a badge admission to an empty cart session", () => {
@@ -161,7 +164,8 @@ describe("kioskFlowReducer", () => {
       cart: cart(),
     });
     expect(confirmation.screen).toBe("confirmation");
-    const retry = kioskFlowReducer(confirmation, { type: "submitFailed" });
+    const pending = kioskFlowReducer(confirmation, { type: "submissionStarted" });
+    const retry = kioskFlowReducer(pending, { type: "submitFailed" });
     expect(retry).toMatchObject({ screen: "cart", session: { cart: cart() } });
 
     const empty = kioskFlowReducer(retry, { type: "legacySubmit", cart: cart([]) });
@@ -208,6 +212,50 @@ describe("kioskFlowReducer", () => {
       screen: "reason",
       session: { cart: { reason: "writeoff", writeoffReasonId: null } },
     });
+  });
+
+  it("makes submission authoritative and rejects navigation until it settles", () => {
+    const confirmation = kioskFlowReducer(at("operation"), {
+      type: "chooseOperation",
+      reason: "buy",
+    });
+    const pending = kioskFlowReducer(confirmation, { type: "submissionStarted" });
+    expect(pending).toMatchObject({ screen: "confirmation", submitting: true });
+
+    for (const action of [
+      { type: "back" as const },
+      { type: "cancelConfirmed" as const },
+      { type: "logoutConfirmed" as const },
+      { type: "idleReset" as const },
+      { type: "invalidateWriteoffReason" as const },
+    ]) {
+      expect(kioskFlowReducer(pending, action)).toBe(pending);
+    }
+    expect(kioskFlowReducer(pending, { type: "submissionStarted" })).toBe(pending);
+  });
+
+  it("accepts submit success/failure only while pending and lets unpair override it", () => {
+    const confirmation = kioskFlowReducer(at("operation"), {
+      type: "chooseOperation",
+      reason: "buy",
+    });
+    const outcome = { kind: "queued" as const, deviceSeq: 7, bottleCount: 1 };
+    expect(
+      kioskFlowReducer(confirmation, {
+        type: "submitted",
+        deviceSeq: 7,
+        result: null,
+        outcome,
+      }),
+    ).toBe(confirmation);
+    expect(kioskFlowReducer(confirmation, { type: "submitFailed" })).toBe(confirmation);
+
+    const pending = kioskFlowReducer(confirmation, { type: "submissionStarted" });
+    expect(kioskFlowReducer(pending, { type: "submitFailed" })).toMatchObject({
+      screen: "cart",
+      session: { cart: cart() },
+    });
+    expect(kioskFlowReducer(pending, { type: "unpaired" })).toEqual({ screen: "pairing" });
   });
 
   it("source-bounds reset actions", () => {

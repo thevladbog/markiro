@@ -82,4 +82,36 @@ describe("WriteoffReason", () => {
       true,
     );
   });
+
+  it("groups reasons and moves selection and focus across pages with arrow keys", () => {
+    const onSelect = vi.fn();
+    const { rerender } = render(
+      <WriteoffReason
+        reasons={reasons}
+        selectedId="reason-6"
+        onSelect={onSelect}
+        onContinue={vi.fn()}
+        onBack={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("radiogroup", { name: "Выберите причину списания" })).toBeDefined();
+    const sixth = screen.getByRole("radio", { name: "Причина 6" });
+    sixth.focus();
+    fireEvent.keyDown(sixth, { key: "ArrowRight" });
+    expect(onSelect).toHaveBeenCalledWith("reason-7");
+
+    rerender(
+      <WriteoffReason
+        reasons={reasons}
+        selectedId="reason-7"
+        onSelect={onSelect}
+        onContinue={vi.fn()}
+        onBack={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("2 / 2")).toBeDefined();
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Причина 7" }));
+  });
 });
