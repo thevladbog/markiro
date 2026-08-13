@@ -30,6 +30,7 @@
     "better-auth": "1.6.23",
     "drizzle-orm": "0.45.2",
     "express": "5.2.1",
+    "express-rate-limit": "8.6.1",
     "fast-xml-parser": "5.10.1",
     "markdown-it": "15.0.0",
     "multer": "2.2.0",

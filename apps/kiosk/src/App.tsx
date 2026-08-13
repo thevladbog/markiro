@@ -1,14 +1,23 @@
 import { KioskShell } from "./ui/KioskShell.js";
+import type { KioskScreen } from "./session/flow.js";
 
 export type KioskView =
-  "loading" | "pairing" | "scanner-setup" | "blocked" | "idle" | "cart" | "done";
+  | "loading"
+  | "pairing"
+  | "scanner-setup"
+  | "blocked"
+  | "idle"
+  | "cart"
+  | "operation"
+  | "reason"
+  | "confirmation"
+  | "done";
 
 export interface KioskViewInput {
   paired: boolean;
   cacheStale: boolean;
   scannerSetupRequested: boolean;
-  employeeId: string | null;
-  submitted: boolean;
+  flowScreen: KioskScreen;
   configLoaded: boolean;
 }
 
@@ -25,8 +34,15 @@ export function nextKioskView(input: KioskViewInput): KioskView {
   if (input.scannerSetupRequested) return "scanner-setup";
   if (!input.paired) return "pairing";
   if (input.cacheStale) return "blocked";
-  if (!input.employeeId) return "idle";
-  return input.submitted ? "done" : "cart";
+  if (input.flowScreen === "outcome") return "done";
+  if (
+    input.flowScreen === "cart" ||
+    input.flowScreen === "operation" ||
+    input.flowScreen === "reason" ||
+    input.flowScreen === "confirmation"
+  )
+    return input.flowScreen;
+  return "idle";
 }
 
 /**

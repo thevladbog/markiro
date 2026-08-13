@@ -1079,7 +1079,14 @@
           "duplicate": "duplicate — code already in another order",
           "over_limit": "daily limit exceeded",
           "unknown_badge": "badge not recognised",
-          "unknown_reason": "write-off reason unavailable"
+          "unknown_reason": "write-off reason unavailable",
+          "writeoff_reason_required": "write-off reason not provided",
+          "writeoff_forbidden": "employee may not create write-offs",
+          "unknown_box": "box not found",
+          "box_not_closed": "box is not closed",
+          "box_disassembled": "box was disassembled",
+          "box_contents_changed": "box contents changed",
+          "mixed_product_box": "box contains multiple products"
         }
       },
       "rejections": {
@@ -1115,6 +1122,8 @@
         },
         "unknownBadge": "Badge not recognised",
         "badgeCodeLabel": "Badge: {{code}}",
+        "boxLabel": "Box {{sscc}}",
+        "boxCountLabel": "Box {{sscc}} · {{count}} pcs",
         "noOrder": "no order",
         "state": {
           "open": "Open",
@@ -1206,6 +1215,40 @@
         "navigationLabel": "Employee sections",
         "profile": "Profile",
         "error": "Error"
+      },
+      "pickupPolicy": {
+        "title": "Pickup policy",
+        "limitModeLabel": "Pickup limit",
+        "limited": "Daily limit",
+        "unlimited": "Unlimited",
+        "dayLimitLabel": "Items per day",
+        "retainedLimitHint": "This value is retained and applies again when the limit is enabled.",
+        "dayLimitError": "Enter a positive whole number",
+        "canWriteoffLabel": "Allow writeoff",
+        "canWriteoffHint": "Writeoff permission changes independently from the limit.",
+        "save": "Save pickup policy",
+        "toasts": { "success": "Pickup policy saved", "error": "Could not save the pickup policy" }
+      },
+      "bulk": {
+        "title": "Bulk pickup policy update",
+        "openAction": "Bulk edit policies",
+        "cancel": "Finish bulk editing",
+        "selectEmployee": "Select {{name}}",
+        "selectedCount": "Selected: {{count}}",
+        "selectFirst": "Select first 500",
+        "maxSelection": "You can select no more than 500 employees",
+        "limitModeLabel": "Limit to assign",
+        "limitAction": "Assign limit",
+        "canWriteoffLabel": "Allow writeoff",
+        "writeoffAction": "Change writeoff permission",
+        "limitConfirmTitle": "Assign limit to employees?",
+        "limitConfirmBody": "The limit will change for the selected employees ({{count}}). Writeoff permission stays unchanged.",
+        "limitConfirmAction": "Assign",
+        "writeoffConfirmTitle": "Change writeoff permission?",
+        "writeoffConfirmBody": "Writeoff permission will change for the selected employees ({{count}}). Their limit stays unchanged.",
+        "writeoffConfirmAction": "Change",
+        "success": "Selected employee policies updated",
+        "error": "Could not update selected employee policies"
       },
       "badges": {
         "title": "Badges",
@@ -1416,7 +1459,6 @@
         "editTitle": "Edit kiosk",
         "nameLabel": "Name",
         "locationLabel": "Location",
-        "dayLimitLabel": "Daily item limit per employee",
         "showPricesLabel": "Show prices",
         "productsLabel": "Allowed products",
         "saveProductsAction": "Save list",
@@ -1439,8 +1481,7 @@
         "discardAction": "Discard",
         "errors": {
           "nameRequired": "Enter a name",
-          "nameTooLong": "200 characters or fewer",
-          "dayLimitInvalid": "Enter a positive whole number"
+          "nameTooLong": "200 characters or fewer"
         }
       },
       "sections": {
@@ -1678,6 +1719,26 @@
           "updateSuccess": "Profile saved",
           "updateError": "Could not save the profile"
         }
+      },
+      "pickupPolicy": {
+        "cardTitle": "Pickup policy",
+        "enabledLabel": "Apply limits across all kiosks in total",
+        "enabledHint": "When enforcement is disabled, saved employee values are retained and apply again after it is enabled.",
+        "save": "Save",
+        "toasts": {
+          "success": "Pickup policy saved",
+          "error": "Could not save the pickup policy"
+        }
+      },
+      "logo": {
+        "cardTitle": "Organisation logo",
+        "previewAlt": "Organisation logo",
+        "fallbackLabel": "Default Markiro logo",
+        "uploadLabel": "Upload logo",
+        "removeAction": "Remove logo",
+        "invalidType": "Choose one JPEG, PNG, or WebP file.",
+        "uploadError": "Could not upload the logo",
+        "removeError": "Could not remove the logo"
       },
       "sscc": {
         "cardTitle": "Box SSCC counter",

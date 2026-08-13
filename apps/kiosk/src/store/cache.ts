@@ -1,10 +1,10 @@
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapDto, KioskBootstrapSnapshotDto } from "../api/types.js";
 import { STORE_SNAPSHOT, withStore } from "./db.js";
 
 const KEY = "current";
 
 export interface CachedSnapshot {
-  bootstrap: KioskBootstrapDto;
+  bootstrap: KioskBootstrapSnapshotDto;
   fetchedAt: string;
 }
 
@@ -41,7 +41,7 @@ export class UnusableBootstrapError extends Error {
  *
  * Throws rather than returning a boolean so a caller cannot quietly ignore it.
  */
-export function assertMeasurableGeneratedAt(bootstrap: KioskBootstrapDto): void {
+export function assertMeasurableGeneratedAt(bootstrap: KioskBootstrapSnapshotDto): void {
   if (Number.isNaN(Date.parse(bootstrap.generatedAt))) {
     throw new UnusableBootstrapError(bootstrap.generatedAt);
   }

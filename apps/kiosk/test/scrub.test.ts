@@ -86,6 +86,26 @@ describe("scrubStoredBadgeCodes", () => {
     expect(parked!.message).toBe("Unknown or inactive badge");
   });
 
+  it("preserves an SSCC body and its bottle estimate while scrubbing the legacy badge", async () => {
+    const body = {
+      ...legacyBody(8),
+      items: [],
+      boxes: [{ sscc: "346006820000000021" }],
+    };
+    await enqueueOrder(body, "e1", "pending_attestation", 12);
+    const before = (await listQueue())[0]!;
+
+    await expect(scrubStoredBadgeCodes(SALT)).resolves.toBe(1);
+
+    const after = (await listQueue())[0]!;
+    expect(after.estimatedBottleCount).toBe(12);
+    expect(after.body.boxes).toEqual(before.body.boxes);
+    expect(after.body.items).toEqual([]);
+    expect(storedBody(after)).not.toHaveProperty("badgeCode");
+    expect(storedBody(after).badgeDigest).toBe(await digestOf(CODE));
+    expect(storedBody(after)).not.toHaveProperty("members");
+  });
+
   it("derives once per distinct badge, not once per order", async () => {
     for (const deviceSeq of [1, 2, 3]) await enqueueOrder(legacyBody(deviceSeq), "e1");
     await enqueueOrder(legacyBody(4, "BADGE-2"), "e2");

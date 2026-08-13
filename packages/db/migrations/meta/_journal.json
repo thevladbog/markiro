@@ -264,8 +264,29 @@
     {
       "idx": 37,
       "version": "7",
-      "when": 1786655046822,
-      "tag": "0037_sscc_counter_start_one",
+      "when": 1786648204179,
+      "tag": "0037_kiosk_pickup_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786648204180,
+      "tag": "0038_organization_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786648204181,
+      "tag": "0039_kiosk_sscc_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786657686545,
+      "tag": "0040_sscc_counter_start_one",
       "breakpoints": true
     }
   ]

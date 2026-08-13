@@ -11,6 +11,10 @@ export interface CreateOrderItemInput {
   rawKm: string;
 }
 
+export interface CreateOrderBoxInput {
+  sscc: string;
+}
+
 /**
  * POST /kiosk/orders body. `deviceSeq` is the kiosk's own monotonic counter —
  * together with `(tenantId, kioskId)` it's the idempotency key for offline
@@ -30,18 +34,25 @@ export interface CreateOrderItemInput {
  * queued by an older bundle drain instead of failing validation; today's app
  * never writes one, and `store/scrub.ts` removes the ones it already wrote.
  */
-export interface CreateOrderDto {
+interface CreateOrderCore {
   deviceSeq: number;
-  badgeDigest: string;
   reason: "buy" | "writeoff";
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];
+  boxes?: CreateOrderBoxInput[];
   createdAt?: string;
   admissionNonce?: string;
   admissionProof?: string;
 }
 
-export type CreateOrderAdmissionDto = Omit<CreateOrderDto, "createdAt" | "admissionProof">;
+type DigestBadgeIdentity = { badgeDigest: string; badgeCode?: never };
+/** Read-only upgrade path for records queued before badge digests. */
+type LegacyBadgeIdentity = { badgeCode: string; badgeDigest?: never };
+
+export type CreateOrderDto = CreateOrderCore & (DigestBadgeIdentity | LegacyBadgeIdentity);
+
+type WithoutDeliveryFields<T> = T extends unknown ? Omit<T, "createdAt" | "admissionProof"> : never;
+export type CreateOrderAdmissionDto = WithoutDeliveryFields<CreateOrderDto>;
 
 export interface CreateOrderAdmissionResultDto {
   claimedAt: string;
@@ -54,12 +65,54 @@ export interface OrderConflict {
   reason: "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit";
 }
 
+export type BoxConflictReason =
+  | "unknown_box"
+  | "box_not_closed"
+  | "box_disassembled"
+  | "box_contents_changed"
+  | "mixed_product_box"
+  | "duplicate"
+  | "over_limit";
+
+export interface BoxConflict {
+  sscc: string;
+  bottleCount: number | null;
+  reason: BoxConflictReason;
+}
+
 /** POST /kiosk/orders response — the authoritative server-side outcome. */
 export interface CreateOrderResultDto {
   orderNo: string;
   status: "pending";
   itemCount: number;
   conflicts: OrderConflict[];
+  boxConflicts?: BoxConflict[];
+  acceptedBoxes?: Array<{ sscc: string; bottleCount: number }>;
+}
+
+export type KioskBoxRegistryChange =
+  | {
+      kind: "upsert";
+      boxId: string;
+      sscc: string;
+      productId: string;
+      bottleCount: number;
+      contentKeys: string[];
+      updatedAt: string;
+    }
+  | { kind: "remove"; sscc: string; updatedAt: string };
+
+export interface KioskBoxRegistryPage {
+  until: string;
+  items: KioskBoxRegistryChange[];
+  nextCursor?: string;
+}
+
+export interface KioskBoxRegistryQuery {
+  since?: string;
+  until?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 export interface SubscriptionAccessSnapshotDto {
@@ -67,6 +120,42 @@ export interface SubscriptionAccessSnapshotDto {
   status: "unmanaged" | "pending_activation" | "trial" | "active" | "expired" | "read_only";
   startsAt: string | null;
   endsAt: string | null;
+}
+
+export interface KioskBrandingDto {
+  organizationName: string;
+  logoUrl: string | null;
+  logoRevision: string | null;
+}
+
+export interface KioskBootstrapEmployeeDto {
+  id: string;
+  fullName: string;
+  role: string | null;
+  badgeHash: string | null;
+  limitMode: "limited" | "unlimited";
+  dayLimit: number;
+  canWriteoff: boolean;
+  /**
+   * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
+   * total, and reading it as one would break the very thing it fixes.
+   *
+   * This device counts its OWN kiosk's contribution from its journal and its
+   * unsynced queue (`session/day-count.ts`), and the limit is the SUM. The
+   * two halves are split by SOURCE, so an overlap is impossible by
+   * construction — no watermark, no clock comparison. Were this a total, the
+   * items this device filed would be counted twice and a worker would be
+   * refused product they are entitled to, at an unattended machine with
+   * nobody to overrule it.
+   *
+   * DECLARED REQUIRED, BUT READ AS UNTRUSTED. This interface describes what
+   * today's server sends; the app casts `res.json()` to it and validates
+   * nothing, and IndexedDB holds whatever snapshot any past server sent. So
+   * it is read through `takenTodayElsewhere()`, which answers zero for a
+   * payload that does not carry it — the same reason `day-count.ts` guards
+   * the journal it reads back.
+   */
+  takenTodayElsewhere: number;
 }
 
 /**
@@ -91,6 +180,8 @@ export interface SubscriptionAccessSnapshotDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshotDto;
+  branding: KioskBrandingDto;
+  pickupPolicy: { limitsEnabled: boolean };
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
@@ -101,32 +192,7 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: {
-    id: string;
-    fullName: string;
-    role: string | null;
-    badgeHash: string | null;
-    /**
-     * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
-     * total, and reading it as one would break the very thing it fixes.
-     *
-     * This device counts its OWN kiosk's contribution from its journal and its
-     * unsynced queue (`session/day-count.ts`), and the limit is the SUM. The
-     * two halves are split by SOURCE, so an overlap is impossible by
-     * construction — no watermark, no clock comparison. Were this a total, the
-     * items this device filed would be counted twice and a worker would be
-     * refused product they are entitled to, at an unattended machine with
-     * nobody to overrule it.
-     *
-     * DECLARED REQUIRED, BUT READ AS UNTRUSTED. This interface describes what
-     * today's server sends; the app casts `res.json()` to it and validates
-     * nothing, and IndexedDB holds whatever snapshot any past server sent. So
-     * it is read through `takenTodayElsewhere()`, which answers zero for a
-     * payload that does not carry it — the same reason `day-count.ts` guards
-     * the journal it reads back.
-     */
-    takenTodayElsewhere: number;
-  }[];
+  employees: KioskBootstrapEmployeeDto[];
   operators: {
     employeeId: string;
     name: string;
@@ -137,6 +203,34 @@ export interface KioskBootstrapDto {
     active: boolean;
   }[];
 }
+
+/**
+ * Snapshots written by an older kiosk bundle can remain in IndexedDB across an
+ * upgrade. Only fields introduced by the current branding/policy contract are
+ * optional here; the current network DTO above remains strict and complete.
+ * Privilege-bearing reads must go through the runtime guards in day-count.ts.
+ */
+export type LegacyKioskBootstrapDto = Omit<
+  KioskBootstrapDto,
+  "branding" | "pickupPolicy" | "employees"
+> & {
+  branding?: KioskBrandingDto;
+  pickupPolicy?: { limitsEnabled: boolean };
+  employees: Array<
+    Omit<
+      KioskBootstrapEmployeeDto,
+      "limitMode" | "dayLimit" | "canWriteoff" | "takenTodayElsewhere"
+    > &
+      Partial<
+        Pick<
+          KioskBootstrapEmployeeDto,
+          "limitMode" | "dayLimit" | "canWriteoff" | "takenTodayElsewhere"
+        >
+      >
+  >;
+};
+
+export type KioskBootstrapSnapshotDto = KioskBootstrapDto | LegacyKioskBootstrapDto;
 
 /**
  * POST /kiosk/pair response — the contract Plan B-2's pairing screen calls.

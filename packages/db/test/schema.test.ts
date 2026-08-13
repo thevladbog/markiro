@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, getTableName } from "drizzle-orm";
-import { getTableConfig } from "drizzle-orm/pg-core";
+import { and, eq, getTableName, is } from "drizzle-orm";
+import { getTableConfig, IndexedColumn } from "drizzle-orm/pg-core";
 import { createDb, schema } from "../src/index.js";
 import {
   boxExceptions,
   boxItems,
+  boxRegistryVersions,
   boxes,
   codeConflicts,
   codeRegistry,
@@ -46,8 +47,20 @@ describe("platform schema", () => {
   it("gives boxes a tenant-unique sscc", () => {
     const cols = Object.keys(boxes);
     expect(cols).toEqual(
-      expect.arrayContaining(["tenantId", "id", "sscc", "shiftId", "terminalId", "closedAt"]),
+      expect.arrayContaining([
+        "tenantId",
+        "id",
+        "sscc",
+        "shiftId",
+        "terminalId",
+        "closedAt",
+        "registryVersion",
+        "updatedAt",
+      ]),
     );
+    if (!("updatedAt" in boxes)) return;
+    expect(boxes.updatedAt.notNull).toBe(true);
+    expect(boxes.updatedAt.hasDefault).toBe(true);
   });
 
   // Column-presence checks above would not catch a dropped unique index or a
@@ -71,6 +84,32 @@ describe("platform schema", () => {
       "terminal_id",
       "device_box_id",
     ]);
+  });
+
+  it("indexes the tenant box registry cursor in paging order", () => {
+    const cursorIndex = getTableConfig(boxes).indexes.find(
+      (one) => one.config.name === "boxes_registry_cursor_idx",
+    );
+
+    expect(cursorIndex, "missing box registry cursor index").toBeDefined();
+    expect(cursorIndex?.config.method).toBe("btree");
+    expect(
+      cursorIndex?.config.columns.map((column) =>
+        is(column, IndexedColumn) ? column.name : undefined,
+      ),
+    ).toEqual(["tenant_id", "registry_version", "id"]);
+  });
+
+  it("declares a tenant-owned committed box registry revision", () => {
+    expect(getTableName(boxRegistryVersions)).toBe("box_registry_versions");
+    expect(boxRegistryVersions.currentVersion.notNull).toBe(true);
+    expect(boxRegistryVersions.currentVersion.hasDefault).toBe(true);
+    const fk = getTableConfig(boxRegistryVersions).foreignKeys.find(
+      (one) => one.getName() === "box_registry_versions_tenant_fk",
+    );
+    expect(fk).toBeDefined();
+    expect(fk?.reference().columns.map((column) => column.name)).toEqual(["tenant_id"]);
+    expect(fk?.reference().foreignColumns.map((column) => column.name)).toEqual(["id"]);
   });
 
   it("gives boxes.operator_id a composite tenant FK to employees", () => {

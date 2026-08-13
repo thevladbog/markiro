@@ -346,6 +346,8 @@ describe("self-hosted OpenAPI documentation", () => {
       const bootstrap = property(kiosk, "bootstrap");
       expectExactObjectFields(bootstrap, [
         "generatedAt",
+        "branding",
+        "pickupPolicy",
         "config",
         "badgeSalt",
         "reasons",
@@ -354,6 +356,12 @@ describe("self-hosted OpenAPI documentation", () => {
         "operators",
         "subscription",
       ]);
+      expectExactObjectFields(property(bootstrap, "branding"), [
+        "organizationName",
+        "logoUrl",
+        "logoRevision",
+      ]);
+      expectExactObjectFields(property(bootstrap, "pickupPolicy"), ["limitsEnabled"]);
       expectExactObjectFields(property(bootstrap, "config"), ["dayLimitPerEmployee", "showPrices"]);
       expectExactObjectFields(arrayItems(property(bootstrap, "reasons")), ["id", "name"]);
       expectExactObjectFields(arrayItems(property(bootstrap, "products")), [
@@ -368,6 +376,9 @@ describe("self-hosted OpenAPI documentation", () => {
         "fullName",
         "role",
         "badgeHash",
+        "limitMode",
+        "dayLimit",
+        "canWriteoff",
         "takenTodayElsewhere",
       ]);
       const kioskOperator = arrayItems(property(bootstrap, "operators"));

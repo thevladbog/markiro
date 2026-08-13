@@ -1,12 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import type { TFunction } from "i18next";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
 import { hasValidCheckDigit } from "@markiro/domain";
-import { Alert, Button, Card, Input, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, Button, Card, Checkbox, Input, PageHeader, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
@@ -16,6 +16,8 @@ import {
   useOrgProfileSscc,
   useUpdateOrgProfile,
   useUpdateOrgProfileSscc,
+  useUploadOrganizationLogo,
+  useDeleteOrganizationLogo,
   type PutOrgProfileInput,
 } from "./api.js";
 
@@ -102,6 +104,18 @@ function toProfileInput(values: ProfileFormValues): PutOrgProfileInput {
   };
 }
 
+function toProfileFormValues(profile: {
+  gln: string | null;
+  inn: string | null;
+  gs1Prefixes: string[];
+}): ProfileFormValues {
+  return {
+    gln: profile.gln ?? "",
+    inn: profile.inn ?? "",
+    gs1Prefixes: profile.gs1Prefixes.join(", "),
+  };
+}
+
 /**
  * The tenant's own organisation profile (GLN, tax id, GS1 prefixes) plus its
  * box SSCC counter (06c Task 5) -- what a plant migrating off another system
@@ -117,25 +131,22 @@ export function OrgProfilePage() {
     register: registerProfile,
     handleSubmit: handleProfileSubmit,
     reset: resetProfile,
-    formState: { errors: profileErrors },
+    formState: { errors: profileErrors, isDirty: isProfileDirty },
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileFormSchema),
     defaultValues: EMPTY_PROFILE_VALUES,
   });
 
   useEffect(() => {
-    if (profileQuery.data) {
-      resetProfile({
-        gln: profileQuery.data.gln ?? "",
-        inn: profileQuery.data.inn ?? "",
-        gs1Prefixes: profileQuery.data.gs1Prefixes.join(", "),
-      });
+    if (profileQuery.data && !isProfileDirty) {
+      resetProfile(toProfileFormValues(profileQuery.data));
     }
-  }, [profileQuery.data, resetProfile]);
+  }, [isProfileDirty, profileQuery.data, resetProfile]);
 
   const submitProfile = handleProfileSubmit(async (values) => {
     try {
-      await updateProfile.mutateAsync(toProfileInput(values));
+      const savedProfile = await updateProfile.mutateAsync(toProfileInput(values));
+      resetProfile(toProfileFormValues(savedProfile));
       toast("ok", t("pages.settings.profile.toasts.updateSuccess"));
     } catch (error) {
       toast(
@@ -191,10 +202,148 @@ export function OrgProfilePage() {
             </form>
           </Card>
 
+          <PickupPolicyCard enabled={profileQuery.data.pickupLimitsEnabled} />
+          <OrganizationLogoCard logoUrl={profileQuery.data.logoUrl} />
+
           <OrgProfileSsccCard derivedPrefix={derivePrefix(profileQuery.data.gln)} />
         </>
       )}
     </div>
+  );
+}
+
+function PickupPolicyCard({ enabled }: { enabled: boolean }) {
+  const { t } = useTranslation();
+  const update = useUpdateOrgProfile();
+  const [checked, setChecked] = useState(enabled);
+  useEffect(() => setChecked(enabled), [enabled]);
+
+  const save = async () => {
+    try {
+      await update.mutateAsync({ pickupLimitsEnabled: checked });
+      toast("ok", t("pages.settings.pickupPolicy.toasts.success"));
+    } catch (error) {
+      toast(
+        "error",
+        error instanceof ApiRequestError
+          ? error.message
+          : t("pages.settings.pickupPolicy.toasts.error"),
+      );
+    }
+  };
+
+  return (
+    <Card title={t("pages.settings.pickupPolicy.cardTitle")}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <Checkbox
+          label={t("pages.settings.pickupPolicy.enabledLabel")}
+          hint={t("pages.settings.pickupPolicy.enabledHint")}
+          checked={checked}
+          disabled={update.isPending}
+          onCheckedChange={setChecked}
+        />
+        <div>
+          <Button type="button" loading={update.isPending} onClick={() => void save()}>
+            {t("pages.settings.pickupPolicy.save")}
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+const ALLOWED_LOGO_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function adminLogoUrl(relativeUrl: string | null): string | null {
+  return relativeUrl?.startsWith("/org/profile/logo/") ? `/api${relativeUrl}` : null;
+}
+
+function OrganizationLogoCard({ logoUrl }: { logoUrl: string | null }) {
+  const { t } = useTranslation();
+  const upload = useUploadOrganizationLogo();
+  const remove = useDeleteOrganizationLogo();
+  const [error, setError] = useState<string | null>(null);
+  const previewUrl = adminLogoUrl(logoUrl);
+
+  const uploadFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!ALLOWED_LOGO_TYPES.has(file.type)) {
+      setError(t("pages.settings.logo.invalidType"));
+      return;
+    }
+    try {
+      setError(null);
+      await upload.mutateAsync(file);
+    } catch (cause) {
+      setError(
+        cause instanceof ApiRequestError ? cause.message : t("pages.settings.logo.uploadError"),
+      );
+    }
+  };
+
+  const deleteLogo = async () => {
+    try {
+      setError(null);
+      await remove.mutateAsync();
+    } catch (cause) {
+      setError(
+        cause instanceof ApiRequestError ? cause.message : t("pages.settings.logo.removeError"),
+      );
+    }
+  };
+
+  return (
+    <Card title={t("pages.settings.logo.cardTitle")}>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
+        {previewUrl ? (
+          <img
+            src={previewUrl}
+            alt={t("pages.settings.logo.previewAlt")}
+            style={{
+              width: 240,
+              height: 96,
+              objectFit: "contain",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--r-2)",
+            }}
+          />
+        ) : (
+          <div
+            aria-label={t("pages.settings.logo.fallbackLabel")}
+            style={{
+              width: 240,
+              height: 96,
+              display: "grid",
+              placeItems: "center",
+              border: "1px solid var(--line)",
+              borderRadius: "var(--r-2)",
+              background: "var(--surface-panel)",
+              font: "var(--text-h3)",
+            }}
+          >
+            Markiro
+          </div>
+        )}
+        <Input
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          label={t("pages.settings.logo.uploadLabel")}
+          disabled={upload.isPending || remove.isPending}
+          onChange={(event) => void uploadFile(event.target.files?.[0])}
+        />
+        {previewUrl ? (
+          <Button
+            type="button"
+            variant="secondary"
+            loading={remove.isPending}
+            onClick={() => void deleteLogo()}
+          >
+            {t("pages.settings.logo.removeAction")}
+          </Button>
+        ) : null}
+        {error ? <Alert tone="error">{error}</Alert> : null}
+      </div>
+    </Card>
   );
 }
 

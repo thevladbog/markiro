@@ -103,6 +103,8 @@ const kioskBootstrapSchema: ResponseSchema = {
   required: [
     "generatedAt",
     "subscription",
+    "branding",
+    "pickupPolicy",
     "config",
     "badgeSalt",
     "reasons",
@@ -113,6 +115,22 @@ const kioskBootstrapSchema: ResponseSchema = {
   properties: {
     generatedAt: { type: "string", format: "date-time" },
     subscription: subscriptionAccessSchema,
+    branding: {
+      type: "object",
+      additionalProperties: false,
+      required: ["organizationName", "logoUrl", "logoRevision"],
+      properties: {
+        organizationName: { type: "string" },
+        logoUrl: { type: "string", nullable: true },
+        logoRevision: { type: "string", format: "uuid", nullable: true },
+      },
+    },
+    pickupPolicy: {
+      type: "object",
+      additionalProperties: false,
+      required: ["limitsEnabled"],
+      properties: { limitsEnabled: { type: "boolean" } },
+    },
     config: {
       type: "object",
       required: ["dayLimitPerEmployee", "showPrices"],
@@ -148,12 +166,24 @@ const kioskBootstrapSchema: ResponseSchema = {
       type: "array",
       items: {
         type: "object",
-        required: ["id", "fullName", "role", "badgeHash", "takenTodayElsewhere"],
+        required: [
+          "id",
+          "fullName",
+          "role",
+          "badgeHash",
+          "limitMode",
+          "dayLimit",
+          "canWriteoff",
+          "takenTodayElsewhere",
+        ],
         properties: {
           id: { type: "string" },
           fullName: { type: "string" },
           role: { type: "string", nullable: true },
           badgeHash: { type: "string", nullable: true },
+          limitMode: { type: "string", enum: ["limited", "unlimited"] },
+          dayLimit: { type: "integer", minimum: 1 },
+          canWriteoff: { type: "boolean" },
           takenTodayElsewhere: { type: "integer", minimum: 0 },
         },
       },

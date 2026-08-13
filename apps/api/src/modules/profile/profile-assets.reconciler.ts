@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
+import { OrgProfileService } from "../org-profile/org-profile.service";
 import { ProfileService } from "./profile.service";
 
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1_000;
@@ -8,7 +9,10 @@ export class ProfileAssetsReconciler implements OnModuleInit, OnModuleDestroy {
   readonly #logger = new Logger(ProfileAssetsReconciler.name);
   #timer?: NodeJS.Timeout;
 
-  constructor(private readonly profiles: ProfileService) {}
+  constructor(
+    private readonly profiles: ProfileService,
+    private readonly organizations: OrgProfileService,
+  ) {}
 
   onModuleInit(): void {
     this.#timer = setInterval(() => void this.runOnce(), RECONCILE_INTERVAL_MS);
@@ -22,11 +26,15 @@ export class ProfileAssetsReconciler implements OnModuleInit, OnModuleDestroy {
 
   private async runOnce(): Promise<void> {
     try {
-      const count = await this.profiles.reconcileAssets();
-      if (count > 0) this.#logger.log(`Reconciled ${count} stale profile asset(s)`);
+      const [profileCount, organizationCount] = await Promise.all([
+        this.profiles.reconcileAssets(),
+        this.organizations.reconcileLogoAssets(),
+      ]);
+      const count = profileCount + organizationCount;
+      if (count > 0) this.#logger.log(`Reconciled ${count} stale stored asset(s)`);
     } catch (error) {
       this.#logger.error(
-        `Could not reconcile stale profile assets: ${
+        `Could not reconcile stale stored assets: ${
           error instanceof Error ? error.message : "unknown error"
         }`,
       );

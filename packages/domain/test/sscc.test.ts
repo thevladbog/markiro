@@ -69,19 +69,27 @@ describe("ssccSerialCapacity", () => {
 });
 
 describe("parseScannedSscc", () => {
-  // buildSscc(0, "460123456", 1) — a real, check-digit-valid SSCC.
-  const sscc = buildSscc(0, "460123456", 1);
+  const sscc = "346006820000000014";
 
-  it("accepts the bare 18 digits", () => {
-    expect(parseScannedSscc(sscc)).toBe(sscc);
+  it.each([
+    [sscc, sscc],
+    [`00${sscc}`, sscc],
+    [`(00)${sscc}`, sscc],
+    [`]C1${sscc}`, sscc],
+    [`]C100${sscc}`, sscc],
+    [`]C1(00)${sscc}`, sscc],
+  ])("normalizes scanner SSCC %s", (raw, expected) => {
+    expect(parseScannedSscc(raw)).toBe(expected);
   });
 
-  it("strips the (00) application identifier", () => {
-    expect(parseScannedSscc(`00${sscc}`)).toBe(sscc);
-  });
-
-  it("strips a leading AIM identifier and the application identifier", () => {
-    expect(parseScannedSscc(`]C100${sscc}`)).toBe(sscc);
+  it.each([
+    `${sscc}0`,
+    `(00)${sscc.slice(0, -1)}0`,
+    `]C1\u001d00${sscc}`,
+    `]C1(00)${sscc}0`,
+    `prefix${sscc}`,
+  ])("rejects malformed scanner SSCC %s", (raw) => {
+    expect(parseScannedSscc(raw)).toBeNull();
   });
 
   it("rejects a payload with a bad check digit", () => {
@@ -98,7 +106,6 @@ describe("parseScannedSscc", () => {
   });
 
   it("rejects a wrong application identifier", () => {
-    const sscc = buildSscc(0, "460123456", 1);
     // Payload with "01" (not "00") app ID + valid SSCC = 20 characters
     expect(parseScannedSscc(`01${sscc}`)).toBeNull();
   });

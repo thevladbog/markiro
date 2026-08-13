@@ -90,7 +90,10 @@ const OPERATIONAL_CONTROLLERS: readonly [
     {
       listEmployees: readPolicy,
       createEmployee: writePolicy,
+      bulkUpdatePickupLimits: writePolicy,
+      bulkUpdatePickupWriteoff: writePolicy,
       updateEmployee: writePolicy,
+      updatePickupPolicy: writePolicy,
       archiveEmployee: writePolicy,
       issueBadge: writePolicy,
       revokeBadge: writePolicy,
@@ -193,10 +196,13 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     OrgProfileController,
     {
+      deleteLogo: settingsPolicy,
+      getLogo: settingsPolicy,
       getProfile: settingsPolicy,
       putProfile: settingsPolicy,
       getSscc: settingsPolicy,
       putSscc: settingsPolicy,
+      uploadLogo: settingsPolicy,
     },
   ],
   [

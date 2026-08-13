@@ -10,6 +10,7 @@ import {
   SUBMIT_TIMEOUT_MS,
 } from "../src/api/client.js";
 import { REFRESH_INTERVAL_MS } from "../src/sync/worker.js";
+import type { KioskBootstrapDto } from "../src/api/types.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -45,6 +46,62 @@ describe("pairKiosk", () => {
 });
 
 describe("createKioskClient", () => {
+  it("returns the complete current branding and pickup-policy bootstrap contract", async () => {
+    const currentBootstrap: KioskBootstrapDto = {
+      generatedAt: "2026-08-13T00:00:00.000Z",
+      subscription: { access: "managed", status: "active", startsAt: null, endsAt: null },
+      branding: {
+        organizationName: "ООО Маяк",
+        logoUrl: "/kiosk/bootstrap/logo/revision-1",
+        logoRevision: "revision-1",
+      },
+      pickupPolicy: { limitsEnabled: true },
+      config: { dayLimitPerEmployee: 5, showPrices: true },
+      badgeSalt: "c2FsdA==",
+      reasons: [{ id: "reason-1", name: "Брак" }],
+      products: [
+        {
+          id: "product-1",
+          gtin14: "04601234567890",
+          name: "Вода",
+          unitPrice: "10.00",
+          egaisCode: null,
+        },
+      ],
+      employees: [
+        {
+          id: "employee-1",
+          fullName: "Иван Иванов",
+          role: null,
+          badgeHash: "digest",
+          limitMode: "limited",
+          dayLimit: 3,
+          canWriteoff: false,
+          takenTodayElsewhere: 2,
+        },
+      ],
+      operators: [],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, currentBootstrap)),
+    );
+
+    const bootstrap = await createKioskClient({
+      token: "tok",
+      serverUrl: "http://srv",
+    }).bootstrap();
+
+    expect(bootstrap.branding).toEqual(currentBootstrap.branding);
+    expect(bootstrap.pickupPolicy).toEqual({ limitsEnabled: true });
+    expect(bootstrap.employees[0]).toMatchObject({
+      limitMode: "limited",
+      dayLimit: 3,
+      canWriteoff: false,
+      takenTodayElsewhere: 2,
+    });
+  });
+
   it("sends the device token on every authenticated call", async () => {
     const fetchMock = vi.fn<typeof fetch>(async () =>
       jsonResponse(200, { generatedAt: "2026-07-28T00:00:00Z" }),
@@ -139,7 +196,54 @@ describe("createKioskClient", () => {
       "x-kiosk-capabilities": "subscription-recovery-v1",
     });
   });
+
+  it("requests a cursor-bound box registry page", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse(200, { until: "9", items: [], nextCursor: "next" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const page = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+      .boxRegistryPage!({
+      since: "7",
+      until: "9",
+      cursor: "opaque cursor",
+      limit: 250,
+    });
+
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "http://srv/kiosk/box-registry?since=7&until=9&cursor=opaque+cursor&limit=250",
+    );
+    expect(page).toEqual({ until: "9", items: [], nextCursor: "next" });
+  });
+
+  it("keeps the structured response body on a kiosk API error", async () => {
+    const details = {
+      code: "order_rejected",
+      message: "No items accepted",
+      conflicts: [{ rawKm: "secret-member", reason: "duplicate" }],
+      boxConflicts: [{ sscc: OLD_SSCC, bottleCount: 12, reason: "duplicate" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(422, details)),
+    );
+
+    const error = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+      .submitOrder({
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: OLD_SSCC }],
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: 422, code: "order_rejected", details });
+  });
 });
+
+const OLD_SSCC = "346006820000000021";
 
 /**
  * THE STALL THAT STOPS A KIOSK DEAD.

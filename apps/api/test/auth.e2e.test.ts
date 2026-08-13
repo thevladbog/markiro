@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createServer, request as rawHttpRequest, type Server } from "node:http";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
@@ -24,9 +25,73 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
+async function listenExpressOnLoopback(server: Server): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+}
+
+async function closeServer(server: Server | undefined): Promise<void> {
+  if (!server) return;
+  await new Promise<void>((resolve, reject) => {
+    server.close((error) => (error ? reject(error) : resolve()));
+  });
+}
+
+function requireTestServer(server: Server | undefined): Server {
+  if (!server) throw new Error("Expected the locked auth test server to be listening");
+  return server;
+}
+
+async function postRawPath(
+  server: Server,
+  path: string,
+  cookie: string | string[],
+): Promise<{ status: number; body: string }> {
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("Expected a TCP test server");
+  const payload = JSON.stringify({ name: "Bypass tenant", slug: `bypass-${randomUUID()}` });
+  const cookieHeader = Array.isArray(cookie)
+    ? cookie.map((value) => value.split(";", 1)[0]).join("; ")
+    : cookie;
+
+  return await new Promise((resolve, reject) => {
+    const outgoing = rawHttpRequest(
+      {
+        host: "127.0.0.1",
+        port: address.port,
+        path,
+        method: "POST",
+        headers: {
+          cookie: cookieHeader,
+          "content-type": "application/json",
+          "content-length": Buffer.byteLength(payload),
+        },
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      },
+    );
+    outgoing.on("error", reject);
+    outgoing.end(payload);
+  });
+}
+
 describe.skipIf(!ready)("auth e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
+  let lockedServer: Server | undefined;
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -44,6 +109,12 @@ describe.skipIf(!ready)("auth e2e", () => {
     server.use(express.json());
     await app.init();
     await listenOnLoopback(app);
+
+    const lockedApp = express();
+    mountAuth(lockedApp, setup.auth, { allowTestSignUp: false });
+    const lockedHttpServer = createServer(lockedApp);
+    await listenExpressOnLoopback(lockedHttpServer);
+    lockedServer = lockedHttpServer;
   });
 
   // app.close() runs Nest's onModuleDestroy lifecycle, which now closes
@@ -52,6 +123,7 @@ describe.skipIf(!ready)("auth e2e", () => {
   // since beforeAll may never have run (e.g. it threw before assigning
   // `app`), in which case there's nothing to close.
   afterAll(async () => {
+    await closeServer(lockedServer);
     await app?.close();
   });
 
@@ -73,12 +145,95 @@ describe.skipIf(!ready)("auth e2e", () => {
   });
 
   it("blocks ordinary public signup outside the explicit test bootstrap", async () => {
-    const lockedServer = express();
-    mountAuth(lockedServer, setup.auth, { allowTestSignUp: false });
-    await request(lockedServer)
+    await request(requireTestServer(lockedServer))
       .post("/api/auth/sign-up/email")
       .send({ email: `blocked-${randomUUID()}@example.com`, password: "not-used", name: "Blocked" })
       .expect(404);
+  });
+
+  it("does not expose canonical aliases of raw organization creation outside test bootstrap", async () => {
+    const signedUp = await request(app!.getHttpServer())
+      .post("/api/auth/sign-up/email")
+      .send({
+        email: `raw-org-${randomUUID()}@example.com`,
+        password: `Pw-${randomUUID()}!Aa1`,
+        name: "Raw org probe",
+      })
+      .expect(200);
+    const cookie = signedUp.headers["set-cookie"];
+    if (!cookie) throw new Error("Expected the test signup to issue a session cookie");
+
+    const blockedPaths = [
+      "/api/auth/organization/create",
+      "/api/auth/organization/create/",
+      "/api/auth/organization/ignored/../create",
+      "/api/auth/organization/%2e/create",
+      "/api/auth/organization/ignored/%2e%2e/create",
+      "/api/auth/organization/ignored/%2E%2E/create",
+      "/api/auth/organization/ignored/.%2e/create",
+      "/api/auth/organization/ignored/%2E./create",
+      "/api/auth/organization/ignored\\..\\create",
+      "/api/auth/organization/create?source=raw-probe",
+      "/api/auth/organization/create#raw-probe",
+    ];
+
+    for (const path of blockedPaths) {
+      const response = await postRawPath(requireTestServer(lockedServer), path, cookie);
+      expect(response.status, path).toBe(404);
+      expect(response.body, path).not.toContain('"id"');
+    }
+  });
+
+  it("fails closed on ambiguous organization paths without decoding twice", async () => {
+    const signedUp = await request(app!.getHttpServer())
+      .post("/api/auth/sign-up/email")
+      .send({
+        email: `raw-org-ambiguous-${randomUUID()}@example.com`,
+        password: `Pw-${randomUUID()}!Aa1`,
+        name: "Raw org ambiguity probe",
+      })
+      .expect(200);
+    const cookie = signedUp.headers["set-cookie"];
+    if (!cookie) throw new Error("Expected the test signup to issue a session cookie");
+
+    const rejectedPaths = [
+      "/api/auth/organization/ignored/%252e%252e/create",
+      "/api/auth/organization/ignored/%2f..%2fcreate",
+      "/api/auth/organization/ignored/%5c..%5ccreate",
+      "/api/auth/organization/ignored//../create",
+      "/api/auth/organization/ignored/%/create",
+      "/api/auth/organization/ignored/%2/create",
+      "/api/auth/organization/ignored/%GG/create",
+    ];
+
+    for (const path of rejectedPaths) {
+      const response = await postRawPath(requireTestServer(lockedServer), path, cookie);
+      expect([400, 404], path).toContain(response.status);
+      expect(response.body, path).not.toContain('"id"');
+    }
+  });
+
+  it("keeps unrelated organization routes available outside test bootstrap", async () => {
+    const signedUp = await request(app!.getHttpServer())
+      .post("/api/auth/sign-up/email")
+      .send({
+        email: `raw-org-unrelated-${randomUUID()}@example.com`,
+        password: `Pw-${randomUUID()}!Aa1`,
+        name: "Unrelated org route probe",
+      })
+      .expect(200);
+    const cookie = signedUp.headers["set-cookie"];
+    if (!cookie) throw new Error("Expected the test signup to issue a session cookie");
+
+    await request(requireTestServer(lockedServer))
+      .get("/api/auth/organization/list?source=raw-probe")
+      .set("cookie", cookie)
+      .expect(200);
+    await request(requireTestServer(lockedServer))
+      .post("/api/auth/organization/check-slug")
+      .set("cookie", cookie)
+      .send({ slug: `available-${randomUUID()}` })
+      .expect(200);
   });
 
   it("organization create without a session is unauthorized", async () => {

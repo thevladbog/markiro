@@ -1079,7 +1079,14 @@
           "duplicate": "дубль — код уже в другой заявке",
           "over_limit": "превышен дневной лимит",
           "unknown_badge": "бейдж не опознан",
-          "unknown_reason": "причина списания недоступна"
+          "unknown_reason": "причина списания недоступна",
+          "writeoff_reason_required": "причина списания не указана",
+          "writeoff_forbidden": "сотруднику запрещено списание",
+          "unknown_box": "короб не найден",
+          "box_not_closed": "короб не закрыт",
+          "box_disassembled": "короб расформирован",
+          "box_contents_changed": "состав короба изменился",
+          "mixed_product_box": "в коробе разные товары"
         }
       },
       "rejections": {
@@ -1115,6 +1122,8 @@
         },
         "unknownBadge": "Бейдж не опознан",
         "badgeCodeLabel": "Бейдж: {{code}}",
+        "boxLabel": "Короб {{sscc}}",
+        "boxCountLabel": "Короб {{sscc}} · {{count}} шт.",
         "noOrder": "без заявки",
         "state": {
           "open": "Не отработан",
@@ -1206,6 +1215,43 @@
         "navigationLabel": "Разделы сотрудника",
         "profile": "Профиль",
         "error": "Ошибка"
+      },
+      "pickupPolicy": {
+        "title": "Правила выдачи",
+        "limitModeLabel": "Лимит выдачи",
+        "limited": "С дневным лимитом",
+        "unlimited": "Без лимита",
+        "dayLimitLabel": "Позиций в день",
+        "retainedLimitHint": "Значение сохранится и снова применится, если включить лимит.",
+        "dayLimitError": "Введите положительное целое число",
+        "canWriteoffLabel": "Разрешить списание",
+        "canWriteoffHint": "Право списания изменяется независимо от лимита.",
+        "save": "Сохранить правила выдачи",
+        "toasts": {
+          "success": "Правила выдачи сохранены",
+          "error": "Не удалось сохранить правила выдачи"
+        }
+      },
+      "bulk": {
+        "title": "Массовое изменение правил выдачи",
+        "openAction": "Массово изменить правила",
+        "cancel": "Завершить массовое изменение",
+        "selectEmployee": "Выбрать {{name}}",
+        "selectedCount": "Выбрано: {{count}}",
+        "selectFirst": "Выбрать первые 500",
+        "maxSelection": "Можно выбрать не более 500 сотрудников",
+        "limitModeLabel": "Назначаемый лимит",
+        "limitAction": "Назначить лимит",
+        "canWriteoffLabel": "Разрешить списание",
+        "writeoffAction": "Изменить право списания",
+        "limitConfirmTitle": "Назначить лимит сотрудникам?",
+        "limitConfirmBody": "Лимит изменится у выбранных сотрудников ({{count}}). Право списания останется прежним.",
+        "limitConfirmAction": "Назначить",
+        "writeoffConfirmTitle": "Изменить право списания?",
+        "writeoffConfirmBody": "Право списания изменится у выбранных сотрудников ({{count}}). Лимит останется прежним.",
+        "writeoffConfirmAction": "Изменить",
+        "success": "Правила выбранных сотрудников обновлены",
+        "error": "Не удалось обновить правила выбранных сотрудников"
       },
       "badges": {
         "title": "Бейджи",
@@ -1420,7 +1466,6 @@
         "editTitle": "Изменить киоск",
         "nameLabel": "Название",
         "locationLabel": "Расположение",
-        "dayLimitLabel": "Лимит позиций на сотрудника в день",
         "showPricesLabel": "Показывать цены",
         "productsLabel": "Разрешённые товары",
         "saveProductsAction": "Сохранить список",
@@ -1443,8 +1488,7 @@
         "discardAction": "Не сохранять",
         "errors": {
           "nameRequired": "Укажите название",
-          "nameTooLong": "Не более 200 символов",
-          "dayLimitInvalid": "Введите положительное целое число"
+          "nameTooLong": "Не более 200 символов"
         }
       },
       "sections": {
@@ -1682,6 +1726,26 @@
           "updateSuccess": "Профиль сохранён",
           "updateError": "Не удалось сохранить профиль"
         }
+      },
+      "pickupPolicy": {
+        "cardTitle": "Политика выдачи",
+        "enabledLabel": "Применять лимиты суммарно во всех киосках",
+        "enabledHint": "Если отключить контроль, сохранённые значения сотрудников останутся и снова начнут действовать после включения.",
+        "save": "Сохранить",
+        "toasts": {
+          "success": "Политика выдачи сохранена",
+          "error": "Не удалось сохранить политику выдачи"
+        }
+      },
+      "logo": {
+        "cardTitle": "Логотип организации",
+        "previewAlt": "Логотип организации",
+        "fallbackLabel": "Логотип Markiro по умолчанию",
+        "uploadLabel": "Загрузить логотип",
+        "removeAction": "Удалить логотип",
+        "invalidType": "Выберите один файл JPEG, PNG или WebP.",
+        "uploadError": "Не удалось загрузить логотип",
+        "removeError": "Не удалось удалить логотип"
       },
       "sscc": {
         "cardTitle": "Счётчик SSCC для коробов",

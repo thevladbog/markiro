@@ -82,6 +82,13 @@ export function StatusStrip({
     stale === null
       ? t("status.stale")
       : t(stale.unit === "days" ? "status.staleDays" : "status.staleHours", { n: stale.n });
+  const onlineLabel = online ? t("status.online") : t("status.offline");
+  const quarantineLabel = t("status.quarantined", { n: quarantined });
+  const fullLabel = [
+    onlineLabel,
+    ...(age !== "fresh" ? [staleLabel] : []),
+    ...(quarantined > 0 ? [quarantineLabel] : []),
+  ].join(" · ");
 
   // Kiosk-sized: `StatusChip`'s office default is 24px tall with 12px type,
   // which is unreadable at the distance someone stands from a wall-mounted
@@ -90,30 +97,9 @@ export function StatusStrip({
   const chip = { height: 40, padding: "0 16px", font: "600 16px/1 var(--font-ui)" } as const;
 
   return (
-    <div
-      role="status"
-      className="kiosk-status-strip"
-      style={{
-        flexShrink: 0,
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        // The third chip is what makes this necessary: «Нет связи…» beside
-        // «Сервер отклонил заявки: …» is wider than a portrait tablet, and
-        // `StatusChip` sets `whiteSpace: nowrap`, so without a wrap the last
-        // signal added is the one that runs off the edge of the screen.
-        flexWrap: "wrap",
-        padding: "10px 24px",
-        background: "var(--surface-card)",
-        borderBottom: "1px solid var(--line)",
-      }}
-    >
+    <div role="status" aria-label={fullLabel} title={fullLabel} className="kiosk-status-strip">
       {/* StatusChipProps omits `children`, so the copy goes through `label`. */}
-      <StatusChip
-        status={online ? "ok" : "warn"}
-        label={online ? t("status.online") : t("status.offline")}
-        style={chip}
-      />
+      <StatusChip status={online ? "ok" : "warn"} label={onlineLabel} style={chip} />
       {/* UNOBTRUSIVE, and that is the design's word for it («ненавязчивая
           плашка», 2026-07-24 §7): a chip in the strip beside the others rather
           than a banner or a modal, and it gates nothing — a kiosk whose data is
@@ -132,13 +118,7 @@ export function StatusStrip({
           states its queue. Deliberately not an i18next plural: the RU
           categories (`_one/_few/_many/_other`) have no EN counterpart and the
           lockstep test requires identical key sets in both files. */}
-      {quarantined > 0 ? (
-        <StatusChip
-          status="warn"
-          label={t("status.quarantined", { n: quarantined })}
-          style={chip}
-        />
-      ) : null}
+      {quarantined > 0 ? <StatusChip status="warn" label={quarantineLabel} style={chip} /> : null}
     </div>
   );
 }

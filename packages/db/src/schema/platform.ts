@@ -535,6 +535,30 @@ export const ssccBlocks = pgTable(
 );
 
 /**
+ * Committed tenant-wide cut for the kiosk box registry. Mutation transactions
+ * increment this row before stamping every changed box with the returned
+ * revision. Readers can therefore use the last committed counter value as a
+ * stable snapshot boundary without relying on wall-clock/MVCC timing.
+ */
+export const boxRegistryVersions = pgTable(
+  "box_registry_versions",
+  {
+    tenantId: text("tenant_id").primaryKey(),
+    currentVersion: bigint("current_version", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "box_registry_versions_tenant_fk",
+      columns: [t.tenantId],
+      foreignColumns: [organization.id],
+    }),
+  ],
+);
+
+/**
  * A transport box. The row is created when its FIRST ITEM arrives, not when
  * the closure event does: items are queued before the closure and the drain
  * is sequential, so this needs no buffering and no out-of-order handling.
@@ -575,12 +599,17 @@ export const boxes = pgTable(
      * a brand-new SSCC through the ordinary `SsccService.allocate` path.
      */
     disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
+    registryVersion: bigint("registry_version", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("boxes_tenant_id_uq").on(t.tenantId, t.id),
     // Two devices holding overlapping pools is precisely the situation
     // nothing else would reveal. An index, not a check in code.
     unique("boxes_tenant_sscc_uq").on(t.tenantId, t.sscc),
+    index("boxes_registry_cursor_idx").on(t.tenantId, t.registryVersion, t.id),
     // A device's own id for the box, unique within its shift and terminal:
     // this is what an arriving scan carries instead of a server id.
     //

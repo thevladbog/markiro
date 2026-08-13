@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button } from "@markiro/ui";
 
-export type EmployeeSectionId = "profile" | "badges" | "station-access";
+export type EmployeeSectionId = "profile" | "pickup-policy" | "badges" | "station-access";
 
 export interface EmployeeSectionNavItem {
   id: EmployeeSectionId;

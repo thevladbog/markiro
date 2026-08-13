@@ -82,6 +82,7 @@ const ORDER = {
   actNo: null,
   conflictCount: 0,
   syncConflicts: [],
+  boxConflicts: [],
   exportHeldProductNames: [],
 };
 

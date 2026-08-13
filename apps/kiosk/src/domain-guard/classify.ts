@@ -10,6 +10,7 @@ export type KioskScan =
    * That layout is `@markiro/domain`'s business alone.
    */
   | { kind: "km"; rawKm: string; gtin14: string; serial: string; kmKey: string }
+  | { kind: "sscc"; sscc: string }
   | { kind: "incomplete"; raw: string } // GS dropped — ask for a re-scan
   | { kind: "unknown"; raw: string };
 
@@ -63,7 +64,8 @@ export function classifyKioskScan(raw: string): KioskScan {
       // codes (GTIN, SSCC) from opaque badge payloads: product codes are valid
       // logistics codes and not badge candidates.
       const classified = classifyScan(raw);
-      if (classified.kind === "gtin" || classified.kind === "sscc") {
+      if (classified.kind === "sscc") return { kind: "sscc", sscc: classified.sscc };
+      if (classified.kind === "gtin") {
         return { kind: "unknown", raw };
       }
       // Opaque payload — try badge resolution.

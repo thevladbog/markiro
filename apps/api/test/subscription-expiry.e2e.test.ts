@@ -10,7 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
-import { createTestStationDevice, signUpAndActivate } from "./support/auth";
+import { createTestEmployee, createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
@@ -18,6 +18,8 @@ import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { preTask8KioskWillQuarantine } from "./support/pre-task8-kiosk-client";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
+const KIOSK_RECOVERY_GTIN = "04600682000013";
+const GS = "\u001d";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -537,7 +539,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `kiosk-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Recovery employee",
@@ -550,22 +552,35 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Recovery kiosk",
       deviceTokenHash: hashDeviceToken(kioskToken),
     });
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: KIOSK_RECOVERY_GTIN,
+      name: "Recovery product",
+    });
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
     const initialEndsAt = new Date(Date.now() + 86_400_000);
     const subscription = await attachPlan(tenantId, {
       startsAt: new Date(Date.now() - 86_400_000),
       endsAt: initialEndsAt,
     });
 
-    const reserve = (token: string, deviceSeq: number) =>
+    const recoveryKm = (prefix: string) =>
+      `01${KIOSK_RECOVERY_GTIN}21${prefix}${randomUUID().replace(/-/g, "").slice(0, 12)}${GS}93Abcd`;
+    const firstKm = recoveryKm("FIRST");
+    const laterKm = recoveryKm("LATER");
+    const secondKioskKm = recoveryKm("SECOND");
+    const reserve = (token: string, deviceSeq: number, rawKm: string) =>
       request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", token)
-        .send({ deviceSeq, badgeCode, reason: "buy", items: [] })
+        .send({ deviceSeq, badgeCode, reason: "buy", items: [{ rawKm }] })
         .expect(201);
-    const firstAdmission = await reserve(kioskToken, 1);
-    const laterAdmission = await reserve(kioskToken, 3);
+    const firstAdmission = await reserve(kioskToken, 1, firstKm);
+    const laterAdmission = await reserve(kioskToken, 3, laterKm);
 
-    const post = (deviceSeq: number, createdAt: string, admissionProof?: string) =>
+    const post = (deviceSeq: number, rawKm: string, createdAt: string, admissionProof?: string) =>
       request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
@@ -574,7 +589,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq,
           badgeCode,
           reason: "buy",
-          items: [],
+          items: [{ rawKm }],
           createdAt,
           ...(admissionProof ? { admissionProof } : {}),
         });
@@ -587,7 +602,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Second recovery kiosk",
       deviceTokenHash: hashDeviceToken(secondKioskToken),
     });
-    const secondAdmission = await reserve(secondKioskToken, 1);
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId: secondKioskId, productId });
+    const secondAdmission = await reserve(secondKioskToken, 1, secondKioskKm);
     await db
       .update(schema.tenantSubscriptions)
       .set({ endsAt: new Date() })
@@ -595,14 +611,15 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
 
     const accepted = await post(
       1,
+      firstKm,
       firstAdmission.body.claimedAt,
       firstAdmission.body.admissionProof,
     ).expect(201);
-    expect(accepted.body).toMatchObject({ status: "pending", itemCount: 0 });
-    const replay = await post(1, new Date().toISOString()).expect(201);
+    expect(accepted.body).toMatchObject({ status: "pending", itemCount: 1 });
+    const replay = await post(1, firstKm, new Date().toISOString()).expect(201);
     expect(replay.body.orderNo).toBe(accepted.body.orderNo);
 
-    const denied = await post(2, new Date().toISOString()).expect(403);
+    const denied = await post(2, recoveryKm("DENIED"), new Date().toISOString()).expect(403);
     expect(denied.body).toEqual({ code: "subscription_read_only" });
 
     const laterEligible = await request(app!.getHttpServer())
@@ -613,7 +630,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 3,
         badgeCode,
         reason: "buy",
-        items: [],
+        items: [{ rawKm: laterKm }],
         createdAt: laterAdmission.body.claimedAt,
         admissionProof: laterAdmission.body.admissionProof,
       })
@@ -627,7 +644,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 1,
         badgeCode,
         reason: "buy",
-        items: [],
+        items: [{ rawKm: secondKioskKm }],
         createdAt: secondAdmission.body.claimedAt,
         admissionProof: secondAdmission.body.admissionProof,
       })
@@ -644,7 +661,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const otherTenantId = await signUpAndActivate(otherAgent);
     const otherEmployeeId = randomUUID();
     const otherBadgeCode = `badge-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: otherEmployeeId,
       tenantId: otherTenantId,
       fullName: "Other tenant employee",
@@ -663,7 +680,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 5,
         badgeCode: otherBadgeCode,
         reason: "buy",
-        items: [],
+        items: [{ rawKm: "not-a-km" }],
         createdAt: firstAdmission.body.claimedAt,
       })
       .expect(403, { code: "subscription_read_only" });
@@ -671,7 +688,13 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 4, badgeCode, reason: "buy", items: [], createdAt: "not-a-date" })
+      .send({
+        deviceSeq: 4,
+        badgeCode,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+        createdAt: "not-a-date",
+      })
       .expect(400);
   });
 
@@ -682,7 +705,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `kiosk-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Untrusted recovery employee",
@@ -705,7 +728,13 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
         .set("x-kiosk-capabilities", capability)
-        .send({ badgeCode, reason: "buy", items: [], createdAt: createdAt.toISOString(), ...body });
+        .send({
+          badgeCode,
+          reason: "buy",
+          items: [{ rawKm: "not-a-km" }],
+          createdAt: createdAt.toISOString(),
+          ...body,
+        });
 
     const audit = vi.spyOn(Logger.prototype, "warn");
     try {
@@ -738,7 +767,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `proof-bootstrap-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Attested employee",
@@ -754,7 +783,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const startsAt = new Date(Date.now() - 60_000);
     const endsAt = new Date(Date.now() + 86_400_000);
     const subscription = await attachPlan(tenantId, { startsAt, endsAt });
-    const content = { badgeCode, reason: "buy", items: [] };
+    const content = { badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }] };
     const reserve = async (deviceSeq: number) =>
       request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
@@ -879,7 +908,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const otherTenantId = await signUpAndActivate(otherAgent);
     const otherEmployeeId = randomUUID();
     const otherTenantKioskToken = `proof-other-tenant-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: otherEmployeeId,
       tenantId: otherTenantId,
       fullName: "Other attestation tenant employee",
@@ -915,7 +944,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const tenantId = await signUpAndActivate(agent);
     const volumeEmployeeId = randomUUID();
     const volumeBadge = `volume-badge-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: volumeEmployeeId,
       tenantId,
       fullName: "Admission volume employee",
@@ -952,7 +981,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       const response = await request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", kioskToken)
-        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [] });
+        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] });
       expect(response.status).toBe(201);
       admissions.push({
         deviceSeq,
@@ -963,7 +992,12 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/order-admissions")
       .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 128, badgeCode: volumeBadge, reason: "buy", items: [] })
+      .send({
+        deviceSeq: 128,
+        badgeCode: volumeBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(409);
     const outstanding = await db
       .select({ deviceSeq: schema.kioskOrderAdmissions.deviceSeq })
@@ -984,7 +1018,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq: admission.deviceSeq,
           badgeCode: volumeBadge,
           reason: "buy",
-          items: [],
+          items: [{ rawKm: "not-a-km" }],
           createdAt: admission.claimedAt,
           admissionProof: admission.admissionProof,
         });
@@ -1001,7 +1035,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       const admission = await request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", kioskToken)
-        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [] })
+        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(201);
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
@@ -1011,7 +1045,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq,
           badgeCode: volumeBadge,
           reason: "buy",
-          items: [],
+          items: [{ rawKm: "not-a-km" }],
           createdAt: admission.body.claimedAt,
           admissionProof: admission.body.admissionProof,
         })
@@ -1022,7 +1056,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .from(schema.kioskOrderAdmissions)
       .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
     expect(afterJitConsume).toEqual([]);
-  }, 30_000);
+  }, 60_000);
 
   it("consumes an exact admission after a durable terminal order rejection", async () => {
     const agent = request.agent(app!.getHttpServer());
@@ -1076,7 +1110,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `proof-idempotent-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Idempotent admission employee",
@@ -1093,7 +1127,12 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       startsAt: new Date(Date.now() - 60_000),
       endsAt: new Date(Date.now() + 86_400_000),
     });
-    const content = { deviceSeq: 1, badgeCode, reason: "buy" as const, items: [] };
+    const content = {
+      deviceSeq: 1,
+      badgeCode,
+      reason: "buy" as const,
+      items: [{ rawKm: "not-a-km" }],
+    };
     const created = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)

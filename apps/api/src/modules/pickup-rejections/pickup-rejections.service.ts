@@ -9,6 +9,16 @@ import type {
   ScanRejectionCode,
 } from "./dto";
 
+type StoredScanRejectionCode = (typeof schema.pickupScanRejections.$inferSelect)["codes"][number];
+
+export function publicScanRejectionCodes(
+  codes: readonly StoredScanRejectionCode[],
+): ScanRejectionCode[] {
+  return codes.filter(
+    (code): code is ScanRejectionCode => !("source" in code) || code.source === "box",
+  );
+}
+
 /**
  * Read side of `pickup_scan_rejections`. The WRITES live in
  * `PickupOrdersService`, where the order transaction they must join already
@@ -117,7 +127,9 @@ export class PickupRejectionsService {
       orderId: row.orderId,
       orderNo: row.orderNo,
       deviceSeq: row.deviceSeq,
-      codes: row.codes as ScanRejectionCode[],
+      // Request markers are internal idempotency metadata, not refused scan
+      // lines. Never expose them in admin counts or rendering.
+      codes: publicScanRejectionCodes(row.codes),
       scannedAt: row.scannedAt,
       syncedAt: row.syncedAt,
       acknowledgedAt: row.acknowledgedAt,
