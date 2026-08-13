@@ -5,8 +5,7 @@ const base: KioskViewInput = {
   paired: true,
   cacheStale: false,
   scannerSetupRequested: false,
-  employeeId: null,
-  submitted: false,
+  flowScreen: "login",
   configLoaded: true,
 };
 
@@ -38,10 +37,17 @@ describe("nextKioskView", () => {
   });
 
   it("shows the cart once an employee is recognised", () => {
-    expect(nextKioskView({ ...base, employeeId: "e1" })).toBe("cart");
+    expect(nextKioskView({ ...base, flowScreen: "cart" })).toBe("cart");
   });
 
+  it.each(["operation", "reason", "confirmation"] as const)(
+    "keeps the legacy combined cart surface while the explicit flow is on %s",
+    (flowScreen) => {
+      expect(nextKioskView({ ...base, flowScreen })).toBe("cart");
+    },
+  );
+
   it("shows the handover confirmation after submitting", () => {
-    expect(nextKioskView({ ...base, employeeId: "e1", submitted: true })).toBe("done");
+    expect(nextKioskView({ ...base, flowScreen: "outcome" })).toBe("done");
   });
 });

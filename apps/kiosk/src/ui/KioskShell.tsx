@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 // Imported from the module that owns the routing decision, which imports this
 // file back to render it. The cycle is safe and deliberate: `nextKioskView` is
@@ -22,7 +22,7 @@ import { Done } from "../screens/Done.js";
 import { Idle } from "../screens/Idle.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
-import type { CartState } from "../session/cart.js";
+import { initialCartState, type CartState } from "../session/cart.js";
 import {
   countTakenToday,
   effectivePickupPolicy,
@@ -30,6 +30,13 @@ import {
   takenTodayElsewhere,
   utcDayOf,
 } from "../session/day-count.js";
+import {
+  initialKioskFlowState,
+  kioskFlowReducer,
+  type ActiveKioskSession,
+  type KioskFlowState,
+  type KioskOutcome,
+} from "../session/flow.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
@@ -46,6 +53,7 @@ import {
   type CacheAge,
 } from "../sync/worker.js";
 import { KioskLayout } from "./KioskLayout.js";
+import { totalKopecks } from "../screens/money.js";
 import { StatusStrip } from "./StatusStrip.js";
 
 /** Matches the dev proxy in `vite.config.ts`; an on-prem install overrides it
@@ -63,31 +71,35 @@ const now = (): Date => new Date();
  * what the server files the order under, and is never sent. The DIGEST rather
  * than the scanned code: the order it goes into is persisted before it is sent
  * (see `CreateOrderDto` in ../api/types.ts). */
-interface KioskSession {
-  /** Monotonic, and the `Cart`'s `key`: `cartReducer`'s `reset` action is
-   * unreachable from the screen (nothing dispatches it), so a fresh instance is
-   * the only way to give the next worker an empty list. */
-  id: number;
-  employeeId: string;
-  fullName: string;
-  badgeDigest: string;
-}
-
-/** An order that has been filed, and what the server made of it — `null` when
- * it is still queued and the server has therefore said nothing at all. */
-interface SubmittedOrder {
-  deviceSeq: number;
-  result: CreateOrderResultDto | null;
-  /**
-   * The cart that became this order, carried whole rather than reduced to a
-   * count. `Done` summarises the handover as «причина · штук · сумма» (design
-   * 2026-07-24 §8.3) and the server's answer holds none of that: no reason, no
-   * prices, and offline no answer at all. Keeping the submitted state is also
-   * what stops the summary drifting — a refresh landing between the submit and
-   * the confirmation would re-price the order under the worker if the items
-   * were looked up again.
-   */
-  cart: CartState;
+function outcomeOf(
+  deviceSeq: number,
+  result: CreateOrderResultDto | null,
+  cart: CartState,
+): KioskOutcome {
+  if (!result) return { kind: "queued", deviceSeq, bottleCount: cart.items.length };
+  if (result.orderNo === "") {
+    return {
+      kind: "rejected",
+      title: "Order rejected",
+      message: "The server rejected every line",
+      bottleCount: cart.items.length,
+    };
+  }
+  if (result.conflicts.length > 0) {
+    const rejected = new Set(result.conflicts.map((conflict) => conflict.rawKm));
+    return {
+      kind: "partial",
+      orderNo: result.orderNo,
+      acceptedBottleCount: result.itemCount,
+      rejectedLines: cart.items.filter((item) => rejected.has(item.rawKm)),
+    };
+  }
+  return {
+    kind: "accepted",
+    orderNo: result.orderNo,
+    bottleCount: result.itemCount,
+    totalKopecks: totalKopecks(cart.items),
+  };
 }
 
 /**
@@ -142,8 +154,9 @@ export function KioskShell(): React.JSX.Element {
    */
   const [quarantinedCount, setQuarantinedCount] = useState(0);
   const [scannerSetupRequested, setScannerSetupRequested] = useState(false);
-  const [session, setSession] = useState<KioskSession | null>(null);
-  const [submitted, setSubmitted] = useState<SubmittedOrder | null>(null);
+  const [flow, dispatchFlow] = useReducer(kioskFlowReducer, initialKioskFlowState);
+  const session = "session" in flow ? flow.session : null;
+  const submitted = flow.screen === "outcome" ? flow : null;
   /** The live scan transport: `null` is the keyboard wedge, a port is Web Serial. */
   const [scanPort, setScanPort] = useState<SerialPort | null>(null);
   /**
@@ -362,8 +375,7 @@ export function KioskShell(): React.JSX.Element {
     }
     // Whoever was mid-cart loses it, which is right: nothing they submit now
     // could be filed, and `Pairing` is about to replace the screen anyway.
-    setSession(null);
-    setSubmitted(null);
+    dispatchFlow({ type: "unpaired" });
     try {
       await quarantineQueue(now(), "device token revoked by the server");
     } catch (err) {
@@ -646,7 +658,8 @@ export function KioskShell(): React.JSX.Element {
    */
   useEffect(() => {
     if (!session) return;
-    const { id: sessionId, employeeId } = session;
+    const sessionId = session.id;
+    const employeeId = session.employee.id;
     let alive = true;
     void (async () => {
       try {
@@ -696,7 +709,10 @@ export function KioskShell(): React.JSX.Element {
    * snapshot the match was made against, even if a refresh lands during the
    * derivation.
    */
-  const admitting = useRef<Omit<KioskSession, "id"> | null>(null);
+  const admitting = useRef<Omit<
+    ActiveKioskSession,
+    "id" | "cart" | "reason" | "writeoffReasonId"
+  > | null>(null);
   const sessions = useRef(0);
 
   /**
@@ -731,11 +747,11 @@ export function KioskShell(): React.JSX.Element {
   const submitting = useRef(false);
 
   const submitCart = useCallback(
-    async (state: CartState, active: KioskSession) => {
+    async (state: CartState, active: ActiveKioskSession) => {
       const cfg = configRef.current;
       if (!cfg) return;
       const policy = snapshotRef.current
-        ? effectivePickupPolicy(snapshotRef.current.bootstrap, active.employeeId)
+        ? effectivePickupPolicy(snapshotRef.current.bootstrap, active.employee.id)
         : null;
       if (state.reason === "writeoff" && !policy?.canWriteoff) return;
       const deviceSeq = cfg.nextDeviceSeq;
@@ -785,7 +801,7 @@ export function KioskShell(): React.JSX.Element {
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
-        await enqueueOrder(body, active.employeeId, "pending_attestation", state.items.length);
+        await enqueueOrder(body, active.employee.id, "pending_attestation", state.items.length);
         // Attestation belongs to the same globally serialized drain as submit.
         // Splitting it here let an interval drain read and submit this durable
         // proofless record while the reservation request was still in flight.
@@ -799,7 +815,12 @@ export function KioskShell(): React.JSX.Element {
         // order, and `Done` says exactly that instead of inventing an «№ —».
         const result = awaited.current.result;
         awaited.current = null;
-        setSubmitted({ deviceSeq, result, cart: state });
+        dispatchFlow({
+          type: "submitted",
+          deviceSeq,
+          result,
+          outcome: outcomeOf(deviceSeq, result, state),
+        });
       } catch (err) {
         // The store refused. Nothing was promised, so the worker stays on their
         // cart and can press again — under the SAME sequence if the counter
@@ -828,6 +849,9 @@ export function KioskShell(): React.JSX.Element {
   );
 
   const paired = Boolean(config?.token);
+  useEffect(() => {
+    dispatchFlow({ type: paired ? "paired" : "unpaired" });
+  }, [paired]);
   // ONE reading of the clock for both answers, so the verdict and the age the
   // strip prints beside it can never describe two different instants.
   const measuredAt = now();
@@ -842,8 +866,7 @@ export function KioskShell(): React.JSX.Element {
     paired,
     cacheStale: age === "blocked",
     scannerSetupRequested,
-    employeeId: session?.employeeId ?? null,
-    submitted: submitted !== null,
+    flowScreen: flow.screen,
     configLoaded,
   });
 
@@ -920,13 +943,12 @@ export function KioskShell(): React.JSX.Element {
         result={submitted.result}
         // What the worker actually handed over: the only record of the reason
         // they chose and the prices they were shown while choosing it.
-        cart={submitted.cart}
+        cart={submitted.session.cart}
         // Hidden rather than defaulted-on if the snapshot is somehow gone: a
         // kiosk that cannot read its own config must not invent a price.
         showPrices={snapshot?.bootstrap.config.showPrices ?? false}
         onReset={() => {
-          setSubmitted(null);
-          setSession(null);
+          dispatchFlow({ type: "finish" });
         }}
       />
     );
@@ -934,7 +956,7 @@ export function KioskShell(): React.JSX.Element {
     screen = (
       <Cart
         key={session.id}
-        employee={{ id: session.employeeId, fullName: session.fullName }}
+        employee={{ id: session.employee.id, fullName: session.employee.fullName }}
         bootstrap={snapshot.bootstrap}
         // This kiosk's own journal and unsynced queue, PLUS the roster's count
         // for every other kiosk — the two disjoint halves of the day, summed
@@ -952,12 +974,37 @@ export function KioskShell(): React.JSX.Element {
         onScan={subscribe}
         onSubmit={(state) => {
           if (submitting.current) return;
+          let next: KioskFlowState = kioskFlowReducer(flow, { type: "cartChanged", cart: state });
+          next = kioskFlowReducer(next, { type: "continue" });
+          if (next.screen === "operation") {
+            next = kioskFlowReducer(next, {
+              type: "chooseOperation",
+              reason: state.reason,
+            });
+          }
+          if (next.screen === "reason" && state.writeoffReasonId) {
+            next = kioskFlowReducer(next, {
+              type: "chooseWriteoffReason",
+              id: state.writeoffReasonId,
+            });
+            next = kioskFlowReducer(next, { type: "continue" });
+          }
+          if (next.screen !== "confirmation") return;
+          dispatchFlow({ type: "cartChanged", cart: state });
+          dispatchFlow({ type: "continue" });
+          if (session.employee.canWriteoff) {
+            dispatchFlow({ type: "chooseOperation", reason: state.reason });
+            if (state.reason === "writeoff" && state.writeoffReasonId) {
+              dispatchFlow({ type: "chooseWriteoffReason", id: state.writeoffReasonId });
+              dispatchFlow({ type: "continue" });
+            }
+          }
           submitting.current = true;
-          void submitCart(state, session).finally(() => {
+          void submitCart(state, next.session).finally(() => {
             submitting.current = false;
           });
         }}
-        onNotMe={() => setSession(null)}
+        onNotMe={() => dispatchFlow({ type: "logoutConfirmed" })}
       />
     );
   } else {
@@ -978,9 +1025,16 @@ export function KioskShell(): React.JSX.Element {
           // `match.digest`, never `raw`: this is the value that ends up in the
           // order body and therefore in IndexedDB, and the scanned code must
           // not go there. It leaves this callback nowhere else.
+          const policy = effectivePickupPolicy(roster.bootstrap, match.employeeId);
+          if (!policy) return null;
           admitting.current = {
-            employeeId: match.employeeId,
-            fullName: employee.fullName,
+            employee: {
+              id: match.employeeId,
+              fullName: employee.fullName,
+              limitMode: policy.limited ? "limited" : "unlimited",
+              dayLimit: policy.dayLimit,
+              canWriteoff: policy.canWriteoff,
+            },
             badgeDigest: match.digest,
           };
           return match.employeeId;
@@ -990,7 +1044,16 @@ export function KioskShell(): React.JSX.Element {
           if (!admitted) return;
           admitting.current = null;
           sessions.current += 1;
-          setSession({ id: sessions.current, ...admitted });
+          dispatchFlow({
+            type: "sessionStarted",
+            session: {
+              id: sessions.current,
+              ...admitted,
+              cart: initialCartState,
+              reason: "buy",
+              writeoffReasonId: null,
+            },
+          });
         }}
         // The ONLY way back into scanner setup once a kiosk is running: the
         // pairing screen's own entry is gone the moment the device is paired,
