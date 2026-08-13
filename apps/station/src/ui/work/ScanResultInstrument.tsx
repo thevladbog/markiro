@@ -47,7 +47,7 @@ export function ScanResultInstrument({
   return (
     <section className="work-instrument work-scan-result" aria-label={productName}>
       <div className="work-scan-result__identity">
-        {productId && image ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} refreshKey={refreshKey} className="work-scan-result__image" /> : null}
+        {productId && image !== null ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} refreshKey={refreshKey} className="work-scan-result__image" /> : null}
         <h2 title={productName}>{productName}</h2>
         {counterpartyName ? <p title={counterpartyName}>{counterpartyName}</p> : null}
       </div>

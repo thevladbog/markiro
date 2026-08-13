@@ -30,6 +30,14 @@ describe("ProductImage", () => {
     expect(revoke).toHaveBeenCalledWith("blob:test");
   });
 
+  it("renders a retained pointer when a rolling legacy payload omits image", async () => {
+    await publishProductImage("p1", image.checksum, new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }));
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:legacy");
+    render(<ProductImage productId="p1" name="Молоко" />);
+
+    await waitFor(() => expect(screen.getByRole("img")).toHaveAttribute("src", "blob:legacy"));
+  });
+
   it("fails closed to a monogram when the pointer is absent or mismatched", async () => {
     render(<ProductImage productId="p1" name="Молоко" image={image} />);
     expect(screen.getByText("М")).toBeDefined();

@@ -30,7 +30,7 @@ export function ProductImage({ productId, name, image, size = 56 }: ProductImage
     let url: string | null = null;
     setObjectUrl(null);
     setFailed(false);
-    if (productId === null || image === undefined || image === null) {
+    if (productId === null || image === null) {
       return () => {
         alive = false;
       };
@@ -38,16 +38,17 @@ export function ProductImage({ productId, name, image, size = 56 }: ProductImage
     void (async () => {
       try {
         const pointer = await readPublishedProductImagePointer(productId);
-        if (!alive || pointer?.checksum !== image.checksum) return;
+        if (!alive || !pointer) return;
         const blob = await readProductImageBlob(pointer.checksum);
-        if (!alive || !blob || blob.type !== image.contentType || blob.size !== image.byteSize) return;
+        if (!alive || !blob || blob.type !== "image/webp") return;
+        if (image && (blob.type !== image.contentType || blob.size !== image.byteSize)) return;
         const digest = [
           ...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())),
         ]
           .map((byte) => byte.toString(16).padStart(2, "0"))
           .join("");
         if (!alive) return;
-        if (digest !== image.checksum) {
+        if (digest !== pointer.checksum || (image && digest !== image.checksum)) {
           await clearPublishedProductImage(productId);
           await deleteProductImageBlob(pointer.checksum);
           return;

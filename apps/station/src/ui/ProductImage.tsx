@@ -29,7 +29,10 @@ export function ProductImage({ exec, productId, productName, image, className, r
       objectUrlRef.current = null;
       return null;
     });
-    if (!exec || !image) return;
+    // `undefined` is a legacy/unknown descriptor. The mirror may still have
+    // a validated pointer from a newer response, so let the cache reader use
+    // that pointer. Only an explicit null is a deletion tombstone.
+    if (!exec || image === null) return;
 
     void (async () => {
       let blob: Blob | null = await readStationProductImage(exec, productId, image);
