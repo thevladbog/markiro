@@ -32,6 +32,7 @@ const RESULT_KEY: Record<KioskScan["kind"], string> = {
   km: "scannerSetup.resultKm",
   badge: "scannerSetup.resultBadge",
   incomplete: "scannerSetup.resultIncomplete",
+  sscc: "scannerSetup.resultUnknown",
   unknown: "scannerSetup.resultUnknown",
 };
 

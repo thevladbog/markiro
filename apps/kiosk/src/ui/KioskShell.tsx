@@ -22,7 +22,8 @@ import { Done } from "../screens/Done.js";
 import { Idle } from "../screens/Idle.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
-import { initialCartState, type CartState } from "../session/cart.js";
+import { bottleCount, initialCartState, type CartState } from "../session/cart.js";
+import { resolveBoxScan, type BoxResolution } from "../session/box-resolution.js";
 import {
   countTakenToday,
   effectivePickupPolicy,
@@ -40,6 +41,8 @@ import {
   type KioskOutcome,
 } from "../session/flow.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
+import { lookupBox, readBoxRegistryMeta } from "../store/box-registry.js";
+import { boxRegistryBindingOf } from "../store/installation-binding.js";
 import {
   brandingOwnerOf,
   invalidateCachedBranding,
@@ -57,6 +60,7 @@ import {
   cancelFlushRetry,
   flushQueue,
   refreshSnapshot,
+  boxRegistryAge,
   serverNow,
   snapshotAge,
   snapshotAgeMs,
@@ -87,29 +91,32 @@ function outcomeOf(
   result: CreateOrderResultDto | null,
   cart: CartState,
 ): KioskOutcome {
-  if (!result) return { kind: "queued", deviceSeq, bottleCount: cart.items.length };
+  if (!result) return { kind: "queued", deviceSeq, bottleCount: bottleCount(cart) };
   if (result.orderNo === "") {
     return {
       kind: "rejected",
       title: "Order rejected",
       message: "The server rejected every line",
-      bottleCount: cart.items.length,
+      bottleCount: bottleCount(cart),
     };
   }
-  if (result.conflicts.length > 0) {
+  if (result.conflicts.length > 0 || (result.boxConflicts?.length ?? 0) > 0) {
     const rejected = new Set(result.conflicts.map((conflict) => conflict.rawKm));
+    const rejectedBoxes = new Set((result.boxConflicts ?? []).map((conflict) => conflict.sscc));
     return {
       kind: "partial",
       orderNo: result.orderNo,
       acceptedBottleCount: result.itemCount,
-      rejectedLines: cart.items.filter((item) => rejected.has(item.rawKm)),
+      rejectedLines: cart.lines.filter((line) =>
+        line.kind === "km" ? rejected.has(line.rawKm) : rejectedBoxes.has(line.sscc),
+      ),
     };
   }
   return {
     kind: "accepted",
     orderNo: result.orderNo,
     bottleCount: result.itemCount,
-    totalKopecks: totalKopecks(cart.items),
+    totalKopecks: totalKopecks(cart.lines),
   };
 }
 
@@ -857,7 +864,7 @@ export function KioskShell(): React.JSX.Element {
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
-        await enqueueOrder(body, active.employee.id, "pending_attestation", state.items.length);
+        await enqueueOrder(body, active.employee.id, "pending_attestation", bottleCount(state));
         // Attestation belongs to the same globally serialized drain as submit.
         // Splitting it here let an interval drain read and submit this durable
         // proofless record while the reservation request was still in flight.
@@ -918,6 +925,25 @@ export function KioskShell(): React.JSX.Element {
   // `null` for exactly the snapshots the gate refuses to date; the strip states
   // the threshold rather than a number there.
   const ageMs = snapshotAgeMs(snapshot, measuredAt);
+
+  const resolveCartBox = useCallback(async (sscc: string): Promise<BoxResolution> => {
+    const cfg = configRef.current;
+    const snap = snapshotRef.current;
+    const binding = boxRegistryBindingOf(cfg);
+    if (!binding || !snap) return { kind: "rejected", notice: "registry-unavailable" };
+    const meta = await readBoxRegistryMeta(binding);
+    return resolveBoxScan(
+      {
+        sscc,
+        bootstrap: snap.bootstrap,
+        registryAge: boxRegistryAge(meta, snap, now()),
+      },
+      {
+        readMeta: () => Promise.resolve(meta),
+        lookup: (canonical) => lookupBox(binding, canonical),
+      },
+    );
+  }, []);
 
   const view = nextKioskView({
     paired,
@@ -1029,6 +1055,7 @@ export function KioskShell(): React.JSX.Element {
         // Zero until the read lands (and if it fails), for the same reason.
         alreadyTakenToday={takenToday?.sessionId === session.id ? takenToday.count : 0}
         onScan={subscribe}
+        resolveBox={resolveCartBox}
         onSubmit={(state) => {
           if (submitting.current) return;
           const next: KioskFlowState = kioskFlowReducer(flow, {

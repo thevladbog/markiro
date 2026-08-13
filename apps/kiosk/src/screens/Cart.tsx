@@ -11,7 +11,8 @@ import {
   initialCartState,
   remainingToday,
   type CartAction,
-  type CartItem,
+  type BoxLine,
+  type KioskCartLine,
   type CartNotice,
   type CartState,
 } from "../session/cart.js";
@@ -58,6 +59,13 @@ export interface CartProps {
    * EXACTLY ONCE at mount for the same reason (see the effect below).
    */
   onScan: (cb: ScanListener) => void | (() => void);
+  /** Local-only SSCC resolver; network access is intentionally outside this contract. */
+  resolveBox?: (
+    sscc: string,
+  ) => Promise<
+    | { kind: "resolved"; box: BoxLine }
+    | { kind: "rejected"; notice: "unknown-box" | "registry-unavailable" | "registry-blocked" }
+  >;
   /** The cart, handed over whole. The caller turns it into a `CreateOrderDto`. */
   onSubmit: (state: CartState) => void;
   /** The worker says the badge was not theirs — end the session. */
@@ -76,6 +84,11 @@ export interface CartProps {
  */
 const BANNER: Partial<Record<CartNotice["kind"], string>> = {
   duplicate: "cart.duplicate",
+  "duplicate-box": "cart.duplicateBox",
+  "duplicate-sscc": "cart.duplicateSscc",
+  "unknown-box": "cart.unknownBox",
+  "registry-unavailable": "cart.registryUnavailable",
+  "registry-blocked": "cart.registryBlocked",
   incomplete: "cart.incomplete",
   "not-a-code": "cart.notACode",
 };
@@ -118,8 +131,10 @@ function initialsOf(fullName: string): string {
  * knowledge whatsoever — it does not know that `kmKey` is `01<gtin14>21<serial>`,
  * so a change to that layout cannot reach it.
  */
-function codeTail(item: CartItem): string {
-  return `…${item.gtin14.slice(-6)}-${item.serial}`;
+function codeTail(item: KioskCartLine): string {
+  return item.kind === "km"
+    ? `…${item.gtin14.slice(-6)}-${item.serial}`
+    : `…${item.sscc.slice(-6)}`;
 }
 
 /**
@@ -146,6 +161,7 @@ export function Cart({
   bootstrap,
   alreadyTakenToday,
   onScan,
+  resolveBox,
   onSubmit,
   onNotMe,
 }: CartProps): React.JSX.Element {
@@ -199,12 +215,44 @@ export function Cart({
    * scanner down and resubscribe after every scan.
    */
   const subscribe = useRef(onScan);
+  const resolveScannedBox = useRef(resolveBox);
+  const scanChain = useRef<Promise<void> | null>(null);
+  const mounted = useRef(true);
   useEffect(() => {
+    mounted.current = true;
     const stop = subscribe.current((raw) => {
-      // The screen's entire scan logic: classify, then let the reducer decide.
-      dispatch({ type: "scan", scan: classifyKioskScan(raw) });
+      const classified = classifyKioskScan(raw);
+      const apply = async () => {
+        if (!mounted.current) return;
+        if (classified.kind !== "sscc") {
+          dispatch({ type: "scan", scan: classified });
+          return;
+        }
+        const resolution = resolveScannedBox.current
+          ? await resolveScannedBox.current(classified.sscc)
+          : { kind: "rejected" as const, notice: "registry-unavailable" as const };
+        if (!mounted.current) return;
+        dispatch(
+          resolution.kind === "resolved"
+            ? { type: "scanBox", box: resolution.box }
+            : { type: "boxRejected", kind: resolution.notice },
+        );
+      };
+      // A normal KM remains synchronous for the legacy touch surface. Once an
+      // SSCC lookup is pending, later scans queue behind it so the first scan
+      // still wins overlap regardless of IndexedDB latency.
+      if (classified.kind !== "sscc" && scanChain.current === null) {
+        void apply();
+        return;
+      }
+      const work = (scanChain.current ?? Promise.resolve()).then(apply);
+      const settled = work.finally(() => {
+        if (scanChain.current === settled) scanChain.current = null;
+      });
+      scanChain.current = settled;
     });
     return () => {
+      mounted.current = false;
       if (stop) stop();
     };
   }, []);
@@ -236,9 +284,9 @@ export function Cart({
   const portrait = orientation === "portrait";
   const limit = pickupPolicy.dayLimit;
   const showPrices = bootstrap.config.showPrices;
-  const count = state.items.length;
+  const count = state.lines.length;
   const remaining = remainingToday(state, cartContext);
-  const total = totalKopecks(state.items);
+  const total = totalKopecks(state.lines);
   const bannerKey = notice ? BANNER[notice.kind] : undefined;
   const submittable = canSubmit(state, cartContext);
 
@@ -504,11 +552,12 @@ export function Cart({
               </div>
             ) : (
               <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {state.items.map((item) => {
-                  const kopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
+                {state.lines.map((item) => {
+                  const unitKopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
+                  const kopecks = unitKopecks === null ? null : unitKopecks * item.bottleCount;
                   return (
                     <li
-                      key={item.kmKey}
+                      key={item.kind === "km" ? item.kmKey : item.sscc}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -562,7 +611,13 @@ export function Cart({
                         className="kiosk-control"
                         type="button"
                         aria-label={t("cart.remove", { name: item.name })}
-                        onClick={() => dispatch({ type: "remove", kmKey: item.kmKey })}
+                        onClick={() =>
+                          dispatch(
+                            item.kind === "km"
+                              ? { type: "remove", kmKey: item.kmKey }
+                              : { type: "removeBox", sscc: item.sscc },
+                          )
+                        }
                         style={{
                           ...ghostButton,
                           width: 56,

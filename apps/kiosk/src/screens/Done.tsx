@@ -37,7 +37,7 @@ export interface DoneProps {
    * are cart-screen business, and a confirmation with a `notice` in its props is
    * a confirmation somebody will eventually render a banner on.
    */
-  cart: Pick<CartState, "items" | "reason">;
+  cart: Pick<CartState, "lines" | "reason">;
   /**
    * `bootstrap.config.showPrices`. Money is hidden device-wide when it is
    * false, and this screen must not be the one that leaks it back.
@@ -178,7 +178,9 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
   // With a result this is the server's ACCEPTED count (`remaining.length`
   // server-side); offline it is what the worker scanned. Both are honest
   // answers to «how much is in this order», which is what the chip asks.
-  const count = result ? result.itemCount : cart.items.length;
+  const count = result
+    ? result.itemCount
+    : cart.lines.reduce((sum, line) => sum + line.bottleCount, 0);
   const conflicts = result?.conflicts ?? [];
 
   const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
@@ -200,7 +202,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
    * Offline (`result === null`) there are no conflicts to know about yet, and
    * the cart IS the order — so the sum is exactly what the worker handed over.
    */
-  const total = conflicts.length > 0 ? null : totalKopecks(cart.items);
+  const total = conflicts.length > 0 ? null : totalKopecks(cart.lines);
 
   // «Покупка · 3 шт · 269,70 ₽» — design 2026-07-24 §8.3's «сводка (причина ·
   // штук · сумма)». The money half is simply absent, not blanked, on a kiosk

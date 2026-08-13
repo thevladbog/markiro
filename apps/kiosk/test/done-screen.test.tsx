@@ -41,7 +41,8 @@ const conflict = (reason: OrderConflict["reason"]): OrderConflict => ({ rawKm: R
 function cartOf(prices: (string | null)[], reason: "buy" | "writeoff" = "buy") {
   return {
     reason,
-    items: prices.map((unitPrice, index) => ({
+    lines: prices.map((unitPrice, index) => ({
+      kind: "km" as const,
       rawKm: `raw-${index}`,
       kmKey: `key-${index}`,
       gtin14: "04600682000013",
@@ -49,6 +50,7 @@ function cartOf(prices: (string | null)[], reason: "buy" | "writeoff" = "buy") {
       productId: "p-milk",
       name: "Молоко 3,2%",
       unitPrice,
+      bottleCount: 1 as const,
     })),
   };
 }

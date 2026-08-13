@@ -8,6 +8,7 @@ import {
 } from "../src/session/flow.js";
 
 const bottle: CartItem = {
+  kind: "km",
   rawKm: "raw-km",
   kmKey: "010460068200001121serial",
   gtin14: "04600682000011",
@@ -15,10 +16,11 @@ const bottle: CartItem = {
   productId: "p1",
   name: "Вода",
   unitPrice: "100.00",
+  bottleCount: 1,
 };
 
-const cart = (items: CartItem[] = [bottle]): CartState => ({
-  items,
+const cart = (lines: CartItem[] = [bottle]): CartState => ({
+  lines,
   reason: "buy",
   writeoffReasonId: null,
   notice: null,
@@ -118,6 +120,39 @@ describe("kioskFlowReducer", () => {
     });
     expect(writeoff).toMatchObject({ screen: "cart" });
     expect("session" in writeoff ? writeoff.session.cart : null).toBe(allowed.session.cart);
+  });
+
+  it("emits loose items and opaque boxes with the bottle estimate but no content keys", () => {
+    const state = at("confirmation");
+    if (state.screen !== "confirmation") throw new Error("expected confirmation fixture");
+    state.session.cart = {
+      ...state.session.cart,
+      lines: [
+        bottle,
+        {
+          kind: "box",
+          boxId: "11111111-1111-4111-8111-111111111111",
+          sscc: "346006820000000021",
+          productId: "p1",
+          name: "Вода",
+          bottleCount: 12,
+          unitPrice: "100.00",
+          contentKeys: ["secret-member"],
+          registryVersion: "4",
+        },
+      ],
+    };
+    const body = createConfirmedOrderBody(state, 8, "2026-08-13T12:00:00Z");
+    expect(body).toEqual({
+      deviceSeq: 8,
+      badgeDigest: "digest",
+      reason: "buy",
+      writeoffReasonId: null,
+      items: [{ rawKm: "raw-km" }],
+      boxes: [{ sscc: "346006820000000021" }],
+      createdAt: "2026-08-13T12:00:00Z",
+    });
+    expect(JSON.stringify(body)).not.toContain("secret-member");
   });
 
   it("returns a failed confirmation to cart and revalidates the edited retry", () => {

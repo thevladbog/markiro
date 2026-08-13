@@ -1,5 +1,5 @@
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
-import type { CartItem, CartState } from "./cart.js";
+import { boxLines, looseLines, type CartState, type KioskCartLine } from "./cart.js";
 
 export type KioskScreen =
   "pairing" | "login" | "cart" | "operation" | "reason" | "confirmation" | "outcome";
@@ -12,7 +12,7 @@ export type KioskOutcome =
       kind: "partial";
       orderNo: string;
       acceptedBottleCount: number;
-      rejectedLines: CartItem[];
+      rejectedLines: KioskCartLine[];
     };
 
 export interface KioskEmployee {
@@ -89,7 +89,10 @@ export function createConfirmedOrderBody(
     badgeDigest: state.session.badgeDigest,
     reason: state.session.cart.reason,
     writeoffReasonId: state.session.cart.writeoffReasonId,
-    items: state.session.cart.items.map((item) => ({ rawKm: item.rawKm })),
+    items: looseLines(state.session.cart).map((item) => ({ rawKm: item.rawKm })),
+    ...(boxLines(state.session.cart).length > 0
+      ? { boxes: boxLines(state.session.cart).map((box) => ({ sscc: box.sscc })) }
+      : {}),
     createdAt,
   };
 }
@@ -115,7 +118,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
         ? withSession(state, { ...state.session, cart: action.cart })
         : state;
     case "legacySubmit": {
-      if (state.screen !== "cart" || action.cart.items.length === 0) return state;
+      if (state.screen !== "cart" || action.cart.lines.length === 0) return state;
       const cart = state.session.employee.canWriteoff
         ? action.cart
         : { ...action.cart, reason: "buy" as const, writeoffReasonId: null };
@@ -136,7 +139,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
     case "continue":
       if (!("session" in state)) return state;
       if (state.screen === "cart") {
-        if (state.session.cart.items.length === 0) return state;
+        if (state.session.cart.lines.length === 0) return state;
         return state.session.employee.canWriteoff
           ? { screen: "operation", session: state.session }
           : {

@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   KioskBootstrapDto,
@@ -10,6 +10,7 @@ import i18n from "../src/i18n/index.js";
 import type { ScanListener } from "../src/scanner/source.js";
 import { Cart, orientationOf } from "../src/screens/Cart.js";
 import { productMonogram } from "../src/screens/product-monogram.js";
+import type { BoxLine } from "../src/session/cart.js";
 
 afterEach(cleanup);
 
@@ -55,6 +56,19 @@ const MILK = "Молоко 3,2%";
 const BREAD = "Хлеб";
 const SCAN_PROMPT = "Поднесите бутылку";
 const SUBMIT = "Готово — передать администратору";
+const SSCC = "346006820000000021";
+
+const twelveBottleBox = (): BoxLine => ({
+  kind: "box",
+  boxId: "11111111-1111-4111-8111-111111111111",
+  sscc: SSCC,
+  productId: "p-milk",
+  name: MILK,
+  bottleCount: 12,
+  unitPrice: "89.90",
+  contentKeys: Array.from({ length: 12 }, (_, index) => `member-${index + 1}`),
+  registryVersion: "7",
+});
 
 function bootstrapWith(
   config: {
@@ -128,6 +142,7 @@ interface Options {
   bootstrap?: KioskBootstrapSnapshotDto;
   alreadyTakenToday?: number;
   onScan?: (cb: ScanListener) => void | (() => void);
+  resolveBox?: React.ComponentProps<typeof Cart>["resolveBox"];
 }
 
 function renderCart(options: Options = {}) {
@@ -145,6 +160,7 @@ function renderCart(options: Options = {}) {
           listener = cb;
         })
       }
+      {...(options.resolveBox ? { resolveBox: options.resolveBox } : {})}
       onSubmit={onSubmit}
       onNotMe={onNotMe}
     />,
@@ -220,6 +236,35 @@ describe("Cart", () => {
 
     expect(rows()).toHaveLength(2);
     expect(screen.getByText("134,90 ₽")).toBeDefined();
+  });
+
+  it("resolves an SSCC as one atomic line and shows its twelve-bottle price", async () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      resolveBox: vi.fn(async () => ({ kind: "resolved" as const, box: twelveBottleBox() })),
+    });
+
+    scan(payload("sscc", `]C100${SSCC}`));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows().join("").replaceAll(/\s/g, " ")).toContain("1 078,80 ₽");
+    expect(totalMoney().replaceAll(/\s/g, " ")).toBe("1 078,80 ₽");
+  });
+
+  it("shows an explicit refusal when the local registry cannot resolve a box", async () => {
+    const { scan } = renderCart({
+      resolveBox: vi.fn(async () => ({
+        kind: "rejected" as const,
+        notice: "registry-unavailable" as const,
+      })),
+    });
+
+    scan(payload("sscc", SSCC));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("реестр коробов недоступен"),
+    );
+    expect(rows()).toHaveLength(0);
   });
 
   /**
@@ -461,6 +506,24 @@ describe("Cart", () => {
     expect(text).not.toContain("₽");
   });
 
+  it("keeps every box price hidden when prices are disabled", async () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({
+        dayLimitPerEmployee: 20,
+        showPrices: false,
+      }),
+      resolveBox: vi.fn(async () => ({ kind: "resolved" as const, box: twelveBottleBox() })),
+    });
+
+    scan(payload("sscc", SSCC));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("89,90");
+    expect(text).not.toContain("1 078,80");
+    expect(text).not.toContain("₽");
+  });
+
   it("hands the whole session back when the worker says it is not them", () => {
     const { onNotMe } = renderCart();
 
@@ -478,8 +541,9 @@ describe("Cart", () => {
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith({
-      items: [
+      lines: [
         {
+          kind: "km",
           rawKm: `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`,
           kmKey: `01${GTIN_MILK}21KYC9X7MQ`,
           gtin14: GTIN_MILK,
@@ -487,6 +551,7 @@ describe("Cart", () => {
           productId: "p-milk",
           name: MILK,
           unitPrice: "89.90",
+          bottleCount: 1,
         },
       ],
       reason: "buy",
