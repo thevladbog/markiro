@@ -27,7 +27,7 @@ function uniqueColumns(table: AnyPgTable, name: string) {
 describe("shift export persistence schema", () => {
   it("generates the queue and integrity checks into the runtime migration", () => {
     const migration = readFileSync(
-      new URL("../migrations/0035_whole_firebird.sql", import.meta.url),
+      new URL("../migrations/0036_neat_quasar.sql", import.meta.url),
       "utf8",
     );
 
