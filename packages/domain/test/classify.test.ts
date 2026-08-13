@@ -13,20 +13,31 @@ describe("classifyScan", () => {
       gtin14: "04006381333931",
     });
   });
-  it("classifies an SSCC label scan, with and without AI 00", () => {
-    expect(classifyScan("346006820000000014")).toEqual({
-      kind: "sscc",
-      sscc: "346006820000000014",
-    });
-    expect(classifyScan("00346006820000000014")).toEqual({
+  it.each([
+    "346006820000000014",
+    "00346006820000000014",
+    "(00)346006820000000014",
+    "]C1346006820000000014",
+    "]C100346006820000000014",
+    "]C1(00)346006820000000014",
+    "  ]C1(00)346006820000000014  ",
+  ])("classifies scanner SSCC %s", (raw) => {
+    expect(classifyScan(raw)).toEqual({
       kind: "sscc",
       sscc: "346006820000000014",
     });
   });
+
+  it.each(["3460068200000000140", "]C1\u001d00346006820000000014", "]C1(00)3460068200000000140"])(
+    "does not classify malformed scanner SSCC %s",
+    (raw) => {
+      expect(classifyScan(raw).kind).not.toBe("sscc");
+    },
+  );
   it("falls back to unknown", () => {
-    expect(classifyScan("hello world")).toEqual({
+    expect(classifyScan("  hello world  ")).toEqual({
       kind: "unknown",
-      raw: "hello world",
+      raw: "  hello world  ",
     });
   });
 });
