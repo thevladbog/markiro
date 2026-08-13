@@ -77,3 +77,19 @@ export {
   resolveCabinetAccess,
 } from "./access/cabinet.js";
 export type { CabinetCapability, CabinetRole, ResolvedCabinetAccess } from "./access/cabinet.js";
+export {
+  getShiftExportFormat,
+  renderShiftExport,
+  sanitizeShiftExportFilenameSegment,
+  SHIFT_EXPORT_FORMATS,
+  ShiftExportDomainError,
+} from "./shift-exports.js";
+export type {
+  RenderShiftExportInput,
+  ShiftExportBoxMode,
+  ShiftExportDomainErrorCode,
+  ShiftExportFormatDescriptor,
+  ShiftExportFormatId,
+  ShiftExportPart,
+  ShiftExportSource,
+} from "./shift-exports.js";

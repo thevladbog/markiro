@@ -1,0 +1,253 @@
+import { describe, expect, it } from "vitest";
+import {
+  getShiftExportFormat,
+  renderShiftExport,
+  sanitizeShiftExportFilenameSegment,
+  SHIFT_EXPORT_FORMATS,
+  ShiftExportDomainError,
+  type ShiftExportSource,
+} from "../src/shift-exports.js";
+
+const decoder = new TextDecoder();
+
+function decode(bytes: Uint8Array): string {
+  return decoder.decode(bytes);
+}
+
+function stripBom(bytes: Uint8Array): string {
+  expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+  return decode(bytes.slice(3));
+}
+
+const flat: ShiftExportSource = { mode: "flat", codes: ["KM-1", "KM-2"] };
+const boxes: ShiftExportSource = {
+  mode: "boxes",
+  boxes: [
+    { sscc: "001234567890123456", codes: ["KM-1", "KM-2"] },
+    { sscc: "009876543210123456", codes: ["KM-3"] },
+  ],
+};
+
+function render(formatId: "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes", source: ShiftExportSource) {
+  const [part] = renderParts(formatId, source);
+
+  if (!part) {
+    throw new Error("Expected export part");
+  }
+
+  return part;
+}
+
+function renderParts(
+  formatId: "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes",
+  source: ShiftExportSource,
+  maxLines: number | null = null,
+) {
+  return renderShiftExport({
+    formatId,
+    formatVersion: 1,
+    productName: "Вода",
+    shiftDate: "2026-08-13",
+    maxLines,
+    source,
+  });
+}
+
+describe("shift export formats", () => {
+  it("keeps the four-version registry in its canonical order", () => {
+    expect(SHIFT_EXPORT_FORMATS).toEqual([
+      {
+        id: "shift_txt_flat",
+        version: 1,
+        label: "[TXT][Без коробов] Отчет смены",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        boxMode: "flat",
+      },
+      {
+        id: "shift_txt_boxes",
+        version: 1,
+        label: "[TXT][С коробами] Отчет смены",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        boxMode: "boxes",
+      },
+      {
+        id: "shift_csv_flat",
+        version: 1,
+        label: "[CSV][Без коробов] Отчет смены",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
+        boxMode: "flat",
+      },
+      {
+        id: "shift_csv_boxes",
+        version: 1,
+        label: "[CSV][С коробами] Отчет смены",
+        extension: "csv",
+        mimeType: "text/csv; charset=utf-8",
+        boxMode: "boxes",
+      },
+    ]);
+    expect(getShiftExportFormat("shift_txt_flat", 1)).toBe(SHIFT_EXPORT_FORMATS[0]);
+  });
+
+  it("renders each format with its exact bytes", () => {
+    expect(decode(render("shift_txt_flat", flat).bytes)).toBe("KM-1\\nKM-2\\n");
+    expect(decode(render("shift_txt_boxes", boxes).bytes)).toBe(
+      "001234567890123456\\nKM-1\\nKM-2\\n\\n009876543210123456\\nKM-3\\n\\n",
+    );
+    expect(stripBom(render("shift_csv_flat", flat).bytes)).toBe("code\\r\\nKM-1\\r\\nKM-2\\r\\n");
+    expect(stripBom(render("shift_csv_boxes", boxes).bytes)).toBe(
+      "box_sscc;code\\r\\n001234567890123456;KM-1\\r\\n001234567890123456;KM-2\\r\\n009876543210123456;KM-3\\r\\n",
+    );
+  });
+
+  it("preserves GS separators, escapes CSV fields, and leaves TXT unprefixed", () => {
+    expect(render("shift_txt_flat", { mode: "flat", codes: ["A\\u001dB"] }).bytes[1]).toBe(0x1d);
+    expect([...render("shift_txt_flat", flat).bytes.slice(0, 3)]).not.toEqual([0xef, 0xbb, 0xbf]);
+    expect(stripBom(render("shift_csv_flat", { mode: "flat", codes: ["a;b", 'a"b', "a\\rb", "a\\nb"] }).bytes)).toBe(
+      'code\\r\\n"a;b"\\r\\n"a""b"\\r\\n"a\\rb"\\r\\n"a\\nb"\\r\\n',
+    );
+  });
+});
+
+describe("shift export splitting", () => {
+  it("fills flat TXT parts through their physical-line limit", () => {
+    const codes: ShiftExportSource = { mode: "flat", codes: ["KM-1", "KM-2", "KM-3", "KM-4"] };
+
+    expect(renderParts("shift_txt_flat", codes, 2).map((part) => ({
+      physicalLineCount: part.physicalLineCount,
+      codeCount: part.codeCount,
+      boxCount: part.boxCount,
+      body: decode(part.bytes),
+    }))).toEqual([
+      { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-1\\nKM-2\\n" },
+      { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-3\\nKM-4\\n" },
+    ]);
+    expect(renderParts("shift_txt_flat", codes, 3).map((part) => ({
+      physicalLineCount: part.physicalLineCount,
+      codeCount: part.codeCount,
+      boxCount: part.boxCount,
+      body: decode(part.bytes),
+    }))).toEqual([
+      { physicalLineCount: 3, codeCount: 3, boxCount: 0, body: "KM-1\\nKM-2\\nKM-3\\n" },
+      { physicalLineCount: 1, codeCount: 1, boxCount: 0, body: "KM-4\\n" },
+    ]);
+  });
+
+  it("reserves a CSV header in every split part", () => {
+    expect(renderParts("shift_csv_flat", flat, 2).map((part) => ({
+      physicalLineCount: part.physicalLineCount,
+      codeCount: part.codeCount,
+      boxCount: part.boxCount,
+      body: stripBom(part.bytes),
+    }))).toEqual([
+      { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\\r\\nKM-1\\r\\n" },
+      { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\\r\\nKM-2\\r\\n" },
+    ]);
+  });
+
+  it("keeps TXT boxes indivisible and starts the next box in a new part", () => {
+    expect(renderParts("shift_txt_boxes", boxes, 5).map((part) => ({
+      physicalLineCount: part.physicalLineCount,
+      codeCount: part.codeCount,
+      boxCount: part.boxCount,
+      body: decode(part.bytes),
+    }))).toEqual([
+      {
+        physicalLineCount: 4,
+        codeCount: 2,
+        boxCount: 1,
+        body: "001234567890123456\\nKM-1\\nKM-2\\n\\n",
+      },
+      {
+        physicalLineCount: 3,
+        codeCount: 1,
+        boxCount: 1,
+        body: "009876543210123456\\nKM-3\\n\\n",
+      },
+    ]);
+  });
+
+  it("counts a CSV box as its item records plus its part header", () => {
+    expect(renderParts("shift_csv_boxes", boxes, 3).map((part) => ({
+      physicalLineCount: part.physicalLineCount,
+      codeCount: part.codeCount,
+      boxCount: part.boxCount,
+      body: stripBom(part.bytes),
+    }))).toEqual([
+      {
+        physicalLineCount: 3,
+        codeCount: 2,
+        boxCount: 1,
+        body: "box_sscc;code\\r\\n001234567890123456;KM-1\\r\\n001234567890123456;KM-2\\r\\n",
+      },
+      {
+        physicalLineCount: 2,
+        codeCount: 1,
+        boxCount: 1,
+        body: "box_sscc;code\\r\\n009876543210123456;KM-3\\r\\n",
+      },
+    ]);
+  });
+
+  it("rejects an indivisible box that cannot fit in an empty part", () => {
+    expect(() => renderParts("shift_txt_boxes", boxes, 3)).toThrow(
+      new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT"),
+    );
+    expect(() => renderParts("shift_csv_boxes", boxes, 2)).toThrow(
+      new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT"),
+    );
+  });
+
+  it("keeps an unsplit result as one ordinary part", () => {
+    const [part] = renderParts("shift_txt_flat", flat, 3);
+
+    expect(part).toMatchObject({
+      partNumber: 1,
+      physicalLineCount: 2,
+      codeCount: 2,
+      boxCount: 0,
+      filename: "Вода_2_2026-08-13.txt",
+    });
+  });
+
+  it("rejects invalid limits and incompatible or empty sources", () => {
+    expect(() => renderParts("shift_txt_flat", flat, 1)).toThrow(
+      new ShiftExportDomainError("INVALID_LINE_LIMIT"),
+    );
+    expect(() => renderParts("shift_txt_flat", flat, 1_000_001)).toThrow(
+      new ShiftExportDomainError("INVALID_LINE_LIMIT"),
+    );
+    expect(() => renderParts("shift_txt_flat", flat, 2.5)).toThrow(
+      new ShiftExportDomainError("INVALID_LINE_LIMIT"),
+    );
+    expect(() => renderParts("shift_txt_flat", boxes)).toThrow(
+      new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH"),
+    );
+    expect(() => renderParts("shift_txt_flat", { mode: "flat", codes: [] })).toThrow(
+      new ShiftExportDomainError("EMPTY_SOURCE"),
+    );
+    expect(() => getShiftExportFormat("missing", 1)).toThrow(
+      new ShiftExportDomainError("FORMAT_NOT_FOUND"),
+    );
+  });
+});
+
+describe("shift export filenames", () => {
+  it("sanitizes the product segment without losing Cyrillic", () => {
+    expect(sanitizeShiftExportFilenameSegment('  Вода / "газ"  ')).toBe("Вода_газ");
+    expect(sanitizeShiftExportFilenameSegment("\\u0000///:::***")).toBe("продукция");
+  });
+
+  it("uses per-part counts, box counts, and part suffixes only for multipart exports", () => {
+    const parts = renderParts("shift_csv_boxes", boxes, 3);
+
+    expect(parts.map((part) => part.filename)).toEqual([
+      "Вода_2_1_2026-08-13_часть_1.csv",
+      "Вода_1_1_2026-08-13_часть_2.csv",
+    ]);
+    expect(render("shift_csv_flat", flat).filename).toBe("Вода_2_2026-08-13.csv");
+  });
+});
