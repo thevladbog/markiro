@@ -17,6 +17,8 @@ describe("Station brand assets", () => {
     expect(fullLogo).toContain('fill="#3DDC7A"');
     expect(fullLogo).toContain(">маркиро</text>");
     expect(appIcon).toContain('viewBox="0 0 512 512"');
+    expect(appIcon).toContain('<rect width="512" height="512" fill="#FAFAF8"');
+    expect(appIcon).toContain('<g fill="#17161A"');
     expect(appIcon).not.toContain("<circle");
   });
 
@@ -39,7 +41,22 @@ describe("Station brand assets", () => {
       "icons/icon.icns",
       "icons/icon.ico",
     ]);
+    expect(config.bundle.windows.nsis).toMatchObject({
+      installerIcon: "icons/icon.ico",
+      installerHooks: "windows/installer-hooks.nsh",
+    });
     expect(config.app.security.csp).toContain("img-src 'self' data:");
+  });
+
+  it("invalidates the Windows shell icon cache after installing refreshed shortcuts", async () => {
+    const hooks = await readFile(
+      resolve(stationRoot, "src-tauri/windows/installer-hooks.nsh"),
+      "utf8",
+    );
+
+    expect(hooks).toContain("!macro NSIS_HOOK_POSTINSTALL");
+    expect(hooks).toContain("SHChangeNotify");
+    expect(hooks).toContain("0x08000000");
   });
 
   it("assigns the branded icon to the native window at startup", async () => {
