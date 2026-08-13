@@ -160,6 +160,34 @@ also assert a current owner's matching broken revision is deleted.
 - Kiosk `tsc -p tsconfig.json --noEmit` — passed.
 - No new scope was reviewed.
 
+## Final bounded re-review of `cb222efa`
+
+### Verdict
+
+**APPROVED.** Both residual Important findings are addressed; no Critical,
+Important or Minor finding remains in the bounded Task 2 scope.
+
+- Pairing validates the listener's raw value directly with `/^\d{8}$/`. The
+  transport layer remains responsible for removing Enter/CRLF framing, while
+  whitespace, punctuation and mixed payloads reaching the screen are rejected.
+- Cached branding now carries the owner and revision of the actual displayed
+  blob. `Idle` captures that immutable pair with the object URL, revokes the
+  exact URL on error, switches immediately to bundled Markiro, and reports the
+  displayed pair rather than reading the current config later.
+- `invalidateCachedBranding` reads config and stored branding in one read-write
+  transaction and deletes only when current config owner, stored row owner, and
+  stored revision all match the displayed handle. An old tenant/revision image
+  error cannot delete the new owner/revision; a matching current broken asset is
+  removed durably.
+
+Final checks:
+
+- `git diff --check dfe60aa6..cb222efa` — passed.
+- Focused `pairing-screen`, `branding`, `idle-screen`, and full `app` suites —
+  **105/105 passed**.
+- Kiosk `tsc -p tsconfig.json --noEmit` — passed.
+- No browser/tablet/physical-scanner/live-storage validation was performed.
+
 ## Final disposition
 
 Both residual Important findings are resolved in the follow-up implementation:
