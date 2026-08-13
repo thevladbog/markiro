@@ -111,9 +111,8 @@ function CreateProductPanel() {
     <>
       <ProductForm
         mode={createdProduct ? "edit" : "create"}
-        initialValues={createdInitialValues}
-        productId={createdProduct?.id}
-        imageAltName={createdProduct?.name}
+        {...(createdInitialValues ? { initialValues: createdInitialValues } : {})}
+        {...(createdProduct ? { productId: createdProduct.id, imageAltName: createdProduct.name } : {})}
         counterparties={context.counterparties}
         labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
@@ -226,7 +225,7 @@ function EditProductPanel() {
         counterparties={context.counterparties}
         labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
-        image={product.image}
+        {...(product.image ? { image: product.image } : {})}
         imageAltName={product.name}
         imageBusy={deleteImageMutation.isPending}
         onDeleteImage={async () => {
