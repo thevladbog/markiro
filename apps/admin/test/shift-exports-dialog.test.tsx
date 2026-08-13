@@ -33,10 +33,38 @@ const SHIFT = {
 } as const;
 
 const FORMATS = [
-  { id: "shift_txt_flat", version: 1, label: "[TXT][Без коробов] Отчет смены", extension: "txt", mimeType: "text/plain; charset=utf-8", boxMode: "flat" },
-  { id: "shift_txt_boxes", version: 1, label: "[TXT][С коробами] Отчет смены", extension: "txt", mimeType: "text/plain; charset=utf-8", boxMode: "boxes" },
-  { id: "shift_csv_flat", version: 1, label: "[CSV][Без коробов] Отчет смены", extension: "csv", mimeType: "text/csv; charset=utf-8", boxMode: "flat" },
-  { id: "shift_csv_boxes", version: 1, label: "[CSV][С коробами] Отчет смены", extension: "csv", mimeType: "text/csv; charset=utf-8", boxMode: "boxes" },
+  {
+    id: "shift_txt_flat",
+    version: 1,
+    label: "[TXT][Без коробов] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "flat",
+  },
+  {
+    id: "shift_txt_boxes",
+    version: 1,
+    label: "[TXT][С коробами] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "boxes",
+  },
+  {
+    id: "shift_csv_flat",
+    version: 1,
+    label: "[CSV][Без коробов] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "flat",
+  },
+  {
+    id: "shift_csv_boxes",
+    version: 1,
+    label: "[CSV][С коробами] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "boxes",
+  },
 ] as const;
 
 const READY_EXPORT = {
@@ -59,18 +87,47 @@ const READY_EXPORT = {
   createdAt: "2026-08-13T16:00:00.000Z",
   stale: true,
   artifacts: [
-    { id: "part-2", partNumber: 2, physicalLineCount: 1, codeCount: 1, boxCount: 1, filename: "second.txt", mimeType: "text/plain; charset=utf-8", byteSize: 24, sha256: "b".repeat(64) },
-    { id: "part-1", partNumber: 1, physicalLineCount: 2, codeCount: 2, boxCount: 1, filename: "first.txt", mimeType: "text/plain; charset=utf-8", byteSize: 42, sha256: "a".repeat(64) },
+    {
+      id: "part-2",
+      partNumber: 2,
+      physicalLineCount: 1,
+      codeCount: 1,
+      boxCount: 1,
+      filename: "second.txt",
+      mimeType: "text/plain; charset=utf-8",
+      byteSize: 24,
+      sha256: "b".repeat(64),
+    },
+    {
+      id: "part-1",
+      partNumber: 1,
+      physicalLineCount: 2,
+      codeCount: 2,
+      boxCount: 1,
+      filename: "first.txt",
+      mimeType: "text/plain; charset=utf-8",
+      byteSize: 42,
+      sha256: "a".repeat(64),
+    },
   ],
 } as const;
 
 function response(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 }
 
 function renderDialog() {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><ShiftExportsDialog shift={SHIFT} open onClose={() => undefined} /></QueryClientProvider>);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={client}>
+      <ShiftExportsDialog shift={SHIFT} open onClose={() => undefined} />
+    </QueryClientProvider>,
+  );
 }
 
 afterEach(() => {
@@ -81,7 +138,10 @@ afterEach(() => {
 
 describe("ShiftExportsDialog", () => {
   it("shows server formats and validates the optional split limit", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => response(String(url).includes("/formats") ? FORMATS : [])));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => response(String(url).includes("/formats") ? FORMATS : [])),
+    );
     renderDialog();
 
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
@@ -105,7 +165,12 @@ describe("ShiftExportsDialog", () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).includes("/formats")) return response(FORMATS);
       if (String(url).endsWith("/exports")) return response([READY_EXPORT]);
-      if (String(url).includes("/download")) return response({ url: "https://storage.example.test/download", filename: "first.txt", expiresInSeconds: 300 });
+      if (String(url).includes("/download"))
+        return response({
+          url: "https://storage.example.test/download",
+          filename: "first.txt",
+          expiresInSeconds: 300,
+        });
       return response({});
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -113,7 +178,9 @@ describe("ShiftExportsDialog", () => {
     const appendChild = vi.spyOn(document.body, "appendChild");
     const removeChild = vi.spyOn(document.body, "removeChild");
     const originalCreateElement = document.createElement.bind(document);
-    const createElement = vi.spyOn(document, "createElement").mockImplementation(((tagName: string) => {
+    const createElement = vi.spyOn(document, "createElement").mockImplementation(((
+      tagName: string,
+    ) => {
       const element = originalCreateElement(tagName) as HTMLAnchorElement;
       if (tagName === "a") element.click = click;
       return element;
@@ -132,7 +199,9 @@ describe("ShiftExportsDialog", () => {
 
     fireEvent.click(within(dialog).getAllByRole("button", { name: "Скачать" })[0]!);
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
-    const link = appendChild.mock.calls.find(([node]) => node instanceof HTMLAnchorElement)?.[0] as HTMLAnchorElement;
+    const link = appendChild.mock.calls.find(
+      ([node]) => node instanceof HTMLAnchorElement,
+    )?.[0] as HTMLAnchorElement;
     expect(link.href).toBe("https://storage.example.test/download");
     expect(link.download).toBe("first.txt");
     expect(removeChild).toHaveBeenCalledWith(link);
@@ -140,19 +209,52 @@ describe("ShiftExportsDialog", () => {
   });
 
   it("renders retained statuses, safe failure text, newest-first history, and flat counts without boxes", async () => {
-    const failed = { ...READY_EXPORT, id: "33333333-3333-4333-8333-333333333333", formatId: "shift_csv_flat", status: "failed", errorCode: "GENERATION_FAILED", artifacts: [], totalBoxCount: 0, createdAt: "2026-08-13T17:00:00.000Z", completedAt: null };
-    const processing = { ...READY_EXPORT, id: "44444444-4444-4444-8444-444444444444", formatId: "shift_txt_flat", status: "processing", artifacts: [], totalBoxCount: 0, createdAt: "2026-08-13T16:30:00.000Z", completedAt: null };
-    const queued = { ...READY_EXPORT, id: "55555555-5555-4555-8555-555555555555", formatId: "shift_csv_flat", status: "queued", artifacts: [], totalBoxCount: 0, createdAt: "2026-08-13T16:20:00.000Z", completedAt: null };
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (String(url).includes("/formats")) return response(FORMATS);
-      if (String(url).endsWith("/exports")) return response([queued, processing, failed]);
-      return response({});
-    }));
+    const failed = {
+      ...READY_EXPORT,
+      id: "33333333-3333-4333-8333-333333333333",
+      formatId: "shift_csv_flat",
+      status: "failed",
+      errorCode: "GENERATION_FAILED",
+      artifacts: [],
+      totalBoxCount: 0,
+      createdAt: "2026-08-13T17:00:00.000Z",
+      completedAt: null,
+    };
+    const processing = {
+      ...READY_EXPORT,
+      id: "44444444-4444-4444-8444-444444444444",
+      formatId: "shift_txt_flat",
+      status: "processing",
+      artifacts: [],
+      totalBoxCount: 0,
+      createdAt: "2026-08-13T16:30:00.000Z",
+      completedAt: null,
+    };
+    const queued = {
+      ...READY_EXPORT,
+      id: "55555555-5555-4555-8555-555555555555",
+      formatId: "shift_csv_flat",
+      status: "queued",
+      artifacts: [],
+      totalBoxCount: 0,
+      createdAt: "2026-08-13T16:20:00.000Z",
+      completedAt: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/formats")) return response(FORMATS);
+        if (String(url).endsWith("/exports")) return response([queued, processing, failed]);
+        return response({});
+      }),
+    );
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
     expect(await within(dialog).findByText("В очереди")).toBeDefined();
     expect(within(dialog).getByText("Формируется")).toBeDefined();
-    expect(within(dialog).getByText("Не удалось сформировать отчет. Повторите попытку.")).toBeDefined();
+    expect(
+      within(dialog).getByText("Не удалось сформировать отчет. Повторите попытку."),
+    ).toBeDefined();
     expect(within(dialog).getAllByText("[CSV][Без коробов] Отчет смены")).toHaveLength(3);
     const rows = within(dialog).getAllByRole("article");
     expect(rows).toHaveLength(3);
@@ -160,7 +262,10 @@ describe("ShiftExportsDialog", () => {
   });
 
   it("rejects empty, fractional, and out-of-range split limits", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => response(String(url).includes("/formats") ? FORMATS : [])));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => response(String(url).includes("/formats") ? FORMATS : [])),
+    );
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: "Разделить отчет на части" }));
@@ -168,7 +273,10 @@ describe("ShiftExportsDialog", () => {
     for (const value of ["", "1", "1000001", "1.5"]) {
       fireEvent.change(limit, { target: { value } });
       expect(within(dialog).getByText("Введите целое число от 2 до 1 000 000")).toBeDefined();
-      expect((within(dialog).getByRole("button", { name: "Сформировать отчет" }) as HTMLButtonElement).disabled).toBe(true);
+      expect(
+        (within(dialog).getByRole("button", { name: "Сформировать отчет" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
     }
     expect(limit.required).toBe(true);
   });
