@@ -53,6 +53,7 @@ interface FakeDb {
 interface FakeDbOptions {
   failArtifactPublication?: boolean;
   commitThenThrow?: boolean;
+  failReconciliationRead?: boolean;
 }
 
 function baseRow(overrides: Partial<ExportRow> = {}): ExportRow {
@@ -82,13 +83,17 @@ function fakeDb(row = baseRow(), options: FakeDbOptions = {}): FakeDb {
   const state: State = { row: { ...row }, artifacts: [], audits: [] };
   const transactions: FakeDb["transactions"] = [];
   const updatePredicates: unknown[] = [];
+  let publicationTransactionFailed = false;
 
   const createBoundary = (target: State, txLog?: FakeDb["transactions"][number]) => {
     const select = () => ({
       from: (table: unknown) => {
-        const result = Promise.resolve(
-          table === schema.shiftExportArtifacts ? target.artifacts : [target.row],
-        );
+        const result =
+          options.failReconciliationRead && publicationTransactionFailed
+            ? Promise.reject(new Error("publication reconciliation read failed: sensitive"))
+            : Promise.resolve(
+                table === schema.shiftExportArtifacts ? target.artifacts : [target.row],
+              );
         const node = {
           where: () => node,
           limit: () => node,
@@ -120,9 +125,20 @@ function fakeDb(row = baseRow(), options: FakeDbOptions = {}): FakeDb {
           },
           returning: async () => {
             if (table === schema.shiftExports && typeof values.attemptCount !== "undefined") {
+              const query = new PgDialect().sqlToQuery(
+                (updatePredicate as { getSQL(): SQL }).getSQL(),
+              );
+              const leaseCutoffParameter = query.params.at(-1);
+              const leaseCutoff =
+                leaseCutoffParameter instanceof Date
+                  ? leaseCutoffParameter
+                  : typeof leaseCutoffParameter === "string"
+                    ? new Date(leaseCutoffParameter)
+                    : undefined;
               const canReclaimAbandoned =
                 target.row.status === "processing" &&
-                target.row.updatedAt.getTime() < Date.now() - 60 * 60 * 1_000 &&
+                leaseCutoff !== undefined &&
+                target.row.updatedAt <= leaseCutoff &&
                 sqlText(updatePredicate).includes('"shift_exports"."updated_at" <=');
               if (target.row.status !== "queued" && !canReclaimAbandoned) return [];
             }
@@ -164,11 +180,18 @@ function fakeDb(row = baseRow(), options: FakeDbOptions = {}): FakeDb {
       };
       const txLog = { insertedArtifacts: 0, markedReady: false };
       transactions.push(txLog);
-      const result = await run(createBoundary(working, txLog) as unknown as Db);
+      let result: unknown;
+      try {
+        result = await run(createBoundary(working, txLog) as unknown as Db);
+      } catch (error) {
+        publicationTransactionFailed = true;
+        throw error;
+      }
       state.row = working.row;
       state.artifacts = working.artifacts;
       state.audits = working.audits;
       if (options.commitThenThrow && txLog.markedReady) {
+        publicationTransactionFailed = true;
         throw new Error("commit acknowledgement lost: sensitive");
       }
       return result;
@@ -299,8 +322,8 @@ describe("ShiftExportRunnerService", () => {
     });
   });
 
-  it.each(["ready", "processing"] as const)("ignores an export already %s", async (status) => {
-    const fake = fakeDb(baseRow({ status }));
+  it("ignores an export already ready", async () => {
+    const fake = fakeDb(baseRow({ status: "ready" }));
     const loader = source();
     const objects = storage();
 
@@ -311,34 +334,67 @@ describe("ShiftExportRunnerService", () => {
 
     expect(loader.load).not.toHaveBeenCalled();
     expect(objects.putVerified).not.toHaveBeenCalled();
-    expect(fake.state.row).toMatchObject({ status, attemptCount: 0 });
+    expect(fake.state.row).toMatchObject({ status: "ready", attemptCount: 0 });
   });
 
-  it("reclaims an abandoned processing attempt without stealing an active attempt", async () => {
-    const abandoned = fakeDb(
-      baseRow({
-        status: "processing",
-        attemptCount: 1,
-        updatedAt: new Date("2020-01-01T00:00:00.000Z"),
-      }),
-    );
-    const abandonedStorage = storage();
+  it("does not steal an actively processing export before the first queue retry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T13:00:00.000Z"));
+    try {
+      const fake = fakeDb(
+        baseRow({
+          status: "processing",
+          attemptCount: 1,
+          updatedAt: new Date("2026-08-13T12:59:50.000Z"),
+        }),
+      );
+      const loader = source();
+      const objects = storage();
 
-    await new ShiftExportRunnerService(abandoned.db, source(), abandonedStorage).run(EXPORT_ID, {
-      retryCount: 1,
-      retryLimit: 5,
-    });
+      await new ShiftExportRunnerService(fake.db, loader, objects).run(EXPORT_ID, {
+        retryCount: 1,
+        retryLimit: 5,
+      });
 
-    expect(abandoned.state.row).toMatchObject({ status: "ready", attemptCount: 2 });
-    expect(abandonedStorage.objects).toEqual(
-      new Set([
-        `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-1.csv`,
-        `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-2.csv`,
-      ]),
-    );
-    const claimSql = abandoned.updatePredicates.map(sqlText).join("\n");
-    expect(claimSql).toContain('"shift_exports"."updated_at" <=');
-    expect(claimSql).toContain('"shift_exports"."attempt_count" =');
+      expect(loader.load).not.toHaveBeenCalled();
+      expect(objects.putVerified).not.toHaveBeenCalled();
+      expect(fake.state.row).toMatchObject({ status: "processing", attemptCount: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reclaims abandoned processing before the first thirty-second queue retry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T13:00:00.000Z"));
+    try {
+      const abandoned = fakeDb(
+        baseRow({
+          status: "processing",
+          attemptCount: 1,
+          updatedAt: new Date("2026-08-13T12:59:30.000Z"),
+        }),
+      );
+      const abandonedStorage = storage();
+
+      await new ShiftExportRunnerService(abandoned.db, source(), abandonedStorage).run(EXPORT_ID, {
+        retryCount: 1,
+        retryLimit: 5,
+      });
+
+      expect(abandoned.state.row).toMatchObject({ status: "ready", attemptCount: 2 });
+      expect(abandonedStorage.objects).toEqual(
+        new Set([
+          `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-1.csv`,
+          `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-2.csv`,
+        ]),
+      );
+      const claimSql = abandoned.updatePredicates.map(sqlText).join("\n");
+      expect(claimSql).toContain('"shift_exports"."updated_at" <=');
+      expect(claimSql).toContain('"shift_exports"."attempt_count" =');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("cleans uploaded objects and leaves a transient storage failure queued for pg-boss", async () => {
@@ -433,6 +489,46 @@ describe("ShiftExportRunnerService", () => {
     expect(objects.objects.size).toBe(2);
     expect(fake.state.audits).toHaveLength(1);
     expect(JSON.stringify(fake.state.audits)).not.toMatch(/code-a|code-b|tenants\/|https?:\/\//);
+  });
+
+  it("reclaims on the next retry when publication and reconciliation reads both fail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-13T13:00:00.000Z"));
+    try {
+      const options: FakeDbOptions = {
+        failArtifactPublication: true,
+        failReconciliationRead: true,
+      };
+      const fake = fakeDb(baseRow({ updatedAt: new Date() }), options);
+      const objects = storage();
+      const runner = new ShiftExportRunnerService(fake.db, source(), objects);
+
+      await expect(runner.run(EXPORT_ID, { retryCount: 0, retryLimit: 5 })).rejects.toThrow(
+        "database publication failed",
+      );
+
+      expect(fake.state.row).toMatchObject({ status: "processing", attemptCount: 1 });
+      expect(objects.delete).not.toHaveBeenCalled();
+      expect(objects.objects.size).toBe(2);
+
+      options.failArtifactPublication = false;
+      options.failReconciliationRead = false;
+      vi.advanceTimersByTime(30_000);
+
+      await runner.run(EXPORT_ID, { retryCount: 1, retryLimit: 5 });
+
+      expect(fake.state.row).toMatchObject({ status: "ready", attemptCount: 2 });
+      expect(fake.state.artifacts).toEqual([
+        expect.objectContaining({
+          objectKey: `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-1.csv`,
+        }),
+        expect.objectContaining({
+          objectKey: `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-2.csv`,
+        }),
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("finishes safe source errors immediately without leaking their message", async () => {

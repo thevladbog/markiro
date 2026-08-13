@@ -32,7 +32,12 @@ type ShiftExportSafeErrorCode = (typeof SHIFT_EXPORT_SAFE_ERROR_CODES)[number];
 type ShiftExportRow = typeof schema.shiftExports.$inferSelect;
 type ShiftExportTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
-const PROCESSING_LEASE_MS = 60 * 60 * 1_000;
+/**
+ * Task 6 retries this request-driven job after 30 seconds. A 20-second lease lets
+ * that first retry reclaim a worker that disappeared or could not reconcile an
+ * ambiguous commit, while the attempt-count predicate fences the previous owner.
+ */
+const PROCESSING_LEASE_MS = 20_000;
 
 interface AttemptContext {
   retryCount: number;
