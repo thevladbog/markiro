@@ -287,10 +287,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.badgeCode).toBe(stranger);
   });
 
-  // A badge heartbeat carries no codes, so nothing was lost -- a row here
-  // would be noise in a surface whose whole point is that it stays worth
-  // reading.
-  it("records nothing when an unrecognised-badge sync carried no codes", async () => {
+  it("records a submitted invalid code when the badge is unrecognised", async () => {
     await postScan({
       deviceSeq: 13,
       badgeCode: "badge-that-never-existed",
@@ -298,7 +295,9 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
       items: [{ rawKm: "not-a-km" }],
     }).expect(422);
 
-    expect(await rejectionsFor(13)).toHaveLength(0);
+    const rows = await rejectionsFor(13);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.codes).toEqual([{ rawKm: "not-a-km", reason: "unknown_badge" }]);
   });
 
   // The unified log has to be a superset: an admin asking "what got refused
@@ -374,9 +373,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "unknown_reason" }]);
   });
 
-  // A heartbeat-shaped writeoff sync (no codes) lost no product and must not
-  // add noise, mirroring the unrecognised-badge item-less guard.
-  it("records nothing when a bad-reason writeoff sync carried no codes", async () => {
+  it("records a submitted invalid code when the writeoff reason is unknown", async () => {
     await postScan({
       deviceSeq: 17,
       badgeCode: BADGE,
@@ -385,7 +382,9 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
       items: [{ rawKm: "not-a-km" }],
     }).expect(400);
 
-    expect(await rejectionsFor(17)).toHaveLength(0);
+    const rows = await rejectionsFor(17);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.codes).toEqual([{ rawKm: "not-a-km", reason: "unknown_reason" }]);
   });
 
   // `resolveWriteoffReasonId`'s OTHER throw site: a kiosk build that forgot to
@@ -404,7 +403,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.employeeId).toBe(employeeId);
     expect(rows[0]!.badgeCode).toBeNull();
     expect(rows[0]!.orderId).toBeNull();
-    expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "unknown_reason" }]);
+    expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "writeoff_reason_required" }]);
   });
 
   // A rejection consumes a device_seq without creating an order. If the

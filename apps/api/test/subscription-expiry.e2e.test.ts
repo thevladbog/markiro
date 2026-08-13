@@ -18,6 +18,8 @@ import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { preTask8KioskWillQuarantine } from "./support/pre-task8-kiosk-client";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
+const KIOSK_RECOVERY_GTIN = "04600682000013";
+const GS = "\u001d";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -550,22 +552,35 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Recovery kiosk",
       deviceTokenHash: hashDeviceToken(kioskToken),
     });
+    const productId = randomUUID();
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: KIOSK_RECOVERY_GTIN,
+      name: "Recovery product",
+    });
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
     const initialEndsAt = new Date(Date.now() + 86_400_000);
     const subscription = await attachPlan(tenantId, {
       startsAt: new Date(Date.now() - 86_400_000),
       endsAt: initialEndsAt,
     });
 
-    const reserve = (token: string, deviceSeq: number) =>
+    const recoveryKm = (prefix: string) =>
+      `01${KIOSK_RECOVERY_GTIN}21${prefix}${randomUUID().replace(/-/g, "").slice(0, 12)}${GS}93Abcd`;
+    const firstKm = recoveryKm("FIRST");
+    const laterKm = recoveryKm("LATER");
+    const secondKioskKm = recoveryKm("SECOND");
+    const reserve = (token: string, deviceSeq: number, rawKm: string) =>
       request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", token)
-        .send({ deviceSeq, badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }] })
+        .send({ deviceSeq, badgeCode, reason: "buy", items: [{ rawKm }] })
         .expect(201);
-    const firstAdmission = await reserve(kioskToken, 1);
-    const laterAdmission = await reserve(kioskToken, 3);
+    const firstAdmission = await reserve(kioskToken, 1, firstKm);
+    const laterAdmission = await reserve(kioskToken, 3, laterKm);
 
-    const post = (deviceSeq: number, createdAt: string, admissionProof?: string) =>
+    const post = (deviceSeq: number, rawKm: string, createdAt: string, admissionProof?: string) =>
       request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
@@ -574,7 +589,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq,
           badgeCode,
           reason: "buy",
-          items: [{ rawKm: "not-a-km" }],
+          items: [{ rawKm }],
           createdAt,
           ...(admissionProof ? { admissionProof } : {}),
         });
@@ -587,7 +602,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       name: "Second recovery kiosk",
       deviceTokenHash: hashDeviceToken(secondKioskToken),
     });
-    const secondAdmission = await reserve(secondKioskToken, 1);
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId: secondKioskId, productId });
+    const secondAdmission = await reserve(secondKioskToken, 1, secondKioskKm);
     await db
       .update(schema.tenantSubscriptions)
       .set({ endsAt: new Date() })
@@ -595,14 +611,15 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
 
     const accepted = await post(
       1,
+      firstKm,
       firstAdmission.body.claimedAt,
       firstAdmission.body.admissionProof,
     ).expect(201);
-    expect(accepted.body).toMatchObject({ status: "pending", itemCount: 0 });
-    const replay = await post(1, new Date().toISOString()).expect(201);
+    expect(accepted.body).toMatchObject({ status: "pending", itemCount: 1 });
+    const replay = await post(1, firstKm, new Date().toISOString()).expect(201);
     expect(replay.body.orderNo).toBe(accepted.body.orderNo);
 
-    const denied = await post(2, new Date().toISOString()).expect(403);
+    const denied = await post(2, recoveryKm("DENIED"), new Date().toISOString()).expect(403);
     expect(denied.body).toEqual({ code: "subscription_read_only" });
 
     const laterEligible = await request(app!.getHttpServer())
@@ -613,7 +630,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 3,
         badgeCode,
         reason: "buy",
-        items: [{ rawKm: "not-a-km" }],
+        items: [{ rawKm: laterKm }],
         createdAt: laterAdmission.body.claimedAt,
         admissionProof: laterAdmission.body.admissionProof,
       })
@@ -627,7 +644,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 1,
         badgeCode,
         reason: "buy",
-        items: [{ rawKm: "not-a-km" }],
+        items: [{ rawKm: secondKioskKm }],
         createdAt: secondAdmission.body.claimedAt,
         admissionProof: secondAdmission.body.admissionProof,
       })

@@ -334,6 +334,11 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
   });
 
   it("does not advertise an uncommitted allocated revision and exposes it after commit", async () => {
+    const baseline = await request(app!.getHttpServer())
+      .get("/kiosk/box-registry?limit=500")
+      .set("x-kiosk-token", token)
+      .expect(200);
+    const baselineUntil = baseline.body.until as string;
     const client = await setup.pool.connect();
     let committed = false;
     try {
@@ -356,10 +361,10 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
 
       const beforeCommit = await request(app!.getHttpServer())
         .get("/kiosk/box-registry")
-        .query({ since: initialUntil })
+        .query({ since: baselineUntil })
         .set("x-kiosk-token", token)
         .expect(200);
-      expect(beforeCommit.body.until).toBe(initialUntil);
+      expect(beforeCommit.body.until).toBe(baselineUntil);
       expect(beforeCommit.body.items).not.toContainEqual(
         expect.objectContaining({ boxId: eligibleBoxId }),
       );
@@ -368,10 +373,10 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       committed = true;
       const afterCommit = await request(app!.getHttpServer())
         .get("/kiosk/box-registry")
-        .query({ since: initialUntil })
+        .query({ since: baselineUntil })
         .set("x-kiosk-token", token)
         .expect(200);
-      expect(BigInt(afterCommit.body.until as string)).toBeGreaterThan(BigInt(initialUntil));
+      expect(BigInt(afterCommit.body.until as string)).toBeGreaterThan(BigInt(baselineUntil));
       expect(afterCommit.body.items).toContainEqual(
         expect.objectContaining({ kind: "upsert", boxId: eligibleBoxId }),
       );

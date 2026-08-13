@@ -777,7 +777,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       deviceSeq: 40,
       badgeCode: BADGE,
       reason: "buy",
-      items: [{ rawKm: "not-a-km" }],
+      items: [{ rawKm: distinctKm("LOCK") }],
     });
     const elapsed = Date.now() - start;
 
