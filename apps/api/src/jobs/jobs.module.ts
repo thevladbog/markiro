@@ -325,7 +325,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       .from(schema.shiftExports)
       .where(eq(schema.shiftExports.status, "queued"));
     for (const row of queued) {
-      await boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId: row.id });
+      const jobId = await boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId: row.id });
+      if (!jobId) throw new Error("shift export enqueue failed during startup reconciliation");
     }
   }
 

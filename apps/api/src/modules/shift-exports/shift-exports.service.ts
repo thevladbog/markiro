@@ -101,7 +101,11 @@ export class ShiftExportsService {
         throw new ConflictException("Idempotency key already belongs to another export request");
       }
       row = existing;
-      shouldEnqueue = existing.status === "queued";
+      // A queued row may already have an in-flight pg-boss send from the
+      // original request. Re-sending here would let a duplicate request race
+      // that send and turn a transient failure into QUEUE_FAILED. Startup
+      // reconciliation repairs a queued row whose process died before send.
+      shouldEnqueue = false;
       if (existing.status === "failed" && existing.errorCode === "QUEUE_FAILED") {
         const restored = await this.restoreFailed(existing, actorUserId);
         if (restored) {

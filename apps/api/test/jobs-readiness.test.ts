@@ -88,6 +88,9 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
 function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   pgBossMock.instances.push(boss);
   const db = {
+    select: vi.fn(() => ({
+      from: vi.fn(() => ({ where: vi.fn(async () => []) })),
+    })),
     delete: vi.fn(() => ({
       where: vi.fn(async () => ({ rowCount: 0 })),
     })),
