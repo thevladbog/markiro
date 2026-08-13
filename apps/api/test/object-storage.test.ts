@@ -41,6 +41,81 @@ describe("ObjectStorageService", () => {
     expect(command.input).not.toHaveProperty("ACL");
   });
 
+  it("uploads verified private objects with their checksum metadata", async () => {
+    const body = Buffer.from("verified export");
+    const sha256 = "4161a5679ca94a7d7999801d153f926f797929158d4110b1cf909030c2d5deba";
+    const send = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({
+      ContentLength: body.byteLength,
+      Metadata: { sha256 },
+    });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(
+      storage.putVerified("tenants/t/shifts/s/export.csv", body, "text/csv", sha256),
+    ).resolves.toEqual({ byteSize: body.byteLength, sha256 });
+
+    const put = send.mock.calls[0]![0] as { input: Record<string, unknown> };
+    expect(put.constructor.name).toBe("PutObjectCommand");
+    expect(put.input).toMatchObject({
+      Bucket: "markiro-private",
+      Key: "tenants/t/shifts/s/export.csv",
+      Body: body,
+      ContentType: "text/csv",
+      Metadata: { sha256 },
+    });
+    expect(put.input).not.toHaveProperty("ACL");
+    expect(send.mock.calls[1]![0]?.constructor.name).toBe("HeadObjectCommand");
+  });
+
+  it.each([
+    ["a different byte length", { ContentLength: 1, Metadata: { sha256: "a".repeat(64) } }],
+    ["missing checksum metadata", { ContentLength: 15 }],
+    ["a different checksum", { ContentLength: 15, Metadata: { sha256: "b".repeat(64) } }],
+  ])("rejects a verified upload when the stored object has %s", async (_reason, head) => {
+    const send = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce(head);
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("verified export"),
+        "text/csv",
+        "a".repeat(64),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a malformed checksum before uploading", async () => {
+    const send = vi.fn();
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("export"),
+        "text/csv",
+        "ABC",
+      ),
+    ).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a valid checksum for different bytes before uploading", async () => {
+    const send = vi.fn();
+    const storage = new ObjectStorageService(env, { send } as never);
+    const validDifferentChecksum = "a".repeat(64);
+
+    await expect(
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("export"),
+        "text/csv",
+        validDifferentChecksum,
+      ),
+    ).rejects.toThrow("Object checksum does not match body");
+    expect(send).not.toHaveBeenCalled();
+  });
+
   it("caps signed reads at five minutes", async () => {
     const presign = vi.fn().mockResolvedValue("signed-read");
     const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
@@ -48,7 +123,37 @@ describe("ObjectStorageService", () => {
     await expect(storage.presignRead("users/u/avatars/a.webp", 301)).rejects.toThrow();
     await expect(storage.presignRead("users/u/avatars/a.webp", 300)).resolves.toBe("signed-read");
     expect(presign).toHaveBeenCalledWith(expect.anything(), expect.anything(), { expiresIn: 300 });
+    const command = presign.mock.calls[0]![1] as { input: Record<string, unknown> };
+    expect(command.input).not.toHaveProperty("ResponseContentDisposition");
     expect(presign).toHaveBeenCalledTimes(1);
+  });
+
+  it("sets a RFC 5987 download filename on signed reads", async () => {
+    const presign = vi.fn().mockResolvedValue("signed-download");
+    const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
+
+    await expect(
+      storage.presignRead("tenants/t/shifts/s/export.csv", 300, {
+        downloadFilename: "Смена 1's export.csv",
+      }),
+    ).resolves.toBe("signed-download");
+
+    const command = presign.mock.calls[0]![1] as { input: Record<string, unknown> };
+    expect(command.input.ResponseContentDisposition).toBe(
+      "attachment; filename*=UTF-8''%D0%A1%D0%BC%D0%B5%D0%BD%D0%B0%201%27s%20export.csv",
+    );
+  });
+
+  it("rejects CR/LF in signed-read download filenames", async () => {
+    const presign = vi.fn();
+    const storage = new ObjectStorageService(env, { send: vi.fn() } as never, presign);
+
+    await expect(
+      storage.presignRead("tenants/t/shifts/s/export.csv", 300, {
+        downloadFilename: "export.csv\r\nX-Injected: true",
+      }),
+    ).rejects.toThrow();
+    expect(presign).not.toHaveBeenCalled();
   });
 
   it("rejects unsafe object keys before calling S3", async () => {
