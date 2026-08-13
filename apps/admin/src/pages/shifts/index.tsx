@@ -37,6 +37,7 @@ import {
   type ShiftDto,
   type ShiftStatus,
 } from "./api.js";
+import { ShiftExportsDialog } from "./ShiftExportsDialog.js";
 import type { ShiftsPanelContext, ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
 import "./shifts.css";
 
@@ -206,6 +207,22 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
   );
 }
 
+function ShiftExportAction({ shift }: { shift: ShiftDto }) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <RowActions>
+        <Button type="button" size="compact" variant="secondary" onClick={() => setOpen(true)}>
+          {t("pages.shifts.exports.action")}
+        </Button>
+      </RowActions>
+      {open ? <ShiftExportsDialog shift={shift} open onClose={() => setOpen(false)} /> : null}
+    </>
+  );
+}
+
 /** Admin shift-planning screen -- Plan 03 Task 13 (list/create/edit/delete/close). */
 export function ShiftsPage() {
   const { t, i18n } = useTranslation();
@@ -303,7 +320,9 @@ export function ShiftsPage() {
         title: t("pages.shifts.table.actions"),
         align: "right",
         render: (row) =>
-          canWrite ? (
+          row.status === "closed" ? (
+            <ShiftExportAction shift={row} />
+          ) : canWrite ? (
             row.status === "planned" ? (
               <AuthorizedPlannedShiftActions shift={row} />
             ) : row.status === "active" ? (

@@ -79,8 +79,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /billing/invoices (TenantBillingController.list)",
       "GET /billing/invoices/:id (TenantBillingController.detail)",
       "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.download)",
+      "GET /shift-exports/:exportId/artifacts/:artifactId/download (ShiftExportsController.download)",
+      "GET /shift-exports/formats (ShiftExportsController.formats)",
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/:id (ShiftsController.getShift)",
+      "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /station-devices (StationDevicesController.list)",
       "GET /team (TeamController.list)",
       "POST /products/gtin-check (ProductsController.checkGtinOwner)",
@@ -107,7 +110,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       mode: "read_only_allowed",
       reason: "export",
     }),
-    routes: ["POST /pickup-orders/export (PickupOrdersController.export)"],
+    routes: [
+      "POST /pickup-orders/export (PickupOrdersController.export)",
+      "POST /shift-exports/:exportId/retry (ShiftExportsController.retry)",
+      "POST /shifts/:shiftId/exports (ShiftExportsController.create)",
+    ],
   },
   {
     contract: customerContract(CABINET_GUARDS, {

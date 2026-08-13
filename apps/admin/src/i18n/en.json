@@ -851,6 +851,62 @@
         "submit": "Close shift",
         "cancel": "Cancel"
       },
+      "exports": {
+        "action": "Generate report",
+        "title": "Shift reports",
+        "formatLabel": "Report format",
+        "splitLabel": "Split report into parts",
+        "lineLimitLabel": "Maximum lines per part",
+        "create": "Generate report",
+        "historyLabel": "Report history",
+        "historyTitle": "Generated reports",
+        "historyEmpty": "No reports have been generated for this shift yet.",
+        "stale": "Shift data changed — generate a new report",
+        "retry": "Retry",
+        "download": "Download",
+        "part": "Part {{number}}",
+        "status": {
+          "queued": "Queued",
+          "processing": "Processing",
+          "ready": "Ready",
+          "failed": "Failed"
+        },
+        "parameters": {
+          "single": "Not split",
+          "split": "up to {{count}} lines per part"
+        },
+        "details": {
+          "actor": "Created by",
+          "unknownActor": "Unknown user",
+          "created": "Time",
+          "format": "Format",
+          "parameters": "Parameters",
+          "codes": "Codes",
+          "boxes": "Boxes"
+        },
+        "counts": {
+          "lines": "{{count}} lines",
+          "codes": "{{count}} codes",
+          "boxes": "{{count}} boxes",
+          "bytes": "{{count}} B"
+        },
+        "validation": {
+          "lineLimit": "Enter a whole number from 2 to 1,000,000"
+        },
+        "errors": {
+          "SHIFT_NOT_CLOSED": "The shift must be closed before generating a report.",
+          "SHIFT_HAS_NO_CODES": "The shift has no codes to include in a report.",
+          "SHIFT_DATE_MISSING": "The shift has no date.",
+          "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
+          "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
+          "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
+          "BOX_EXCEEDS_LINE_LIMIT": "A box does not fit within the lines-per-part limit.",
+          "GENERATION_FAILED": "Could not generate the report. Try again.",
+          "STORAGE_FAILED": "Could not save the report. Try again.",
+          "QUEUE_FAILED": "Could not queue the report. Try again.",
+          "infrastructure": "Could not complete the operation. Try again later."
+        }
+      },
       "toasts": {
         "createSuccess": "Shift planned",
         "createError": "Could not plan the shift",

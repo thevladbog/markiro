@@ -1,6 +1,6 @@
 {
-  "id": "00950e72-8cb5-48b9-aa6b-b9c1d4e3936b",
-  "prevId": "ff1d30ba-a96b-468e-b82f-b7840bf41930",
+  "id": "5b469dd1-475e-4e55-be37-f897479942c9",
+  "prevId": "00950e72-8cb5-48b9-aa6b-b9c1d4e3936b",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2358,7 +2358,7 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": true,
-          "default": 0
+          "default": 1
         },
         "updated_at": {
           "name": "updated_at",
