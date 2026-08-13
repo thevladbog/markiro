@@ -9,7 +9,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
@@ -276,6 +276,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
           },
         ),
       );
+      await this.reconcileQueuedShiftExports(boss);
 
       // Also run all nine maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
@@ -316,6 +317,16 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     const jobId = await this.boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId });
     if (!jobId) throw new Error("shift export enqueue failed");
     return jobId;
+  }
+
+  private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
+    const queued = await this.db
+      .select({ id: schema.shiftExports.id })
+      .from(schema.shiftExports)
+      .where(eq(schema.shiftExports.status, "queued"));
+    for (const row of queued) {
+      await boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId: row.id });
+    }
   }
 
   async checkReady(): Promise<void> {
