@@ -1,5 +1,23 @@
-import { Body, Controller, Get, Put, Req, UseGuards } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Post,
+  Param,
+  ParseUUIDPipe,
+  Put,
+  Req,
+  StreamableFile,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
+import { ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -14,6 +32,7 @@ import {
   putOrgProfileSchema,
   ssccCounterSchema,
   type OrgProfileDto,
+  type OrganizationLogoDto,
   type PutOrgProfileDto,
   type SsccCounterDto,
 } from "./dto";
@@ -39,7 +58,58 @@ export class OrgProfileController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(putOrgProfileSchema)) body: PutOrgProfileDto,
   ): Promise<OrgProfileDto> {
-    return this.orgProfileService.upsertProfile(req.tenantId!, body);
+    return this.orgProfileService.upsertProfile(req.tenantId!, req.userId!, body);
+  }
+
+  @Post("logo")
+  @RequireSubscriptionWrite()
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      required: ["logo"],
+      properties: { logo: { type: "string", format: "binary" } },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor("logo", {
+      storage: memoryStorage(),
+      limits: {
+        fileSize: 5 * 1024 * 1024,
+        files: 1,
+        fields: 0,
+        // Busboy emits partsLimit at this count. Two is therefore the exclusive
+        // threshold that accepts one file and rejects every subsequent part.
+        parts: 2,
+      },
+    }),
+  )
+  uploadLogo(
+    @Req() req: RequestWithTenant,
+    @UploadedFile() file?: Express.Multer.File,
+  ): Promise<OrganizationLogoDto> {
+    if (!file) throw new BadRequestException("Logo file is required");
+    return this.orgProfileService.uploadLogo(req.tenantId!, req.userId!, file.buffer);
+  }
+
+  @Get("logo/:revision")
+  async getLogo(
+    @Req() req: RequestWithTenant,
+    @Param("revision", new ParseUUIDPipe()) revision: string,
+  ): Promise<StreamableFile> {
+    const logo = await this.orgProfileService.getKioskLogo(req.tenantId!, revision);
+    return new StreamableFile(logo.body, {
+      type: logo.contentType,
+      disposition: "inline",
+      length: logo.body.byteLength,
+    });
+  }
+
+  @Delete("logo")
+  @HttpCode(204)
+  @RequireSubscriptionWrite()
+  deleteLogo(@Req() req: RequestWithTenant): Promise<void> {
+    return this.orgProfileService.deleteLogo(req.tenantId!, req.userId!);
   }
 
   @Get("sscc")

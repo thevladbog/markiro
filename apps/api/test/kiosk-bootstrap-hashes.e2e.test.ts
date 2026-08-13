@@ -12,7 +12,10 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { hashSecret } from "../src/lib/pin-hash";
+import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { createTestEmployee } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
+import sharp from "sharp";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -28,7 +31,24 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
 
   let tenantId: string;
   let employeeId: string;
+  let ownerAgent: ReturnType<typeof request.agent>;
   const TOKEN = `kiosk-token-${randomUUID()}`;
+  const objects = new Map<string, { body: Buffer; contentType: string }>();
+  const storage = {
+    ensureBucket: async () => undefined,
+    put: async (key: string, body: Buffer, contentType: string) => {
+      objects.set(key, { body, contentType });
+    },
+    get: async (key: string) => {
+      const object = objects.get(key);
+      if (!object) throw Object.assign(new Error("missing"), { name: "NoSuchKey" });
+      return object;
+    },
+    delete: async (key: string) => {
+      objects.delete(key);
+    },
+    presignRead: async () => "unused",
+  };
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -37,7 +57,10 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
 
     const ref = await Test.createTestingModule({
       imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
-    }).compile();
+    })
+      .overrideProvider(ObjectStorageService)
+      .useValue(storage)
+      .compile();
 
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -46,13 +69,16 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
     await app.init();
     await listenOnLoopback(app);
 
-    const agent = request.agent(app!.getHttpServer());
-    tenantId = await signUpAndActivate(agent);
+    ownerAgent = request.agent(app!.getHttpServer());
+    tenantId = await signUpAndActivate(ownerAgent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: employeeId, tenantId, fullName: "Оператор Бейджев", role: "оператор" });
+    await createTestEmployee(db, {
+      id: employeeId,
+      tenantId,
+      fullName: "Оператор Бейджев",
+      role: "оператор",
+    });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     const pinHash = await hashSecret("4321");
@@ -117,6 +143,34 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
     expect(employee.badgeCodes).toBeUndefined();
     expect(typeof employee.badgeHash).toBe("string");
     await expect(verifyPhc("BADGE-4412", employee.badgeHash)).resolves.toBe(true);
+    expect(res.body.branding).toEqual({
+      organizationName: "Test Plant",
+      logoUrl: null,
+      logoRevision: null,
+    });
+  });
+
+  it("publishes the active logo revision and same-origin device URL in bootstrap", async () => {
+    const source = await sharp({
+      create: { width: 900, height: 360, channels: 3, background: "#2463eb" },
+    })
+      .png()
+      .toBuffer();
+    const upload = await ownerAgent
+      .post("/org/profile/logo")
+      .attach("logo", source, { filename: "plant.png", contentType: "image/png" })
+      .expect(201);
+
+    const res = await request(app!.getHttpServer())
+      .get("/kiosk/bootstrap")
+      .set("x-kiosk-token", TOKEN)
+      .expect(200);
+
+    expect(res.body.branding).toEqual({
+      organizationName: "Test Plant",
+      logoUrl: `/kiosk/branding/logo/${upload.body.logoRevision}`,
+      logoRevision: upload.body.logoRevision,
+    });
   });
 
   it("shares one salt across every badge hash so the kiosk derives once", async () => {

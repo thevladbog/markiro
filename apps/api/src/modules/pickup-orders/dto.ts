@@ -1,14 +1,38 @@
-import { isCanonicalDigestB64 } from "@markiro/domain";
+import { isCanonicalDigestB64, isValidSscc } from "@markiro/domain";
 import { z } from "zod";
 import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
+import type { KioskBrandingDto } from "../org-profile/dto";
 
 /** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
 export const pairKioskSchema = z.object({ code: z.string().regex(/^\d{8}$/) });
 export type PairKioskDto = z.infer<typeof pairKioskSchema>;
 
 /** POST /kiosk/orders — one raw scan from the kiosk's scanner. */
-export const createOrderItemSchema = z.object({ rawKm: z.string().min(1) });
+export const MAX_KIOSK_ORDER_ITEMS = 500;
+export const MAX_KIOSK_ORDER_BOXES = 100;
+export const MAX_KIOSK_RAW_SCAN_BYTES = 1024;
+
+export const createOrderItemSchema = z.object({
+  rawKm: z
+    .string()
+    .min(1)
+    .max(MAX_KIOSK_RAW_SCAN_BYTES)
+    .refine(
+      (value) => Buffer.byteLength(value, "utf8") <= MAX_KIOSK_RAW_SCAN_BYTES,
+      "Raw scan exceeds 1024 UTF-8 bytes",
+    ),
+});
 export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
+
+export const createOrderBoxSchema = z
+  .object({
+    sscc: z
+      .string()
+      .regex(/^\d{18}$/)
+      .refine(isValidSscc, "Invalid SSCC check digit"),
+  })
+  .strict();
+export type CreateOrderBoxInput = z.infer<typeof createOrderBoxSchema>;
 
 /** PostgreSQL `integer` upper bound for the durable kiosk idempotency key. */
 export const MAX_KIOSK_DEVICE_SEQ = 2_147_483_647;
@@ -58,7 +82,8 @@ const createOrderContentShape = {
   badgeCode: z.string().min(1).optional(),
   reason: z.enum(["buy", "writeoff"]),
   writeoffReasonId: z.string().uuid().nullable().optional(),
-  items: z.array(createOrderItemSchema),
+  items: z.array(createOrderItemSchema).max(MAX_KIOSK_ORDER_ITEMS),
+  boxes: z.array(createOrderBoxSchema).max(MAX_KIOSK_ORDER_BOXES).optional(),
   admissionNonce: z.string().min(32).max(128).optional(),
 };
 
@@ -67,9 +92,21 @@ const hasExactlyOneBadgeIdentity = (body: {
   badgeCode?: string | undefined;
 }): boolean => (body.badgeDigest === undefined) !== (body.badgeCode === undefined);
 
+const hasOrderContent = (body: {
+  items: readonly unknown[];
+  boxes?: readonly { sscc: string }[] | undefined;
+}): boolean => body.items.length + (body.boxes?.length ?? 0) > 0;
+
+const hasUniqueBoxes = (body: { boxes?: readonly { sscc: string }[] | undefined }): boolean => {
+  const boxes = body.boxes ?? [];
+  return new Set(boxes.map((box) => box.sscc)).size === boxes.length;
+};
+
 export const createOrderAdmissionSchema = z
   .object(createOrderContentShape)
-  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required");
+  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required")
+  .refine(hasOrderContent, "At least one item or box is required")
+  .refine(hasUniqueBoxes, "Box SSCC values must be unique");
 export type CreateOrderAdmissionDto = z.infer<typeof createOrderAdmissionSchema>;
 
 export interface CreateOrderAdmissionResultDto {
@@ -87,7 +124,9 @@ export const createOrderSchema = z
   // the server would have to rank, and a body carrying a digest AND the
   // plaintext it is meant to replace is the very thing this field exists to
   // stop being persisted.
-  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required");
+  .refine(hasExactlyOneBadgeIdentity, "Exactly one of badgeDigest or badgeCode is required")
+  .refine(hasOrderContent, "At least one item or box is required")
+  .refine(hasUniqueBoxes, "Box SSCC values must be unique");
 export type CreateOrderDto = z.infer<typeof createOrderSchema>;
 
 /** A scanned item that could not be accepted into the order, and why. */
@@ -96,12 +135,34 @@ export interface OrderConflict {
   reason: "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit";
 }
 
+export type BoxConflictReason =
+  | "unknown_box"
+  | "box_not_closed"
+  | "box_disassembled"
+  | "box_contents_changed"
+  | "mixed_product_box"
+  | "duplicate"
+  | "over_limit";
+
+export interface BoxConflict {
+  sscc: string;
+  bottleCount: number | null;
+  reason: BoxConflictReason;
+}
+
+export interface AcceptedBox {
+  sscc: string;
+  bottleCount: number;
+}
+
 /** POST /kiosk/orders response — the authoritative server-side outcome. */
 export interface CreateOrderResultDto {
   orderNo: string;
   status: "pending";
   itemCount: number;
   conflicts: OrderConflict[];
+  boxConflicts: BoxConflict[];
+  acceptedBoxes: AcceptedBox[];
 }
 
 /**
@@ -126,6 +187,8 @@ export interface CreateOrderResultDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshot;
+  branding: KioskBrandingDto;
+  pickupPolicy: { limitsEnabled: boolean };
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
@@ -141,6 +204,9 @@ export interface KioskBootstrapDto {
     fullName: string;
     role: string | null;
     badgeHash: string | null;
+    limitMode: "limited" | "unlimited";
+    dayLimit: number;
+    canWriteoff: boolean;
     /**
      * How many items this employee has already taken TODAY AT EVERY KIOSK BUT
      * THE ONE ASKING. Not a total, and it must never become one.
@@ -255,6 +321,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   receiptNo: string | null;
   actNo: string | null;
   syncConflicts: OrderConflict[];
+  boxConflicts: BoxConflict[];
   /** Products this order's items reference that carry no 1С link yet — non-empty means this order is held back from `mode=query` (плана И-2, спека §5). */
   exportHeldProductNames: string[];
 }

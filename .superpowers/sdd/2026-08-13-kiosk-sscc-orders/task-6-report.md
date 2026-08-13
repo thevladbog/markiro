@@ -1,0 +1,54 @@
+# Task 6 implementation report
+
+## Outcome
+
+The kiosk now downloads the tenant box registry into IndexedDB through an isolated staging cut and exposes only the last completely activated cut to offline lookup. Loose/box order bodies, enqueue-time bottle estimates, structured terminal box verdicts, and old `badgeCode` queue records survive restart and bundle upgrades without exposing box member KMs.
+
+## Registry persistence and refresh
+
+- IndexedDB v3 adds active, staging, and metadata stores without replacing v2 config, snapshot, queue, journal, or quarantine records.
+- Full snapshots replace active rows only on the final page; deltas preserve unaffected rows and atomically apply named upserts/removes with the version metadata.
+- An incomplete, failed, cyclic, oversized, or superseded page cut never changes active lookup. A restarted 409 cut first disowns prior staging.
+- Refresh uses the active revision as `since`, binds follow-up pages to `until`, retries exact `registry_snapshot_changed` at most three times with 250/500 ms waits, and caps one attempt at 10,000 pages.
+- Registry failure leaves a successful bootstrap installed and the prior active registry intact. A 401 between bootstrap and registry is rethrown so device revocation is not hidden.
+- Untrusted pages and stored rows validate revision, kind, SSCC checksum, timestamp, bottle count, unique content keys, field allowlists, 500 page entries, 1,000 page member keys, cursor length/cycles, and aggregate page count.
+
+## Queue and error compatibility
+
+- `CreateOrderDto` uses exact digest-or-legacy-code identity and adds optional canonical `boxes`.
+- `QueuedOrder.estimatedBottleCount` stays outside the wire body. Valid 0..1500 estimates drive local day counts; old/corrupt records fall back to `body.items.length`.
+- 413 joins the narrow terminal order allowlist. `KioskApiError.details` retains the parsed response in memory, while quarantine copies only validated `{sscc,bottleCount,reason}` box tuples and never the raw response, loose conflict KMs, or box members.
+- Existing badge scrubbing changes only badge identity. Focused coverage proves `boxes`, SSCC, estimate, admission state, and empty member-free body remain unchanged in queue/quarantine custody.
+
+## Verification
+
+- RED: 5 files failed; 7 expected assertions plus missing box-registry module; 162 existing tests passed.
+- Focused GREEN: 6 files / 191 tests passed.
+- Full kiosk: 21 files / 478 tests passed.
+- Kiosk TypeScript typecheck, full ESLint, Vite production build, scoped Prettier check, and `git diff --check` passed.
+- Commands used direct installed package binaries because the pnpm wrapper stalled in this worktree.
+- No visual/touch cart flow from the later plan was implemented in this task.
+
+## Important review fix round
+
+The first review of `739495a5` confirmed four Important gaps: concurrent full-cut ownership, trusted freshness, string-allocation limits, and installation isolation. The fix round makes registry ownership installation-scoped and independently enforced in IndexedDB rather than relying only on worker scheduling.
+
+- A cut is the exact tuple `(serverUrl, kioskId, owner, since, until)`. A new cut disowns prior staging; only its owner may page, discard, or activate it. A full cut cannot replace an equal/newer active revision and a delta must still match its active base.
+- Refresh is single-flight per canonical installation. Registry and config operations also share IndexedDB transaction stores, so a re-pair/revocation serializes with activation. Begin, stage, and activation reject a stale binding; config change clears active/staging/meta atomically without clearing queue or journal.
+- Registry metadata is bound to the installation and stamped with the successful bootstrap's server `generatedAt`. `boxRegistryAge` uses the snapshot's server-corrected clock and the same fresh/warn/blocked thresholds.
+- Before page data reaches IndexedDB or dedupe, every string is limited to 1,024 UTF-8 bytes and the page to one MiB aggregate UTF-8, in addition to the existing 500-change/1,000-member bounds. UUID identifiers, SSCC checksum, page/cursor shape and stored rows are validated fail-closed.
+- Re-pairing on the same normalized binding preserves a valid cut; another server, another kiosk, revocation, or metadata/config mismatch clears registry only. A new binding always starts with a full refresh even if the previous binding had a higher revision.
+
+Fix-round evidence: RED was 3 files with 12 expected failures and 108 existing passes. Focused final GREEN was 4 files / 146 tests; full kiosk was 21 files / 485 tests. Kiosk typecheck, full ESLint, Vite PWA production build, explicit changed-file Prettier check, and `git diff --check` passed. The checks used direct installed package binaries to avoid the worktree's intermittently stalled pnpm wrapper.
+
+## Credential-ownership fix round
+
+Re-review found that binding-only ownership still allowed a held token-A request to resume after a same-binding re-pair installed token B. The registry now uses a random UUID credential generation:
+
+- config creates/migrates the non-secret generation and rotates it on any token change;
+- registry cut and active metadata store only that UUID, never token plaintext or token-derived reversible material;
+- begin, page, discard, and activation compare binding plus generation with current config inside the same IndexedDB transaction;
+- token rotation clears registry stores atomically but preserves offline queue/journal custody;
+- single-flight includes the generation, allowing token B to refresh while token A remains held.
+
+Functional RED was 1 failed / 16 passed: old activation resolved after same-binding token rotation. Focused GREEN was 4 files / 148 tests, including the held-old-client/new-client winner sequence. Final full kiosk rerun passed 21 files / 487 tests; typecheck, full ESLint, Vite PWA build, changed-file Prettier, and diff-check passed. An earlier full run had one timing-sensitive app assertion fail; its isolated rerun and the complete final rerun both passed.

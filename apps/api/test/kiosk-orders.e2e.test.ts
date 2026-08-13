@@ -66,11 +66,18 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
 
     const agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
+    await db
+      .insert(schema.pickupTenantPolicies)
+      .values({ tenantId, limitsEnabled: true })
+      .onConflictDoNothing();
 
     employeeId = randomUUID();
     await db
       .insert(schema.employees)
       .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await db
+      .insert(schema.employeePickupPolicies)
+      .values({ tenantId, employeeId, limitMode: "limited", dayLimit: 5, canWriteoff: false });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
@@ -126,6 +133,48 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .send({ organizationId: orgId })
       .expect(200);
     return orgId;
+  }
+
+  async function createPolicySubject(policy: {
+    limitMode: "limited" | "unlimited";
+    dayLimit: number;
+    canWriteoff?: boolean;
+  }): Promise<{ employeeId: string; badge: string; kioskId: string; token: string }> {
+    const subjectEmployeeId = randomUUID();
+    const badge = `badge-policy-${randomUUID()}`;
+    const subjectKioskId = randomUUID();
+    const token = `kiosk-token-policy-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: subjectEmployeeId,
+      tenantId,
+      fullName: "Политиков П.",
+    });
+    await db.insert(schema.employeePickupPolicies).values({
+      tenantId,
+      employeeId: subjectEmployeeId,
+      limitMode: policy.limitMode,
+      dayLimit: policy.dayLimit,
+      canWriteoff: policy.canWriteoff ?? false,
+    });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: subjectEmployeeId, badgeCode: badge });
+    await db.insert(schema.kiosks).values({
+      id: subjectKioskId,
+      tenantId,
+      name: `Киоск-политика-${randomUUID()}`,
+      // Deliberately disagrees with employee policy. New orders must not read
+      // this legacy kiosk-level limit.
+      dayLimitPerEmployee: 99,
+      deviceTokenHash: hashDeviceToken(token),
+    });
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId: subjectKioskId, productId });
+    return { employeeId: subjectEmployeeId, badge, kioskId: subjectKioskId, token };
+  }
+
+  function distinctKm(prefix: string): string {
+    const serial = `${prefix}${randomUUID().replace(/-/g, "")}`.slice(0, 18).toUpperCase();
+    return `01${GTIN}21${serial}${GS}93Abcd`;
   }
 
   it("creates a pending order from valid KM scans and echoes the order number", async () => {
@@ -218,7 +267,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [] })
+      .send({ deviceSeq: 3, badgeCode: "NOPE", reason: "buy", items: [{ rawKm: "not-a-km" }] })
       .expect(422);
   });
 
@@ -228,6 +277,9 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await db
       .insert(schema.employees)
       .values({ id: revokedEmployeeId, tenantId, fullName: "Отозванов О." });
+    await db
+      .insert(schema.employeePickupPolicies)
+      .values({ tenantId, employeeId: revokedEmployeeId });
     await db.insert(schema.employeeBadges).values({
       tenantId,
       employeeId: revokedEmployeeId,
@@ -238,7 +290,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 13, badgeCode: revokedBadge, reason: "buy", items: [] })
+      .send({
+        deviceSeq: 13,
+        badgeCode: revokedBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(422);
   });
 
@@ -249,6 +306,9 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .insert(schema.employees)
       .values({ id: archivedEmployeeId, tenantId, fullName: "Архивов А." });
     await db
+      .insert(schema.employeePickupPolicies)
+      .values({ tenantId, employeeId: archivedEmployeeId });
+    await db
       .insert(schema.employeeBadges)
       .values({ tenantId, employeeId: archivedEmployeeId, badgeCode: archivedBadge });
 
@@ -256,7 +316,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 11, badgeCode: archivedBadge, reason: "buy", items: [] })
+      .send({
+        deviceSeq: 11,
+        badgeCode: archivedBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(201);
 
     await db
@@ -269,7 +334,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [] })
+      .send({
+        deviceSeq: 12,
+        badgeCode: archivedBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(422);
   });
 
@@ -304,10 +374,11 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     it("files an order under the same employee the plaintext code would have", async () => {
       // Its own employee, so the accepted item below spends that employee's
       // daily allowance rather than a slot the shared `BADGE` fixture's later
-      // tests are counting on (`dayLimitPerEmployee: 5`).
+      // tests are counting on (the employee policy's `dayLimit: 5`).
       const id = randomUUID();
       const badge = `badge-digest-${randomUUID()}`;
       await db.insert(schema.employees).values({ id, tenantId, fullName: "Дайджестов Д." });
+      await db.insert(schema.employeePickupPolicies).values({ tenantId, employeeId: id });
       await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
 
       const res = await request(app!.getHttpServer())
@@ -345,7 +416,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", TOKEN)
-        .send({ deviceSeq: 51, badgeCode: BADGE, reason: "buy", items: [] })
+        .send({ deviceSeq: 51, badgeCode: BADGE, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(201);
     });
 
@@ -358,14 +429,14 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
           badgeDigest: await digestOf(BADGE),
           badgeCode: BADGE,
           reason: "buy",
-          items: [],
+          items: [{ rawKm: "not-a-km" }],
         })
         .expect(400);
 
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", TOKEN)
-        .send({ deviceSeq: 53, reason: "buy", items: [] })
+        .send({ deviceSeq: 53, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(400);
     });
 
@@ -388,7 +459,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
         await request(app!.getHttpServer())
           .post("/kiosk/orders")
           .set("x-kiosk-token", TOKEN)
-          .send({ deviceSeq: 54, badgeDigest, reason: "buy", items: [] })
+          .send({ deviceSeq: 54, badgeDigest, reason: "buy", items: [{ rawKm: "not-a-km" }] })
           .expect(400);
       }
     });
@@ -397,6 +468,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       const id = randomUUID();
       const badge = `badge-digest-revoked-${randomUUID()}`;
       await db.insert(schema.employees).values({ id, tenantId, fullName: "Отозванов Д." });
+      await db.insert(schema.employeePickupPolicies).values({ tenantId, employeeId: id });
       await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
 
       // The badge hash is materialised by the bootstrap the device pulls, so
@@ -407,7 +479,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", TOKEN)
-        .send({ deviceSeq: 55, badgeDigest, reason: "buy", items: [] })
+        .send({ deviceSeq: 55, badgeDigest, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(201);
 
       await db
@@ -423,7 +495,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", TOKEN)
-        .send({ deviceSeq: 56, badgeDigest, reason: "buy", items: [] })
+        .send({ deviceSeq: 56, badgeDigest, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(422);
     });
 
@@ -431,6 +503,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       const id = randomUUID();
       const badge = `badge-digest-archived-${randomUUID()}`;
       await db.insert(schema.employees).values({ id, tenantId, fullName: "Архивов Д." });
+      await db.insert(schema.employeePickupPolicies).values({ tenantId, employeeId: id });
       await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
       const badgeDigest = await digestOf(badge);
 
@@ -442,7 +515,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", TOKEN)
-        .send({ deviceSeq: 57, badgeDigest, reason: "buy", items: [] })
+        .send({ deviceSeq: 57, badgeDigest, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(422);
     });
   });
@@ -469,10 +542,34 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
   });
 
   it("requires a non-archived writeoffReasonId of this tenant for reason=writeoff", async () => {
+    const writeoffEmployeeId = randomUUID();
+    const writeoffBadge = `badge-writeoff-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: writeoffEmployeeId,
+      tenantId,
+      fullName: "Списываев С.",
+      role: null,
+    });
+    await db.insert(schema.employeePickupPolicies).values({
+      tenantId,
+      employeeId: writeoffEmployeeId,
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: true,
+    });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: writeoffEmployeeId, badgeCode: writeoffBadge });
+
     const missing = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 4, badgeCode: BADGE, reason: "writeoff", items: [] })
+      .send({
+        deviceSeq: 4,
+        badgeCode: writeoffBadge,
+        reason: "writeoff",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(400);
     expect(missing.body.message).toBeDefined();
 
@@ -489,10 +586,10 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set("x-kiosk-token", TOKEN)
       .send({
         deviceSeq: 4,
-        badgeCode: BADGE,
+        badgeCode: writeoffBadge,
         reason: "writeoff",
         writeoffReasonId: archivedReasonId,
-        items: [],
+        items: [{ rawKm: "not-a-km" }],
       })
       .expect(400);
 
@@ -509,7 +606,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set("x-kiosk-token", TOKEN)
       .send({
         deviceSeq: 4,
-        badgeCode: BADGE,
+        badgeCode: writeoffBadge,
         reason: "writeoff",
         writeoffReasonId: activeReasonId,
         items: [{ rawKm: `01${GTIN}21WRITEOFF1${GS}93Abcd` }],
@@ -517,6 +614,49 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .expect(201);
     expect(ok.body.itemCount).toBe(1);
     expect(ok.body.conflicts).toHaveLength(0);
+  });
+
+  it("denies writeoff without the employee permission, regardless of role", async () => {
+    const deniedEmployeeId = randomUUID();
+    const deniedBadge = `badge-writeoff-denied-${randomUUID()}`;
+    const reasonId = randomUUID();
+    await db.insert(schema.employees).values({
+      id: deniedEmployeeId,
+      tenantId,
+      fullName: "Запрещенов З.",
+      role: "директор",
+    });
+    await db.insert(schema.employeePickupPolicies).values({
+      tenantId,
+      employeeId: deniedEmployeeId,
+      limitMode: "unlimited",
+      dayLimit: 5,
+      canWriteoff: false,
+    });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: deniedEmployeeId, badgeCode: deniedBadge });
+    await db.insert(schema.pickupOrderReasons).values({
+      id: reasonId,
+      tenantId,
+      name: "Нет разрешения",
+      sortOrder: 0,
+    });
+
+    await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", TOKEN)
+      .send({
+        deviceSeq: 41,
+        badgeCode: deniedBadge,
+        reason: "writeoff",
+        writeoffReasonId: reasonId,
+        items: [{ rawKm: "not-a-km" }],
+      })
+      .expect(422, {
+        code: "writeoff_forbidden",
+        message: "Employee is not allowed to create writeoffs",
+      });
   });
 
   it("converts a race against an already-open code (23505) into a duplicate conflict", async () => {
@@ -637,7 +777,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       deviceSeq: 40,
       badgeCode: BADGE,
       reason: "buy",
-      items: [],
+      items: [{ rawKm: distinctKm("LOCK") }],
     });
     const elapsed = Date.now() - start;
 
@@ -649,44 +789,289 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(elapsed).toBeGreaterThanOrEqual(HOLD_MS - 100);
   });
 
-  it("day-limit accepts up to dayLimitPerEmployee and marks the overflow over_limit", async () => {
-    const limitKioskId = randomUUID();
-    const limitBadge = `badge-limit-${randomUUID()}`;
-    const limitEmployeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: limitEmployeeId, tenantId, fullName: "Лимитов Л." });
-    await db
-      .insert(schema.employeeBadges)
-      .values({ tenantId, employeeId: limitEmployeeId, badgeCode: limitBadge });
-    await db
-      .insert(schema.kiosks)
-      .values({ id: limitKioskId, tenantId, name: "Киоск-лимит", dayLimitPerEmployee: 2 });
-    await db.insert(schema.kioskProducts).values({ tenantId, kioskId: limitKioskId, productId });
-    const limitToken = `kiosk-token-limit-${randomUUID()}`;
-    await db
-      .update(schema.kiosks)
-      .set({ deviceTokenHash: hashDeviceToken(limitToken) })
-      .where(eq(schema.kiosks.id, limitKioskId));
-
+  it("applies the employee's limited boundary instead of the legacy kiosk limit", async () => {
+    const subject = await createPolicySubject({ limitMode: "limited", dayLimit: 2 });
+    const scans = [distinctKm("LIM1"), distinctKm("LIM2"), distinctKm("LIM3")];
     const res = await request(app!.getHttpServer())
       .post("/kiosk/orders")
-      .set("x-kiosk-token", limitToken)
+      .set("x-kiosk-token", subject.token)
       .send({
         deviceSeq: 1,
-        badgeCode: limitBadge,
+        badgeCode: subject.badge,
         reason: "buy",
-        items: [
-          { rawKm: `01${GTIN}21LIM1${GS}93Abcd` },
-          { rawKm: `01${GTIN}21LIM2${GS}93Abcd` },
-          { rawKm: `01${GTIN}21LIM3${GS}93Abcd` },
-        ],
+        items: scans.map((rawKm) => ({ rawKm })),
       })
       .expect(201);
     expect(res.body.itemCount).toBe(2);
-    expect(res.body.conflicts).toEqual([
-      { rawKm: `01${GTIN}21LIM3${GS}93Abcd`, reason: "over_limit" },
-    ]);
+    expect(res.body.conflicts).toEqual([{ rawKm: scans[2], reason: "over_limit" }]);
+  });
+
+  it("does not apply a numeric limit when the tenant policy is disabled", async () => {
+    const subject = await createPolicySubject({ limitMode: "limited", dayLimit: 1 });
+    const scans = [distinctKm("OFF1"), distinctKm("OFF2")];
+    await db
+      .update(schema.pickupTenantPolicies)
+      .set({ limitsEnabled: false })
+      .where(eq(schema.pickupTenantPolicies.tenantId, tenantId));
+    try {
+      const res = await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", subject.token)
+        .send({
+          deviceSeq: 1,
+          badgeCode: subject.badge,
+          reason: "buy",
+          items: scans.map((rawKm) => ({ rawKm })),
+        })
+        .expect(201);
+      expect(res.body.conflicts).toEqual([]);
+      expect(res.body.itemCount).toBe(2);
+    } finally {
+      await db
+        .update(schema.pickupTenantPolicies)
+        .set({ limitsEnabled: true })
+        .where(eq(schema.pickupTenantPolicies.tenantId, tenantId));
+    }
+  });
+
+  it("does not apply a numeric limit to an unlimited employee", async () => {
+    const subject = await createPolicySubject({ limitMode: "unlimited", dayLimit: 1 });
+    const scans = [distinctKm("UNL1"), distinctKm("UNL2")];
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", subject.token)
+      .send({
+        deviceSeq: 1,
+        badgeCode: subject.badge,
+        reason: "buy",
+        items: scans.map((rawKm) => ({ rawKm })),
+      })
+      .expect(201);
+    expect(res.body.conflicts).toEqual([]);
+    expect(res.body.itemCount).toBe(2);
+  });
+
+  it("counts accepted items from another kiosk against a limited employee", async () => {
+    const subject = await createPolicySubject({ limitMode: "limited", dayLimit: 2 });
+    const otherKioskId = randomUUID();
+    const priorOrderId = randomUUID();
+    const priorKm = distinctKm("ELSE");
+    await db
+      .insert(schema.kiosks)
+      .values({ id: otherKioskId, tenantId, name: `Другой киоск ${randomUUID()}` });
+    await db.insert(schema.pickupOrders).values({
+      id: priorOrderId,
+      tenantId,
+      orderNo: `ORD-ELSE-${randomUUID().slice(0, 8)}`,
+      kioskId: otherKioskId,
+      employeeId: subject.employeeId,
+      reason: "buy",
+      status: "pending",
+      itemCount: 1,
+    });
+    await db.insert(schema.pickupOrderItems).values({
+      tenantId,
+      orderId: priorOrderId,
+      productId,
+      gtin14: GTIN,
+      serial: priorKm,
+      rawKm: priorKm,
+      kmKey: priorKm,
+      scannedAt: new Date(),
+    });
+
+    const scans = [distinctKm("CROSS1"), distinctKm("CROSS2")];
+    const res = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", subject.token)
+      .send({
+        deviceSeq: 1,
+        badgeCode: subject.badge,
+        reason: "buy",
+        items: scans.map((rawKm) => ({ rawKm })),
+      })
+      .expect(201);
+    expect(res.body.itemCount).toBe(1);
+    expect(res.body.conflicts).toEqual([{ rawKm: scans[1], reason: "over_limit" }]);
+  });
+
+  it("serializes the employee UTC-day allowance across two kiosks", async () => {
+    const subject = await createPolicySubject({ limitMode: "limited", dayLimit: 1 });
+    const otherKioskId = randomUUID();
+    const otherToken = `kiosk-token-policy-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: otherKioskId,
+      tenantId,
+      name: `Киоск-политика-${randomUUID()}`,
+      dayLimitPerEmployee: 99,
+      deviceTokenHash: hashDeviceToken(otherToken),
+    });
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId: otherKioskId, productId });
+
+    // Hold a different insert barrier for each kiosk. Before the fix both
+    // requests finish their out-of-transaction count and wait in their own
+    // INSERT trigger. After the fix one waits there while the other waits on
+    // the shared employee/day lock. Waiting for any two of those three exact
+    // keys makes the race deterministic in both versions without a sleep.
+    const suffix = randomUUID().replaceAll("-", "_");
+    const functionName = `wait_for_pickup_limit_${suffix}`;
+    const triggerName = `wait_for_pickup_limit_${suffix}`;
+    const firstBarrier = `pickup-limit-test:${randomUUID()}`;
+    const secondBarrier = `pickup-limit-test:${randomUUID()}`;
+    const blocker = await setup.pool.connect();
+    const blockerPid = (await blocker.query<{ pid: number }>("select pg_backend_pid() as pid"))
+      .rows[0]!.pid;
+    let barriersHeld = false;
+    let firstRequest: Promise<request.Response> | undefined;
+    let secondRequest: Promise<request.Response> | undefined;
+    try {
+      await setup.pool.query(`
+        create function ${functionName}() returns trigger language plpgsql as $$
+        begin
+          if new.tenant_id = '${tenantId}' and new.employee_id = '${subject.employeeId}' then
+            if new.kiosk_id = '${subject.kioskId}' then
+              perform pg_advisory_xact_lock(hashtextextended('${firstBarrier}', 0));
+            elsif new.kiosk_id = '${otherKioskId}' then
+              perform pg_advisory_xact_lock(hashtextextended('${secondBarrier}', 0));
+            end if;
+          end if;
+          return new;
+        end
+        $$
+      `);
+      await setup.pool.query(`
+        create trigger ${triggerName}
+        before insert on pickup_orders
+        for each row execute function ${functionName}()
+      `);
+      await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [firstBarrier]);
+      await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [secondBarrier]);
+      barriersHeld = true;
+
+      firstRequest = request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", subject.token)
+        .send({
+          deviceSeq: 101,
+          badgeCode: subject.badge,
+          reason: "buy",
+          items: [{ rawKm: distinctKm("RACEA") }],
+        })
+        .then((response) => response);
+      secondRequest = request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", otherToken)
+        .send({
+          deviceSeq: 202,
+          badgeCode: subject.badge,
+          reason: "buy",
+          items: [{ rawKm: distinctKm("RACEB") }],
+        })
+        .then((response) => response);
+
+      const deadline = Date.now() + 10_000;
+      let waiterCount = 0;
+      while (Date.now() < deadline) {
+        const waiting = await setup.pool.query<{ count: number }>(
+          `select count(*)::int as count
+           from pg_stat_activity activity
+           where activity.datname = current_database()
+             and activity.pid <> pg_backend_pid()
+             and activity.pid <> $1
+             and (
+               $1 = any(pg_blocking_pids(activity.pid))
+               or exists (
+                 select 1
+                 from unnest(pg_blocking_pids(activity.pid)) direct_blocker(pid)
+                 where $1 = any(pg_blocking_pids(direct_blocker.pid))
+               )
+             )`,
+          [blockerPid],
+        );
+        waiterCount = waiting.rows[0]?.count ?? 0;
+        if (waiterCount >= 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiterCount).toBeGreaterThanOrEqual(2);
+
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [firstBarrier]);
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [secondBarrier]);
+      barriersHeld = false;
+
+      const responses = await Promise.all([firstRequest, secondRequest]);
+      expect(responses.map((response) => response.status)).toEqual([201, 201]);
+      expect(responses.reduce((sum, response) => sum + Number(response.body.itemCount), 0)).toBe(1);
+      expect(
+        responses.flatMap((response) => response.body.conflicts as Array<{ reason: string }>),
+      ).toEqual([expect.objectContaining({ reason: "over_limit" })]);
+
+      const accepted = await db
+        .select({ id: schema.pickupOrderItems.id })
+        .from(schema.pickupOrderItems)
+        .innerJoin(
+          schema.pickupOrders,
+          and(
+            eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
+            eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, tenantId),
+            eq(schema.pickupOrders.employeeId, subject.employeeId),
+          ),
+        );
+      expect(accepted).toHaveLength(1);
+    } finally {
+      if (barriersHeld) {
+        await blocker
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [firstBarrier])
+          .catch(() => undefined);
+        await blocker
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [secondBarrier])
+          .catch(() => undefined);
+      }
+      blocker.release();
+      await Promise.allSettled(
+        [firstRequest, secondRequest].filter(
+          (pending): pending is Promise<request.Response> => pending !== undefined,
+        ),
+      );
+      await setup.pool.query(`drop trigger if exists ${triggerName} on pickup_orders`);
+      await setup.pool.query(`drop function if exists ${functionName}()`);
+    }
+  }, 20_000);
+
+  it("reports a missing active employee policy as a configuration error", async () => {
+    const missingEmployeeId = randomUUID();
+    const missingBadge = `badge-policy-missing-${randomUUID()}`;
+    await db.insert(schema.employees).values({
+      id: missingEmployeeId,
+      tenantId,
+      fullName: "Без Политики",
+    });
+    await db
+      .insert(schema.employeeBadges)
+      .values({ tenantId, employeeId: missingEmployeeId, badgeCode: missingBadge });
+
+    try {
+      const response = await request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", TOKEN)
+        .send({
+          deviceSeq: 42,
+          badgeCode: missingBadge,
+          reason: "buy",
+          items: [{ rawKm: "not-a-km" }],
+        })
+        .expect(500);
+      expect(response.body.message).toBe("Employee pickup policy is not configured");
+    } finally {
+      await db
+        .update(schema.employees)
+        .set({ status: "archived" })
+        .where(eq(schema.employees.id, missingEmployeeId));
+    }
   });
 
   /**
@@ -697,9 +1082,9 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
    * The server therefore honours the value only within a plausible window and
    * otherwise files the order under its own clock.
    *
-   * Each case gets its own kiosk (`dayLimitPerEmployee: 1`) and its own
-   * employee, so the counts below are exact rather than "whatever else this
-   * suite happened to leave behind for the shared badge".
+   * Each case gets its own employee policy (`dayLimit: 1`) and its own badge,
+   * so the counts below are exact rather than "whatever else this suite
+   * happened to leave behind for the shared badge".
    */
   describe("client-supplied createdAt", () => {
     let clockKioskId: string;
@@ -715,6 +1100,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       const id = randomUUID();
       const badge = `badge-clock-${randomUUID()}`;
       await db.insert(schema.employees).values({ id, tenantId, fullName: "Часов Ч." });
+      await db.insert(schema.employeePickupPolicies).values({
+        tenantId,
+        employeeId: id,
+        limitMode: "limited",
+        dayLimit: 1,
+      });
       await db.insert(schema.employeeBadges).values({ tenantId, employeeId: id, badgeCode: badge });
       return badge;
     }
@@ -881,6 +1272,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       true,
     );
     const employee = res.body.employees.find((e: { id: string }) => e.id === employeeId);
+    expect(res.body.pickupPolicy).toEqual({ limitsEnabled: true });
+    expect(employee).toMatchObject({
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: false,
+    });
     // Task 4: the payload carries a PBKDF2 verifier, never the plaintext badge code.
     expect(employee.badgeCodes).toBeUndefined();
     expect(typeof employee.badgeHash).toBe("string");
@@ -922,7 +1319,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", archivedToken)
-      .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy", items: [] })
+      .send({ deviceSeq: 1, badgeCode: BADGE, reason: "buy", items: [{ rawKm: "not-a-km" }] })
       .expect(401);
   });
 
@@ -950,7 +1347,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set({ deviceTokenHash: hashDeviceToken(revokedToken) })
       .where(eq(schema.kiosks.id, revokedKioskId));
 
-    const order = { deviceSeq: 14, badgeCode: BADGE, reason: "buy", items: [] };
+    const order = {
+      deviceSeq: 14,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [{ rawKm: "not-a-km" }],
+    };
 
     // Same route, same body: only the reason for the refusal differs.
     const badDevice = await request(app!.getHttpServer())

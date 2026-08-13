@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
+import { createTestEmployee } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 /** GTIN test vector (check-digit VALID). See kiosk-orders.e2e.test.ts for the full rationale. */
@@ -55,7 +56,7 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Смирнов Алексей Петрович",

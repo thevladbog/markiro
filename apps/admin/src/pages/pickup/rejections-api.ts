@@ -18,12 +18,23 @@ export type ScanRejectionReason =
   | "duplicate"
   | "over_limit"
   | "unknown_badge"
-  | "unknown_reason";
+  | "unknown_reason"
+  | "writeoff_reason_required"
+  | "writeoff_forbidden"
+  | "unknown_box"
+  | "box_not_closed"
+  | "box_disassembled"
+  | "box_contents_changed"
+  | "mixed_product_box";
 
-export interface ScanRejectionCode {
-  rawKm: string;
-  reason: ScanRejectionReason;
-}
+export type ScanRejectionCode =
+  | { rawKm: string; reason: ScanRejectionReason }
+  | {
+      source: "box";
+      sscc: string;
+      bottleCount: number | null;
+      reason: ScanRejectionReason;
+    };
 
 /** Mirrors `apps/api/src/modules/pickup-rejections/dto.ts`'s `PickupScanRejectionRowDto`. */
 export interface PickupScanRejectionRowDto {

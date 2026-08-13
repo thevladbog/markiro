@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 import {
   countTakenToday,
+  effectivePickupPolicy,
   startOfUtcDay,
   takenTodayElsewhere,
   utcDayOf,
@@ -148,6 +149,28 @@ describe("countTakenToday", () => {
 
   it("counts a still-queued order in full — the server has not yet said what it accepts", () => {
     expect(count([], [queued({ items: 3 })])).toBe(3);
+  });
+
+  it("counts a queued twelve-bottle box by its enqueue-time estimate", () => {
+    const boxOrder = queued({ items: 0 });
+    boxOrder.body.boxes = [{ sscc: "346006820000000021" }];
+    boxOrder.estimatedBottleCount = 12;
+
+    expect(count([], [boxOrder])).toBe(12);
+  });
+
+  it("falls back to loose item count for a queue record written by the previous bundle", () => {
+    const legacy = queued({ items: 3 });
+    delete legacy.estimatedBottleCount;
+
+    expect(count([], [legacy])).toBe(3);
+  });
+
+  it("ignores a corrupt oversized bottle estimate instead of refusing allowance", () => {
+    const corrupt = queued({ items: 2 });
+    corrupt.estimatedBottleCount = 1_000_000;
+
+    expect(count([], [corrupt])).toBe(2);
   });
 
   it("ignores a queued order belonging to somebody else, or to another day", () => {
@@ -372,5 +395,155 @@ describe("takenTodayElsewhere", () => {
    */
   it("adds to this device's own count rather than replacing it", () => {
     expect(count([journalled({ acceptedCount: 2 })]) + takenTodayElsewhere(roster, ME)).toBe(5);
+  });
+});
+
+describe("effectivePickupPolicy", () => {
+  const bootstrap = (value: unknown): KioskBootstrapDto => value as KioskBootstrapDto;
+
+  it("combines the tenant limit switch with the employee policy", () => {
+    const snapshot = bootstrap({
+      pickupPolicy: { limitsEnabled: true },
+      config: { dayLimitPerEmployee: 5, showPrices: true },
+      employees: [
+        {
+          id: ME,
+          limitMode: "limited",
+          dayLimit: 3,
+          canWriteoff: true,
+        },
+      ],
+    });
+
+    expect(effectivePickupPolicy(snapshot, ME)).toEqual({
+      limited: true,
+      dayLimit: 3,
+      canWriteoff: true,
+    });
+
+    const tenantOff = bootstrap({
+      ...snapshot,
+      pickupPolicy: { limitsEnabled: false },
+    });
+    expect(effectivePickupPolicy(tenantOff, ME)).toEqual({
+      limited: false,
+      dayLimit: 3,
+      canWriteoff: true,
+    });
+  });
+
+  it("does not apply a limit for an explicitly unlimited employee", () => {
+    const snapshot = bootstrap({
+      pickupPolicy: { limitsEnabled: true },
+      config: { dayLimitPerEmployee: 5, showPrices: true },
+      employees: [
+        {
+          id: ME,
+          limitMode: "unlimited",
+          dayLimit: 1,
+          canWriteoff: false,
+        },
+      ],
+    });
+    expect(effectivePickupPolicy(snapshot, ME)).toEqual({
+      limited: false,
+      dayLimit: 1,
+      canWriteoff: false,
+    });
+  });
+
+  it("reads an old snapshot conservatively without granting unlimited or writeoff", () => {
+    const oldSnapshot = bootstrap({
+      config: { dayLimitPerEmployee: 4, showPrices: true },
+      employees: [{ id: ME }],
+    });
+    expect(effectivePickupPolicy(oldSnapshot, ME)).toEqual({
+      limited: true,
+      dayLimit: 4,
+      canWriteoff: false,
+    });
+  });
+
+  it("does not grant employee privileges when the tenant policy field is missing", () => {
+    const partial = bootstrap({
+      config: { dayLimitPerEmployee: 4, showPrices: true },
+      employees: [
+        {
+          id: ME,
+          limitMode: "unlimited",
+          dayLimit: 1,
+          canWriteoff: true,
+        },
+      ],
+    });
+    expect(effectivePickupPolicy(partial, ME)).toEqual({
+      limited: true,
+      dayLimit: 4,
+      canWriteoff: false,
+    });
+  });
+
+  it("does not disable limits when only the tenant policy field is present", () => {
+    const partial = bootstrap({
+      pickupPolicy: { limitsEnabled: false },
+      config: { dayLimitPerEmployee: 4, showPrices: true },
+      employees: [{ id: ME }],
+    });
+    expect(effectivePickupPolicy(partial, ME)).toEqual({
+      limited: true,
+      dayLimit: 4,
+      canWriteoff: false,
+    });
+  });
+
+  it.each([
+    {
+      what: "tenant switch is not boolean",
+      pickupPolicy: { limitsEnabled: "false" },
+      employee: { limitMode: "unlimited", dayLimit: 1, canWriteoff: true },
+    },
+    {
+      what: "limit mode is unknown",
+      pickupPolicy: { limitsEnabled: false },
+      employee: { limitMode: "forever", dayLimit: 1, canWriteoff: true },
+    },
+    {
+      what: "day limit is not a positive integer",
+      pickupPolicy: { limitsEnabled: false },
+      employee: { limitMode: "unlimited", dayLimit: 0, canWriteoff: true },
+    },
+    {
+      what: "writeoff flag is missing",
+      pickupPolicy: { limitsEnabled: false },
+      employee: { limitMode: "unlimited", dayLimit: 1 },
+    },
+  ])("falls back atomically when $what", ({ pickupPolicy, employee }) => {
+    const malformed = bootstrap({
+      pickupPolicy,
+      config: { dayLimitPerEmployee: 6, showPrices: true },
+      employees: [{ id: ME, ...employee }],
+    });
+    expect(effectivePickupPolicy(malformed, ME)).toEqual({
+      limited: true,
+      dayLimit: 6,
+      canWriteoff: false,
+    });
+  });
+
+  it("uses a deny-all limit when the legacy fallback is not a positive integer", () => {
+    const malformed = bootstrap({
+      config: { dayLimitPerEmployee: 0, showPrices: true },
+      employees: [{ id: ME, limitMode: "unlimited", dayLimit: 1, canWriteoff: true }],
+    });
+    expect(effectivePickupPolicy(malformed, ME)).toEqual({
+      limited: true,
+      dayLimit: 0,
+      canWriteoff: false,
+    });
+  });
+
+  it("returns null for an employee absent from the snapshot", () => {
+    const snapshot = bootstrap({ pickupPolicy: { limitsEnabled: true }, employees: [] });
+    expect(effectivePickupPolicy(snapshot, ME)).toBeNull();
   });
 });

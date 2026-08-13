@@ -11,7 +11,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
-import { user } from "./auth.js";
+import { organization, user } from "./auth.js";
 
 export const mediaAssetStatus = pgEnum("media_asset_status", ["staging", "active", "deleting"]);
 
@@ -39,6 +39,30 @@ export const mediaAssets = pgTable(
   (table) => [
     unique("media_assets_object_key_uq").on(table.objectKey),
     unique("media_assets_owner_id_uq").on(table.ownerUserId, table.id),
+  ],
+);
+
+/** Durable, tenant-owned metadata for normalized company logo objects. */
+export const organizationLogoAssets = pgTable(
+  "organization_logo_assets",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id, { onDelete: "cascade" }),
+    objectKey: text("object_key").notNull(),
+    contentType: text("content_type").notNull(),
+    byteSize: bigint("byte_size", { mode: "number" }).notNull(),
+    checksum: text("checksum").notNull(),
+    width: integer("width").notNull(),
+    height: integer("height").notNull(),
+    status: mediaAssetStatus("status").notNull().default("staging"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("organization_logo_assets_object_key_uq").on(table.objectKey),
+    unique("organization_logo_assets_tenant_id_uq").on(table.tenantId, table.id),
   ],
 );
 

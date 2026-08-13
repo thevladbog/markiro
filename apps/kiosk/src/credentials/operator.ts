@@ -1,5 +1,5 @@
 import { deriveDigestB64, parsePhc, PHC_ITERATIONS, verifyPhc } from "@markiro/domain";
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapDto, KioskBootstrapSnapshotDto } from "../api/types.js";
 
 /** One row of `bootstrap.operators` — the roster for the settings sign-in. */
 export type Operator = KioskBootstrapDto["operators"][number];
@@ -31,7 +31,7 @@ const DUMMY_PHC =
 export async function verifyOperatorPin(
   login: string,
   pin: string,
-  bootstrap: KioskBootstrapDto,
+  bootstrap: KioskBootstrapSnapshotDto,
 ): Promise<Operator | null> {
   if (login.length === 0) return null;
   const operator = bootstrap.operators.find(
@@ -56,7 +56,7 @@ export async function verifyOperatorPin(
  * from (badge_code, badgeSalt). Last-write-wins is thus unreachable — if the
  * server constraint is ever relaxed, this map would need a duplicate guard.
  */
-function buildOperatorBadgeIndex(bootstrap: KioskBootstrapDto): Map<string, Operator> {
+function buildOperatorBadgeIndex(bootstrap: KioskBootstrapSnapshotDto): Map<string, Operator> {
   const index = new Map<string, Operator>();
   for (const operator of bootstrap.operators) {
     if (!operator.active || !operator.badgeHash) continue;
@@ -69,7 +69,7 @@ function buildOperatorBadgeIndex(bootstrap: KioskBootstrapDto): Map<string, Oper
 /** Returns the active operator behind a scanned badge, or null. */
 export async function verifyOperatorBadge(
   raw: string,
-  bootstrap: KioskBootstrapDto,
+  bootstrap: KioskBootstrapSnapshotDto,
 ): Promise<Operator | null> {
   if (!raw) return null;
   const digest = await deriveDigestB64(raw, bootstrap.badgeSalt, PHC_ITERATIONS);

@@ -1,11 +1,16 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { KioskBootstrapDto } from "../src/api/types.js";
+import type {
+  KioskBootstrapDto,
+  KioskBootstrapSnapshotDto,
+  LegacyKioskBootstrapDto,
+} from "../src/api/types.js";
 import { classifyKioskScan, type KioskScan } from "../src/domain-guard/classify.js";
 import i18n from "../src/i18n/index.js";
 import type { ScanListener } from "../src/scanner/source.js";
 import { Cart, orientationOf } from "../src/screens/Cart.js";
 import { productMonogram } from "../src/screens/product-monogram.js";
+import type { BoxLine, LooseKmLine } from "../src/session/cart.js";
 
 afterEach(cleanup);
 
@@ -50,12 +55,47 @@ const bareBarcode = () => payload("unknown", GTIN_MILK);
 const MILK = "Молоко 3,2%";
 const BREAD = "Хлеб";
 const SCAN_PROMPT = "Поднесите бутылку";
-const SUBMIT = "Готово — передать администратору";
+const SUBMIT = "Продолжить";
+const SSCC = "346006820000000021";
+
+const twelveBottleBox = (): BoxLine => ({
+  kind: "box",
+  boxId: "11111111-1111-4111-8111-111111111111",
+  sscc: SSCC,
+  productId: "p-milk",
+  name: MILK,
+  bottleCount: 12,
+  unitPrice: "89.90",
+  contentKeys: Array.from({ length: 12 }, (_, index) => `member-${index + 1}`),
+  registryVersion: "7",
+});
+
+const looseLine = (index: number, name = `${MILK} ${index}`): LooseKmLine => ({
+  kind: "km",
+  rawKm: `01${GTIN_MILK}21SERIAL${index}${GS}93Abcd`,
+  kmKey: `01${GTIN_MILK}21SERIAL${index}`,
+  gtin14: GTIN_MILK,
+  serial: `SERIAL${index}`,
+  productId: "p-milk",
+  name,
+  unitPrice: "89.90",
+  bottleCount: 1,
+});
+
+function setViewport(width: number, height: number): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+  fireEvent(window, new Event("resize"));
+}
 
 function bootstrapWith(
   config: {
     dayLimitPerEmployee?: number;
     showPrices?: boolean;
+    limitsEnabled?: boolean;
+    employeeLimitMode?: "limited" | "unlimited";
+    employeeDayLimit?: number;
+    canWriteoff?: boolean;
     /** Prices are per-product, so an unpriced item needs its own catalogue. */
     products?: KioskBootstrapDto["products"];
   } = {},
@@ -68,6 +108,8 @@ function bootstrapWith(
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: config.limitsEnabled ?? true },
     config: {
       dayLimitPerEmployee: config.dayLimitPerEmployee ?? 5,
       showPrices: config.showPrices ?? true,
@@ -81,15 +123,45 @@ function bootstrapWith(
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
       { id: "p-bread", gtin14: GTIN_BREAD, name: BREAD, unitPrice: "45.00", egaisCode: null },
     ],
-    employees: [],
+    employees: [
+      {
+        id: "e1",
+        fullName: "Смирнов Алексей",
+        role: null,
+        badgeHash: null,
+        limitMode: config.employeeLimitMode ?? "limited",
+        dayLimit: config.employeeDayLimit ?? config.dayLimitPerEmployee ?? 5,
+        canWriteoff: config.canWriteoff ?? true,
+        takenTodayElsewhere: 0,
+      },
+    ],
     operators: [],
   };
 }
 
+function legacyBootstrapWith(dayLimitPerEmployee: number): LegacyKioskBootstrapDto {
+  const current = bootstrapWith({ dayLimitPerEmployee });
+  return {
+    generatedAt: current.generatedAt,
+    subscription: current.subscription,
+    config: current.config,
+    badgeSalt: current.badgeSalt,
+    reasons: current.reasons,
+    products: current.products,
+    employees: current.employees.map(
+      ({ limitMode: _limitMode, dayLimit: _dayLimit, canWriteoff: _canWriteoff, ...employee }) =>
+        employee,
+    ),
+    operators: current.operators,
+  };
+}
+
 interface Options {
-  bootstrap?: KioskBootstrapDto;
+  bootstrap?: KioskBootstrapSnapshotDto;
   alreadyTakenToday?: number;
   onScan?: (cb: ScanListener) => void | (() => void);
+  resolveBox?: React.ComponentProps<typeof Cart>["resolveBox"];
+  initialState?: React.ComponentProps<typeof Cart>["initialState"];
 }
 
 function renderCart(options: Options = {}) {
@@ -107,6 +179,8 @@ function renderCart(options: Options = {}) {
           listener = cb;
         })
       }
+      {...(options.resolveBox ? { resolveBox: options.resolveBox } : {})}
+      {...(options.initialState ? { initialState: options.initialState } : {})}
       onSubmit={onSubmit}
       onNotMe={onNotMe}
     />,
@@ -157,6 +231,195 @@ describe("productMonogram", () => {
 });
 
 describe("Cart", () => {
+  it("renders five portrait lines, pages the rest, and keeps totals and CTA visible", () => {
+    setViewport(480, 800);
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: Array.from({ length: 6 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    expect(screen.getAllByRole("button", { name: /Открыть позицию/ })).toHaveLength(5);
+    expect(screen.getByText("1 / 2")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Назад" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Далее" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect(screen.getAllByText("6 позиций · 6 бутылок")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: SUBMIT })).toBeDefined();
+
+    click("Далее");
+    expect(screen.getAllByRole("button", { name: /Открыть позицию/ })).toHaveLength(1);
+    expect(screen.getByText("2 / 2")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Далее" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("renders exactly three cart lines in landscape and clamps the page after resize", () => {
+    setViewport(480, 800);
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: Array.from({ length: 6 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+    click("Далее");
+    expect(screen.getByText("2 / 2")).toBeDefined();
+
+    setViewport(800, 480);
+    expect(screen.getAllByRole("button", { name: /Открыть позицию/ })).toHaveLength(3);
+    expect(screen.getByText("2 / 2")).toBeDefined();
+  });
+
+  it("moves to and announces the page containing a newly accepted KM, but a refusal stays put", () => {
+    setViewport(480, 800);
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 30 }),
+      initialState: {
+        lines: Array.from({ length: 10 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+    click("Далее");
+    expect(screen.getByText("2 / 2")).toBeDefined();
+
+    scan(km(GTIN_MILK, "NEWPAGE11"));
+    expect(screen.getByText("3 / 3")).toBeDefined();
+    const added = screen.getByText(/NEWPAGE11/).closest("button");
+    expect(added).not.toBeNull();
+    expect(added?.getAttribute("data-new")).toBe("true");
+    expect(screen.getByRole("status", { name: /Добавлена позиция/ }).textContent).toContain(MILK);
+
+    click("Назад");
+    expect(screen.getByText("2 / 3")).toBeDefined();
+    scan(km(GTIN_MILK, "SERIAL6"));
+    expect(screen.getByText("2 / 3")).toBeDefined();
+  });
+
+  it("keeps scan order and opens the last page for a newly resolved box", async () => {
+    setViewport(800, 480);
+    let resolve!: (value: { kind: "resolved"; box: BoxLine }) => void;
+    const resolution = new Promise<{ kind: "resolved"; box: BoxLine }>((done) => {
+      resolve = done;
+    });
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 30 }),
+      initialState: {
+        lines: Array.from({ length: 6 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+      resolveBox: vi.fn(() => resolution),
+    });
+    click("Далее");
+    expect(screen.getByText("2 / 2")).toBeDefined();
+
+    scan(payload("sscc", SSCC));
+    resolve({ kind: "resolved", box: twelveBottleBox() });
+
+    await waitFor(() => expect(screen.getByText("3 / 3")).toBeDefined());
+    const added = screen.getByRole("button", { name: /Открыть позицию.*12/ });
+    expect(added.getAttribute("data-new")).toBe("true");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain(MILK);
+  });
+
+  it("uses explicit DataMatrix and box icons without exposing protocol abbreviations", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [looseLine(1), twelveBottleBox()],
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    expect(screen.getByLabelText("DataMatrix")).toBeDefined();
+    expect(screen.getByLabelText("Короб")).toBeDefined();
+    expect(screen.queryByText(/^ЧЗ$/)).toBeNull();
+    expect(screen.queryByText(/^SSCC$/)).toBeNull();
+    expect(screen.getByText("12 бутылок")).toBeDefined();
+  });
+
+  it("opens full box details and removes only the whole non-expandable box after confirmation", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [twelveBottleBox()],
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Открыть позицию.*12/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(MILK);
+    expect(dialog.textContent).toContain("12 бутылок");
+    expect(dialog.textContent).toContain(SSCC);
+    expect(dialog.textContent).toContain("Короб удаляется только целиком");
+    expect(dialog.textContent).not.toContain("member-1");
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+
+    click("Убрать короб");
+    expect(screen.getByRole("dialog").textContent).toContain("Убрать короб целиком?");
+    expect(rows()).toHaveLength(1);
+    click("Убрать 12 бутылок");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("keeps a long name and serial visually truncatable while exposing the full detail", () => {
+    const longName = `Очень длинное название продукта ${"для проверки ".repeat(12)}`;
+    const line = { ...looseLine(1, longName), serial: `SERIAL-${"X".repeat(120)}` };
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [line],
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    const row = screen.getByRole("button", { name: /Открыть позицию/ });
+    expect(row.getAttribute("aria-label")).toContain(longName);
+    expect(row.querySelector(".kiosk-line__name")?.getAttribute("title")).toBe(longName);
+    fireEvent.click(row);
+    expect(screen.getByRole("dialog").textContent).toContain(longName);
+    expect(screen.getByRole("dialog").textContent).toContain(line.serial);
+  });
+  it("restores the exact canonical mixed draft when the screen remounts after submit failure", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [twelveBottleBox()],
+        reason: "writeoff",
+        writeoffReasonId: "reason-defect",
+        notice: null,
+      },
+    });
+
+    expect(rows()).toHaveLength(1);
+    expect(rows().join(" ")).toContain(MILK);
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
+    expect(submitButton().disabled).toBe(false);
+  });
+
   it("shows a scanned product with its name, its code tail and its price", () => {
     const { scan } = renderCart();
 
@@ -170,8 +433,7 @@ describe("Cart", () => {
     // is written «89,90», and a dot here is the screen contradicting both.
     expect(row).toContain("89,90 ₽");
 
-    const monogram = screen.getByText("М", { selector: ".kiosk-product-monogram" });
-    expect(monogram.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByLabelText("DataMatrix")).toBeDefined();
   });
 
   it("adds up the prices of everything in the list", () => {
@@ -182,6 +444,55 @@ describe("Cart", () => {
 
     expect(rows()).toHaveLength(2);
     expect(screen.getByText("134,90 ₽")).toBeDefined();
+  });
+
+  it("resolves an SSCC as one atomic line and shows its twelve-bottle price", async () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      resolveBox: vi.fn(async () => ({ kind: "resolved" as const, box: twelveBottleBox() })),
+    });
+
+    scan(payload("sscc", `]C100${SSCC}`));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows().join("").replaceAll(/\s/g, " ")).toContain("1 078,80 ₽");
+    expect(totalMoney().replaceAll(/\s/g, " ")).toBe("1 078,80 ₽");
+  });
+
+  it("shows an explicit refusal when the local registry cannot resolve a box", async () => {
+    const { scan } = renderCart({
+      resolveBox: vi.fn(async () => ({
+        kind: "rejected" as const,
+        notice: "registry-unavailable" as const,
+      })),
+    });
+
+    scan(payload("sscc", SSCC));
+
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("реестр коробов недоступен"),
+    );
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("recovers the serialized scan chain after one registry lookup throws", async () => {
+    const resolveBox = vi
+      .fn<NonNullable<React.ComponentProps<typeof Cart>["resolveBox"]>>()
+      .mockRejectedValueOnce(new Error("indexeddb unavailable"))
+      .mockResolvedValueOnce({ kind: "resolved", box: twelveBottleBox() });
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      resolveBox,
+    });
+
+    scan(payload("sscc", SSCC));
+    scan(km(GTIN_BREAD, "AFTERFAIL"));
+    scan(payload("sscc", SSCC));
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows().join(" ")).toContain(BREAD);
+    expect(rows().join(" ")).toContain(MILK);
+    expect(resolveBox).toHaveBeenCalledTimes(2);
   });
 
   /**
@@ -242,6 +553,61 @@ describe("Cart", () => {
     scan(km(GTIN_MILK, "KYC9X7MQ"));
 
     expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined();
+  });
+
+  it("uses the employee limit instead of the legacy kiosk limit", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 50, employeeDayLimit: 1 }),
+      alreadyTakenToday: 1,
+    });
+
+    expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+    expect(screen.getByText("Лимит на сегодня — 1 шт")).toBeDefined();
+    expect(screen.getByText("Лимит 1 шт в день · осталось 0")).toBeDefined();
+  });
+
+  it.each([
+    {
+      what: "tenant limits are disabled",
+      bootstrap: bootstrapWith({
+        dayLimitPerEmployee: 1,
+        employeeDayLimit: 1,
+        limitsEnabled: false,
+      }),
+    },
+    {
+      what: "the employee is unlimited",
+      bootstrap: bootstrapWith({
+        dayLimitPerEmployee: 1,
+        employeeDayLimit: 1,
+        employeeLimitMode: "unlimited",
+      }),
+    },
+  ])("keeps accepting scans when $what", ({ bootstrap }) => {
+    const { scan } = renderCart({ bootstrap, alreadyTakenToday: 1 });
+
+    scan(km(GTIN_MILK, "UNLIMIT1"));
+
+    expect(rows()).toHaveLength(1);
+    expect(screen.getByText(SCAN_PROMPT)).toBeDefined();
+    expect(screen.getByText("Без ограничений")).toBeDefined();
+  });
+
+  it("does not expose or submit writeoff when the employee lacks permission", () => {
+    const { scan, onSubmit } = renderCart({ bootstrap: bootstrapWith({ canWriteoff: false }) });
+    scan(km(GTIN_MILK, "BUYONLY1"));
+
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
+    click(SUBMIT);
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ reason: "buy" }));
+  });
+
+  it("falls back to the legacy limit and no writeoff for an old cached snapshot", () => {
+    renderCart({ bootstrap: legacyBootstrapWith(1), alreadyTakenToday: 1 });
+
+    expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+    expect(screen.getByText("Лимит на сегодня — 1 шт")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
   });
 
   // The panel keys on "nothing left", and what the reducer refuses is "nothing
@@ -337,19 +703,12 @@ describe("Cart", () => {
     expect(rows().join("")).toContain(MILK);
   });
 
-  it("holds submit until a write-off names its sub-reason, using the bootstrap's reasons", () => {
+  it("keeps operation and writeoff-reason decisions off the scanner cart", () => {
     const { scan } = renderCart();
     scan(km(GTIN_MILK, "KYC9X7MQ"));
     expect(submitButton().disabled).toBe(false);
-
-    click("Списание");
-    expect(submitButton().disabled).toBe(true);
-
-    // The chips are the tenant's own reasons, not a hard-coded list.
-    expect(screen.getByRole("button", { name: "Подарок" })).toBeDefined();
-    click("Брак");
-
-    expect(submitButton().disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Брак" })).toBeNull();
   });
 
   it("shows no price anywhere when the kiosk is configured to hide them", () => {
@@ -368,11 +727,31 @@ describe("Cart", () => {
     expect(text).not.toContain("₽");
   });
 
-  it("hands the whole session back when the worker says it is not them", () => {
+  it("keeps every box price hidden when prices are disabled", async () => {
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({
+        dayLimitPerEmployee: 20,
+        showPrices: false,
+      }),
+      resolveBox: vi.fn(async () => ({ kind: "resolved" as const, box: twelveBottleBox() })),
+    });
+
+    scan(payload("sscc", SSCC));
+
+    await waitFor(() => expect(rows()).toHaveLength(1));
+    const text = document.body.textContent ?? "";
+    expect(text).not.toContain("89,90");
+    expect(text).not.toContain("1 078,80");
+    expect(text).not.toContain("₽");
+  });
+
+  it("clears the session only after the worker confirms that it is not theirs", () => {
     const { onNotMe } = renderCart();
 
     click("Не я");
-
+    expect(onNotMe).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog").textContent).toContain("Это не ваш список?");
+    click("Выйти и очистить");
     expect(onNotMe).toHaveBeenCalledTimes(1);
   });
 
@@ -385,8 +764,9 @@ describe("Cart", () => {
 
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith({
-      items: [
+      lines: [
         {
+          kind: "km",
           rawKm: `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`,
           kmKey: `01${GTIN_MILK}21KYC9X7MQ`,
           gtin14: GTIN_MILK,
@@ -394,6 +774,7 @@ describe("Cart", () => {
           productId: "p-milk",
           name: MILK,
           unitPrice: "89.90",
+          bottleCount: 1,
         },
       ],
       reason: "buy",

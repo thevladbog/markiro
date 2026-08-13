@@ -354,6 +354,24 @@ describe.skipIf(!ready)("platform tenant management", () => {
     throw new Error(`Timed out waiting for ${applicationName} to block on the database lock`);
   }
 
+  it("provisions the tenant pickup policy with limits enabled", async () => {
+    const created = await admin
+      .post("/platform/tenants")
+      .send({
+        tenantName: "Pickup policy tenant",
+        tenantSlug: `pickup-policy-${randomUUID()}`,
+        email: `platform-owner-${randomUUID()}@example.com`,
+      })
+      .expect(201);
+    const createdTenantId = (created.body as { tenantId: string }).tenantId;
+
+    const [policy] = await setup.db
+      .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+      .from(schema.pickupTenantPolicies)
+      .where(eq(schema.pickupTenantPolicies.tenantId, createdTenantId));
+    expect(policy).toEqual({ limitsEnabled: true });
+  });
+
   it("creates one pending demo, lists bounded states, and redacts financial fields for support", async () => {
     await accountant
       .post("/platform/tenants")

@@ -1,4 +1,4 @@
-import type { OrderConflict } from "../api/types.js";
+import type { BoxConflict, OrderConflict } from "../api/types.js";
 import { STORE_JOURNAL, withCursor, withStore } from "./db.js";
 
 /**
@@ -62,6 +62,8 @@ export interface JournalEntry {
    */
   acceptedCount: number;
   conflicts: OrderConflict[];
+  acceptedBoxes?: Array<{ sscc: string; bottleCount: number }>;
+  boxConflicts?: BoxConflict[];
 }
 
 /**

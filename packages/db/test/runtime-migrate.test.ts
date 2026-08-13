@@ -1,4 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -54,6 +55,19 @@ const execFile = promisify(execFileCallback);
 const databaseUrlFromEnvironment = process.env.DATABASE_URL;
 const migrationsFolderOnDisk = fileURLToPath(new URL("../migrations", import.meta.url));
 const runtimeMigrateModule = fileURLToPath(new URL("../src/runtime-migrate.ts", import.meta.url));
+const pickupPolicyMigration = new URL(
+  "../migrations/0037_kiosk_pickup_policy.sql",
+  import.meta.url,
+);
+const organizationBrandingMigration = new URL(
+  "../migrations/0038_organization_branding.sql",
+  import.meta.url,
+);
+const kioskSsccOrdersMigration = new URL(
+  "../migrations/0039_kiosk_sscc_orders.sql",
+  import.meta.url,
+);
+const migrationJournal = new URL("../migrations/meta/_journal.json", import.meta.url);
 
 const legacyStationMigrationFixture = String.raw`
 import { randomUUID } from "node:crypto";
@@ -198,6 +212,65 @@ afterEach(resetHarness);
 resetHarness();
 
 describe("runRuntimeMigrations", () => {
+  test("packages tenant and employee pickup policy backfills", () => {
+    const migration = readFileSync(pickupPolicyMigration, "utf8");
+    const journal = JSON.parse(readFileSync(migrationJournal, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+
+    expect(migration).toContain('CREATE TYPE "public"."pickup_limit_mode"');
+    expect(migration).toContain("INSERT INTO pickup_tenant_policies (tenant_id, limits_enabled)");
+    expect(migration).toContain("INSERT INTO employee_pickup_policies");
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0037_kiosk_pickup_policy");
+  });
+
+  test("packages tenant-owned organization branding metadata", () => {
+    const migration = readFileSync(organizationBrandingMigration, "utf8");
+    const journal = JSON.parse(readFileSync(migrationJournal, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+
+    expect(migration).toContain('CREATE TABLE "organization_logo_assets"');
+    expect(migration).toContain('CONSTRAINT "org_profiles_logo_tenant_fk"');
+    expect(migration).toContain('FOREIGN KEY ("tenant_id","logo_asset_id")');
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0038_organization_branding");
+  });
+
+  test("packages kiosk box provenance with a committed tenant registry revision", () => {
+    expect(existsSync(kioskSsccOrdersMigration)).toBe(true);
+    if (!existsSync(kioskSsccOrdersMigration)) return;
+
+    const migration = readFileSync(kioskSsccOrdersMigration, "utf8");
+    const journal = JSON.parse(readFileSync(migrationJournal, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+
+    expect(migration).toContain('CREATE TABLE "pickup_order_boxes"');
+    expect(migration).toContain('CREATE TABLE "box_registry_versions"');
+    expect(migration).toContain('"current_version" bigint DEFAULT 0 NOT NULL');
+    expect(migration).toContain(
+      'ALTER TABLE "boxes" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now() NOT NULL;',
+    );
+    expect(migration).toContain(
+      'ALTER TABLE "boxes" ADD COLUMN "registry_version" bigint DEFAULT 0 NOT NULL;',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "box_registry_versions_tenant_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id")',
+    );
+    expect(migration).toContain(
+      'INSERT INTO "box_registry_versions" ("tenant_id", "current_version") SELECT "id", 0 FROM "organization" ON CONFLICT ("tenant_id") DO NOTHING;',
+    );
+    expect(migration).not.toMatch(/\bUPDATE\s+"?boxes"?/iu);
+    expect(migration).toContain(
+      'CREATE INDEX "boxes_registry_cursor_idx" ON "boxes" USING btree ("tenant_id","registry_version","id");',
+    );
+    expect(migration).toContain('CONSTRAINT "pickup_order_items_tenant_order_box_fk"');
+    expect(migration).toContain(
+      'FOREIGN KEY ("tenant_id","order_id","order_box_id") REFERENCES "public"."pickup_order_boxes"("tenant_id","order_id","id")',
+    );
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0039_kiosk_sscc_orders");
+  });
+
   test("holds one session advisory lock across the runtime migration", async () => {
     const logs: string[] = [];
 

@@ -34,14 +34,12 @@ export interface KioskDto {
 export interface CreateKioskInput {
   name: string;
   location?: string | null;
-  dayLimitPerEmployee?: number;
   showPrices?: boolean;
 }
 
 export interface UpdateKioskInput {
   name?: string;
   location?: string | null;
-  dayLimitPerEmployee?: number;
   showPrices?: boolean;
   status?: KioskStatus;
 }

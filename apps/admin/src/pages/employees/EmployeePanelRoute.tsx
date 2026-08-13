@@ -14,6 +14,7 @@ import {
   type EmployeeDto,
 } from "./api.js";
 import { EmployeeBadgesSection } from "./EmployeeBadgesSection.js";
+import { EmployeePickupPolicySection } from "./EmployeePickupPolicySection.js";
 import {
   EMPLOYEE_PROFILE_FORM_ID,
   EmployeeProfileForm,
@@ -44,12 +45,18 @@ type PanelMode = "create" | "edit";
 
 interface SectionFlags {
   profile: boolean;
+  policy: boolean;
   badges: boolean;
   access: boolean;
 }
 
-const CLEAN_SECTIONS: SectionFlags = { profile: false, badges: false, access: false };
-const SECTION_ORDER: EmployeeSectionId[] = ["profile", "badges", "station-access"];
+const CLEAN_SECTIONS: SectionFlags = {
+  profile: false,
+  policy: false,
+  badges: false,
+  access: false,
+};
+const SECTION_ORDER: EmployeeSectionId[] = ["profile", "pickup-policy", "badges", "station-access"];
 
 export function closeEmployeePanel(location: Location, navigate: NavigateFunction) {
   if ((location.state as EmployeesPanelLocationState | null)?.employeesBackground === true) {
@@ -231,13 +238,14 @@ function EmployeeEditPanelContent({
   const [profileApiError, setProfileApiError] = useState<string | null>(null);
   const [profileValidationError, setProfileValidationError] = useState(false);
   const [dirty, setDirty] = useState<SectionFlags>(CLEAN_SECTIONS);
-  const [busy, setBusy] = useState({ badges: false, access: false });
-  const [errors, setErrors] = useState({ badges: false, access: false });
+  const [busy, setBusy] = useState({ policy: false, badges: false, access: false });
+  const [errors, setErrors] = useState({ policy: false, badges: false, access: false });
   const [accessStatus, setAccessStatus] = useState<EmployeeAccessSectionStatus>("loading");
   const [activeSection, setActiveSection] = useState<EmployeeSectionId>("profile");
   const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
   const [lastResolvedEmployee, setLastResolvedEmployee] = useState<EmployeeDto | null>(null);
   const profileSectionRef = useRef<HTMLElement>(null);
+  const policyHostRef = useRef<HTMLDivElement>(null);
   const badgesHostRef = useRef<HTMLDivElement>(null);
   const accessHostRef = useRef<HTMLDivElement>(null);
   const resolvedEmployee = context.employees.find((item) => item.id === employeeId);
@@ -260,8 +268,8 @@ function EmployeeEditPanelContent({
     // a dirty Profile form's initial-value object.
     [employeeFullName, employeeRole],
   );
-  const panelDirty = dirty.profile || dirty.badges || dirty.access;
-  const panelBusy = updateMutation.isPending || busy.badges || busy.access;
+  const panelDirty = dirty.profile || dirty.policy || dirty.badges || dirty.access;
+  const panelBusy = updateMutation.isPending || busy.policy || busy.badges || busy.access;
   const guard = useRoutePanelGuard(close, panelBusy);
   const setGuardDirty = guard.setDirty;
 
@@ -274,17 +282,26 @@ function EmployeeEditPanelContent({
   const reportBadgesDirty = useCallback((value: boolean) => {
     setDirty((current) => (current.badges === value ? current : { ...current, badges: value }));
   }, []);
+  const reportPolicyDirty = useCallback((value: boolean) => {
+    setDirty((current) => (current.policy === value ? current : { ...current, policy: value }));
+  }, []);
   const reportAccessDirty = useCallback((value: boolean) => {
     setDirty((current) => (current.access === value ? current : { ...current, access: value }));
   }, []);
   const reportBadgesBusy = useCallback((value: boolean) => {
     setBusy((current) => (current.badges === value ? current : { ...current, badges: value }));
   }, []);
+  const reportPolicyBusy = useCallback((value: boolean) => {
+    setBusy((current) => (current.policy === value ? current : { ...current, policy: value }));
+  }, []);
   const reportAccessBusy = useCallback((value: boolean) => {
     setBusy((current) => (current.access === value ? current : { ...current, access: value }));
   }, []);
   const reportBadgesError = useCallback((value: boolean) => {
     setErrors((current) => (current.badges === value ? current : { ...current, badges: value }));
+  }, []);
+  const reportPolicyError = useCallback((value: boolean) => {
+    setErrors((current) => (current.policy === value ? current : { ...current, policy: value }));
   }, []);
   const reportAccessError = useCallback((value: boolean) => {
     setErrors((current) => (current.access === value ? current : { ...current, access: value }));
@@ -307,6 +324,12 @@ function EmployeeEditPanelContent({
 
   const getSectionElement = useCallback((id: EmployeeSectionId): HTMLElement | null => {
     if (id === "profile") return profileSectionRef.current;
+    if (id === "pickup-policy") {
+      return (
+        policyHostRef.current?.querySelector<HTMLElement>(".mk-employee-pickup-policy-section") ??
+        null
+      );
+    }
     if (id === "badges") {
       return (
         badgesHostRef.current?.querySelector<HTMLElement>(".mk-employee-badges-section") ?? null
@@ -388,6 +411,11 @@ function EmployeeEditPanelContent({
       id: "profile",
       label: t("pages.employees.sections.profile"),
       hasError: profileApiError !== null || profileValidationError,
+    },
+    {
+      id: "pickup-policy",
+      label: t("pages.employees.pickupPolicy.title"),
+      hasError: errors.policy,
     },
     {
       id: "badges",
@@ -483,6 +511,14 @@ function EmployeeEditPanelContent({
                 onErrorChange={reportProfileValidationError}
               />
             </section>
+            <div ref={policyHostRef} className="mk-employee-edit-panel__section-host">
+              <EmployeePickupPolicySection
+                employee={employee}
+                onDirtyChange={reportPolicyDirty}
+                onBusyChange={reportPolicyBusy}
+                onErrorChange={reportPolicyError}
+              />
+            </div>
             <div ref={badgesHostRef} className="mk-employee-edit-panel__section-host">
               <EmployeeBadgesSection
                 employee={employee}

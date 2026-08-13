@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheAge,
+  boxRegistryAge,
   cancelFlushRetry,
   flushQueue,
   humaniseAge,
@@ -21,12 +22,38 @@ import * as configStore from "../src/store/config.js";
 import { writeConfig } from "../src/store/config.js";
 import { readSnapshot, replaceSnapshot, type CachedSnapshot } from "../src/store/cache.js";
 import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  lookupBox,
+  readBoxRegistryMeta,
+} from "../src/store/box-registry.js";
+import {
   createKioskClient,
   KioskApiError,
   KioskTimeoutError,
   SUBMIT_TIMEOUT_MS,
 } from "../src/api/client.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
+import { findOldestUnviewedOutcome } from "../src/store/outcomes.js";
+
+const OUTCOME_KIOSK_ID = "11111111-1111-4111-8111-111111111111";
+const OUTCOME_EMPLOYEE_ID = "22222222-2222-4222-8222-222222222222";
+
+async function outcomeOwner() {
+  const config = await writeConfig({
+    serverUrl: "https://tenant.example/api",
+    token: "token",
+    kioskId: OUTCOME_KIOSK_ID,
+    kioskName: "Gate",
+    place: null,
+    nextDeviceSeq: 2,
+  });
+  return {
+    serverUrl: config.serverUrl,
+    kioskId: config.kioskId!,
+    credentialGeneration: config.credentialGeneration!,
+  };
+}
 
 afterEach(() => {
   // FIRST, and while the fake timers are still installed: a drain that stopped
@@ -114,6 +141,71 @@ describe("cacheAge", () => {
 });
 
 describe("flushQueue", () => {
+  it("persists an accepted result before dequeue and upserts it on replay", async () => {
+    const owner = await outcomeOwner();
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "loose" }] },
+      OUTCOME_EMPLOYEE_ID,
+      undefined,
+      13,
+    );
+    vi.spyOn(queueStore, "dequeueOrder").mockRejectedValueOnce(new Error("crash window"));
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-1",
+        status: "pending" as const,
+        itemCount: 13,
+        conflicts: [],
+        acceptedBoxes: [{ sscc: "346006820000000021", bottleCount: 12 }],
+      })),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-08-13T12:00:00.000Z"));
+    await flushQueue(client as never, () => new Date("2026-08-13T12:01:00.000Z"));
+
+    await expect(findOldestUnviewedOutcome(owner, OUTCOME_EMPLOYEE_ID)).resolves.toMatchObject({
+      kind: "accepted",
+      orderNo: "ORD-1",
+      acceptedCount: 13,
+      acceptedBoxes: [{ sscc: "346006820000000021", bottleCount: 12 }],
+    });
+  });
+
+  it("persists a safe rejected result for a terminal response", async () => {
+    const owner = await outcomeOwner();
+    const orderCommitted = vi.fn();
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "secret-prefix-ABC123" }] },
+      OUTCOME_EMPLOYEE_ID,
+      undefined,
+      13,
+    );
+    await flushQueue(
+      {
+        ...refusingClient(
+          new KioskApiError(422, "rejected", "order_rejected", {
+            conflicts: [{ rawKm: "secret-prefix-ABC123", reason: "duplicate" }],
+            boxConflicts: [
+              { sscc: "346006820000000021", bottleCount: 12, reason: "duplicate", members: ["no"] },
+            ],
+          }),
+        ),
+        orderCommitted,
+      } as never,
+      () => new Date("2026-08-13T12:00:00.000Z"),
+    );
+
+    const result = await findOldestUnviewedOutcome(owner, OUTCOME_EMPLOYEE_ID);
+    expect(result).toMatchObject({ kind: "rejected", acceptedCount: 0 });
+    expect(JSON.stringify(result)).not.toContain("secret-prefix");
+    expect(JSON.stringify(result)).not.toContain("members");
+    expect(result?.rejected).toEqual([
+      { kind: "loose", codeTail: "…ABC123", reason: "duplicate" },
+      { kind: "box", sscc: "346006820000000021", bottleCount: 12, reason: "duplicate" },
+    ]);
+    expect(orderCommitted).toHaveBeenCalledTimes(1);
+  });
   it("serializes a crash-safe pending attestation before submit even when the response crosses expiry", async () => {
     let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
     const admission = new Promise<{ claimedAt: string; admissionProof: string }>((resolve) => {
@@ -310,10 +402,11 @@ describe("flushQueue", () => {
    * new one.
    */
   it("stamps the entry with the kiosk the device is bound to when the server answers", async () => {
+    const filedKioskId = "33333333-3333-4333-8333-333333333333";
     await writeConfig({
       serverUrl: "/api",
       token: "tok",
-      kioskId: "k-gate-b",
+      kioskId: filedKioskId,
       kioskName: "Проходная Б",
       place: null,
       nextDeviceSeq: 2,
@@ -326,7 +419,7 @@ describe("flushQueue", () => {
         items: [{ rawKm: "01…" }],
         createdAt: "2026-07-28T06:00:00.000Z",
       },
-      "e1",
+      OUTCOME_EMPLOYEE_ID,
     );
     const client = {
       bootstrap: vi.fn(),
@@ -340,7 +433,7 @@ describe("flushQueue", () => {
 
     await flushQueue(client as never, () => new Date("2026-07-28T07:00:00.000Z"));
 
-    expect((await journalStore.readJournal(10))[0]).toMatchObject({ kioskId: "k-gate-b" });
+    expect((await journalStore.readJournal(10))[0]).toMatchObject({ kioskId: filedKioskId });
   });
 
   // With no `createdAt` in the body the server stamps the order as it arrives
@@ -733,6 +826,63 @@ describe("flushQueue", () => {
         conflicts: [],
       },
     ]);
+  });
+
+  it("quarantines only sanitized box verdicts from structured terminal details", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: "346006820000000021" }],
+        createdAt: "2026-07-28T07:00:00.000Z",
+      },
+      "e1",
+      undefined,
+      12,
+    );
+    const details = {
+      boxConflicts: [
+        {
+          sscc: "346006820000000021",
+          bottleCount: 12,
+          reason: "duplicate",
+          extra: "drop-me",
+        },
+      ],
+      conflicts: [{ rawKm: "response-secret", reason: "duplicate" }],
+      rawSecret: "do-not-persist",
+    };
+
+    await flushQueue(
+      refusingClient(new KioskApiError(422, "rejected", "order_rejected", details)) as never,
+      () => new Date("2026-07-28T07:01:00.000Z"),
+    );
+
+    const parked = (await listQuarantine())[0]!;
+    expect(parked.boxConflicts).toEqual([
+      { sscc: "346006820000000021", bottleCount: 12, reason: "duplicate" },
+    ]);
+    expect(JSON.stringify(parked)).not.toContain("response-secret");
+    expect(JSON.stringify(parked)).not.toContain("drop-me");
+    expect(parked.body.boxes).toEqual([{ sscc: "346006820000000021" }]);
+  });
+
+  it("persists no structured box verdict when one entry is invalid", async () => {
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "wire" }] },
+      "e1",
+    );
+    await flushQueue(
+      refusingClient(
+        new KioskApiError(422, "rejected", "order_rejected", {
+          boxConflicts: [{ sscc: "000000000000000000", bottleCount: 900, reason: "duplicate" }],
+        }),
+      ) as never,
+      () => new Date(),
+    );
+    expect((await listQuarantine())[0]).not.toHaveProperty("boxConflicts");
   });
 
   /**
@@ -1278,7 +1428,7 @@ describe("flushQueue backoff", () => {
 });
 
 describe("isTerminalRejection", () => {
-  it.each([400, 409, 422])(
+  it.each([400, 409, 413, 422])(
     "treats %i as a verdict this order can never come back from",
     (status) => {
       expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(true);
@@ -1318,11 +1468,24 @@ const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
     startsAt: "2026-07-01T00:00:00.000Z",
     endsAt: "2026-08-31T00:00:00.000Z",
   },
+  branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+  pickupPolicy: { limitsEnabled: true },
   config: { dayLimitPerEmployee: 5, showPrices: true },
   badgeSalt: "c2FsdA==",
   reasons: [],
   products: [],
-  employees: [{ id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 }],
+  employees: [
+    {
+      id: "e1",
+      fullName: "A",
+      role: null,
+      badgeHash: null,
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: true,
+      takenTodayElsewhere: 0,
+    },
+  ],
   operators: [],
 });
 
@@ -1555,6 +1718,147 @@ describe("refreshSnapshot", () => {
     });
   });
 
+  it("uses server-generated bootstrap time for registry freshness despite device clock skew", async () => {
+    const serverGeneratedAt = "2026-07-28T07:00:00.000Z";
+    const skewedFetchedAt = new Date("2036-07-28T07:00:03.000Z");
+    await writeConfig({
+      serverUrl: "https://one.example/api",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap(serverGeneratedAt)),
+      boxRegistryPage: vi.fn(async () => ({ until: "1", items: [] })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(client as never, () => skewedFetchedAt);
+
+    const meta = await readBoxRegistryMeta({
+      serverUrl: "https://one.example/api",
+      kioskId: "k-1",
+    });
+    const cached = await readSnapshot();
+    expect(meta?.generatedAt).toBe(serverGeneratedAt);
+    expect(
+      boxRegistryAge(meta, cached, new Date(skewedFetchedAt.getTime() + 30 * 60 * 60_000)),
+    ).toBe("warn");
+  });
+
+  it("single-flights overlapping refreshes for the same installation", async () => {
+    await writeConfig({
+      serverUrl: "https://one.example/api",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markPageStarted!: () => void;
+    const pageStarted = new Promise<void>((resolve) => {
+      markPageStarted = resolve;
+    });
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => {
+        markPageStarted();
+        await held;
+        return { until: "1", items: [] };
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    const first = refreshSnapshot(client as never, () => new Date("2026-07-28T07:00:03Z"));
+    await pageStarted;
+    const second = refreshSnapshot(client as never, () => new Date("2026-07-28T07:00:04Z"));
+    await Promise.resolve();
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a new credential refresh win while an old same-binding client is held", async () => {
+    const binding = { serverUrl: "https://one.example/api", kioskId: "k-1" };
+    const oldConfig = await writeConfig({
+      ...binding,
+      token: "old-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    let releaseOld!: () => void;
+    const heldOld = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldPageStarted!: () => void;
+    const oldStarted = new Promise<void>((resolve) => {
+      oldPageStarted = resolve;
+    });
+    const oldSscc = "346006820000000021";
+    const newSscc = "346006820000000014";
+    const change = (sscc: string) => ({
+      kind: "upsert" as const,
+      boxId: "00000000-0000-4000-8000-000000000001",
+      sscc,
+      productId: "00000000-0000-4000-8000-000000000002",
+      bottleCount: 1,
+      contentKeys: [`member-${sscc}`],
+      updatedAt: "2026-07-28T07:00:00Z",
+    });
+    const oldClient = {
+      registryOwner: {
+        binding,
+        credentialGeneration: oldConfig.credentialGeneration!,
+      },
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => {
+        oldPageStarted();
+        await heldOld;
+        return { until: "1", items: [change(oldSscc)] };
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    const oldRefresh = refreshSnapshot(oldClient as never, () => new Date("2026-07-28T07:00:01Z"));
+    await oldStarted;
+    const newConfig = await writeConfig({
+      ...binding,
+      token: "new-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const newClient = {
+      registryOwner: {
+        binding,
+        credentialGeneration: newConfig.credentialGeneration!,
+      },
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:01:00.000Z")),
+      boxRegistryPage: vi.fn(async () => ({ until: "2", items: [change(newSscc)] })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(newClient as never, () => new Date("2026-07-28T07:01:01Z"));
+    releaseOld();
+    await oldRefresh;
+
+    expect(newClient.boxRegistryPage).toHaveBeenCalledTimes(1);
+    expect(await lookupBox(binding, newSscc)).not.toBeNull();
+    expect(await lookupBox(binding, oldSscc)).toBeNull();
+    expect(await readBoxRegistryMeta(binding)).toMatchObject({
+      credentialGeneration: newConfig.credentialGeneration,
+      version: "2",
+    });
+  });
+
   it("leaves the cached snapshot untouched when the fetch fails — a blinking network must not brick the kiosk", async () => {
     const cached = bootstrap("2026-07-28T06:00:00.000Z");
     await replaceSnapshot(cached, new Date("2026-07-28T06:00:01.000Z"));
@@ -1592,5 +1896,186 @@ describe("refreshSnapshot", () => {
     // last-known-good dataset and ages fresh → warn → blocked over seven days,
     // rather than persisting a stamp whose freshness can never be established.
     expect(JSON.stringify(await readSnapshot())).toBe(before);
+  });
+
+  it("keeps a successful bootstrap when a bounded registry refresh exhausts snapshot-change retries", async () => {
+    const fresh = bootstrap("2026-07-28T07:00:00.000Z");
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
+      bootstrap: vi.fn(async () => fresh),
+      boxRegistryPage: vi.fn(async () => {
+        throw new KioskApiError(409, "changed", "registry_snapshot_changed");
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    await expect(
+      refreshSnapshot(
+        client as never,
+        () => new Date("2026-07-28T07:00:03.000Z"),
+        async () => {},
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(3);
+    expect(await readSnapshot()).toEqual({
+      bootstrap: fresh,
+      fetchedAt: "2026-07-28T07:00:03.000Z",
+    });
+  });
+
+  it("restarts a changed multi-page registry from the old active version", async () => {
+    const fresh = bootstrap("2026-07-28T07:00:00.000Z");
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const queries: unknown[] = [];
+    const responses = [
+      { until: "2", items: [], nextCursor: "page-2" },
+      new KioskApiError(409, "changed", "registry_snapshot_changed"),
+      { until: "3", items: [], nextCursor: undefined },
+    ];
+    const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
+      bootstrap: vi.fn(async () => fresh),
+      boxRegistryPage: vi.fn(async (query: unknown) => {
+        queries.push(query);
+        const next = responses.shift();
+        if (next instanceof Error) throw next;
+        return next!;
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(
+      client as never,
+      () => new Date("2026-07-28T07:00:03.000Z"),
+      async () => {},
+    );
+
+    expect(queries).toEqual([
+      { limit: 250 },
+      { until: "2", cursor: "page-2", limit: 250 },
+      { limit: 250 },
+    ]);
+  });
+
+  it("does not hide revocation between bootstrap and registry fetch", async () => {
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => {
+        throw new KioskApiError(401, "revoked");
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    await expect(refreshSnapshot(client as never, () => new Date())).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("bounds an untrusted cursor cycle and keeps the old active cut", async () => {
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => ({ until: "2", items: [], nextCursor: "same" })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(
+      client as never,
+      () => new Date(),
+      async () => {},
+    );
+
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds unique malicious cursors and discards the incomplete cut", async () => {
+    const sscc = "346006820000000021";
+    const binding = { serverUrl: "https://one.example/api", kioskId: "k-1" };
+    const config = await writeConfig({
+      ...binding,
+      token: "token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const seed = {
+      binding,
+      credentialGeneration: config.credentialGeneration!,
+      owner: "seed",
+      since: null,
+      until: "1",
+    };
+    await beginBoxRegistryStage(seed);
+    await activateBoxRegistryPage(
+      seed,
+      [
+        {
+          kind: "upsert",
+          boxId: "00000000-0000-4000-8000-000000000001",
+          sscc,
+          productId: "00000000-0000-4000-8000-000000000002",
+          bottleCount: 1,
+          contentKeys: ["member"],
+          updatedAt: "2026-07-28T06:00:00Z",
+        },
+      ],
+      "2026-07-28T06:00:00Z",
+    );
+    let cursor = 0;
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => ({
+        until: "2",
+        items: [],
+        nextCursor: `cursor-${(cursor += 1)}`,
+      })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(
+      client as never,
+      () => new Date(),
+      async () => {},
+      2,
+    );
+
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(2);
+    expect(await readBoxRegistryMeta(binding)).toMatchObject({ version: "1" });
+    expect(await lookupBox(binding, sscc)).toMatchObject({
+      boxId: "00000000-0000-4000-8000-000000000001",
+    });
   });
 });

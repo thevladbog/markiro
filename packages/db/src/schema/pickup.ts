@@ -18,11 +18,12 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
-import { products } from "./platform.js";
+import { boxes, products } from "./platform.js";
 import { tenantSubscriptions } from "./saas.js";
 
 export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
 export const kioskStatus = pgEnum("kiosk_status", ["active", "archived"]);
+export const pickupLimitMode = pgEnum("pickup_limit_mode", ["limited", "unlimited"]);
 export const pickupReason = pgEnum("pickup_reason", ["buy", "writeoff"]);
 export const pickupOrderStatus = pgEnum("pickup_order_status", [
   "pending",
@@ -47,6 +48,35 @@ export const employees = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("employees_tenant_id_uq").on(t.tenantId, t.id)],
+);
+
+export const pickupTenantPolicies = pgTable("pickup_tenant_policies", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => organization.id),
+  limitsEnabled: boolean("limits_enabled").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const employeePickupPolicies = pgTable(
+  "employee_pickup_policies",
+  {
+    tenantId: tenantId(),
+    employeeId: uuid("employee_id").notNull(),
+    limitMode: pickupLimitMode("limit_mode").notNull().default("limited"),
+    dayLimit: integer("day_limit").notNull().default(5),
+    canWriteoff: boolean("can_writeoff").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.employeeId] }),
+    check("employee_pickup_policies_day_limit_check", sql`${t.dayLimit} > 0`),
+    foreignKey({
+      name: "employee_pickup_policies_tenant_employee_fk",
+      columns: [t.tenantId, t.employeeId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }).onDelete("cascade"),
+  ],
 );
 
 export const employeeBadges = pgTable(
@@ -238,7 +268,17 @@ export const pickupOrders = pgTable(
     // order can arrive hours late, so the admin must be able to see what was
     // dropped; without this the conflicts only ever existed in the HTTP
     // response the kiosk got.
-    syncConflicts: jsonb("sync_conflicts").$type<{ rawKm: string; reason: string }[]>(),
+    syncConflicts: jsonb("sync_conflicts").$type<
+      (
+        | { rawKm: string; reason: string }
+        | {
+            source: "box";
+            sscc: string;
+            bottleCount: number | null;
+            reason: string;
+          }
+      )[]
+    >(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedByUserId: text("resolved_by_user_id"),
@@ -281,12 +321,55 @@ export const pickupOrders = pgTable(
   ],
 );
 
+/**
+ * An immutable order-time snapshot of an accepted production box. The
+ * production box stays linked for provenance, while the copied SSCC/product/
+ * quantity/price preserve what the kiosk order contained if the box later
+ * receives an exception.
+ */
+export const pickupOrderBoxes = pgTable(
+  "pickup_order_boxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    orderId: uuid("order_id").notNull(),
+    boxId: uuid("box_id").notNull(),
+    sscc: char("sscc", { length: 18 }).notNull(),
+    productId: uuid("product_id").notNull(),
+    bottleCount: integer("bottle_count").notNull(),
+    unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("pickup_order_boxes_tenant_id_uq").on(t.tenantId, t.id),
+    unique("pickup_order_boxes_tenant_order_id_uq").on(t.tenantId, t.orderId, t.id),
+    unique("pickup_order_boxes_order_box_uq").on(t.tenantId, t.orderId, t.boxId),
+    check("pickup_order_boxes_bottle_count_check", sql`${t.bottleCount} > 0`),
+    foreignKey({
+      name: "pickup_order_boxes_tenant_order_fk",
+      columns: [t.tenantId, t.orderId],
+      foreignColumns: [pickupOrders.tenantId, pickupOrders.id],
+    }),
+    foreignKey({
+      name: "pickup_order_boxes_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+    foreignKey({
+      name: "pickup_order_boxes_tenant_product_fk",
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+  ],
+);
+
 export const pickupOrderItems = pgTable(
   "pickup_order_items",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     orderId: uuid("order_id").notNull(),
+    orderBoxId: uuid("order_box_id"),
     productId: uuid("product_id").notNull(),
     gtin14: text("gtin14").notNull(),
     serial: text("serial").notNull(),
@@ -306,6 +389,11 @@ export const pickupOrderItems = pgTable(
       name: "pickup_order_items_tenant_order_fk",
       columns: [t.tenantId, t.orderId],
       foreignColumns: [pickupOrders.tenantId, pickupOrders.id],
+    }),
+    foreignKey({
+      name: "pickup_order_items_tenant_order_box_fk",
+      columns: [t.tenantId, t.orderId, t.orderBoxId],
+      foreignColumns: [pickupOrderBoxes.tenantId, pickupOrderBoxes.orderId, pickupOrderBoxes.id],
     }),
     foreignKey({
       name: "pickup_order_items_tenant_product_fk",
@@ -458,7 +546,24 @@ export const pickupScanRejections = pgTable(
     badgeCode: text("badge_code"),
     orderId: uuid("order_id"),
     deviceSeq: integer("device_seq").notNull(),
-    codes: jsonb("codes").$type<{ rawKm: string; reason: string }[]>().notNull(),
+    codes: jsonb("codes")
+      .$type<
+        (
+          | { rawKm: string; reason: string }
+          | {
+              source: "box";
+              sscc: string;
+              bottleCount: number | null;
+              reason: string;
+            }
+          | {
+              source: "request";
+              version: 2;
+              terminalReason: string;
+            }
+        )[]
+      >()
+      .notNull(),
     scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),

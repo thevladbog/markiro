@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 export default defineConfig({
   testDir: "./tests",
+  testMatch: "docs.spec.ts",
   outputDir: join(tmpdir(), "markiro-production-docs-playwright"),
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

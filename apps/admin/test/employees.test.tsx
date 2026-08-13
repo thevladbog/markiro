@@ -10,8 +10,10 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as EmployeesApiModule from "../src/pages/employees/api.js";
+import { EMPLOYEES_QUERY_KEY, type EmployeeDto } from "../src/pages/employees/api.js";
+import { EmployeePickupPolicySection } from "../src/pages/employees/EmployeePickupPolicySection.js";
 import { EmployeeProfileForm } from "../src/pages/employees/EmployeeProfileForm.js";
-import { EmployeesPage } from "../src/pages/employees/index.js";
+import { EmployeesPage, limitBulkEmployeeSelection } from "../src/pages/employees/index.js";
 import { jsonResponse } from "./helpers/http.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
@@ -83,11 +85,12 @@ async function chooseOption(label: string, option: string) {
   expect(trigger.textContent).toContain(option);
 }
 
-const JANE = {
+const JANE: EmployeeDto = {
   id: "1",
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
+  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false },
   badges: [
     {
       id: "b1",
@@ -106,6 +109,30 @@ const JANE = {
   ],
   createdAt: "2026-01-01T00:00:00.000Z",
 };
+
+function renderPickupPolicy(employee: EmployeeDto = JANE) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  const reporters = {
+    onDirtyChange: vi.fn(),
+    onBusyChange: vi.fn(),
+    onErrorChange: vi.fn(),
+  };
+  queryClient.setQueryData([...EMPLOYEES_QUERY_KEY, {}], [employee]);
+  const tree = (currentEmployee: EmployeeDto) => (
+    <QueryClientProvider client={queryClient}>
+      <EmployeePickupPolicySection employee={currentEmployee} {...reporters} />
+    </QueryClientProvider>
+  );
+  const view = render(tree(employee));
+  return {
+    ...view,
+    queryClient,
+    reporters,
+    rerenderEmployee: (nextEmployee: EmployeeDto) => view.rerender(tree(nextEmployee)),
+  };
+}
 
 const INITIAL_EMPLOYEE_PROFILE_VALUES = { fullName: "Jane Doe", role: "Кассир" };
 
@@ -143,7 +170,183 @@ describe("EmployeeProfileForm", () => {
   });
 });
 
+describe("EmployeePickupPolicySection", () => {
+  it("rehydrates a clean editor from an incoming policy", async () => {
+    const { rerenderEmployee, reporters } = renderPickupPolicy();
+
+    rerenderEmployee({
+      ...JANE,
+      pickupPolicy: { limitMode: "unlimited", dayLimit: 8, canWriteoff: true },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("radio", { name: "Без лимита" }).getAttribute("aria-checked")).toBe(
+        "true",
+      );
+      expect((screen.getByLabelText("Позиций в день") as HTMLInputElement).value).toBe("8");
+      expect(
+        screen.getByRole("checkbox", { name: "Разрешить списание" }).getAttribute("aria-checked"),
+      ).toBe("true");
+      expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  it("preserves a local draft when an incoming policy changes", async () => {
+    const { rerenderEmployee, reporters } = renderPickupPolicy();
+    const user = userEvent.setup();
+
+    const dayLimit = screen.getByLabelText("Позиций в день");
+    await user.clear(dayLimit);
+    await user.type(dayLimit, "9");
+    await user.click(screen.getByRole("checkbox", { name: "Разрешить списание" }));
+    rerenderEmployee({
+      ...JANE,
+      pickupPolicy: { limitMode: "unlimited", dayLimit: 8, canWriteoff: false },
+    });
+
+    expect(
+      screen.getByRole("radio", { name: "С дневным лимитом" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect((screen.getByLabelText("Позиций в день") as HTMLInputElement).value).toBe("9");
+    expect(
+      screen.getByRole("checkbox", { name: "Разрешить списание" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(true);
+  });
+
+  it("uses the successful response as the clean baseline and updates employee caches", async () => {
+    const savedEmployee: EmployeeDto = {
+      ...JANE,
+      pickupPolicy: { limitMode: "limited", dayLimit: 9, canWriteoff: false },
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, savedEmployee)),
+    );
+    const { queryClient, reporters } = renderPickupPolicy();
+    const user = userEvent.setup();
+
+    const dayLimit = screen.getByLabelText("Позиций в день");
+    await user.clear(dayLimit);
+    await user.type(dayLimit, "9");
+    await user.click(screen.getByRole("button", { name: "Сохранить правила выдачи" }));
+
+    const successToast = await screen.findByText("Правила выдачи сохранены");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Pickup policy success toast not found");
+    await user.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+    await waitFor(() => expect(reporters.onDirtyChange).toHaveBeenLastCalledWith(false));
+    expect((screen.getByLabelText("Позиций в день") as HTMLInputElement).value).toBe("9");
+    expect(queryClient.getQueryData([...EMPLOYEES_QUERY_KEY, {}])).toEqual([savedEmployee]);
+  });
+});
+
 describe("EmployeesPage", () => {
+  it("confirms selected-employee bulk limits without changing writeoff permission", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/employees/pickup-policy/limits" && init?.method === "PATCH") {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Массово изменить правила" }));
+    await user.click(screen.getByRole("checkbox", { name: "Выбрать Jane Doe" }));
+    await user.click(screen.getByRole("radio", { name: "Без лимита" }));
+    await user.click(screen.getByRole("button", { name: "Назначить лимит" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Назначить лимит сотрудникам?" });
+    await user.click(within(dialog).getByRole("button", { name: "Назначить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/employees/pickup-policy/limits",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ employeeIds: ["1"], limitMode: "unlimited", dayLimit: 12 }),
+        }),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("keeps bulk writeoff separate and leaves its confirmation open on error", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === "/api/employees/pickup-policy/writeoff-permission") {
+        return jsonResponse(409, { message: "Selection changed" });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Массово изменить правила" }));
+    expect(screen.getByRole("button", { name: "Назначить лимит" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Выбрать Jane Doe" }));
+    await user.click(screen.getByRole("checkbox", { name: "Разрешить списание" }));
+    await user.click(screen.getByRole("button", { name: "Изменить право списания" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Изменить право списания?" });
+    await user.click(within(dialog).getByRole("button", { name: "Изменить" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("Selection changed");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/employees/pickup-policy/writeoff-permission",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ employeeIds: ["1"], canWriteoff: true }),
+      }),
+    );
+  });
+
+  it("caps bulk selection at 500 employees", () => {
+    const selected = limitBulkEmployeeSelection(
+      Array.from({ length: 501 }, (_, index) => String(index + 1)),
+    );
+    expect(selected.size).toBe(500);
+    expect(selected.has("500")).toBe(true);
+    expect(selected.has("501")).toBe(false);
+  });
+
+  it.each(["0", "1.5"])(
+    "exposes an accessible bulk day-limit error for %s and clears it after recovery",
+    async (invalidValue) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse(200, { items: [JANE] })),
+      );
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(await screen.findByRole("button", { name: "Массово изменить правила" }));
+      await user.click(screen.getByRole("checkbox", { name: "Выбрать Jane Doe" }));
+      const dayLimit = screen.getByLabelText("Позиций в день");
+      await user.clear(dayLimit);
+      await user.type(dayLimit, invalidValue);
+
+      expect(dayLimit.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByText("Введите положительное целое число")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Назначить лимит" })).toHaveProperty(
+        "disabled",
+        true,
+      );
+
+      await user.clear(dayLimit);
+      await user.type(dayLimit, "3");
+      expect(dayLimit.hasAttribute("aria-invalid")).toBe(false);
+      expect(screen.queryByText("Введите положительное целое число")).toBeNull();
+      expect(screen.getByRole("button", { name: "Назначить лимит" })).toHaveProperty(
+        "disabled",
+        false,
+      );
+    },
+  );
+
   it("uses the shared page/filter layout and requests the selected status", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
     vi.stubGlobal("fetch", fetchMock);

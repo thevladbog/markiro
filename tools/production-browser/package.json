@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "playwright test --config playwright.config.ts",
+    "test:kiosk": "playwright test --config kiosk.playwright.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

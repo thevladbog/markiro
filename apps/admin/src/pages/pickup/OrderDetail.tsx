@@ -390,15 +390,28 @@ export function OrderDetailPage() {
         </div>
       </Card>
 
-      {order.syncConflicts.length > 0 && (
+      {order.syncConflicts.length + order.boxConflicts.length > 0 && (
         <Alert
           tone="warn"
-          title={t("pages.pickup.conflicts.title", { count: order.syncConflicts.length })}
+          title={t("pages.pickup.conflicts.title", {
+            count: order.syncConflicts.length + order.boxConflicts.length,
+          })}
         >
           <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
             {order.syncConflicts.map((c, i) => (
               <li key={`${c.rawKm}:${i}`} style={{ font: "var(--text-code)" }}>
                 {c.rawKm} — {t(`pages.pickup.conflicts.reason.${c.reason}`)}
+              </li>
+            ))}
+            {order.boxConflicts.map((c, i) => (
+              <li key={`${c.sscc}:${i}`} style={{ font: "var(--text-code)" }}>
+                {t(
+                  c.bottleCount === null
+                    ? "pages.pickup.rejections.boxLabel"
+                    : "pages.pickup.rejections.boxCountLabel",
+                  { sscc: c.sscc, count: c.bottleCount ?? 0 },
+                )}{" "}
+                — {t(`pages.pickup.conflicts.reason.${c.reason}`)}
               </li>
             ))}
           </ul>
