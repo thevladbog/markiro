@@ -456,9 +456,11 @@ export async function readShiftMirror(
 }
 
 export interface ShiftContextRow {
+  productId: string;
   gtin14: string;
   productName: string;
   counterpartyName: string | null;
+  image?: StationProductImageDescriptor | null | undefined;
 }
 
 /**
@@ -471,11 +473,18 @@ export async function readShiftContext(
   shiftId: string,
 ): Promise<ShiftContextRow | null> {
   const rows = await exec.all<{
+    product_id: string;
     gtin14: string;
     name: string;
     counterparty_name: string | null;
+    image_checksum: string | null;
+    image_content_type: "image/webp" | null;
+    image_byte_size: number | null;
+    image_width: number | null;
+    image_height: number | null;
   }>(
-    `SELECT p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name
+    `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
+       p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
      WHERE s.id = ?`,
     [shiftId],
@@ -483,9 +492,13 @@ export async function readShiftContext(
   const row = rows[0];
   if (!row) return null;
   return {
+    productId: row.product_id,
     gtin14: row.gtin14,
     productName: row.name,
     counterpartyName: row.counterparty_name,
+    image: row.image_checksum && row.image_content_type && row.image_byte_size !== null && row.image_width !== null && row.image_height !== null
+      ? { checksum: row.image_checksum, contentType: row.image_content_type, byteSize: row.image_byte_size, width: row.image_width, height: row.image_height }
+      : row.image_checksum === null ? null : undefined,
   };
 }
 

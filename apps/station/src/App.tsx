@@ -1146,6 +1146,8 @@ export function App() {
             operatorId={operator.operatorId}
             expectedGtin14={shiftContext.gtin14}
             productName={shiftContext.productName}
+            productId={shiftContext.productId}
+            productImage={shiftContext.image}
             counterpartyName={shiftContext.counterpartyName}
             source={scanSource}
             sound={sound}
@@ -1188,6 +1190,7 @@ export function App() {
       ) : floorView === "select" ? (
         <ShiftSelection
           client={activeClient}
+          exec={tauriExecutor}
           onSelected={handleShiftEntered}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false

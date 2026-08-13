@@ -1,4 +1,6 @@
 import type { RecentOperation } from "../../lib/journal.js";
+import type { SqlExecutor, StationProductImageDescriptor } from "../../lib/mirror.js";
+import { ProductImage } from "../ProductImage.js";
 
 export interface ScanResultLabels {
   waiting: string;
@@ -17,6 +19,9 @@ export interface ScanResultInstrumentProps {
   counterpartyName: string | null;
   operation: RecentOperation | null;
   labels: ScanResultLabels;
+  exec?: SqlExecutor | undefined;
+  productId?: string | undefined;
+  image?: StationProductImageDescriptor | null | undefined;
 }
 
 export function operationStatusLabel(verdict: string, labels: ScanResultLabels): string {
@@ -32,11 +37,15 @@ export function ScanResultInstrument({
   counterpartyName,
   operation,
   labels,
+  exec,
+  productId,
+  image,
 }: ScanResultInstrumentProps) {
   const tone = operation?.verdict === "ok" ? "ok" : operation ? "error" : "neutral";
   return (
     <section className="work-instrument work-scan-result" aria-label={productName}>
       <div className="work-scan-result__identity">
+        {productId ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} className="work-scan-result__image" /> : null}
         <h2 title={productName}>{productName}</h2>
         {counterpartyName ? <p title={counterpartyName}>{counterpartyName}</p> : null}
       </div>

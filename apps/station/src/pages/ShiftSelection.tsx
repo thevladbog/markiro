@@ -5,6 +5,7 @@ import { StationApiError, type StationClient } from "../lib/api-client.js";
 import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
+import type { SqlExecutor } from "../lib/mirror.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { prefetchStationProductImage, trackStationProductImageSync } from "../lib/product-image-cache.js";
 
@@ -29,6 +30,7 @@ interface ShiftListItem {
 
 export interface ShiftSelectionProps {
   client: StationClient;
+  exec?: SqlExecutor;
   onSelected: (shift: { id: string; status: string; mode: string }) => void;
   onNew: () => void;
   /** Opens the workstation setup screen; omitted where there is no way in. */
@@ -56,6 +58,7 @@ export function shiftSelectionPersistentState(input: {
 
 export function ShiftSelection({
   client,
+  exec,
   onSelected,
   onNew,
   onSetup,
@@ -197,6 +200,9 @@ export function ShiftSelection({
                   active={shift.status === "active"}
                   disabled={busy}
                   onSelect={() => (shift.status === "active" ? rejoin(shift) : void open(shift))}
+                  exec={exec}
+                  productId={shift.productId}
+                  image={shift.image}
                 />
               ))}
             </div>
