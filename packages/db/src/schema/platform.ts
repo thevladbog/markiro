@@ -582,6 +582,7 @@ export const boxes = pgTable(
     // Two devices holding overlapping pools is precisely the situation
     // nothing else would reveal. An index, not a check in code.
     unique("boxes_tenant_sscc_uq").on(t.tenantId, t.sscc),
+    index("boxes_registry_cursor_idx").on(t.tenantId, t.updatedAt, t.id),
     // A device's own id for the box, unique within its shift and terminal:
     // this is what an arriving scan carries instead of a server id.
     //

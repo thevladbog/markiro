@@ -236,7 +236,7 @@ describe("runRuntimeMigrations", () => {
     expect(journal.entries.map((entry) => entry.tag)).toContain("0036_organization_branding");
   });
 
-  test("packages kiosk box provenance and backfills the registry cursor", () => {
+  test("packages kiosk box provenance with a bounded fast-default registry cursor", () => {
     expect(existsSync(kioskSsccOrdersMigration)).toBe(true);
     if (!existsSync(kioskSsccOrdersMigration)) return;
 
@@ -246,9 +246,13 @@ describe("runRuntimeMigrations", () => {
     };
 
     expect(migration).toContain('CREATE TABLE "pickup_order_boxes"');
-    expect(migration).toContain('ADD COLUMN "updated_at" timestamp with time zone');
-    expect(migration).toContain("COALESCE(closure_received_at, closed_at, opened_at, now())");
-    expect(migration).toContain('ALTER COLUMN "updated_at" SET NOT NULL');
+    expect(migration).toContain(
+      'ALTER TABLE "boxes" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now() NOT NULL;',
+    );
+    expect(migration).not.toMatch(/\bUPDATE\s+"?boxes"?/iu);
+    expect(migration).toContain(
+      'CREATE INDEX "boxes_registry_cursor_idx" ON "boxes" USING btree ("tenant_id","updated_at","id");',
+    );
     expect(migration).toContain('CONSTRAINT "pickup_order_items_tenant_order_box_fk"');
     expect(migration).toContain(
       'FOREIGN KEY ("tenant_id","order_id","order_box_id") REFERENCES "public"."pickup_order_boxes"("tenant_id","order_id","id")',

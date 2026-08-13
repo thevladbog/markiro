@@ -1,5 +1,5 @@
 {
-  "id": "ff99e0d5-a07d-48a0-b51e-f495a1ce1c80",
+  "id": "baa7aec7-abe7-439d-a522-eb604a6fe420",
   "prevId": "c47ac141-6c0e-4581-acc3-4348f2c35004",
   "version": "7",
   "dialect": "postgresql",
@@ -1292,7 +1292,35 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "boxes_registry_cursor_idx": {
+          "name": "boxes_registry_cursor_idx",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "updated_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "boxes_tenant_id_organization_id_fk": {
           "name": "boxes_tenant_id_organization_id_fk",

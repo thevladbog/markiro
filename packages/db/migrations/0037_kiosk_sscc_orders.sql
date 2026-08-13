@@ -14,14 +14,11 @@ CREATE TABLE "pickup_order_boxes" (
 	CONSTRAINT "pickup_order_boxes_bottle_count_check" CHECK ("pickup_order_boxes"."bottle_count" > 0)
 );
 --> statement-breakpoint
-ALTER TABLE "boxes" ADD COLUMN "updated_at" timestamp with time zone;--> statement-breakpoint
-UPDATE "boxes"
-SET "updated_at" = COALESCE(closure_received_at, closed_at, opened_at, now());--> statement-breakpoint
-ALTER TABLE "boxes" ALTER COLUMN "updated_at" SET DEFAULT now();--> statement-breakpoint
-ALTER TABLE "boxes" ALTER COLUMN "updated_at" SET NOT NULL;--> statement-breakpoint
+ALTER TABLE "boxes" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now() NOT NULL;--> statement-breakpoint
 ALTER TABLE "pickup_order_items" ADD COLUMN "order_box_id" uuid;--> statement-breakpoint
 ALTER TABLE "pickup_order_boxes" ADD CONSTRAINT "pickup_order_boxes_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pickup_order_boxes" ADD CONSTRAINT "pickup_order_boxes_tenant_order_fk" FOREIGN KEY ("tenant_id","order_id") REFERENCES "public"."pickup_orders"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pickup_order_boxes" ADD CONSTRAINT "pickup_order_boxes_tenant_box_fk" FOREIGN KEY ("tenant_id","box_id") REFERENCES "public"."boxes"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "pickup_order_boxes" ADD CONSTRAINT "pickup_order_boxes_tenant_product_fk" FOREIGN KEY ("tenant_id","product_id") REFERENCES "public"."products"("tenant_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "pickup_order_items" ADD CONSTRAINT "pickup_order_items_tenant_order_box_fk" FOREIGN KEY ("tenant_id","order_id","order_box_id") REFERENCES "public"."pickup_order_boxes"("tenant_id","order_id","id") ON DELETE no action ON UPDATE no action;
+ALTER TABLE "pickup_order_items" ADD CONSTRAINT "pickup_order_items_tenant_order_box_fk" FOREIGN KEY ("tenant_id","order_id","order_box_id") REFERENCES "public"."pickup_order_boxes"("tenant_id","order_id","id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "boxes_registry_cursor_idx" ON "boxes" USING btree ("tenant_id","updated_at","id");

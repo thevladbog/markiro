@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq, getTableName } from "drizzle-orm";
-import { getTableConfig } from "drizzle-orm/pg-core";
+import { and, eq, getTableName, is } from "drizzle-orm";
+import { getTableConfig, IndexedColumn } from "drizzle-orm/pg-core";
 import { createDb, schema } from "../src/index.js";
 import {
   boxExceptions,
@@ -78,6 +78,20 @@ describe("platform schema", () => {
       "terminal_id",
       "device_box_id",
     ]);
+  });
+
+  it("indexes the tenant box registry cursor in paging order", () => {
+    const cursorIndex = getTableConfig(boxes).indexes.find(
+      (one) => one.config.name === "boxes_registry_cursor_idx",
+    );
+
+    expect(cursorIndex, "missing box registry cursor index").toBeDefined();
+    expect(cursorIndex?.config.method).toBe("btree");
+    expect(
+      cursorIndex?.config.columns.map((column) =>
+        is(column, IndexedColumn) ? column.name : undefined,
+      ),
+    ).toEqual(["tenant_id", "updated_at", "id"]);
   });
 
   it("gives boxes.operator_id a composite tenant FK to employees", () => {
