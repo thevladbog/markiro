@@ -16,46 +16,50 @@ export class MediaAssetsService {
 
   /** Best-effort immediate cleanup; durable `deleting` metadata remains for reconciliation. */
   async cleanupDeletingTenantAsset(tenantId: string, assetId: string): Promise<void> {
-    const [asset] = await this.db
-      .select({ objectKey: schema.mediaAssets.objectKey })
-      .from(schema.mediaAssets)
-      .where(
-        and(
-          eq(schema.mediaAssets.id, assetId),
-          eq(schema.mediaAssets.ownerTenantId, tenantId),
-          eq(schema.mediaAssets.status, "deleting"),
-          notExists(
-            this.db
-              .select({ productAssetId: schema.productImages.assetId })
-              .from(schema.productImages)
-              .where(eq(schema.productImages.assetId, assetId)),
-          ),
-        ),
-      )
-      .limit(1);
-    if (!asset) return;
-
     try {
+      const [asset] = await this.db
+        .select({ objectKey: schema.mediaAssets.objectKey })
+        .from(schema.mediaAssets)
+        .where(
+          and(
+            eq(schema.mediaAssets.id, assetId),
+            eq(schema.mediaAssets.ownerTenantId, tenantId),
+            eq(schema.mediaAssets.status, "deleting"),
+            notExists(
+              this.db
+                .select({ productAssetId: schema.productImages.assetId })
+                .from(schema.productImages)
+                .where(eq(schema.productImages.assetId, assetId)),
+            ),
+          ),
+        )
+        .limit(1);
+      if (!asset) return;
+
       await this.storage.delete(asset.objectKey);
     } catch {
       return;
     }
 
-    await this.db
-      .delete(schema.mediaAssets)
-      .where(
-        and(
-          eq(schema.mediaAssets.id, assetId),
-          eq(schema.mediaAssets.ownerTenantId, tenantId),
-          eq(schema.mediaAssets.status, "deleting"),
-          notExists(
-            this.db
-              .select({ productAssetId: schema.productImages.assetId })
-              .from(schema.productImages)
-              .where(eq(schema.productImages.assetId, assetId)),
+    try {
+      await this.db
+        .delete(schema.mediaAssets)
+        .where(
+          and(
+            eq(schema.mediaAssets.id, assetId),
+            eq(schema.mediaAssets.ownerTenantId, tenantId),
+            eq(schema.mediaAssets.status, "deleting"),
+            notExists(
+              this.db
+                .select({ productAssetId: schema.productImages.assetId })
+                .from(schema.productImages)
+                .where(eq(schema.productImages.assetId, assetId)),
+            ),
           ),
-        ),
-      );
+        );
+    } catch {
+      // Object deletion is authoritative; retain the durable row for reconciliation.
+    }
   }
 
   async reconcile(now = new Date(), limit = DEFAULT_RECONCILE_LIMIT): Promise<number> {

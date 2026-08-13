@@ -14,6 +14,7 @@ import {
   Res,
   UploadedFile,
   UseGuards,
+  UseFilters,
   UseInterceptors,
 } from "@nestjs/common";
 import { FileInterceptor } from "@nestjs/platform-express";
@@ -45,6 +46,7 @@ import {
   type UpdateProductDto,
 } from "./dto";
 import { ProductsService } from "./products.service";
+import { ProductImageUploadFilter } from "./product-image-upload.filter";
 
 @ApiTags("products")
 @Controller("products")
@@ -121,6 +123,7 @@ export class ProductsController {
       limits: { fileSize: 5 * 1024 * 1024, files: 1 },
     }),
   )
+  @UseFilters(ProductImageUploadFilter)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async uploadImage(
@@ -128,7 +131,13 @@ export class ProductsController {
     @Param("id") id: string,
     @UploadedFile() file?: Express.Multer.File,
   ): Promise<ProductDto> {
-    if (!file) throw new BadRequestException("Product image file is required");
+    if (!file) {
+      return this.productsService
+        .recordImageUploadFailure(req.tenantId!, req.userId!, id, "missing_image")
+        .then(() => {
+          throw new BadRequestException("Product image file is required");
+        });
+    }
     return this.productsService.uploadImage(req.tenantId!, req.userId!, id, file.buffer);
   }
 

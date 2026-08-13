@@ -108,6 +108,44 @@ function fakeStorage(failingKeys: string[] = []) {
 }
 
 describe("MediaAssetsService", () => {
+  it("does not let an immediate-cleanup metadata lookup failure escape", async () => {
+    const db = {
+      select: () => {
+        throw new Error("database lookup unavailable");
+      },
+    } as unknown as Db;
+    const storage = fakeStorage();
+
+    await expect(
+      new MediaAssetsService(db, storage).cleanupDeletingTenantAsset("tenant-1", "asset-1"),
+    ).resolves.toBeUndefined();
+    expect(storage.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not let an immediate-cleanup metadata deletion failure escape after object deletion", async () => {
+    let metadataPresent = true;
+    const query = {
+      from: () => query,
+      where: () => query,
+      limit: async () => [{ objectKey: "tenants/tenant-1/products/asset-1.webp" }],
+    };
+    const db = {
+      select: () => query,
+      delete: () => ({
+        where: async () => {
+          throw new Error("database delete unavailable");
+        },
+      }),
+    } as unknown as Db;
+    const storage = fakeStorage();
+
+    await expect(
+      new MediaAssetsService(db, storage).cleanupDeletingTenantAsset("tenant-1", "asset-1"),
+    ).resolves.toBeUndefined();
+    expect(storage.delete).toHaveBeenCalledWith("tenants/tenant-1/products/asset-1.webp");
+    expect(metadataPresent).toBe(true);
+  });
+
   it("reconciles unreferenced stale user and tenant assets without touching aggregate references", async () => {
     const userStaging = asset({ id: "user-staging" });
     const userDeleting = asset({ id: "user-deleting", status: "deleting" });

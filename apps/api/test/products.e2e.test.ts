@@ -799,9 +799,10 @@ describe.skipIf(!ready)("products e2e", () => {
     ]);
   });
 
-  it("rejects invalid and oversized image sources without storing an object", async () => {
+  it("rejects and audits invalid, missing, and oversized image sources without storing an object", async () => {
     const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
+    const tenantId = await signUpAndActivate(agent);
+    const actorUserId = await actorForTenant(tenantId);
     const created = await agent
       .post("/products")
       .send({ gtin: EAN13_CANONICAL, name: "Bounded Widget" })
@@ -815,16 +816,73 @@ describe.skipIf(!ready)("products e2e", () => {
         contentType: "image/svg+xml",
       })
       .expect(400);
+    await agent.post(`/products/${productId}/image`).expect(400, {
+      message: "Product image file is required",
+      error: "Bad Request",
+      statusCode: 400,
+    });
     await agent
       .post(`/products/${productId}/image`)
       .attach("image", Buffer.alloc(5 * 1024 * 1024 + 1), {
         filename: "too-large.png",
         contentType: "image/png",
       })
-      .expect(413);
+      .expect(400, {
+        message: "Product image exceeds the 5 MiB source limit",
+        error: "Bad Request",
+        statusCode: 400,
+      });
 
     expect(storage.put).not.toHaveBeenCalled();
     expect((await agent.get(`/products/${productId}`).expect(200)).body.image).toBeNull();
+    const audits = await db
+      .select({
+        actorUserId: schema.tenantAuditEvents.actorUserId,
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+        ),
+      )
+      .orderBy(schema.tenantAuditEvents.createdAt);
+    expect(audits).toEqual([
+      {
+        actorUserId,
+        action: "product.image.uploaded",
+        outcome: "failure",
+        targetType: "product",
+        targetId: productId,
+        before: { image: null },
+        after: { reason: "invalid_image" },
+      },
+      {
+        actorUserId,
+        action: "product.image.uploaded",
+        outcome: "failure",
+        targetType: "product",
+        targetId: productId,
+        before: { image: null },
+        after: { reason: "missing_image" },
+      },
+      {
+        actorUserId,
+        action: "product.image.uploaded",
+        outcome: "failure",
+        targetType: "product",
+        targetId: productId,
+        before: { image: null },
+        after: { reason: "source_too_large" },
+      },
+    ]);
+    expect(JSON.stringify(audits)).not.toMatch(/objectKey|assetId/);
   });
 
   it("masks unknown and foreign product image operations as 404 before storage", async () => {
@@ -1018,6 +1076,102 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(assets.map(({ status }: { status: string }) => status).sort()).toEqual([
       "active",
       "staging",
+    ]);
+  });
+
+  it("audits a switch failure against the current image read after the product lock", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const actorUserId = await actorForTenant(tenantId);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Locked Audit Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+    const initial = await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#111827"), "initial.jpg")
+      .expect(201);
+
+    let releaseDelayedUpload!: () => void;
+    let delayedUploadReached!: () => void;
+    const delayedUploadStarted = new Promise<void>((resolve) => {
+      delayedUploadReached = resolve;
+    });
+    const delayedUploadRelease = new Promise<void>((resolve) => {
+      releaseDelayedUpload = resolve;
+    });
+    storage.put.mockImplementationOnce(async (key: string, body: Buffer) => {
+      delayedUploadReached();
+      await delayedUploadRelease;
+      storedObjects.set(key, body);
+    });
+    const delayedFailure = agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#f59e0b"), "delayed-failure.jpg");
+    await delayedUploadStarted;
+
+    const concurrentSuccess = await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#16a34a"), "concurrent-success.jpg")
+      .expect(201);
+    expect(concurrentSuccess.body.image).not.toEqual(initial.body.image);
+
+    const suffix = randomUUID().replaceAll("-", "");
+    const functionName = `fail_locked_product_image_switch_${suffix}`;
+    const triggerName = `fail_locked_product_image_switch_${suffix}`;
+    await setup.pool.query(
+      `create function ${functionName}() returns trigger language plpgsql as $$ begin raise exception 'forced locked product image switch failure'; end $$`,
+    );
+    await setup.pool.query(
+      `create trigger ${triggerName} before update on product_images for each row execute function ${functionName}()`,
+    );
+    try {
+      releaseDelayedUpload();
+      await delayedFailure.expect(503);
+    } finally {
+      releaseDelayedUpload();
+      await setup.pool.query(`drop trigger ${triggerName} on product_images`);
+      await setup.pool.query(`drop function ${functionName}()`);
+    }
+
+    expect((await agent.get(`/products/${productId}`).expect(200)).body.image).toEqual(
+      concurrentSuccess.body.image,
+    );
+    const failureAudits = await db
+      .select({
+        actorUserId: schema.tenantAuditEvents.actorUserId,
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+          eq(schema.tenantAuditEvents.outcome, "failure"),
+        ),
+      );
+    expect(failureAudits).toEqual([
+      {
+        actorUserId,
+        action: "product.image.replaced",
+        outcome: "failure",
+        targetType: "product",
+        targetId: productId,
+        before: { image: concurrentSuccess.body.image },
+        after: {
+          attemptedImage: expect.objectContaining({
+            contentType: "image/webp",
+            checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
+          }),
+          reason: "switch_failed",
+        },
+      },
     ]);
   });
 

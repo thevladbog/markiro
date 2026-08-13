@@ -336,6 +336,7 @@ export class ProductsService {
     }
 
     let previousAssetId: string | null = null;
+    let switchBeforeImage: ProductImageDescriptor | null | undefined;
     try {
       await this.db.transaction(async (tx: ProductAuditTx) => {
         await this.lockProduct(tx, tenantId, productId);
@@ -366,6 +367,7 @@ export class ProductsService {
           .limit(1);
         previousAssetId = current?.assetId ?? null;
         const before = current ? descriptorFromAsset(current) : null;
+        switchBeforeImage = before;
 
         const activated = await tx
           .update(schema.mediaAssets)
@@ -414,7 +416,7 @@ export class ProductsService {
         tenantId,
         actorUserId,
         productId,
-        initialImage,
+        switchBeforeImage ?? initialImage,
         descriptor,
         "switch_failed",
       );
@@ -429,6 +431,24 @@ export class ProductsService {
       await this.mediaAssets.cleanupDeletingTenantAsset(tenantId, previousAssetId);
     }
     return this.getProduct(tenantId, productId);
+  }
+
+  async recordImageUploadFailure(
+    tenantId: string,
+    actorUserId: string,
+    productId: string,
+    reason: "missing_image" | "source_too_large",
+  ): Promise<void> {
+    const product = await this.findRow(tenantId, productId);
+    if (!product) throw new NotFoundException();
+    await this.writeFailureAudit(
+      tenantId,
+      actorUserId,
+      productId,
+      this.imageDescriptor(product),
+      null,
+      reason,
+    );
   }
 
   async deleteImage(tenantId: string, actorUserId: string, productId: string): Promise<void> {
@@ -630,7 +650,9 @@ export class ProductsService {
       | "processing_unavailable"
       | "metadata_unavailable"
       | "storage_unavailable"
-      | "switch_failed",
+      | "switch_failed"
+      | "missing_image"
+      | "source_too_large",
   ): Promise<void> {
     await this.db.insert(schema.tenantAuditEvents).values({
       organizationId: tenantId,
