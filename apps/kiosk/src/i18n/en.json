@@ -43,6 +43,9 @@
   "cart": {
     "logo": "markiro · for yourself",
     "notMe": "Not me",
+    "notMeTitle": "Is this not your list?",
+    "notMeBody": "Signing out removes every scanned item.",
+    "notMeConfirm": "Sign out and clear",
     "scanTitle": "Hold the bottle up",
     "scanTitleTarget": "code towards the scanner",
     "scanHint": "The code is on the label, next to the Chestny ZNAK mark",
@@ -99,6 +102,52 @@
     "unknownBody": "This kiosk does not issue it. Put the bottle aside and ask an administrator — you can carry on scanning the others.",
     "unknownDismiss": "Got it",
     "close": "Close"
+  },
+  "flow": {
+    "back": "Back",
+    "continue": "Continue",
+    "cancel": "Cancel operation",
+    "cancelTitle": "Clear the list and exit?",
+    "cancelBody": "Every scanned item will be removed. This cannot be undone.",
+    "keepWorking": "Go back",
+    "cancelConfirm": "Yes, clear and exit"
+  },
+  "operation": {
+    "eyebrow": "Operation",
+    "title": "What should happen to these items?",
+    "buy": {
+      "title": "Through checkout",
+      "description": "Prepare the items for payment at checkout"
+    },
+    "writeoff": {
+      "title": "Write-off",
+      "description": "Record an internal write-off",
+      "unavailable": "Write-off is unavailable: an administrator must add an active reason."
+    }
+  },
+  "reason": {
+    "eyebrow": "Write-off",
+    "title": "Choose a write-off reason",
+    "required": "Choose one reason",
+    "selected": "Reason selected"
+  },
+  "confirmation": {
+    "eyebrow": "Final check",
+    "title": "Confirmation",
+    "summaryLabel": "Operation summary",
+    "operation": "Operation",
+    "reason": "Reason",
+    "contents": "Contents",
+    "composition": "Loose: {{loose}} · Boxes: {{boxes}}",
+    "total": "Total",
+    "lines": "Items to confirm",
+    "check": "Check the contents before confirming",
+    "reasonUnavailable": "This write-off reason is no longer available. Go back and choose another.",
+    "saving": "Saving…",
+    "confirm_one": "Confirm {{count}} bottle",
+    "confirm_few": "Confirm {{count}} bottles",
+    "confirm_many": "Confirm {{count}} bottles",
+    "confirm_other": "Confirm {{count}} bottles"
   },
   "done": {
     "title": "Order {{order}} handed over",

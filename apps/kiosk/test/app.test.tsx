@@ -120,6 +120,7 @@ const EMPLOYEE = { id: "e1", fullName: "Смирнов Алексей" };
 const IDLE_TITLE = "Отсканируйте пропуск";
 const CART_TITLE = "Вы берёте";
 const SUBMIT = "Продолжить";
+const CONFIRM_ONE = "Подтвердить 1 бутылку";
 const QUEUED_TITLE = "Заявка передана, номер появится после синхронизации";
 const OFFLINE = "Нет связи — киоск работает офлайн";
 const GATE_TITLE = "Вход в настройки";
@@ -595,13 +596,29 @@ function setWebSerialWithoutGrant(port: SerialPort): void {
 }
 
 /** Badge in, one bottle scanned, submit pressed — the whole worker's flow. */
+async function proceedToBuyConfirmation(bottles = 1): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+  });
+  await settle(() => expect(screen.getByRole("button", { name: /Через кассу/ })).toBeDefined());
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /Через кассу/ }));
+  });
+  await settle(() =>
+    expect(
+      screen.getByRole("button", { name: new RegExp(`Подтвердить ${bottles} бутыл`) }),
+    ).toBeDefined(),
+  );
+}
+
 async function takeOneBottle(): Promise<void> {
   scan(BADGE);
   await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
   scan(KM);
   await settle(() => expect(screen.getByText(MILK)).toBeDefined());
+  await proceedToBuyConfirmation();
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+    fireEvent.click(screen.getByRole("button", { name: CONFIRM_ONE }));
   });
 }
 
@@ -731,8 +748,34 @@ describe("KioskShell", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Не я" }));
     });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Выйти и очистить" }));
+    });
 
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+  });
+
+  it("skips operation choice and confirms a purchase for an employee without writeoff permission", async () => {
+    const bootstrap = bootstrapAt(NOW.toISOString());
+    bootstrap.employees[0]!.canWriteoff = false;
+    await replaceSnapshot(bootstrap, NOW);
+    await writeConfig(config());
+    server.reachable = false;
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    scan(KM);
+    await settle(() => expect(screen.getByText(MILK)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+    });
+
+    await settle(() => expect(screen.getByRole("button", { name: CONFIRM_ONE })).toBeDefined());
+    expect(screen.queryByRole("button", { name: /Списание/ })).toBeNull();
+    expect(screen.getAllByText("Через кассу")).toHaveLength(1);
   });
 
   /**
@@ -1304,8 +1347,9 @@ describe("KioskShell", () => {
     scan(KM);
     await settle(() => expect(screen.getByText(MILK)).toBeDefined());
 
+    await proceedToBuyConfirmation();
     await act(async () => {
-      const button = screen.getByRole("button", { name: SUBMIT });
+      const button = screen.getByRole("button", { name: CONFIRM_ONE });
       fireEvent.click(button);
       fireEvent.click(button);
     });
@@ -1343,7 +1387,9 @@ describe("KioskShell", () => {
     await takeOneBottle();
     await settle(async () => expect((await readConfig())?.nextDeviceSeq).toBe(6));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+      const button = document.querySelector(".kiosk-flow__primary");
+      if (!(button instanceof HTMLButtonElement)) throw new Error("confirmation CTA missing");
+      fireEvent.click(button);
     });
     deliver();
 
@@ -1380,8 +1426,9 @@ describe("KioskShell", () => {
     scan(SSCC);
     scan(KM);
     await settle(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
+    await proceedToBuyConfirmation(3);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+      fireEvent.click(screen.getByRole("button", { name: "Подтвердить 3 бутылки" }));
     });
     await settle(() => expect(refused).toHaveBeenCalled());
     await act(async () => {});
@@ -1390,8 +1437,9 @@ describe("KioskShell", () => {
     expect(screen.getByText(CART_TITLE)).toBeDefined();
     expect(screen.getAllByText(MILK)).toHaveLength(2);
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    await proceedToBuyConfirmation(3);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+      fireEvent.click(screen.getByRole("button", { name: "Подтвердить 3 бутылки" }));
     });
     await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
 
@@ -1647,6 +1695,9 @@ describe("KioskShell", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Не я" }));
     });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Выйти и очистить" }));
+    });
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 
     await holdIdleHeader(SETTINGS_HOLD_MS);
@@ -1849,6 +1900,9 @@ describe("KioskShell", () => {
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Выйти и очистить" }));
     });
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 

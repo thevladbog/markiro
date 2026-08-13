@@ -65,6 +65,7 @@ export type KioskFlowAction =
   | { type: "continue" }
   | { type: "chooseOperation"; reason: "buy" | "writeoff" }
   | { type: "chooseWriteoffReason"; id: string }
+  | { type: "invalidateWriteoffReason" }
   | { type: "back" }
   | {
       type: "submitted";
@@ -262,6 +263,19 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
         ...state.session,
         cart: { ...state.session.cart, writeoffReasonId: action.id },
       });
+    case "invalidateWriteoffReason":
+      if (
+        (state.screen !== "reason" && state.screen !== "confirmation") ||
+        state.session.cart.reason !== "writeoff"
+      )
+        return state;
+      return {
+        screen: "reason",
+        session: {
+          ...state.session,
+          cart: { ...state.session.cart, writeoffReasonId: null },
+        },
+      };
     case "back":
       if (!("session" in state) || state.screen === "outcome") return state;
       if (state.screen === "operation") return { screen: "cart", session: state.session };

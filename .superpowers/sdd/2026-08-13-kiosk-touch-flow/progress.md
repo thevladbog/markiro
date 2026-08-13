@@ -36,3 +36,11 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-touch-flow.md`, accepted
 - Decision: `PagedLines` is a controlled view over the existing pure pagination rules and clamps on item/page-size changes. Rows open a shared accessible modal and removal remains a reducer action only after a second confirmation. Boxes never expose members or partial quantities. The compact legacy operation controls stay only until Task 5 supplies the separate screens; scanner and canonical cart custody remain unchanged.
 - External: no browser/tablet/physical-scanner acceptance performed in this task.
 - Review fix: both Important findings addressed. Accepted appends navigate to and announce a briefly highlighted final line without moving on refusal/removal. The status strip is a fixed 61 px single row with bounded visual ellipsis and full accessible labels. Fix RED 3 failed/50 passed; focused 54/54; full kiosk 559/559; typecheck, ESLint, PWA build, Prettier and diff-check passed.
+
+### Task 5: operation, reason and confirmation screens
+
+- Status: implemented, awaiting review.
+- RED: five focused files failed for the three absent screens, collapsed app routing and absent active-reason invalidation; 24 existing assertions passed.
+- GREEN: focused 39/39; integrated Task 5/App/Cart/i18n 135/135; full kiosk 572/572; typecheck, full ESLint, PWA build, Prettier and diff-check passed.
+- Decision: cart owns scanning only and hands the canonical draft to the reducer before `continue`. Writeoff selection is available only with permission and active reasons; reason refresh is fail-closed in both reducer routing and the final submit callback. Confirmation owns a synchronous pointer lock while the shell retains its durable-submit guard. Cancel and “Не я” require explicit confirmation before clearing the session.
+- External: no browser/tablet/physical-scanner acceptance performed; outcome persistence remains Task 6.

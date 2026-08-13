@@ -2,7 +2,16 @@ import { KioskShell } from "./ui/KioskShell.js";
 import type { KioskScreen } from "./session/flow.js";
 
 export type KioskView =
-  "loading" | "pairing" | "scanner-setup" | "blocked" | "idle" | "cart" | "done";
+  | "loading"
+  | "pairing"
+  | "scanner-setup"
+  | "blocked"
+  | "idle"
+  | "cart"
+  | "operation"
+  | "reason"
+  | "confirmation"
+  | "done";
 
 export interface KioskViewInput {
   paired: boolean;
@@ -32,7 +41,7 @@ export function nextKioskView(input: KioskViewInput): KioskView {
     input.flowScreen === "reason" ||
     input.flowScreen === "confirmation"
   )
-    return "cart";
+    return input.flowScreen;
   return "idle";
 }
 

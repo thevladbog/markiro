@@ -318,6 +318,7 @@ export function Cart({
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<KioskCartLine | null>(null);
   const [newLineKey, setNewLineKey] = useState<string | null>(null);
+  const [confirmNotMe, setConfirmNotMe] = useState(false);
   const pageSize = pageSizeFor(window.innerWidth, window.innerHeight);
   const previousLines = useRef(state.lines);
   useEffect(() => {
@@ -345,7 +346,11 @@ export function Cart({
           </span>
           <span className="kiosk-cart__employee-name">{employee.fullName}</span>
         </span>
-        <button className="kiosk-control kiosk-cart__not-me" type="button" onClick={onNotMe}>
+        <button
+          className="kiosk-control kiosk-cart__not-me"
+          type="button"
+          onClick={() => setConfirmNotMe(true)}
+        >
           {t("cart.notMe")}
         </button>
       </header>
@@ -379,35 +384,6 @@ export function Cart({
               <span>{remaining === 0 ? t("cart.limitHint") : t("cart.scanTitleTarget")}</span>
               {remaining === 0 ? null : <small>{t("cart.scanHint")}</small>}
             </div>
-          </div>
-
-          <div className="kiosk-cart__legacy-operation" aria-label={t("cart.reason")}>
-            {(pickupPolicy.canWriteoff ? (["buy", "writeoff"] as const) : (["buy"] as const)).map(
-              (reason) => (
-                <button
-                  className="kiosk-control kiosk-cart__operation-button"
-                  key={reason}
-                  type="button"
-                  aria-pressed={state.reason === reason}
-                  onClick={() => dispatch({ type: "reason", reason })}
-                >
-                  {t(reason === "buy" ? "cart.reasonBuy" : "cart.reasonWriteoff")}
-                </button>
-              ),
-            )}
-            {pickupPolicy.canWriteoff && state.reason === "writeoff"
-              ? bootstrap.reasons.map((reason) => (
-                  <button
-                    className="kiosk-control kiosk-cart__reason-button"
-                    key={reason.id}
-                    type="button"
-                    aria-pressed={state.writeoffReasonId === reason.id}
-                    onClick={() => dispatch({ type: "writeoffReason", id: reason.id })}
-                  >
-                    {reason.name}
-                  </button>
-                ))
-              : null}
           </div>
         </section>
 
@@ -527,6 +503,30 @@ export function Cart({
           setSelected(null);
         }}
       />
+
+      <Modal
+        open={confirmNotMe}
+        onClose={() => setConfirmNotMe(false)}
+        closeLabel={t("flow.keepWorking")}
+        width={560}
+        title={t("cart.notMeTitle")}
+        footer={
+          <div className="kiosk-flow__dialog-actions">
+            <button
+              className="kiosk-control kiosk-flow__secondary"
+              type="button"
+              onClick={() => setConfirmNotMe(false)}
+            >
+              {t("flow.keepWorking")}
+            </button>
+            <button className="kiosk-control kiosk-flow__danger" type="button" onClick={onNotMe}>
+              {t("cart.notMeConfirm")}
+            </button>
+          </div>
+        }
+      >
+        <p className="kiosk-flow__dialog-copy">{t("cart.notMeBody")}</p>
+      </Modal>
 
       {/*
         The red stop. Its copy deliberately does NOT say «not in the catalogue»,

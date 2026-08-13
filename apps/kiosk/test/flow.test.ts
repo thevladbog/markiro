@@ -193,6 +193,23 @@ describe("kioskFlowReducer", () => {
     });
   });
 
+  it("invalidates a refreshed-away writeoff reason and returns confirmation fail-closed", () => {
+    const reason = kioskFlowReducer(at("operation"), {
+      type: "chooseOperation",
+      reason: "writeoff",
+    });
+    const selected = kioskFlowReducer(reason, {
+      type: "chooseWriteoffReason",
+      id: "removed-reason",
+    });
+    const confirmation = kioskFlowReducer(selected, { type: "continue" });
+
+    expect(kioskFlowReducer(confirmation, { type: "invalidateWriteoffReason" })).toMatchObject({
+      screen: "reason",
+      session: { cart: { reason: "writeoff", writeoffReasonId: null } },
+    });
+  });
+
   it("source-bounds reset actions", () => {
     expect(kioskFlowReducer({ screen: "login" }, { type: "finish" })).toEqual({
       screen: "login",

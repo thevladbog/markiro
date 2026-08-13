@@ -20,8 +20,11 @@ import { Blocked } from "../screens/Blocked.js";
 import { Cart } from "../screens/Cart.js";
 import { Done } from "../screens/Done.js";
 import { Idle } from "../screens/Idle.js";
+import { Confirmation } from "../screens/Confirmation.js";
+import { OperationChoice } from "../screens/OperationChoice.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
+import { WriteoffReason } from "../screens/WriteoffReason.js";
 import { bottleCount, initialCartState } from "../session/cart.js";
 import { resolveBoxScan, type BoxResolution } from "../session/box-resolution.js";
 import {
@@ -38,7 +41,6 @@ import {
   kioskFlowReducer,
   type ActiveKioskSession,
   type ConfirmedKioskFlowState,
-  type KioskFlowState,
 } from "../session/flow.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { lookupBox, readBoxRegistryMeta } from "../store/box-registry.js";
@@ -783,7 +785,10 @@ export function KioskShell(): React.JSX.Element {
       const active = confirmed.session;
       const state = active.cart;
       const cfg = configRef.current;
-      if (!cfg) return;
+      if (!cfg) {
+        dispatchFlow({ type: "submitFailed" });
+        return;
+      }
       const policy = snapshotRef.current
         ? effectivePickupPolicy(snapshotRef.current.bootstrap, active.employee.id)
         : null;
@@ -910,6 +915,19 @@ export function KioskShell(): React.JSX.Element {
     );
   }, []);
 
+  const activeReasonIds = useMemo(
+    () => new Set(snapshot?.bootstrap.reasons.map((reason) => reason.id) ?? []),
+    [snapshot],
+  );
+  useEffect(() => {
+    if (flow.screen !== "reason" && flow.screen !== "confirmation") return;
+    if (flow.session.cart.reason !== "writeoff") return;
+    const id = flow.session.cart.writeoffReasonId;
+    if (id !== null && !activeReasonIds.has(id)) {
+      dispatchFlow({ type: "invalidateWriteoffReason" });
+    }
+  }, [activeReasonIds, flow]);
+
   const view = nextKioskView({
     paired,
     cacheStale: age === "blocked",
@@ -1023,19 +1041,61 @@ export function KioskShell(): React.JSX.Element {
         onScan={subscribe}
         resolveBox={resolveCartBox}
         onSubmit={(state) => {
+          dispatchFlow({ type: "cartChanged", cart: state });
+          dispatchFlow({ type: "continue" });
+        }}
+        onNotMe={() => dispatchFlow({ type: "logoutConfirmed" })}
+      />
+    );
+  } else if (view === "operation" && session && snapshot) {
+    screen = (
+      <OperationChoice
+        writeoffAvailable={snapshot.bootstrap.reasons.length > 0}
+        onChoose={(reason) => dispatchFlow({ type: "chooseOperation", reason })}
+        onBack={() => dispatchFlow({ type: "back" })}
+        onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
+      />
+    );
+  } else if (view === "reason" && session && snapshot) {
+    screen = (
+      <WriteoffReason
+        reasons={snapshot.bootstrap.reasons}
+        selectedId={session.cart.writeoffReasonId}
+        onSelect={(id) => dispatchFlow({ type: "chooseWriteoffReason", id })}
+        onContinue={() => dispatchFlow({ type: "continue" })}
+        onBack={() => dispatchFlow({ type: "back" })}
+        onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
+      />
+    );
+  } else if (view === "confirmation" && flow.screen === "confirmation" && snapshot) {
+    const reasonName =
+      flow.session.cart.reason === "writeoff"
+        ? (snapshot.bootstrap.reasons.find(
+            (reason) => reason.id === flow.session.cart.writeoffReasonId,
+          )?.name ?? null)
+        : null;
+    screen = (
+      <Confirmation
+        cart={flow.session.cart}
+        showPrices={snapshot.bootstrap.config.showPrices}
+        reasonName={reasonName}
+        onBack={() => dispatchFlow({ type: "back" })}
+        onCancel={() => dispatchFlow({ type: "cancelConfirmed" })}
+        onConfirm={() => {
+          if (
+            flow.session.cart.reason === "writeoff" &&
+            (flow.session.cart.writeoffReasonId === null ||
+              !activeReasonIds.has(flow.session.cart.writeoffReasonId))
+          ) {
+            dispatchFlow({ type: "invalidateWriteoffReason" });
+            return;
+          }
           if (submitting.current) return;
-          const next: KioskFlowState = kioskFlowReducer(flow, {
-            type: "legacySubmit",
-            cart: state,
-          });
-          if (next.screen !== "confirmation") return;
-          dispatchFlow({ type: "legacySubmit", cart: state });
           submitting.current = true;
-          void submitCart(next).finally(() => {
+          return submitCart(flow).finally(() => {
             submitting.current = false;
           });
         }}
-        onNotMe={() => dispatchFlow({ type: "logoutConfirmed" })}
       />
     );
   } else {
@@ -1108,7 +1168,13 @@ export function KioskShell(): React.JSX.Element {
   // screens would only be reading a strip about a device that is not yet a
   // kiosk.
   const status =
-    view === "idle" || view === "cart" || view === "done" || view === "blocked" ? (
+    view === "idle" ||
+    view === "cart" ||
+    view === "operation" ||
+    view === "reason" ||
+    view === "confirmation" ||
+    view === "done" ||
+    view === "blocked" ? (
       <StatusStrip online={online} age={age} ageMs={ageMs} quarantined={quarantinedCount} />
     ) : undefined;
 

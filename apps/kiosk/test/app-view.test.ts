@@ -41,9 +41,9 @@ describe("nextKioskView", () => {
   });
 
   it.each(["operation", "reason", "confirmation"] as const)(
-    "keeps the legacy combined cart surface while the explicit flow is on %s",
+    "routes the explicit %s screen separately from the scanner cart",
     (flowScreen) => {
-      expect(nextKioskView({ ...base, flowScreen })).toBe("cart");
+      expect(nextKioskView({ ...base, flowScreen })).toBe(flowScreen);
     },
   );
 

@@ -416,9 +416,7 @@ describe("Cart", () => {
 
     expect(rows()).toHaveLength(1);
     expect(rows().join(" ")).toContain(MILK);
-    expect(screen.getByRole("button", { name: "Списание" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
     expect(submitButton().disabled).toBe(false);
   });
 
@@ -705,19 +703,12 @@ describe("Cart", () => {
     expect(rows().join("")).toContain(MILK);
   });
 
-  it("holds submit until a write-off names its sub-reason, using the bootstrap's reasons", () => {
+  it("keeps operation and writeoff-reason decisions off the scanner cart", () => {
     const { scan } = renderCart();
     scan(km(GTIN_MILK, "KYC9X7MQ"));
     expect(submitButton().disabled).toBe(false);
-
-    click("Списание");
-    expect(submitButton().disabled).toBe(true);
-
-    // The chips are the tenant's own reasons, not a hard-coded list.
-    expect(screen.getByRole("button", { name: "Подарок" })).toBeDefined();
-    click("Брак");
-
-    expect(submitButton().disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Брак" })).toBeNull();
   });
 
   it("shows no price anywhere when the kiosk is configured to hide them", () => {
@@ -754,11 +745,13 @@ describe("Cart", () => {
     expect(text).not.toContain("₽");
   });
 
-  it("hands the whole session back when the worker says it is not them", () => {
+  it("clears the session only after the worker confirms that it is not theirs", () => {
     const { onNotMe } = renderCart();
 
     click("Не я");
-
+    expect(onNotMe).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog").textContent).toContain("Это не ваш список?");
+    click("Выйти и очистить");
     expect(onNotMe).toHaveBeenCalledTimes(1);
   });
 
