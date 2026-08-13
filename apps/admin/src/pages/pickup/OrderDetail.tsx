@@ -411,8 +411,7 @@ export function OrderDetailPage() {
                     : "pages.pickup.rejections.boxCountLabel",
                   { sscc: c.sscc, count: c.bottleCount ?? 0 },
                 )}{" "}
-                —{" "}
-                {t(`pages.pickup.conflicts.reason.${c.reason}`)}
+                — {t(`pages.pickup.conflicts.reason.${c.reason}`)}
               </li>
             ))}
           </ul>

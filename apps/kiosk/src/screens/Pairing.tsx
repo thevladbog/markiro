@@ -430,6 +430,7 @@ export function Pairing({
             <Button
               className="kiosk-control kiosk-pairing__scan-button"
               variant="secondary"
+              size="floor"
               aria-pressed={awaitingScan}
               disabled={busy}
               onClick={() => setAwaitingScan(true)}

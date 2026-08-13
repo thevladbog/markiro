@@ -73,3 +73,12 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-touch-flow.md`, accepted
 - Accessibility: semantic browser snapshots retained headings/status/alerts/radiogroup labels and text beside icons; checked touch controls were at least 48 px; visible focus ring was 2 px; sampled primary/secondary text contrast measured 16.36:1 / 8.16:1.
 - Automated: focused Task 7 11/11; full kiosk 30 files / 595 tests; typecheck, full ESLint, Vite PWA build (305 modules + service worker), Prettier and diff-check passed.
 - External: no physical tablet, physical HID/Web Serial scanner, installed-PWA restart, real private logo delivery or burn-in observation was performed.
+- Review fix: independent Chromium review reproduced an internally scrolling refusal panel, a 40 px Pairing scan action and the absence of a committed browser runner. Refusal details are now capped at two safe concrete lines plus an additional-count summary with no nested scroll; Pairing uses the shared 64 px floor Button. A standalone Playwright gate drives the real App through Pairing→branded Login and checks all deterministic post-login states, both exact minima, descendant overflow, computed 48 px targets, below-minimum diagnostics, focus and reduced motion. Focused 56/56, full kiosk 597/597 and Chromium 19/19 passed; re-review is pending.
+
+### Task 8: cross-package final gates
+
+- Status: automated verification complete; physical and operational acceptance remains external.
+- Shared/package gates: domain 207/207, DB 70/70 runnable with 51 PostgreSQL tests explicitly skipped without `DATABASE_URL`, UI 143/143, admin 646/646 and kiosk 597/597. Typecheck and builds passed across domain, DB, UI, API, admin and kiosk. ESLint completed without errors; five existing admin hook-dependency warnings remain.
+- API package: 595 runnable tests passed and 749 infrastructure-dependent tests skipped. The aggregate command is not green in this checkout: nine suites require missing database/auth/platform environment or a permitted listen socket, and one provision CLI assertion timed out through the repository pnpm entry point. No shared database was migrated or mutated.
+- Browser: committed standalone Chromium matrix 19/19 at 480×800 and 800×480.
+- External: the exact physical-device/scanner/PWA/object-storage/burn-in checklist remains unchecked in `task-8-report.md`.

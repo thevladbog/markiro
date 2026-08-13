@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { KioskLayout, supportsKioskViewport } from "../src/ui/KioskLayout.js";
 import { StatusStrip } from "../src/ui/StatusStrip.js";
+import { Pairing } from "../src/screens/Pairing.js";
 
 afterEach(() => {
   cleanup();
@@ -68,6 +69,21 @@ describe("KioskLayout", () => {
       /@media \(orientation: landscape\) and \(max-height: 540px\)[\s\S]*?\.kiosk-pairing\s*{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(280px, 0\.8fr\)/,
     );
     expect(css).toMatch(/\.kiosk-pairing__details\s*{[\s\S]*?overflow:\s*hidden/);
+  });
+
+  it("uses the shared floor-sized Button contract for the pairing scan action", () => {
+    render(
+      <Pairing
+        defaultServerUrl="https://markiro.test"
+        subscribe={() => () => undefined}
+        onPaired={() => undefined}
+        onConfigureScanner={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Сканировать код" }).style.minHeight).toBe(
+      "var(--control-floor)",
+    );
   });
 
   it("keeps the worst persistent status in one fixed bounded row", () => {

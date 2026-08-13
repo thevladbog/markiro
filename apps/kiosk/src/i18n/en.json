@@ -170,8 +170,9 @@
     "reset": "Done",
     "autoReset": "The screen returns to the start in {{seconds}} seconds",
     "conflictsTitle": "{{n}} pcs were not accepted",
-    "conflictsHint": "Put those bottles aside and show them to an administrator — they did not make it into the order.",
-    "boxRejected": "Box …{{sscc}} was rejected as a whole; {{count}} bottles were not included: {{reason}}",
+    "conflictsMore": "More refusals: {{count}}",
+    "conflictsHint": "Put the bottles aside and show them to an administrator.",
+    "boxRejected": "Box …{{sscc}}: {{count}} bottles were not included — {{reason}}",
     "conflictReason": {
       "not_km": "not a marking code",
       "incomplete": "the code was read only partly",
@@ -188,7 +189,7 @@
       "box_contents_changed": "the box contents changed",
       "mixed_product_box": "the box contains different products",
       "duplicate": "the box is already in another order",
-      "over_limit": "the whole box exceeds the daily limit",
+      "over_limit": "the daily limit was exceeded",
       "other": "the box was not accepted — ask the administrator why"
     }
   },

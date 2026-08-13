@@ -215,6 +215,14 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
     : cart.lines.reduce((sum, line) => sum + line.bottleCount, 0);
   const conflicts = result?.conflicts ?? [];
   const boxConflicts = result?.boxConflicts ?? [];
+  const visibleConflicts = [
+    ...conflicts.map((value) => ({ kind: "km", value }) as const),
+    ...boxConflicts.map((value) => ({ kind: "box", value }) as const),
+  ].slice(0, 2);
+  const hiddenConflictCount = Math.max(
+    0,
+    conflicts.length + boxConflicts.length - visibleConflicts.length,
+  );
   const refusedCount =
     conflicts.length + boxConflicts.reduce((sum, conflict) => sum + (conflict.bottleCount ?? 1), 0);
 
@@ -385,27 +393,30 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
               color: "var(--fg-2)",
             }}
           >
-            {conflicts.map((item, index) => (
-              // The index is part of the key because the same code can legally
-              // appear twice in one submission (that is what `duplicate`
-              // means), so `rawKm` alone is not unique. Nothing here reorders,
-              // so an index key is stable for this list's whole lifetime.
-              <li key={`${item.rawKm}-${item.reason}-${index}`}>
-                {t(CONFLICT_REASON[item.reason] ?? UNRECOGNISED_REASON)}
-              </li>
-            ))}
-            {boxConflicts.map((box, index) => (
-              <li key={`${box.sscc}-${box.reason}-${index}`}>
-                {t("done.boxRejected", {
-                  sscc: box.sscc.slice(-6),
-                  count: box.bottleCount ?? 1,
-                  reason: t(BOX_CONFLICT_REASON[box.reason] ?? "done.boxConflictReason.other", {
-                    n: box.bottleCount ?? 1,
-                  }),
-                })}
-              </li>
-            ))}
+            {visibleConflicts.map((conflict, index) =>
+              conflict.kind === "km" ? (
+                <li key={`km-${conflict.value.reason}-${index}`}>
+                  {t(CONFLICT_REASON[conflict.value.reason] ?? UNRECOGNISED_REASON)}
+                </li>
+              ) : (
+                <li key={`box-${conflict.value.sscc}-${conflict.value.reason}-${index}`}>
+                  {t("done.boxRejected", {
+                    sscc: conflict.value.sscc.slice(-6),
+                    count: conflict.value.bottleCount ?? 1,
+                    reason: t(
+                      BOX_CONFLICT_REASON[conflict.value.reason] ?? "done.boxConflictReason.other",
+                      { n: conflict.value.bottleCount ?? 1 },
+                    ),
+                  })}
+                </li>
+              ),
+            )}
           </ul>
+          {hiddenConflictCount > 0 ? (
+            <span className="kiosk-done__conflicts-more">
+              {t("done.conflictsMore", { count: hiddenConflictCount })}
+            </span>
+          ) : null}
           <span style={{ font: "400 17px/24px var(--font-ui)", color: "var(--fg-2)" }}>
             {t("done.conflictsHint")}
           </span>

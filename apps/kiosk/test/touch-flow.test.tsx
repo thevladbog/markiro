@@ -76,4 +76,35 @@ describe("touch-flow acceptance contracts", () => {
       /@media \(orientation: landscape\) and \(max-height: 540px\)[\s\S]*?\.kiosk-done\s*>\s*svg\s*{[\s\S]*?height:\s*40px/,
     );
   });
+
+  it("bounds refusal details without a nested scroll region", () => {
+    render(
+      <Done
+        result={{
+          orderNo: "ORD-26-42",
+          status: "pending",
+          itemCount: 1,
+          conflicts: [
+            { rawKm: "raw-1", reason: "duplicate" },
+            { rawKm: "raw-2", reason: "over_limit" },
+            { rawKm: "raw-3", reason: "not_allowed" },
+          ],
+          boxConflicts: [],
+          acceptedBoxes: [],
+        }}
+        cart={{ reason: "buy", lines: [] }}
+        showPrices={false}
+        onReset={vi.fn()}
+      />,
+    );
+
+    const alert = screen.getByRole("alert");
+    expect(alert.querySelectorAll("li")).toHaveLength(2);
+    expect(alert.textContent).toContain("Ещё отказов: 1");
+
+    const css = readFileSync(`${process.cwd()}/src/kiosk.css`, "utf8");
+    const conflictRule = css.match(/\.kiosk-done__conflicts\s*{([^}]*)}/)?.[1];
+    expect(conflictRule).toContain("overflow: hidden");
+    expect(conflictRule).not.toContain("overflow-y: auto");
+  });
 });

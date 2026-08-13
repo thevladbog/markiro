@@ -671,7 +671,13 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 4, badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }], createdAt: "not-a-date" })
+      .send({
+        deviceSeq: 4,
+        badgeCode,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+        createdAt: "not-a-date",
+      })
       .expect(400);
   });
 
@@ -705,7 +711,13 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
         .set("x-kiosk-capabilities", capability)
-        .send({ badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }], createdAt: createdAt.toISOString(), ...body });
+        .send({
+          badgeCode,
+          reason: "buy",
+          items: [{ rawKm: "not-a-km" }],
+          createdAt: createdAt.toISOString(),
+          ...body,
+        });
 
     const audit = vi.spyOn(Logger.prototype, "warn");
     try {
@@ -963,7 +975,12 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/order-admissions")
       .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 128, badgeCode: volumeBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
+      .send({
+        deviceSeq: 128,
+        badgeCode: volumeBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(409);
     const outstanding = await db
       .select({ deviceSeq: schema.kioskOrderAdmissions.deviceSeq })
@@ -1093,7 +1110,12 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       startsAt: new Date(Date.now() - 60_000),
       endsAt: new Date(Date.now() + 86_400_000),
     });
-    const content = { deviceSeq: 1, badgeCode, reason: "buy" as const, items: [{ rawKm: "not-a-km" }] };
+    const content = {
+      deviceSeq: 1,
+      badgeCode,
+      reason: "buy" as const,
+      items: [{ rawKm: "not-a-km" }],
+    };
     const created = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)

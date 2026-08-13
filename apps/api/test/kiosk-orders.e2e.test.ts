@@ -290,7 +290,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 13, badgeCode: revokedBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
+      .send({
+        deviceSeq: 13,
+        badgeCode: revokedBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(422);
   });
 
@@ -311,7 +316,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 11, badgeCode: archivedBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
+      .send({
+        deviceSeq: 11,
+        badgeCode: archivedBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(201);
 
     await db
@@ -324,7 +334,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 12, badgeCode: archivedBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
+      .send({
+        deviceSeq: 12,
+        badgeCode: archivedBadge,
+        reason: "buy",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(422);
   });
 
@@ -549,7 +564,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     const missing = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", TOKEN)
-      .send({ deviceSeq: 4, badgeCode: writeoffBadge, reason: "writeoff", items: [{ rawKm: "not-a-km" }] })
+      .send({
+        deviceSeq: 4,
+        badgeCode: writeoffBadge,
+        reason: "writeoff",
+        items: [{ rawKm: "not-a-km" }],
+      })
       .expect(400);
     expect(missing.body.message).toBeDefined();
 
@@ -1038,7 +1058,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       const response = await request(app!.getHttpServer())
         .post("/kiosk/orders")
         .set("x-kiosk-token", TOKEN)
-        .send({ deviceSeq: 42, badgeCode: missingBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
+        .send({
+          deviceSeq: 42,
+          badgeCode: missingBadge,
+          reason: "buy",
+          items: [{ rawKm: "not-a-km" }],
+        })
         .expect(500);
       expect(response.body.message).toBe("Employee pickup policy is not configured");
     } finally {
@@ -1322,7 +1347,12 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .set({ deviceTokenHash: hashDeviceToken(revokedToken) })
       .where(eq(schema.kiosks.id, revokedKioskId));
 
-    const order = { deviceSeq: 14, badgeCode: BADGE, reason: "buy", items: [{ rawKm: "not-a-km" }] };
+    const order = {
+      deviceSeq: 14,
+      badgeCode: BADGE,
+      reason: "buy",
+      items: [{ rawKm: "not-a-km" }],
+    };
 
     // Same route, same body: only the reason for the refusal differs.
     const badDevice = await request(app!.getHttpServer())

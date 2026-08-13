@@ -24,9 +24,14 @@ export const createOrderItemSchema = z.object({
 });
 export type CreateOrderItemInput = z.infer<typeof createOrderItemSchema>;
 
-export const createOrderBoxSchema = z.object({
-  sscc: z.string().regex(/^\d{18}$/).refine(isValidSscc, "Invalid SSCC check digit"),
-}).strict();
+export const createOrderBoxSchema = z
+  .object({
+    sscc: z
+      .string()
+      .regex(/^\d{18}$/)
+      .refine(isValidSscc, "Invalid SSCC check digit"),
+  })
+  .strict();
 export type CreateOrderBoxInput = z.infer<typeof createOrderBoxSchema>;
 
 /** PostgreSQL `integer` upper bound for the durable kiosk idempotency key. */

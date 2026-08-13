@@ -107,9 +107,9 @@ describe("kiosk box registry OpenAPI contract", () => {
       );
       const boxItems = properties.boxes?.items as Record<string, unknown> | undefined;
       if (!boxItems) throw new Error("missing boxes item schema");
-      expect(
-        boxItems.properties as Record<string, unknown>,
-      ).toEqual({ sscc: { type: "string", pattern: "^[0-9]{18}$" } });
+      expect(boxItems.properties as Record<string, unknown>).toEqual({
+        sscc: { type: "string", pattern: "^[0-9]{18}$" },
+      });
       expect(boxItems.additionalProperties).toBe(false);
       expect(JSON.stringify(responses["201"])).toContain("unknown_box");
       expect(JSON.stringify(responses["422"])).toContain("order_rejected");
