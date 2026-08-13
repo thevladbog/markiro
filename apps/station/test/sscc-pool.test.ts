@@ -19,6 +19,38 @@ describe("sscc pool", () => {
     expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBeNull();
   });
 
+  it("skips unused serial zero in a legacy box block", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 0,
+      toSerial: 3,
+      consumedThroughSerial: null,
+    });
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(1);
+  });
+
+  it("keeps a server-known consumed cursor ahead of the box minimum", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 0,
+      toSerial: 9,
+      consumedThroughSerial: 4,
+    });
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(5);
+  });
+
+  it("does not apply the box minimum to another extension digit", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 1,
+      fromSerial: 0,
+      toSerial: 2,
+    });
+    expect(await burnSerial(exec, ISSUER_PREFIX, 1)).toBe(0);
+  });
+
   it("burns serials in ascending order", async () => {
     await addRange(exec, {
       issuerPrefix: ISSUER_PREFIX,
@@ -152,7 +184,6 @@ describe("sscc pool", () => {
     it("recovers a device that lost its local database entirely, without reissuing already-consumed serials", async () => {
       const full = { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 0, toSerial: 9 };
       await addRange(exec, full);
-      expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(0);
       expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(1);
       expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2);
 
@@ -176,7 +207,8 @@ describe("sscc pool", () => {
         if (serial === null) break;
         seen.push(serial);
       }
-      // Never 0, 1 or 2 again -- those are already on printed labels.
+      // Never 1 or 2 again -- those are already on printed labels. Serial 0
+      // remains unused under the box allocation policy.
       expect(seen).toEqual([3, 4, 5, 6, 7, 8, 9]);
       expect(new Set(seen).size).toBe(seen.length);
     });
@@ -184,14 +216,13 @@ describe("sscc pool", () => {
     it("fast-forwards a stale but still-present local cursor instead of leaving it regressed", async () => {
       const full = { issuerPrefix: ISSUER_PREFIX, extensionDigit: 0, fromSerial: 0, toSerial: 9 };
       await addRange(exec, full);
-      expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(0);
       expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(1);
       expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2);
 
       // The device's local database is restored from a stale snapshot (a
       // crash recovery, a restored backup) that still holds this exact row
-      // but has forgotten the three burns above -- next_serial regresses to
-      // fromSerial even though serials 0-2 are already on printed labels.
+      // but has forgotten the two burns above -- next_serial regresses to
+      // fromSerial even though serials 1-2 are already on printed labels.
       await exec.run(
         "UPDATE sscc_pool SET next_serial = ? WHERE issuer_prefix = ? AND extension_digit = ? AND from_serial = ?",
         [full.fromSerial, full.issuerPrefix, full.extensionDigit, full.fromSerial],

@@ -31,7 +31,7 @@ const COUNTERPARTY_GLN = "4609876543008";
 // "460123400" -- the same example the correction's own background uses: one
 // GS1 member holding two GLNs (e.g. two locations) that differ only in the
 // digits after the prefix. Two counters keyed on the full GLN would each
-// hand out serial 0 independently and buildSscc would turn both into the
+// hand out serial 1 independently and buildSscc would turn both into the
 // SAME SSCC -- the exact collision the prefix-keyed counter prevents.
 const SHARED_PREFIX = "460123400";
 const GLN_SHARING_PREFIX_A = "4601234000017";
@@ -146,6 +146,16 @@ describe.skipIf(!ready)("sscc e2e", () => {
     expect(new Set(blocks.map((b) => b.fromSerial)).size).toBe(8);
   });
 
+  it("starts a fresh box range at serial one", async () => {
+    const deviceId = await registerDevice("First serial device");
+    const block = await app!.get(SsccService).allocate(tenantId, "555555555", 0, deviceId, 3);
+
+    expect(block).toMatchObject({ fromSerial: 1, toSerial: 3 });
+    const sscc = buildSscc(0, "555555555", block.fromSerial);
+    expect(sscc).toHaveLength(18);
+    expect(sscc.slice(10, 17)).toBe("0000001");
+  });
+
   it("continues from the seeded starting serial", async () => {
     const prefix = "222222222";
     const deviceId = await registerDevice("Seeded-counter device");
@@ -198,8 +208,8 @@ describe.skipIf(!ready)("sscc e2e", () => {
     const blockA = await svc.allocate(tenantId, prefixA, 0, deviceA, 50);
     const blockB = await svc.allocate(tenantId, prefixB, 0, deviceB, 50);
     // Contiguous ranges prove ONE shared counter advanced twice, rather than
-    // two independent counters (keyed on the full GLN) each starting at 0 --
-    // the bug this correction fixes, which would make blockB.fromSerial 0
+    // two independent counters (keyed on the full GLN) each starting at 1 --
+    // the bug this correction fixes, which would make blockB.fromSerial 1
     // instead of continuing from blockA's range.
     expect(blockB.fromSerial).toBe(blockA.toSerial + 1);
   });
@@ -418,12 +428,21 @@ describe.skipIf(!ready)("sscc e2e", () => {
 
     it("reports a consumed cursor of 0 as itself, not as 'nothing consumed yet' (Task 10 fix)", async () => {
       const svc = app!.get(SsccService);
-      // A brand-new prefix, never allocated under before in this file, so
-      // this device's very first block starts at serial 0 -- the one value
-      // where "== null" (correct) and a falsy check (the regression this
-      // guards) diverge: 0 is falsy but not null/undefined.
+      // Historical blocks beginning at zero remain valid even though fresh
+      // box allocation now starts at one. Seed one directly so this test
+      // still covers the one cursor value where "== null" (correct) and a
+      // falsy check (the regression this guards) diverge: 0 is falsy but not
+      // null/undefined.
       const prefix = "700000005";
       const deviceId = await registerDevice("Remainder device D");
+      await db.insert(schema.ssccBlocks).values({
+        tenantId,
+        issuerPrefix: prefix,
+        extensionDigit: 0,
+        deviceId,
+        fromSerial: 0,
+        toSerial: 19,
+      });
 
       const first = await svc.allocateForBundle(tenantId, prefix, 0, deviceId, 20);
       expect(first.fromSerial).toBe(0);

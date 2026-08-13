@@ -39,6 +39,10 @@ describe("platform schema", () => {
     );
   });
 
+  it("defaults a fresh sscc counter to serial one", () => {
+    expect(ssccCounters.nextSerial.default).toBe(1);
+  });
+
   it("gives boxes a tenant-unique sscc", () => {
     const cols = Object.keys(boxes);
     expect(cols).toEqual(
