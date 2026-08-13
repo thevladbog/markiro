@@ -94,6 +94,16 @@
       "duplicate": "duplicate — the code is already in another order",
       "over_limit": "the daily limit was exceeded",
       "other": "the code was not accepted — ask the administrator why"
+    },
+    "boxConflictReason": {
+      "unknown_box": "the box is not in the registry",
+      "box_not_closed": "the box has not been closed",
+      "box_disassembled": "the box was disassembled",
+      "box_contents_changed": "the box contents changed",
+      "mixed_product_box": "the box contains different products",
+      "duplicate": "the box is already in another order",
+      "over_limit": "the whole box exceeds the daily limit",
+      "other": "the box was not accepted — ask the administrator why"
     }
   },
   "blocked": {

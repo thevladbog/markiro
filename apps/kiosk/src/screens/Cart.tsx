@@ -53,6 +53,8 @@ export interface CartProps {
    * screen prints is a courtesy and `POST /kiosk/orders` remains the authority.
    */
   alreadyTakenToday: number;
+  /** Canonical session draft restored after navigation or a failed durable submit. */
+  initialState?: CartState;
   /**
    * Subscribes `cb` to the device's scans and MAY return a teardown, which
    * this screen calls on unmount — same contract as `Idle`, and called
@@ -160,6 +162,7 @@ export function Cart({
   employee,
   bootstrap,
   alreadyTakenToday,
+  initialState = initialCartState,
   onScan,
   resolveBox,
   onSubmit,
@@ -184,7 +187,7 @@ export function Cart({
     (state: CartState, action: CartAction) => cartReducer(state, action, cartContext),
     [cartContext],
   );
-  const [state, dispatch] = useReducer(reduce, initialCartState);
+  const [state, dispatch] = useReducer(reduce, initialState);
   const pickupPolicy = cartPickupPolicy(cartContext);
 
   // A refresh may revoke writeoff while this cart is already open. Normalize
@@ -217,6 +220,7 @@ export function Cart({
   const subscribe = useRef(onScan);
   const resolveScannedBox = useRef(resolveBox);
   const scanChain = useRef<Promise<void> | null>(null);
+  const resolverFailureLogged = useRef(false);
   const mounted = useRef(true);
   useEffect(() => {
     mounted.current = true;
@@ -228,9 +232,27 @@ export function Cart({
           dispatch({ type: "scan", scan: classified });
           return;
         }
-        const resolution = resolveScannedBox.current
-          ? await resolveScannedBox.current(classified.sscc)
-          : { kind: "rejected" as const, notice: "registry-unavailable" as const };
+        let resolution:
+          | { kind: "resolved"; box: BoxLine }
+          | {
+              kind: "rejected";
+              notice: "unknown-box" | "registry-unavailable" | "registry-blocked";
+            };
+        try {
+          resolution = resolveScannedBox.current
+            ? await resolveScannedBox.current(classified.sscc)
+            : { kind: "rejected", notice: "registry-unavailable" };
+        } catch (error) {
+          // One corrupt/unreadable IndexedDB lookup must not poison the promise
+          // tail and silently disable every later scan. Log once per mounted
+          // session to avoid flooding an unattended kiosk, and convert the
+          // failure to the same actionable notice as an unavailable registry.
+          if (!resolverFailureLogged.current) {
+            resolverFailureLogged.current = true;
+            console.error("kiosk: the local box registry could not be read", error);
+          }
+          resolution = { kind: "rejected", notice: "registry-unavailable" };
+        }
         if (!mounted.current) return;
         dispatch(
           resolution.kind === "resolved"

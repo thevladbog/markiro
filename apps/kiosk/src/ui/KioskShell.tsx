@@ -22,7 +22,7 @@ import { Done } from "../screens/Done.js";
 import { Idle } from "../screens/Idle.js";
 import { Pairing } from "../screens/Pairing.js";
 import { ScannerSetup } from "../screens/ScannerSetup.js";
-import { bottleCount, initialCartState, type CartState } from "../session/cart.js";
+import { bottleCount, initialCartState } from "../session/cart.js";
 import { resolveBoxScan, type BoxResolution } from "../session/box-resolution.js";
 import {
   countTakenToday,
@@ -34,11 +34,11 @@ import {
 import {
   createConfirmedOrderBody,
   initialKioskFlowState,
+  kioskOutcomeOf,
   kioskFlowReducer,
   type ActiveKioskSession,
   type ConfirmedKioskFlowState,
   type KioskFlowState,
-  type KioskOutcome,
 } from "../session/flow.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import { lookupBox, readBoxRegistryMeta } from "../store/box-registry.js";
@@ -68,7 +68,6 @@ import {
   type CacheAge,
 } from "../sync/worker.js";
 import { KioskLayout } from "./KioskLayout.js";
-import { totalKopecks } from "../screens/money.js";
 import { StatusStrip } from "./StatusStrip.js";
 
 /** Matches the dev proxy in `vite.config.ts`; an on-prem install overrides it
@@ -86,40 +85,6 @@ const now = (): Date => new Date();
  * what the server files the order under, and is never sent. The DIGEST rather
  * than the scanned code: the order it goes into is persisted before it is sent
  * (see `CreateOrderDto` in ../api/types.ts). */
-function outcomeOf(
-  deviceSeq: number,
-  result: CreateOrderResultDto | null,
-  cart: CartState,
-): KioskOutcome {
-  if (!result) return { kind: "queued", deviceSeq, bottleCount: bottleCount(cart) };
-  if (result.orderNo === "") {
-    return {
-      kind: "rejected",
-      title: "Order rejected",
-      message: "The server rejected every line",
-      bottleCount: bottleCount(cart),
-    };
-  }
-  if (result.conflicts.length > 0 || (result.boxConflicts?.length ?? 0) > 0) {
-    const rejected = new Set(result.conflicts.map((conflict) => conflict.rawKm));
-    const rejectedBoxes = new Set((result.boxConflicts ?? []).map((conflict) => conflict.sscc));
-    return {
-      kind: "partial",
-      orderNo: result.orderNo,
-      acceptedBottleCount: result.itemCount,
-      rejectedLines: cart.lines.filter((line) =>
-        line.kind === "km" ? rejected.has(line.rawKm) : rejectedBoxes.has(line.sscc),
-      ),
-    };
-  }
-  return {
-    kind: "accepted",
-    orderNo: result.orderNo,
-    bottleCount: result.itemCount,
-    totalKopecks: totalKopecks(cart.lines),
-  };
-}
-
 /**
  * Recovers the transport a previous session settled on.
  *
@@ -882,7 +847,7 @@ export function KioskShell(): React.JSX.Element {
           type: "submitted",
           deviceSeq,
           result,
-          outcome: outcomeOf(deviceSeq, result, state),
+          outcome: kioskOutcomeOf(deviceSeq, result, state),
         });
       } catch (err) {
         // The store refused. Nothing was promised, so the worker stays on their
@@ -1054,6 +1019,7 @@ export function KioskShell(): React.JSX.Element {
         //
         // Zero until the read lands (and if it fails), for the same reason.
         alreadyTakenToday={takenToday?.sessionId === session.id ? takenToday.count : 0}
+        initialState={session.cart}
         onScan={subscribe}
         resolveBox={resolveCartBox}
         onSubmit={(state) => {

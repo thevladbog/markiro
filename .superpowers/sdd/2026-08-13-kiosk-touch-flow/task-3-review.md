@@ -2,7 +2,25 @@
 
 ## Verdict
 
-**Changes requested.** No Critical findings; three Important findings remain.
+**Approved after fixes.** No Critical findings; all three Important findings were
+resolved in the Task 3 follow-up.
+
+## Disposition
+
+- `Done` now derives its result state from the same canonical outcome helper as
+  the shell, includes loose and box conflicts, and calculates a displayed total
+  only from server-confirmed loose items and accepted boxes. The calculation
+  uses each accepted box's server bottle count and its scan-time unit price; if
+  the response cannot reconcile to the authoritative accepted bottle count, the
+  total is intentionally unknown rather than overstated. Box members remain
+  private.
+- `Cart` is seeded from `flow.session.cart` when remounted after a local
+  persistence failure. The exact mixed lines and reason survive, and retry
+  creates the same loose-item and box wire body without resetting the scanner or
+  employee session.
+- Every queued box resolution now recovers its promise tail after a resolver
+  failure, reports a bounded registry-unavailable notice, and continues to
+  serialize later KM and SSCC scans. Unmount still prevents a stale dispatch.
 
 ## Findings
 
@@ -45,10 +63,12 @@ first resolver rejects and a later KM/SSCC is still processed in order.
 
 ## Checks performed
 
-- Focused mixed/integration suites: 9 files, 261 tests passed.
+- Follow-up focused screen/integration suites: 4 files, 142 tests passed.
+- Full kiosk suite: 25 files, 549 tests passed.
 - Kiosk TypeScript `--noEmit`: passed.
-- `git diff --check 67c27470^ 67c27470`: passed.
-- Review was read-only for production code.
+- Full kiosk ESLint: passed.
+- Vite PWA production build: passed.
+- Changed-file Prettier and `git diff --check`: passed.
 
 ## Notes
 

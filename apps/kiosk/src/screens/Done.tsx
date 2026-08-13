@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import type { CreateOrderResultDto, OrderConflict } from "../api/types.js";
+import type { BoxConflictReason, CreateOrderResultDto, OrderConflict } from "../api/types.js";
 import type { CartState } from "../session/cart.js";
-import { formatMoney, moneyFormat, totalKopecks, UNPRICED } from "./money.js";
+import { acceptedTotalKopecks, kioskOutcomeOf } from "../session/flow.js";
+import { formatMoney, moneyFormat, UNPRICED } from "./money.js";
 
 /**
  * How long the confirmation stands before the kiosk returns to the idle
@@ -95,6 +96,16 @@ const CONFLICT_REASON: Record<OrderConflict["reason"], string> = {
   over_limit: "done.conflictReason.over_limit",
 };
 
+const BOX_CONFLICT_REASON: Record<BoxConflictReason, string> = {
+  unknown_box: "done.boxConflictReason.unknown_box",
+  box_not_closed: "done.boxConflictReason.box_not_closed",
+  box_disassembled: "done.boxConflictReason.box_disassembled",
+  box_contents_changed: "done.boxConflictReason.box_contents_changed",
+  mixed_product_box: "done.boxConflictReason.mixed_product_box",
+  duplicate: "done.boxConflictReason.duplicate",
+  over_limit: "done.boxConflictReason.over_limit",
+};
+
 /**
  * The confirmation the worker reads before walking away, and the only place
  * the kiosk ever tells them what the server made of their order.
@@ -175,6 +186,8 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
   // not a number it forgot to send.
   const orderNo = result && result.orderNo !== "" ? result.orderNo : null;
   const refused = result !== null && orderNo === null;
+  const outcome = kioskOutcomeOf(0, result, { ...cart, writeoffReasonId: null, notice: null });
+  const partial = outcome.kind === "partial";
   // With a result this is the server's ACCEPTED count (`remaining.length`
   // server-side); offline it is what the worker scanned. Both are honest
   // answers to «how much is in this order», which is what the chip asks.
@@ -182,6 +195,9 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
     ? result.itemCount
     : cart.lines.reduce((sum, line) => sum + line.bottleCount, 0);
   const conflicts = result?.conflicts ?? [];
+  const boxConflicts = result?.boxConflicts ?? [];
+  const refusedCount =
+    conflicts.length + boxConflicts.reduce((sum, conflict) => sum + (conflict.bottleCount ?? 1), 0);
 
   const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
   /**
@@ -202,7 +218,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
    * Offline (`result === null`) there are no conflicts to know about yet, and
    * the cart IS the order — so the sum is exactly what the worker handed over.
    */
-  const total = conflicts.length > 0 ? null : totalKopecks(cart.lines);
+  const total = acceptedTotalKopecks(result, cart);
 
   // «Покупка · 3 шт · 269,70 ₽» — design 2026-07-24 §8.3's «сводка (причина ·
   // штук · сумма)». The money half is simply absent, not blanked, on a kiosk
@@ -222,13 +238,13 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         height="104"
         viewBox="0 0 24 24"
         fill="none"
-        stroke={refused ? "var(--warn-fg)" : "var(--ok-solid)"}
+        stroke={refused || partial ? "var(--warn-fg)" : "var(--ok-solid)"}
         strokeWidth="2"
         aria-hidden="true"
         focusable="false"
       >
         <rect x="2" y="2" width="20" height="20" />
-        {refused ? <path d="M12 7v6M12 16.5v.5" /> : <path d="M7 12.5l3.5 3.5L17 8.5" />}
+        {refused || partial ? <path d="M12 7v6M12 16.5v.5" /> : <path d="M7 12.5l3.5 3.5L17 8.5" />}
       </svg>
 
       <div
@@ -303,7 +319,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         </span>
       ) : null}
 
-      {conflicts.length > 0 ? (
+      {refusedCount > 0 ? (
         // `role="alert"`, like `Cart`'s banner: this is the one thing on the
         // screen the worker must not walk past.
         <div
@@ -323,7 +339,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
           }}
         >
           <span style={{ font: "700 22px/28px var(--font-ui)", color: "var(--warn-fg)" }}>
-            {t("done.conflictsTitle", { n: conflicts.length })}
+            {t("done.conflictsTitle", { n: refusedCount })}
           </span>
           <ul
             style={{
@@ -341,6 +357,13 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
               // so an index key is stable for this list's whole lifetime.
               <li key={`${item.rawKm}-${item.reason}-${index}`}>
                 {t(CONFLICT_REASON[item.reason] ?? UNRECOGNISED_REASON)}
+              </li>
+            ))}
+            {boxConflicts.map((box, index) => (
+              <li key={`${box.sscc}-${box.reason}-${index}`}>
+                {t(BOX_CONFLICT_REASON[box.reason] ?? "done.boxConflictReason.other", {
+                  n: box.bottleCount ?? 1,
+                })}
               </li>
             ))}
           </ul>

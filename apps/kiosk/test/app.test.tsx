@@ -23,6 +23,7 @@ import {
 } from "../src/store/config.js";
 import { appendJournal, type JournalEntry } from "../src/store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
+import { activateBoxRegistryPage, beginBoxRegistryStage } from "../src/store/box-registry.js";
 import { REFRESH_INTERVAL_MS, RETRY_MAX_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
 
 afterEach(cleanup);
@@ -112,6 +113,8 @@ const GS = String.fromCharCode(0x1d);
 const GTIN_MILK = "04600682000013";
 const MILK = "Молоко 3,2%";
 const KM = `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`;
+const SSCC = "346006820000000021";
+const BOX_PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
 const EMPLOYEE = { id: "e1", fullName: "Смирнов Алексей" };
 
 const IDLE_TITLE = "Отсканируйте пропуск";
@@ -169,6 +172,7 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
     reasons: [{ id: "r-defect", name: "Брак" }],
     products: [
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
+      { id: BOX_PRODUCT_ID, gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
     ],
     employees: [
       {
@@ -354,7 +358,34 @@ const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
  */
 async function pair(generatedAt = NOW.toISOString(), over: Partial<KioskConfig> = {}) {
   await replaceSnapshot(bootstrapAt(generatedAt), new Date(generatedAt));
-  await writeConfig(config(over));
+  return writeConfig(config(over));
+}
+
+async function seedBoxRegistry(): Promise<void> {
+  const stored = await pair();
+  const cut = {
+    binding: { serverUrl: stored.serverUrl, kioskId: stored.kioskId! },
+    credentialGeneration: stored.credentialGeneration!,
+    owner: "app-test",
+    since: null,
+    until: "1",
+  };
+  await beginBoxRegistryStage(cut);
+  await activateBoxRegistryPage(
+    cut,
+    [
+      {
+        kind: "upsert",
+        boxId: "11111111-1111-4111-8111-111111111111",
+        sscc: SSCC,
+        productId: BOX_PRODUCT_ID,
+        bottleCount: 2,
+        contentKeys: ["box-member-a", "box-member-b"],
+        updatedAt: NOW.toISOString(),
+      },
+    ],
+    NOW.toISOString(),
+  );
 }
 
 const queuedOrder = (deviceSeq: number): CreateOrderDto => ({
@@ -1334,8 +1365,8 @@ describe("KioskShell", () => {
    * numbers to be monotonic, not dense. That asymmetry is the entire reason the
    * counter is written before the order, and it is what this test pins.
    */
-  it("never files two orders under one device sequence when the counter write fails", async () => {
-    await pair();
+  it("keeps the exact cart visible and retryable when the counter write fails", async () => {
+    await seedBoxRegistry();
     render(<App />);
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 
@@ -1344,28 +1375,34 @@ describe("KioskShell", () => {
     const refused = vi
       .spyOn(configStore, "writeConfig")
       .mockRejectedValueOnce(new Error("the config store refused the write"));
-    await takeOneBottle();
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    scan(SSCC);
+    scan(KM);
+    await settle(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+    });
     await settle(() => expect(refused).toHaveBeenCalled());
     await act(async () => {});
-    // Nothing was promised: no number, no confirmation, still their own cart.
+    // Nothing was promised: no number, no confirmation, still their own cart —
+    // including the exact line they can retry without rescanning.
     expect(screen.getByText(CART_TITLE)).toBeDefined();
+    expect(screen.getAllByText(MILK)).toHaveLength(2);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
     });
-    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
 
-    // Whatever DID become durable leaves on the ordinary interval, unattended.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
+    expect(server.orders).toHaveLength(1);
+    expect(server.orders[0]).toMatchObject({
+      deviceSeq: 5,
+      badgeDigest,
+      reason: "buy",
+      items: [{ rawKm: KM }],
+      boxes: [{ sscc: SSCC }],
     });
-
-    // And now the next worker takes their own bottle.
-    await takeOneBottle();
-    await settle(() => expect(said()).toContain("ORD-"));
-
-    const seqs = server.orders.map((order) => order.deviceSeq);
-    expect(seqs.length).toBeGreaterThan(0);
-    expect(new Set(seqs).size).toBe(seqs.length);
   });
 
   /**

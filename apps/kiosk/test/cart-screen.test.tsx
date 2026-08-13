@@ -143,6 +143,7 @@ interface Options {
   alreadyTakenToday?: number;
   onScan?: (cb: ScanListener) => void | (() => void);
   resolveBox?: React.ComponentProps<typeof Cart>["resolveBox"];
+  initialState?: React.ComponentProps<typeof Cart>["initialState"];
 }
 
 function renderCart(options: Options = {}) {
@@ -161,6 +162,7 @@ function renderCart(options: Options = {}) {
         })
       }
       {...(options.resolveBox ? { resolveBox: options.resolveBox } : {})}
+      {...(options.initialState ? { initialState: options.initialState } : {})}
       onSubmit={onSubmit}
       onNotMe={onNotMe}
     />,
@@ -211,6 +213,25 @@ describe("productMonogram", () => {
 });
 
 describe("Cart", () => {
+  it("restores the exact canonical mixed draft when the screen remounts after submit failure", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [twelveBottleBox()],
+        reason: "writeoff",
+        writeoffReasonId: "reason-defect",
+        notice: null,
+      },
+    });
+
+    expect(rows()).toHaveLength(1);
+    expect(rows().join(" ")).toContain(MILK);
+    expect(screen.getByRole("button", { name: "Списание" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(submitButton().disabled).toBe(false);
+  });
+
   it("shows a scanned product with its name, its code tail and its price", () => {
     const { scan } = renderCart();
 
@@ -265,6 +286,26 @@ describe("Cart", () => {
       expect(screen.getByRole("alert").textContent).toContain("реестр коробов недоступен"),
     );
     expect(rows()).toHaveLength(0);
+  });
+
+  it("recovers the serialized scan chain after one registry lookup throws", async () => {
+    const resolveBox = vi
+      .fn<NonNullable<React.ComponentProps<typeof Cart>["resolveBox"]>>()
+      .mockRejectedValueOnce(new Error("indexeddb unavailable"))
+      .mockResolvedValueOnce({ kind: "resolved", box: twelveBottleBox() });
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      resolveBox,
+    });
+
+    scan(payload("sscc", SSCC));
+    scan(km(GTIN_BREAD, "AFTERFAIL"));
+    scan(payload("sscc", SSCC));
+
+    await waitFor(() => expect(rows()).toHaveLength(2));
+    expect(rows().join(" ")).toContain(BREAD);
+    expect(rows().join(" ")).toContain(MILK);
+    expect(resolveBox).toHaveBeenCalledTimes(2);
   });
 
   /**

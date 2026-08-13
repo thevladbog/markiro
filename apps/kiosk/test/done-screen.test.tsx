@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CreateOrderResultDto, OrderConflict } from "../src/api/types.js";
+import type { BoxConflict, CreateOrderResultDto, OrderConflict } from "../src/api/types.js";
 import i18n from "../src/i18n/index.js";
 import { Blocked } from "../src/screens/Blocked.js";
 import { Done } from "../src/screens/Done.js";
+import type { CartState } from "../src/session/cart.js";
 import { StatusStrip } from "../src/ui/StatusStrip.js";
 
 afterEach(cleanup);
@@ -28,7 +29,19 @@ function resultWith(over: Partial<CreateOrderResultDto> = {}): CreateOrderResult
   return { orderNo: ORDER_NO, status: "pending", itemCount: 3, conflicts: [], ...over };
 }
 
-const conflict = (reason: OrderConflict["reason"]): OrderConflict => ({ rawKm: RAW_KM, reason });
+const conflict = (reason: OrderConflict["reason"], rawKm = RAW_KM): OrderConflict => ({
+  rawKm,
+  reason,
+});
+const SSCC = "346006820000000021";
+const boxConflict = (
+  reason: BoxConflict["reason"],
+  bottleCount: number | null = 12,
+): BoxConflict => ({
+  sscc: SSCC,
+  bottleCount,
+  reason,
+});
 
 /**
  * The cart as `Cart` handed it to `onSubmit` — the only place the reason and
@@ -57,9 +70,29 @@ function cartOf(prices: (string | null)[], reason: "buy" | "writeoff" = "buy") {
 
 const THREE_BOTTLES = ["89.90", "89.90", "89.90"];
 
+function mixedCart(): Pick<CartState, "lines" | "reason"> {
+  return {
+    reason: "buy" as const,
+    lines: [
+      cartOf(["89.90"]).lines[0]!,
+      {
+        kind: "box" as const,
+        boxId: "11111111-1111-4111-8111-111111111111",
+        sscc: SSCC,
+        productId: "p-milk",
+        name: "Молоко 3,2%",
+        bottleCount: 12,
+        unitPrice: "89.90",
+        contentKeys: ["member-secret"],
+        registryVersion: "7",
+      },
+    ],
+  };
+}
+
 function renderDone(
   result: CreateOrderResultDto | null,
-  cart = cartOf(THREE_BOTTLES),
+  cart: Pick<CartState, "lines" | "reason"> = cartOf(THREE_BOTTLES),
   showPrices = true,
 ) {
   const onReset = vi.fn();
@@ -325,6 +358,55 @@ describe("Done", () => {
 
     expect(screen.getByText("Покупка · 2 шт · —")).toBeDefined();
     expect(text()).not.toContain("269,70");
+  });
+
+  it("renders a box-only partial as partial and prices only the accepted loose bottle", () => {
+    renderDone(
+      resultWith({
+        itemCount: 1,
+        conflicts: [],
+        boxConflicts: [boxConflict("duplicate")],
+        acceptedBoxes: [],
+      }),
+      mixedCart(),
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("короб");
+    expect(screen.getByText("Покупка · 1 шт · 89,90 ₽")).toBeDefined();
+    expect(text()).not.toContain("member-secret");
+    expect(text()).not.toContain("1 168,70");
+  });
+
+  it("prices a mixed partial from the server-accepted box set", () => {
+    renderDone(
+      resultWith({
+        itemCount: 12,
+        conflicts: [conflict("duplicate", "raw-0")],
+        boxConflicts: [],
+        acceptedBoxes: [{ sscc: SSCC, bottleCount: 12 }],
+      }),
+      mixedCart(),
+    );
+
+    expect(screen.getByText("Покупка · 12 шт · 1 078,80 ₽")).toBeDefined();
+    expect(screen.getByRole("alert")).toBeDefined();
+  });
+
+  it("prices a fully accepted box and still hides all money when configured", () => {
+    const accepted = resultWith({
+      itemCount: 12,
+      conflicts: [],
+      boxConflicts: [],
+      acceptedBoxes: [{ sscc: SSCC, bottleCount: 12 }],
+    });
+    const cart = { ...mixedCart(), lines: [mixedCart().lines[1]!] };
+    const visible = renderDone(accepted, cart);
+    expect(screen.getByText("Покупка · 12 шт · 1 078,80 ₽")).toBeDefined();
+
+    visible.unmount();
+    renderDone(accepted, cart, false);
+    expect(screen.getByText("Покупка · 12 шт")).toBeDefined();
+    expect(text()).not.toContain("₽");
   });
 
   // `showPrices = false` hides money everywhere on this device, and a summary

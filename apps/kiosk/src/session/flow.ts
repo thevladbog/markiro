@@ -1,5 +1,6 @@
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
 import { boxLines, looseLines, type CartState, type KioskCartLine } from "./cart.js";
+import { toKopecks, totalKopecks } from "../screens/money.js";
 
 export type KioskScreen =
   "pairing" | "login" | "cart" | "operation" | "reason" | "confirmation" | "outcome";
@@ -77,6 +78,83 @@ export type KioskFlowAction =
   | { type: "idleReset" };
 
 export const initialKioskFlowState: KioskFlowState = Object.freeze({ screen: "pairing" });
+
+/**
+ * The one server-result interpretation used by both shell routing and the
+ * visible outcome. Prices remain the scan-time cart snapshot, while accepted
+ * membership and bottle count come only from the server response.
+ */
+export function kioskOutcomeOf(
+  deviceSeq: number,
+  result: CreateOrderResultDto | null,
+  cart: CartState,
+): KioskOutcome {
+  if (!result)
+    return {
+      kind: "queued",
+      deviceSeq,
+      bottleCount: cart.lines.reduce((n, l) => n + l.bottleCount, 0),
+    };
+  if (result.orderNo === "") {
+    return {
+      kind: "rejected",
+      title: "Order rejected",
+      message: "The server rejected every line",
+      bottleCount: cart.lines.reduce((n, l) => n + l.bottleCount, 0),
+    };
+  }
+  const rejectedLoose = new Set(result.conflicts.map((conflict) => conflict.rawKm));
+  const rejectedBoxes = new Set((result.boxConflicts ?? []).map((conflict) => conflict.sscc));
+  const hasConflicts = rejectedLoose.size > 0 || rejectedBoxes.size > 0;
+  if (hasConflicts) {
+    return {
+      kind: "partial",
+      orderNo: result.orderNo,
+      acceptedBottleCount: result.itemCount,
+      rejectedLines: cart.lines.filter((line) =>
+        line.kind === "km" ? rejectedLoose.has(line.rawKm) : rejectedBoxes.has(line.sscc),
+      ),
+    };
+  }
+  return {
+    kind: "accepted",
+    orderNo: result.orderNo,
+    bottleCount: result.itemCount,
+    totalKopecks: totalKopecks(cart.lines),
+  };
+}
+
+/** Scan-time prices filtered by the exact accepted server result. */
+export function acceptedTotalKopecks(
+  result: CreateOrderResultDto | null,
+  cart: Pick<CartState, "lines">,
+): number | null {
+  if (result === null) return totalKopecks(cart.lines);
+  if (result.orderNo === "" || result.itemCount === 0) return null;
+  const rejectedLoose = new Set(result.conflicts.map((conflict) => conflict.rawKm));
+  const acceptedBoxes = new Map(
+    (result.acceptedBoxes ?? []).map((box) => [box.sscc, box.bottleCount] as const),
+  );
+  let total = 0;
+  let acceptedCount = 0;
+  for (const line of cart.lines) {
+    const unit = line.unitPrice === null ? null : toKopecks(line.unitPrice);
+    if (unit === null) return null;
+    if (line.kind === "km") {
+      if (!rejectedLoose.has(line.rawKm)) {
+        total += unit;
+        acceptedCount += 1;
+      }
+      continue;
+    }
+    const acceptedBoxCount = acceptedBoxes.get(line.sscc);
+    if (acceptedBoxCount !== undefined) {
+      total += unit * acceptedBoxCount;
+      acceptedCount += acceptedBoxCount;
+    }
+  }
+  return acceptedCount === result.itemCount ? total : null;
+}
 
 /** Exact wire draft from the reducer-confirmed canonical session only. */
 export function createConfirmedOrderBody(

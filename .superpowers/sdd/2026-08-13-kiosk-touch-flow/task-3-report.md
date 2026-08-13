@@ -14,13 +14,35 @@ The kiosk cart now has one canonical mixed-line model for individual KM bottles 
 - The existing Cart and Done surfaces were migrated only enough to preserve current behavior: mixed totals, whole-box removal, explicit box-registry feedback and canonical submit state. The pure 5-row portrait / 3-row landscape pager is ready for Task 4; this task does not introduce the new fixed-viewport cart design.
 - Scanner Setup deliberately keeps its current generic non-KM verdict for SSCC until its later visual scope; badge/KM setup behavior and scanner lifecycle are unchanged.
 
+## Review follow-up
+
+- The shell and Done screen now share one canonical interpretation of accepted,
+  partial, rejected and queued results. Both loose and box conflicts affect the
+  outcome. Partial results cannot render as green full success.
+- Displayed money is derived only from accepted loose items and
+  `acceptedBoxes`. Box totals use the server-returned accepted bottle count and
+  the scan-time unit price. A response that cannot be reconciled to its
+  authoritative `itemCount` displays an unknown total instead of charging for
+  the submitted cart. Prices remain hidden when tenant policy disables them.
+- Local `writeConfig` or enqueue failure remounts the exact preserved mixed cart
+  and reason, so the employee can retry without rescanning or restarting the
+  scanner/session. The retry body contains only exact loose raw codes and SSCCs.
+- A rejected async registry lookup is converted into an explicit bounded
+  registry-unavailable notice. The serialized scan chain recovers to a fulfilled
+  tail, so later KM and SSCC scans continue in order without an unhandled
+  rejection; unmounted carts still suppress stale dispatches.
+
 ## TDD evidence
 
 - Initial focused RED kept 48 legacy assertions green and failed 11 new classifier/cart/flow assertions; the pagination suite could not load because the module did not exist.
 - The local resolver RED could not load because `session/box-resolution.ts` did not exist.
 - The final screen RED had two expected failures: a resolved 12-bottle box displayed `89,90 ₽` instead of `1 078,80 ₽`, and an unavailable registry produced no visible alert.
+- Review follow-up RED exposed three regressions: box-only partial outcome was
+  green/full-price, persistence failure remounted an empty cart, and a rejected
+  resolver produced an unhandled rejection that blocked later scans.
 - Focused GREEN across classifier, mixed reducer, pagination, resolver, flow, store/day-count and Cart integration passed 163/163.
-- Full kiosk suite passed 544/544. Typecheck, full ESLint, Vite PWA production build, changed-file Prettier and `git diff --check` passed.
+- Review follow-up focused screen/integration suites passed 142/142.
+- Full kiosk suite passed 549/549. Typecheck, full ESLint, Vite PWA production build, changed-file Prettier and `git diff --check` passed.
 
 ## External verification not performed
 
