@@ -27,3 +27,11 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-touch-flow.md`, accepted
 - RED: the first focused run retained 48 legacy passes and exposed 11 missing mixed-cart/classifier behaviors plus the absent pagination suite; the local registry resolver suite was also absent. A final screen RED reproduced the box row showing one unit price and a silent unavailable-registry refusal.
 - GREEN: focused mixed cart/classifier/pagination/resolver/flow/store/day-count/screen tests 163/163; full kiosk 544/544; typecheck, ESLint, PWA build, changed-file Prettier and diff-check passed.
 - Decision: `CartState.lines` is the canonical session model. SSCC resolution is a local-only async boundary before the pure reducer, uses the active Task 6 registry and trusted freshness verdict, and serializes pending SSCC scans so first-scan overlap semantics do not depend on IndexedDB timing. Box member keys remain local overlap evidence; the queue receives only loose raw KMs, canonical SSCCs and the bottle estimate. Pure pagination is delivered for Task 4 to render without introducing that visual flow early.
+
+### Task 4: fixed-viewport paged touch cart
+
+- Status: implemented, awaiting review.
+- RED: focused cart/layout/i18n had 11 expected failures with 40 existing passes for the missing 5/3 pager, row icons, dialog/atomic box removal and fixed overflow contracts.
+- GREEN: focused 51/51; full kiosk 556/556; typecheck, full `src test` ESLint, Vite PWA build, changed-file Prettier and diff-check passed.
+- Decision: `PagedLines` is a controlled view over the existing pure pagination rules and clamps on item/page-size changes. Rows open a shared accessible modal and removal remains a reducer action only after a second confirmation. Boxes never expose members or partial quantities. The compact legacy operation controls stay only until Task 5 supplies the separate screens; scanner and canonical cart custody remain unchanged.
+- External: no browser/tablet/physical-scanner acceptance performed in this task.

@@ -10,7 +10,7 @@ import i18n from "../src/i18n/index.js";
 import type { ScanListener } from "../src/scanner/source.js";
 import { Cart, orientationOf } from "../src/screens/Cart.js";
 import { productMonogram } from "../src/screens/product-monogram.js";
-import type { BoxLine } from "../src/session/cart.js";
+import type { BoxLine, LooseKmLine } from "../src/session/cart.js";
 
 afterEach(cleanup);
 
@@ -55,7 +55,7 @@ const bareBarcode = () => payload("unknown", GTIN_MILK);
 const MILK = "Молоко 3,2%";
 const BREAD = "Хлеб";
 const SCAN_PROMPT = "Поднесите бутылку";
-const SUBMIT = "Готово — передать администратору";
+const SUBMIT = "Продолжить";
 const SSCC = "346006820000000021";
 
 const twelveBottleBox = (): BoxLine => ({
@@ -69,6 +69,24 @@ const twelveBottleBox = (): BoxLine => ({
   contentKeys: Array.from({ length: 12 }, (_, index) => `member-${index + 1}`),
   registryVersion: "7",
 });
+
+const looseLine = (index: number, name = `${MILK} ${index}`): LooseKmLine => ({
+  kind: "km",
+  rawKm: `01${GTIN_MILK}21SERIAL${index}${GS}93Abcd`,
+  kmKey: `01${GTIN_MILK}21SERIAL${index}`,
+  gtin14: GTIN_MILK,
+  serial: `SERIAL${index}`,
+  productId: "p-milk",
+  name,
+  unitPrice: "89.90",
+  bottleCount: 1,
+});
+
+function setViewport(width: number, height: number): void {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: width });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: height });
+  fireEvent(window, new Event("resize"));
+}
 
 function bootstrapWith(
   config: {
@@ -213,6 +231,122 @@ describe("productMonogram", () => {
 });
 
 describe("Cart", () => {
+  it("renders five portrait lines, pages the rest, and keeps totals and CTA visible", () => {
+    setViewport(480, 800);
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: Array.from({ length: 6 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    expect(screen.getAllByRole("button", { name: /Открыть позицию/ })).toHaveLength(5);
+    expect(screen.getByText("1 / 2")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Назад" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByRole("button", { name: "Далее" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+    expect(screen.getAllByText("6 позиций · 6 бутылок")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: SUBMIT })).toBeDefined();
+
+    click("Далее");
+    expect(screen.getAllByRole("button", { name: /Открыть позицию/ })).toHaveLength(1);
+    expect(screen.getByText("2 / 2")).toBeDefined();
+    expect((screen.getByRole("button", { name: "Далее" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+  });
+
+  it("renders exactly three cart lines in landscape and clamps the page after resize", () => {
+    setViewport(480, 800);
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: Array.from({ length: 6 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+    click("Далее");
+    expect(screen.getByText("2 / 2")).toBeDefined();
+
+    setViewport(800, 480);
+    expect(screen.getAllByRole("button", { name: /Открыть позицию/ })).toHaveLength(3);
+    expect(screen.getByText("2 / 2")).toBeDefined();
+  });
+
+  it("uses explicit DataMatrix and box icons without exposing protocol abbreviations", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [looseLine(1), twelveBottleBox()],
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    expect(screen.getByLabelText("DataMatrix")).toBeDefined();
+    expect(screen.getByLabelText("Короб")).toBeDefined();
+    expect(screen.queryByText(/^ЧЗ$/)).toBeNull();
+    expect(screen.queryByText(/^SSCC$/)).toBeNull();
+    expect(screen.getByText("12 бутылок")).toBeDefined();
+  });
+
+  it("opens full box details and removes only the whole non-expandable box after confirmation", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [twelveBottleBox()],
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Открыть позицию.*12/ }));
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.textContent).toContain(MILK);
+    expect(dialog.textContent).toContain("12 бутылок");
+    expect(dialog.textContent).toContain(SSCC);
+    expect(dialog.textContent).toContain("Короб удаляется только целиком");
+    expect(dialog.textContent).not.toContain("member-1");
+    expect(screen.queryByRole("spinbutton")).toBeNull();
+
+    click("Убрать короб");
+    expect(screen.getByRole("dialog").textContent).toContain("Убрать короб целиком?");
+    expect(rows()).toHaveLength(1);
+    click("Убрать 12 бутылок");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(rows()).toHaveLength(0);
+  });
+
+  it("keeps a long name and serial visually truncatable while exposing the full detail", () => {
+    const longName = `Очень длинное название продукта ${"для проверки ".repeat(12)}`;
+    const line = { ...looseLine(1, longName), serial: `SERIAL-${"X".repeat(120)}` };
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
+      initialState: {
+        lines: [line],
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+
+    const row = screen.getByRole("button", { name: /Открыть позицию/ });
+    expect(row.getAttribute("aria-label")).toContain(longName);
+    expect(row.querySelector(".kiosk-line__name")?.getAttribute("title")).toBe(longName);
+    fireEvent.click(row);
+    expect(screen.getByRole("dialog").textContent).toContain(longName);
+    expect(screen.getByRole("dialog").textContent).toContain(line.serial);
+  });
   it("restores the exact canonical mixed draft when the screen remounts after submit failure", () => {
     renderCart({
       bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),
@@ -245,8 +379,7 @@ describe("Cart", () => {
     // is written «89,90», and a dot here is the screen contradicting both.
     expect(row).toContain("89,90 ₽");
 
-    const monogram = screen.getByText("М", { selector: ".kiosk-product-monogram" });
-    expect(monogram.getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByLabelText("DataMatrix")).toBeDefined();
   });
 
   it("adds up the prices of everything in the list", () => {

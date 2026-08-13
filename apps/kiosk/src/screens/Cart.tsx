@@ -6,6 +6,7 @@ import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
 import {
   canSubmit,
+  bottleCount,
   cartPickupPolicy,
   cartReducer,
   initialCartState,
@@ -16,11 +17,14 @@ import {
   type CartNotice,
   type CartState,
 } from "../session/cart.js";
+import { pageSizeFor } from "../session/pagination.js";
 // The money rules live beside the two screens that print money, so the cart and
 // the confirmation that summarises it cannot drift apart on a separator or a
 // rounding step.
 import { formatMoney, moneyFormat, toKopecks, totalKopecks, UNPRICED } from "./money.js";
-import { productMonogram } from "./product-monogram.js";
+import { CartLineDialog } from "../ui/CartLineDialog.js";
+import { ItemKindIcon } from "../ui/ItemKindIcon.js";
+import { PagedLines } from "../ui/PagedLines.js";
 
 export type KioskOrientation = "landscape" | "portrait";
 
@@ -303,7 +307,6 @@ export function Cart({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const portrait = orientation === "portrait";
   const limit = pickupPolicy.dayLimit;
   const showPrices = bootstrap.config.showPrices;
   const count = state.lines.length;
@@ -311,490 +314,189 @@ export function Cart({
   const total = totalKopecks(state.lines);
   const bannerKey = notice ? BANNER[notice.kind] : undefined;
   const submittable = canSubmit(state, cartContext);
-
-  const ghostButton = {
-    borderRadius: 10,
-    border: "1px solid var(--line-strong)",
-    background: "transparent",
-    color: "var(--fg-2)",
-    font: "600 18px/1 var(--font-ui)",
-  } as const;
+  const bottles = bottleCount(state);
+  const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<KioskCartLine | null>(null);
+  const pageSize = pageSizeFor(window.innerWidth, window.innerHeight);
+  const summary = t("cart.summary", {
+    positions: t("cart.positions", { count }),
+    bottles: t("cart.bottles", { count: bottles }),
+  });
 
   return (
-    <main className="kiosk-screen kiosk-cart">
-      <header
-        style={{
-          height: 76,
-          flexShrink: 0,
-          boxSizing: "border-box",
-          background: "var(--surface-card)",
-          borderBottom: "1px solid var(--line)",
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "0 24px",
-        }}
-      >
-        {/* The wordless mark from the prototype's header; the wordmark next to
-            it says everything this signals. */}
-        <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-          <rect x="4" y="4" width="56" height="56" fill="var(--surface-inverse)" />
-          <g fill="var(--surface-page)">
-            <rect x="14" y="14" width="8" height="8" />
-            <rect x="14" y="26" width="8" height="8" />
-            <rect x="14" y="38" width="8" height="8" />
-            <rect x="26" y="22" width="8" height="8" />
-            <rect x="38" y="14" width="8" height="8" />
-            <rect x="38" y="26" width="8" height="8" />
-            <rect x="38" y="38" width="8" height="8" />
-            <rect x="26" y="42" width="8" height="8" fill="var(--accent-module)" />
-          </g>
-        </svg>
-        <span style={{ font: "600 17px/1 var(--font-mono)" }}>{t("cart.logo")}</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <span
-            aria-hidden="true"
-            style={{
-              width: 44,
-              height: 44,
-              flexShrink: 0,
-              borderRadius: 10,
-              background: "var(--surface-inverse)",
-              color: "var(--fg-on-inverse)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              font: "600 17px/1 var(--font-ui)",
-            }}
-          >
+    <main className="kiosk-screen kiosk-cart" data-orientation={orientation}>
+      <header className="kiosk-cart__header">
+        <span className="kiosk-cart__wordmark">{t("cart.logo")}</span>
+        <span className="kiosk-cart__employee" title={employee.fullName}>
+          <span aria-hidden="true" className="kiosk-cart__initials">
             {initialsOf(employee.fullName)}
           </span>
-          <span
-            style={{
-              font: "600 20px/1 var(--font-ui)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {employee.fullName}
-          </span>
+          <span className="kiosk-cart__employee-name">{employee.fullName}</span>
         </span>
-        <button
-          className="kiosk-control"
-          type="button"
-          onClick={onNotMe}
-          style={{ ...ghostButton, height: 56, padding: "0 22px", flexShrink: 0 }}
-        >
+        <button className="kiosk-control kiosk-cart__not-me" type="button" onClick={onNotMe}>
           {t("cart.notMe")}
         </button>
       </header>
 
       {bannerKey ? (
-        <div
-          role="alert"
-          style={{
-            flexShrink: 0,
-            background: "var(--warn-bg)",
-            borderBottom: "1px solid var(--warn-border)",
-            color: "var(--warn-fg)",
-            padding: "14px 24px",
-            font: "600 19px/26px var(--font-ui)",
-          }}
-        >
+        <div className="kiosk-cart__banner" role="alert">
           {t(bannerKey)}
         </div>
       ) : null}
 
-      {/* Landscape puts the scan zone beside the list, portrait stacks them.
-          Flex direction only — no media queries, so the same build serves a
-          rotated kiosk without a reload. */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: portrait ? "column" : "row",
-          minHeight: 0,
-        }}
-      >
-        <div
-          style={{
-            flex: portrait ? "0 0 auto" : "1 1 0",
-            padding: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            minWidth: 0,
-            minHeight: 0,
-          }}
-        >
-          {remaining === 0 ? (
-            // REPLACES the scan zone, never covers it: a scan prompt still on
-            // screen next to an exhausted limit is an invitation the kiosk will
-            // refuse, and the worker would keep waving bottles at it.
-            <div
-              role="status"
-              style={{
-                flex: portrait ? "0 0 auto" : "1 1 0",
-                border: "2px solid var(--warn-border)",
-                borderRadius: 16,
-                background: "var(--warn-bg)",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 14,
-                padding: 24,
-                textAlign: "center",
-              }}
-            >
-              <span style={{ font: "700 28px/36px var(--font-ui)", color: "var(--warn-fg)" }}>
-                {t("cart.limitTitle", { limit })}
-              </span>
-              <span style={{ font: "400 18px/26px var(--font-ui)", color: "var(--fg-2)" }}>
-                {t("cart.limitHint")}
-              </span>
-            </div>
-          ) : (
-            <div
-              style={{
-                flex: portrait ? "0 0 auto" : "1 1 0",
-                border: "2px dashed var(--line-strong)",
-                borderRadius: 16,
-                background: "var(--surface-card)",
-                display: "flex",
-                flexDirection: portrait ? "row" : "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: portrait ? 20 : 18,
-                padding: portrait ? "16px 22px" : 24,
-              }}
-            >
-              <svg
-                width={portrait ? 52 : 96}
-                height={portrait ? 52 : 96}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--line-strong)"
-                strokeWidth="1.5"
-                style={{ flexShrink: 0 }}
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path d="M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10" />
-              </svg>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                  textAlign: portrait ? "left" : "center",
-                }}
-              >
-                {/* Two elements, one sentence: the design breaks the line after
-                    «бутылку», and a dictionary entry carrying markup would push
-                    that break past every future translator. */}
-                <span
-                  style={{ font: `700 ${portrait ? "22px/28px" : "28px/36px"} var(--font-ui)` }}
-                >
-                  {t("cart.scanTitle")}
-                </span>
-                <span
-                  style={{ font: `700 ${portrait ? "22px/28px" : "28px/36px"} var(--font-ui)` }}
-                >
-                  {t("cart.scanTitleTarget")}
-                </span>
-                <span style={{ font: "400 17px/24px var(--font-ui)", color: "var(--fg-3)" }}>
-                  {t("cart.scanHint")}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <section
-          aria-labelledby="kiosk-cart-list-title"
-          style={{
-            width: portrait ? "auto" : 460,
-            flex: portrait ? "1 1 0" : "0 0 auto",
-            borderLeft: portrait ? "none" : "1px solid var(--line)",
-            borderTop: portrait ? "1px solid var(--line)" : "none",
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-            boxSizing: "border-box",
-            background: "var(--surface-card)",
-          }}
-        >
+      <div className="kiosk-cart__workspace">
+        <section className="kiosk-cart__scan" aria-label={t("cart.scanRegion")}>
           <div
-            style={{
-              padding: "20px 24px 14px 24px",
-              display: "flex",
-              alignItems: "baseline",
-              gap: 10,
-              borderBottom: "1px solid var(--line)",
-            }}
+            className={
+              remaining === 0 ? "kiosk-scan-card kiosk-scan-card--limit" : "kiosk-scan-card"
+            }
+            role={remaining === 0 ? "status" : undefined}
           >
-            <h1
-              id="kiosk-cart-list-title"
-              style={{ margin: 0, font: "700 24px/30px var(--font-ui)" }}
+            <svg
+              className="kiosk-scan-card__icon"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
             >
-              {t("cart.listTitle")}
-            </h1>
-            <span
-              style={{
-                font: "600 20px/1 var(--font-mono)",
-                fontVariantNumeric: "tabular-nums",
-                color: "var(--fg-3)",
-              }}
-            >
-              {count}
-            </span>
+              <path d="M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10" />
+            </svg>
+            <div className="kiosk-scan-card__copy">
+              <strong>
+                {remaining === 0 ? t("cart.limitTitle", { limit }) : t("cart.scanTitle")}
+              </strong>
+              <span>{remaining === 0 ? t("cart.limitHint") : t("cart.scanTitleTarget")}</span>
+              {remaining === 0 ? null : <small>{t("cart.scanHint")}</small>}
+            </div>
           </div>
 
-          <div className="kiosk-cart__list" style={{ flex: 1 }}>
-            {count === 0 ? (
-              <div
-                style={{
-                  padding: "48px 24px",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 10,
-                  textAlign: "center",
-                }}
-              >
-                <span style={{ font: "600 20px/28px var(--font-ui)", color: "var(--fg-disabled)" }}>
-                  {t("cart.emptyTitle")}
-                </span>
-                <span style={{ font: "400 16px/24px var(--font-ui)", color: "var(--fg-3)" }}>
-                  {t("cart.emptyHint")}
-                </span>
-              </div>
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {state.lines.map((item) => {
-                  const unitKopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
-                  const kopecks = unitKopecks === null ? null : unitKopecks * item.bottleCount;
-                  return (
-                    <li
-                      key={item.kind === "km" ? item.kmKey : item.sscc}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                        padding: "12px 20px 12px 24px",
-                        borderBottom: "1px solid var(--line)",
-                      }}
-                    >
-                      <span aria-hidden="true" className="kiosk-product-monogram">
-                        {productMonogram(item.name)}
-                      </span>
-                      <span
-                        style={{
-                          flex: 1,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 3,
-                          minWidth: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            font: "600 18px/24px var(--font-ui)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {item.name}
-                        </span>
-                        <span
-                          style={{ font: "400 14px/18px var(--font-mono)", color: "var(--fg-3)" }}
-                        >
-                          {codeTail(item)}
-                        </span>
-                      </span>
-                      {showPrices && item.unitPrice !== null ? (
-                        <span
-                          style={{
-                            font: "600 19px/1 var(--font-mono)",
-                            fontVariantNumeric: "tabular-nums",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {kopecks === null
-                            ? UNPRICED
-                            : t("cart.price", { value: formatMoney(kopecks, money) })}
-                        </span>
-                      ) : null}
-                      <button
-                        className="kiosk-control"
-                        type="button"
-                        aria-label={t("cart.remove", { name: item.name })}
-                        onClick={() =>
-                          dispatch(
-                            item.kind === "km"
-                              ? { type: "remove", kmKey: item.kmKey }
-                              : { type: "removeBox", sscc: item.sscc },
-                          )
-                        }
-                        style={{
-                          ...ghostButton,
-                          width: 56,
-                          height: 56,
-                          flexShrink: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <svg
-                          width="22"
-                          height="22"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          aria-hidden="true"
-                          focusable="false"
-                        >
-                          <path d="M6 6l12 12M18 6L6 18" />
-                        </svg>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
+          <div className="kiosk-cart__legacy-operation" aria-label={t("cart.reason")}>
+            {(pickupPolicy.canWriteoff ? (["buy", "writeoff"] as const) : (["buy"] as const)).map(
+              (reason) => (
+                <button
+                  className="kiosk-control kiosk-cart__operation-button"
+                  key={reason}
+                  type="button"
+                  aria-pressed={state.reason === reason}
+                  onClick={() => dispatch({ type: "reason", reason })}
+                >
+                  {t(reason === "buy" ? "cart.reasonBuy" : "cart.reasonWriteoff")}
+                </button>
+              ),
             )}
-          </div>
-
-          <div
-            style={{
-              flexShrink: 0,
-              borderTop: "1px solid var(--line)",
-              padding: "20px 24px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-            }}
-          >
-            <div
-              className="kiosk-cart__reason-scroll"
-              style={{ display: "flex", flexDirection: "column", gap: 8 }}
-            >
-              <span style={{ font: "500 14px/1 var(--font-ui)", color: "var(--fg-3)" }}>
-                {t("cart.reason")}
-              </span>
-              <div style={{ display: "flex", gap: 8 }}>
-                {(pickupPolicy.canWriteoff
-                  ? (["buy", "writeoff"] as const)
-                  : (["buy"] as const)
-                ).map((reason) => {
-                  const on = state.reason === reason;
-                  return (
-                    <button
-                      className="kiosk-control"
-                      key={reason}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => dispatch({ type: "reason", reason })}
-                      style={{
-                        flex: 1,
-                        height: 56,
-                        borderRadius: 10,
-                        border: `1px solid ${on ? "var(--surface-inverse)" : "var(--line-strong)"}`,
-                        background: on ? "var(--surface-inverse)" : "transparent",
-                        color: on ? "var(--fg-on-inverse)" : "var(--fg-2)",
-                        font: "600 18px/1 var(--font-ui)",
-                      }}
-                    >
-                      {t(reason === "buy" ? "cart.reasonBuy" : "cart.reasonWriteoff")}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* The sub-reasons are the tenant's own, straight from the
-                  bootstrap — never a list hard-coded on the device. */}
-              {pickupPolicy.canWriteoff && state.reason === "writeoff" ? (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {bootstrap.reasons.map((sub) => {
-                    const on = state.writeoffReasonId === sub.id;
-                    return (
-                      <button
-                        className="kiosk-control"
-                        key={sub.id}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => dispatch({ type: "writeoffReason", id: sub.id })}
-                        style={{
-                          height: 48,
-                          padding: "0 20px",
-                          borderRadius: "var(--r-round)",
-                          border: `1px solid ${on ? "var(--ok-solid)" : "var(--line-strong)"}`,
-                          background: on ? "var(--ok-bg)" : "transparent",
-                          color: on ? "var(--ok-fg)" : "var(--fg-2)",
-                          font: "600 16px/1 var(--font-ui)",
-                        }}
-                      >
-                        {sub.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div>
-
-            <div
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
-            >
-              <span style={{ font: "600 20px/26px var(--font-ui)" }}>
-                {t("cart.total", { n: count })}
-              </span>
-              {showPrices ? (
-                <span
-                  style={{
-                    font: "600 26px/1 var(--font-mono)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {/* «—», not a sum with the unpriced items quietly left out:
-                      this is the number the administrator charges against. */}
-                  {total === null
-                    ? UNPRICED
-                    : t("cart.price", { value: formatMoney(total, money) })}
-                </span>
-              ) : null}
-            </div>
-
-            <span style={{ font: "400 15px/20px var(--font-ui)", color: "var(--fg-3)" }}>
-              {pickupPolicy.limited
-                ? t("cart.limitFooter", { limit, remaining })
-                : t("cart.unlimitedFooter")}
-            </span>
-
-            <button
-              className="kiosk-control"
-              type="button"
-              disabled={!submittable}
-              onClick={() => {
-                if (canSubmit(state, cartContext)) onSubmit(state);
-              }}
-              style={{
-                height: 84,
-                borderRadius: 12,
-                border: "none",
-                background: submittable ? "var(--accent)" : "var(--surface-panel)",
-                color: submittable ? "var(--fg-on-inverse)" : "var(--fg-disabled)",
-                font: "700 24px/1 var(--font-ui)",
-              }}
-            >
-              {t("cart.submit")}
-            </button>
+            {pickupPolicy.canWriteoff && state.reason === "writeoff"
+              ? bootstrap.reasons.map((reason) => (
+                  <button
+                    className="kiosk-control kiosk-cart__reason-button"
+                    key={reason.id}
+                    type="button"
+                    aria-pressed={state.writeoffReasonId === reason.id}
+                    onClick={() => dispatch({ type: "writeoffReason", id: reason.id })}
+                  >
+                    {reason.name}
+                  </button>
+                ))
+              : null}
           </div>
         </section>
+
+        <section className="kiosk-cart__basket" aria-labelledby="kiosk-cart-list-title">
+          <header className="kiosk-cart__basket-header">
+            <h1 id="kiosk-cart-list-title">{t("cart.listTitle")}</h1>
+            <span>{summary}</span>
+          </header>
+
+          {count === 0 ? (
+            <div className="kiosk-cart__empty">
+              <strong>{t("cart.emptyTitle")}</strong>
+              <span>{t("cart.emptyHint")}</span>
+            </div>
+          ) : (
+            <PagedLines
+              items={state.lines}
+              pageSize={pageSize}
+              page={page}
+              onPageChange={setPage}
+              renderItem={(item) => {
+                const unitKopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
+                const kopecks = unitKopecks === null ? null : unitKopecks * item.bottleCount;
+                return (
+                  <button
+                    className="kiosk-control kiosk-line"
+                    type="button"
+                    aria-label={t("cart.openLine", {
+                      name: item.name,
+                      quantity: t("cart.bottles", { count: item.bottleCount }),
+                    })}
+                    onClick={() => setSelected(item)}
+                  >
+                    <ItemKindIcon kind={item.kind} />
+                    <span className="kiosk-line__copy">
+                      <span className="kiosk-line__name" title={item.name}>
+                        {item.name}
+                      </span>
+                      <span className="kiosk-line__code" title={codeTail(item)}>
+                        {codeTail(item)}
+                      </span>
+                    </span>
+                    <span className="kiosk-line__count">
+                      {t("cart.bottles", { count: item.bottleCount })}
+                    </span>
+                    {showPrices ? (
+                      <span className="kiosk-line__price">
+                        {kopecks === null
+                          ? UNPRICED
+                          : t("cart.price", { value: formatMoney(kopecks, money) })}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              }}
+            />
+          )}
+        </section>
       </div>
+
+      <footer className="kiosk-cart__checkout">
+        <div className="kiosk-cart__totals">
+          <strong>{summary}</strong>
+          <span className="kiosk-cart__legacy-total">
+            <span>{t("cart.total", { n: count })}</span>
+            {showPrices ? (
+              <span>
+                {total === null ? UNPRICED : t("cart.price", { value: formatMoney(total, money) })}
+              </span>
+            ) : null}
+          </span>
+          <small>
+            {pickupPolicy.limited
+              ? t("cart.limitFooter", { limit, remaining })
+              : t("cart.unlimitedFooter")}
+          </small>
+        </div>
+        <button
+          className="kiosk-control kiosk-cart__continue"
+          type="button"
+          disabled={!submittable}
+          onClick={() => {
+            if (canSubmit(state, cartContext)) onSubmit(state);
+          }}
+        >
+          {t("cart.submit")}
+        </button>
+      </footer>
+
+      <CartLineDialog
+        line={selected}
+        onClose={() => setSelected(null)}
+        onRemove={(line) => {
+          dispatch(
+            line.kind === "km"
+              ? { type: "remove", kmKey: line.kmKey }
+              : { type: "removeBox", sscc: line.sscc },
+          );
+          setSelected(null);
+        }}
+      />
 
       {/*
         The red stop. Its copy deliberately does NOT say «not in the catalogue»,

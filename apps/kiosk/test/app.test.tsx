@@ -119,7 +119,7 @@ const EMPLOYEE = { id: "e1", fullName: "Смирнов Алексей" };
 
 const IDLE_TITLE = "Отсканируйте пропуск";
 const CART_TITLE = "Вы берёте";
-const SUBMIT = "Готово — передать администратору";
+const SUBMIT = "Продолжить";
 const QUEUED_TITLE = "Заявка передана, номер появится после синхронизации";
 const OFFLINE = "Нет связи — киоск работает офлайн";
 const GATE_TITLE = "Вход в настройки";
