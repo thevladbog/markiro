@@ -114,6 +114,7 @@ function manualSource(): ScanSource & { emit: ScanListener } {
 /** Keeps every subscribed callback so tests can invoke one after its cleanup. */
 function retainingSource(): ScanSource & {
   emit: ScanListener;
+  firstSubscribed: () => ScanListener;
   latestSubscribed: () => ScanListener;
 } {
   let listener: ScanListener = () => {};
@@ -127,6 +128,11 @@ function retainingSource(): ScanSource & {
       };
     },
     emit: (raw) => listener(raw),
+    firstSubscribed() {
+      const first = subscribed[0];
+      if (!first) throw new Error("scan source has not subscribed yet");
+      return first;
+    },
     latestSubscribed() {
       const latest = subscribed.at(-1);
       if (!latest) throw new Error("scan source has not subscribed yet");
@@ -899,6 +905,7 @@ describe("WorkScreen box progress, closing and printing", () => {
   async function seedPendingPrint(
     exec: SqlExecutor,
     errorCode: string | null = null,
+    state: "pending" | "printed" = "pending",
   ): Promise<void> {
     await seedLabelSpec(exec, "s1");
     await exec.run("UPDATE shift_mirror SET issuer_prefix = ? WHERE id = ?", [
@@ -916,7 +923,7 @@ describe("WorkScreen box progress, closing and printing", () => {
         SSCC,
         "2026-07-29T08:00:00.000Z",
         "2026-07-29T09:00:00.000Z",
-        "pending",
+        state,
         errorCode,
       ],
     );
@@ -1484,6 +1491,46 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
   });
 
+  it("drops a stale source callback after an immediately successful print with verification off", async () => {
+    const base = makeExec();
+    await seedPendingPrint(base, "transport_failed");
+    const source = retainingSource();
+    const print = vi.fn(async () => {});
+    let armed = false;
+    let injected = false;
+    let staleCallback: ScanListener = () => {};
+    const exec: SqlExecutor = {
+      run: base.run,
+      all: async <T,>(sql: string, params: unknown[] = []) => {
+        if (armed && !injected && sql.includes("b.closed_at IS NULL")) {
+          injected = true;
+          staleCallback(OTHER_KM);
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+
+    renderWorkTracked({
+      exec,
+      source,
+      verifyPrintedLabel: false,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+
+    await screen.findByText("Принтер не принял задание");
+    staleCallback = source.firstSubscribed();
+    armed = true;
+    fireEvent.click(screen.getByRole("button", { name: "Повторить печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    await waitFor(() => expect(injected).toBe(true));
+    await act(async () => Promise.resolve());
+
+    expect(
+      await base.all("SELECT raw FROM scan_events_mirror WHERE raw = ?", [OTHER_KM]),
+    ).toHaveLength(0);
+    expect(await base.all("SELECT raw FROM outbox WHERE raw = ?", [OTHER_KM])).toHaveLength(0);
+  });
+
   // Task 13 review, Finding 3: opening the print-unavailable notice used to
   // depend on `verifyPrintedLabel` being on -- so in the DEFAULT
   // configuration (verification off), a box that closed with no printer
@@ -1570,6 +1617,32 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
   });
 
+  it("regenerates a restart-restored printed label for the same persisted box and SSCC", async () => {
+    const exec = makeExec();
+    await seedPendingPrint(exec, null, "printed");
+    const close = vi.fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>();
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+
+    renderWorkTracked({
+      exec,
+      closeCurrentBox: close,
+      verifyPrintedLabel: true,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+
+    expect(await screen.findByText("Отсканируйте распечатанную этикетку")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
+
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    const [, bytes] = print.mock.calls[0]!;
+    expect(new TextDecoder().decode(bytes)).toContain(SSCC);
+    expect(close).not.toHaveBeenCalled();
+    const boxes = await exec.all<{ box_id: string; sscc: string }>(
+      "SELECT box_id, sscc FROM boxes_mirror WHERE closed_at IS NOT NULL",
+    );
+    expect(boxes).toEqual([{ box_id: SEEDED_BOX_ID, sscc: SSCC }]);
+  });
+
   // Self-review addition: none of the brief's own tests ever set
   // `verifyPrintedLabel: true`, so the "on" branch of that setting was never
   // actually exercised -- only its negation was. This is the positive half.
@@ -1600,6 +1673,41 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(
       screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" }),
     ).toBeDefined();
+  });
+
+  it("logs only a fixed category when verification reprint transport rejects", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    const secret = "native COM7 secret-message";
+    const print = vi
+      .fn<(_target: PrintTarget, _bytes: Uint8Array) => Promise<void>>()
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce(new Error(secret));
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWorkTracked({
+        exec,
+        boxCapacity: 10,
+        boxItemCount: 9,
+        closeCurrentBox: close,
+        verifyPrintedLabel: true,
+        printing: { target: PRINT_TARGET, language: "zpl", print },
+      });
+      act(() => scan(KM));
+      await screen.findByText("Отсканируйте распечатанную этикетку");
+      fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
+
+      await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(consoleError).toHaveBeenCalledWith("station: box label reprint failed"),
+      );
+      expect(consoleError.mock.calls.flat().map(String).join(" ")).not.toContain(secret);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   // Task 13 review, Finding 3: opening the verification prompt when the

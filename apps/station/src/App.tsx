@@ -209,6 +209,28 @@ export function App() {
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [printRecoveryBlocked, setPrintRecoveryBlocked] = useState(false);
+  // Printer Setup deliberately unmounts WorkScreen. Its cleanup publishes
+  // `false`, but that does not resolve the persisted recovery which opened
+  // Setup. Keep the App-level block latched until the remounted WorkScreen
+  // first rehydrates that row (`true`) and later reports its real resolution
+  // (`false`).
+  const printRecoverySetupLatch = useRef<"idle" | "awaiting-remount" | "remounted">("idle");
+  const handlePrintRecoveryChange = useCallback((blocked: boolean): void => {
+    const phase = printRecoverySetupLatch.current;
+    if (blocked) {
+      if (phase === "awaiting-remount") printRecoverySetupLatch.current = "remounted";
+      setPrintRecoveryBlocked(true);
+      return;
+    }
+    if (phase === "awaiting-remount") return;
+    if (phase === "remounted") printRecoverySetupLatch.current = "idle";
+    setPrintRecoveryBlocked(false);
+  }, []);
+  const openPrintRecoverySetup = useCallback((): void => {
+    printRecoverySetupLatch.current = "awaiting-remount";
+    setPrintRecoveryBlocked(true);
+    setShowSetup(true);
+  }, []);
   const [showConflicts, setShowConflicts] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
   const [operatorSwitchState, setOperatorSwitchState] = useState<"idle" | "settling" | "failed">(
@@ -604,6 +626,7 @@ export function App() {
     setIssuerPrefix(null);
     setFloorView("select");
     setShowSetup(false);
+    printRecoverySetupLatch.current = "idle";
     setPrintRecoveryBlocked(false);
     setShowConflicts(false);
     setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
@@ -1149,8 +1172,8 @@ export function App() {
                   }
                 : null
             }
-            onOpenPrinterSetup={() => setShowSetup(true)}
-            onPrintRecoveryChange={setPrintRecoveryBlocked}
+            onOpenPrinterSetup={openPrintRecoverySetup}
+            onPrintRecoveryChange={handlePrintRecoveryChange}
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>

@@ -94,3 +94,78 @@ gates. No browser, hardware, Windows, or live updater claim is made.
   closing scan both produce no journal or outbox row.
 - Error UI and print-boundary logs expose categories only, not raw native
   details.
+
+## Review remediation: setup latch, admission seal, restart reprint, sanitized error
+
+The four blocking review findings were addressed without changing the Task 2
+scan semantics, Task 3 grid/ordinal behavior, or Task 4 durable lifecycle:
+
+- `App` now latches recovery-origin printer setup across the `WorkScreen`
+  unmount. The cleanup `false` is ignored until the remounted screen first
+  rehydrates the persisted row and later reports its actual resolution. Update,
+  operator-switch, and window controls remain disabled in Setup and after the
+  return to the unresolved recovery.
+- `WorkScreen` now seals product admission synchronously when a durable close
+  enters printing and keeps it sealed until the successor box has been opened.
+  Both stale physical callbacks and queue-head scans re-check that seal, so an
+  immediately successful, verification-off print cannot leak a scan into the
+  journal/outbox while its queue entry drains.
+- Restart-restored `printed` verification entries retain the persisted item
+  count. Reprint regenerates the label from the same persisted SSCC/box data;
+  it never closes a box or allocates another SSCC.
+- Verification reprint failures log only the fixed category
+  `station: box label reprint failed`; caught native errors are not logged.
+
+### Review RED evidence
+
+Baseline focused run after adding the App/WorkScreen regressions:
+
+```text
+node_modules/.bin/vitest run test/work-screen.test.tsx test/App.test.tsx
+2 files failed; 4 tests failed; 121 tests passed
+
+App setup latch: expected disabled true, received false
+Restart-restored reprint: expected print once, received 0 calls
+Sanitized reprint log: received Error { message: "native COM7 secret-message" }
+Immediate-print callback regression: failed before the admission transition was observable
+```
+
+The final deterministic stale-callback test was also mutation-checked with the
+new admission checks removed:
+
+```text
+node_modules/.bin/vitest run test/work-screen.test.tsx \
+  -t "drops a stale source callback after an immediately successful print with verification off" \
+  --reporter=dot
+1 test failed: expected no scan_events_mirror row, received
+{ raw: "0104600000000015215Ab2" }
+```
+
+### Review GREEN evidence
+
+```text
+node_modules/.bin/vitest run test/work-screen.test.tsx test/App.test.tsx --reporter=dot
+2 files passed; 125 tests passed
+
+node_modules/.bin/vitest run test/work-screen.test.tsx \
+  -t "drops a stale source callback after an immediately successful print with verification off" \
+  --reporter=dot
+1 file passed; 1 test passed; 61 tests skipped
+```
+
+Latest final gates after the review fixes:
+
+- Station full suite: `node_modules/.bin/vitest run --reporter=dot` — 64 files,
+  732 tests passed.
+- Station typecheck: `node_modules/.bin/tsc -p tsconfig.json --noEmit` from
+  `apps/station` — passed.
+- Station lint: `../../node_modules/.bin/eslint . --ignore-pattern
+  'src-tauri/target/**' --ignore-pattern 'src-tauri/gen/**'` from `apps/station`
+  — passed.
+- Station build: `node_modules/.bin/vite build` from `apps/station` — passed,
+  398 modules transformed.
+- Focused Prettier check and `git diff --check` — passed.
+
+The original physical printer/scanner, Tauri/Windows, browser, live updater,
+and real floor viewport limitations remain unchanged; none of those external
+acceptance gates was exercised by this review fix.

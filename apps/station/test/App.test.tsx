@@ -1075,6 +1075,22 @@ describe("App", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
       expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: /fullscreen/ }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
     } finally {
       consoleErrorSpy.mockRestore();
     }

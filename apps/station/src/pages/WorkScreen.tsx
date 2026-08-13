@@ -298,6 +298,18 @@ export function WorkScreen({
     printRecoveryRef.current = next;
     setPrintRecoveryState(next);
   }, []);
+  // This seal spans the gap between a durable close and the successful
+  // opening of its successor box. Recovery state alone is too short-lived:
+  // an immediately successful print clears it while the close queue entry is
+  // still draining, allowing an already-delivered native scan callback to
+  // journal against no box. The ref closes admission synchronously; state
+  // publishes the same block to App and the visible source subscription.
+  const [printAdmissionBlocked, setPrintAdmissionBlockedState] = useState(issuerPrefix !== null);
+  const printAdmissionBlockedRef = useRef(issuerPrefix !== null);
+  const updatePrintAdmissionBlocked = useCallback((blocked: boolean): void => {
+    printAdmissionBlockedRef.current = blocked;
+    setPrintAdmissionBlockedState(blocked);
+  }, []);
   const [printRecoveryHydrated, setPrintRecoveryHydrated] = useState(issuerPrefix === null);
   const printRecoveryHydratedRef = useRef(issuerPrefix === null);
   printRecoveryHydratedRef.current = printRecoveryHydrated;
@@ -309,13 +321,19 @@ export function WorkScreen({
   // is now blocked by the first prompt, but no secondary entry may overwrite
   // it if another legitimate print path produces one.
   const [verificationQueue, setVerificationQueue] = useState<
-    Array<{ sscc: string; bytes: Uint8Array | null; boxId: string | null }>
+    Array<{
+      sscc: string;
+      itemCount: number;
+      bytes: Uint8Array | null;
+      boxId: string | null;
+    }>
   >([]);
   const verificationBlockedRef = useRef(false);
   /** The one prompt currently shown, or null when the queue is empty. */
   const verification = verificationQueue[0] ?? null;
   function enqueueVerification(entry: {
     sscc: string;
+    itemCount: number;
     bytes: Uint8Array | null;
     boxId: string | null;
   }): void {
@@ -381,6 +399,7 @@ export function WorkScreen({
   const ordinaryScanBlockedRef = useRef(false);
   ordinaryScanBlockedRef.current = Boolean(
     !printRecoveryHydrated ||
+    printAdmissionBlocked ||
     verification ||
     printRecovery ||
     confirmClear ||
@@ -486,6 +505,7 @@ export function WorkScreen({
   useEffect(() => {
     if (issuerPrefix === null) {
       updatePrintRecovery(null);
+      updatePrintAdmissionBlocked(false);
       printRecoveryHydratedRef.current = true;
       setPrintRecoveryHydrated(true);
       printRecoveryReady.current = Promise.resolve(false);
@@ -493,6 +513,7 @@ export function WorkScreen({
     }
     let cancelled = false;
     let hydrationSucceeded = false;
+    updatePrintAdmissionBlocked(true);
     printRecoveryHydratedRef.current = false;
     setPrintRecoveryHydrated(false);
     printRecoveryReady.current = findUnresolvedBoxPrint(
@@ -507,9 +528,15 @@ export function WorkScreen({
           updatePrintRecovery(null);
           boxReady.current = ensureCurrentBox();
           await boxReady.current;
+          if (!cancelled) updatePrintAdmissionBlocked(false);
         } else if (unresolved.state === "printed") {
           updatePrintRecovery(null);
-          enqueueVerification({ sscc: unresolved.sscc, bytes: null, boxId: unresolved.boxId });
+          enqueueVerification({
+            sscc: unresolved.sscc,
+            itemCount: unresolved.itemCount,
+            bytes: null,
+            boxId: unresolved.boxId,
+          });
         } else {
           const fallbackCode: BoxPrintErrorCode = !printingRef.current
             ? "printer_unconfigured"
@@ -542,6 +569,7 @@ export function WorkScreen({
     issuerPrefix,
     shiftId,
     terminalId,
+    updatePrintAdmissionBlocked,
     updatePrintRecovery,
     verifyPrintedLabel,
   ]);
@@ -553,6 +581,7 @@ export function WorkScreen({
   // (Task 13's correction), not a race to paper over.
   useEffect(() => {
     if (issuerPrefix === null) {
+      updatePrintAdmissionBlocked(false);
       updateBox(null);
       setBoxNumber(null);
       boxReady.current = Promise.resolve();
@@ -565,9 +594,13 @@ export function WorkScreen({
       return;
     }
     let cancelled = false;
-    boxReady.current = ensureCurrentBox().catch((err: unknown) => {
-      if (!cancelled) console.error("station: failed to load or open the current box", err);
-    });
+    boxReady.current = ensureCurrentBox()
+      .then(() => {
+        if (!cancelled) updatePrintAdmissionBlocked(false);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) console.error("station: failed to load or open the current box", err);
+      });
     return () => {
       cancelled = true;
     };
@@ -577,6 +610,7 @@ export function WorkScreen({
     printRecoveryHydrated,
     printRecovery,
     verification,
+    updatePrintAdmissionBlocked,
     updateBox,
   ]);
 
@@ -634,13 +668,12 @@ export function WorkScreen({
     });
   }
 
-  async function attemptRecoveryPrint(job: PrintRecoveryState): Promise<void> {
-    updatePrintRecovery({ ...job, pending: true });
+  async function attemptClosedBoxPrint(result: { sscc: string; itemCount: number }) {
     await labelSpecReady.current;
     const currentPrinting = printingRef.current;
-    const attempt = await attemptBoxPrint({
+    return attemptBoxPrint({
       template: labelSpecRef.current,
-      fields: fieldsForClosedBox(job),
+      fields: fieldsForClosedBox(result),
       printing: currentPrinting
         ? {
             ...currentPrinting,
@@ -650,6 +683,11 @@ export function WorkScreen({
       render: (template, fields, language) =>
         renderLabelBytes(template, fields, language, rasterizeText),
     });
+  }
+
+  async function attemptRecoveryPrint(job: PrintRecoveryState): Promise<void> {
+    updatePrintRecovery({ ...job, pending: true });
+    const attempt = await attemptClosedBoxPrint(job);
 
     if (attempt.kind === "failed") {
       try {
@@ -670,7 +708,12 @@ export function WorkScreen({
     }
     updatePrintRecovery(null);
     if (verifyPrintedLabel) {
-      enqueueVerification({ sscc: job.sscc, bytes: attempt.bytes, boxId: job.boxId });
+      enqueueVerification({
+        sscc: job.sscc,
+        itemCount: job.itemCount,
+        bytes: attempt.bytes,
+        boxId: job.boxId,
+      });
     }
     void reloadClosedBoxes();
   }
@@ -679,22 +722,14 @@ export function WorkScreen({
     result: { sscc: string; itemCount: number },
     boxId: string,
   ): Promise<void> {
-    await labelSpecReady.current;
-    const currentPrinting = printingRef.current;
-    const attempt = await attemptBoxPrint({
-      template: labelSpecRef.current,
-      fields: fieldsForClosedBox(result),
-      printing: currentPrinting
-        ? {
-            ...currentPrinting,
-            print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
-          }
-        : null,
-      render: (template, fields, language) =>
-        renderLabelBytes(template, fields, language, rasterizeText),
-    });
+    const attempt = await attemptClosedBoxPrint(result);
     if (attempt.kind === "printed" && verifyPrintedLabel) {
-      enqueueVerification({ sscc: result.sscc, bytes: attempt.bytes, boxId });
+      enqueueVerification({
+        sscc: result.sscc,
+        itemCount: result.itemCount,
+        bytes: attempt.bytes,
+        boxId,
+      });
     }
   }
 
@@ -769,6 +804,7 @@ export function WorkScreen({
         console.error("station: closed box identity unavailable for print recovery");
         return;
       }
+      updatePrintAdmissionBlocked(true);
       // Scans that arrived while this close was in flight belong to neither
       // the closed box nor a not-yet-open next box. Keep ordered side-channel
       // jobs, but reject those buffered product scans before recovery begins.
@@ -867,6 +903,7 @@ export function WorkScreen({
       createScanQueue({
         shouldProcess: () =>
           printRecoveryHydratedRef.current &&
+          !printAdmissionBlockedRef.current &&
           printRecoveryRef.current === null &&
           !verificationBlockedRef.current,
         async process(raw): Promise<ScanOutcome> {
@@ -1136,7 +1173,9 @@ export function WorkScreen({
     return source.start((raw) => {
       if (!printRecoveryHydratedRef.current) {
         void printRecoveryReady.current?.then((recoveryBlocked) => {
-          if (!recoveryBlocked && !printRecoveryRef.current) queue.enqueue(raw);
+          if (!recoveryBlocked && !printAdmissionBlockedRef.current && !printRecoveryRef.current) {
+            queue.enqueue(raw);
+          }
         });
         return;
       }
@@ -1157,7 +1196,10 @@ export function WorkScreen({
 
   const printBlocked =
     issuerPrefix !== null &&
-    (!printRecoveryHydrated || printRecovery !== null || verification !== null);
+    (!printRecoveryHydrated ||
+      printAdmissionBlocked ||
+      printRecovery !== null ||
+      verification !== null);
   const recoveryCallbackRef = useRef(onPrintRecoveryChange);
   recoveryCallbackRef.current = onPrintRecoveryChange;
   useEffect(() => {
@@ -1394,21 +1436,21 @@ export function WorkScreen({
           expected={verification.sscc}
           onVerified={handleVerified}
           onReprint={() => {
-            // `.catch`, not a bare `void` (Task 13 review, "also fix,
-            // cheap"): a rejected printer call must not become an unhandled
-            // rejection just because this handler cannot itself await it.
-            // Routed through `serializePrint` too (Finding 9): a manual
-            // reprint shares the same physical printer as an ordinary
-            // box-close print, and could otherwise overlap with one for a
-            // DIFFERENT box closing at the same moment.
-            if (verification.bytes && printing) {
-              const reprintBytes = verification.bytes;
-              serializePrint(() => printing.print(printing.target, reprintBytes)).catch(
-                (err: unknown) => {
-                  console.error("station: reprinting the box label failed", err);
-                },
-              );
-            }
+            // A restart restores the durable box/SSCC but not volatile bytes.
+            // Regenerate from that exact persisted identity; never close a
+            // second box or allocate another serial. In-session verification
+            // still sends the exact bytes already rendered. Both routes share
+            // the physical-printer queue and expose only a fixed error category.
+            void (async () => {
+              if (verification.bytes && printing) {
+                const reprintBytes = verification.bytes;
+                await serializePrint(() => printing.print(printing.target, reprintBytes));
+                return;
+              }
+              await attemptClosedBoxPrint(verification);
+            })().catch(() => {
+              console.error("station: box label reprint failed");
+            });
           }}
           onSkip={() => {
             const boxId = verification.boxId;
