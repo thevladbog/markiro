@@ -119,13 +119,13 @@ function response(body: unknown): Response {
   });
 }
 
-function renderDialog() {
+function renderDialog(onClose = () => undefined) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={client}>
-      <ShiftExportsDialog shift={SHIFT} open onClose={() => undefined} />
+      <ShiftExportsDialog shift={SHIFT} open onClose={onClose} />
     </QueryClientProvider>,
   );
 }
@@ -240,18 +240,17 @@ describe("ShiftExportsDialog", () => {
       createdAt: "2026-08-13T16:20:00.000Z",
       completedAt: null,
     };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (url: string) => {
-        if (String(url).includes("/formats")) return response(FORMATS);
-        if (String(url).endsWith("/exports")) return response([queued, processing, failed]);
-        return response({});
-      }),
-    );
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/formats")) return response(FORMATS);
+      if (String(url).endsWith("/exports")) return response([queued, processing, failed]);
+      return response({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
     expect(await within(dialog).findByText("В очереди")).toBeDefined();
     expect(within(dialog).getByText("Формируется")).toBeDefined();
+    expect(within(dialog).getByText("Ошибка")).toBeDefined();
     expect(
       within(dialog).getByText("Не удалось сформировать отчет. Повторите попытку."),
     ).toBeDefined();
@@ -259,6 +258,42 @@ describe("ShiftExportsDialog", () => {
     const rows = within(dialog).getAllByRole("article");
     expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain("Не удалось сформировать отчет");
+    expect(within(rows[0]!).queryByText("0 коробов")).toBeNull();
+    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Повторить" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/retry"))).toBe(true),
+    );
+  });
+
+  it("removes all dismiss controls while creation is pending", async () => {
+    let release!: (value: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      release = resolve;
+    });
+    const onClose = vi.fn();
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/formats")) return response(FORMATS);
+      if (String(url).includes("/shifts/") && init?.method === "POST") return pending;
+      return response([]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderDialog(onClose);
+    const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
+    await waitFor(() =>
+      expect(
+        (within(dialog).getByRole("button", { name: "Сформировать отчет" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Сформировать отчет" }));
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(1));
+    await waitFor(() =>
+      expect(within(dialog).queryByRole("button", { name: "Закрыть" })).toBeNull(),
+    );
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    fireEvent.click(dialog.parentElement!);
+    expect(onClose).not.toHaveBeenCalled();
+    release(response({}));
   });
 
   it("rejects empty, fractional, and out-of-range split limits", async () => {
