@@ -6,22 +6,22 @@ import { schema } from "../src/index.js";
 
 function table(name: string) {
   const candidate = (schema as unknown as Record<string, AnyPgTable | undefined>)[name];
-  expect(candidate, `schema.${name} is missing`).toBeDefined();
-  return candidate!;
+  if (!candidate) throw new Error(`schema.${name} is missing`);
+  return candidate;
 }
 
 function foreignKey(table: AnyPgTable, name: string) {
   const key = getTableConfig(table).foreignKeys.find((item) => item.getName() === name);
-  expect(key, `missing foreign key ${name}`).toBeDefined();
-  return key!.reference();
+  if (!key) throw new Error(`missing foreign key ${name}`);
+  return key.reference();
 }
 
 function uniqueColumns(table: AnyPgTable, name: string) {
   const constraint = getTableConfig(table).uniqueConstraints.find(
     (item) => item.getName() === name,
   );
-  expect(constraint, `missing unique constraint ${name}`).toBeDefined();
-  return constraint!.columns.map((column) => column.name);
+  if (!constraint) throw new Error(`missing unique constraint ${name}`);
+  return constraint.columns.map((column) => column.name);
 }
 
 describe("shift export persistence schema", () => {

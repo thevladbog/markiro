@@ -182,7 +182,7 @@ export class ShiftExportSourceService {
       (row) => row.tenantId === tenantId && row.shiftId === shiftId,
     );
     const eligible = relevant.filter(
-      (row) =>
+      (row): row is BoxMembershipRow & { sscc: string } =>
         row.closedAt !== null &&
         row.sscc !== null &&
         row.disassembledAt === null &&
@@ -212,16 +212,19 @@ export class ShiftExportSourceService {
         }
         existing.rows.push(row);
       } else {
-        rowsByBox.set(row.boxId, { sscc: row.sscc!, rows: [row] });
+        rowsByBox.set(row.boxId, { sscc: row.sscc, rows: [row] });
       }
     }
 
     const boxes = [...rowsByBox.values()]
-      .sort((left, right) => left.sscc.localeCompare(right.sscc))
+      .sort((left, right) => compareCodeUnits(left.sscc, right.sscc))
       .map((box) => ({
         sscc: box.sscc,
         codes: box.rows
-          .map((row) => authoritativeByHash.get(row.codeHash)!)
+          .flatMap((row) => {
+            const authoritativeRow = authoritativeByHash.get(row.codeHash);
+            return authoritativeRow ? [authoritativeRow] : [];
+          })
           .sort(compareAuthoritativeCodes)
           .map((row) => row.canonicalRaw),
       }));
@@ -236,6 +239,10 @@ function compareAuthoritativeCodes(
 ): number {
   return (
     left.scannedAt.getTime() - right.scannedAt.getTime() ||
-    left.codeHash.localeCompare(right.codeHash)
+    compareCodeUnits(left.codeHash, right.codeHash)
   );
+}
+
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

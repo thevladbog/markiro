@@ -5,7 +5,7 @@ export const createShiftExportSchema = z.strictObject({
   formatId: z.enum(["shift_txt_flat", "shift_txt_boxes", "shift_csv_flat", "shift_csv_boxes"]),
   formatVersion: z.literal(1),
   maxLines: z.number().int().min(2).max(1_000_000).nullable(),
-  idempotencyKey: z.string().uuid(),
+  idempotencyKey: z.uuid(),
 });
 
 export type CreateShiftExportDto = z.infer<typeof createShiftExportSchema>;

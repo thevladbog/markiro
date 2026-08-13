@@ -10,6 +10,7 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import type { OnModuleDestroy } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import type { Env } from "../../env";
 
 type S3Boundary = Pick<S3Client, "send"> & { destroy?: () => void };
@@ -93,13 +94,15 @@ export class ObjectStorageService implements OnModuleDestroy {
   ): Promise<{ byteSize: number; sha256: string }> {
     assertSafeKey(key);
     assertSha256(sha256);
+    const derivedSha256 = createHash("sha256").update(body).digest("hex");
+    if (derivedSha256 !== sha256) throw new Error("Object checksum does not match body");
     await this.#client.send(
       new PutObjectCommand({
         Bucket: this.#bucket,
         Key: key,
         Body: body,
         ContentType: contentType,
-        Metadata: { sha256 },
+        Metadata: { sha256: derivedSha256 },
       }),
     );
 
@@ -108,11 +111,11 @@ export class ObjectStorageService implements OnModuleDestroy {
     );
     const byteSize = stored.ContentLength;
     const storedSha256 = stored.Metadata?.sha256;
-    if (byteSize !== body.byteLength || storedSha256 !== sha256) {
+    if (byteSize !== body.byteLength || storedSha256 !== derivedSha256) {
       throw new Error("Object upload verification failed");
     }
 
-    return { byteSize, sha256: storedSha256 };
+    return { byteSize, sha256: derivedSha256 };
   }
 
   async delete(key: string): Promise<void> {

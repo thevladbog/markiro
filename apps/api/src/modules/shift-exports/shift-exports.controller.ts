@@ -20,6 +20,8 @@ import {
 } from "./dto";
 import { ShiftExportsService } from "./shift-exports.service";
 
+type SessionRequest = RequestWithTenant & { tenantId: string; userId: string };
+
 @ApiTags("shift-exports")
 @Controller()
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
@@ -35,36 +37,38 @@ export class ShiftExportsController {
   }
 
   @Post("shifts/:shiftId/exports")
+  @AllowSubscriptionReadOnly("export")
   @ApiParam({ name: "shiftId", format: "uuid", type: "string" })
   @ApiBody({ schema: createShiftExportOpenApiSchema })
   @ApiCreatedResponse({ schema: shiftExportOpenApiSchema })
   create(
-    @Req() req: RequestWithTenant,
+    @Req() req: SessionRequest,
     @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
     @Body(new ZodValidationPipe(createShiftExportSchema)) body: CreateShiftExportDto,
   ): Promise<ShiftExportDto> {
-    return this.exports.create(req.tenantId!, req.userId!, shiftId, body);
+    return this.exports.create(req.tenantId, req.userId, shiftId, body);
   }
 
   @Get("shifts/:shiftId/exports")
   @ApiParam({ name: "shiftId", format: "uuid", type: "string" })
   @ApiOkResponse({ schema: { type: "array", items: shiftExportOpenApiSchema } })
   list(
-    @Req() req: RequestWithTenant,
+    @Req() req: SessionRequest,
     @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
   ): Promise<ShiftExportDto[]> {
-    return this.exports.list(req.tenantId!, shiftId);
+    return this.exports.list(req.tenantId, shiftId);
   }
 
   @Post("shift-exports/:exportId/retry")
+  @AllowSubscriptionReadOnly("export")
   @ApiParam({ name: "exportId", format: "uuid", type: "string" })
   @HttpCode(200)
   @ApiOkResponse({ schema: shiftExportOpenApiSchema })
   retry(
-    @Req() req: RequestWithTenant,
+    @Req() req: SessionRequest,
     @Param("exportId", new ParseUUIDPipe()) exportId: string,
   ): Promise<ShiftExportDto> {
-    return this.exports.retry(req.tenantId!, req.userId!, exportId);
+    return this.exports.retry(req.tenantId, req.userId, exportId);
   }
 
   @Get("shift-exports/:exportId/artifacts/:artifactId/download")
@@ -72,10 +76,10 @@ export class ShiftExportsController {
   @ApiParam({ name: "artifactId", format: "uuid", type: "string" })
   @ApiOkResponse({ schema: shiftExportDownloadOpenApiSchema })
   download(
-    @Req() req: RequestWithTenant,
+    @Req() req: SessionRequest,
     @Param("exportId", new ParseUUIDPipe()) exportId: string,
     @Param("artifactId", new ParseUUIDPipe()) artifactId: string,
   ): Promise<ShiftExportDownloadDto> {
-    return this.exports.download(req.tenantId!, req.userId!, exportId, artifactId);
+    return this.exports.download(req.tenantId, req.userId, exportId, artifactId);
   }
 }

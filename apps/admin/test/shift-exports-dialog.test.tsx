@@ -189,7 +189,7 @@ describe("ShiftExportsDialog", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
     expect(await within(dialog).findByText("Готов"));
-    expect(within(dialog).getByText("Данные смены изменились — сформируйте новую")).toBeDefined();
+    expect(within(dialog).getByText("Данные смены изменились — сформируйте новый отчет.")).toBeDefined();
     expect(within(dialog).getByText("Иванов Иван")).toBeDefined();
     expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(2);
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
@@ -197,7 +197,9 @@ describe("ShiftExportsDialog", () => {
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
     expect(within(dialog).getByText("2 строк · 2 кодов · 1 коробов · 42 Б")).toBeDefined();
 
-    fireEvent.click(within(dialog).getAllByRole("button", { name: "Скачать" })[0]!);
+    const downloadButton = within(dialog).getAllByRole("button", { name: "Скачать" })[0];
+    if (!downloadButton) throw new Error("download button is missing");
+    fireEvent.click(downloadButton);
     await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
     const link = appendChild.mock.calls.find(
       ([node]) => node instanceof HTMLAnchorElement,
@@ -258,15 +260,17 @@ describe("ShiftExportsDialog", () => {
     const rows = within(dialog).getAllByRole("article");
     expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain("Не удалось сформировать отчет");
-    expect(within(rows[0]!).queryByText("0 коробов")).toBeNull();
-    fireEvent.click(within(rows[0]!).getByRole("button", { name: "Повторить" }));
+    const newestRow = rows[0];
+    if (!newestRow) throw new Error("newest export row is missing");
+    expect(within(newestRow).queryByText("0 коробов")).toBeNull();
+    fireEvent.click(within(newestRow).getByRole("button", { name: "Повторить" }));
     await waitFor(() =>
       expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/retry"))).toBe(true),
     );
   });
 
   it("removes all dismiss controls while creation is pending", async () => {
-    let release!: (value: Response) => void;
+    let release: ((value: Response) => void) | undefined;
     const pending = new Promise<Response>((resolve) => {
       release = resolve;
     });
@@ -291,9 +295,37 @@ describe("ShiftExportsDialog", () => {
       expect(within(dialog).queryByRole("button", { name: "Закрыть" })).toBeNull(),
     );
     fireEvent.keyDown(dialog, { key: "Escape" });
-    fireEvent.click(dialog.parentElement!);
+    const overlay = dialog.parentElement;
+    if (!overlay) throw new Error("modal overlay is missing");
+    fireEvent.click(overlay);
     expect(onClose).not.toHaveBeenCalled();
+    if (!release) throw new Error("pending response resolver is missing");
     release(response({}));
+  });
+
+  it("reuses the idempotency key when the first create response is lost", async () => {
+    const requests: string[] = [];
+    let createAttempts = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/formats")) return response(FORMATS);
+      if (String(url).includes("/shifts/") && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { idempotencyKey: string };
+        requests.push(body.idempotencyKey);
+        createAttempts += 1;
+        if (createAttempts === 1) throw new Error("response lost");
+        return response({ ...READY_EXPORT, status: "queued", artifacts: [] });
+      }
+      return response([]);
+    }));
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
+    const createButton = within(dialog).getByRole("button", { name: "Сформировать отчет" });
+    await waitFor(() => expect((createButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(createButton);
+    await waitFor(() => expect(requests).toHaveLength(1));
+    fireEvent.click(createButton);
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]).toBe(requests[1]);
   });
 
   it("rejects empty, fractional, and out-of-range split limits", async () => {

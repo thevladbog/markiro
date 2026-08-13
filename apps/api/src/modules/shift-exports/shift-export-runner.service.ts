@@ -355,5 +355,7 @@ function safeDomainErrorCode(error: unknown): ShiftExportSafeErrorCode | null {
     case "FORMAT_SOURCE_MISMATCH":
     case "EMPTY_SOURCE":
       return "GENERATION_FAILED";
+    default:
+      return "GENERATION_FAILED";
   }
 }

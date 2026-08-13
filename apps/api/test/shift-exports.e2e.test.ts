@@ -327,7 +327,7 @@ describe.skipIf(!ready)("shift exports e2e", () => {
       formatVersion: 1,
       maxLines: 500,
       status: "failed",
-      errorCode: "BOX_COVERAGE_INCOMPLETE",
+      errorCode: "STORAGE_FAILED",
       completedAt: new Date(),
       createdByUserId: owner.userId,
       idempotencyKey: randomUUID(),

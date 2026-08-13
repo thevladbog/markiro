@@ -325,7 +325,8 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
     event.preventDefault();
     if (!canSubmit || !formatId) return;
     // A new deliberate submission after a failed request starts a new idempotency scope.
-    idempotencyKey.current = crypto.randomUUID();
+    const requestIdempotencyKey = idempotencyKey.current ?? crypto.randomUUID();
+    idempotencyKey.current = requestIdempotencyKey;
     setError(null);
     try {
       await create.mutateAsync({
@@ -334,7 +335,7 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
           formatId,
           formatVersion: 1,
           maxLines: parsedLineLimit,
-          idempotencyKey: idempotencyKey.current,
+          idempotencyKey: requestIdempotencyKey,
         },
       });
       idempotencyKey.current = null;
@@ -386,7 +387,10 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
             name="shift-export-format"
             value={formatId}
             disabled={create.isPending}
-            onValueChange={(value) => setFormatId(value as ShiftExportFormatId)}
+            onValueChange={(value) => {
+              idempotencyKey.current = null;
+              setFormatId(value as ShiftExportFormatId);
+            }}
             options={(formats.data ?? []).map((format) => ({
               value: format.id,
               label: format.label,
@@ -397,7 +401,10 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
           label={t("pages.shifts.exports.splitLabel")}
           checked={split}
           disabled={create.isPending}
-          onCheckedChange={setSplit}
+            onCheckedChange={(value) => {
+              idempotencyKey.current = null;
+              setSplit(value);
+            }}
         />
         {split ? (
           <Input
@@ -411,7 +418,10 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
             value={lineLimit}
             {...(lineLimitError ? { error: lineLimitError } : {})}
             disabled={create.isPending}
-            onChange={(event) => setLineLimit(event.target.value)}
+            onChange={(event) => {
+              idempotencyKey.current = null;
+              setLineLimit(event.target.value);
+            }}
           />
         ) : null}
       </form>

@@ -9,7 +9,7 @@ import {
   type OnModuleInit,
 } from "@nestjs/common";
 import { PgBoss, type JobWithMetadata } from "pg-boss";
-import { eq, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
@@ -81,6 +81,7 @@ const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
 
 const DISPATCH_EMAIL_OUTBOX_QUEUE_NAME = "dispatch-email-outbox";
 const DISPATCH_EMAIL_OUTBOX_QUEUE_CRON = "* * * * *";
+const SHIFT_EXPORT_RECONCILE_LIMIT = 100;
 const RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME = "reconcile-email-deliveries";
 const RECONCILE_EMAIL_DELIVERIES_QUEUE_CRON = "*/5 * * * *";
 const PRUNE_EMAIL_DELIVERIES_QUEUE_NAME = "prune-email-deliveries";
@@ -135,7 +136,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly mailJobs: MailJobsService,
     private readonly mailRetention: MailRetentionService,
     private readonly subscriptionStatus: SubscriptionStatusJob,
-    private readonly shiftExportRunner?: ShiftExportRunnerService,
+    private readonly shiftExportRunner: ShiftExportRunnerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -266,7 +267,6 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
           BUILD_SHIFT_EXPORT_QUEUE,
           { includeMetadata: true },
           async (jobs: JobWithMetadata<{ exportId: string }>[]) => {
-            if (!this.shiftExportRunner) throw new Error("shift export runner is unavailable");
             for (const job of jobs) {
               await this.shiftExportRunner.run(job.data.exportId, {
                 retryCount: job.retryCount,
@@ -320,13 +320,31 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
-    const queued = await this.db
-      .select({ id: schema.shiftExports.id })
-      .from(schema.shiftExports)
-      .where(eq(schema.shiftExports.status, "queued"));
+    let queued: { id: string }[];
+    try {
+      queued = await this.db
+        .select({ id: schema.shiftExports.id })
+        .from(schema.shiftExports)
+        .where(eq(schema.shiftExports.status, "queued"))
+        .orderBy(asc(schema.shiftExports.createdAt))
+        .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
+    } catch (error) {
+      this.logger.error(
+        "shift export reconciliation query failed",
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
     for (const row of queued) {
-      const jobId = await boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId: row.id });
-      if (!jobId) throw new Error("shift export enqueue failed during startup reconciliation");
+      try {
+        const jobId = await boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId: row.id });
+        if (!jobId) throw new Error("shift export enqueue returned no job id");
+      } catch (error) {
+        this.logger.error(
+          `shift export reconciliation failed for ${row.id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
     }
   }
 

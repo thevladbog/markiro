@@ -21,6 +21,7 @@ import type {
 
 type ShiftExportRow = typeof schema.shiftExports.$inferSelect;
 type ShiftExportTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+const RETRYABLE_ERROR_CODES = ["QUEUE_FAILED", "STORAGE_FAILED", "GENERATION_FAILED"] as const;
 
 interface ListedShiftExportRow extends ShiftExportRow {
   lateDataAt: Date | null;
@@ -134,8 +135,8 @@ export class ShiftExportsService {
       .limit(1);
     if (!existing) throw new NotFoundException();
     if (existing.status !== "failed") throw new ConflictException("Only failed exports can retry");
-    const restored = await this.restoreFailed(existing, actorUserId);
-    if (!restored) throw new ConflictException("Export is no longer failed");
+    const restored = await this.restoreFailed(existing, actorUserId, RETRYABLE_ERROR_CODES);
+    if (!restored) throw new ConflictException("Export is no longer retryable");
     await this.enqueueOrFail(restored, actorUserId);
     return this.getById(tenantId, exportId);
   }
@@ -275,6 +276,7 @@ export class ShiftExportsService {
   private async restoreFailed(
     existing: ShiftExportRow,
     actorUserId: string,
+    errorCodes: readonly string[] = ["QUEUE_FAILED"],
   ): Promise<ShiftExportRow | undefined> {
     return this.db.transaction(async (tx) => {
       const [restored] = await tx
@@ -285,7 +287,7 @@ export class ShiftExportsService {
             eq(schema.shiftExports.tenantId, existing.tenantId),
             eq(schema.shiftExports.id, existing.id),
             eq(schema.shiftExports.status, "failed"),
-            eq(schema.shiftExports.errorCode, "QUEUE_FAILED"),
+            inArray(schema.shiftExports.errorCode, [...errorCodes]),
           ),
         )
         .returning();

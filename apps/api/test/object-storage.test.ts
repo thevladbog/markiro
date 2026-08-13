@@ -43,7 +43,7 @@ describe("ObjectStorageService", () => {
 
   it("uploads verified private objects with their checksum metadata", async () => {
     const body = Buffer.from("verified export");
-    const sha256 = "a".repeat(64);
+    const sha256 = "4161a5679ca94a7d7999801d153f926f797929158d4110b1cf909030c2d5deba";
     const send = vi.fn().mockResolvedValueOnce({}).mockResolvedValueOnce({
       ContentLength: body.byteLength,
       Metadata: { sha256 },
@@ -92,6 +92,22 @@ describe("ObjectStorageService", () => {
     await expect(
       storage.putVerified("tenants/t/shifts/s/export.csv", Buffer.from("export"), "text/csv", "ABC"),
     ).rejects.toThrow();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("rejects a valid checksum for different bytes before uploading", async () => {
+    const send = vi.fn();
+    const storage = new ObjectStorageService(env, { send } as never);
+    const validDifferentChecksum = "a".repeat(64);
+
+    await expect(
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("export"),
+        "text/csv",
+        validDifferentChecksum,
+      ),
+    ).rejects.toThrow("Object checksum does not match body");
     expect(send).not.toHaveBeenCalled();
   });
 
