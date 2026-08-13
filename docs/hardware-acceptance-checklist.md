@@ -160,6 +160,7 @@ and the browser gallery do not satisfy these checks.
 - [ ] Scan production-like EAN-13 and KM DataMatrix; verify GTIN, serial, and AI 91/92/93 presentation.
 - [ ] Fill a 20-place box and confirm each cell, auto-close, and reset after print resolution.
 - [ ] Disconnect the printer during close; confirm the exact persistent category survives restart.
+- [ ] On packaged Windows, from persistent unresolved box-label recovery choose `Настроить принтер`; while setup is open and after returning, confirm the same unresolved box and 18-digit SSCC remain, product scans and ordinary controls stay sealed, then resolve through retry and scan-back verification when enabled without a second close or serial allocation.
 - [ ] Retry after restoring the printer and confirm the same 18-digit SSCC prints once.
 - [ ] Repeat the failure and explicitly continue without a label; confirm the skip is synchronized and the next box accepts scans.
 - [ ] Enable scan-back verification and scan GS1-128 `(00)` plus the expected SSCC.

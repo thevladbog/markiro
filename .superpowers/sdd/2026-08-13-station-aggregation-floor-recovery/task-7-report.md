@@ -4,7 +4,7 @@
 
 The final domain, DB, API, Station, UI, Rust, formatting, release-contract,
 production-bundle-contract, and diff gates passed with the test infrastructure
-described below. The hardware checklist now contains the eight concrete
+described below. The hardware checklist now contains the nine concrete
 aggregation and box-label recovery checks for the next packaged Windows beta.
 Every new Windows, Tauri, scanner, printer, restart, and display item remains
 unchecked because none was physically executed in this task.
@@ -226,7 +226,7 @@ these physical acceptance items.
 
 ## Self-review
 
-- All eight required beta steps appear verbatim as unchecked checklist items.
+- All nine required beta steps appear as unchecked checklist items.
 - No existing or new hardware checkbox was marked complete.
 - The release runbook points to the canonical hardware subsection and states
   that every item remains unchecked before the real run.
@@ -252,3 +252,38 @@ Final code and operational reviewers must separately inspect:
 - 1280×800 and 1024×768 layout bounds;
 - the distinction between automated/browser results and actual
   Windows/scanner/printer acceptance.
+
+## P1 review correction: printer-setup recovery round trip
+
+Review found that the original acceptance record covered printer disconnect,
+restart, retry, and skip, but did not independently require the printer-setup
+detour to preserve the unresolved print job and scan-admission seal.
+
+The implementation boundary was verified before editing the checklist:
+
+- `WorkScreen` documents `onOpenPrinterSetup` as opening setup without
+  resolving the durable print job;
+- `BoxPrintRecovery` exposes `Настроить принтер` only from the persistent
+  recovery surface;
+- the recovery state carries the same box and full SSCC, and the admission
+  checks continue to block ordinary scans until retry/verification or explicit
+  skip resolves it.
+
+An additional packaged-Windows item now requires the operator to enter printer
+setup from persistent recovery, return to the same unresolved box and SSCC,
+observe that scans and ordinary controls remain sealed throughout, and finish
+through retry plus scan-back verification when enabled without a second box
+close or serial allocation. The item remains unchecked because no packaged
+Windows, scanner, or printer run was performed.
+
+Focused correction verification:
+
+```bash
+PNPM exec prettier --check \
+  docs/hardware-acceptance-checklist.md \
+  .superpowers/sdd/2026-08-13-station-aggregation-floor-recovery/task-7-report.md
+git diff --check
+```
+
+Result: both commands exited 0. No package, browser, release, Windows, scanner,
+or printer gate was rerun for this documentation-only correction, as requested.
