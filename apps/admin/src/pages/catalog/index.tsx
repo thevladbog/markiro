@@ -44,6 +44,23 @@ const CANDIDATES_CHANNEL_TYPE = "commerceml";
 
 type StatusFilter = "all" | ProductStatus;
 
+function ProductThumbnail({ product }: { product: ProductDto }) {
+  const [failed, setFailed] = useState(false);
+  if (!product.image || failed) {
+    return <span aria-label={failed ? "" : undefined}>—</span>;
+  }
+  return (
+    <img
+      src={productImageUrl(product) ?? undefined}
+      alt={product.name}
+      width={48}
+      height={48}
+      onError={() => setFailed(true)}
+      style={{ objectFit: "cover", borderRadius: 6 }}
+    />
+  );
+}
+
 /** Debounce delay (ms) between the last keystroke in the search box and the refetch. */
 const SEARCH_DEBOUNCE_MS = 300;
 
@@ -217,7 +234,7 @@ export function CatalogPage() {
       {
         key: "image",
         title: t("pages.catalog.table.image"),
-        render: (row) => row.image ? <img src={productImageUrl(row) ?? undefined} alt={row.name} width={48} height={48} style={{ objectFit: "cover", borderRadius: 6 }} /> : <span aria-label={t("pages.catalog.table.noImage")}>—</span>,
+        render: (row) => <ProductThumbnail product={row} />,
       },
       { key: "name", title: t("pages.catalog.table.name") },
       {

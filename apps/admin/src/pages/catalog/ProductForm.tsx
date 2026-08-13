@@ -438,7 +438,7 @@ export function ProductForm({
           <div className="mk-product-image-control">
             {(previewUrl || (mode === "edit" && productId && image)) && !imageLoadFailed
               ? <img
-                  src={previewUrl ?? productImageUrl({ id: productId!, image }) ?? undefined}
+                  src={previewUrl ?? productImageUrl({ id: productId!, image: image ?? null }) ?? undefined}
                   alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
                   onError={() => setImageLoadFailed(true)}
                   className="mk-product-image-control__preview"

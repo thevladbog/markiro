@@ -32,9 +32,11 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     // Better Auth session cookie -- credentials are set explicitly here
     // anyway so this wrapper's behavior doesn't depend on that default.
     credentials: "include",
-    headers: isMultipart
+    ...(isMultipart
       ? init.headers
-      : { "Content-Type": "application/json", ...init.headers },
+        ? { headers: init.headers }
+        : {}
+      : { headers: { "Content-Type": "application/json", ...(init.headers ?? {}) } }),
   });
 
   if (!response.ok) {
