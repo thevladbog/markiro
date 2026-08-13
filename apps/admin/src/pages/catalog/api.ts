@@ -9,7 +9,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import { apiFetch } from "../../api/client.js";
+import { API_BASE, apiFetch } from "../../api/client.js";
 
 export type ProductStatus = "draft" | "active";
 

@@ -17,3 +17,10 @@ Checks run:
 - `git diff --check` — passed.
 
 Not exercised: live browser visual acceptance, API/MinIO upload against a running backend, and station/kiosk consumers (handled by later tasks).
+
+Review fix round 1:
+
+- Imported the shared API base for image URLs and kept the multipart boundary browser-managed.
+- A create whose image upload fails remains in the same panel as an edit and retries only the image upload; the created product is not posted again.
+- Image decode/display errors fall back to the empty state; alt text uses the current product name.
+- A selected local file contributes to the dirty/close guard.

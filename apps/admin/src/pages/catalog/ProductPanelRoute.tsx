@@ -87,12 +87,33 @@ function CreateProductPanel() {
   const mutation = useCreateProduct();
   const imageMutation = useUploadProductImage();
   const [error, setError] = useState<string | null>(null);
+  const [createdProduct, setCreatedProduct] = useState<ProductDto | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending || imageMutation.isPending);
+  const createdInitialValues = useMemo<ProductFormValues | undefined>(
+    () =>
+      createdProduct
+        ? {
+            gtin: createdProduct.gtin14,
+            name: createdProduct.name,
+            productGroup: createdProduct.productGroup ?? "",
+            boxCapacity: createdProduct.boxCapacity === null ? "" : String(createdProduct.boxCapacity),
+            palletCapacity: createdProduct.palletCapacity === null ? "" : String(createdProduct.palletCapacity),
+            unitPrice: createdProduct.unitPrice ?? "",
+            egaisCode: createdProduct.egaisCode ?? "",
+            defaultCounterpartyId: createdProduct.defaultCounterpartyId ?? "",
+            defaultLabelTemplateId: createdProduct.defaultLabelTemplateId ?? "",
+          }
+        : undefined,
+    [createdProduct],
+  );
   if (loading || failed) return <PanelState mode="create" />;
   return (
     <>
       <ProductForm
-        mode="create"
+        mode={createdProduct ? "edit" : "create"}
+        initialValues={createdInitialValues}
+        productId={createdProduct?.id}
+        imageAltName={createdProduct?.name}
         counterparties={context.counterparties}
         labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
@@ -102,16 +123,26 @@ function CreateProductPanel() {
         onSubmit={async (input, image) => {
           try {
             setError(null);
-            const created = await mutation.mutateAsync(input);
-            if (image) await imageMutation.mutateAsync({ id: created.id, file: image });
+            const created = createdProduct ?? (await mutation.mutateAsync(input));
+            if (image) {
+              try {
+                await imageMutation.mutateAsync({ id: created.id, file: image });
+              } catch (cause) {
+                setCreatedProduct(created);
+                setError(t("pages.catalog.form.imageError"));
+                throw cause;
+              }
+            }
             toast("ok", t("pages.catalog.toasts.createSuccess"));
             guard.finish();
           } catch (cause) {
-            setError(
-              cause instanceof ApiRequestError
-                ? cause.message
-                : t("pages.catalog.toasts.createError"),
-            );
+            if (!createdProduct) {
+              setError(
+                cause instanceof ApiRequestError
+                  ? cause.message
+                  : t("pages.catalog.toasts.createError"),
+              );
+            }
           }
         }}
       />
@@ -196,6 +227,7 @@ function EditProductPanel() {
         labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
         image={product.image}
+        imageAltName={product.name}
         imageBusy={deleteImageMutation.isPending}
         onDeleteImage={async () => {
           try {

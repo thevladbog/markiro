@@ -97,6 +97,7 @@ export interface ProductFormProps {
    */
   externalRef?: string | null;
   image?: ProductImageDescriptor | null;
+  imageAltName?: string;
   imageBusy?: boolean;
   onDeleteImage?: () => void | Promise<void>;
   counterparties: CounterpartyDto[];
@@ -171,6 +172,7 @@ export function ProductForm({
   productStatus,
   productId,
   externalRef,
+  imageAltName,
   counterparties,
   labelTemplates,
   submitting = false,
@@ -193,6 +195,7 @@ export function ProductForm({
   const [linkedExternalRef, setLinkedExternalRef] = useState<string | null>(externalRef ?? null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   const {
     register,
@@ -232,14 +235,19 @@ export function ProductForm({
       return;
     }
     const url = URL.createObjectURL(selectedImage);
+    setImageLoadFailed(false);
     setPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [selectedImage]);
 
   useEffect(() => {
+    setImageLoadFailed(false);
+  }, [image]);
+
+  useEffect(() => {
     isDirtyRef.current = isDirty;
-    onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
+    onDirtyChange(isDirty || Boolean(selectedImage));
+  }, [isDirty, onDirtyChange, selectedImage]);
 
   // GTIN owner hint (design brief 03): only ever calls the check for a
   // checksum-valid GTIN (`isValidGtin`, client-side, before any network
@@ -425,10 +433,11 @@ export function ProductForm({
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
           <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
           <div className="mk-product-image-control">
-            {previewUrl || (mode === "edit" && productId && image)
+            {(previewUrl || (mode === "edit" && productId && image)) && !imageLoadFailed
               ? <img
                   src={previewUrl ?? productImageUrl({ id: productId!, image }) ?? undefined}
-                  alt={t("pages.catalog.form.imageAlt")}
+                  alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                  onError={() => setImageLoadFailed(true)}
                   className="mk-product-image-control__preview"
                 />
               : <div className="mk-product-image-control__empty">{t("pages.catalog.form.imageEmpty")}</div>}
