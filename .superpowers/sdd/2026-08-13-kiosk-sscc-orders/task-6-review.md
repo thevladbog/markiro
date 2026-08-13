@@ -1,115 +1,75 @@
-# Task 6 re-review
+# Task 6 final re-review
 
 Initial implementation: `739495a5`
 
 Fix round 1: `739495a5..e6277324`
 
-Verdict: **CHANGES REQUESTED**. Three of the four original Important findings are
-addressed. Installation isolation is improved, but the required current-token
-ownership check is still absent, leaving one Important same-binding re-pair race.
+Fix round 2: `e6277324..3d35ea38`
 
-## Remaining Important finding
+Verdict: **APPROVED**. The residual same-binding token-rotation Important is
+addressed. No Critical or Important finding remains in the bounded Task 6 scope.
 
-### A refresh is not owned by the current persisted token
+## Residual Important: addressed
 
-`BoxRegistryCut` and `BoxRegistryMeta` carry only canonicalized
-`{serverUrl,kioskId}`. `beginBoxRegistryStage`, `stageBoxRegistryPage`, and
-`activateBoxRegistryPage` atomically verify that the persisted config has the same
-binding and merely contains some non-empty token. They do not verify that the
-token which authenticated the refresh is still the persisted token. The
-single-flight key is also binding-only.
+### Registry cuts are owned by the current persisted credential generation
 
-Consequently, this sequence is still possible:
+- `writeConfig` stores a random, non-secret UUID `credentialGeneration`. It
+  rotates whenever the paired token changes, including a re-pair to the same
+  canonical server and kiosk, and is preserved only for the same token/binding.
+- `BoxRegistryCut` and active metadata carry the canonical binding plus that
+  generation, never token plaintext or reversible token-derived material.
+- Begin, stage, activation, and discard read config in the same IndexedDB
+  transaction as their registry work and compare the exact current credential
+  owner. Old-generation begin/stage/activation abort; old-generation discard is
+  a no-op and cannot clear the new cut.
+- Token rotation clears active, staging, and registry metadata atomically with
+  the config update. Queue, journal, quarantine, and snapshot stores are outside
+  that transaction and remain intact.
+- The worker single-flight key includes canonical server URL, kiosk ID, and
+  credential generation. A new credential refresh therefore does not wait on or
+  reuse a held old-credential refresh.
 
-1. Client A starts a registry refresh under token A for server S and kiosk K.
-2. The device is re-paired to the same S/K and `writeConfig` installs token B.
-   Because the binding is unchanged, the implementation deliberately preserves
-   active and staging registry stores.
-3. Client A resumes. Its cut still passes every binding/current-token-presence
-   check and can stage or activate after token B became authoritative.
+The end-to-end regression holds token-A before staging, writes token B for the
+same server/kiosk, activates token-B revision 2, then releases token A. The old
+client publishes no row and does not erase or overwrite the new active cut. A
+storage-boundary regression also begins an old cut before rotation, requires its
+later activation to fail, and successfully activates the new owner.
 
-This violates the required invariant that an activation belongs to both the
-current persisted binding and credential. It can publish a response authenticated
-under a revoked/replaced credential after re-pairing. Bind each cut to a
-credential generation or non-reversible token fingerprint and compare it with the
-current config in the same IndexedDB transactions; do not persist another badge or
-reusable credential. Add a regression that holds token-A refresh, re-pairs the
-same server/kiosk with token B, requires the old stage/activation to fail, then
-allows a token-B refresh. Queue and journal must remain intact.
+## Upgrade and secret handling
 
-## Addressed original findings
+- Existing version-3 paired config without a valid generation is upgraded on
+  `readConfig` through the normal atomic config/registry transaction. It receives
+  a fresh generation; incompatible old metadata is cleared rather than trusted.
+- IndexedDB remains version 3; no queue or journal migration is introduced.
+- The generation is random ownership metadata, not a badge, device token, token
+  hash, or credential usable against the API. No new token logging or registry
+  persistence path was added.
 
-### Concurrent initial snapshots — addressed
+## Earlier findings remain addressed
 
-- Staging metadata has a unique owner and exact cut tuple.
-- Stage, discard, and activation require that exact owner; a losing discard cannot
-  clear the winner's staging rows.
-- Full activation rejects `until <= active.version`, so an older full snapshot
-  cannot regress the active cut.
-- The regression interleaves two `since=null` cuts and proves no row mixing,
-  winner erasure, or active-version regression.
-
-### Trusted freshness — addressed for the Task 6 persistence contract
-
-- Activated metadata receives `bootstrap.generatedAt`, the server timestamp from
-  the successful refresh, rather than the tablet fetch time.
-- `boxRegistryAge` uses the bootstrap snapshot's corrected server clock and the
-  same fresh/warn/blocked thresholds, failing closed when either half is missing
-  or unmeasurable.
-- UI consumption of this single verdict belongs to the later cart/touch-flow
-  task; Task 6 now exposes the required trusted verdict rather than claiming the
-  device timestamp is authoritative.
-
-### Runtime and allocation bounds — addressed
-
-- Page preflight runs before copying/deduplication and enforces 500 changes,
-  1,000 member keys, 1,024 UTF-8 bytes per string, and one MiB aggregate string
-  bytes.
-- Box/product identifiers must be UUID-shaped; SSCC, revision, timestamp, field
-  allowlists, bottle count, duplicate keys, cursor length/cycles, and total pages
-  remain bounded.
-- Active rows are revalidated, including the same string budgets, before lookup.
-
-### Cross-installation binding and lifecycle clearing — partially addressed
-
-- Metadata and storage operations are bound to normalized `serverUrl+kioskId`.
-- Changing server or kiosk and revoking the token atomically clear only registry
-  stores; queue and journal are preserved.
-- Stale callers for another binding cannot read, clear, stage, or activate the
-  current binding.
-- The same-binding token-rotation race above remains open.
-
-## Compatibility review
-
-- IndexedDB remains version 3 and the v2-to-v3 upgrade creates only the new
-  registry stores; existing snapshot and legacy queue records are retained.
-- Registry clearing transactions do not include queue, journal, quarantine, or
-  snapshot stores.
-- No new badge plaintext path was introduced, and Task 6 queue/scrub wire
-  compatibility is unchanged from the initial implementation.
+- Concurrent initial full cuts have exact owner/CAS isolation; loser discard
+  cannot erase winner staging and an older full cut cannot regress active.
+- Registry freshness uses trusted bootstrap server `generatedAt` and the shared
+  corrected fresh/warn/blocked verdict.
+- Runtime validation retains per-string 1,024-byte UTF-8, aggregate one-MiB,
+  member-count, UUID, SSCC, revision, cursor, and page bounds.
+- Changing server/kiosk or revoking a token clears only registry stores; legacy
+  queues, scrub compatibility, journal custody, and exact order wire payloads are
+  unchanged.
 
 ## Verification
 
-- Focused registry/store/sync/pairing tests: **4 files, 146 tests passed**.
+- Focused registry/store/sync/pairing tests: **4 files, 148 tests passed**.
 - Kiosk TypeScript typecheck: **passed**.
-- `git diff --check 739495a5..e6277324`: **passed**.
+- `git diff --check e6277324..3d35ea38`: **passed**.
+- Implementer report additionally records full kiosk **21 files / 487 tests**,
+  lint, and Vite PWA build passing; this review independently reran only the
+  bounded gates above.
 - No browser, physical scanner, tablet, or live-service check was run or claimed.
 
 ## Classification
 
 - Critical: 0
-- Important: 1
+- Important: 0
 - Minor: 0
-- Approval: **CHANGES REQUESTED**
-
-## Implementer response: credential-ownership fix round
-
-The remaining Important finding is implemented and awaits independent re-review.
-
-- `KioskConfig` now owns a random non-secret UUID credential generation. It is created for legacy paired config and rotated whenever the stored token changes, including a same-server/same-kiosk re-pair. The token remains only in the pre-existing config record; registry staging and metadata contain the UUID generation, never token plaintext or reversible token-derived material.
-- Config writes serialize with registry stores. Token rotation atomically clears active/staging/meta while leaving queue, journal, quarantine, and snapshot untouched. Same binding plus the same token preserves the generation and active cut across ordinary config writes and URL normalization.
-- Every cut includes the credential generation. Begin, stage, discard, and activation compare it with the current config inside their IndexedDB transaction. An old-generation discard is a no-op and cannot erase the new generation's staging.
-- The worker's single-flight key is `(canonical serverUrl, kioskId, credentialGeneration)`, so a new credential refresh can proceed while an old credential request is still held.
-- Exact regression: token-A refresh is held before staging, the same binding is paired with token B, token-B refresh activates revision 2, then token A is released and rejected without publishing its row or clearing revision 2.
-
-Fix-round evidence: functional RED was 1 failed / 16 passed in `store.test.ts` because the old cut resolved instead of rejecting. Focused final GREEN was 4 files / 148 tests. Full kiosk passed 21 files / 487 tests on the final rerun; the first broad run had one existing timing-sensitive app assertion fail while its isolated rerun and the complete rerun passed. Typecheck, full ESLint, and Vite PWA build passed.
+- Approval: **APPROVED**
