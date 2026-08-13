@@ -53,4 +53,19 @@ describe("product image sync", () => {
     expect(await readPublishedProductImagePointer("p1")).toBeNull();
     await clearProductImages();
   });
+
+  it("does not trust a cached blob whose checksum no longer matches", async () => {
+    const replacement = new Uint8Array([4, 5, 6]);
+    const hash = await crypto.subtle.digest("SHA-256", replacement);
+    const replacementImage = {
+      ...descriptor(replacement),
+      checksum: [...new Uint8Array(hash)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(""),
+    };
+    await publishProductImage("p1", replacementImage.checksum, new Blob([1, 2, 3], { type: "image/webp" }));
+    const download = vi.fn(async () => new Blob([replacement], { type: "image/webp" }));
+    await syncProductImages({ downloadProductImage: download }, [product(replacementImage)]);
+    expect(download).toHaveBeenCalledOnce();
+  });
 });

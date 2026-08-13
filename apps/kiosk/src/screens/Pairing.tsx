@@ -215,6 +215,10 @@ export function Pairing({
       // failure for what it is (`bundle`, below) instead of discovering it
       // halfway through a write sequence. `replaceSnapshot` refuses it too.
       assertMeasurableGeneratedAt(result.bootstrap);
+      // Scrub before either new-tenant record is durable. If this local write
+      // fails, the spent code is reported and no new token or snapshot can
+      // become visible on restart.
+      await clearProductImages();
       // THE ORDER OF THESE TWO WRITES IS LOAD-BEARING — do not tidy it.
       // `config.token` is the state-machine trigger: `nextKioskView` reads
       // `paired` from it, and once it is set this screen is unreachable. So the
@@ -245,11 +249,6 @@ export function Pairing({
         // device cannot collide with the idempotency keys of its own past orders.
         nextDeviceSeq: result.nextDeviceSeq,
       });
-      // A device may have been paired to another tenant before this redeem.
-      // Scrub completes before any new-tenant media can be published; if the
-      // local store refuses, keep the device on pairing and retry with a fresh
-      // code rather than leaking the previous tenant's image bytes.
-      await clearProductImages();
       // Pairing already contains the bootstrap, so start media reconciliation
       // immediately with the newly redeemed token. It is deliberately
       // background work: an unavailable image must not delay the kiosk's

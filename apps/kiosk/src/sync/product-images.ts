@@ -2,6 +2,7 @@ import type { KioskClient } from "../api/client.js";
 import type { KioskBootstrapDto, ProductImageDescriptor } from "../api/types.js";
 import {
   clearPublishedProductImage,
+  deleteProductImageBlob,
   hasProductImageBlob,
   pruneProductImages,
   publishProductImage,
@@ -68,6 +69,13 @@ export async function syncProductImages(
         if (await hasProductImageBlob(descriptor.checksum)) {
           const blob = await readProductImageBlob(descriptor.checksum);
           if (!blob) throw new Error("product image blob disappeared");
+          try {
+            await validate(blob, descriptor);
+          } catch (error) {
+            await clearPublishedProductImage(product.id);
+            await deleteProductImageBlob(descriptor.checksum);
+            throw error;
+          }
           await publishProductImage(product.id, descriptor.checksum, blob);
           result.reused += 1;
           continue;

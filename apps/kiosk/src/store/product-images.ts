@@ -44,6 +44,10 @@ export async function hasProductImageBlob(checksum: string): Promise<boolean> {
   return (await readBlob(checksum)) !== null;
 }
 
+export async function deleteProductImageBlob(checksum: string): Promise<void> {
+  await withStore(STORE_PRODUCT_IMAGE_BLOBS, "readwrite", (store) => store.delete(checksum));
+}
+
 /** Blob-first, pointer-second publication. A failed pointer write never loses the old pointer. */
 export async function publishProductImage(productId: string, checksum: string, blob: Blob): Promise<void> {
   await withStore(STORE_PRODUCT_IMAGE_BLOBS, "readwrite", (store) => store.put(blob, checksum));

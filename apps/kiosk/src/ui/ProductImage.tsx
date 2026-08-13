@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ProductImageDescriptor } from "../api/types.js";
 import {
+  clearPublishedProductImage,
+  deleteProductImageBlob,
   readProductImageBlob,
   readPublishedProductImagePointer,
 } from "../store/product-images.js";
@@ -21,11 +23,13 @@ export interface ProductImageProps {
  */
 export function ProductImage({ productId, name, image, size = 56 }: ProductImageProps): React.JSX.Element {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     let alive = true;
     let url: string | null = null;
     setObjectUrl(null);
+    setFailed(false);
     if (productId === null || image === undefined || image === null) {
       return () => {
         alive = false;
@@ -37,6 +41,17 @@ export function ProductImage({ productId, name, image, size = 56 }: ProductImage
         if (!alive || pointer?.checksum !== image.checksum) return;
         const blob = await readProductImageBlob(pointer.checksum);
         if (!alive || !blob || blob.type !== image.contentType || blob.size !== image.byteSize) return;
+        const digest = [
+          ...new Uint8Array(await crypto.subtle.digest("SHA-256", await blob.arrayBuffer())),
+        ]
+          .map((byte) => byte.toString(16).padStart(2, "0"))
+          .join("");
+        if (!alive) return;
+        if (digest !== image.checksum) {
+          await clearPublishedProductImage(productId);
+          await deleteProductImageBlob(pointer.checksum);
+          return;
+        }
         url = URL.createObjectURL(blob);
         if (alive) setObjectUrl(url);
         else URL.revokeObjectURL(url);
@@ -51,15 +66,22 @@ export function ProductImage({ productId, name, image, size = 56 }: ProductImage
     };
   }, [productId, image]);
 
-  if (objectUrl) {
+  if (objectUrl && !failed) {
     return (
       <img
         src={objectUrl}
-        alt=""
-        aria-hidden="true"
+        alt={name}
         width={size}
         height={size}
         style={{ width: size, height: size, objectFit: "cover", borderRadius: 10, flexShrink: 0 }}
+        onError={() => {
+          setFailed(true);
+          const stale = objectUrl;
+          setObjectUrl(null);
+          URL.revokeObjectURL(stale);
+          if (productId) void clearPublishedProductImage(productId);
+          if (image) void deleteProductImageBlob(image.checksum);
+        }}
       />
     );
   }
