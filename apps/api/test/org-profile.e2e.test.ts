@@ -127,6 +127,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: [],
       inn: null,
       pickupLimitsEnabled: true,
+      logoUrl: null,
+      logoRevision: null,
     });
   });
 
@@ -147,6 +149,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: ["4600000", "4600001"],
       inn: "7701234567",
       pickupLimitsEnabled: true,
+      logoUrl: null,
+      logoRevision: null,
     });
 
     const get = await agent.get("/org/profile").expect(200);
@@ -169,6 +173,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: [],
       inn: "7709876543",
       pickupLimitsEnabled: true,
+      logoUrl: null,
+      logoRevision: null,
     });
   });
 
@@ -212,6 +218,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: [],
       inn: "7701234567",
       pickupLimitsEnabled: true,
+      logoUrl: null,
+      logoRevision: null,
     });
 
     // Verify GET sees the merged state
@@ -221,6 +229,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: [],
       inn: "7701234567",
       pickupLimitsEnabled: true,
+      logoUrl: null,
+      logoRevision: null,
     });
   });
 
@@ -246,6 +256,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: [],
       inn: null,
       pickupLimitsEnabled: true,
+      logoUrl: null,
+      logoRevision: null,
     });
   });
 
@@ -271,6 +283,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gs1Prefixes: [],
       inn: null,
       pickupLimitsEnabled: false,
+      logoUrl: null,
+      logoRevision: null,
     });
 
     const [audit] = await setup.db
@@ -322,7 +336,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .send({ organizationId: orgId })
       .expect(200);
 
-    await agent.get("/org/profile").expect(200);
+    const profile = await agent.get("/org/profile").expect(200);
+    expect(profile.body).toMatchObject({ logoUrl: null, logoRevision: null });
   });
 
   it("normalizes, activates, audits, streams, and idempotently deletes a tenant logo", async () => {
@@ -348,6 +363,17 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .attach("logo", source, { filename: "plant.png", contentType: "image/png" })
       .expect(201);
     expect(upload.body.logoRevision).toMatch(/^[0-9a-f-]{36}$/);
+    expect(upload.body.logoUrl).toBe(`/org/profile/logo/${upload.body.logoRevision}`);
+
+    const profile = await agent.get("/org/profile").expect(200);
+    expect(profile.body).toMatchObject({
+      logoRevision: upload.body.logoRevision,
+      logoUrl: `/org/profile/logo/${upload.body.logoRevision}`,
+    });
+    await agent
+      .get(`/org/profile/logo/${upload.body.logoRevision}`)
+      .expect("content-type", /image\/webp/)
+      .expect(200);
 
     const [asset] = await db
       .select()
@@ -449,7 +475,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
 
     const frameSize = 64 * 64 * 3;
     const animated = await sharp(
-      Buffer.concat([Buffer.alloc(frameSize), Buffer.alloc(frameSize, 1)]),
+      Buffer.concat([Buffer.alloc(frameSize), Buffer.alloc(frameSize, 255)]),
       {
         raw: { width: 64, height: 128, pageHeight: 64, channels: 3 },
       },
@@ -500,6 +526,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .get(`/kiosk/branding/logo/${foreignUpload.body.logoRevision}`)
       .set("x-kiosk-token", kioskToken)
       .expect(404);
+    await first.get(`/org/profile/logo/${foreignUpload.body.logoRevision}`).expect(404);
+    await second.get(`/org/profile/logo/${ownUpload.body.logoRevision}`).expect(404);
     objects.delete(`tenants/${firstOrg}/branding/${ownUpload.body.logoRevision}.webp`);
     await request(app!.getHttpServer())
       .get(`/kiosk/branding/logo/${ownUpload.body.logoRevision}`)

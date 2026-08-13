@@ -68,6 +68,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /lines/:id (LinesController.getLine)",
       "GET /operators (OperatorsController.listOperators)",
       "GET /org/profile (OrgProfileController.getProfile)",
+      "GET /org/profile/logo/:revision (OrgProfileController.getLogo)",
       "GET /org/profile/sscc (OrgProfileController.getSscc)",
       "GET /pickup-orders (PickupOrdersController.list)",
       "GET /pickup-orders/:id (PickupOrdersController.detail)",

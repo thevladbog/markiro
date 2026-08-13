@@ -29,16 +29,27 @@ function renderPage() {
   );
 }
 
-const PROFILE = { gln: "4601112222005", gs1Prefixes: ["4600000"], inn: "7701234567" };
-const EMPTY_PROFILE = { gln: null, gs1Prefixes: [], inn: null };
+const PROFILE = {
+  gln: "4601112222005",
+  gs1Prefixes: ["4600000"],
+  inn: "7701234567",
+  pickupLimitsEnabled: true,
+  logoUrl: null as string | null,
+  logoRevision: null as string | null,
+};
+const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000 };
 
 /** Routes the shared `fetch` mock by URL/method -- both GET/PUT `/org/profile` and its `/sscc` sibling are called on this one page. */
 function routeFetch(overrides: {
   profile?: (init?: RequestInit) => Response | Promise<Response>;
   sscc?: (init?: RequestInit) => Response | Promise<Response>;
+  logo?: (init?: RequestInit) => Response | Promise<Response>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/org/profile/logo") {
+      return overrides.logo ? overrides.logo(init) : jsonResponse(204, undefined);
+    }
     if (url === "/api/org/profile/sscc") {
       return overrides.sscc ? overrides.sscc(init) : jsonResponse(200, COUNTER);
     }
@@ -58,6 +69,90 @@ async function cardOf(titleText: string): Promise<HTMLElement> {
 }
 
 describe("OrgProfilePage", () => {
+  it("saves the all-kiosk pickup-limit toggle and explains that employee values are retained", async () => {
+    const fetchMock = routeFetch({
+      profile: (init) =>
+        init?.method === "PUT"
+          ? jsonResponse(200, { ...PROFILE, pickupLimitsEnabled: false })
+          : jsonResponse(200, PROFILE),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Применять лимиты суммарно во всех киосках",
+    });
+    expect(toggle.getAttribute("aria-describedby")).not.toBeNull();
+    expect(screen.getByText(/значения сотрудников останутся/i)).toBeDefined();
+    fireEvent.click(toggle);
+    fireEvent.click(
+      within(await cardOf("Политика выдачи")).getByRole("button", { name: "Сохранить" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ pickupLimitsEnabled: false }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Политика выдачи сохранена");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Pickup policy success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("uses Markiro fallback, rejects unsupported logo input, then previews and removes the normalized logo", async () => {
+    let profile = PROFILE;
+    const revision = "11111111-1111-4111-8111-111111111111";
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, profile),
+      logo: (init) => {
+        if (init?.method === "POST") {
+          profile = {
+            ...profile,
+            logoRevision: revision,
+            logoUrl: `/org/profile/logo/${revision}`,
+          };
+          return jsonResponse(201, { logoRevision: revision, logoUrl: profile.logoUrl });
+        }
+        profile = { ...profile, logoRevision: null, logoUrl: null };
+        return jsonResponse(204, undefined);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    expect(await screen.findByLabelText("Логотип Markiro по умолчанию")).toBeDefined();
+    const input = screen.getByLabelText("Загрузить логотип");
+    fireEvent.change(input, {
+      target: { files: [new File(["svg"], "logo.svg", { type: "image/svg+xml" })] },
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain("JPEG, PNG или WebP");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+
+    fireEvent.change(input, {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+    const preview = await screen.findByRole("img", { name: "Логотип организации" });
+    expect(preview.getAttribute("src")).toBe(`/api/org/profile/logo/${revision}`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/org/profile/logo",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile/logo",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    expect(await screen.findByLabelText("Логотип Markiro по умолчанию")).toBeDefined();
+  });
+
   it("renders the profile fields and the derived prefix from the mocked GET responses", async () => {
     vi.stubGlobal("fetch", routeFetch({}));
 

@@ -6,8 +6,11 @@ import {
   Get,
   HttpCode,
   Post,
+  Param,
+  ParseUUIDPipe,
   Put,
   Req,
+  StreamableFile,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -87,6 +90,19 @@ export class OrgProfileController {
   ): Promise<OrganizationLogoDto> {
     if (!file) throw new BadRequestException("Logo file is required");
     return this.orgProfileService.uploadLogo(req.tenantId!, req.userId!, file.buffer);
+  }
+
+  @Get("logo/:revision")
+  async getLogo(
+    @Req() req: RequestWithTenant,
+    @Param("revision", new ParseUUIDPipe()) revision: string,
+  ): Promise<StreamableFile> {
+    const logo = await this.orgProfileService.getKioskLogo(req.tenantId!, revision);
+    return new StreamableFile(logo.body, {
+      type: logo.contentType,
+      disposition: "inline",
+      length: logo.body.byteLength,
+    });
   }
 
   @Delete("logo")

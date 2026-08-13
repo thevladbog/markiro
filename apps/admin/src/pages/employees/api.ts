@@ -15,6 +15,13 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { apiFetch } from "../../api/client.js";
 
 export type EmployeeStatus = "active" | "archived";
+export type EmployeePickupLimitMode = "limited" | "unlimited";
+
+export interface EmployeePickupPolicyInput {
+  limitMode: EmployeePickupLimitMode;
+  dayLimit: number;
+  canWriteoff: boolean;
+}
 
 /** Mirrors `apps/api/src/modules/employees/dto.ts`'s `BadgeDto`. */
 export interface BadgeDto {
@@ -31,6 +38,7 @@ export interface EmployeeDto {
   fullName: string;
   role: string | null;
   status: EmployeeStatus;
+  pickupPolicy: EmployeePickupPolicyInput;
   badges: BadgeDto[];
   createdAt: string;
 }
@@ -53,6 +61,21 @@ export interface ListEmployeesParams {
 export interface IssueBadgeInput {
   badgeCode: string;
   label?: string | null;
+}
+
+export interface BulkEmployeePickupLimitsInput {
+  employeeIds: string[];
+  limitMode: EmployeePickupLimitMode;
+  dayLimit: number;
+}
+
+export interface BulkEmployeePickupWriteoffInput {
+  employeeIds: string[];
+  canWriteoff: boolean;
+}
+
+interface BulkEmployeePickupPolicyResponse {
+  items: Array<EmployeePickupPolicyInput & { employeeId: string }>;
 }
 
 interface ListEmployeesResponse {
@@ -107,6 +130,31 @@ function removeBadge(id: string, badgeId: string): Promise<void> {
   return apiFetch<void>(`/employees/${id}/badges/${badgeId}`, { method: "DELETE" });
 }
 
+function patchPickupPolicy(id: string, input: EmployeePickupPolicyInput): Promise<EmployeeDto> {
+  return apiFetch<EmployeeDto>(`/employees/${id}/pickup-policy`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+function patchBulkPickupLimits(
+  input: BulkEmployeePickupLimitsInput,
+): Promise<BulkEmployeePickupPolicyResponse> {
+  return apiFetch<BulkEmployeePickupPolicyResponse>("/employees/pickup-policy/limits", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+function patchBulkPickupWriteoff(
+  input: BulkEmployeePickupWriteoffInput,
+): Promise<BulkEmployeePickupPolicyResponse> {
+  return apiFetch<BulkEmployeePickupPolicyResponse>(
+    "/employees/pickup-policy/writeoff-permission",
+    { method: "PATCH", body: JSON.stringify(input) },
+  );
+}
+
 /** `GET /employees` -- the active tenant's employees, optionally filtered by status. */
 export function useEmployees(params: ListEmployeesParams = {}): UseQueryResult<EmployeeDto[]> {
   return useQuery({
@@ -139,6 +187,40 @@ export function useUpdateEmployee(): UseMutationResult<
       void queryClient.invalidateQueries({ queryKey: EMPLOYEES_QUERY_KEY });
     },
   });
+}
+
+function useInvalidateEmployeesMutation<TInput>(
+  mutationFn: (input: TInput) => Promise<unknown>,
+): UseMutationResult<unknown, Error, TInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: EMPLOYEES_QUERY_KEY }),
+  });
+}
+
+export function useUpdateEmployeePickupPolicy(): UseMutationResult<
+  unknown,
+  Error,
+  { id: string; input: EmployeePickupPolicyInput }
+> {
+  return useInvalidateEmployeesMutation(({ id, input }) => patchPickupPolicy(id, input));
+}
+
+export function useBulkEmployeePickupLimits(): UseMutationResult<
+  unknown,
+  Error,
+  BulkEmployeePickupLimitsInput
+> {
+  return useInvalidateEmployeesMutation(patchBulkPickupLimits);
+}
+
+export function useBulkEmployeePickupWriteoff(): UseMutationResult<
+  unknown,
+  Error,
+  BulkEmployeePickupWriteoffInput
+> {
+  return useInvalidateEmployeesMutation(patchBulkPickupWriteoff);
 }
 
 /** `DELETE /employees/:id` -- archives (soft-deletes) the employee. Invalidates the list on success. */

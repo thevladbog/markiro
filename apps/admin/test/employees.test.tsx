@@ -11,7 +11,7 @@ import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
 import type * as EmployeesApiModule from "../src/pages/employees/api.js";
 import { EmployeeProfileForm } from "../src/pages/employees/EmployeeProfileForm.js";
-import { EmployeesPage } from "../src/pages/employees/index.js";
+import { EmployeesPage, limitBulkEmployeeSelection } from "../src/pages/employees/index.js";
 import { jsonResponse } from "./helpers/http.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
@@ -88,6 +88,7 @@ const JANE = {
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
+  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false },
   badges: [
     {
       id: "b1",
@@ -144,6 +145,77 @@ describe("EmployeeProfileForm", () => {
 });
 
 describe("EmployeesPage", () => {
+  it("confirms selected-employee bulk limits without changing writeoff permission", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "/api/employees/pickup-policy/limits" && init?.method === "PATCH") {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Массово изменить правила" }));
+    await user.click(screen.getByRole("checkbox", { name: "Выбрать Jane Doe" }));
+    await user.click(screen.getByRole("radio", { name: "Без лимита" }));
+    await user.click(screen.getByRole("button", { name: "Назначить лимит" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Назначить лимит сотрудникам?" });
+    await user.click(within(dialog).getByRole("button", { name: "Назначить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/employees/pickup-policy/limits",
+        expect.objectContaining({
+          method: "PATCH",
+          body: JSON.stringify({ employeeIds: ["1"], limitMode: "unlimited", dayLimit: 12 }),
+        }),
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("keeps bulk writeoff separate and leaves its confirmation open on error", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === "/api/employees/pickup-policy/writeoff-permission") {
+        return jsonResponse(409, { message: "Selection changed" });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: "Массово изменить правила" }));
+    expect(screen.getByRole("button", { name: "Назначить лимит" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    await user.click(screen.getByRole("checkbox", { name: "Выбрать Jane Doe" }));
+    await user.click(screen.getByRole("checkbox", { name: "Разрешить списание" }));
+    await user.click(screen.getByRole("button", { name: "Изменить право списания" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Изменить право списания?" });
+    await user.click(within(dialog).getByRole("button", { name: "Изменить" }));
+
+    expect((await within(dialog).findByRole("alert")).textContent).toContain("Selection changed");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/employees/pickup-policy/writeoff-permission",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ employeeIds: ["1"], canWriteoff: true }),
+      }),
+    );
+  });
+
+  it("caps bulk selection at 500 employees", () => {
+    const selected = limitBulkEmployeeSelection(
+      Array.from({ length: 501 }, (_, index) => String(index + 1)),
+    );
+    expect(selected.size).toBe(500);
+    expect(selected.has("500")).toBe(true);
+    expect(selected.has("501")).toBe(false);
+  });
+
   it("uses the shared page/filter layout and requests the selected status", async () => {
     const fetchMock = vi.fn(async () => jsonResponse(200, { items: [JANE] }));
     vi.stubGlobal("fetch", fetchMock);

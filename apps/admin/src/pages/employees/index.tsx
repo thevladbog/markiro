@@ -6,10 +6,13 @@ import {
   AdminPage,
   Alert,
   Button,
+  Checkbox,
   ConfirmDialog,
   EmptyState,
   FilterBar,
   PageHeader,
+  Input,
+  RadioGroup,
   RowActions,
   Select,
   StatusChip,
@@ -22,7 +25,15 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
-import { useArchiveEmployee, useEmployees, type EmployeeDto, type EmployeeStatus } from "./api.js";
+import {
+  useArchiveEmployee,
+  useBulkEmployeePickupLimits,
+  useBulkEmployeePickupWriteoff,
+  useEmployees,
+  type EmployeeDto,
+  type EmployeePickupLimitMode,
+  type EmployeeStatus,
+} from "./api.js";
 import type { EmployeesPanelContext, EmployeesPanelLocationState } from "./EmployeePanelRoute.js";
 import "./employees.css";
 
@@ -35,6 +46,10 @@ const STATUS_TO_CHIP: Record<EmployeeStatus, StatusChipStatus> = {
 
 const TABLE_SKELETON_COLUMNS = ["full-name", "role", "status", "badges", "actions"];
 const TABLE_SKELETON_ROWS = ["first", "second", "third"];
+
+export function limitBulkEmployeeSelection(employeeIds: string[]): Set<string> {
+  return new Set(employeeIds.slice(0, 500));
+}
 
 function EmployeesTableSkeleton({ label }: { label: string }) {
   return (
@@ -171,6 +186,15 @@ export function EmployeesPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const query = useEmployees(status === "all" ? {} : { status });
   const [employeesResolved, setEmployeesResolved] = useState(false);
+  const [bulkMode, setBulkMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLimitMode, setBulkLimitMode] = useState<EmployeePickupLimitMode>("limited");
+  const [bulkDayLimit, setBulkDayLimit] = useState("12");
+  const [bulkCanWriteoff, setBulkCanWriteoff] = useState(false);
+  const [confirmation, setConfirmation] = useState<"limits" | "writeoff" | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const bulkLimits = useBulkEmployeePickupLimits();
+  const bulkWriteoff = useBulkEmployeePickupWriteoff();
 
   useEffect(() => {
     if (query.data !== undefined) setEmployeesResolved(true);
@@ -185,6 +209,33 @@ export function EmployeesPage() {
 
   const columns: TableColumn<EmployeeDto>[] = useMemo(
     () => [
+      ...(bulkMode
+        ? [
+            {
+              key: "select",
+              title: "",
+              width: 32,
+              render: (row: EmployeeDto) => {
+                const checked = selectedIds.has(row.id);
+                return (
+                  <Checkbox
+                    label={t("pages.employees.bulk.selectEmployee", { name: row.fullName })}
+                    checked={checked}
+                    disabled={!checked && selectedIds.size >= 500}
+                    onCheckedChange={() =>
+                      setSelectedIds((current) => {
+                        const next = new Set(current);
+                        if (next.has(row.id)) next.delete(row.id);
+                        else if (next.size < 500) next.add(row.id);
+                        return next;
+                      })
+                    }
+                  />
+                );
+              },
+            } satisfies TableColumn<EmployeeDto>,
+          ]
+        : []),
       { key: "fullName", title: t("pages.employees.table.fullName") },
       {
         key: "role",
@@ -218,15 +269,117 @@ export function EmployeesPage() {
         render: (row) => (canWrite ? <AuthorizedEmployeeRowActions employee={row} /> : null),
       },
     ],
-    [t, canWrite],
+    [t, canWrite, bulkMode, selectedIds],
   );
+
+  const confirmBulk = async () => {
+    if (!confirmation || selectedIds.size === 0 || selectedIds.size > 500) return;
+    try {
+      setBulkError(null);
+      if (confirmation === "limits") {
+        await bulkLimits.mutateAsync({
+          employeeIds: [...selectedIds],
+          limitMode: bulkLimitMode,
+          dayLimit: Number(bulkDayLimit),
+        });
+      } else {
+        await bulkWriteoff.mutateAsync({
+          employeeIds: [...selectedIds],
+          canWriteoff: bulkCanWriteoff,
+        });
+      }
+      setConfirmation(null);
+      toast("ok", t("pages.employees.bulk.success"));
+    } catch (cause) {
+      setBulkError(
+        cause instanceof ApiRequestError ? cause.message : t("pages.employees.bulk.error"),
+      );
+    }
+  };
 
   return (
     <AdminPage className="mk-employees-page" data-testid="employees-page">
       <PageHeader
         title={t("pages.employees.title")}
-        actions={canWrite ? <AuthorizedCreateEmployeeAction /> : null}
+        actions={
+          canWrite ? (
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button
+                type="button"
+                variant={bulkMode ? "secondary" : "primary"}
+                onClick={() => {
+                  setBulkMode((current) => !current);
+                  setSelectedIds(new Set());
+                }}
+              >
+                {bulkMode ? t("pages.employees.bulk.cancel") : t("pages.employees.bulk.openAction")}
+              </Button>
+              {!bulkMode ? <AuthorizedCreateEmployeeAction /> : null}
+            </div>
+          ) : null
+        }
       />
+
+      {bulkMode ? (
+        <section className="mk-employees-bulk" aria-label={t("pages.employees.bulk.title")}>
+          <span>{t("pages.employees.bulk.selectedCount", { count: selectedIds.size })}</span>
+          <div>
+            <Button
+              type="button"
+              size="compact"
+              variant="secondary"
+              onClick={() =>
+                setSelectedIds(limitBulkEmployeeSelection(items.map((employee) => employee.id)))
+              }
+            >
+              {t("pages.employees.bulk.selectFirst")}
+            </Button>
+          </div>
+          {selectedIds.size >= 500 ? (
+            <Alert tone="warn">{t("pages.employees.bulk.maxSelection")}</Alert>
+          ) : null}
+          <div className="mk-employees-bulk__actions">
+            <div className="mk-employees-bulk__group">
+              <RadioGroup
+                label={t("pages.employees.bulk.limitModeLabel")}
+                options={[
+                  { value: "limited", label: t("pages.employees.pickupPolicy.limited") },
+                  { value: "unlimited", label: t("pages.employees.pickupPolicy.unlimited") },
+                ]}
+                value={bulkLimitMode}
+                onValueChange={(value) => setBulkLimitMode(value as EmployeePickupLimitMode)}
+              />
+              <Input
+                label={t("pages.employees.pickupPolicy.dayLimitLabel")}
+                value={bulkDayLimit}
+                inputMode="numeric"
+                onChange={(event) => setBulkDayLimit(event.target.value)}
+              />
+              <Button
+                type="button"
+                disabled={selectedIds.size === 0 || !/^[1-9]\d*$/.test(bulkDayLimit)}
+                onClick={() => setConfirmation("limits")}
+              >
+                {t("pages.employees.bulk.limitAction")}
+              </Button>
+            </div>
+            <div className="mk-employees-bulk__group">
+              <Checkbox
+                label={t("pages.employees.bulk.canWriteoffLabel")}
+                checked={bulkCanWriteoff}
+                onCheckedChange={setBulkCanWriteoff}
+              />
+              <Button
+                type="button"
+                disabled={selectedIds.size === 0}
+                onClick={() => setConfirmation("writeoff")}
+              >
+                {t("pages.employees.bulk.writeoffAction")}
+              </Button>
+            </div>
+          </div>
+        </section>
+      ) : null}
 
       <FilterBar
         label={t("pages.employees.filters.label")}
@@ -294,6 +447,34 @@ export function EmployeesPage() {
             },
           } satisfies EmployeesPanelContext
         }
+      />
+      <ConfirmDialog
+        open={confirmation !== null}
+        title={t(
+          confirmation === "limits"
+            ? "pages.employees.bulk.limitConfirmTitle"
+            : "pages.employees.bulk.writeoffConfirmTitle",
+        )}
+        description={t(
+          confirmation === "limits"
+            ? "pages.employees.bulk.limitConfirmBody"
+            : "pages.employees.bulk.writeoffConfirmBody",
+          { count: selectedIds.size },
+        )}
+        error={bulkError}
+        cancelLabel={t("pages.employees.cancel")}
+        confirmLabel={t(
+          confirmation === "limits"
+            ? "pages.employees.bulk.limitConfirmAction"
+            : "pages.employees.bulk.writeoffConfirmAction",
+        )}
+        busy={bulkLimits.isPending || bulkWriteoff.isPending}
+        onCancel={() => {
+          if (bulkLimits.isPending || bulkWriteoff.isPending) return;
+          setConfirmation(null);
+          setBulkError(null);
+        }}
+        onConfirm={() => void confirmBulk()}
       />
     </AdminPage>
   );

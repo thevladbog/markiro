@@ -40,12 +40,25 @@ export class OrgProfileService {
 
   /** Returns the tenant's profile, or the empty defaults if no row exists yet. */
   async getProfile(tenantId: string): Promise<OrgProfileDto> {
-    const [[row], [pickupPolicy]] = await Promise.all([
+    const [[row], [pickupPolicy], [logo]] = await Promise.all([
       this.db.select().from(schema.orgProfiles).where(eq(schema.orgProfiles.tenantId, tenantId)),
       this.db
         .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
         .from(schema.pickupTenantPolicies)
         .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
+      this.db
+        .select({ revision: schema.organizationLogoAssets.id })
+        .from(schema.orgProfiles)
+        .innerJoin(
+          schema.organizationLogoAssets,
+          and(
+            eq(schema.organizationLogoAssets.tenantId, tenantId),
+            eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
+            eq(schema.organizationLogoAssets.status, "active"),
+          ),
+        )
+        .where(eq(schema.orgProfiles.tenantId, tenantId))
+        .limit(1),
     ]);
     if (!pickupPolicy) {
       throw new InternalServerErrorException("Tenant pickup policy is not configured");
@@ -55,6 +68,8 @@ export class OrgProfileService {
       gs1Prefixes: row?.gs1Prefixes ?? [],
       inn: row?.inn ?? null,
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
+      logoRevision: logo?.revision ?? null,
+      logoUrl: logo?.revision ? `/org/profile/logo/${logo.revision}` : null,
     };
   }
 
@@ -211,7 +226,7 @@ export class OrgProfileService {
     }
 
     if (previousAssetId) await this.tryDeleteLogoAsset(tenantId, previousAssetId);
-    return { logoRevision: assetId };
+    return { logoRevision: assetId, logoUrl: `/org/profile/logo/${assetId}` };
   }
 
   async deleteLogo(tenantId: string, actorUserId: string): Promise<void> {

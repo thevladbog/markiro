@@ -276,7 +276,6 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
         ? {
             name: kiosk.name,
             location: kiosk.location ?? "",
-            dayLimitPerEmployee: String(kiosk.dayLimitPerEmployee),
             showPrices: kiosk.showPrices,
           }
         : undefined,

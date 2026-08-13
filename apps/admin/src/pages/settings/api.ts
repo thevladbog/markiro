@@ -8,16 +8,26 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import { apiFetch } from "../../api/client.js";
+import { apiErrorFromResponse, apiFetch } from "../../api/client.js";
 
 /** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `OrgProfileDto`. */
 export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
+  pickupLimitsEnabled: boolean;
+  logoUrl: string | null;
+  logoRevision: string | null;
 }
 
-export type PutOrgProfileInput = Partial<OrgProfileDto>;
+export type PutOrgProfileInput = Partial<
+  Pick<OrgProfileDto, "gln" | "gs1Prefixes" | "inn" | "pickupLimitsEnabled">
+>;
+
+export interface OrganizationLogoDto {
+  logoRevision: string;
+  logoUrl: string;
+}
 
 /** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `SsccCounterDto`. */
 export interface SsccCounterDto {
@@ -74,6 +84,42 @@ export function useUpdateOrgProfile(): UseMutationResult<OrgProfileDto, Error, P
       // explicit here so the counter still refetches even if that matching
       // behavior or either key ever changes.
       void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_SSCC_QUERY_KEY });
+    },
+  });
+}
+
+async function uploadOrganizationLogo(file: File): Promise<OrganizationLogoDto> {
+  const form = new FormData();
+  form.append("logo", file);
+  const response = await fetch("/api/org/profile/logo", {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  if (response.ok) return (await response.json()) as OrganizationLogoDto;
+  throw await apiErrorFromResponse(response);
+}
+
+export function useUploadOrganizationLogo(): UseMutationResult<OrganizationLogoDto, Error, File> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: uploadOrganizationLogo,
+    onSuccess: (logo) => {
+      queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, (current) =>
+        current ? { ...current, ...logo } : current,
+      );
+    },
+  });
+}
+
+export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: () => apiFetch<void>("/org/profile/logo", { method: "DELETE" }),
+    onSuccess: () => {
+      queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, (current) =>
+        current ? { ...current, logoUrl: null, logoRevision: null } : current,
+      );
     },
   });
 }

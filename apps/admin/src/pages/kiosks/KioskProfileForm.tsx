@@ -17,10 +17,6 @@ const kioskFormSchema = z.object({
     .min(1, "pages.kiosks.form.errors.nameRequired")
     .max(200, "pages.kiosks.form.errors.nameTooLong"),
   location: z.string().trim().optional(),
-  dayLimitPerEmployee: z
-    .string()
-    .trim()
-    .regex(/^[1-9]\d*$/, "pages.kiosks.form.errors.dayLimitInvalid"),
   showPrices: z.boolean(),
 });
 
@@ -40,7 +36,6 @@ export interface KioskProfileFormProps {
 const EMPTY_VALUES: KioskFormValues = {
   name: "",
   location: "",
-  dayLimitPerEmployee: "5",
   showPrices: true,
 };
 
@@ -54,7 +49,6 @@ export function toKioskInput(values: KioskFormValues): CreateKioskInput {
   return {
     name: values.name.trim(),
     location: location ? location : null,
-    dayLimitPerEmployee: Number(values.dayLimitPerEmployee),
     showPrices: values.showPrices,
   };
 }
@@ -120,13 +114,6 @@ export function KioskProfileForm({
         label={t("pages.kiosks.form.locationLabel")}
         {...errorProp(translateFieldError(t, errors.location?.message))}
         {...register("location")}
-      />
-      <Input
-        label={t("pages.kiosks.form.dayLimitLabel")}
-        mono
-        inputMode="numeric"
-        {...errorProp(translateFieldError(t, errors.dayLimitPerEmployee?.message))}
-        {...register("dayLimitPerEmployee")}
       />
       <Controller
         control={control}
