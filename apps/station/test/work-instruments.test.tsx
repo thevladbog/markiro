@@ -66,7 +66,9 @@ describe("work instruments", () => {
         labels={labels}
       />,
     );
-    const status = screen.getByRole("status");
+    const status = screen.getByRole("status", {
+      name: "Accepted: (01)04600000000015 (21)SERIAL-42 (91)KEY (92)SIGNATURE (93)TAIL",
+    });
     const acceptedMarker = status.querySelector('[data-semantic="accepted-marker"]');
     expect(acceptedMarker?.textContent).toBe("✓");
     expect(acceptedMarker?.getAttribute("aria-hidden")).toBe("true");

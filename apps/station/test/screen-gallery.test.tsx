@@ -140,6 +140,32 @@ describe("development screen gallery", () => {
     expect(screen.getByRole("button", { name: clear })).toBeDefined();
   });
 
+  it.each([
+    { locale: "ru" as const, accepted: "ПРИНЯТО" },
+    { locale: "en" as const, accepted: "ACCEPTED" },
+  ])(
+    "announces the localized accepted result without adding visual fact copy in $locale",
+    ({ locale, accepted }) => {
+      const normalized =
+        "(01)04607000000042 (21)DEMO-SERIAL-000128 (91)ABCD " +
+        "(92)TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789 (93)XYZ1";
+      render(<StationScreenGallery request={{ state: "work-aggregation", locale }} />);
+
+      const status = screen.getByRole("status", { name: `${accepted}: ${normalized}` });
+      expect(status.textContent).toBe(`✓${normalized}`);
+      expect(status.textContent).not.toContain(accepted);
+      expect(status.textContent).not.toContain("GTIN");
+      expect(status.textContent).not.toContain("Серийный номер");
+      expect(status.textContent).not.toContain("Serial number");
+      expect(status.textContent).not.toContain("Криптохвост");
+      expect(status.textContent).not.toContain("Crypto tail");
+      expect(status.querySelector('[data-semantic="verdict"]')).toBeNull();
+      expect(status.querySelector('[data-semantic="gtin"]')).toBeNull();
+      expect(status.querySelector('[data-semantic="serial"]')).toBeNull();
+      expect(status.querySelector('[data-semantic="crypto"]')).toBeNull();
+    },
+  );
+
   it("renders standalone box states through the production grouped fill instrument", () => {
     const view = render(<StationScreenGallery request={{ state: "box-empty", locale: "ru" }} />);
     expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);

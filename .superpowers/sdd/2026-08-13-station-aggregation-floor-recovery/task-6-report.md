@@ -63,6 +63,28 @@ and WorkScreen suite: 4 files, 118 tests. The corrected IAB semantic matrix
 passed 6/6 rows, including both locales at 1024×768, before the full matrix was
 regenerated.
 
+### Review correction round 2: accessible acceptance
+
+The next review found that the compact visual check was `aria-hidden` while the
+`role="status"` region had no accessible name. A screen reader could therefore
+hear the normalized code change without hearing that the code was accepted.
+
+Tests were changed before production code. The first test draft used a
+jest-dom matcher that this Vitest setup does not install, so that matcher error
+was corrected before accepting RED evidence. The decisive RED run covered the
+real component plus RU/EN production gallery labels and exited 1 with 3 expected
+failures and 45 passes: every failure reported an empty accessible name on the
+accepted `role="status"` region.
+
+The minimal production change adds a conditional accessible name in the form
+`${labels.ok}: ${operation.identity.normalized}` for accepted identities only.
+The marker remains decorative and the visual DOM remains exactly one compact
+check plus one normalized code block. GREEN passed 2 files and 48/48 tests; the
+broader Task 2/6/WorkScreen viewport-focused gate passed 4 files and 120/120
+tests. RU and EN assertions independently require the localized acceptance
+status and exact normalized code in the accessible name while rejecting visible
+accepted, GTIN, serial, and crypto fact copy/hooks.
+
 ## TDD evidence
 
 ### RED
@@ -139,6 +161,8 @@ was suppressed.
 ## Automated gates
 
 - Focused corrected Task 2/6/WorkScreen suite: 4 files, 118 tests passed.
+- Accessible-acceptance correction: component/gallery GREEN 48/48; refreshed
+  Task 2/6/WorkScreen focused suite 120/120.
 - Full Station suite: 64 files, 741 tests passed. Existing intentional
   error-path logs, React `act(...)` notices, and jsdom's missing-canvas notice
   were emitted; there were no failures or skips.
@@ -178,4 +202,8 @@ The browser matrix is not packaged Windows/Tauri or physical factory
 acceptance. No real scanner, printer, ZPL/TSPL output, out-of-paper/disconnect
 recovery, scan-back verification, speaker, gloved touch, Windows fullscreen,
 or restart with a pending print job was exercised. Those gates remain external
-and are not claimed by this task.
+and are not claimed by this task. No manual VoiceOver or NVDA session was run;
+the localized accessible-name contract is verified by Testing Library's
+accessibility-tree role/name queries. The geometry matrix was not regenerated
+for round 2 because the change adds only a non-visual ARIA attribute and does
+not alter rendered content or CSS.

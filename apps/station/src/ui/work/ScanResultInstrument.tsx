@@ -45,6 +45,11 @@ export function ScanResultInstrument({
         role="status"
         data-tone={tone}
         data-compact-success={tone === "ok" && operation?.identity ? "true" : undefined}
+        aria-label={
+          tone === "ok" && operation?.identity
+            ? `${labels.ok}: ${operation.identity.normalized}`
+            : undefined
+        }
       >
         {tone === "ok" && operation?.identity ? (
           <>
