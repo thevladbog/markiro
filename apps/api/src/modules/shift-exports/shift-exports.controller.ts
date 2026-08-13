@@ -1,5 +1,5 @@
-import { Body, Controller, Get, HttpCode, Param, Post, Req, UseGuards } from "@nestjs/common";
-import { ApiBody, ApiCreatedResponse, ApiOkResponse, ApiTags } from "@nestjs/swagger";
+import { Body, Controller, Get, HttpCode, Param, ParseUUIDPipe, Post, Req, UseGuards } from "@nestjs/common";
+import { ApiBody, ApiCreatedResponse, ApiOkResponse, ApiParam, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -35,41 +35,46 @@ export class ShiftExportsController {
   }
 
   @Post("shifts/:shiftId/exports")
+  @ApiParam({ name: "shiftId", format: "uuid", type: "string" })
   @ApiBody({ schema: createShiftExportOpenApiSchema })
   @ApiCreatedResponse({ schema: shiftExportOpenApiSchema })
   create(
     @Req() req: RequestWithTenant,
-    @Param("shiftId") shiftId: string,
+    @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
     @Body(new ZodValidationPipe(createShiftExportSchema)) body: CreateShiftExportDto,
   ): Promise<ShiftExportDto> {
     return this.exports.create(req.tenantId!, req.userId!, shiftId, body);
   }
 
   @Get("shifts/:shiftId/exports")
+  @ApiParam({ name: "shiftId", format: "uuid", type: "string" })
   @ApiOkResponse({ schema: { type: "array", items: shiftExportOpenApiSchema } })
   list(
     @Req() req: RequestWithTenant,
-    @Param("shiftId") shiftId: string,
+    @Param("shiftId", new ParseUUIDPipe()) shiftId: string,
   ): Promise<ShiftExportDto[]> {
     return this.exports.list(req.tenantId!, shiftId);
   }
 
   @Post("shift-exports/:exportId/retry")
+  @ApiParam({ name: "exportId", format: "uuid", type: "string" })
   @HttpCode(200)
   @ApiOkResponse({ schema: shiftExportOpenApiSchema })
   retry(
     @Req() req: RequestWithTenant,
-    @Param("exportId") exportId: string,
+    @Param("exportId", new ParseUUIDPipe()) exportId: string,
   ): Promise<ShiftExportDto> {
     return this.exports.retry(req.tenantId!, req.userId!, exportId);
   }
 
   @Get("shift-exports/:exportId/artifacts/:artifactId/download")
+  @ApiParam({ name: "exportId", format: "uuid", type: "string" })
+  @ApiParam({ name: "artifactId", format: "uuid", type: "string" })
   @ApiOkResponse({ schema: shiftExportDownloadOpenApiSchema })
   download(
     @Req() req: RequestWithTenant,
-    @Param("exportId") exportId: string,
-    @Param("artifactId") artifactId: string,
+    @Param("exportId", new ParseUUIDPipe()) exportId: string,
+    @Param("artifactId", new ParseUUIDPipe()) artifactId: string,
   ): Promise<ShiftExportDownloadDto> {
     return this.exports.download(req.tenantId!, req.userId!, exportId, artifactId);
   }

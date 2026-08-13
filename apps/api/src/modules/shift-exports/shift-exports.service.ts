@@ -92,8 +92,16 @@ export class ShiftExportsService {
         )
         .limit(1);
       if (!existing) throw error;
+      if (
+        existing.shiftId !== shiftId ||
+        existing.formatId !== input.formatId ||
+        existing.formatVersion !== input.formatVersion ||
+        existing.maxLines !== input.maxLines
+      ) {
+        throw new ConflictException("Idempotency key already belongs to another export request");
+      }
       row = existing;
-      shouldEnqueue = false;
+      shouldEnqueue = existing.status === "queued";
       if (existing.status === "failed" && existing.errorCode === "QUEUE_FAILED") {
         const restored = await this.restoreFailed(existing, actorUserId);
         if (restored) {
@@ -273,6 +281,7 @@ export class ShiftExportsService {
             eq(schema.shiftExports.tenantId, existing.tenantId),
             eq(schema.shiftExports.id, existing.id),
             eq(schema.shiftExports.status, "failed"),
+            eq(schema.shiftExports.errorCode, "QUEUE_FAILED"),
           ),
         )
         .returning();
