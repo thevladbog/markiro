@@ -69,7 +69,7 @@ const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto 
 });
 
 describe("cache", () => {
-  it("upgrades a version-two database without losing its snapshot or queue", async () => {
+  it("upgrades a version-two database without losing its snapshot or queue and adds outcomes", async () => {
     globalThis.indexedDB = new IDBFactory();
     await new Promise<void>((resolve, reject) => {
       const request = indexedDB.open("markiro-kiosk", 2);
@@ -104,6 +104,16 @@ describe("cache", () => {
         body: { deviceSeq: 4, badgeCode: "legacy", reason: "buy", items: [] },
       },
     ]);
+    const opened = indexedDB.open("markiro-kiosk");
+    const stores = await new Promise<string[]>((resolve, reject) => {
+      opened.onerror = () => reject(opened.error);
+      opened.onsuccess = () => {
+        const db = opened.result;
+        resolve(Array.from(db.objectStoreNames));
+        db.close();
+      };
+    });
+    expect(stores).toContain("outcomes");
   });
   it("returns null before anything is stored", async () => {
     await expect(readSnapshot()).resolves.toBeNull();

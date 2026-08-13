@@ -118,6 +118,8 @@ describe("Done", () => {
   it("prints the order number the server actually gave back", () => {
     renderDone(resultWith());
 
+    expect(screen.getByRole("status").getAttribute("data-tone")).toBe("success");
+    expect(screen.getByText("Подтверждено сервером")).toBeDefined();
     expect(screen.getByText(`Заявка № ${ORDER_NO} передана`)).toBeDefined();
     expect(screen.getByText("Сообщите администратору — он оформит заявку")).toBeDefined();
     expect(screen.getByText("и выведет коды из оборота.")).toBeDefined();
@@ -131,6 +133,8 @@ describe("Done", () => {
   it("confirms the handover without a number when the order was queued offline", () => {
     renderDone(null, cartOf(["89.90", "89.90"]));
 
+    expect(screen.getByRole("status").getAttribute("data-tone")).toBe("warning");
+    expect(screen.getByText("Это ещё не подтверждённый успех")).toBeDefined();
     expect(screen.getByText("Заявка передана, номер появится после синхронизации")).toBeDefined();
     // Neither the real prefix nor the «№» that would front a placeholder.
     expect(text()).not.toContain("ORD-");
@@ -167,7 +171,19 @@ describe("Done", () => {
   it("says nothing of the sort when the server refused the order outright", () => {
     renderDone(resultWith({ orderNo: "", itemCount: 0, conflicts: [conflict("over_limit")] }));
 
+    expect(screen.getByRole("status").getAttribute("data-tone")).toBe("error");
     expect(text()).not.toContain(QUEUED_CHECK);
+  });
+
+  it("describes a rejected box without exposing its member keys", () => {
+    renderDone(
+      resultWith({ orderNo: "", itemCount: 0, boxConflicts: [boxConflict("duplicate")] }),
+      mixedCart(),
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("…000021");
+    expect(alert.textContent).toContain("12 бутылок не попали в операцию");
+    expect(text()).not.toContain("member-secret");
   });
 
   it("returns the kiosk to the start on its own after ten seconds", () => {

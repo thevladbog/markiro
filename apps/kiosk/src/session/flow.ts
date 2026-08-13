@@ -1,6 +1,7 @@
 import type { CreateOrderDto, CreateOrderResultDto } from "../api/types.js";
 import { boxLines, looseLines, type CartState, type KioskCartLine } from "./cart.js";
 import { toKopecks, totalKopecks } from "../screens/money.js";
+import type { StoredKioskOutcome } from "../store/outcomes.js";
 
 export type KioskScreen =
   "pairing" | "login" | "cart" | "operation" | "reason" | "confirmation" | "outcome";
@@ -55,12 +56,14 @@ export type KioskFlowState =
       deviceSeq: number;
       result: CreateOrderResultDto | null;
       outcome: KioskOutcome;
+      storedOutcome?: StoredKioskOutcome;
     };
 
 export type KioskFlowAction =
   | { type: "paired" }
   | { type: "unpaired" }
   | { type: "sessionStarted"; session: ActiveKioskSession }
+  | { type: "outcomeRecovered"; session: ActiveKioskSession; outcome: StoredKioskOutcome }
   | { type: "cartChanged"; cart: CartState }
   | { type: "legacySubmit"; cart: CartState }
   | { type: "submissionStarted" }
@@ -75,6 +78,7 @@ export type KioskFlowAction =
       deviceSeq: number;
       result: CreateOrderResultDto | null;
       outcome: KioskOutcome;
+      storedOutcome?: StoredKioskOutcome;
     }
   | { type: "finish" }
   | { type: "cancelConfirmed" }
@@ -202,6 +206,32 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
       return state.screen === "pairing" ? { screen: "login" } : state;
     case "sessionStarted":
       return state.screen === "login" ? { screen: "cart", session: action.session } : state;
+    case "outcomeRecovered":
+      return state.screen === "login"
+        ? {
+            screen: "outcome",
+            session: action.session,
+            deviceSeq: action.outcome.deviceSeq,
+            result: null,
+            outcome: {
+              kind: action.outcome.kind,
+              ...(action.outcome.kind === "accepted"
+                ? {
+                    orderNo: action.outcome.orderNo ?? "",
+                    bottleCount: action.outcome.acceptedCount,
+                    totalKopecks: null,
+                  }
+                : action.outcome.kind === "partial"
+                  ? {
+                      orderNo: action.outcome.orderNo ?? "",
+                      acceptedBottleCount: action.outcome.acceptedCount,
+                      rejectedLines: [],
+                    }
+                  : { title: "Rejected", message: "Rejected", bottleCount: 0 }),
+            } as KioskOutcome,
+            storedOutcome: action.outcome,
+          }
+        : state;
     case "cartChanged":
       return state.screen === "cart"
         ? withSession(state, { ...state.session, cart: action.cart })
@@ -316,6 +346,7 @@ export function kioskFlowReducer(state: KioskFlowState, action: KioskFlowAction)
             deviceSeq: action.deviceSeq,
             result: action.result,
             outcome: action.outcome,
+            ...(action.storedOutcome ? { storedOutcome: action.storedOutcome } : {}),
           }
         : state;
     case "finish":

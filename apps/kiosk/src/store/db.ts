@@ -8,12 +8,13 @@ const DB_NAME = "markiro-kiosk";
  * `countTakenToday` does with an entry from before the journal carried an
  * employee.
  */
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 export const STORE_CONFIG = "config";
 export const STORE_SNAPSHOT = "snapshot";
 export const STORE_QUEUE = "queue";
 export const STORE_JOURNAL = "journal";
+export const STORE_OUTCOMES = "outcomes";
 /**
  * Where an order the server refused FOR GOOD goes — added in version 2, which
  * is the shape change that bumped the number above.
@@ -56,6 +57,8 @@ function open(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_QUEUE, { keyPath: "deviceSeq" });
       if (!db.objectStoreNames.contains(STORE_JOURNAL))
         db.createObjectStore(STORE_JOURNAL, { autoIncrement: true });
+      if (!db.objectStoreNames.contains(STORE_OUTCOMES))
+        db.createObjectStore(STORE_OUTCOMES, { keyPath: "id" });
       // Keyed by `deviceSeq` like the queue it is fed from, so re-quarantining
       // the same order (a drain that parked it but crashed before the dequeue)
       // overwrites rather than duplicates.

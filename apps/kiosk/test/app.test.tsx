@@ -25,6 +25,7 @@ import { appendJournal, type JournalEntry } from "../src/store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
 import { activateBoxRegistryPage, beginBoxRegistryStage } from "../src/store/box-registry.js";
 import { REFRESH_INTERVAL_MS, RETRY_MAX_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
+import { putOutcome } from "../src/store/outcomes.js";
 
 afterEach(cleanup);
 
@@ -623,6 +624,37 @@ async function takeOneBottle(): Promise<void> {
 }
 
 describe("KioskShell", () => {
+  it("shows the same employee an unviewed server result after restart and acknowledges it on Done", async () => {
+    await pair();
+    const config = await readConfig();
+    if (!config?.kioskId || !config.credentialGeneration) throw new Error("paired owner missing");
+    await putOutcome({
+      owner: {
+        serverUrl: config.serverUrl,
+        kioskId: config.kioskId,
+        credentialGeneration: config.credentialGeneration,
+      },
+      deviceSeq: 4,
+      employeeId: EMPLOYEE.id,
+      at: "2026-08-13T11:00:00.000Z",
+      viewedAt: null,
+      kind: "accepted",
+      orderNo: "ORD-RESTART",
+      acceptedCount: 12,
+      acceptedBoxes: [{ sscc: SSCC, bottleCount: 12 }],
+      rejected: [],
+    });
+
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(/ORD-RESTART/)).toBeDefined());
+    expect(screen.queryByText(CART_TITLE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+  });
   it("asks an unpaired device for a pairing code, and calls no API without a token", async () => {
     render(<App />);
 

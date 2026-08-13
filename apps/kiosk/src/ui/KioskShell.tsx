@@ -18,7 +18,7 @@ import type { ScanListener, ScanSource } from "../scanner/source.js";
 import { createWebSerialSource, listGrantedPorts, type SerialPort } from "../scanner/web-serial.js";
 import { Blocked } from "../screens/Blocked.js";
 import { Cart } from "../screens/Cart.js";
-import { Done } from "../screens/Done.js";
+import { Outcome } from "../screens/Outcome.js";
 import { Idle } from "../screens/Idle.js";
 import { Confirmation } from "../screens/Confirmation.js";
 import { OperationChoice } from "../screens/OperationChoice.js";
@@ -57,6 +57,12 @@ import {
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
+import {
+  acknowledgeOutcome,
+  findOldestUnviewedOutcome,
+  readOutcome,
+  type OutcomeOwner,
+} from "../store/outcomes.js";
 import { scrubStoredBadgeCodes } from "../store/scrub.js";
 import {
   cancelFlushRetry,
@@ -80,6 +86,16 @@ const DEFAULT_SERVER_URL = "/api";
  * (`cacheAge`, `flushQueue`'s journal stamps, an order's `createdAt`) takes it
  * as a parameter, so this is the shell's single reading of `Date`. */
 const now = (): Date => new Date();
+
+function outcomeOwnerOf(config: KioskConfig | null): OutcomeOwner | null {
+  return config?.kioskId && config.credentialGeneration
+    ? {
+        serverUrl: config.serverUrl,
+        kioskId: config.kioskId,
+        credentialGeneration: config.credentialGeneration,
+      }
+    : null;
+}
 
 /** One worker, from the badge that admitted them to the confirmation they walk
  * away from. `badgeDigest` is carried because `POST /kiosk/orders` re-resolves
@@ -848,11 +864,14 @@ export function KioskShell(): React.JSX.Element {
         // order, and `Done` says exactly that instead of inventing an «№ —».
         const result = awaited.current.result;
         awaited.current = null;
+        const owner = outcomeOwnerOf(configRef.current);
+        const storedOutcome = owner ? await readOutcome(owner, deviceSeq) : null;
         dispatchFlow({
           type: "submitted",
           deviceSeq,
           result,
           outcome: kioskOutcomeOf(deviceSeq, result, state),
+          ...(storedOutcome ? { storedOutcome } : {}),
         });
       } catch (err) {
         // The store refused. Nothing was promised, so the worker stays on their
@@ -997,7 +1016,7 @@ export function KioskShell(): React.JSX.Element {
     screen = <Blocked queuedCount={queuedCount} />;
   } else if (view === "done" && submitted) {
     screen = (
-      <Done
+      <Outcome
         // Per order. `Done`'s "already reset" flag is a sticky ref, so a re-used
         // instance never auto-resets again and the second worker's confirmation
         // would stand until somebody pressed the button.
@@ -1007,6 +1026,7 @@ export function KioskShell(): React.JSX.Element {
         // different things to tell the worker, and that screen is where the
         // distinction is made.
         result={submitted.result}
+        storedOutcome={submitted.storedOutcome}
         // What the worker actually handed over: the only record of the reason
         // they chose and the prices they were shown while choosing it.
         cart={submitted.session.cart}
@@ -1014,6 +1034,13 @@ export function KioskShell(): React.JSX.Element {
         // kiosk that cannot read its own config must not invent a price.
         showPrices={snapshot?.bootstrap.config.showPrices ?? false}
         onReset={() => {
+          const owner = outcomeOwnerOf(configRef.current);
+          if ((submitted.storedOutcome || submitted.result !== null) && owner) {
+            void acknowledgeOutcome(owner, submitted.deviceSeq, now().toISOString()).then(() =>
+              dispatchFlow({ type: "finish" }),
+            );
+            return;
+          }
           dispatchFlow({ type: "finish" });
         }}
       />
@@ -1143,14 +1170,22 @@ export function KioskShell(): React.JSX.Element {
           if (!admitted) return;
           admitting.current = null;
           sessions.current += 1;
-          dispatchFlow({
-            type: "sessionStarted",
-            session: {
-              id: sessions.current,
-              ...admitted,
-              cart: initialCartState,
-            },
-          });
+          const session: ActiveKioskSession = {
+            id: sessions.current,
+            ...admitted,
+            cart: initialCartState,
+          };
+          const owner = outcomeOwnerOf(configRef.current);
+          void (async () => {
+            const unviewed = owner
+              ? await findOldestUnviewedOutcome(owner, admitted.employee.id)
+              : null;
+            dispatchFlow(
+              unviewed
+                ? { type: "outcomeRecovered", session, outcome: unviewed }
+                : { type: "sessionStarted", session },
+            );
+          })();
         }}
         // The ONLY way back into scanner setup once a kiosk is running: the
         // pairing screen's own entry is gone the moment the device is paired,

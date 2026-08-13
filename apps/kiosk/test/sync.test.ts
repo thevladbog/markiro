@@ -34,6 +34,23 @@ import {
   SUBMIT_TIMEOUT_MS,
 } from "../src/api/client.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
+import { findOldestUnviewedOutcome } from "../src/store/outcomes.js";
+
+async function outcomeOwner() {
+  const config = await writeConfig({
+    serverUrl: "https://tenant.example/api",
+    token: "token",
+    kioskId: "k-1",
+    kioskName: "Gate",
+    place: null,
+    nextDeviceSeq: 2,
+  });
+  return {
+    serverUrl: config.serverUrl,
+    kioskId: config.kioskId!,
+    credentialGeneration: config.credentialGeneration!,
+  };
+}
 
 afterEach(() => {
   // FIRST, and while the fake timers are still installed: a drain that stopped
@@ -121,6 +138,66 @@ describe("cacheAge", () => {
 });
 
 describe("flushQueue", () => {
+  it("persists an accepted result before dequeue and upserts it on replay", async () => {
+    const owner = await outcomeOwner();
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "loose" }] },
+      "e1",
+      undefined,
+      13,
+    );
+    vi.spyOn(queueStore, "dequeueOrder").mockRejectedValueOnce(new Error("crash window"));
+    const client = {
+      bootstrap: vi.fn(),
+      submitOrder: vi.fn(async () => ({
+        orderNo: "ORD-1",
+        status: "pending" as const,
+        itemCount: 13,
+        conflicts: [],
+        acceptedBoxes: [{ sscc: "346006820000000021", bottleCount: 12 }],
+      })),
+    };
+
+    await flushQueue(client as never, () => new Date("2026-08-13T12:00:00.000Z"));
+    await flushQueue(client as never, () => new Date("2026-08-13T12:01:00.000Z"));
+
+    await expect(findOldestUnviewedOutcome(owner, "e1")).resolves.toMatchObject({
+      kind: "accepted",
+      orderNo: "ORD-1",
+      acceptedCount: 13,
+      acceptedBoxes: [{ sscc: "346006820000000021", bottleCount: 12 }],
+    });
+  });
+
+  it("persists a safe rejected result for a terminal response", async () => {
+    const owner = await outcomeOwner();
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "secret-prefix-ABC123" }] },
+      "e1",
+      undefined,
+      13,
+    );
+    await flushQueue(
+      refusingClient(
+        new KioskApiError(422, "rejected", "order_rejected", {
+          conflicts: [{ rawKm: "secret-prefix-ABC123", reason: "duplicate" }],
+          boxConflicts: [
+            { sscc: "346006820000000021", bottleCount: 12, reason: "duplicate", members: ["no"] },
+          ],
+        }),
+      ) as never,
+      () => new Date("2026-08-13T12:00:00.000Z"),
+    );
+
+    const result = await findOldestUnviewedOutcome(owner, "e1");
+    expect(result).toMatchObject({ kind: "rejected", acceptedCount: 0 });
+    expect(JSON.stringify(result)).not.toContain("secret-prefix");
+    expect(JSON.stringify(result)).not.toContain("members");
+    expect(result?.rejected).toEqual([
+      { kind: "loose", codeTail: "…ABC123", reason: "duplicate" },
+      { kind: "box", sscc: "346006820000000021", bottleCount: 12, reason: "duplicate" },
+    ]);
+  });
   it("serializes a crash-safe pending attestation before submit even when the response crosses expiry", async () => {
     let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
     const admission = new Promise<{ claimedAt: string; admissionProof: string }>((resolve) => {

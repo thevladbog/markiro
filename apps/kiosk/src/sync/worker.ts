@@ -5,14 +5,17 @@ import type {
   BoxConflictReason,
   CreateOrderAdmissionDto,
   CreateOrderDto,
+  CreateOrderResultDto,
+  OrderConflict,
 } from "../api/types.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
   type CachedSnapshot,
 } from "../store/cache.js";
-import { readConfig } from "../store/config.js";
+import { readConfig, type KioskConfig } from "../store/config.js";
 import { appendJournal } from "../store/journal.js";
+import { putOutcome, type OutcomeOwner, type StoredRejectedLine } from "../store/outcomes.js";
 import {
   activateBoxRegistryPage,
   beginBoxRegistryStage,
@@ -493,6 +496,7 @@ async function quarantine(
   err: KioskApiError,
   now: () => Date,
   kioskId: string | null,
+  owner: OutcomeOwner | null,
 ): Promise<boolean> {
   const at = now().toISOString();
   const boxConflicts = safeBoxConflicts(err.details);
@@ -527,11 +531,39 @@ async function quarantine(
       // rule the success path applies to a refused ITEM, applied to the order.
       acceptedCount: 0,
       conflicts: [],
+      ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
     });
   } catch (journalErr) {
     // Best effort: the quarantine record is the custody, the journal is the
     // log. Losing the log line must not put the order back in the queue.
     console.warn("kiosk: a refused order could not be journalled", journalErr);
+  }
+  if (owner) {
+    try {
+      await putOutcome({
+        owner,
+        deviceSeq: order.deviceSeq,
+        employeeId: order.employeeId,
+        at,
+        viewedAt: null,
+        kind: "rejected",
+        orderNo: null,
+        acceptedCount: 0,
+        acceptedBoxes: [],
+        rejected: [
+          ...safeLooseConflicts(err.details),
+          ...boxConflicts.map((conflict) => ({
+            kind: "box" as const,
+            sscc: conflict.sscc,
+            bottleCount: conflict.bottleCount ?? 1,
+            reason: conflict.reason,
+          })),
+        ],
+      });
+    } catch (outcomeErr) {
+      console.error("kiosk: a refused outcome could not be stored", outcomeErr);
+      return false;
+    }
   }
   try {
     await dequeueOrder(order.deviceSeq);
@@ -551,6 +583,80 @@ const BOX_CONFLICT_REASONS: ReadonlySet<BoxConflictReason> = new Set([
   "duplicate",
   "over_limit",
 ]);
+const LOOSE_CONFLICT_REASONS: ReadonlySet<OrderConflict["reason"]> = new Set([
+  "not_km",
+  "incomplete",
+  "unknown_product",
+  "not_allowed",
+  "duplicate",
+  "over_limit",
+]);
+
+function safeLooseConflicts(details: unknown): StoredRejectedLine[] {
+  if (!details || typeof details !== "object") return [];
+  const raw = (details as { conflicts?: unknown }).conflicts;
+  if (!Array.isArray(raw) || raw.length > 100) return [];
+  const conflicts: StoredRejectedLine[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { rawKm?: unknown; reason?: unknown };
+    if (
+      typeof candidate.rawKm !== "string" ||
+      candidate.rawKm.length === 0 ||
+      candidate.rawKm.length > 4_096 ||
+      typeof candidate.reason !== "string" ||
+      !LOOSE_CONFLICT_REASONS.has(candidate.reason as OrderConflict["reason"])
+    )
+      return [];
+    conflicts.push({
+      kind: "loose",
+      codeTail: `…${candidate.rawKm.slice(-6)}`,
+      reason: candidate.reason as OrderConflict["reason"],
+    });
+  }
+  return conflicts;
+}
+
+function outcomeOwnerOf(config: KioskConfig): OutcomeOwner | null {
+  return config.kioskId && config.credentialGeneration
+    ? {
+        serverUrl: config.serverUrl,
+        kioskId: config.kioskId,
+        credentialGeneration: config.credentialGeneration,
+      }
+    : null;
+}
+
+function rejectedOfResult(result: CreateOrderResultDto): StoredRejectedLine[] {
+  return [
+    ...safeLooseConflicts({ conflicts: result.conflicts }),
+    ...safeBoxConflicts({ boxConflicts: result.boxConflicts ?? [] }).map((conflict) => ({
+      kind: "box" as const,
+      sscc: conflict.sscc,
+      bottleCount: conflict.bottleCount ?? 1,
+      reason: conflict.reason,
+    })),
+  ];
+}
+
+function safeAcceptedBoxes(value: unknown): Array<{ sscc: string; bottleCount: number }> {
+  if (!Array.isArray(value) || value.length > 100) return [];
+  const boxes: Array<{ sscc: string; bottleCount: number }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { sscc?: unknown; bottleCount?: unknown };
+    if (
+      typeof candidate.sscc !== "string" ||
+      !isValidSscc(candidate.sscc) ||
+      !Number.isInteger(candidate.bottleCount) ||
+      (candidate.bottleCount as number) <= 0 ||
+      (candidate.bottleCount as number) > 500
+    )
+      return [];
+    boxes.push({ sscc: candidate.sscc, bottleCount: candidate.bottleCount as number });
+  }
+  return boxes;
+}
 
 /** Copies only the public box verdict fields out of an untrusted error body. */
 function safeBoxConflicts(details: unknown): BoxConflict[] {
@@ -618,7 +724,9 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
      * withdrawals under "no kiosk" on a device that has one, and the day count
      * would stop seeing them.
      */
-    const kioskId = (await readConfig())?.kioskId ?? null;
+    const config = await readConfig();
+    const kioskId = config?.kioskId ?? null;
+    const outcomeOwner = config ? outcomeOwnerOf(config) : null;
     const queued = await listQueue(); // ascending deviceSeq
     for (const order of queued) {
       /** Whether THIS order's failure came from the wire or from the store
@@ -662,6 +770,28 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         answered = true;
         delivered = true;
         const at = now().toISOString();
+        const acceptedBoxes = safeAcceptedBoxes(result.acceptedBoxes ?? []);
+        const boxConflicts = safeBoxConflicts({ boxConflicts: result.boxConflicts ?? [] });
+        if (outcomeOwner) {
+          const rejected = rejectedOfResult(result);
+          await putOutcome({
+            owner: outcomeOwner,
+            deviceSeq: order.deviceSeq,
+            employeeId: order.employeeId,
+            at,
+            viewedAt: null,
+            kind:
+              result.orderNo === "" || result.itemCount === 0
+                ? "rejected"
+                : rejected.length > 0
+                  ? "partial"
+                  : "accepted",
+            orderNo: result.orderNo || null,
+            acceptedCount: result.itemCount,
+            acceptedBoxes,
+            rejected,
+          });
+        }
         await appendJournal({
           at,
           // The order's own scan time, which is what the server files it under
@@ -686,6 +816,8 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           // worker server-side, so it must not count against them here.
           acceptedCount: result.itemCount,
           conflicts: result.conflicts,
+          ...(acceptedBoxes.length > 0 ? { acceptedBoxes } : {}),
+          ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
         });
       } catch (err) {
         // A verdict the order can never come back from is not a stall: park it
@@ -695,7 +827,7 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         // order stays queued.
         if (
           isTerminalRejection(err) &&
-          (await quarantine(order, err as KioskApiError, now, kioskId))
+          (await quarantine(order, err as KioskApiError, now, kioskId, outcomeOwner))
         ) {
           continue;
         }

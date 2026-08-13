@@ -45,3 +45,11 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-touch-flow.md`, accepted
 - Decision: cart owns scanning only and hands the canonical draft to the reducer before `continue`. Writeoff selection is available only with permission and active reasons; reason refresh is fail-closed in both reducer routing and the final submit callback. Confirmation owns a synchronous pointer lock while the shell retains its durable-submit guard. Cancel and “Не я” require explicit confirmation before clearing the session.
 - External: no browser/tablet/physical-scanner acceptance performed; outcome persistence remains Task 6.
 - Review fix: APPROVED. Submission is an explicit reducer-owned pending state entered synchronously before durable work; navigation/reset/repeat actions are blocked until pending success/failure while unpair still overrides it. Confirmation disables Back/Cancel/primary, and the reason cards implement a labelled radiogroup with arrow-key paging/focus. Fix RED 4 failed/25 passed; focused GREEN 29/29; deferred App integration green; full kiosk 572/572 and direct typecheck passed.
+
+### Task 6: honest durable outcomes
+
+- Status: implemented, awaiting review.
+- RED: missing outcome store/migration and result semantics, absent sync persistence, and restart badge routing reproduced; existing focused assertions remained green.
+- GREEN: focused Task 6/App 239/239; full kiosk 583/583; direct typecheck passed.
+- Decision: only a server result can produce green. Unknown delivery remains amber; terminal and partial results are red. Sanitized outcomes are idempotently stored before journal/dequeue under server URL + kiosk + credential generation + device sequence, bounded to 100 rows per owner generation. The same employee sees the oldest unviewed result after restart and explicit finish atomically acknowledges it.
+- External: no browser/tablet/physical-scanner or installed-PWA acceptance performed; Task 7 remains open.

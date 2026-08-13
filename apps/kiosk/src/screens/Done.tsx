@@ -188,6 +188,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
   const refused = result !== null && orderNo === null;
   const outcome = kioskOutcomeOf(0, result, { ...cart, writeoffReasonId: null, notice: null });
   const partial = outcome.kind === "partial";
+  const tone = result === null ? "warning" : refused || partial ? "error" : "success";
   // With a result this is the server's ACCEPTED count (`remaining.length`
   // server-side); offline it is what the worker scanned. Both are honest
   // answers to «how much is in this order», which is what the chip asks.
@@ -238,7 +239,13 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         height="104"
         viewBox="0 0 24 24"
         fill="none"
-        stroke={refused || partial ? "var(--warn-fg)" : "var(--ok-solid)"}
+        stroke={
+          tone === "success"
+            ? "var(--ok-solid)"
+            : tone === "warning"
+              ? "var(--warn-fg)"
+              : "var(--err-solid)"
+        }
         strokeWidth="2"
         aria-hidden="true"
         focusable="false"
@@ -249,8 +256,18 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
 
       <div
         role="status"
+        data-tone={tone}
         style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}
       >
+        <strong className="kiosk-done__verdict">
+          {result === null
+            ? t("done.verdictQueued")
+            : refused
+              ? t("done.verdictRejected")
+              : partial
+                ? t("done.verdictPartial")
+                : t("done.verdictAccepted")}
+        </strong>
         <h1
           style={{
             margin: 0,
@@ -361,8 +378,12 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
             ))}
             {boxConflicts.map((box, index) => (
               <li key={`${box.sscc}-${box.reason}-${index}`}>
-                {t(BOX_CONFLICT_REASON[box.reason] ?? "done.boxConflictReason.other", {
-                  n: box.bottleCount ?? 1,
+                {t("done.boxRejected", {
+                  sscc: box.sscc.slice(-6),
+                  count: box.bottleCount ?? 1,
+                  reason: t(BOX_CONFLICT_REASON[box.reason] ?? "done.boxConflictReason.other", {
+                    n: box.bottleCount ?? 1,
+                  }),
                 })}
               </li>
             ))}

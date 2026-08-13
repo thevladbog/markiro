@@ -150,6 +150,10 @@
     "confirm_other": "Confirm {{count}} bottles"
   },
   "done": {
+    "verdictAccepted": "Confirmed by the server",
+    "verdictQueued": "This is not a confirmed success yet",
+    "verdictRejected": "The server rejected the operation",
+    "verdictPartial": "The server accepted the operation partially",
     "title": "Order {{order}} handed over",
     "titleQueued": "Order handed over — its number appears once the kiosk syncs",
     "titleRefused": "The order was not accepted",
@@ -162,6 +166,7 @@
     "autoReset": "The screen returns to the start in {{seconds}} seconds",
     "conflictsTitle": "{{n}} pcs were not accepted",
     "conflictsHint": "Put those bottles aside and show them to an administrator — they did not make it into the order.",
+    "boxRejected": "Box …{{sscc}} was rejected as a whole; {{count}} bottles were not included: {{reason}}",
     "conflictReason": {
       "not_km": "not a marking code",
       "incomplete": "the code was read only partly",
