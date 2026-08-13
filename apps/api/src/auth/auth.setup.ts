@@ -1,5 +1,6 @@
 import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
+import { rateLimit } from "express-rate-limit";
 import { buildAuth, createDb, schema, type Auth } from "@markiro/db";
 import { sessionAllowedOrigins, type Env } from "../env";
 import { MailCryptoService } from "../modules/mail/mail-crypto.service";
@@ -84,6 +85,8 @@ const TEAM_MUTATION_PATHS = new Set([
 ]);
 const RAW_TENANT_PROVISIONING_PATH = "/api/auth/organization/create";
 const AUTH_PATH_CANONICALIZATION_ORIGIN = "http://auth-path.invalid";
+const BLOCKED_ORGANIZATION_WINDOW_MS = 60_000;
+const BLOCKED_ORGANIZATION_REQUEST_LIMIT = 60;
 
 /**
  * Canonicalizes the raw request target the same way Better Call does before
@@ -109,6 +112,14 @@ function canonicalizeAuthRequestPath(rawUrl: string): string | null {
   }
 }
 
+function isBlockedOrganizationPath(normalizedPath: string | null, allowTestSignUp: boolean) {
+  return (
+    normalizedPath === null ||
+    (!allowTestSignUp && normalizedPath === RAW_TENANT_PROVISIONING_PATH) ||
+    (normalizedPath !== null && TEAM_MUTATION_PATHS.has(normalizedPath))
+  );
+}
+
 /**
  * Better Auth needs the raw (unparsed) request body — mount BEFORE any json
  * body parser is installed on the server (see main.ts: app created with
@@ -116,7 +127,7 @@ function canonicalizeAuthRequestPath(rawUrl: string): string | null {
  */
 export function mountAuth(
   server: Express,
-  auth: AuthSetup["auth"],
+  auth: Parameters<typeof toNodeHandler>[0],
   options: { allowTestSignUp?: boolean } = {},
 ) {
   const allowTestSignUp = options.allowTestSignUp ?? process.env.NODE_ENV === "test";
@@ -133,28 +144,35 @@ export function mountAuth(
   server.all("/api/auth/api-key/*splat", (_request, response) => {
     response.sendStatus(404);
   });
-  server.all("/api/auth/organization/*splat", (request, response, next) => {
-    const normalizedPath = canonicalizeAuthRequestPath(request.originalUrl);
-    if (normalizedPath === null) {
-      response.sendStatus(404);
-      return;
-    }
-    // Production tenants must go through TenantProvisioningService, which
-    // atomically establishes the owner, subscription/default entitlements and
-    // pickup policy. Better Auth's generic organization endpoint creates only
-    // its own organization/member rows and would leave a partially-provisioned
-    // tenant behind. The test bootstrap keeps it solely as an e2e fixture
-    // primitive; setupAuth's test-only afterCreateOrganization hook supplies
-    // the adjacent policy row those fixtures require.
-    if (!allowTestSignUp && normalizedPath === RAW_TENANT_PROVISIONING_PATH) {
-      response.sendStatus(404);
-      return;
-    }
-    if (TEAM_MUTATION_PATHS.has(normalizedPath)) {
-      response.sendStatus(404);
-      return;
-    }
-    next();
-  });
+  server.all(
+    "/api/auth/organization/*splat",
+    rateLimit({
+      windowMs: BLOCKED_ORGANIZATION_WINDOW_MS,
+      limit: BLOCKED_ORGANIZATION_REQUEST_LIMIT,
+      standardHeaders: "draft-8",
+      legacyHeaders: false,
+      skip: (request) =>
+        !isBlockedOrganizationPath(
+          canonicalizeAuthRequestPath(request.originalUrl),
+          allowTestSignUp,
+        ),
+      handler: (_request, response) => response.sendStatus(429),
+    }),
+    (request, response, next) => {
+      const normalizedPath = canonicalizeAuthRequestPath(request.originalUrl);
+      // Production tenants must go through TenantProvisioningService, which
+      // atomically establishes the owner, subscription/default entitlements and
+      // pickup policy. Better Auth's generic organization endpoint creates only
+      // its own organization/member rows and would leave a partially-provisioned
+      // tenant behind. The test bootstrap keeps it solely as an e2e fixture
+      // primitive; setupAuth's test-only afterCreateOrganization hook supplies
+      // the adjacent policy row those fixtures require.
+      if (isBlockedOrganizationPath(normalizedPath, allowTestSignUp)) {
+        response.sendStatus(404);
+        return;
+      }
+      next();
+    },
+  );
   server.all("/api/auth/*splat", toNodeHandler(auth));
 }
