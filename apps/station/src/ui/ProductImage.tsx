@@ -11,6 +11,7 @@ export interface ProductImageProps {
   productName: string | null;
   image?: StationProductImageDescriptor | null | undefined;
   className?: string;
+  refreshKey?: number;
 }
 
 /** Offline-first product photo. A missing/corrupt photo deliberately degrades to text. */
@@ -55,7 +56,7 @@ export function ProductImage({ exec, productId, productName, image, className }:
     return () => {
       cancelled = true;
     };
-  }, [exec, image, productId]);
+  }, [exec, image, productId, refreshKey]);
 
   useEffect(() => () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);

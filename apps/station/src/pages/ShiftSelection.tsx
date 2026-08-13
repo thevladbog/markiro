@@ -72,6 +72,7 @@ export function ShiftSelection({
   const [loading, setLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [requestedPage, setRequestedPage] = useState(1);
   const mounted = useRef(true);
 
@@ -98,6 +99,9 @@ export function ShiftSelection({
             ...(shift.image === undefined ? {} : { image: shift.image }),
           }, isCurrent ? () => !isCurrent() : undefined);
           trackStationProductImageSync(prefetch);
+          void prefetch.then(() => {
+            if (mounted.current) setImageRefreshKey((key) => key + 1);
+          });
         }
         setLoading(false);
       })
@@ -203,6 +207,7 @@ export function ShiftSelection({
                   exec={exec}
                   productId={shift.productId}
                   image={shift.image}
+                  imageRefreshKey={imageRefreshKey}
                 />
               ))}
             </div>

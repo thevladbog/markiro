@@ -13,6 +13,7 @@ export interface ShiftCardProps {
   exec?: SqlExecutor | undefined;
   productId?: string;
   image?: StationProductImageDescriptor | null | undefined;
+  imageRefreshKey?: number;
 }
 
 /** A fixed-height floor card; the parent supplies a bounded page of at most three. */
@@ -27,11 +28,12 @@ export function ShiftCard({
   exec,
   productId,
   image,
+  imageRefreshKey,
 }: ShiftCardProps) {
   return (
     <Card className="shift-card" padding="var(--sp-3)">
       <div className="shift-card__body">
-        {productId ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} /> : null}
+        {productId ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} refreshKey={imageRefreshKey} /> : null}
         <div className="shift-card__product">{productName ?? "—"}</div>
         <div className="shift-card__counterparty">
           {counterpartyName ? `${counterpartyLabel} ${counterpartyName}` : null}
