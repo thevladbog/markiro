@@ -84,7 +84,7 @@ function errorMessage(error: unknown, t: (key: string) => string): string {
   return t("pages.shifts.exports.errors.infrastructure");
 }
 
-function ExportParameters({ item, language, formatLabel }: { item: ShiftExportDto; language: string; formatLabel?: string }) {
+function ExportParameters({ item, language, formatLabel }: { item: ShiftExportDto; language: string; formatLabel: string | undefined }) {
   const { t } = useTranslation();
   const split = item.maxLines === null
     ? t("pages.shifts.exports.parameters.single")
@@ -149,7 +149,7 @@ function ArtifactRow({ item, artifact, language, onError }: {
   );
 }
 
-function HistoryRow({ item, language, formatLabel, onError }: { item: ShiftExportDto; language: string; formatLabel?: string; onError: (error: unknown) => void }) {
+function HistoryRow({ item, language, formatLabel, onError }: { item: ShiftExportDto; language: string; formatLabel: string | undefined; onError: (error: unknown) => void }) {
   const { t } = useTranslation();
   const retry = useRetryShiftExport();
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -248,7 +248,7 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
       open={open}
       title={t("pages.shifts.exports.title")}
       closeLabel={t("common.close")}
-      onClose={create.isPending ? undefined : close}
+      {...(create.isPending ? {} : { onClose: close })}
       width="min(760px, calc(100vw - 32px))"
       className="mk-shift-exports"
       footer={<><Button type="button" variant="secondary" disabled={create.isPending} onClick={close}>{t("pages.shifts.cancel")}</Button><Button type="submit" form="shift-export-form" disabled={!canSubmit} loading={create.isPending}>{t("pages.shifts.exports.create")}</Button></>}
