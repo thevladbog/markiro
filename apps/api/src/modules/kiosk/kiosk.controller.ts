@@ -14,6 +14,7 @@ import {
 } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
+  ApiConflictResponse,
   ApiHeader,
   ApiOkResponse,
   ApiQuery,
@@ -153,6 +154,14 @@ export class KioskController {
     },
   })
   @ApiBadRequestResponse({ description: "Malformed bounds, cursor, or page size." })
+  @ApiConflictResponse({
+    description: "The tenant registry changed while this snapshot was being paged; restart it.",
+    schema: {
+      type: "object",
+      required: ["code"],
+      properties: { code: { type: "string", enum: ["registry_snapshot_changed"] } },
+    },
+  })
   @ApiUnauthorizedResponse({ description: "Missing, unknown, revoked, or archived kiosk token." })
   async boxRegistry(
     @Req() req: RequestWithKiosk,

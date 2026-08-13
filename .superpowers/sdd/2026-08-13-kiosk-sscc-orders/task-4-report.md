@@ -93,3 +93,29 @@ Result: 1 failed suite, 5 tests skipped. This is not reported as GREEN and the m
 ### Fix commit
 
 This commit — `fix(api): stabilize kiosk box registry snapshots`
+
+## Fix round 2: restart fence and GTIN invalidation
+
+### RED
+
+- Combined registry/OpenAPI/GTIN run before production edits: 3 failed files; 2 failed tests, 31 passed, and the missing GTIN module suite collected 0 tests.
+- Expected failures pinned the absent exact-revision restart fence, absent `409 registry_snapshot_changed` OpenAPI response, and absent product GTIN registry invalidation boundary.
+
+### GREEN and protocol
+
+- Focused registry, OpenAPI, product-invalidation, and station mutation tests: 4 files, 45/45 passed. Route inventory: 2/2 passed. The service-boundary tests exercise the real `ProductsService.updateProduct` transaction callback: GTIN change invalidates, while name-only and canonical same-GTIN updates do not.
+- A cursor page is accepted only while the tenant counter equals its bound `until`. The service checks once before candidate reads and again after all candidate/count/fact reads. Either mismatch returns HTTP 409 with stable body `{ "code": "registry_snapshot_changed" }`; Task 6 must discard staging and restart from a new first page.
+- The post-read fence closes the page-internal READ COMMITTED race: a mutation committed between candidate and fact statements cannot produce a mixed-revision page. A commit after the final fence cannot rewrite reads already completed for that page; it instead makes any next request fail its preflight fence.
+- The DB e2e now models page 1, a committed mutation to an unpaged box, page 2 conflict, then restart at the new cut with the correct current state.
+- `ProductsService.updateProduct` now normalizes before entry, then transactionally locks and rereads the tenant product with `FOR UPDATE`, merges the patch, updates it, and invalidates only when the persisted canonical GTIN actually changed. This avoids a concurrent GTIN flip being overwritten without a registry revision.
+- GTIN invalidation uses one tenant revision and a set-based `UPDATE boxes ... FROM shifts` for every matching closed SSCC box. It does not materialize an unbounded historical box-ID array. A tenant/product-scoped existence probe avoids counter-only revisions when there are no affected boxes.
+- Production write-path audit: ProductsService is the sole path that writes `gtin14`; CommerceML Exchange changes `unitPrice` only, while Integrations link/unlink changes `externalRef` only. Those unrelated writes intentionally do not invalidate the box registry. Same-GTIN and name-only product updates likewise do not allocate a revision.
+
+### Verification and explicit DB boundary
+
+- API TypeScript, scoped ESLint, Nest build, scoped Prettier, and `git diff --check` passed. No DB schema changed, so migration generation was not run.
+- Focused PostgreSQL registry e2e: 1 failed suite, 6 skipped, stopping deliberately because shared DB migration 0037 is unapplied (`boxes.registry_version missing`). The database was not modified and this is not reported as GREEN.
+
+### Fix commit
+
+This commit — `fix(api): fence registry pages and invalidate product GTIN changes`

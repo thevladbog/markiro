@@ -35,6 +35,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
   let productId: string;
   let initialUntil: string;
   let memberKey: string;
+  const pagingBoxIds: string[] = [];
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -146,7 +147,9 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
 
     // Same updatedAt, different UUIDs: paging must use the id tie-breaker.
     for (const serial of [102, 103]) {
-      await createOneMemberBox({ tenantId, shiftId, serial, updatedAt: timestamp });
+      pagingBoxIds.push(
+        await createOneMemberBox({ tenantId, shiftId, serial, updatedAt: timestamp }),
+      );
     }
 
     // Foreign tenant data must never appear, even though the kioskProducts
@@ -188,7 +191,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
     shiftId: string;
     serial: number;
     updatedAt: Date;
-  }): Promise<void> {
+  }): Promise<string> {
     const boxId = randomUUID();
     const closure = new Date(input.updatedAt.getTime() - 10_000);
     const scannedAt = new Date(closure.getTime() - input.serial);
@@ -229,6 +232,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       codeHash: hash,
       addedAt: scannedAt,
     });
+    return boxId;
   }
 
   it("returns a tenant-only 12-bottle upsert without raw KM crypto material", async () => {
@@ -273,6 +277,46 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       })
       .set("x-kiosk-token", token)
       .expect(400);
+  });
+
+  it("rejects page 2 after an unpaged box changes and a restart sees the new cut", async () => {
+    const first = await request(app!.getHttpServer())
+      .get("/kiosk/box-registry?limit=1")
+      .set("x-kiosk-token", token)
+      .expect(200);
+    const targetBoxId = pagingBoxIds.find(
+      (boxId) => boxId !== (first.body.items[0] as { boxId?: string } | undefined)?.boxId,
+    )!;
+    await db.transaction(async (tx) => {
+      const changed = await tx
+        .update(schema.boxes)
+        .set({ disassembledAt: new Date() })
+        .where(eq(schema.boxes.id, targetBoxId))
+        .returning({ id: schema.boxes.id });
+      await advanceBoxRegistryVersion(
+        tx,
+        tenantId,
+        changed.map((box) => box.id),
+      );
+    });
+
+    const conflict = await request(app!.getHttpServer())
+      .get("/kiosk/box-registry")
+      .query({ limit: 1, until: first.body.until, cursor: first.body.nextCursor })
+      .set("x-kiosk-token", token)
+      .expect(409);
+    expect(conflict.body).toEqual({ code: "registry_snapshot_changed" });
+
+    const restarted = await request(app!.getHttpServer())
+      .get("/kiosk/box-registry?limit=500")
+      .set("x-kiosk-token", token)
+      .expect(200);
+    expect(BigInt(restarted.body.until as string)).toBeGreaterThan(
+      BigInt(first.body.until as string),
+    );
+    expect(restarted.body.items).not.toContainEqual(
+      expect.objectContaining({ boxId: targetBoxId }),
+    );
   });
 
   it("does not advertise an uncommitted allocated revision and exposes it after commit", async () => {

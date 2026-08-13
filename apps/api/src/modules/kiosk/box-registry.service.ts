@@ -1,4 +1,4 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { and, asc, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { canonicalizeKm, isValidSscc, kmKey } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
@@ -14,6 +14,12 @@ import {
 
 export const MAX_BOX_REGISTRY_MEMBERS = 500;
 export const MAX_REGISTRY_PAGE_MEMBER_KEYS = 1000;
+
+export function assertBoxRegistrySnapshotCurrent(current: string, until: string): void {
+  if (current !== until) {
+    throw new ConflictException({ code: "registry_snapshot_changed" });
+  }
+}
 
 export interface BoxRegistryCandidate {
   id: string;
@@ -324,12 +330,18 @@ export function shapeBoxRegistryPage(
 export class BoxRegistryService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async list(tenantId: string, query: BoxRegistryQueryDto): Promise<KioskBoxRegistryPage> {
+  private async currentVersion(tenantId: string): Promise<string> {
     const [versionRow] = await this.db
       .select({ currentVersion: schema.boxRegistryVersions.currentVersion })
       .from(schema.boxRegistryVersions)
       .where(eq(schema.boxRegistryVersions.tenantId, tenantId));
-    const window = resolveBoxRegistryWindow(query, (versionRow?.currentVersion ?? 0n).toString());
+    return (versionRow?.currentVersion ?? 0n).toString();
+  }
+
+  async list(tenantId: string, query: BoxRegistryQueryDto): Promise<KioskBoxRegistryPage> {
+    const initialVersion = await this.currentVersion(tenantId);
+    const window = resolveBoxRegistryWindow(query, initialVersion);
+    assertBoxRegistrySnapshotCurrent(initialVersion, window.until);
     const since = window.since === null ? null : BigInt(window.since);
     const until = BigInt(window.until);
     const afterRegistryVersion =
@@ -395,6 +407,10 @@ export class BoxRegistryService {
       rows.length > window.limit,
     );
     const facts = await resolveBoxRegistryFacts(this.db, tenantId, prefix.candidates, counts);
+    // Reads above are separate READ COMMITTED statements. Fence the complete
+    // page so a commit during candidate/fact resolution forces a restart
+    // instead of returning facts from two tenant registry revisions.
+    assertBoxRegistrySnapshotCurrent(await this.currentVersion(tenantId), window.until);
     return shapeBoxRegistryPage(prefix.candidates, facts, window, prefix.hasMoreCandidates);
   }
 }

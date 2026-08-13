@@ -37,7 +37,9 @@ describe("kiosk box registry OpenAPI contract", () => {
         parameters.map((parameter) => ("$ref" in parameter ? "$ref" : parameter.name)).sort(),
       ).toEqual(["cursor", "limit", "since", "until"]);
       expect(JSON.stringify(parameters)).toContain("revision");
-      expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(["200", "400", "401"]);
+      expect(Object.keys(operation?.responses ?? {}).sort()).toEqual(["200", "400", "401", "409"]);
+      const conflict = operation?.responses["409"];
+      expect(JSON.stringify(conflict)).toContain("registry_snapshot_changed");
 
       const ok = operation?.responses["200"];
       if (!ok || "$ref" in ok) throw new Error("missing inline 200 response");

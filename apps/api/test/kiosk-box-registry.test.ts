@@ -7,6 +7,7 @@ import {
   resolveBoxRegistryWindow,
 } from "../src/modules/kiosk/box-registry.dto";
 import {
+  assertBoxRegistrySnapshotCurrent,
   MAX_REGISTRY_PAGE_MEMBER_KEYS,
   MAX_BOX_REGISTRY_MEMBERS,
   evaluateBoxRegistryCandidate,
@@ -66,6 +67,17 @@ function member(
 }
 
 describe("box registry cursor", () => {
+  it("requires every page read to remain at the exact advertised tenant revision", () => {
+    expect(() =>
+      assertBoxRegistrySnapshotCurrent("9007199254740993", "9007199254740993"),
+    ).not.toThrow();
+    try {
+      assertBoxRegistrySnapshotCurrent("9007199254740994", "9007199254740993");
+      throw new Error("expected snapshot conflict");
+    } catch (error) {
+      expect(error).toMatchObject({ status: 409, response: { code: "registry_snapshot_changed" } });
+    }
+  });
   it("round-trips a canonical versioned cursor and binds both snapshot bounds", () => {
     const value = {
       v: 2 as const,
