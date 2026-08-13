@@ -81,6 +81,7 @@ export interface ShiftDto {
   mode: ShiftMode;
   productId: string;
   productName: string | null;
+  image?: import("../products/dto").ProductImageDescriptor | null;
   lineId: string | null;
   lineName: string | null;
   counterpartyId: string | null;

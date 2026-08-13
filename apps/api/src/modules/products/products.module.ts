@@ -13,5 +13,6 @@ import { ProductImageUploadFilter } from "./product-image-upload.filter";
   imports: [MediaModule, OrgProfileModule],
   controllers: [ProductsController],
   providers: [ProductsService, ProductImageUploadFilter],
+  exports: [ProductsService],
 })
 export class ProductsModule {}
