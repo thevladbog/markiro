@@ -11,6 +11,7 @@ import { schema, type Db } from "@markiro/db";
 import { DomainError, gtinMatchesPrefix, normalizeToGtin14 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OrgProfileService } from "../org-profile/org-profile.service";
+import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import {
   invalidateProductGtinRegistry,
   productGtinActuallyChanged,
@@ -115,6 +116,7 @@ export class ProductsService {
 
     try {
       return await this.db.transaction(async (tx) => {
+        if (normalizedGtin !== undefined) await lockTenantBoxRegistry(tx, tenantId);
         // Lock and merge in the same transaction. A pre-transaction read can
         // miss a concurrent GTIN flip and then silently overwrite it without
         // invalidating the registry revision that kiosks observe.

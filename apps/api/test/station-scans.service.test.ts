@@ -47,6 +47,7 @@ describe("StationScansService box registry versioning", () => {
   it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
     const boxUpdates: Array<Record<string, unknown>> = [];
     const insertedTables: unknown[] = [];
+    const lockQueries: Array<{ sql: string; params: unknown[] }> = [];
     const shiftId = "11111111-1111-1111-1111-111111111111";
     const terminalId = "22222222-2222-2222-2222-222222222222";
     const dbStub = {
@@ -74,7 +75,11 @@ describe("StationScansService box registry versioning", () => {
               }),
             }),
           }),
-          execute: () => Promise.resolve(),
+          execute: (query: SQL) => {
+            const rendered = new PgDialect().sqlToQuery(query);
+            lockQueries.push({ sql: rendered.sql, params: rendered.params });
+            return Promise.resolve();
+          },
           update: (table: unknown) => ({
             set: (values: Record<string, unknown>) => {
               if (table === schema.boxes) boxUpdates.push(values);
@@ -120,6 +125,10 @@ describe("StationScansService box registry versioning", () => {
     );
 
     expect(insertedTables).toContain(schema.boxRegistryVersions);
+    expect(lockQueries[0]?.params).toContain("box-registry:tenant-1");
+    expect(
+      lockQueries.filter((query) => query.params.includes("box-registry:tenant-1")).length,
+    ).toBe(1);
     expect(boxUpdates).toHaveLength(2);
     expect(boxUpdates[0]).not.toHaveProperty("registryVersion");
     expect(boxUpdates[1]?.registryVersion).toBe(1n);
@@ -129,6 +138,40 @@ describe("StationScansService box registry versioning", () => {
     expect(query).toMatch(
       /^GREATEST\(clock_timestamp\(\), .*updated_at.* \+ interval '1 millisecond'\)$/i,
     );
+  });
+
+  it("does not acquire the tenant registry lock for an exact replay", async () => {
+    const execute = vi.fn();
+    const replayRows = [{ terminalId: null, payloadDigest: null, result: null }];
+    const tx = {
+      execute,
+      insert: () => ({
+        values: () => ({
+          onConflictDoNothing: () => ({ returning: () => Promise.resolve([]) }),
+        }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            for: () => Promise.resolve(replayRows),
+          }),
+        }),
+      }),
+    };
+    // Match the actual digest by returning it through a thenable shim after
+    // the service has built the query; the mismatch path is irrelevant to
+    // the lock assertion, so use the legacy replay row which returns early.
+    const service = new StationScansService(
+      { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
+      ssccServiceStub,
+      entitlementsServiceStub,
+    );
+    await service.applyBatch(
+      "tenant-1",
+      { batchId: "replay-1", items: [], boxes: [], exceptions: [] },
+      "terminal-1",
+    );
+    expect(execute).not.toHaveBeenCalled();
   });
 });
 
@@ -294,6 +337,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
       transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
         openedTransaction = true;
         const tx = {
+          execute: () => Promise.resolve(),
           insert: () => ({
             values: () => ({
               onConflictDoNothing: () => ({

@@ -119,3 +119,28 @@ This commit — `fix(api): stabilize kiosk box registry snapshots`
 ### Fix commit
 
 This commit — `fix(api): fence registry pages and invalidate product GTIN changes`
+
+## Fix round 3: tenant lock ordering and unconditional GTIN revisions
+
+### RED
+
+- Focused product/station run before production edits: 2 failed files, 7 failed and 6 passed.
+- Failures pinned the racy no-box `EXISTS` shortcut, missing tenant-registry lock before product/device-box rows, missing SQL builder, and PostgreSQL-invalid qualified `SET` targets.
+
+### GREEN and final invariants
+
+- Every actual persisted canonical GTIN change now allocates exactly one tenant revision, including when zero boxes match, then performs one set-based tenant/product update for all currently closed SSCC boxes. A concurrent first closure cannot fall through an `EXISTS` gap: the tenant lock orders the closure and GTIN revision.
+- `lockTenantBoxRegistry` uses transaction advisory key `box-registry:<tenantId>`. A newly claimed station batch acquires it before entitlement shift locks, device-box locks, code locks, mutations, counter, and stamps. Exact replays return before it. Product updates carrying a GTIN field acquire it before `FOR UPDATE`; name-only/price/linkage updates do not contend, while a canonical same-GTIN request locks and then correctly avoids a revision.
+- Cross-tenant work uses distinct advisory keys and remains parallel. Registry-affecting work for one tenant serializes; this is an accepted correctness/deadlock tradeoff.
+- Product box stamping remains one set-based `UPDATE boxes ... FROM shifts`, with static unqualified `registry_version` and `updated_at` SET targets. The PgDialect regression test pins valid LHS syntax plus tenant/product predicates while allowing qualified RHS expressions.
+- Focused registry/OpenAPI/product/station tests: 4 files, 47/47 passed, including lock order, replay non-locking, unconditional no-box revision, name-only/no-op behavior, and exact SQL generation. Snapshot 409 tests remain green.
+
+### Verification and operational Minor
+
+- Route inventory 2/2, API typecheck, scoped lint, Nest build, Prettier, and diff-check passed.
+- Continuous registry mutation can repeatedly force safe 409 restarts. This is accepted instead of serving an inconsistent snapshot; Task 6 should keep the last active registry, discard only staging, use bounded retry/backoff, and expose refresh status rather than blocking kiosk operation.
+- Shared PostgreSQL still lacks migration 0037. Focused e2e remains explicitly NOT GREEN and the database was not changed.
+
+### Fix commit
+
+This commit — `fix(api): serialize box registry mutations`

@@ -14,6 +14,7 @@ import type { MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
+import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import type {
   BatchConflictDto,
   DeniedStationRecordDto,
@@ -281,6 +282,12 @@ export class StationScansService {
           ...(stored?.denied ? { denied: stored.denied } : {}),
         };
       }
+
+      // Global lock-order root for a newly claimed, potentially mutating
+      // batch: tenant registry -> shift/device-box/code rows -> revision
+      // counter -> box stamps. Exact replays return above and never contend
+      // with production registry mutations.
+      await lockTenantBoxRegistry(tx, tenantId);
 
       const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
       const allShiftIds = [

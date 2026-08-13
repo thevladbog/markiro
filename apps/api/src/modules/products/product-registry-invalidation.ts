@@ -19,35 +19,15 @@ export function productGtinActuallyChanged(
   );
 }
 
-type ProductRegistryMutationExecutor = Pick<Db, "insert" | "execute">;
-
-/** Stamp only tenant boxes whose eligibility depends on the changed product GTIN. */
-export async function invalidateProductGtinRegistry(
-  tx: ProductRegistryMutationExecutor,
+export function buildProductRegistryStampSql(
   tenantId: string,
   productId: string,
-): Promise<void> {
-  // Avoid materializing an unbounded historical box-id array in Node. The
-  // EXISTS preflight prevents a counter-only revision for products with no
-  // relevant boxes; the set-based UPDATE stamps every matching box.
-  const affected = await tx.execute<{ exists: boolean }>(sql`
-    select exists (
-      select 1 from ${schema.boxes}
-      inner join ${schema.shifts}
-        on ${schema.shifts.tenantId} = ${schema.boxes.tenantId}
-       and ${schema.shifts.id} = ${schema.boxes.shiftId}
-      where ${schema.boxes.tenantId} = ${tenantId}
-        and ${schema.shifts.productId} = ${productId}
-        and ${schema.boxes.sscc} is not null
-        and ${schema.boxes.closedAt} is not null
-    ) as exists
-  `);
-  if (!affected.rows[0]?.exists) return;
-  const revision = await allocateBoxRegistryVersion(tx, tenantId);
-  await tx.execute(sql`
+  revision: bigint,
+) {
+  return sql`
     update ${schema.boxes}
-       set ${schema.boxes.registryVersion} = ${revision},
-           ${schema.boxes.updatedAt} = greatest(
+       set registry_version = ${revision},
+           updated_at = greatest(
              clock_timestamp(),
              ${schema.boxes.updatedAt} + interval '1 millisecond'
            )
@@ -58,5 +38,20 @@ export async function invalidateProductGtinRegistry(
        and ${schema.shifts.productId} = ${productId}
        and ${schema.boxes.sscc} is not null
        and ${schema.boxes.closedAt} is not null
-  `);
+  `;
+}
+
+type ProductRegistryMutationExecutor = Pick<Db, "insert" | "execute">;
+
+/** Stamp only tenant boxes whose eligibility depends on the changed product GTIN. */
+export async function invalidateProductGtinRegistry(
+  tx: ProductRegistryMutationExecutor,
+  tenantId: string,
+  productId: string,
+): Promise<void> {
+  // Every actual GTIN change gets a revision, even with no boxes currently
+  // visible. The tenant registry lock makes a concurrent first closure order
+  // wholly before or after this revision, eliminating the old EXISTS race.
+  const revision = await allocateBoxRegistryVersion(tx, tenantId);
+  await tx.execute(buildProductRegistryStampSql(tenantId, productId, revision));
 }

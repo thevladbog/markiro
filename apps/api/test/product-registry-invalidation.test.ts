@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ProductsService } from "../src/modules/products/products.service";
+import { PgDialect } from "drizzle-orm/pg-core";
 import {
+  buildProductRegistryStampSql,
   invalidateProductGtinRegistry,
   productGtinActuallyChanged,
   type ProductGtinVersion,
@@ -39,26 +41,38 @@ describe("product GTIN registry invalidation", () => {
     ).toBe(false);
   });
 
-  it("does not allocate a revision when the product has no closed SSCC boxes", async () => {
-    const execute = vi.fn().mockResolvedValue({ rows: [{ exists: false }] });
-    const insert = vi.fn();
+  it("allocates a revision even when the product has no closed SSCC boxes", async () => {
+    const execute = vi.fn().mockResolvedValue({ rows: [] });
+    const returning = vi.fn().mockResolvedValue([{ currentVersion: 9n }]);
+    const onConflictDoUpdate = vi.fn(() => ({ returning }));
+    const values = vi.fn(() => ({ onConflictDoUpdate }));
+    const insert = vi.fn(() => ({ values }));
     await invalidateProductGtinRegistry({ execute, insert } as never, "tenant-a", "product-a");
     expect(execute).toHaveBeenCalledTimes(1);
-    expect(insert).not.toHaveBeenCalled();
+    expect(insert).toHaveBeenCalledTimes(1);
   });
 
   it("allocates once and performs one set-based stamp without materializing box ids", async () => {
-    const execute = vi
-      .fn()
-      .mockResolvedValueOnce({ rows: [{ exists: true }] })
-      .mockResolvedValueOnce({ rows: [] });
+    const execute = vi.fn().mockResolvedValue({ rows: [] });
     const returning = vi.fn().mockResolvedValue([{ currentVersion: 9n }]);
     const onConflictDoUpdate = vi.fn(() => ({ returning }));
     const values = vi.fn(() => ({ onConflictDoUpdate }));
     const insert = vi.fn(() => ({ values }));
     await invalidateProductGtinRegistry({ execute, insert } as never, "tenant-a", "product-a");
     expect(insert).toHaveBeenCalledTimes(1);
-    expect(execute).toHaveBeenCalledTimes(2);
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it("generates valid unqualified UPDATE SET targets with tenant/product scoping", () => {
+    const query = new PgDialect().sqlToQuery(
+      buildProductRegistryStampSql("tenant-a", "product-a", 9n),
+    ).sql;
+    expect(query).toMatch(/update "boxes"\s+set registry_version = \$1,\s+updated_at =/i);
+    expect(query).not.toMatch(/set\s+"boxes"\./i);
+    expect(query).not.toMatch(/,\s*"boxes"\."updated_at"\s*=/i);
+    expect(query).toContain('from "shifts"');
+    expect(query).toContain('"boxes"."tenant_id" = $2');
+    expect(query).toContain('"shifts"."product_id" = $3');
   });
 });
 
@@ -91,11 +105,19 @@ describe("ProductsService update registry boundary", () => {
     const whereUpdate = vi.fn(() => ({ returning }));
     const set = vi.fn(() => ({ where: whereUpdate }));
     const update = vi.fn(() => ({ set }));
-    const execute = vi.fn().mockResolvedValue({ rows: [{ exists: true }] });
+    const events: string[] = [];
+    const execute = vi.fn().mockImplementation(() => {
+      events.push("execute");
+      return Promise.resolve({ rows: [] });
+    });
     const counterReturning = vi.fn().mockResolvedValue([{ currentVersion: 2n }]);
     const onConflictDoUpdate = vi.fn(() => ({ returning: counterReturning }));
     const values = vi.fn(() => ({ onConflictDoUpdate }));
     const insert = vi.fn(() => ({ values }));
+    forUpdate.mockImplementation(() => {
+      events.push("product-for-update");
+      return Promise.resolve([baseRow]);
+    });
     const tx = { select, update, execute, insert };
     const transaction = vi.fn(async (callback: (executor: typeof tx) => unknown) => callback(tx));
     return {
@@ -103,20 +125,27 @@ describe("ProductsService update registry boundary", () => {
       execute,
       insert,
       forUpdate,
+      events,
     };
   }
 
   beforeEach(() => vi.clearAllMocks());
 
-  it.each([
-    ["name-only", { name: "After" }],
-    ["canonical GTIN no-op", { gtin: "4600682000013" }],
-  ])("does not invalidate for %s update", async (_label, patch) => {
+  it("does not lock or invalidate for a name-only update", async () => {
     const fixture = serviceFor(baseRow.gtin14);
-    await fixture.service.updateProduct(tenantId, productId, patch);
+    await fixture.service.updateProduct(tenantId, productId, { name: "After" });
     expect(fixture.forUpdate).toHaveBeenCalledWith("update");
     expect(fixture.execute).not.toHaveBeenCalled();
     expect(fixture.insert).not.toHaveBeenCalled();
+    expect(fixture.events).toEqual(["product-for-update"]);
+  });
+
+  it("locks before the product row but does not invalidate a canonical GTIN no-op", async () => {
+    const fixture = serviceFor(baseRow.gtin14);
+    await fixture.service.updateProduct(tenantId, productId, { gtin: "4600682000013" });
+    expect(fixture.execute).toHaveBeenCalledTimes(1);
+    expect(fixture.insert).not.toHaveBeenCalled();
+    expect(fixture.events.slice(0, 2)).toEqual(["execute", "product-for-update"]);
   });
 
   it("invalidates affected boxes for a persisted GTIN change inside the transaction", async () => {
@@ -125,5 +154,6 @@ describe("ProductsService update registry boundary", () => {
     expect(fixture.forUpdate).toHaveBeenCalledWith("update");
     expect(fixture.execute).toHaveBeenCalledTimes(2);
     expect(fixture.insert).toHaveBeenCalledTimes(1);
+    expect(fixture.events.slice(0, 2)).toEqual(["execute", "product-for-update"]);
   });
 });
