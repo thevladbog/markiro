@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, PinPad } from "@markiro/ui";
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import { verifyOperatorBadge, verifyOperatorPin } from "../credentials/operator.js";
 import { classifyKioskScan, type KioskScan } from "../domain-guard/classify.js";
 import { isWebSerialSupported } from "../scanner/keyboard.js";
@@ -60,7 +60,7 @@ export interface ScannerSetupProps {
   paired: boolean;
   /** null before pairing — an unpaired device has no roster to check against,
    * and by design needs none (see the access tiers below). */
-  bootstrap: KioskBootstrapDto | null;
+  bootstrap: KioskBootstrapSnapshotDto | null;
   /**
    * THE DEVICE'S SCANNER, and the only one this screen has: the shell's
    * fan-out over the transport the kiosk is CURRENTLY running — the very

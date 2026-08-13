@@ -1318,11 +1318,24 @@ const bootstrap = (generatedAt: string): KioskBootstrapDto => ({
     startsAt: "2026-07-01T00:00:00.000Z",
     endsAt: "2026-08-31T00:00:00.000Z",
   },
+  branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+  pickupPolicy: { limitsEnabled: true },
   config: { dayLimitPerEmployee: 5, showPrices: true },
   badgeSalt: "c2FsdA==",
   reasons: [],
   products: [],
-  employees: [{ id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 }],
+  employees: [
+    {
+      id: "e1",
+      fullName: "A",
+      role: null,
+      badgeHash: null,
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: true,
+      takenTodayElsewhere: 0,
+    },
+  ],
   operators: [],
 });
 

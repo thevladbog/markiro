@@ -875,6 +875,153 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
     expect(res.body.conflicts).toEqual([{ rawKm: scans[1], reason: "over_limit" }]);
   });
 
+  it("serializes the employee UTC-day allowance across two kiosks", async () => {
+    const subject = await createPolicySubject({ limitMode: "limited", dayLimit: 1 });
+    const otherKioskId = randomUUID();
+    const otherToken = `kiosk-token-policy-${randomUUID()}`;
+    await db.insert(schema.kiosks).values({
+      id: otherKioskId,
+      tenantId,
+      name: `Киоск-политика-${randomUUID()}`,
+      dayLimitPerEmployee: 99,
+      deviceTokenHash: hashDeviceToken(otherToken),
+    });
+    await db.insert(schema.kioskProducts).values({ tenantId, kioskId: otherKioskId, productId });
+
+    // Hold a different insert barrier for each kiosk. Before the fix both
+    // requests finish their out-of-transaction count and wait in their own
+    // INSERT trigger. After the fix one waits there while the other waits on
+    // the shared employee/day lock. Waiting for any two of those three exact
+    // keys makes the race deterministic in both versions without a sleep.
+    const suffix = randomUUID().replaceAll("-", "_");
+    const functionName = `wait_for_pickup_limit_${suffix}`;
+    const triggerName = `wait_for_pickup_limit_${suffix}`;
+    const firstBarrier = `pickup-limit-test:${randomUUID()}`;
+    const secondBarrier = `pickup-limit-test:${randomUUID()}`;
+    const blocker = await setup.pool.connect();
+    const blockerPid = (await blocker.query<{ pid: number }>("select pg_backend_pid() as pid"))
+      .rows[0]!.pid;
+    let barriersHeld = false;
+    let firstRequest: Promise<request.Response> | undefined;
+    let secondRequest: Promise<request.Response> | undefined;
+    try {
+      await setup.pool.query(`
+        create function ${functionName}() returns trigger language plpgsql as $$
+        begin
+          if new.tenant_id = '${tenantId}' and new.employee_id = '${subject.employeeId}' then
+            if new.kiosk_id = '${subject.kioskId}' then
+              perform pg_advisory_xact_lock(hashtextextended('${firstBarrier}', 0));
+            elsif new.kiosk_id = '${otherKioskId}' then
+              perform pg_advisory_xact_lock(hashtextextended('${secondBarrier}', 0));
+            end if;
+          end if;
+          return new;
+        end
+        $$
+      `);
+      await setup.pool.query(`
+        create trigger ${triggerName}
+        before insert on pickup_orders
+        for each row execute function ${functionName}()
+      `);
+      await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [firstBarrier]);
+      await blocker.query("select pg_advisory_lock(hashtextextended($1, 0))", [secondBarrier]);
+      barriersHeld = true;
+
+      firstRequest = request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", subject.token)
+        .send({
+          deviceSeq: 101,
+          badgeCode: subject.badge,
+          reason: "buy",
+          items: [{ rawKm: distinctKm("RACEA") }],
+        })
+        .then((response) => response);
+      secondRequest = request(app!.getHttpServer())
+        .post("/kiosk/orders")
+        .set("x-kiosk-token", otherToken)
+        .send({
+          deviceSeq: 202,
+          badgeCode: subject.badge,
+          reason: "buy",
+          items: [{ rawKm: distinctKm("RACEB") }],
+        })
+        .then((response) => response);
+
+      const deadline = Date.now() + 10_000;
+      let waiterCount = 0;
+      while (Date.now() < deadline) {
+        const waiting = await setup.pool.query<{ count: number }>(
+          `select count(*)::int as count
+           from pg_stat_activity activity
+           where activity.datname = current_database()
+             and activity.pid <> pg_backend_pid()
+             and activity.pid <> $1
+             and (
+               $1 = any(pg_blocking_pids(activity.pid))
+               or exists (
+                 select 1
+                 from unnest(pg_blocking_pids(activity.pid)) direct_blocker(pid)
+                 where $1 = any(pg_blocking_pids(direct_blocker.pid))
+               )
+             )`,
+          [blockerPid],
+        );
+        waiterCount = waiting.rows[0]?.count ?? 0;
+        if (waiterCount >= 2) break;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      expect(waiterCount).toBeGreaterThanOrEqual(2);
+
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [firstBarrier]);
+      await blocker.query("select pg_advisory_unlock(hashtextextended($1, 0))", [secondBarrier]);
+      barriersHeld = false;
+
+      const responses = await Promise.all([firstRequest, secondRequest]);
+      expect(responses.map((response) => response.status)).toEqual([201, 201]);
+      expect(responses.reduce((sum, response) => sum + Number(response.body.itemCount), 0)).toBe(1);
+      expect(
+        responses.flatMap((response) => response.body.conflicts as Array<{ reason: string }>),
+      ).toEqual([expect.objectContaining({ reason: "over_limit" })]);
+
+      const accepted = await db
+        .select({ id: schema.pickupOrderItems.id })
+        .from(schema.pickupOrderItems)
+        .innerJoin(
+          schema.pickupOrders,
+          and(
+            eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
+            eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.pickupOrders.tenantId, tenantId),
+            eq(schema.pickupOrders.employeeId, subject.employeeId),
+          ),
+        );
+      expect(accepted).toHaveLength(1);
+    } finally {
+      if (barriersHeld) {
+        await blocker
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [firstBarrier])
+          .catch(() => undefined);
+        await blocker
+          .query("select pg_advisory_unlock(hashtextextended($1, 0))", [secondBarrier])
+          .catch(() => undefined);
+      }
+      blocker.release();
+      await Promise.allSettled(
+        [firstRequest, secondRequest].filter(
+          (pending): pending is Promise<request.Response> => pending !== undefined,
+        ),
+      );
+      await setup.pool.query(`drop trigger if exists ${triggerName} on pickup_orders`);
+      await setup.pool.query(`drop function if exists ${functionName}()`);
+    }
+  }, 20_000);
+
   it("reports a missing active employee policy as a configuration error", async () => {
     const missingEmployeeId = randomUUID();
     const missingBadge = `badge-policy-missing-${randomUUID()}`;

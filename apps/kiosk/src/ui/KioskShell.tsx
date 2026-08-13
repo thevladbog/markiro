@@ -25,6 +25,7 @@ import { ScannerSetup } from "../screens/ScannerSetup.js";
 import type { CartState } from "../session/cart.js";
 import {
   countTakenToday,
+  effectivePickupPolicy,
   startOfUtcDay,
   takenTodayElsewhere,
   utcDayOf,
@@ -728,6 +729,10 @@ export function KioskShell(): React.JSX.Element {
     async (state: CartState, active: KioskSession) => {
       const cfg = configRef.current;
       if (!cfg) return;
+      const policy = snapshotRef.current
+        ? effectivePickupPolicy(snapshotRef.current.bootstrap, active.employeeId)
+        : null;
+      if (state.reason === "writeoff" && !policy?.canWriteoff) return;
       const deviceSeq = cfg.nextDeviceSeq;
       const content = {
         deviceSeq,

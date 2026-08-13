@@ -76,7 +76,11 @@ export function useUpdateOrgProfile(): UseMutationResult<OrgProfileDto, Error, P
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: putOrgProfile,
-    onSuccess: () => {
+    onSuccess: (profile) => {
+      // Adopt the mutation response before starting any refetch. Consumers
+      // using the profile as an editable baseline must not briefly fall back
+      // to stale cache data while another settings card updates the same key.
+      queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, profile);
       void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_QUERY_KEY });
       // Belt-and-suspenders alongside TanStack Query's default prefix-based
       // invalidation (invalidating ["org-profile"] already matches

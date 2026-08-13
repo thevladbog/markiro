@@ -1,5 +1,6 @@
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import type { KioskScan } from "../domain-guard/classify.js";
+import { effectivePickupPolicy, type EffectivePickupPolicy } from "./day-count.js";
 
 export interface CartItem {
   rawKm: string;
@@ -52,8 +53,20 @@ export type CartAction =
 
 /** Everything the reducer needs from outside itself. No clock, no I/O. */
 export interface CartContext {
-  bootstrap: KioskBootstrapDto;
+  bootstrap: KioskBootstrapSnapshotDto;
+  employeeId: string;
   alreadyTakenToday: number;
+}
+
+const DENY_ALL_POLICY: EffectivePickupPolicy = Object.freeze({
+  limited: true,
+  dayLimit: 0,
+  canWriteoff: false,
+});
+
+/** Missing employee data is an unusable session, never implicit privilege. */
+export function cartPickupPolicy(ctx: CartContext): EffectivePickupPolicy {
+  return effectivePickupPolicy(ctx.bootstrap, ctx.employeeId) ?? DENY_ALL_POLICY;
 }
 
 // Frozen because `reset` hands this very object straight back out and it is
@@ -102,8 +115,14 @@ export function cartReducer(state: CartState, action: CartAction, ctx: CartConte
         notice: null,
       };
     case "reason":
-      return { ...state, reason: action.reason };
+      if (action.reason === "writeoff" && !cartPickupPolicy(ctx).canWriteoff) return state;
+      return {
+        ...state,
+        reason: action.reason,
+        ...(action.reason === "buy" ? { writeoffReasonId: null } : {}),
+      };
     case "writeoffReason":
+      if (!cartPickupPolicy(ctx).canWriteoff) return state;
       return { ...state, writeoffReasonId: action.id };
     case "dismissNotice":
       return { ...state, notice: null };
@@ -183,8 +202,10 @@ function applyScan(state: CartState, scan: KioskScan, ctx: CartContext): CartSta
  * they present.
  */
 export function remainingToday(state: CartState, ctx: CartContext): number {
+  const policy = cartPickupPolicy(ctx);
+  if (!policy.limited) return Number.POSITIVE_INFINITY;
   const taken = ctx.alreadyTakenToday + state.items.length;
-  return Math.max(0, ctx.bootstrap.config.dayLimitPerEmployee - taken);
+  return Math.max(0, policy.dayLimit - taken);
 }
 
 /**
@@ -192,8 +213,11 @@ export function remainingToday(state: CartState, ctx: CartContext): number {
  * its sub-reason: `writeoffReasonId` is what the server files the loss under,
  * and an unattributed write-off is the one thing this flow cannot audit later.
  */
-export function canSubmit(state: CartState): boolean {
+export function canSubmit(state: CartState, ctx: CartContext): boolean {
   if (state.items.length === 0) return false;
-  if (state.reason === "writeoff" && state.writeoffReasonId === null) return false;
+  if (state.reason === "writeoff") {
+    if (!cartPickupPolicy(ctx).canWriteoff) return false;
+    if (state.writeoffReasonId === null) return false;
+  }
   return true;
 }

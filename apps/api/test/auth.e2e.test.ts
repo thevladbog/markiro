@@ -81,6 +81,32 @@ describe.skipIf(!ready)("auth e2e", () => {
       .expect(404);
   });
 
+  it("does not expose raw organization creation outside the explicit test bootstrap", async () => {
+    const signedUp = await request(app!.getHttpServer())
+      .post("/api/auth/sign-up/email")
+      .send({
+        email: `raw-org-${randomUUID()}@example.com`,
+        password: `Pw-${randomUUID()}!Aa1`,
+        name: "Raw org probe",
+      })
+      .expect(200);
+    const cookie = signedUp.headers["set-cookie"];
+    if (!cookie) throw new Error("Expected the test signup to issue a session cookie");
+
+    const lockedServer = express();
+    mountAuth(lockedServer, setup.auth, { allowTestSignUp: false });
+    await request(lockedServer)
+      .post("/api/auth/organization/create")
+      .set("cookie", cookie)
+      .send({ name: "Bypass tenant", slug: `bypass-${randomUUID()}` })
+      .expect(404);
+    await request(lockedServer)
+      .post("/api/auth/organization/create/")
+      .set("cookie", cookie)
+      .send({ name: "Bypass tenant alias", slug: `bypass-alias-${randomUUID()}` })
+      .expect(404);
+  });
+
   it("organization create without a session is unauthorized", async () => {
     await request(app!.getHttpServer())
       .post("/api/auth/organization/create")

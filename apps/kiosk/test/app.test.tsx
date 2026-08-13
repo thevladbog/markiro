@@ -162,6 +162,8 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee: 5, showPrices: true },
     badgeSalt: SALT,
     reasons: [{ id: "r-defect", name: "Брак" }],
@@ -174,6 +176,9 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
         fullName: EMPLOYEE.fullName,
         role: null,
         badgeHash,
+        limitMode: "limited",
+        dayLimit: 5,
+        canWriteoff: true,
         // What this worker took at the OTHER kiosks today, which is the one
         // part of their day count this device cannot see for itself.
         takenTodayElsewhere: server.takenTodayElsewhere,

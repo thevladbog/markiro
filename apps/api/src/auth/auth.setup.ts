@@ -82,6 +82,7 @@ const TEAM_MUTATION_PATHS = new Set([
   "/api/auth/organization/remove-member",
   "/api/auth/organization/update-member-role",
 ]);
+const RAW_TENANT_PROVISIONING_PATH = "/api/auth/organization/create";
 
 /**
  * Better Auth needs the raw (unparsed) request body — mount BEFORE any json
@@ -109,6 +110,17 @@ export function mountAuth(
   });
   server.all("/api/auth/organization/*splat", (request, response, next) => {
     const normalizedPath = request.path.replace(/\/+$/, "");
+    // Production tenants must go through TenantProvisioningService, which
+    // atomically establishes the owner, subscription/default entitlements and
+    // pickup policy. Better Auth's generic organization endpoint creates only
+    // its own organization/member rows and would leave a partially-provisioned
+    // tenant behind. The test bootstrap keeps it solely as an e2e fixture
+    // primitive; setupAuth's test-only afterCreateOrganization hook supplies
+    // the adjacent policy row those fixtures require.
+    if (!allowTestSignUp && normalizedPath === RAW_TENANT_PROVISIONING_PATH) {
+      response.sendStatus(404);
+      return;
+    }
     if (TEAM_MUTATION_PATHS.has(normalizedPath)) {
       response.sendStatus(404);
       return;

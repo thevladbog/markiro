@@ -153,6 +153,162 @@ describe("OrgProfilePage", () => {
     expect(await screen.findByLabelText("Логотип Markiro по умолчанию")).toBeDefined();
   });
 
+  it("preserves dirty INN and prefix drafts across logo, policy and profile-cache updates", async () => {
+    let profile = PROFILE;
+    const revision = "22222222-2222-4222-8222-222222222222";
+    let profileGetCount = 0;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          const input = JSON.parse(String(init.body)) as { pickupLimitsEnabled?: boolean };
+          profile = {
+            ...profile,
+            ...(input.pickupLimitsEnabled === undefined
+              ? {}
+              : { pickupLimitsEnabled: input.pickupLimitsEnabled }),
+          };
+          return jsonResponse(200, profile);
+        }
+        profileGetCount += 1;
+        return jsonResponse(200, profile);
+      },
+      logo: (init) => {
+        if (init?.method === "POST") {
+          profile = {
+            ...profile,
+            logoRevision: revision,
+            logoUrl: `/org/profile/logo/${revision}`,
+          };
+          return jsonResponse(201, {
+            logoRevision: revision,
+            logoUrl: profile.logoUrl,
+          });
+        }
+        profile = { ...profile, logoRevision: null, logoUrl: null };
+        return jsonResponse(204, undefined);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const inn = within(profileCard).getByLabelText("ИНН") as HTMLInputElement;
+    const prefixes = within(profileCard).getByLabelText("Префиксы GS1") as HTMLInputElement;
+    fireEvent.change(inn, { target: { value: "7707654321" } });
+    fireEvent.change(prefixes, { target: { value: "4600000, 4609999" } });
+
+    const logoInput = screen.getByLabelText("Загрузить логотип");
+    fireEvent.change(logoInput, {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+    await screen.findByRole("img", { name: "Логотип организации" });
+    expect(inn.value).toBe("7707654321");
+    expect(prefixes.value).toBe("4600000, 4609999");
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
+    await screen.findByLabelText("Логотип Markiro по умолчанию");
+    expect(inn.value).toBe("7707654321");
+    expect(prefixes.value).toBe("4600000, 4609999");
+
+    const getsBeforePolicySave = profileGetCount;
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Применять лимиты суммарно во всех киосках" }),
+    );
+    fireEvent.click(
+      within(await cardOf("Политика выдачи")).getByRole("button", { name: "Сохранить" }),
+    );
+    await waitFor(() => expect(profileGetCount).toBeGreaterThan(getsBeforePolicySave));
+    expect(inn.value).toBe("7707654321");
+    expect(prefixes.value).toBe("4600000, 4609999");
+  });
+
+  it("adopts a clean profile refetch", async () => {
+    let profile = PROFILE;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = {
+            ...profile,
+            inn: "7709999999",
+            gs1Prefixes: ["4609999"],
+            pickupLimitsEnabled: false,
+          };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Применять лимиты суммарно во всех киосках" }),
+    );
+    fireEvent.click(
+      within(await cardOf("Политика выдачи")).getByRole("button", { name: "Сохранить" }),
+    );
+
+    expect(await within(profileCard).findByDisplayValue("7709999999")).toBeDefined();
+    expect(within(profileCard).getByDisplayValue("4609999")).toBeDefined();
+  });
+
+  it("adopts a successful profile save before a cross-card cache update", async () => {
+    const savedProfile = {
+      ...PROFILE,
+      inn: "7708888888",
+      gs1Prefixes: ["4608888"],
+    };
+    const refetchedProfile = {
+      ...savedProfile,
+      inn: "7707777777",
+      gs1Prefixes: ["4607777"],
+      logoRevision: "33333333-3333-4333-8333-333333333333",
+      logoUrl: "/org/profile/logo/33333333-3333-4333-8333-333333333333",
+    };
+    let saved = false;
+    let resolveRefetch: ((response: Response) => void) | undefined;
+    const refetch = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          saved = true;
+          return jsonResponse(200, savedProfile);
+        }
+        return saved ? refetch : jsonResponse(200, PROFILE);
+      },
+      logo: () =>
+        jsonResponse(201, {
+          logoRevision: refetchedProfile.logoRevision,
+          logoUrl: refetchedProfile.logoUrl,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const inn = within(profileCard).getByLabelText("ИНН") as HTMLInputElement;
+    const prefixes = within(profileCard).getByLabelText("Префиксы GS1") as HTMLInputElement;
+    fireEvent.change(inn, { target: { value: savedProfile.inn } });
+    fireEvent.change(prefixes, { target: { value: savedProfile.gs1Prefixes.join(", ") } });
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Профиль сохранён");
+
+    fireEvent.change(screen.getByLabelText("Загрузить логотип"), {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+    await screen.findByRole("img", { name: "Логотип организации" });
+    expect(inn.value).toBe(savedProfile.inn);
+    expect(prefixes.value).toBe(savedProfile.gs1Prefixes.join(", "));
+
+    resolveRefetch?.(jsonResponse(200, refetchedProfile));
+    expect(await within(profileCard).findByDisplayValue(refetchedProfile.inn)).toBeDefined();
+    expect(
+      within(profileCard).getByDisplayValue(refetchedProfile.gs1Prefixes.join(", ")),
+    ).toBeDefined();
+  });
+
   it("renders the profile fields and the derived prefix from the mocked GET responses", async () => {
     vi.stubGlobal("fetch", routeFetch({}));
 
@@ -222,7 +378,7 @@ describe("OrgProfilePage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("status")).toBeDefined();
+    expect((await screen.findByText("Загрузка…")).closest('[role="status"]')).not.toBeNull();
     expect(screen.queryByText("Профиль организации")).toBeNull();
   });
 

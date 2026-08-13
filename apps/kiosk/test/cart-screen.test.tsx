@@ -1,6 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { KioskBootstrapDto } from "../src/api/types.js";
+import type {
+  KioskBootstrapDto,
+  KioskBootstrapSnapshotDto,
+  LegacyKioskBootstrapDto,
+} from "../src/api/types.js";
 import { classifyKioskScan, type KioskScan } from "../src/domain-guard/classify.js";
 import i18n from "../src/i18n/index.js";
 import type { ScanListener } from "../src/scanner/source.js";
@@ -56,6 +60,10 @@ function bootstrapWith(
   config: {
     dayLimitPerEmployee?: number;
     showPrices?: boolean;
+    limitsEnabled?: boolean;
+    employeeLimitMode?: "limited" | "unlimited";
+    employeeDayLimit?: number;
+    canWriteoff?: boolean;
     /** Prices are per-product, so an unpriced item needs its own catalogue. */
     products?: KioskBootstrapDto["products"];
   } = {},
@@ -68,6 +76,8 @@ function bootstrapWith(
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: config.limitsEnabled ?? true },
     config: {
       dayLimitPerEmployee: config.dayLimitPerEmployee ?? 5,
       showPrices: config.showPrices ?? true,
@@ -81,13 +91,41 @@ function bootstrapWith(
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
       { id: "p-bread", gtin14: GTIN_BREAD, name: BREAD, unitPrice: "45.00", egaisCode: null },
     ],
-    employees: [],
+    employees: [
+      {
+        id: "e1",
+        fullName: "Смирнов Алексей",
+        role: null,
+        badgeHash: null,
+        limitMode: config.employeeLimitMode ?? "limited",
+        dayLimit: config.employeeDayLimit ?? config.dayLimitPerEmployee ?? 5,
+        canWriteoff: config.canWriteoff ?? true,
+        takenTodayElsewhere: 0,
+      },
+    ],
     operators: [],
   };
 }
 
+function legacyBootstrapWith(dayLimitPerEmployee: number): LegacyKioskBootstrapDto {
+  const current = bootstrapWith({ dayLimitPerEmployee });
+  return {
+    generatedAt: current.generatedAt,
+    subscription: current.subscription,
+    config: current.config,
+    badgeSalt: current.badgeSalt,
+    reasons: current.reasons,
+    products: current.products,
+    employees: current.employees.map(
+      ({ limitMode: _limitMode, dayLimit: _dayLimit, canWriteoff: _canWriteoff, ...employee }) =>
+        employee,
+    ),
+    operators: current.operators,
+  };
+}
+
 interface Options {
-  bootstrap?: KioskBootstrapDto;
+  bootstrap?: KioskBootstrapSnapshotDto;
   alreadyTakenToday?: number;
   onScan?: (cb: ScanListener) => void | (() => void);
 }
@@ -242,6 +280,61 @@ describe("Cart", () => {
     scan(km(GTIN_MILK, "KYC9X7MQ"));
 
     expect(screen.getByText("Лимит 5 шт в день · осталось 3")).toBeDefined();
+  });
+
+  it("uses the employee limit instead of the legacy kiosk limit", () => {
+    renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 50, employeeDayLimit: 1 }),
+      alreadyTakenToday: 1,
+    });
+
+    expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+    expect(screen.getByText("Лимит на сегодня — 1 шт")).toBeDefined();
+    expect(screen.getByText("Лимит 1 шт в день · осталось 0")).toBeDefined();
+  });
+
+  it.each([
+    {
+      what: "tenant limits are disabled",
+      bootstrap: bootstrapWith({
+        dayLimitPerEmployee: 1,
+        employeeDayLimit: 1,
+        limitsEnabled: false,
+      }),
+    },
+    {
+      what: "the employee is unlimited",
+      bootstrap: bootstrapWith({
+        dayLimitPerEmployee: 1,
+        employeeDayLimit: 1,
+        employeeLimitMode: "unlimited",
+      }),
+    },
+  ])("keeps accepting scans when $what", ({ bootstrap }) => {
+    const { scan } = renderCart({ bootstrap, alreadyTakenToday: 1 });
+
+    scan(km(GTIN_MILK, "UNLIMIT1"));
+
+    expect(rows()).toHaveLength(1);
+    expect(screen.getByText(SCAN_PROMPT)).toBeDefined();
+    expect(screen.getByText("Без ограничений")).toBeDefined();
+  });
+
+  it("does not expose or submit writeoff when the employee lacks permission", () => {
+    const { scan, onSubmit } = renderCart({ bootstrap: bootstrapWith({ canWriteoff: false }) });
+    scan(km(GTIN_MILK, "BUYONLY1"));
+
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
+    click(SUBMIT);
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ reason: "buy" }));
+  });
+
+  it("falls back to the legacy limit and no writeoff for an old cached snapshot", () => {
+    renderCart({ bootstrap: legacyBootstrapWith(1), alreadyTakenToday: 1 });
+
+    expect(screen.queryByText(SCAN_PROMPT)).toBeNull();
+    expect(screen.getByText("Лимит на сегодня — 1 шт")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Списание" })).toBeNull();
   });
 
   // The panel keys on "nothing left", and what the reducer refuses is "nothing

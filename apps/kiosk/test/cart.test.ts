@@ -61,6 +61,8 @@ function bootstrapWith(dayLimitPerEmployee: number): KioskBootstrapDto {
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee, showPrices: true },
     badgeSalt: "c2FsdA==",
     reasons: [{ id: "reason-defect", name: "Брак" }],
@@ -68,13 +70,24 @@ function bootstrapWith(dayLimitPerEmployee: number): KioskBootstrapDto {
       { id: "p-milk", gtin14: GTIN_MILK, name: "Молоко 3,2%", unitPrice: "89.90", egaisCode: null },
       { id: "p-bread", gtin14: GTIN_BREAD, name: "Хлеб", unitPrice: "45.00", egaisCode: null },
     ],
-    employees: [],
+    employees: [
+      {
+        id: "e1",
+        fullName: "Смирнов Алексей",
+        role: null,
+        badgeHash: null,
+        limitMode: "limited",
+        dayLimit: dayLimitPerEmployee,
+        canWriteoff: true,
+        takenTodayElsewhere: 0,
+      },
+    ],
     operators: [],
   };
 }
 
 function ctxOf(dayLimitPerEmployee: number, alreadyTakenToday = 0) {
-  return { bootstrap: bootstrapWith(dayLimitPerEmployee), alreadyTakenToday };
+  return { bootstrap: bootstrapWith(dayLimitPerEmployee), employeeId: "e1", alreadyTakenToday };
 }
 
 type Ctx = ReturnType<typeof ctxOf>;
@@ -244,6 +257,27 @@ describe("cartReducer — plain actions", () => {
 
     expect(state).toEqual(initialCartState);
   });
+
+  it("does not enter writeoff when the effective employee policy forbids it", () => {
+    const current = bootstrapWith(5);
+    const ctx = {
+      bootstrap: {
+        ...current,
+        employees: current.employees.map((employee) => ({ ...employee, canWriteoff: false })),
+      },
+      employeeId: "e1",
+      alreadyTakenToday: 0,
+    };
+
+    const state = cartReducer(
+      run(ctx, scan(km(GTIN_MILK, "AAAA1111"))),
+      { type: "reason", reason: "writeoff" },
+      ctx,
+    );
+
+    expect(state.reason).toBe("buy");
+    expect(state.writeoffReasonId).toBeNull();
+  });
 });
 
 describe("initialCartState", () => {
@@ -294,31 +328,34 @@ describe("remainingToday", () => {
 
 describe("canSubmit", () => {
   it("is false while nothing has been scanned", () => {
-    expect(canSubmit(initialCartState)).toBe(false);
+    expect(canSubmit(initialCartState, ctxOf(5))).toBe(false);
   });
 
   it("is true for a non-empty buy cart", () => {
-    expect(canSubmit(run(ctxOf(5), scan(km(GTIN_MILK, "AAAA1111"))))).toBe(true);
+    const ctx = ctxOf(5);
+    expect(canSubmit(run(ctx, scan(km(GTIN_MILK, "AAAA1111"))), ctx)).toBe(true);
   });
 
   it("is false for a write-off with no sub-reason chosen", () => {
-    const state = run(ctxOf(5), scan(km(GTIN_MILK, "AAAA1111")), {
+    const ctx = ctxOf(5);
+    const state = run(ctx, scan(km(GTIN_MILK, "AAAA1111")), {
       type: "reason",
       reason: "writeoff",
     });
 
     expect(state.writeoffReasonId).toBeNull();
-    expect(canSubmit(state)).toBe(false);
+    expect(canSubmit(state, ctx)).toBe(false);
   });
 
   it("is true for a write-off once a sub-reason is chosen", () => {
+    const ctx = ctxOf(5);
     const state = run(
-      ctxOf(5),
+      ctx,
       scan(km(GTIN_MILK, "AAAA1111")),
       { type: "reason", reason: "writeoff" },
       { type: "writeoffReason", id: "reason-defect" },
     );
 
-    expect(canSubmit(state)).toBe(true);
+    expect(canSubmit(state, ctx)).toBe(true);
   });
 });

@@ -101,6 +101,18 @@ function toProfileInput(values: ProfileFormValues): PutOrgProfileInput {
   };
 }
 
+function toProfileFormValues(profile: {
+  gln: string | null;
+  inn: string | null;
+  gs1Prefixes: string[];
+}): ProfileFormValues {
+  return {
+    gln: profile.gln ?? "",
+    inn: profile.inn ?? "",
+    gs1Prefixes: profile.gs1Prefixes.join(", "),
+  };
+}
+
 /**
  * The tenant's own organisation profile (GLN, tax id, GS1 prefixes) plus its
  * box SSCC counter (06c Task 5) -- what a plant migrating off another system
@@ -116,25 +128,22 @@ export function OrgProfilePage() {
     register: registerProfile,
     handleSubmit: handleProfileSubmit,
     reset: resetProfile,
-    formState: { errors: profileErrors },
+    formState: { errors: profileErrors, isDirty: isProfileDirty },
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileFormSchema),
     defaultValues: EMPTY_PROFILE_VALUES,
   });
 
   useEffect(() => {
-    if (profileQuery.data) {
-      resetProfile({
-        gln: profileQuery.data.gln ?? "",
-        inn: profileQuery.data.inn ?? "",
-        gs1Prefixes: profileQuery.data.gs1Prefixes.join(", "),
-      });
+    if (profileQuery.data && !isProfileDirty) {
+      resetProfile(toProfileFormValues(profileQuery.data));
     }
-  }, [profileQuery.data, resetProfile]);
+  }, [isProfileDirty, profileQuery.data, resetProfile]);
 
   const submitProfile = handleProfileSubmit(async (values) => {
     try {
-      await updateProfile.mutateAsync(toProfileInput(values));
+      const savedProfile = await updateProfile.mutateAsync(toProfileInput(values));
+      resetProfile(toProfileFormValues(savedProfile));
       toast("ok", t("pages.settings.profile.toasts.updateSuccess"));
     } catch (error) {
       toast(

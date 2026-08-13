@@ -342,78 +342,10 @@ export class PickupOrdersService {
     // 4. Per-item KM validation, allowlist resolution and in-request dedup.
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
 
-    // 5. Day-limit: apply the effective tenant + employee policy and flag overflow.
-    // `when` is the server's decision, not the device's claim (see
-    // `resolveScanTime`, settled at step 1b), and the SAME value then dates the
-    // order row below -- so the limit is always counted against the day the
-    // order is filed under.
-    const { accepted, overflowConflicts } = await this.applyDayLimit(
-      tenantId,
-      employeeId,
-      when,
-      candidates,
-      employee.pickupPolicy,
-    );
-    conflicts.push(...overflowConflicts);
-
-    // 5b. A non-empty scan that produced only conflicts (nothing accepted) must
-    // NOT persist an empty pending order — it would clutter the свод with a
-    // 0-item row that can never be resolved. But first re-check idempotency: a
-    // concurrent submission carrying the same deviceSeq may have created the
-    // real order since step 1 (e.g. this request over-limited precisely because
-    // its twin's items just landed — so that winner is already committed).
-    // Return the winner if present; otherwise it's a genuine all-conflict scan
-    // and we return the conflicts with an empty orderNo. (A genuinely item-less
-    // sync, `items: []` e.g. a badge heartbeat, is excluded and still creates
-    // its order.)
-    if (accepted.length === 0 && dto.items.length > 0) {
-      const [twin] = await this.db
-        .select({
-          orderNo: schema.pickupOrders.orderNo,
-          itemCount: schema.pickupOrders.itemCount,
-        })
-        .from(schema.pickupOrders)
-        .where(
-          and(
-            eq(schema.pickupOrders.tenantId, tenantId),
-            eq(schema.pickupOrders.kioskId, kioskId),
-            eq(schema.pickupOrders.deviceSeq, dto.deviceSeq),
-          ),
-        );
-      if (twin) {
-        await this.consumeKioskAdmission(this.db, tenantId, kioskId, dto.deviceSeq);
-        return {
-          orderNo: twin.orderNo,
-          status: "pending",
-          itemCount: twin.itemCount,
-          conflicts: [],
-        };
-      }
-      // No order row is created here, so `syncConflicts` has nowhere to live.
-      // `pickup_scan_rejections` is that home: the cabinet would otherwise
-      // never learn that a worker's ENTIRE scan session was refused -- the
-      // same blind spot `syncConflicts` exists to close, in its worst case.
-      await this.db.transaction(async (tx) => {
-        await this.recordScanRejection(tx, {
-          tenantId,
-          kioskId,
-          employeeId,
-          badgeCode: null,
-          orderId: null,
-          deviceSeq: dto.deviceSeq,
-          codes: conflicts,
-          scannedAt: when,
-        });
-        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
-      });
-      // Kept alongside the durable row: cheap, and ops alerting may key on it.
-      this.logger.warn(
-        `kiosk ${kioskId}: all ${dto.items.length} scanned code(s) refused for employee ${employeeId} — ${conflicts.map((c) => c.reason).join(", ")}`,
-      );
-      return { orderNo: "", status: "pending", itemCount: 0, conflicts };
-    }
-
-    // 6. Transactional insert; a kmKey race against another open order converts that item to a duplicate conflict.
+    // 5-6. The live employee policy, UTC-day count, allowance decision and
+    // insert are one serialized transaction. A kmKey race against another
+    // open order converts that item to a duplicate conflict and retries the
+    // whole decision against the new committed state.
     const order = await this.insertOrderWithRetry(
       tenantId,
       kioskId,
@@ -422,9 +354,17 @@ export class PickupOrdersService {
       writeoffReasonId,
       dto.deviceSeq,
       when,
-      accepted,
+      candidates,
       conflicts,
+      dto.items,
     );
+
+    if (order.writeoffForbidden) {
+      throw new UnprocessableEntityException({
+        code: "writeoff_forbidden",
+        message: "Employee is not allowed to create writeoffs",
+      });
+    }
 
     // 7. Outcome. (A device-seq race outcome carries its own `conflicts: []`, mirroring the
     // sequential idempotent path — this request's own conflicts belong to a duplicate submission.)
@@ -432,7 +372,7 @@ export class PickupOrdersService {
       orderNo: order.orderNo,
       status: "pending",
       itemCount: order.itemCount,
-      conflicts: order.conflicts ?? conflicts,
+      conflicts: order.conflicts,
     };
   }
 
@@ -1497,6 +1437,53 @@ export class PickupOrdersService {
   }
 
   /**
+   * Re-reads and pins the policy rows used by the authoritative allowance
+   * decision. The badge lookup happens before product resolution so invalid
+   * badges can retain their existing rejection semantics; this second read is
+   * deliberately inside the serialized order transaction, after its
+   * employee/day advisory lock, so a request that waited behind another kiosk
+   * never decides from the stale policy snapshot it brought into the wait.
+   */
+  private async resolveLivePickupPolicy(
+    db: Pick<Db, "select">,
+    tenantId: string,
+    employeeId: string,
+  ): Promise<EffectivePickupPolicy> {
+    const [employeePolicy] = await db
+      .select({
+        limitMode: schema.employeePickupPolicies.limitMode,
+        dayLimit: schema.employeePickupPolicies.dayLimit,
+        canWriteoff: schema.employeePickupPolicies.canWriteoff,
+      })
+      .from(schema.employeePickupPolicies)
+      .where(
+        and(
+          eq(schema.employeePickupPolicies.tenantId, tenantId),
+          eq(schema.employeePickupPolicies.employeeId, employeeId),
+        ),
+      )
+      .for("share");
+    if (!employeePolicy) {
+      throw new InternalServerErrorException("Employee pickup policy is not configured");
+    }
+
+    const [tenantPolicy] = await db
+      .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+      .from(schema.pickupTenantPolicies)
+      .where(eq(schema.pickupTenantPolicies.tenantId, tenantId))
+      .for("share");
+    if (!tenantPolicy) {
+      throw new InternalServerErrorException("Tenant pickup policy is not configured");
+    }
+
+    return {
+      limited: tenantPolicy.limitsEnabled && employeePolicy.limitMode === "limited",
+      dayLimit: employeePolicy.dayLimit,
+      canWriteoff: employeePolicy.canWriteoff,
+    };
+  }
+
+  /**
    * Which of the two identifiers the body names the badge by, as one value the
    * callers below can exhaust.
    *
@@ -1797,6 +1784,7 @@ export class PickupOrdersService {
 
   /** Applies the employee's effective tenant-aware limit for today (UTC). */
   private async applyDayLimit(
+    db: Pick<Db, "select">,
     tenantId: string,
     employeeId: string,
     when: Date,
@@ -1806,7 +1794,7 @@ export class PickupOrdersService {
     if (!policy.limited) return { accepted: candidates, overflowConflicts: [] };
 
     const dateStr = when.toISOString().slice(0, 10);
-    const existingRows = await this.db
+    const existingRows = await db
       .select({ id: schema.pickupOrderItems.id })
       .from(schema.pickupOrderItems)
       .innerJoin(
@@ -1841,15 +1829,15 @@ export class PickupOrdersService {
   }
 
   /**
-   * Inserts the order + accepted items in a transaction. If insertion loses a race against
-   * another open order for the same kmKey (23505 on pickup_order_items_tenant_kmkey_open_uq),
-   * converts every now-conflicting item to a `duplicate` conflict and retries without them.
+   * Serializes one employee's UTC-day allowance across every kiosk, then
+   * resolves the live policy, counts accepted items, decides the split and
+   * inserts the order inside that same transaction. The advisory key is
+   * narrower than a tenant or kiosk lock: only this tenant + employee + UTC
+   * date contend, while every other employee and date continues independently.
    *
-   * A separate race is possible on (tenantId, kioskId, deviceSeq) itself: two truly-concurrent
-   * POSTs with the same idempotency key both pass the pre-SELECT in `createFromKiosk` (TOCTOU),
-   * so the loser's INSERT hits `pickup_orders_kiosk_device_seq_uq` (23505). That is NOT a
-   * conflict to surface — it means another request already created the order this one wants;
-   * re-fetch and return the winner's outcome instead of erroring or creating a duplicate order.
+   * If insertion loses a race against another open kmKey, the failed
+   * transaction is rolled back, the newly-conflicting item becomes a
+   * `duplicate`, and the complete policy/count/insert decision is retried.
    */
   private async insertOrderWithRetry(
     tenantId: string,
@@ -1861,11 +1849,24 @@ export class PickupOrdersService {
     when: Date,
     items: ResolvedItem[],
     conflicts: OrderConflict[],
-  ): Promise<{ orderNo: string; itemCount: number; conflicts?: OrderConflict[] }> {
-    let remaining = items;
+    rawItems: CreateOrderDto["items"],
+  ): Promise<{
+    orderNo: string;
+    itemCount: number;
+    conflicts: OrderConflict[];
+    writeoffForbidden?: true;
+  }> {
+    let remaining = [...items];
+    const accumulatedConflicts = [...conflicts];
     for (;;) {
+      let attemptedAccepted: ResolvedItem[] = [];
       try {
         return await this.db.transaction(async (tx) => {
+          const utcDay = when.toISOString().slice(0, 10);
+          await tx.execute(
+            sql`select pg_advisory_xact_lock(hashtextextended(${`pickup-limit:${tenantId}:${employeeId}:${utcDay}`}, 0))`,
+          );
+
           // Lock the kiosk row before inserting. `PairingService.attemptRedeem`
           // takes this SAME row lock before it computes nextDeviceSeq during a
           // re-pair, so the two paths can never interleave: a device that is
@@ -1880,6 +1881,86 @@ export class PickupOrdersService {
             .from(schema.kiosks)
             .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)))
             .for("update");
+
+          // The optimistic lookup at createFromKiosk's entry keeps ordinary
+          // replays cheap. This second lookup is the race-free one: it runs
+          // after both locks, so a concurrent winner is committed and visible
+          // before this request makes any policy or allowance decision.
+          const [existing] = await tx
+            .select({
+              orderNo: schema.pickupOrders.orderNo,
+              itemCount: schema.pickupOrders.itemCount,
+            })
+            .from(schema.pickupOrders)
+            .where(
+              and(
+                eq(schema.pickupOrders.tenantId, tenantId),
+                eq(schema.pickupOrders.kioskId, kioskId),
+                eq(schema.pickupOrders.deviceSeq, deviceSeq),
+              ),
+            );
+          if (existing) {
+            await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
+            return { ...existing, conflicts: [] };
+          }
+
+          const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);
+          if (reason === "writeoff" && !policy.canWriteoff) {
+            if (rawItems.length > 0) {
+              await this.recordScanRejection(tx, {
+                tenantId,
+                kioskId,
+                employeeId,
+                badgeCode: null,
+                orderId: null,
+                deviceSeq,
+                codes: rawItems.map((item) => ({
+                  rawKm: item.rawKm,
+                  reason: "writeoff_forbidden",
+                })),
+                scannedAt: when,
+              });
+            }
+            await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
+            return {
+              orderNo: "",
+              itemCount: 0,
+              conflicts: [],
+              writeoffForbidden: true as const,
+            };
+          }
+
+          const { accepted, overflowConflicts } = await this.applyDayLimit(
+            tx,
+            tenantId,
+            employeeId,
+            when,
+            remaining,
+            policy,
+          );
+          attemptedAccepted = accepted;
+          const attemptConflicts = [...accumulatedConflicts, ...overflowConflicts];
+
+          // A non-empty scan that produced only conflicts must not create an
+          // empty pending order. The rejection and admission consumption are
+          // committed under the same employee/day lock as the decision.
+          if (accepted.length === 0 && rawItems.length > 0) {
+            await this.recordScanRejection(tx, {
+              tenantId,
+              kioskId,
+              employeeId,
+              badgeCode: null,
+              orderId: null,
+              deviceSeq,
+              codes: attemptConflicts,
+              scannedAt: when,
+            });
+            await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
+            this.logger.warn(
+              `kiosk ${kioskId}: all ${rawItems.length} scanned code(s) refused for employee ${employeeId} — ${attemptConflicts.map((conflict) => conflict.reason).join(", ")}`,
+            );
+            return { orderNo: "", itemCount: 0, conflicts: attemptConflicts };
+          }
 
           // nextOrderNo's `tx` param is deliberately loosely typed (Task 7) so it
           // doesn't have to import drizzle's transaction type; adapt the real
@@ -1900,17 +1981,17 @@ export class PickupOrdersService {
               reason,
               writeoffReasonId,
               status: "pending",
-              itemCount: remaining.length,
-              totalPrice: computeTotalPrice(remaining),
+              itemCount: accepted.length,
+              totalPrice: computeTotalPrice(accepted),
               deviceSeq,
               createdAt: when,
-              syncConflicts: conflicts.length > 0 ? conflicts : null,
+              syncConflicts: attemptConflicts.length > 0 ? attemptConflicts : null,
             })
             .returning();
           if (!order) throw new Error("Failed to insert pickup order");
-          if (remaining.length > 0) {
+          if (accepted.length > 0) {
             await tx.insert(schema.pickupOrderItems).values(
-              remaining.map((item) => ({
+              accepted.map((item) => ({
                 tenantId,
                 orderId: order.id,
                 productId: item.productId,
@@ -1925,10 +2006,8 @@ export class PickupOrdersService {
           }
           // Same transaction as the order on purpose: the kmKey-race retry
           // below rolls this back with it, so a rejection row can never
-          // outlive the order attempt that produced it. `conflicts` is
-          // mutated by that retry before it loops, so on the attempt that
-          // finally commits it holds the complete set.
-          if (conflicts.length > 0) {
+          // outlive the order attempt that produced it.
+          if (attemptConflicts.length > 0) {
             await this.recordScanRejection(tx, {
               tenantId,
               kioskId,
@@ -1936,12 +2015,16 @@ export class PickupOrdersService {
               badgeCode: null,
               orderId: order.id,
               deviceSeq,
-              codes: conflicts,
+              codes: attemptConflicts,
               scannedAt: when,
             });
           }
           await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
-          return { orderNo: order.orderNo, itemCount: order.itemCount };
+          return {
+            orderNo: order.orderNo,
+            itemCount: order.itemCount,
+            conflicts: attemptConflicts,
+          };
         });
       } catch (error) {
         if (this.isDeviceSeqRace(error)) {
@@ -1960,9 +2043,9 @@ export class PickupOrdersService {
           return { orderNo: winner.orderNo, itemCount: winner.itemCount, conflicts: [] };
         }
 
-        if (!this.isKmKeyRace(error) || remaining.length === 0) throw error;
+        if (!this.isKmKeyRace(error) || attemptedAccepted.length === 0) throw error;
 
-        const keys = remaining.map((i) => i.kmKey);
+        const keys = attemptedAccepted.map((item) => item.kmKey);
         const openRows = await this.db
           .select({ kmKey: schema.pickupOrderItems.kmKey })
           .from(schema.pickupOrderItems)
@@ -1979,21 +2062,12 @@ export class PickupOrdersService {
         const stillOk: ResolvedItem[] = [];
         for (const item of remaining) {
           if (conflictingKeys.has(item.kmKey)) {
-            conflicts.push({ rawKm: item.rawKm, reason: "duplicate" });
+            accumulatedConflicts.push({ rawKm: item.rawKm, reason: "duplicate" });
           } else {
             stillOk.push(item);
           }
         }
         remaining = stillOk;
-        // NOTE: when `remaining` empties here we deliberately fall through and
-        // let the next iteration attempt an (item-less) insert. That insert is
-        // what reliably distinguishes a genuine all-conflict scan from a
-        // concurrent same-deviceSeq duplicate: the latter hits
-        // `pickup_orders_kiosk_device_seq_uq` and returns the winner via
-        // `isDeviceSeqRace` above. A post-hoc SELECT here cannot make that
-        // distinction race-free (the twin's commit may not yet be visible), so
-        // the empty-order guard stays at classification time (createFromKiosk's
-        // step 5b), which covers the common case without breaking idempotency.
       }
     }
   }

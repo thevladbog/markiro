@@ -1,4 +1,4 @@
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import { kioskIdOf } from "../store/config.js";
 import type { JournalEntry } from "../store/journal.js";
 import type { QueuedOrder } from "../store/queue.js";
@@ -186,7 +186,7 @@ export function countTakenToday({
  * product instead of printing «осталось NaN».
  */
 export function takenTodayElsewhere(
-  bootstrap: KioskBootstrapDto | null,
+  bootstrap: KioskBootstrapSnapshotDto | null,
   employeeId: string,
 ): number {
   const employee = bootstrap?.employees?.find((one) => one.id === employeeId);
@@ -231,14 +231,14 @@ function isCompleteCurrentPickupPolicy(
  * the positive legacy kiosk limit (or deny-all zero), and no writeoff.
  */
 export function effectivePickupPolicy(
-  bootstrap: KioskBootstrapDto,
+  bootstrap: KioskBootstrapSnapshotDto,
   employeeId: string,
 ): EffectivePickupPolicy | null {
   const employee = bootstrap.employees?.find((one) => one.id === employeeId);
   if (!employee) return null;
 
   const rawEmployee = employee as Partial<(typeof bootstrap.employees)[number]>;
-  const rawBootstrap = bootstrap as Partial<KioskBootstrapDto>;
+  const rawBootstrap = bootstrap as Partial<KioskBootstrapSnapshotDto>;
   const rawTenantPolicy = rawBootstrap.pickupPolicy as
     { limitsEnabled?: unknown } | null | undefined;
   const currentPolicy = {

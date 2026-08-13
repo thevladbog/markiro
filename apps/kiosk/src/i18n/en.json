@@ -53,6 +53,7 @@
     "price": "{{value}} ₽",
     "total": "{{n}} pcs",
     "limitFooter": "Limit {{limit}} pcs a day · {{remaining}} left",
+    "unlimitedFooter": "Unlimited",
     "submit": "Done — hand over to the administrator",
     "duplicate": "This code is already on the list. Every bottle has its own code: take another one.",
     "incomplete": "The code was read only partly — the scanner dropped the separator. Scan this bottle again.",

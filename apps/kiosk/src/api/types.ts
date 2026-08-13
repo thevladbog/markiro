@@ -69,6 +69,42 @@ export interface SubscriptionAccessSnapshotDto {
   endsAt: string | null;
 }
 
+export interface KioskBrandingDto {
+  organizationName: string;
+  logoUrl: string | null;
+  logoRevision: string | null;
+}
+
+export interface KioskBootstrapEmployeeDto {
+  id: string;
+  fullName: string;
+  role: string | null;
+  badgeHash: string | null;
+  limitMode: "limited" | "unlimited";
+  dayLimit: number;
+  canWriteoff: boolean;
+  /**
+   * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
+   * total, and reading it as one would break the very thing it fixes.
+   *
+   * This device counts its OWN kiosk's contribution from its journal and its
+   * unsynced queue (`session/day-count.ts`), and the limit is the SUM. The
+   * two halves are split by SOURCE, so an overlap is impossible by
+   * construction — no watermark, no clock comparison. Were this a total, the
+   * items this device filed would be counted twice and a worker would be
+   * refused product they are entitled to, at an unattended machine with
+   * nobody to overrule it.
+   *
+   * DECLARED REQUIRED, BUT READ AS UNTRUSTED. This interface describes what
+   * today's server sends; the app casts `res.json()` to it and validates
+   * nothing, and IndexedDB holds whatever snapshot any past server sent. So
+   * it is read through `takenTodayElsewhere()`, which answers zero for a
+   * payload that does not carry it — the same reason `day-count.ts` guards
+   * the journal it reads back.
+   */
+  takenTodayElsewhere: number;
+}
+
 /**
  * GET /kiosk/bootstrap — everything a kiosk needs to work offline.
  *
@@ -91,7 +127,8 @@ export interface SubscriptionAccessSnapshotDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshotDto;
-  pickupPolicy?: { limitsEnabled: boolean };
+  branding: KioskBrandingDto;
+  pickupPolicy: { limitsEnabled: boolean };
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
@@ -102,35 +139,7 @@ export interface KioskBootstrapDto {
     unitPrice: string | null;
     egaisCode: string | null;
   }[];
-  employees: {
-    id: string;
-    fullName: string;
-    role: string | null;
-    badgeHash: string | null;
-    limitMode?: "limited" | "unlimited";
-    dayLimit?: number;
-    canWriteoff?: boolean;
-    /**
-     * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
-     * total, and reading it as one would break the very thing it fixes.
-     *
-     * This device counts its OWN kiosk's contribution from its journal and its
-     * unsynced queue (`session/day-count.ts`), and the limit is the SUM. The
-     * two halves are split by SOURCE, so an overlap is impossible by
-     * construction — no watermark, no clock comparison. Were this a total, the
-     * items this device filed would be counted twice and a worker would be
-     * refused product they are entitled to, at an unattended machine with
-     * nobody to overrule it.
-     *
-     * DECLARED REQUIRED, BUT READ AS UNTRUSTED. This interface describes what
-     * today's server sends; the app casts `res.json()` to it and validates
-     * nothing, and IndexedDB holds whatever snapshot any past server sent. So
-     * it is read through `takenTodayElsewhere()`, which answers zero for a
-     * payload that does not carry it — the same reason `day-count.ts` guards
-     * the journal it reads back.
-     */
-    takenTodayElsewhere: number;
-  }[];
+  employees: KioskBootstrapEmployeeDto[];
   operators: {
     employeeId: string;
     name: string;
@@ -141,6 +150,34 @@ export interface KioskBootstrapDto {
     active: boolean;
   }[];
 }
+
+/**
+ * Snapshots written by an older kiosk bundle can remain in IndexedDB across an
+ * upgrade. Only fields introduced by the current branding/policy contract are
+ * optional here; the current network DTO above remains strict and complete.
+ * Privilege-bearing reads must go through the runtime guards in day-count.ts.
+ */
+export type LegacyKioskBootstrapDto = Omit<
+  KioskBootstrapDto,
+  "branding" | "pickupPolicy" | "employees"
+> & {
+  branding?: KioskBrandingDto;
+  pickupPolicy?: { limitsEnabled: boolean };
+  employees: Array<
+    Omit<
+      KioskBootstrapEmployeeDto,
+      "limitMode" | "dayLimit" | "canWriteoff" | "takenTodayElsewhere"
+    > &
+      Partial<
+        Pick<
+          KioskBootstrapEmployeeDto,
+          "limitMode" | "dayLimit" | "canWriteoff" | "takenTodayElsewhere"
+        >
+      >
+  >;
+};
+
+export type KioskBootstrapSnapshotDto = KioskBootstrapDto | LegacyKioskBootstrapDto;
 
 /**
  * POST /kiosk/pair response — the contract Plan B-2's pairing screen calls.

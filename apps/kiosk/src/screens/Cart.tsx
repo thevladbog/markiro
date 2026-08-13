@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@markiro/ui";
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
 import {
   canSubmit,
+  cartPickupPolicy,
   cartReducer,
   initialCartState,
   remainingToday,
@@ -38,7 +39,7 @@ export function orientationOf(width: number, height: number): KioskOrientation {
 export interface CartProps {
   /** Who the badge admitted. Shown in the header so the wrong person notices. */
   employee: { id: string; fullName: string };
-  bootstrap: KioskBootstrapDto;
+  bootstrap: KioskBootstrapSnapshotDto;
   /**
    * What this employee has already taken today, as far as the device can tell:
    * the sum of the two disjoint halves `session/day-count.ts` owns — this
@@ -155,15 +156,29 @@ export function Cart({
   // every scan.
   const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
 
+  const cartContext = useMemo(
+    () => ({ bootstrap, employeeId: employee.id, alreadyTakenToday }),
+    [alreadyTakenToday, bootstrap, employee.id],
+  );
+
   // The reducer is rebuilt when its context changes so a dispatch always
   // decides against the current bootstrap; React reads the reducer from the
   // render in which the action is processed, so no ref is needed here.
   const reduce = useCallback(
-    (state: CartState, action: CartAction) =>
-      cartReducer(state, action, { bootstrap, alreadyTakenToday }),
-    [bootstrap, alreadyTakenToday],
+    (state: CartState, action: CartAction) => cartReducer(state, action, cartContext),
+    [cartContext],
   );
   const [state, dispatch] = useReducer(reduce, initialCartState);
+  const pickupPolicy = cartPickupPolicy(cartContext);
+
+  // A refresh may revoke writeoff while this cart is already open. Normalize
+  // the stale choice immediately; hiding the control alone would leave a
+  // forbidden reason in the state handed to the shell.
+  useEffect(() => {
+    if (!pickupPolicy.canWriteoff && state.reason === "writeoff") {
+      dispatch({ type: "reason", reason: "buy" });
+    }
+  }, [pickupPolicy.canWriteoff, state.reason]);
 
   const [orientation, setOrientation] = useState<KioskOrientation>(() =>
     orientationOf(window.innerWidth, window.innerHeight),
@@ -219,13 +234,13 @@ export function Cart({
   }, [notice]);
 
   const portrait = orientation === "portrait";
-  const limit = bootstrap.config.dayLimitPerEmployee;
+  const limit = pickupPolicy.dayLimit;
   const showPrices = bootstrap.config.showPrices;
   const count = state.items.length;
-  const remaining = remainingToday(state, { bootstrap, alreadyTakenToday });
+  const remaining = remainingToday(state, cartContext);
   const total = totalKopecks(state.items);
   const bannerKey = notice ? BANNER[notice.kind] : undefined;
-  const submittable = canSubmit(state);
+  const submittable = canSubmit(state, cartContext);
 
   const ghostButton = {
     borderRadius: 10,
@@ -596,7 +611,10 @@ export function Cart({
                 {t("cart.reason")}
               </span>
               <div style={{ display: "flex", gap: 8 }}>
-                {(["buy", "writeoff"] as const).map((reason) => {
+                {(pickupPolicy.canWriteoff
+                  ? (["buy", "writeoff"] as const)
+                  : (["buy"] as const)
+                ).map((reason) => {
                   const on = state.reason === reason;
                   return (
                     <button
@@ -622,7 +640,7 @@ export function Cart({
               </div>
               {/* The sub-reasons are the tenant's own, straight from the
                   bootstrap — never a list hard-coded on the device. */}
-              {state.reason === "writeoff" ? (
+              {pickupPolicy.canWriteoff && state.reason === "writeoff" ? (
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   {bootstrap.reasons.map((sub) => {
                     const on = state.writeoffReasonId === sub.id;
@@ -674,14 +692,18 @@ export function Cart({
             </div>
 
             <span style={{ font: "400 15px/20px var(--font-ui)", color: "var(--fg-3)" }}>
-              {t("cart.limitFooter", { limit, remaining })}
+              {pickupPolicy.limited
+                ? t("cart.limitFooter", { limit, remaining })
+                : t("cart.unlimitedFooter")}
             </span>
 
             <button
               className="kiosk-control"
               type="button"
               disabled={!submittable}
-              onClick={() => onSubmit(state)}
+              onClick={() => {
+                if (canSubmit(state, cartContext)) onSubmit(state);
+              }}
               style={{
                 height: 84,
                 borderRadius: 12,
