@@ -1,4 +1,5 @@
 import type { CreateOrderDto } from "../api/types.js";
+import type { BoxConflict } from "../api/types.js";
 import { STORE_QUARANTINE, STORE_QUEUE, updateEach, withStore } from "./db.js";
 
 export interface QueuedOrder {
@@ -35,6 +36,8 @@ export interface QueuedOrder {
    */
   admissionState?: "pending_attestation";
   admissionNonce?: string;
+  /** Validated loose + boxed bottle total at enqueue time. */
+  estimatedBottleCount?: number;
 }
 
 /** Queues one scanned order. `deviceSeq` is the store's `keyPath`, so this is
@@ -43,12 +46,22 @@ export async function enqueueOrder(
   body: CreateOrderDto,
   employeeId: string,
   admissionState?: "pending_attestation",
+  estimatedBottleCount?: number,
 ): Promise<void> {
+  if (
+    estimatedBottleCount !== undefined &&
+    (!Number.isInteger(estimatedBottleCount) ||
+      estimatedBottleCount < 0 ||
+      estimatedBottleCount > 1_500)
+  ) {
+    throw new Error("estimatedBottleCount must be a non-negative integer");
+  }
   const record: QueuedOrder = {
     deviceSeq: body.deviceSeq,
     employeeId,
     body,
     ...(admissionState ? { admissionState } : {}),
+    ...(estimatedBottleCount !== undefined ? { estimatedBottleCount } : {}),
   };
   await withStore(STORE_QUEUE, "readwrite", (s) => s.put(record));
 }
@@ -114,6 +127,8 @@ export interface QuarantinedOrder extends QueuedOrder {
   status: number;
   /** The server's own message, verbatim, so the reason survives the refusal. */
   message: string;
+  /** Allowlisted box verdicts only; raw member KMs are never copied from error details. */
+  boxConflicts?: BoxConflict[];
 }
 
 /** Sets one order aside. Idempotent: `deviceSeq` is the store's `keyPath`, so

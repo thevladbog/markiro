@@ -1,5 +1,11 @@
-import { isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
-import type { CreateOrderAdmissionDto, CreateOrderDto } from "../api/types.js";
+import { isDeviceRevoked, isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
+import { isValidSscc } from "@markiro/domain";
+import type {
+  BoxConflict,
+  BoxConflictReason,
+  CreateOrderAdmissionDto,
+  CreateOrderDto,
+} from "../api/types.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
@@ -7,6 +13,13 @@ import {
 } from "../store/cache.js";
 import { readConfig } from "../store/config.js";
 import { appendJournal } from "../store/journal.js";
+import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  discardBoxRegistryStage,
+  readBoxRegistryMeta,
+  stageBoxRegistryPage,
+} from "../store/box-registry.js";
 import {
   attestQueuedOrder,
   dequeueOrder,
@@ -407,7 +420,7 @@ export function flushQueue(client: KioskClient, now: () => Date): Promise<void> 
  * change that verdict, while later queue records may still be eligible because
  * they carry an earlier validated occurrence and a different device sequence.
  */
-const TERMINAL_STATUSES: ReadonlySet<number> = new Set([400, 409, 422]);
+const TERMINAL_STATUSES: ReadonlySet<number> = new Set([400, 409, 413, 422]);
 
 export function isTerminalRejection(err: unknown): boolean {
   return (
@@ -464,8 +477,15 @@ async function quarantine(
   kioskId: string | null,
 ): Promise<boolean> {
   const at = now().toISOString();
+  const boxConflicts = safeBoxConflicts(err.details);
   try {
-    await quarantineOrder({ ...order, at, status: err.status, message: err.message });
+    await quarantineOrder({
+      ...order,
+      at,
+      status: err.status,
+      message: err.message,
+      ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
+    });
   } catch (storeErr) {
     console.error("kiosk: a refused order could not be set aside", storeErr);
     return false;
@@ -502,6 +522,48 @@ async function quarantine(
     return false;
   }
   return true;
+}
+
+const BOX_CONFLICT_REASONS: ReadonlySet<BoxConflictReason> = new Set([
+  "unknown_box",
+  "box_not_closed",
+  "box_disassembled",
+  "box_contents_changed",
+  "mixed_product_box",
+  "duplicate",
+  "over_limit",
+]);
+
+/** Copies only the public box verdict fields out of an untrusted error body. */
+function safeBoxConflicts(details: unknown): BoxConflict[] {
+  if (!details || typeof details !== "object") return [];
+  const raw = (details as { boxConflicts?: unknown }).boxConflicts;
+  if (!Array.isArray(raw) || raw.length > 100) return [];
+  const conflicts: BoxConflict[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { sscc?: unknown; bottleCount?: unknown; reason?: unknown };
+    if (
+      typeof candidate.sscc !== "string" ||
+      !isValidSscc(candidate.sscc) ||
+      !(
+        candidate.bottleCount === null ||
+        (Number.isInteger(candidate.bottleCount) &&
+          (candidate.bottleCount as number) > 0 &&
+          (candidate.bottleCount as number) <= 500)
+      ) ||
+      typeof candidate.reason !== "string" ||
+      !BOX_CONFLICT_REASONS.has(candidate.reason as BoxConflictReason)
+    ) {
+      return [];
+    }
+    conflicts.push({
+      sscc: candidate.sscc,
+      bottleCount: candidate.bottleCount as number | null,
+      reason: candidate.reason as BoxConflictReason,
+    });
+  }
+  return conflicts;
 }
 
 /**
@@ -693,8 +755,108 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
  * dependency but nothing in `src/` validates responses yet; full response
  * validation is a separate concern and does not belong in this guard.
  */
-export async function refreshSnapshot(client: KioskClient, now: () => Date): Promise<void> {
+const BOX_REGISTRY_RESTARTS = 3;
+const BOX_REGISTRY_PAGE_LIMIT = 250;
+const BOX_REGISTRY_MAX_PAGES = 10_000;
+
+async function refreshBoxRegistry(
+  client: KioskClient,
+  fetchedAt: Date,
+  wait: (milliseconds: number) => Promise<void>,
+  maxPages: number,
+): Promise<void> {
+  let since = (await readBoxRegistryMeta())?.version;
+  for (let attempt = 0; attempt < BOX_REGISTRY_RESTARTS; attempt += 1) {
+    try {
+      let until: string | undefined;
+      let cursor: string | undefined;
+      const seenCursors = new Set<string>();
+      let pages = 0;
+      do {
+        pages += 1;
+        if (pages > maxPages) throw new Error("box registry page limit exceeded");
+        const page = await client.boxRegistryPage!({
+          ...(since !== undefined ? { since } : {}),
+          ...(until !== undefined ? { until } : {}),
+          ...(cursor !== undefined ? { cursor } : {}),
+          limit: BOX_REGISTRY_PAGE_LIMIT,
+        });
+        if (
+          !page ||
+          typeof page !== "object" ||
+          typeof page.until !== "string" ||
+          !/^(0|[1-9][0-9]{0,18})$/.test(page.until) ||
+          BigInt(page.until) > 9_223_372_036_854_775_807n ||
+          !Array.isArray(page.items) ||
+          !(
+            page.nextCursor === undefined ||
+            (typeof page.nextCursor === "string" &&
+              page.nextCursor.length > 0 &&
+              page.nextCursor.length <= 1_024)
+          )
+        ) {
+          throw new Error("invalid box registry page");
+        }
+        if (until === undefined) {
+          until = page.until;
+          await beginBoxRegistryStage(since ?? null, until);
+        } else if (page.until !== until) {
+          throw new Error("box registry page changed its until revision");
+        }
+        cursor = page.nextCursor;
+        if (cursor !== undefined) {
+          if (seenCursors.has(cursor)) throw new Error("box registry cursor cycle");
+          seenCursors.add(cursor);
+        }
+        if (cursor !== undefined) {
+          await stageBoxRegistryPage(since ?? null, until, page.items);
+        } else {
+          await activateBoxRegistryPage(since ?? null, until, page.items, fetchedAt);
+        }
+      } while (cursor !== undefined);
+      return;
+    } catch (error) {
+      try {
+        await discardBoxRegistryStage();
+      } catch (storeError) {
+        // Revocation is the one verdict storage trouble must never hide: the
+        // shell has to stop admitting workers immediately.
+        if (isDeviceRevoked(error)) throw error;
+        throw storeError;
+      }
+      if (
+        error instanceof KioskApiError &&
+        error.status === 409 &&
+        error.code === "registry_snapshot_changed" &&
+        attempt + 1 < BOX_REGISTRY_RESTARTS
+      ) {
+        since = (await readBoxRegistryMeta())?.version;
+        await wait(250 * 2 ** attempt);
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+export async function refreshSnapshot(
+  client: KioskClient,
+  now: () => Date,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  registryMaxPages = BOX_REGISTRY_MAX_PAGES,
+): Promise<void> {
   const bootstrap = await client.bootstrap();
   assertMeasurableGeneratedAt(bootstrap);
-  await replaceSnapshot(bootstrap, now());
+  const fetchedAt = now();
+  await replaceSnapshot(bootstrap, fetchedAt);
+  // Older test doubles and old custom clients have no registry method. A real
+  // current client does; registry failure never rolls back a good bootstrap.
+  if (typeof client.boxRegistryPage !== "function") return;
+  try {
+    await refreshBoxRegistry(client, fetchedAt, wait, registryMaxPages);
+  } catch (error) {
+    if (isDeviceRevoked(error)) throw error;
+    console.warn("kiosk: the box registry could not be refreshed", error);
+  }
 }

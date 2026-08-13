@@ -10,6 +10,7 @@ import {
 } from "../src/store/queue.js";
 import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
+import { IDBFactory } from "fake-indexeddb";
 
 const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto => ({
   generatedAt: "2026-07-28T06:00:00.000Z",
@@ -30,6 +31,42 @@ const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto 
 });
 
 describe("cache", () => {
+  it("upgrades a version-two database without losing its snapshot or queue", async () => {
+    globalThis.indexedDB = new IDBFactory();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("markiro-kiosk", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore("snapshot");
+        db.createObjectStore("queue", { keyPath: "deviceSeq" });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction(["snapshot", "queue"], "readwrite");
+        tx.objectStore("snapshot").put({ bootstrap: snapshot([]), fetchedAt: "legacy" }, "current");
+        tx.objectStore("queue").put({
+          deviceSeq: 4,
+          employeeId: "e1",
+          body: { deviceSeq: 4, badgeCode: "legacy", reason: "buy", items: [] },
+        });
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+
+    expect(await readSnapshot()).toMatchObject({ fetchedAt: "legacy" });
+    expect(await listQueue()).toEqual([
+      {
+        deviceSeq: 4,
+        employeeId: "e1",
+        body: { deviceSeq: 4, badgeCode: "legacy", reason: "buy", items: [] },
+      },
+    ]);
+  });
   it("returns null before anything is stored", async () => {
     await expect(readSnapshot()).resolves.toBeNull();
   });
@@ -106,6 +143,28 @@ describe("queue", () => {
     await enqueueOrder({ deviceSeq: 2, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     await dequeueOrder(1);
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([2]);
+  });
+
+  it("persists boxes verbatim beside a bottle estimate outside the wire body", async () => {
+    const body = {
+      deviceSeq: 3,
+      badgeDigest: "B",
+      reason: "buy" as const,
+      items: [{ rawKm: "loose" }],
+      boxes: [{ sscc: "346006820000000021" }],
+    };
+
+    await enqueueOrder(body, "e1", "pending_attestation", 13);
+
+    expect(await listQueue()).toEqual([
+      {
+        deviceSeq: 3,
+        employeeId: "e1",
+        body,
+        admissionState: "pending_attestation",
+        estimatedBottleCount: 13,
+      },
+    ]);
   });
 });
 

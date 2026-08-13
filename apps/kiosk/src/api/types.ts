@@ -11,6 +11,10 @@ export interface CreateOrderItemInput {
   rawKm: string;
 }
 
+export interface CreateOrderBoxInput {
+  sscc: string;
+}
+
 /**
  * POST /kiosk/orders body. `deviceSeq` is the kiosk's own monotonic counter —
  * together with `(tenantId, kioskId)` it's the idempotency key for offline
@@ -30,18 +34,25 @@ export interface CreateOrderItemInput {
  * queued by an older bundle drain instead of failing validation; today's app
  * never writes one, and `store/scrub.ts` removes the ones it already wrote.
  */
-export interface CreateOrderDto {
+interface CreateOrderCore {
   deviceSeq: number;
-  badgeDigest: string;
   reason: "buy" | "writeoff";
   writeoffReasonId?: string | null;
   items: CreateOrderItemInput[];
+  boxes?: CreateOrderBoxInput[];
   createdAt?: string;
   admissionNonce?: string;
   admissionProof?: string;
 }
 
-export type CreateOrderAdmissionDto = Omit<CreateOrderDto, "createdAt" | "admissionProof">;
+type DigestBadgeIdentity = { badgeDigest: string; badgeCode?: never };
+/** Read-only upgrade path for records queued before badge digests. */
+type LegacyBadgeIdentity = { badgeCode: string; badgeDigest?: never };
+
+export type CreateOrderDto = CreateOrderCore & (DigestBadgeIdentity | LegacyBadgeIdentity);
+
+type WithoutDeliveryFields<T> = T extends unknown ? Omit<T, "createdAt" | "admissionProof"> : never;
+export type CreateOrderAdmissionDto = WithoutDeliveryFields<CreateOrderDto>;
 
 export interface CreateOrderAdmissionResultDto {
   claimedAt: string;
@@ -54,12 +65,54 @@ export interface OrderConflict {
   reason: "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit";
 }
 
+export type BoxConflictReason =
+  | "unknown_box"
+  | "box_not_closed"
+  | "box_disassembled"
+  | "box_contents_changed"
+  | "mixed_product_box"
+  | "duplicate"
+  | "over_limit";
+
+export interface BoxConflict {
+  sscc: string;
+  bottleCount: number | null;
+  reason: BoxConflictReason;
+}
+
 /** POST /kiosk/orders response — the authoritative server-side outcome. */
 export interface CreateOrderResultDto {
   orderNo: string;
   status: "pending";
   itemCount: number;
   conflicts: OrderConflict[];
+  boxConflicts?: BoxConflict[];
+  acceptedBoxes?: Array<{ sscc: string; bottleCount: number }>;
+}
+
+export type KioskBoxRegistryChange =
+  | {
+      kind: "upsert";
+      boxId: string;
+      sscc: string;
+      productId: string;
+      bottleCount: number;
+      contentKeys: string[];
+      updatedAt: string;
+    }
+  | { kind: "remove"; sscc: string; updatedAt: string };
+
+export interface KioskBoxRegistryPage {
+  until: string;
+  items: KioskBoxRegistryChange[];
+  nextCursor?: string;
+}
+
+export interface KioskBoxRegistryQuery {
+  since?: string;
+  until?: string;
+  cursor?: string;
+  limit?: number;
 }
 
 export interface SubscriptionAccessSnapshotDto {

@@ -151,6 +151,28 @@ describe("countTakenToday", () => {
     expect(count([], [queued({ items: 3 })])).toBe(3);
   });
 
+  it("counts a queued twelve-bottle box by its enqueue-time estimate", () => {
+    const boxOrder = queued({ items: 0 });
+    boxOrder.body.boxes = [{ sscc: "346006820000000021" }];
+    boxOrder.estimatedBottleCount = 12;
+
+    expect(count([], [boxOrder])).toBe(12);
+  });
+
+  it("falls back to loose item count for a queue record written by the previous bundle", () => {
+    const legacy = queued({ items: 3 });
+    delete legacy.estimatedBottleCount;
+
+    expect(count([], [legacy])).toBe(3);
+  });
+
+  it("ignores a corrupt oversized bottle estimate instead of refusing allowance", () => {
+    const corrupt = queued({ items: 2 });
+    corrupt.estimatedBottleCount = 1_000_000;
+
+    expect(count([], [corrupt])).toBe(2);
+  });
+
   it("ignores a queued order belonging to somebody else, or to another day", () => {
     expect(
       count(

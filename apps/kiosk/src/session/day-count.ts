@@ -308,11 +308,16 @@ function attributedOrder(order: QueuedOrder): Withdrawal | null {
   const body = record.body;
   if (!body || !Array.isArray(body.items)) return null;
   if (typeof body.createdAt !== "string") return null;
+  const estimate = record.estimatedBottleCount;
+  const items =
+    Number.isInteger(estimate) && (estimate as number) >= 0 && (estimate as number) <= 1_500
+      ? (estimate as number)
+      : body.items.length;
   return {
     deviceSeq: record.deviceSeq,
     employeeId: record.employeeId,
     takenAt: body.createdAt,
-    items: body.items.length,
+    items,
   };
 }
 

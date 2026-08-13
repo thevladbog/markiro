@@ -224,6 +224,7 @@ export function KioskShell(): React.JSX.Element {
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
+      boxRegistryPage: (query) => base.boxRegistryPage!(query),
       attestOrder: async (body) => {
         try {
           const result = await base.attestOrder(body);
@@ -781,7 +782,7 @@ export function KioskShell(): React.JSX.Element {
         // answer, so this is device-local bookkeeping — it is what lets the
         // day count charge an order that has not synced yet to the worker who
         // took it, and what `flushQueue` copies into the journal.
-        await enqueueOrder(body, active.employeeId, "pending_attestation");
+        await enqueueOrder(body, active.employeeId, "pending_attestation", state.items.length);
         // Attestation belongs to the same globally serialized drain as submit.
         // Splitting it here let an interval drain read and submit this durable
         // proofless record while the reservation request was still in flight.

@@ -21,6 +21,11 @@ import * as configStore from "../src/store/config.js";
 import { writeConfig } from "../src/store/config.js";
 import { readSnapshot, replaceSnapshot, type CachedSnapshot } from "../src/store/cache.js";
 import {
+  activateBoxRegistryPage,
+  lookupBox,
+  readBoxRegistryMeta,
+} from "../src/store/box-registry.js";
+import {
   createKioskClient,
   KioskApiError,
   KioskTimeoutError,
@@ -735,6 +740,63 @@ describe("flushQueue", () => {
     ]);
   });
 
+  it("quarantines only sanitized box verdicts from structured terminal details", async () => {
+    await enqueueOrder(
+      {
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: "346006820000000021" }],
+        createdAt: "2026-07-28T07:00:00.000Z",
+      },
+      "e1",
+      undefined,
+      12,
+    );
+    const details = {
+      boxConflicts: [
+        {
+          sscc: "346006820000000021",
+          bottleCount: 12,
+          reason: "duplicate",
+          extra: "drop-me",
+        },
+      ],
+      conflicts: [{ rawKm: "response-secret", reason: "duplicate" }],
+      rawSecret: "do-not-persist",
+    };
+
+    await flushQueue(
+      refusingClient(new KioskApiError(422, "rejected", "order_rejected", details)) as never,
+      () => new Date("2026-07-28T07:01:00.000Z"),
+    );
+
+    const parked = (await listQuarantine())[0]!;
+    expect(parked.boxConflicts).toEqual([
+      { sscc: "346006820000000021", bottleCount: 12, reason: "duplicate" },
+    ]);
+    expect(JSON.stringify(parked)).not.toContain("response-secret");
+    expect(JSON.stringify(parked)).not.toContain("drop-me");
+    expect(parked.body.boxes).toEqual([{ sscc: "346006820000000021" }]);
+  });
+
+  it("persists no structured box verdict when one entry is invalid", async () => {
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "wire" }] },
+      "e1",
+    );
+    await flushQueue(
+      refusingClient(
+        new KioskApiError(422, "rejected", "order_rejected", {
+          boxConflicts: [{ sscc: "000000000000000000", bottleCount: 900, reason: "duplicate" }],
+        }),
+      ) as never,
+      () => new Date(),
+    );
+    expect((await listQuarantine())[0]).not.toHaveProperty("boxConflicts");
+  });
+
   /**
    * THE SECOND WAY THE HEAD OF THE QUEUE GOES BAD, and the one that used to be
    * unreachable from here: a badge the server can no longer resolve — the
@@ -1278,7 +1340,7 @@ describe("flushQueue backoff", () => {
 });
 
 describe("isTerminalRejection", () => {
-  it.each([400, 409, 422])(
+  it.each([400, 409, 413, 422])(
     "treats %i as a verdict this order can never come back from",
     (status) => {
       expect(isTerminalRejection(new KioskApiError(status, "refused"))).toBe(true);
@@ -1605,5 +1667,133 @@ describe("refreshSnapshot", () => {
     // last-known-good dataset and ages fresh → warn → blocked over seven days,
     // rather than persisting a stamp whose freshness can never be established.
     expect(JSON.stringify(await readSnapshot())).toBe(before);
+  });
+
+  it("keeps a successful bootstrap when a bounded registry refresh exhausts snapshot-change retries", async () => {
+    const fresh = bootstrap("2026-07-28T07:00:00.000Z");
+    const client = {
+      bootstrap: vi.fn(async () => fresh),
+      boxRegistryPage: vi.fn(async () => {
+        throw new KioskApiError(409, "changed", "registry_snapshot_changed");
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    await expect(
+      refreshSnapshot(
+        client as never,
+        () => new Date("2026-07-28T07:00:03.000Z"),
+        async () => {},
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(3);
+    expect(await readSnapshot()).toEqual({
+      bootstrap: fresh,
+      fetchedAt: "2026-07-28T07:00:03.000Z",
+    });
+  });
+
+  it("restarts a changed multi-page registry from the old active version", async () => {
+    const fresh = bootstrap("2026-07-28T07:00:00.000Z");
+    const queries: unknown[] = [];
+    const responses = [
+      { until: "2", items: [], nextCursor: "page-2" },
+      new KioskApiError(409, "changed", "registry_snapshot_changed"),
+      { until: "3", items: [], nextCursor: undefined },
+    ];
+    const client = {
+      bootstrap: vi.fn(async () => fresh),
+      boxRegistryPage: vi.fn(async (query: unknown) => {
+        queries.push(query);
+        const next = responses.shift();
+        if (next instanceof Error) throw next;
+        return next!;
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(
+      client as never,
+      () => new Date("2026-07-28T07:00:03.000Z"),
+      async () => {},
+    );
+
+    expect(queries).toEqual([
+      { limit: 250 },
+      { until: "2", cursor: "page-2", limit: 250 },
+      { limit: 250 },
+    ]);
+  });
+
+  it("does not hide revocation between bootstrap and registry fetch", async () => {
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => {
+        throw new KioskApiError(401, "revoked");
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    await expect(refreshSnapshot(client as never, () => new Date())).rejects.toMatchObject({
+      status: 401,
+    });
+  });
+
+  it("bounds an untrusted cursor cycle and keeps the old active cut", async () => {
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => ({ until: "2", items: [], nextCursor: "same" })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(
+      client as never,
+      () => new Date(),
+      async () => {},
+    );
+
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("bounds unique malicious cursors and discards the incomplete cut", async () => {
+    const sscc = "346006820000000021";
+    await activateBoxRegistryPage(
+      null,
+      "1",
+      [
+        {
+          kind: "upsert",
+          boxId: "old",
+          sscc,
+          productId: "product",
+          bottleCount: 1,
+          contentKeys: ["member"],
+          updatedAt: "2026-07-28T06:00:00Z",
+        },
+      ],
+      new Date("2026-07-28T06:00:00Z"),
+    );
+    let cursor = 0;
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => ({
+        until: "2",
+        items: [],
+        nextCursor: `cursor-${(cursor += 1)}`,
+      })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(
+      client as never,
+      () => new Date(),
+      async () => {},
+      2,
+    );
+
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(2);
+    expect(await readBoxRegistryMeta()).toMatchObject({ version: "1" });
+    expect(await lookupBox(sscc)).toMatchObject({ boxId: "old" });
   });
 });

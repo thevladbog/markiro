@@ -196,7 +196,54 @@ describe("createKioskClient", () => {
       "x-kiosk-capabilities": "subscription-recovery-v1",
     });
   });
+
+  it("requests a cursor-bound box registry page", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () =>
+      jsonResponse(200, { until: "9", items: [], nextCursor: "next" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const page = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+      .boxRegistryPage!({
+      since: "7",
+      until: "9",
+      cursor: "opaque cursor",
+      limit: 250,
+    });
+
+    expect(fetchMock.mock.calls[0]![0]).toBe(
+      "http://srv/kiosk/box-registry?since=7&until=9&cursor=opaque+cursor&limit=250",
+    );
+    expect(page).toEqual({ until: "9", items: [], nextCursor: "next" });
+  });
+
+  it("keeps the structured response body on a kiosk API error", async () => {
+    const details = {
+      code: "order_rejected",
+      message: "No items accepted",
+      conflicts: [{ rawKm: "secret-member", reason: "duplicate" }],
+      boxConflicts: [{ sscc: OLD_SSCC, bottleCount: 12, reason: "duplicate" }],
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(422, details)),
+    );
+
+    const error = await createKioskClient({ token: "tok", serverUrl: "http://srv" })
+      .submitOrder({
+        deviceSeq: 1,
+        badgeDigest: "B",
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: OLD_SSCC }],
+      })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toMatchObject({ status: 422, code: "order_rejected", details });
+  });
 });
+
+const OLD_SSCC = "346006820000000021";
 
 /**
  * THE STALL THAT STOPS A KIOSK DEAD.
