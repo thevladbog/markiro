@@ -92,7 +92,7 @@ describe("processProductImage", () => {
     await expect(processProductImage(oversized)).rejects.toThrow(/25 million/);
   });
 
-  it("produces deterministic metadata-free normalized bytes", async () => {
+  it("applies EXIF orientation and produces deterministic metadata-free normalized bytes", async () => {
     const source = await sharp({
       create: { width: 1400, height: 700, channels: 3, background: "#2463eb" },
     })
@@ -106,6 +106,8 @@ describe("processProductImage", () => {
 
     expect(second.buffer.equals(first.buffer)).toBe(true);
     expect(second.checksum).toBe(first.checksum);
+    expect(first).toMatchObject({ width: 600, height: 1200 });
+    expect(metadata).toMatchObject({ width: 600, height: 1200 });
     expect(metadata.exif).toBeUndefined();
     expect(metadata.icc).toBeUndefined();
   });

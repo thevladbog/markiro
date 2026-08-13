@@ -12,6 +12,7 @@ interface FakeAsset {
   ownerTenantId: string | null;
   objectKey: string;
   status: AssetStatus;
+  updatedAt: Date;
   referencedBy?: "avatar" | "product";
   referenceAfterClaim?: "avatar" | "product";
   claimLost?: boolean;
@@ -23,11 +24,15 @@ function asset(overrides: Partial<FakeAsset> & Pick<FakeAsset, "id">): FakeAsset
     ownerTenantId: null,
     objectKey: `users/user-1/avatars/${overrides.id}.webp`,
     status: "staging",
+    updatedAt: new Date("2026-08-13T11:00:00.000Z"),
     ...overrides,
   };
 }
 
-function fakeDb(initial: FakeAsset[]): { db: Db; rows: FakeAsset[]; deletedIds: string[] } {
+function fakeDb(
+  initial: FakeAsset[],
+  staleBefore = new Date("2026-08-13T11:45:00.000Z"),
+): { db: Db; rows: FakeAsset[]; deletedIds: string[] } {
   const rows = initial.map((row) => ({ ...row }));
   const deletedIds: string[] = [];
   let candidates: FakeAsset[] = [];
@@ -46,6 +51,7 @@ function fakeDb(initial: FakeAsset[]): { db: Db; rows: FakeAsset[]; deletedIds: 
               .filter(
                 (row) =>
                   (row.status === "staging" || row.status === "deleting") &&
+                  row.updatedAt < staleBefore &&
                   row.referencedBy === undefined,
               )
               .slice(0, limit);
@@ -168,6 +174,28 @@ describe("MediaAssetsService", () => {
     expect(storage.delete).not.toHaveBeenCalled();
     expect(state.deletedIds).toEqual([]);
   });
+
+  it.each(["staging", "deleting"] as const)(
+    "retains fresh %s assets until they cross the stale cutoff",
+    async (status) => {
+      const fresh = asset({
+        id: `fresh-${status}`,
+        status,
+        updatedAt: new Date("2026-08-13T11:50:00.000Z"),
+      });
+      const state = fakeDb([fresh]);
+      const storage = fakeStorage();
+
+      await expect(
+        new MediaAssetsService(state.db, storage).reconcile(
+          new Date("2026-08-13T12:00:00.000Z"),
+        ),
+      ).resolves.toBe(0);
+      expect(storage.delete).not.toHaveBeenCalled();
+      expect(state.rows).toEqual([fresh]);
+      expect(state.deletedIds).toEqual([]);
+    },
+  );
 
   it.each(["avatar", "product"] as const)(
     "rechecks a %s reference after claiming and before deleting object bytes",
