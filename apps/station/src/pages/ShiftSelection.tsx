@@ -6,6 +6,7 @@ import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
 import { StationScreen } from "../ui/StationScreen.js";
+import { prefetchStationProductImage } from "../lib/product-image-cache.js";
 
 const SHIFT_PAGE_SIZE = 3;
 
@@ -16,6 +17,14 @@ interface ShiftListItem {
   productName: string | null;
   plannedQty: number | null;
   counterpartyName?: string | null;
+  productId: string;
+  image?: {
+    checksum: string;
+    contentType: "image/webp";
+    byteSize: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 export interface ShiftSelectionProps {
@@ -80,6 +89,12 @@ export function ShiftSelection({
       .then((response) => {
         if (cancelled) return;
         setItems(response.items);
+        for (const shift of response.items) {
+          void prefetchStationProductImage(client, {
+            id: shift.productId,
+            ...(shift.image === undefined ? {} : { image: shift.image }),
+          });
+        }
         setLoading(false);
       })
       .catch((err: unknown) => {

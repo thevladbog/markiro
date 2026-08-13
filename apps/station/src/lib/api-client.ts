@@ -193,6 +193,17 @@ export function createStationClient(
         });
         if (!res.ok) throw new StationApiError(res.status, await readError(res));
         return await res.blob();
+      } catch (error) {
+        if (credentialBoundary && isStationCredentialRejection(error)) {
+          await rejectCredentialGeneration(
+            {
+              machineId: credentialBoundary.machineId,
+              generation: credentialBoundary.generation,
+            },
+            credentialBoundary.onCredentialRejected,
+          );
+        }
+        throw error;
       } finally {
         clearTimeout(timer);
       }

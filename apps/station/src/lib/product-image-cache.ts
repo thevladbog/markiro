@@ -5,6 +5,7 @@ export const STATION_PRODUCT_IMAGE_CACHE = "markiro-station-product-images-v1";
 const CACHE_ORIGIN = "https://station.invalid/product-images/";
 
 type CacheLike = Cache & { delete(request: RequestInfo): Promise<boolean> };
+const activeImageMirrors = new Set<Promise<void>>();
 
 function cacheKey(productId: string, checksum: string): string {
   return `${CACHE_ORIGIN}${encodeURIComponent(productId)}/${encodeURIComponent(checksum)}`;
@@ -29,12 +30,41 @@ async function validateBlob(blob: Blob, descriptor: StationProductImageDescripto
   }
 }
 
+export async function prefetchStationProductImage(
+  client: Pick<StationClient, "download">,
+  product: { id: string; image?: StationProductImageDescriptor | null },
+): Promise<void> {
+  if (!product.image) return;
+  try {
+    const cache = await openImageCache();
+    const key = cacheKey(product.id, product.image.checksum);
+    const existing = await cache.match(key);
+    if (existing) {
+      try {
+        await validateBlob(await existing.blob(), product.image);
+        return;
+      } catch {
+        await cache.delete(key);
+      }
+    }
+    const blob = await client.download(
+      `/station/products/${encodeURIComponent(product.id)}/image/${encodeURIComponent(product.image.checksum)}`,
+    );
+    await validateBlob(blob, product.image);
+    await cache.put(key, new Response(blob, { headers: { "Content-Type": product.image.contentType } }));
+  } catch (error) {
+    console.error("station: product image prefetch failed", error);
+  }
+}
+
 export async function syncStationProductImage(
   exec: SqlExecutor,
   client: Pick<StationClient, "download">,
   product: { id: string; image?: StationProductImageDescriptor | null },
+  isSealed?: () => boolean,
 ): Promise<void> {
   try {
+    if (isSealed?.()) return;
     if (product.image === undefined) return;
     if (product.image === null) {
       await exec.run("UPDATE product_mirror SET image_pointer_checksum = NULL WHERE id = ?", [product.id]);
@@ -53,11 +83,18 @@ export async function syncStationProductImage(
       const blob = await client.download(
         `/station/products/${encodeURIComponent(product.id)}/image/${encodeURIComponent(product.image.checksum)}`,
       );
+      if (isSealed?.()) return;
       await validateBlob(blob, product.image);
       await cache.put(key, new Response(blob, { headers: { "Content-Type": product.image.contentType } }));
     } else {
-      await validateBlob(await existing.blob(), product.image);
+      try {
+        await validateBlob(await existing.blob(), product.image);
+      } catch (error) {
+        await cache.delete(key);
+        throw error;
+      }
     }
+    if (isSealed?.()) return;
     await exec.run("UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ? AND image_checksum = ?", [
       product.image.checksum,
       product.id,
@@ -66,6 +103,15 @@ export async function syncStationProductImage(
   } catch (error) {
     console.error("station: product image sync failed", error);
   }
+}
+
+export function trackStationProductImageSync(operation: Promise<void>): void {
+  activeImageMirrors.add(operation);
+  void operation.finally(() => activeImageMirrors.delete(operation));
+}
+
+export async function waitForStationProductImageMirrors(): Promise<void> {
+  await Promise.all([...activeImageMirrors]);
 }
 
 export async function readStationProductImage(exec: SqlExecutor, productId: string): Promise<Blob | null> {

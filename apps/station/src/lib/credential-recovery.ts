@@ -1,5 +1,6 @@
 import { purgeOperatorsMirror, type SqlExecutor } from "./mirror.js";
 import { waitForShiftBundleMirrors } from "./shift-bundle.js";
+import { clearStationProductImages, waitForStationProductImageMirrors } from "./product-image-cache.js";
 
 export interface SealedWorkSummary {
   scans: number;
@@ -266,10 +267,12 @@ export async function clearRejectedCredentialState({
   // key was revoked. Let every already-started download/write settle, then
   // delete its reproducible rows so a late 200 cannot repopulate them.
   await waitForShiftBundleMirrors();
+  await waitForStationProductImageMirrors();
   // Serialized with roster publishing. The purge first installs a fail-closed
   // read gate, then strictly clears both slots and the selector; no deletion
   // failure is swallowed.
   await purgeOperatorsMirror(exec);
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
+  await clearStationProductImages(exec);
 }
