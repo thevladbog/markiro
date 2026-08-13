@@ -17,6 +17,7 @@ type CanonicalOrderContent = Pick<CreateOrderAdmissionDto, "deviceSeq" | "reason
   badgeDigest: string | null;
   badgeCode: string | null;
   writeoffReasonId: string | null;
+  boxes?: { sscc: string }[];
 };
 
 /**
@@ -27,13 +28,21 @@ type CanonicalOrderContent = Pick<CreateOrderAdmissionDto, "deviceSeq" | "reason
 export function canonicalKioskOrderContent(
   dto: CreateOrderAdmissionDto | CreateOrderDto,
 ): CanonicalOrderContent {
-  return {
+  const legacy = {
     deviceSeq: dto.deviceSeq,
     badgeDigest: dto.badgeDigest ?? null,
     badgeCode: dto.badgeCode ?? null,
     reason: dto.reason,
     writeoffReasonId: dto.writeoffReasonId ?? null,
     items: dto.items.map((item) => ({ rawKm: item.rawKm })),
+  };
+  if (!Object.prototype.hasOwnProperty.call(dto, "boxes")) return legacy;
+  return {
+    ...legacy,
+    items: legacy.items.toSorted((left, right) => left.rawKm.localeCompare(right.rawKm)),
+    boxes: (dto.boxes ?? [])
+      .map((box) => ({ sscc: box.sscc }))
+      .toSorted((left, right) => left.sscc.localeCompare(right.sscc)),
   };
 }
 

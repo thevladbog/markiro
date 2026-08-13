@@ -152,7 +152,14 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.orderId).toBeNull();
     expect(rows[0]!.employeeId).toBe(employeeId);
     expect(rows[0]!.badgeCode).toBeNull();
-    expect(rows[0]!.codes.map((c) => c.rawKm).sort()).toEqual([REFUSED_KM, REFUSED_KM_2].sort());
+    expect(
+      rows[0]!.codes
+        .filter((code): code is Extract<(typeof rows)[number]["codes"][number], { rawKm: string }> =>
+          "rawKm" in code,
+        )
+        .map((code) => code.rawKm)
+        .sort(),
+    ).toEqual([REFUSED_KM, REFUSED_KM_2].sort());
   });
 
   it("records a replayed all-refused sync exactly once", async () => {
@@ -287,7 +294,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
       deviceSeq: 13,
       badgeCode: "badge-that-never-existed",
       reason: "buy",
-      items: [],
+      items: [{ rawKm: "not-a-km" }],
     }).expect(422);
 
     expect(await rejectionsFor(13)).toHaveLength(0);
@@ -374,7 +381,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
       badgeCode: BADGE,
       reason: "writeoff",
       writeoffReasonId: randomUUID(),
-      items: [],
+      items: [{ rawKm: "not-a-km" }],
     }).expect(400);
 
     expect(await rejectionsFor(17)).toHaveLength(0);

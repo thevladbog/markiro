@@ -14,12 +14,16 @@ import {
 } from "@nestjs/common";
 import {
   ApiBadRequestResponse,
+  ApiBody,
   ApiConflictResponse,
+  ApiCreatedResponse,
   ApiHeader,
   ApiOkResponse,
+  ApiPayloadTooLargeResponse,
   ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
 } from "@nestjs/swagger";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -199,6 +203,133 @@ export class KioskController {
     required: false,
     description:
       "Comma-separated client capabilities. subscription-recovery-v1 opts into coded 403 recovery verdicts.",
+  })
+  @ApiBody({
+    description:
+      "At least one line across items and boxes. Box lines accept only a canonical SSCC; product, quantity, price, and members are server-derived.",
+    schema: {
+      type: "object",
+      required: ["deviceSeq", "reason", "items"],
+      properties: {
+        deviceSeq: { type: "integer", minimum: 0, maximum: 2_147_483_647 },
+        badgeDigest: { type: "string" },
+        badgeCode: { type: "string", deprecated: true },
+        reason: { type: "string", enum: ["buy", "writeoff"] },
+        writeoffReasonId: { type: "string", format: "uuid", nullable: true },
+        admissionNonce: { type: "string", minLength: 32, maxLength: 128 },
+        createdAt: { type: "string", format: "date-time" },
+        admissionProof: { type: "string", minLength: 1, maxLength: 2048 },
+        items: {
+          type: "array",
+          maxItems: 500,
+          items: {
+            type: "object",
+            required: ["rawKm"],
+            properties: { rawKm: { type: "string", minLength: 1, maxLength: 1024 } },
+          },
+        },
+        boxes: {
+          type: "array",
+          maxItems: 100,
+          uniqueItems: true,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["sscc"],
+            properties: { sscc: { type: "string", pattern: "^[0-9]{18}$" } },
+          },
+        },
+      },
+    },
+  })
+  @ApiCreatedResponse({
+    description: "Authoritative atomic loose-item and box outcome.",
+    schema: {
+      type: "object",
+      required: ["orderNo", "status", "itemCount", "conflicts", "boxConflicts", "acceptedBoxes"],
+      properties: {
+        orderNo: { type: "string" },
+        status: { type: "string", enum: ["pending"] },
+        itemCount: { type: "integer", minimum: 0 },
+        conflicts: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["rawKm", "reason"],
+            properties: {
+              rawKm: { type: "string" },
+              reason: {
+                type: "string",
+                enum: [
+                  "not_km",
+                  "incomplete",
+                  "unknown_product",
+                  "not_allowed",
+                  "duplicate",
+                  "over_limit",
+                ],
+              },
+            },
+          },
+        },
+        boxConflicts: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["sscc", "bottleCount", "reason"],
+            properties: {
+              sscc: { type: "string", pattern: "^[0-9]{18}$" },
+              bottleCount: { type: "integer", minimum: 1, maximum: 500, nullable: true },
+              reason: {
+                type: "string",
+                enum: [
+                  "unknown_box",
+                  "box_not_closed",
+                  "box_disassembled",
+                  "box_contents_changed",
+                  "mixed_product_box",
+                  "duplicate",
+                  "over_limit",
+                ],
+              },
+            },
+          },
+        },
+        acceptedBoxes: {
+          type: "array",
+          items: {
+            type: "object",
+            required: ["sscc", "bottleCount"],
+            properties: {
+              sscc: { type: "string", pattern: "^[0-9]{18}$" },
+              bottleCount: { type: "integer", minimum: 1, maximum: 500 },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: "Malformed, empty, duplicated, or unbounded order body." })
+  @ApiPayloadTooLargeResponse({
+    description: "The submitted boxes exceed the bounded aggregate membership budget.",
+    schema: {
+      type: "object",
+      required: ["code"],
+      properties: { code: { type: "string", enum: ["box_request_too_large"] } },
+    },
+  })
+  @ApiUnprocessableEntityResponse({
+    description: "No submitted line was accepted, or a terminal employee/write-off rule failed.",
+    schema: {
+      type: "object",
+      properties: {
+        code: { type: "string", enum: ["order_rejected", "writeoff_forbidden"] },
+        message: { type: "string" },
+        conflicts: { type: "array", items: { type: "object" } },
+        boxConflicts: { type: "array", items: { type: "object" } },
+        acceptedBoxes: { type: "array", maxItems: 0 },
+      },
+    },
   })
   async createOrder(
     @Req() req: RequestWithKiosk,

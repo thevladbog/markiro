@@ -1023,7 +1023,14 @@
           "duplicate": "дубль — код уже в другой заявке",
           "over_limit": "превышен дневной лимит",
           "unknown_badge": "бейдж не опознан",
-          "unknown_reason": "причина списания недоступна"
+          "unknown_reason": "причина списания недоступна",
+          "writeoff_reason_required": "причина списания не указана",
+          "writeoff_forbidden": "сотруднику запрещено списание",
+          "unknown_box": "короб не найден",
+          "box_not_closed": "короб не закрыт",
+          "box_disassembled": "короб расформирован",
+          "box_contents_changed": "состав короба изменился",
+          "mixed_product_box": "в коробе разные товары"
         }
       },
       "rejections": {
@@ -1059,6 +1066,8 @@
         },
         "unknownBadge": "Бейдж не опознан",
         "badgeCodeLabel": "Бейдж: {{code}}",
+        "boxLabel": "Короб {{sscc}}",
+        "boxCountLabel": "Короб {{sscc}} · {{count}} шт.",
         "noOrder": "без заявки",
         "state": {
           "open": "Не отработан",

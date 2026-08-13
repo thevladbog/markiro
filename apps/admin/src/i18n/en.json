@@ -1023,7 +1023,14 @@
           "duplicate": "duplicate — code already in another order",
           "over_limit": "daily limit exceeded",
           "unknown_badge": "badge not recognised",
-          "unknown_reason": "write-off reason unavailable"
+          "unknown_reason": "write-off reason unavailable",
+          "writeoff_reason_required": "write-off reason not provided",
+          "writeoff_forbidden": "employee may not create write-offs",
+          "unknown_box": "box not found",
+          "box_not_closed": "box is not closed",
+          "box_disassembled": "box was disassembled",
+          "box_contents_changed": "box contents changed",
+          "mixed_product_box": "box contains multiple products"
         }
       },
       "rejections": {
@@ -1059,6 +1066,8 @@
         },
         "unknownBadge": "Badge not recognised",
         "badgeCodeLabel": "Badge: {{code}}",
+        "boxLabel": "Box {{sscc}}",
+        "boxCountLabel": "Box {{sscc}} · {{count}} pcs",
         "noOrder": "no order",
         "state": {
           "open": "Open",

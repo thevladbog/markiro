@@ -36,6 +36,14 @@ import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 import { OrgProfileService } from "../org-profile/org-profile.service";
 import {
+  applyOrderLineLimit,
+  classifyResolvedBoxConflicts,
+  reclassifyOrderKmKeyRace,
+  resolveOrderBoxes,
+  type ResolvedOrderBox,
+} from "./box-order-resolver";
+import { lockPickupOrderTransaction } from "./pickup-order-locks";
+import {
   issueOpaqueKioskAdmissionToken,
   kioskAdmissionTokenHash,
   kioskOrderPayloadDigest,
@@ -46,6 +54,8 @@ import {
   type CreateOrderAdmissionResultDto,
   type CreateOrderDto,
   type CreateOrderResultDto,
+  type AcceptedBox,
+  type BoxConflict,
   type KioskBootstrapDto,
   type ListPickupOrdersQueryDto,
   type ListPickupOrdersResponseDto,
@@ -64,6 +74,45 @@ interface ResolvedItem {
   serial: string;
   kmKey: string;
   unitPrice: string | null;
+}
+
+type StoredOrderConflict =
+  | { rawKm: string; reason: string }
+  | {
+      source: "box";
+      sscc: string;
+      bottleCount: number | null;
+      reason: string;
+    };
+
+interface KioskOrderOutcome {
+  orderNo: string;
+  itemCount: number;
+  conflicts: OrderConflict[];
+  boxConflicts: BoxConflict[];
+  acceptedBoxes: AcceptedBox[];
+  rejected?: true;
+  terminalReason?: string;
+  writeoffForbidden?: true;
+}
+
+export function orderRejectedResponse(input: {
+  conflicts: readonly OrderConflict[];
+  boxConflicts: readonly BoxConflict[];
+}): {
+  code: "order_rejected";
+  message: string;
+  conflicts: readonly OrderConflict[];
+  boxConflicts: readonly BoxConflict[];
+  acceptedBoxes: [];
+} {
+  return {
+    code: "order_rejected",
+    message: "No submitted order lines were accepted",
+    conflicts: input.conflicts,
+    boxConflicts: input.boxConflicts,
+    acceptedBoxes: [],
+  };
 }
 
 interface EffectivePickupPolicy {
@@ -167,28 +216,18 @@ export class PickupOrdersService {
     dto: CreateOrderDto,
   ): Promise<CreateOrderResultDto> {
     // 1. Idempotency: a replayed sync for the same device sequence returns the same order, unchanged.
-    const [existing] = await this.db
-      .select()
-      .from(schema.pickupOrders)
-      .where(
-        and(
-          eq(schema.pickupOrders.tenantId, tenantId),
-          eq(schema.pickupOrders.kioskId, kioskId),
-          eq(schema.pickupOrders.deviceSeq, dto.deviceSeq),
-        ),
-      );
+    const existing = await this.findKioskOrderOutcome(tenantId, kioskId, dto.deviceSeq);
     if (existing) {
       // The order is already durable, so any reservation left behind for this
       // idempotency key has served its only purpose. This also repairs the
       // crash window where the order committed but an older deployment did
       // not consume its admission row.
       await this.consumeKioskAdmission(this.db, tenantId, kioskId, dto.deviceSeq);
-      return {
-        orderNo: existing.orderNo,
-        status: "pending",
-        itemCount: existing.itemCount,
-        conflicts: [],
-      };
+      return { ...existing, status: "pending" };
+    }
+    if (dto.boxes !== undefined) {
+      const rejection = await this.findKioskRejectionOutcome(tenantId, kioskId, dto.deviceSeq);
+      if (rejection) this.throwPersistedKioskRejection(rejection);
     }
 
     // 1b. Settle the ONE timestamp this request is filed under, before any step
@@ -265,9 +304,10 @@ export class PickupOrdersService {
       // is examined, so without this the codes the worker walked off with
       // leave no trace at all. Codes only: an item-less badge heartbeat
       // lost nothing and must not add noise here.
-      const badgeCode = dto.items.length > 0 ? await this.auditBadgeValue(tenantId, dto) : null;
+      const hasLines = dto.items.length + (dto.boxes?.length ?? 0) > 0;
+      const badgeCode = hasLines ? await this.auditBadgeValue(tenantId, dto) : null;
       await this.db.transaction(async (tx) => {
-        if (dto.items.length > 0) {
+        if (hasLines) {
           await this.recordScanRejection(tx, {
             tenantId,
             kioskId,
@@ -275,7 +315,7 @@ export class PickupOrdersService {
             badgeCode,
             orderId: null,
             deviceSeq: dto.deviceSeq,
-            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_badge" })),
+            codes: this.auditSubmittedLines(dto, "unknown_badge"),
             scannedAt: when,
           });
         }
@@ -287,7 +327,7 @@ export class PickupOrdersService {
 
     if (dto.reason === "writeoff" && !employee.pickupPolicy.canWriteoff) {
       await this.db.transaction(async (tx) => {
-        if (dto.items.length > 0) {
+        if (dto.items.length + (dto.boxes?.length ?? 0) > 0) {
           await this.recordScanRejection(tx, {
             tenantId,
             kioskId,
@@ -295,7 +335,7 @@ export class PickupOrdersService {
             badgeCode: null,
             orderId: null,
             deviceSeq: dto.deviceSeq,
-            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "writeoff_forbidden" })),
+            codes: this.auditSubmittedLines(dto, "writeoff_forbidden"),
             scannedAt: when,
           });
         }
@@ -322,7 +362,7 @@ export class PickupOrdersService {
       // Rethrow unchanged: this call site must not alter the kiosk's
       // response, whichever of `resolveWriteoffReasonId`'s two messages fired.
       await this.db.transaction(async (tx) => {
-        if (dto.items.length > 0) {
+        if (dto.items.length + (dto.boxes?.length ?? 0) > 0) {
           await this.recordScanRejection(tx, {
             tenantId,
             kioskId,
@@ -330,7 +370,10 @@ export class PickupOrdersService {
             badgeCode: null,
             orderId: null,
             deviceSeq: dto.deviceSeq,
-            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "unknown_reason" })),
+            codes: this.auditSubmittedLines(
+              dto,
+              dto.writeoffReasonId ? "unknown_reason" : "writeoff_reason_required",
+            ),
             scannedAt: when,
           });
         }
@@ -357,6 +400,8 @@ export class PickupOrdersService {
       candidates,
       conflicts,
       dto.items,
+      dto.boxes ?? [],
+      dto.boxes !== undefined,
     );
 
     if (order.writeoffForbidden) {
@@ -365,6 +410,7 @@ export class PickupOrdersService {
         message: "Employee is not allowed to create writeoffs",
       });
     }
+    if (order.rejected) this.throwRejectedOrder(order);
 
     // 7. Outcome. (A device-seq race outcome carries its own `conflicts: []`, mirroring the
     // sequential idempotent path — this request's own conflicts belong to a duplicate submission.)
@@ -373,6 +419,8 @@ export class PickupOrdersService {
       status: "pending",
       itemCount: order.itemCount,
       conflicts: order.conflicts,
+      boxConflicts: order.boxConflicts,
+      acceptedBoxes: order.acceptedBoxes,
     };
   }
 
@@ -926,7 +974,8 @@ export class PickupOrdersService {
       })),
       receiptNo: row.receiptNo,
       actNo: row.actNo,
-      syncConflicts: (row.syncConflicts as OrderConflict[] | null) ?? [],
+      syncConflicts: this.splitStoredConflicts(row.syncConflicts).conflicts,
+      boxConflicts: this.splitStoredConflicts(row.syncConflicts).boxConflicts,
       exportHeldProductNames,
     };
   }
@@ -1318,7 +1367,7 @@ export class PickupOrdersService {
     status: "pending" | "punched" | "writtenoff" | "cancelled";
     createdAt: Date;
     exportedAt: Date | null;
-    syncConflicts: { rawKm: string; reason: string }[] | null;
+    syncConflicts: StoredOrderConflict[] | null;
   }): PickupOrderRowDto {
     return {
       id: row.id,
@@ -1355,7 +1404,7 @@ export class PickupOrdersService {
       badgeCode: string | null;
       orderId: string | null;
       deviceSeq: number;
-      codes: { rawKm: string; reason: string }[];
+      codes: StoredOrderConflict[];
       scannedAt: Date;
     },
   ): Promise<void> {
@@ -1783,16 +1832,12 @@ export class PickupOrdersService {
   }
 
   /** Applies the employee's effective tenant-aware limit for today (UTC). */
-  private async applyDayLimit(
+  private async countTakenToday(
     db: Pick<Db, "select">,
     tenantId: string,
     employeeId: string,
     when: Date,
-    candidates: ResolvedItem[],
-    policy: EffectivePickupPolicy,
-  ): Promise<{ accepted: ResolvedItem[]; overflowConflicts: OrderConflict[] }> {
-    if (!policy.limited) return { accepted: candidates, overflowConflicts: [] };
-
+  ): Promise<number> {
     const dateStr = when.toISOString().slice(0, 10);
     const existingRows = await db
       .select({ id: schema.pickupOrderItems.id })
@@ -1813,19 +1858,7 @@ export class PickupOrdersService {
           sql`(${schema.pickupOrders.createdAt} at time zone 'utc')::date = ${dateStr}`,
         ),
       );
-    let count = existingRows.length;
-
-    const accepted: ResolvedItem[] = [];
-    const overflowConflicts: OrderConflict[] = [];
-    for (const c of candidates) {
-      if (count < policy.dayLimit) {
-        accepted.push(c);
-        count++;
-      } else {
-        overflowConflicts.push({ rawKm: c.rawKm, reason: "over_limit" });
-      }
-    }
-    return { accepted, overflowConflicts };
+    return existingRows.length;
   }
 
   /**
@@ -1850,22 +1883,26 @@ export class PickupOrdersService {
     items: ResolvedItem[],
     conflicts: OrderConflict[],
     rawItems: CreateOrderDto["items"],
-  ): Promise<{
-    orderNo: string;
-    itemCount: number;
-    conflicts: OrderConflict[];
-    writeoffForbidden?: true;
-  }> {
+    requestedBoxes: NonNullable<CreateOrderDto["boxes"]>,
+    vNext: boolean,
+  ): Promise<KioskOrderOutcome> {
     let remaining = [...items];
     const accumulatedConflicts = [...conflicts];
-    for (;;) {
+    let remainingBoxes = [...requestedBoxes];
+    const accumulatedBoxConflicts: BoxConflict[] = [];
+    const maxAttempts = items.length + requestedBoxes.length + 1;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       let attemptedAccepted: ResolvedItem[] = [];
+      let attemptedBoxes: ResolvedOrderBox[] = [];
       try {
         return await this.db.transaction(async (tx) => {
           const utcDay = when.toISOString().slice(0, 10);
-          await tx.execute(
-            sql`select pg_advisory_xact_lock(hashtextextended(${`pickup-limit:${tenantId}:${employeeId}:${utcDay}`}, 0))`,
-          );
+          await lockPickupOrderTransaction(tx, {
+            tenantId,
+            employeeId,
+            utcDay,
+            hasBoxes: remainingBoxes.length > 0,
+          });
 
           // Lock the kiosk row before inserting. `PairingService.attemptRedeem`
           // takes this SAME row lock before it computes nextDeviceSeq during a
@@ -1901,12 +1938,14 @@ export class PickupOrdersService {
             );
           if (existing) {
             await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
-            return { ...existing, conflicts: [] };
+            const replay = await this.findKioskOrderOutcome(tenantId, kioskId, deviceSeq, tx);
+            if (!replay) throw new Error("Failed to reload kiosk order replay");
+            return replay;
           }
 
           const policy = await this.resolveLivePickupPolicy(tx, tenantId, employeeId);
           if (reason === "writeoff" && !policy.canWriteoff) {
-            if (rawItems.length > 0) {
+            if (rawItems.length + requestedBoxes.length > 0) {
               await this.recordScanRejection(tx, {
                 tenantId,
                 kioskId,
@@ -1914,10 +1953,18 @@ export class PickupOrdersService {
                 badgeCode: null,
                 orderId: null,
                 deviceSeq,
-                codes: rawItems.map((item) => ({
-                  rawKm: item.rawKm,
-                  reason: "writeoff_forbidden",
-                })),
+                codes: [
+                  ...rawItems.map((item) => ({
+                    rawKm: item.rawKm,
+                    reason: "writeoff_forbidden",
+                  })),
+                  ...requestedBoxes.map((box) => ({
+                    source: "box" as const,
+                    sscc: box.sscc,
+                    bottleCount: null,
+                    reason: "writeoff_forbidden",
+                  })),
+                ],
                 scannedAt: when,
               });
             }
@@ -1926,25 +1973,73 @@ export class PickupOrdersService {
               orderNo: "",
               itemCount: 0,
               conflicts: [],
+              boxConflicts: [],
+              acceptedBoxes: [],
               writeoffForbidden: true as const,
             };
           }
 
-          const { accepted, overflowConflicts } = await this.applyDayLimit(
-            tx,
-            tenantId,
-            employeeId,
-            when,
-            remaining,
-            policy,
+          const resolved = await resolveOrderBoxes(tx, tenantId, remainingBoxes);
+          const allMemberKeys = resolved.boxes.flatMap((box) =>
+            box.members.map((member) => member.kmKey),
           );
-          attemptedAccepted = accepted;
-          const attemptConflicts = [...accumulatedConflicts, ...overflowConflicts];
+          const keysToCheck = [...new Set([...remaining.map((item) => item.kmKey), ...allMemberKeys])];
+          const usedRows =
+            keysToCheck.length === 0
+              ? []
+              : await tx
+                  .select({ kmKey: schema.pickupOrderItems.kmKey })
+                  .from(schema.pickupOrderItems)
+                  .where(
+                    and(
+                      eq(schema.pickupOrderItems.tenantId, tenantId),
+                      eq(schema.pickupOrderItems.voided, false),
+                      inArray(schema.pickupOrderItems.kmKey, keysToCheck),
+                    ),
+                  );
+          const usedKeys = new Set(usedRows.map((row) => row.kmKey));
+          const duplicateLooseConflicts: OrderConflict[] = [];
+          const uniqueLoose = remaining.filter((item) => {
+            if (!usedKeys.has(item.kmKey)) return true;
+            duplicateLooseConflicts.push({ rawKm: item.rawKm, reason: "duplicate" });
+            return false;
+          });
+          const boxDedup = classifyResolvedBoxConflicts({
+            boxes: resolved.boxes,
+            looseKeys: new Set(uniqueLoose.map((item) => item.kmKey)),
+            usedKeys,
+          });
+          const existingCount = await this.countTakenToday(tx, tenantId, employeeId, when);
+          const limited = applyOrderLineLimit({
+            existingCount,
+            dayLimit: policy.dayLimit,
+            limited: policy.limited,
+            loose: uniqueLoose,
+            boxes: boxDedup.accepted,
+            looseConflict: (item) => ({ rawKm: item.rawKm, reason: "over_limit" }),
+          });
+          attemptedAccepted = limited.acceptedLoose;
+          attemptedBoxes = limited.acceptedBoxes;
+          const attemptConflicts = [
+            ...accumulatedConflicts,
+            ...duplicateLooseConflicts,
+            ...limited.looseConflicts,
+          ];
+          const attemptBoxConflicts = [
+            ...accumulatedBoxConflicts,
+            ...resolved.conflicts,
+            ...boxDedup.conflicts,
+            ...limited.boxConflicts,
+          ];
+          const storedConflicts = this.joinStoredConflicts(attemptConflicts, attemptBoxConflicts);
+          const acceptedBottleCount =
+            limited.acceptedLoose.length +
+            limited.acceptedBoxes.reduce((total, box) => total + box.bottleCount, 0);
 
           // A non-empty scan that produced only conflicts must not create an
           // empty pending order. The rejection and admission consumption are
           // committed under the same employee/day lock as the decision.
-          if (accepted.length === 0 && rawItems.length > 0) {
+          if (acceptedBottleCount === 0 && rawItems.length + requestedBoxes.length > 0) {
             await this.recordScanRejection(tx, {
               tenantId,
               kioskId,
@@ -1952,14 +2047,21 @@ export class PickupOrdersService {
               badgeCode: null,
               orderId: null,
               deviceSeq,
-              codes: attemptConflicts,
+              codes: storedConflicts,
               scannedAt: when,
             });
             await this.consumeKioskAdmission(tx, tenantId, kioskId, deviceSeq);
             this.logger.warn(
-              `kiosk ${kioskId}: all ${rawItems.length} scanned code(s) refused for employee ${employeeId} — ${attemptConflicts.map((conflict) => conflict.reason).join(", ")}`,
+              `kiosk ${kioskId}: all ${rawItems.length + requestedBoxes.length} submitted line(s) refused for employee ${employeeId} — ${storedConflicts.map((conflict) => conflict.reason).join(", ")}`,
             );
-            return { orderNo: "", itemCount: 0, conflicts: attemptConflicts };
+            return {
+              orderNo: "",
+              itemCount: 0,
+              conflicts: attemptConflicts,
+              boxConflicts: attemptBoxConflicts,
+              acceptedBoxes: [],
+              ...(vNext ? { rejected: true as const } : {}),
+            };
           }
 
           // nextOrderNo's `tx` param is deliberately loosely typed (Task 7) so it
@@ -1981,33 +2083,79 @@ export class PickupOrdersService {
               reason,
               writeoffReasonId,
               status: "pending",
-              itemCount: accepted.length,
-              totalPrice: computeTotalPrice(accepted),
+              itemCount: acceptedBottleCount,
+              totalPrice: computeTotalPrice([
+                ...limited.acceptedLoose,
+                ...limited.acceptedBoxes.flatMap((box) =>
+                  box.members.map(() => ({ unitPrice: box.unitPrice })),
+                ),
+              ]),
               deviceSeq,
               createdAt: when,
-              syncConflicts: attemptConflicts.length > 0 ? attemptConflicts : null,
+              syncConflicts: storedConflicts.length > 0 ? storedConflicts : null,
             })
             .returning();
           if (!order) throw new Error("Failed to insert pickup order");
-          if (accepted.length > 0) {
+          const orderBoxIds = new Map<string, string>();
+          if (limited.acceptedBoxes.length > 0) {
+            const insertedBoxes = await tx
+              .insert(schema.pickupOrderBoxes)
+              .values(
+                limited.acceptedBoxes.map((box) => ({
+                  tenantId,
+                  orderId: order.id,
+                  boxId: box.boxId,
+                  sscc: box.sscc,
+                  productId: box.productId,
+                  bottleCount: box.bottleCount,
+                  unitPrice: box.unitPrice,
+                })),
+              )
+              .returning({ id: schema.pickupOrderBoxes.id, boxId: schema.pickupOrderBoxes.boxId });
+            for (const box of insertedBoxes) orderBoxIds.set(box.boxId, box.id);
+            for (const box of limited.acceptedBoxes) {
+              if (!orderBoxIds.has(box.boxId)) {
+                throw new Error("Failed to persist pickup order box provenance");
+              }
+            }
+          }
+          if (acceptedBottleCount > 0) {
             await tx.insert(schema.pickupOrderItems).values(
-              accepted.map((item) => ({
-                tenantId,
-                orderId: order.id,
-                productId: item.productId,
-                gtin14: item.gtin14,
-                serial: item.serial,
-                rawKm: item.rawKm,
-                kmKey: item.kmKey,
-                unitPrice: item.unitPrice,
-                scannedAt: when,
-              })),
+              [
+                ...limited.acceptedLoose.map((item) => ({
+                  tenantId,
+                  orderId: order.id,
+                  productId: item.productId,
+                  gtin14: item.gtin14,
+                  serial: item.serial,
+                  rawKm: item.rawKm,
+                  kmKey: item.kmKey,
+                  unitPrice: item.unitPrice,
+                  scannedAt: when,
+                })),
+                ...limited.acceptedBoxes.flatMap((box) => {
+                  const orderBoxId = orderBoxIds.get(box.boxId);
+                  if (!orderBoxId) throw new Error("Missing pickup order box provenance");
+                  return box.members.map((member) => ({
+                    tenantId,
+                    orderId: order.id,
+                    orderBoxId,
+                    productId: box.productId,
+                    gtin14: member.gtin14,
+                    serial: member.serial,
+                    rawKm: member.rawKm,
+                    kmKey: member.kmKey,
+                    unitPrice: box.unitPrice,
+                    scannedAt: when,
+                  }));
+                }),
+              ],
             );
           }
           // Same transaction as the order on purpose: the kmKey-race retry
           // below rolls this back with it, so a rejection row can never
           // outlive the order attempt that produced it.
-          if (attemptConflicts.length > 0) {
+          if (storedConflicts.length > 0) {
             await this.recordScanRejection(tx, {
               tenantId,
               kioskId,
@@ -2015,7 +2163,7 @@ export class PickupOrdersService {
               badgeCode: null,
               orderId: order.id,
               deviceSeq,
-              codes: attemptConflicts,
+              codes: storedConflicts,
               scannedAt: when,
             });
           }
@@ -2024,28 +2172,30 @@ export class PickupOrdersService {
             orderNo: order.orderNo,
             itemCount: order.itemCount,
             conflicts: attemptConflicts,
+            boxConflicts: attemptBoxConflicts,
+            acceptedBoxes: limited.acceptedBoxes
+              .map((box) => ({ sscc: box.sscc, bottleCount: box.bottleCount }))
+              .toSorted((left, right) => left.sscc.localeCompare(right.sscc)),
           };
         });
       } catch (error) {
         if (this.isDeviceSeqRace(error)) {
-          const [winner] = await this.db
-            .select()
-            .from(schema.pickupOrders)
-            .where(
-              and(
-                eq(schema.pickupOrders.tenantId, tenantId),
-                eq(schema.pickupOrders.kioskId, kioskId),
-                eq(schema.pickupOrders.deviceSeq, deviceSeq),
-              ),
-            );
+          const winner = await this.findKioskOrderOutcome(tenantId, kioskId, deviceSeq);
           if (!winner) throw error; // shouldn't happen, but avoid looping forever
           await this.consumeKioskAdmission(this.db, tenantId, kioskId, deviceSeq);
-          return { orderNo: winner.orderNo, itemCount: winner.itemCount, conflicts: [] };
+          return winner;
         }
 
-        if (!this.isKmKeyRace(error) || attemptedAccepted.length === 0) throw error;
+        if (
+          !this.isKmKeyRace(error) ||
+          (attemptedAccepted.length === 0 && attemptedBoxes.length === 0)
+        )
+          throw error;
 
-        const keys = attemptedAccepted.map((item) => item.kmKey);
+        const keys = [
+          ...attemptedAccepted.map((item) => item.kmKey),
+          ...attemptedBoxes.flatMap((box) => box.members.map((member) => member.kmKey)),
+        ];
         const openRows = await this.db
           .select({ kmKey: schema.pickupOrderItems.kmKey })
           .from(schema.pickupOrderItems)
@@ -2059,17 +2209,19 @@ export class PickupOrdersService {
         const conflictingKeys = new Set(openRows.map((r) => r.kmKey));
         if (conflictingKeys.size === 0) throw error; // shouldn't happen, but avoid looping forever
 
-        const stillOk: ResolvedItem[] = [];
-        for (const item of remaining) {
-          if (conflictingKeys.has(item.kmKey)) {
-            accumulatedConflicts.push({ rawKm: item.rawKm, reason: "duplicate" });
-          } else {
-            stillOk.push(item);
-          }
-        }
-        remaining = stillOk;
+        const reclassified = reclassifyOrderKmKeyRace({
+          loose: remaining,
+          requestedBoxes: remainingBoxes,
+          attemptedBoxes,
+          conflictingKeys,
+        });
+        remaining = reclassified.loose;
+        accumulatedConflicts.push(...reclassified.looseConflicts);
+        remainingBoxes = reclassified.requestedBoxes;
+        accumulatedBoxConflicts.push(...reclassified.boxConflicts);
       }
     }
+    throw new ConflictException({ code: "pickup_order_retry_exhausted" });
   }
 
   /** 23505 on pickup_order_items_tenant_kmkey_open_uq -> the code is already open in another order. */
@@ -2088,6 +2240,169 @@ export class PickupOrdersService {
     const code = err?.code || cause?.code;
     const constraint = err?.constraint || cause?.constraint;
     return code === "23505" && constraint === "pickup_orders_kiosk_device_seq_uq";
+  }
+
+  private splitStoredConflicts(stored: readonly StoredOrderConflict[] | null | undefined): {
+    conflicts: OrderConflict[];
+    boxConflicts: BoxConflict[];
+  } {
+    const conflicts: OrderConflict[] = [];
+    const boxConflicts: BoxConflict[] = [];
+    for (const conflict of stored ?? []) {
+      if ("source" in conflict) {
+        if (conflict.source === "box" && this.isBoxConflictReason(conflict.reason)) {
+          boxConflicts.push({
+            sscc: conflict.sscc,
+            bottleCount: conflict.bottleCount,
+            reason: conflict.reason,
+          });
+        }
+        continue;
+      }
+      if (this.isOrderConflictReason(conflict.reason)) {
+        conflicts.push({ rawKm: conflict.rawKm, reason: conflict.reason });
+      }
+    }
+    return { conflicts, boxConflicts };
+  }
+
+  private isOrderConflictReason(reason: string): reason is OrderConflict["reason"] {
+    return [
+      "not_km",
+      "incomplete",
+      "unknown_product",
+      "not_allowed",
+      "duplicate",
+      "over_limit",
+    ].includes(reason);
+  }
+
+  private isBoxConflictReason(reason: string): reason is BoxConflict["reason"] {
+    return [
+      "unknown_box",
+      "box_not_closed",
+      "box_disassembled",
+      "box_contents_changed",
+      "mixed_product_box",
+      "duplicate",
+      "over_limit",
+    ].includes(reason);
+  }
+
+  private joinStoredConflicts(
+    conflicts: readonly OrderConflict[],
+    boxConflicts: readonly BoxConflict[],
+  ): StoredOrderConflict[] {
+    return [
+      ...conflicts,
+      ...boxConflicts.map((conflict) => ({ source: "box" as const, ...conflict })),
+    ];
+  }
+
+  private auditSubmittedLines(dto: CreateOrderDto, reason: string): StoredOrderConflict[] {
+    return [
+      ...dto.items.map((item) => ({ rawKm: item.rawKm, reason })),
+      ...(dto.boxes ?? []).map((box) => ({
+        source: "box" as const,
+        sscc: box.sscc,
+        bottleCount: null,
+        reason,
+      })),
+    ];
+  }
+
+  private async findKioskOrderOutcome(
+    tenantId: string,
+    kioskId: string,
+    deviceSeq: number,
+    db: Pick<Db, "select"> = this.db,
+  ): Promise<KioskOrderOutcome | null> {
+    const [order] = await db
+      .select({
+        id: schema.pickupOrders.id,
+        orderNo: schema.pickupOrders.orderNo,
+        itemCount: schema.pickupOrders.itemCount,
+        syncConflicts: schema.pickupOrders.syncConflicts,
+      })
+      .from(schema.pickupOrders)
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.kioskId, kioskId),
+          eq(schema.pickupOrders.deviceSeq, deviceSeq),
+        ),
+      );
+    if (!order) return null;
+    const boxes = await db
+      .select({ sscc: schema.pickupOrderBoxes.sscc, bottleCount: schema.pickupOrderBoxes.bottleCount })
+      .from(schema.pickupOrderBoxes)
+      .where(
+        and(
+          eq(schema.pickupOrderBoxes.tenantId, tenantId),
+          eq(schema.pickupOrderBoxes.orderId, order.id),
+        ),
+      )
+      .orderBy(asc(schema.pickupOrderBoxes.createdAt), asc(schema.pickupOrderBoxes.id));
+    return {
+      orderNo: order.orderNo,
+      itemCount: order.itemCount,
+      ...this.splitStoredConflicts(order.syncConflicts),
+      acceptedBoxes: boxes.toSorted((left, right) => left.sscc.localeCompare(right.sscc)),
+    };
+  }
+
+  private async findKioskRejectionOutcome(
+    tenantId: string,
+    kioskId: string,
+    deviceSeq: number,
+  ): Promise<KioskOrderOutcome | null> {
+    const [rejection] = await this.db
+      .select({ codes: schema.pickupScanRejections.codes })
+      .from(schema.pickupScanRejections)
+      .where(
+        and(
+          eq(schema.pickupScanRejections.tenantId, tenantId),
+          eq(schema.pickupScanRejections.kioskId, kioskId),
+          eq(schema.pickupScanRejections.deviceSeq, deviceSeq),
+        ),
+      );
+    if (!rejection) return null;
+    const storedBox = rejection.codes.find(
+      (code): code is Extract<(typeof rejection.codes)[number], { source: "box" }> =>
+        "source" in code && code.source === "box",
+    );
+    if (!storedBox) return null;
+    return {
+      orderNo: "",
+      itemCount: 0,
+      ...this.splitStoredConflicts(rejection.codes),
+      acceptedBoxes: [],
+      rejected: true,
+      terminalReason: storedBox.reason,
+    };
+  }
+
+  private throwPersistedKioskRejection(outcome: KioskOrderOutcome): never {
+    if (outcome.terminalReason === "unknown_badge") {
+      throw new UnprocessableEntityException("Unknown or inactive badge");
+    }
+    if (outcome.terminalReason === "writeoff_forbidden") {
+      throw new UnprocessableEntityException({
+        code: "writeoff_forbidden",
+        message: "Employee is not allowed to create writeoffs",
+      });
+    }
+    if (outcome.terminalReason === "writeoff_reason_required") {
+      throw new BadRequestException("writeoffReasonId is required when reason is writeoff");
+    }
+    if (outcome.terminalReason === "unknown_reason") {
+      throw new BadRequestException("Unknown or archived writeoff reason");
+    }
+    this.throwRejectedOrder(outcome);
+  }
+
+  private throwRejectedOrder(outcome: KioskOrderOutcome): never {
+    throw new UnprocessableEntityException(orderRejectedResponse(outcome));
   }
 
   private async consumeKioskAdmission(

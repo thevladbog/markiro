@@ -268,7 +268,17 @@ export const pickupOrders = pgTable(
     // order can arrive hours late, so the admin must be able to see what was
     // dropped; without this the conflicts only ever existed in the HTTP
     // response the kiosk got.
-    syncConflicts: jsonb("sync_conflicts").$type<{ rawKm: string; reason: string }[]>(),
+    syncConflicts: jsonb("sync_conflicts").$type<
+      (
+        | { rawKm: string; reason: string }
+        | {
+            source: "box";
+            sscc: string;
+            bottleCount: number | null;
+            reason: string;
+          }
+      )[]
+    >(),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     resolvedAt: timestamp("resolved_at", { withTimezone: true }),
     resolvedByUserId: text("resolved_by_user_id"),
@@ -536,7 +546,19 @@ export const pickupScanRejections = pgTable(
     badgeCode: text("badge_code"),
     orderId: uuid("order_id"),
     deviceSeq: integer("device_seq").notNull(),
-    codes: jsonb("codes").$type<{ rawKm: string; reason: string }[]>().notNull(),
+    codes: jsonb("codes")
+      .$type<
+        (
+          | { rawKm: string; reason: string }
+          | {
+              source: "box";
+              sscc: string;
+              bottleCount: number | null;
+              reason: string;
+            }
+        )[]
+      >()
+      .notNull(),
     scannedAt: timestamp("scanned_at", { withTimezone: true }).notNull(),
     syncedAt: timestamp("synced_at", { withTimezone: true }).notNull().defaultNow(),
     acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),

@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { buildSscc, canonicalizeKm, kmHash, kmKey } from "@markiro/domain";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { AppModule } from "../src/app.module";
@@ -12,7 +12,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { advanceBoxRegistryVersion } from "../src/modules/boxes/box-registry-version";
-import { createTestStationDevice, signUpAndActivate } from "./support/auth";
+import { createTestEmployee, createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 const ready = Boolean(
@@ -35,6 +35,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
   let productId: string;
   let initialUntil: string;
   let memberKey: string;
+  let pickupBadge: string;
   const pagingBoxIds: string[] = [];
 
   beforeAll(async () => {
@@ -83,6 +84,18 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       name: "Registry kiosk",
       deviceTokenHash: hashDeviceToken(token),
     });
+    const employeeId = randomUUID();
+    pickupBadge = `box-badge-${randomUUID()}`;
+    await createTestEmployee(
+      db,
+      { id: employeeId, tenantId, fullName: "Box employee" },
+      { limitMode: "unlimited", dayLimit: 5 },
+    );
+    await db.insert(schema.employeeBadges).values({
+      tenantId,
+      employeeId,
+      badgeCode: pickupBadge,
+    });
     stationKey = (await createTestStationDevice(app, agent, "Registry station")).apiKey;
 
     productId = randomUUID();
@@ -91,6 +104,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       tenantId,
       gtin14: GTIN,
       name: "Bottle",
+      unitPrice: "17.50",
     });
     const shiftId = randomUUID();
     await db.insert(schema.shifts).values({
@@ -365,6 +379,140 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       if (!committed) await client.query("rollback");
       client.release();
     }
+  });
+
+  it("accepts boxes atomically, expands members, snapshots current price, and replays exactly", async () => {
+    const requested = await db
+      .select({ sscc: schema.boxes.sscc })
+      .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), isNull(schema.boxes.disassembledAt)));
+    const ssccs = requested
+      .map((row) => row.sscc)
+      .filter((sscc): sscc is string => sscc !== null)
+      .slice(0, 3)
+      .toReversed();
+    const body = {
+      deviceSeq: 900,
+      badgeCode: pickupBadge,
+      reason: "buy" as const,
+      items: [],
+      boxes: ssccs.map((sscc) => ({ sscc })),
+    };
+    const first = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send(body)
+      .expect(201);
+    expect(first.body).toMatchObject({ itemCount: 13, conflicts: [], boxConflicts: [] });
+    expect(first.body.acceptedBoxes).toEqual(
+      [...ssccs]
+        .sort()
+        .map((sscc) => ({ sscc, bottleCount: sscc === eligibleSscc ? 12 : 1 })),
+    );
+
+    const [order] = await db
+      .select({ id: schema.pickupOrders.id, totalPrice: schema.pickupOrders.totalPrice })
+      .from(schema.pickupOrders)
+      .where(
+        and(
+          eq(schema.pickupOrders.tenantId, tenantId),
+          eq(schema.pickupOrders.deviceSeq, 900),
+        ),
+      );
+    expect(order?.totalPrice).toBe("227.50");
+    expect(
+      await db
+        .select({ id: schema.pickupOrderBoxes.id })
+        .from(schema.pickupOrderBoxes)
+        .where(eq(schema.pickupOrderBoxes.orderId, order!.id)),
+    ).toHaveLength(2);
+    const expanded = await db
+      .select({ orderBoxId: schema.pickupOrderItems.orderBoxId })
+      .from(schema.pickupOrderItems)
+      .where(eq(schema.pickupOrderItems.orderId, order!.id));
+    expect(expanded).toHaveLength(13);
+    expect(expanded.every((item) => item.orderBoxId !== null)).toBe(true);
+
+    const replay = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send(body)
+      .expect(201);
+    expect(replay.body).toEqual(first.body);
+  });
+
+  it("rejects a whole previously-used box with 422 and creates no empty order", async () => {
+    const before = await db
+      .select({ id: schema.pickupOrders.id })
+      .from(schema.pickupOrders)
+      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 901)));
+    expect(before).toEqual([]);
+
+    const response = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send({
+        deviceSeq: 901,
+        badgeCode: pickupBadge,
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: eligibleSscc }],
+      })
+      .expect(422);
+    expect(response.body).toEqual({
+      code: "order_rejected",
+      message: "No submitted order lines were accepted",
+      conflicts: [],
+      boxConflicts: [{ sscc: eligibleSscc, bottleCount: 12, reason: "duplicate" }],
+      acceptedBoxes: [],
+    });
+    expect(
+      await db
+        .select({ id: schema.pickupOrders.id })
+        .from(schema.pickupOrders)
+        .where(
+          and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 901)),
+        ),
+    ).toEqual([]);
+
+    const replay = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send({
+        deviceSeq: 901,
+        badgeCode: pickupBadge,
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: eligibleSscc }],
+      })
+      .expect(422);
+    expect(replay.body).toEqual(response.body);
+  });
+
+  it("makes a foreign-tenant SSCC indistinguishable from an unknown box", async () => {
+    const foreignSscc = buildSscc(3, "4600682", 999);
+    const response = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send({
+        deviceSeq: 902,
+        badgeCode: pickupBadge,
+        reason: "buy",
+        items: [],
+        boxes: [{ sscc: foreignSscc }],
+      })
+      .expect(422);
+    expect(response.body.boxConflicts).toEqual([
+      { sscc: foreignSscc, bottleCount: null, reason: "unknown_box" },
+    ]);
+    expect(
+      await db
+        .select({ id: schema.pickupOrders.id })
+        .from(schema.pickupOrders)
+        .where(
+          and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 902)),
+        ),
+    ).toEqual([]);
   });
 
   it("emits a remove delta after disassembly", async () => {

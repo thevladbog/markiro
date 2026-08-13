@@ -6,6 +6,11 @@ import {
   kioskOrderPayloadDigest,
 } from "../src/modules/pickup-orders/kiosk-admission-proof";
 import { admissionSequenceWithinWindow } from "../src/modules/pickup-orders/kiosk-admission-proof";
+import {
+  createOrderAdmissionSchema,
+  createOrderSchema,
+} from "../src/modules/pickup-orders/dto";
+import { buildSscc } from "@markiro/domain";
 
 const order = {
   deviceSeq: 17,
@@ -13,6 +18,8 @@ const order = {
   reason: "buy" as const,
   items: [{ rawKm: "010460704360021721serial" }],
 };
+const ssccA = buildSscc(3, "4600682", 41);
+const ssccB = buildSscc(3, "4600682", 42);
 
 describe("durable kiosk order admission", () => {
   it("bounds outstanding proofs without requiring dense device sequences", () => {
@@ -57,6 +64,85 @@ describe("durable kiosk order admission", () => {
     expect(kioskOrderPayloadDigest({ ...order, items: [{ rawKm: "different-content" }] })).not.toBe(
       kioskOrderPayloadDigest(order),
     );
+    expect(kioskOrderPayloadDigest(order)).toBe(
+      "2817e3f27914b23bce65957cc9f37983a2f781c63870c333e7e428c4be52bf02",
+    );
+  });
+
+  it("keeps legacy proof bytes but canonically sorts vNext copies", () => {
+    const items = [{ rawKm: "z" }, { rawKm: "a" }];
+    const boxes = [{ sscc: ssccB }, { sscc: ssccA }];
+    const legacy = { ...order, items };
+    const vNext = { ...legacy, boxes };
+
+    expect(canonicalKioskOrderContent(legacy)).toEqual({
+      deviceSeq: 17,
+      badgeDigest: null,
+      badgeCode: "badge-a",
+      reason: "buy",
+      writeoffReasonId: null,
+      items,
+    });
+    expect(canonicalKioskOrderContent(vNext)).toEqual({
+      deviceSeq: 17,
+      badgeDigest: null,
+      badgeCode: "badge-a",
+      reason: "buy",
+      writeoffReasonId: null,
+      items: [{ rawKm: "a" }, { rawKm: "z" }],
+      boxes: [{ sscc: ssccA }, { sscc: ssccB }],
+    });
+    expect(items).toEqual([{ rawKm: "z" }, { rawKm: "a" }]);
+    expect(boxes).toEqual([{ sscc: ssccB }, { sscc: ssccA }]);
+  });
+
+  it("requires at least one unique canonical loose item or box", () => {
+    const base = { deviceSeq: 1, badgeCode: "badge", reason: "buy" as const };
+    expect(createOrderSchema.safeParse({ ...base, items: [] }).success).toBe(false);
+    expect(
+      createOrderSchema.safeParse({ ...base, items: [], boxes: [{ sscc: ssccA }] }).success,
+    ).toBe(true);
+    expect(
+      createOrderAdmissionSchema.safeParse({
+        ...base,
+        items: [{ rawKm: "one" }],
+        boxes: [],
+      }).success,
+    ).toBe(true);
+    expect(
+      createOrderSchema.safeParse({
+        ...base,
+        items: [],
+        boxes: [{ sscc: ssccA }, { sscc: ssccA }],
+      }).success,
+    ).toBe(false);
+    expect(
+      createOrderSchema.safeParse({
+        ...base,
+        items: [],
+        boxes: [{ sscc: `00${ssccA}` }],
+      }).success,
+    ).toBe(false);
+    expect(
+      createOrderSchema.safeParse({
+        ...base,
+        items: [{ rawKm: "ж".repeat(600) }],
+      }).success,
+    ).toBe(false);
+    expect(
+      createOrderSchema.safeParse({
+        ...base,
+        items: [],
+        boxes: [{ sscc: ssccA, bottleCount: 12 }],
+      }).success,
+    ).toBe(false);
+    expect(
+      createOrderSchema.safeParse({
+        ...base,
+        items: [],
+        boxes: [{ sscc: ssccA, members: ["secret"] }],
+      }).success,
+    ).toBe(false);
   });
 
   it("issues opaque high-entropy tokens and exposes only deterministic hashes for persistence", () => {

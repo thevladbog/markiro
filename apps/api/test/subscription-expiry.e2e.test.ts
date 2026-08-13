@@ -560,7 +560,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", token)
-        .send({ deviceSeq, badgeCode, reason: "buy", items: [] })
+        .send({ deviceSeq, badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(201);
     const firstAdmission = await reserve(kioskToken, 1);
     const laterAdmission = await reserve(kioskToken, 3);
@@ -574,7 +574,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq,
           badgeCode,
           reason: "buy",
-          items: [],
+          items: [{ rawKm: "not-a-km" }],
           createdAt,
           ...(admissionProof ? { admissionProof } : {}),
         });
@@ -613,7 +613,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 3,
         badgeCode,
         reason: "buy",
-        items: [],
+        items: [{ rawKm: "not-a-km" }],
         createdAt: laterAdmission.body.claimedAt,
         admissionProof: laterAdmission.body.admissionProof,
       })
@@ -627,7 +627,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 1,
         badgeCode,
         reason: "buy",
-        items: [],
+        items: [{ rawKm: "not-a-km" }],
         createdAt: secondAdmission.body.claimedAt,
         admissionProof: secondAdmission.body.admissionProof,
       })
@@ -663,7 +663,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         deviceSeq: 5,
         badgeCode: otherBadgeCode,
         reason: "buy",
-        items: [],
+        items: [{ rawKm: "not-a-km" }],
         createdAt: firstAdmission.body.claimedAt,
       })
       .expect(403, { code: "subscription_read_only" });
@@ -671,7 +671,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 4, badgeCode, reason: "buy", items: [], createdAt: "not-a-date" })
+      .send({ deviceSeq: 4, badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }], createdAt: "not-a-date" })
       .expect(400);
   });
 
@@ -705,7 +705,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         .post("/kiosk/orders")
         .set("x-kiosk-token", kioskToken)
         .set("x-kiosk-capabilities", capability)
-        .send({ badgeCode, reason: "buy", items: [], createdAt: createdAt.toISOString(), ...body });
+        .send({ badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }], createdAt: createdAt.toISOString(), ...body });
 
     const audit = vi.spyOn(Logger.prototype, "warn");
     try {
@@ -754,7 +754,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const startsAt = new Date(Date.now() - 60_000);
     const endsAt = new Date(Date.now() + 86_400_000);
     const subscription = await attachPlan(tenantId, { startsAt, endsAt });
-    const content = { badgeCode, reason: "buy", items: [] };
+    const content = { badgeCode, reason: "buy", items: [{ rawKm: "not-a-km" }] };
     const reserve = async (deviceSeq: number) =>
       request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
@@ -952,7 +952,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       const response = await request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", kioskToken)
-        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [] });
+        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] });
       expect(response.status).toBe(201);
       admissions.push({
         deviceSeq,
@@ -963,7 +963,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     await request(app!.getHttpServer())
       .post("/kiosk/order-admissions")
       .set("x-kiosk-token", kioskToken)
-      .send({ deviceSeq: 128, badgeCode: volumeBadge, reason: "buy", items: [] })
+      .send({ deviceSeq: 128, badgeCode: volumeBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
       .expect(409);
     const outstanding = await db
       .select({ deviceSeq: schema.kioskOrderAdmissions.deviceSeq })
@@ -984,7 +984,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq: admission.deviceSeq,
           badgeCode: volumeBadge,
           reason: "buy",
-          items: [],
+          items: [{ rawKm: "not-a-km" }],
           createdAt: admission.claimedAt,
           admissionProof: admission.admissionProof,
         });
@@ -1001,7 +1001,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       const admission = await request(app!.getHttpServer())
         .post("/kiosk/order-admissions")
         .set("x-kiosk-token", kioskToken)
-        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [] })
+        .send({ deviceSeq, badgeCode: volumeBadge, reason: "buy", items: [{ rawKm: "not-a-km" }] })
         .expect(201);
       await request(app!.getHttpServer())
         .post("/kiosk/orders")
@@ -1011,7 +1011,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
           deviceSeq,
           badgeCode: volumeBadge,
           reason: "buy",
-          items: [],
+          items: [{ rawKm: "not-a-km" }],
           createdAt: admission.body.claimedAt,
           admissionProof: admission.body.admissionProof,
         })
@@ -1093,7 +1093,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       startsAt: new Date(Date.now() - 60_000),
       endsAt: new Date(Date.now() + 86_400_000),
     });
-    const content = { deviceSeq: 1, badgeCode, reason: "buy" as const, items: [] };
+    const content = { deviceSeq: 1, badgeCode, reason: "buy" as const, items: [{ rawKm: "not-a-km" }] };
     const created = await request(app!.getHttpServer())
       .post("/kiosk/orders")
       .set("x-kiosk-token", kioskToken)

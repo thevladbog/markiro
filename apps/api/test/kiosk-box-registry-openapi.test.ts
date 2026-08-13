@@ -66,4 +66,55 @@ describe("kiosk box registry OpenAPI contract", () => {
       await app.close();
     }
   });
+
+  it("documents atomic box order results and the aggregate budget error", async () => {
+    const ref = await Test.createTestingModule({
+      controllers: [KioskController],
+      providers: [
+        { provide: BoxRegistryService, useValue: {} },
+        { provide: PickupOrdersService, useValue: {} },
+        { provide: OrgProfileService, useValue: {} },
+      ],
+    })
+      .overrideGuard(KioskDeviceGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = ref.createNestApplication();
+    await app.init();
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("orders contract").setVersion("test").build(),
+      );
+      const responses = document.paths["/kiosk/orders"]?.post?.responses ?? {};
+      expect(Object.keys(responses)).toEqual(expect.arrayContaining(["201", "400", "413", "422"]));
+      expect(JSON.stringify(responses["201"])).toContain("acceptedBoxes");
+      expect(JSON.stringify(responses["413"])).toContain("box_request_too_large");
+      const requestBody = document.paths["/kiosk/orders"]?.post?.requestBody;
+      expect(JSON.stringify(requestBody)).toContain("At least one line");
+      expect(requestBody && !("$ref" in requestBody)).toBe(true);
+      if (!requestBody || "$ref" in requestBody) throw new Error("missing inline request body");
+      const requestSchema = (
+        requestBody.content as Record<string, { schema?: Record<string, unknown> }>
+      )["application/json"]?.schema;
+      const properties = requestSchema?.properties as Record<string, Record<string, unknown>>;
+      expect(properties.items).toMatchObject({ type: "array", maxItems: 500 });
+      expect(properties.boxes).toMatchObject({ type: "array", maxItems: 100 });
+      expect(Object.keys(properties)).toEqual(
+        expect.arrayContaining(["createdAt", "admissionProof", "admissionNonce"]),
+      );
+      const boxItems = properties.boxes?.items as Record<string, unknown> | undefined;
+      if (!boxItems) throw new Error("missing boxes item schema");
+      expect(
+        boxItems.properties as Record<string, unknown>,
+      ).toEqual({ sscc: { type: "string", pattern: "^[0-9]{18}$" } });
+      expect(boxItems.additionalProperties).toBe(false);
+      expect(JSON.stringify(responses["201"])).toContain("unknown_box");
+      expect(JSON.stringify(responses["422"])).toContain("order_rejected");
+    } finally {
+      await app.close();
+    }
+  });
 });
