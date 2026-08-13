@@ -16,6 +16,43 @@ const client = createStationClient({
 });
 
 describe("NewShift", () => {
+  it("returns from the initial GTIN screen to shift selection", () => {
+    const onBack = vi.fn();
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("returns from the resolved-product screen to shift selection", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [{ id: "p1", gtin14: "04600000000015", name: "Cola", status: "active" }],
+          }),
+          { status: 200 },
+        ),
+      );
+    const onBack = vi.fn();
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
+    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
+      target: { value: "4600000000015" },
+    });
+    fireEvent.submit(screen.getByLabelText("Type or scan a GTIN").closest("form")!);
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it("renders input, found, and missing as mutually exclusive fixed state panels", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

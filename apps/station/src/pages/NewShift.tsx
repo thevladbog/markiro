@@ -134,6 +134,9 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
             <Button size="floor" fullWidth loading={busy} onClick={() => void start()}>
               {t("shifts.start")}
             </Button>
+            <Button size="floor" fullWidth variant="secondary" disabled={busy} onClick={onBack}>
+              {t("shifts.back")}
+            </Button>
           </FloorFooter>
         }
       >
@@ -175,6 +178,9 @@ export function NewShift({ client, onStarted, onBack }: NewShiftProps) {
         <FloorFooter ariaLabel={t("shifts.newActions")}>
           <Button size="floor" type="submit" form="new-shift-resolve" fullWidth loading={busy}>
             {t("shifts.open")}
+          </Button>
+          <Button size="floor" fullWidth variant="secondary" disabled={busy} onClick={onBack}>
+            {t("shifts.back")}
           </Button>
         </FloorFooter>
       }
