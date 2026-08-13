@@ -1,12 +1,15 @@
 import { randomUUID } from "node:crypto";
 import express from "express";
+import sharp from "sharp";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { and, eq } from "drizzle-orm";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
+import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
@@ -81,6 +84,17 @@ describe.skipIf(!ready)("products e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  const storedObjects = new Map<string, Buffer>();
+  const storage = {
+    ensureBucket: vi.fn().mockResolvedValue(undefined),
+    put: vi.fn(async (key: string, body: Buffer) => {
+      storedObjects.set(key, body);
+    }),
+    delete: vi.fn(async (key: string) => {
+      storedObjects.delete(key);
+    }),
+    presignRead: vi.fn(async (key: string) => `https://signed.invalid/${encodeURIComponent(key)}`),
+  };
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -88,8 +102,11 @@ describe.skipIf(!ready)("products e2e", () => {
     db = setup.db;
 
     const ref = await Test.createTestingModule({
-      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL })],
-    }).compile();
+      imports: [AppModule.forRoot({ ...setup, databaseUrl: env.DATABASE_URL, env })],
+    })
+      .overrideProvider(ObjectStorageService)
+      .useValue(storage)
+      .compile();
 
     app = ref.createNestApplication({ bodyParser: false });
     const server = app.getHttpAdapter().getInstance();
@@ -101,6 +118,21 @@ describe.skipIf(!ready)("products e2e", () => {
 
   afterAll(async () => {
     await app?.close();
+  });
+
+  beforeEach(() => {
+    storedObjects.clear();
+    vi.clearAllMocks();
+    storage.ensureBucket.mockResolvedValue(undefined);
+    storage.put.mockImplementation(async (key: string, body: Buffer) => {
+      storedObjects.set(key, body);
+    });
+    storage.delete.mockImplementation(async (key: string) => {
+      storedObjects.delete(key);
+    });
+    storage.presignRead.mockImplementation(
+      async (key: string) => `https://signed.invalid/${encodeURIComponent(key)}`,
+    );
   });
 
   async function signUpWithInactiveOrg(agent: ReturnType<typeof request.agent>): Promise<string> {
@@ -129,6 +161,22 @@ describe.skipIf(!ready)("products e2e", () => {
       .send({ organizationId: orgId })
       .expect(200);
     return orgId;
+  }
+
+  async function actorForTenant(tenantId: string): Promise<string> {
+    const [member] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId))
+      .limit(1);
+    if (!member) throw new Error("Expected tenant owner fixture");
+    return member.userId;
+  }
+
+  async function productImageFixture(background = "#2463eb"): Promise<Buffer> {
+    return sharp({ create: { width: 640, height: 320, channels: 3, background } })
+      .jpeg()
+      .toBuffer();
   }
 
   it("GET /products is unauthorized without a session", async () => {
@@ -583,6 +631,421 @@ describe.skipIf(!ready)("products e2e", () => {
       egaisCode: "0123456789",
       externalRef: "ext-ref-001",
     });
+  });
+
+  it("uploads, enriches, replaces, reads, and idempotently deletes a private product image", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const actorUserId = await actorForTenant(tenantId);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Image Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+    expect(created.body.image).toBeNull();
+
+    const first = await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#2463eb"), {
+        filename: "source-one.jpg",
+        contentType: "image/jpeg",
+      })
+      .expect(201);
+    expect(first.body.image).toMatchObject({
+      contentType: "image/webp",
+      checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
+      byteSize: expect.any(Number),
+      width: 640,
+      height: 320,
+    });
+    expect(first.body).not.toHaveProperty("assetId");
+    expect(first.body).not.toHaveProperty("objectKey");
+    expect(first.body.image).not.toHaveProperty("assetId");
+    expect(first.body.image).not.toHaveProperty("objectKey");
+
+    const [firstAsset] = await db
+      .select({
+        id: schema.mediaAssets.id,
+        ownerTenantId: schema.mediaAssets.ownerTenantId,
+        ownerUserId: schema.mediaAssets.ownerUserId,
+        objectKey: schema.mediaAssets.objectKey,
+        contentType: schema.mediaAssets.contentType,
+        byteSize: schema.mediaAssets.byteSize,
+        checksum: schema.mediaAssets.checksum,
+        width: schema.mediaAssets.width,
+        height: schema.mediaAssets.height,
+        status: schema.mediaAssets.status,
+      })
+      .from(schema.productImages)
+      .innerJoin(schema.mediaAssets, eq(schema.mediaAssets.id, schema.productImages.assetId))
+      .where(
+        and(
+          eq(schema.productImages.tenantId, tenantId),
+          eq(schema.productImages.productId, productId),
+        ),
+      );
+    expect(firstAsset).toMatchObject({
+      ownerTenantId: tenantId,
+      ownerUserId: null,
+      objectKey: expect.stringMatching(
+        new RegExp(`^tenants/${tenantId}/products/${productId}/[a-f0-9-]+\\.webp$`),
+      ),
+      contentType: "image/webp",
+      byteSize: first.body.image.byteSize,
+      checksum: first.body.image.checksum,
+      width: 640,
+      height: 320,
+      status: "active",
+    });
+    expect(storedObjects.get(firstAsset!.objectKey)).toBeDefined();
+
+    const detail = await agent.get(`/products/${productId}`).expect(200);
+    expect(detail.body.image).toEqual(first.body.image);
+    const list = await agent.get("/products").expect(200);
+    expect(list.body.items).toEqual([
+      expect.objectContaining({ id: productId, image: first.body.image }),
+    ]);
+    const updated = await agent
+      .patch(`/products/${productId}`)
+      .send({ name: "Image Widget Updated" })
+      .expect(200);
+    expect(updated.body.image).toEqual(first.body.image);
+
+    const read = await agent
+      .get(`/products/${productId}/image/${first.body.image.checksum}`)
+      .redirects(0)
+      .expect(302);
+    expect(read.headers.location).toBe(
+      `https://signed.invalid/${encodeURIComponent(firstAsset!.objectKey)}`,
+    );
+    expect(storage.presignRead).toHaveBeenCalledWith(firstAsset!.objectKey, 300);
+
+    const second = await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#dc2626"), {
+        filename: "source-two.png",
+        contentType: "image/png",
+      })
+      .expect(201);
+    expect(second.body.image.checksum).not.toBe(first.body.image.checksum);
+    await agent.get(`/products/${productId}/image/${first.body.image.checksum}`).expect(404);
+    expect(storedObjects.has(firstAsset!.objectKey)).toBe(false);
+    expect(
+      await db
+        .select({ id: schema.mediaAssets.id })
+        .from(schema.mediaAssets)
+        .where(eq(schema.mediaAssets.id, firstAsset!.id)),
+    ).toHaveLength(0);
+
+    const audits = await db
+      .select({
+        actorUserId: schema.tenantAuditEvents.actorUserId,
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+        ),
+      )
+      .orderBy(schema.tenantAuditEvents.createdAt);
+    expect(audits).toEqual([
+      {
+        actorUserId,
+        action: "product.image.uploaded",
+        outcome: "success",
+        targetType: "product",
+        targetId: productId,
+        before: { image: null },
+        after: { image: first.body.image },
+      },
+      {
+        actorUserId,
+        action: "product.image.replaced",
+        outcome: "success",
+        targetType: "product",
+        targetId: productId,
+        before: { image: first.body.image },
+        after: { image: second.body.image },
+      },
+    ]);
+
+    await agent.delete(`/products/${productId}/image`).expect(204);
+    await agent.delete(`/products/${productId}/image`).expect(204);
+    expect((await agent.get(`/products/${productId}`).expect(200)).body.image).toBeNull();
+    const finalAudits = await db
+      .select({
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+        ),
+      )
+      .orderBy(schema.tenantAuditEvents.createdAt);
+    expect(finalAudits).toEqual([
+      { action: "product.image.uploaded", outcome: "success" },
+      { action: "product.image.replaced", outcome: "success" },
+      { action: "product.image.deleted", outcome: "success" },
+    ]);
+  });
+
+  it("rejects invalid and oversized image sources without storing an object", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Bounded Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+
+    await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", Buffer.from("<svg><script>alert(1)</script></svg>"), {
+        filename: "not-an-image.svg",
+        contentType: "image/svg+xml",
+      })
+      .expect(400);
+    await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", Buffer.alloc(5 * 1024 * 1024 + 1), {
+        filename: "too-large.png",
+        contentType: "image/png",
+      })
+      .expect(413);
+
+    expect(storage.put).not.toHaveBeenCalled();
+    expect((await agent.get(`/products/${productId}`).expect(200)).body.image).toBeNull();
+  });
+
+  it("masks unknown and foreign product image operations as 404 before storage", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+    const created = await owner
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Tenant A Image" })
+      .expect(201);
+    const productId = created.body.id as string;
+    const outsider = request.agent(app!.getHttpServer());
+    await signUpAndActivate(outsider);
+
+    await outsider
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture(), "foreign.jpg")
+      .expect(404);
+    await outsider.delete(`/products/${productId}/image`).expect(404);
+    await outsider.get(`/products/${productId}/image/${"a".repeat(64)}`).expect(404);
+    await outsider
+      .post(`/products/${randomUUID()}/image`)
+      .attach("image", await productImageFixture(), "unknown.jpg")
+      .expect(404);
+    expect(storage.put).not.toHaveBeenCalled();
+  });
+
+  it("keeps the current image when object storage fails and records safe failure metadata", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const actorUserId = await actorForTenant(tenantId);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Storage Failure Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+    storage.put.mockRejectedValueOnce(new Error("private storage detail"));
+
+    await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture(), "failure.jpg")
+      .expect(503, {
+        message: "Product image storage is unavailable",
+        error: "Service Unavailable",
+        statusCode: 503,
+      });
+
+    expect((await agent.get(`/products/${productId}`).expect(200)).body.image).toBeNull();
+    const [staging] = await db
+      .select({
+        id: schema.mediaAssets.id,
+        checksum: schema.mediaAssets.checksum,
+        status: schema.mediaAssets.status,
+      })
+      .from(schema.mediaAssets)
+      .where(eq(schema.mediaAssets.ownerTenantId, tenantId))
+      .orderBy(schema.mediaAssets.createdAt);
+    expect(staging).toMatchObject({
+      status: "staging",
+      checksum: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
+    const [audit] = await db
+      .select({
+        actorUserId: schema.tenantAuditEvents.actorUserId,
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, productId),
+        ),
+      );
+    expect(audit).toEqual({
+      actorUserId,
+      action: "product.image.uploaded",
+      outcome: "failure",
+      targetType: "product",
+      targetId: productId,
+      after: {
+        attemptedImage: expect.objectContaining({
+          checksum: staging!.checksum,
+          contentType: "image/webp",
+        }),
+        reason: "storage_unavailable",
+      },
+    });
+    expect(JSON.stringify(audit)).not.toMatch(/objectKey|assetId|private storage detail/);
+  });
+
+  it("serializes concurrent replacements and retains exactly one active current image", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Concurrent Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+    await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#111827"), "initial.jpg")
+      .expect(201);
+
+    let releaseUploads!: () => void;
+    const uploadsReady = new Promise<void>((resolve) => {
+      releaseUploads = resolve;
+    });
+    let pendingUploads = 0;
+    storage.put.mockImplementation(async (key: string, body: Buffer) => {
+      pendingUploads += 1;
+      if (pendingUploads === 2) releaseUploads();
+      await uploadsReady;
+      storedObjects.set(key, body);
+    });
+    const [red, green] = await Promise.all([
+      agent
+        .post(`/products/${productId}/image`)
+        .attach("image", await productImageFixture("#dc2626"), "red.jpg"),
+      agent
+        .post(`/products/${productId}/image`)
+        .attach("image", await productImageFixture("#16a34a"), "green.jpg"),
+    ]);
+    expect(red.status).toBe(201);
+    expect(green.status).toBe(201);
+
+    const current = await agent.get(`/products/${productId}`).expect(200);
+    expect([red.body.image.checksum, green.body.image.checksum]).toContain(
+      current.body.image.checksum,
+    );
+    const active = await db
+      .select({ id: schema.mediaAssets.id })
+      .from(schema.productImages)
+      .innerJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.productImages.tenantId, tenantId),
+          eq(schema.productImages.productId, productId),
+        ),
+      );
+    expect(active).toHaveLength(1);
+    expect(storedObjects.size).toBe(1);
+  });
+
+  it("preserves the old image when the transactional switch fails", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Switch Failure Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+    const initial = await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture("#111827"), "initial.jpg")
+      .expect(201);
+    const suffix = randomUUID().replaceAll("-", "");
+    const functionName = `fail_product_image_switch_${suffix}`;
+    const triggerName = `fail_product_image_switch_${suffix}`;
+    await setup.pool.query(
+      `create function ${functionName}() returns trigger language plpgsql as $$ begin raise exception 'forced product image switch failure'; end $$`,
+    );
+    await setup.pool.query(
+      `create trigger ${triggerName} before update on product_images for each row execute function ${functionName}()`,
+    );
+    try {
+      await agent
+        .post(`/products/${productId}/image`)
+        .attach("image", await productImageFixture("#f59e0b"), "replacement.jpg")
+        .expect(503);
+    } finally {
+      await setup.pool.query(`drop trigger ${triggerName} on product_images`);
+      await setup.pool.query(`drop function ${functionName}()`);
+    }
+
+    expect((await agent.get(`/products/${productId}`).expect(200)).body.image).toEqual(
+      initial.body.image,
+    );
+    const assets = await db
+      .select({ status: schema.mediaAssets.status })
+      .from(schema.mediaAssets)
+      .where(eq(schema.mediaAssets.ownerTenantId, tenantId));
+    expect(assets.map(({ status }: { status: string }) => status).sort()).toEqual([
+      "active",
+      "staging",
+    ]);
+  });
+
+  it("marks product media deleting before product cascade and leaves retryable cleanup", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const created = await agent
+      .post("/products")
+      .send({ gtin: EAN13_CANONICAL, name: "Delete Cleanup Widget" })
+      .expect(201);
+    const productId = created.body.id as string;
+    await agent
+      .post(`/products/${productId}/image`)
+      .attach("image", await productImageFixture(), "delete.jpg")
+      .expect(201);
+    storage.delete.mockRejectedValueOnce(new Error("S3 unavailable"));
+
+    await agent.delete(`/products/${productId}`).expect(204);
+    const references = await db
+      .select({ productId: schema.productImages.productId })
+      .from(schema.productImages)
+      .where(eq(schema.productImages.productId, productId));
+    const [asset] = await db
+      .select({ status: schema.mediaAssets.status })
+      .from(schema.mediaAssets)
+      .where(eq(schema.mediaAssets.ownerTenantId, tenantId));
+    expect(references).toHaveLength(0);
+    expect(asset).toEqual({ status: "deleting" });
   });
 
   // ---------------------------------------------------------------------
