@@ -33,4 +33,26 @@ describe("Windows lockdown contract", () => {
       enter.indexOf("cover_current_monitor"),
     );
   });
+
+  it("rolls back every applied window mode while preserving a monitor-coverage failure", async () => {
+    const source = await readFile(resolve(stationRoot, "src-tauri/src/commands.rs"), "utf8");
+    const rollback = source.slice(
+      source.indexOf("fn rollback_failed_lockdown"),
+      source.indexOf("pub fn enter_lockdown"),
+    );
+    const enter = source.slice(
+      source.indexOf("pub fn enter_lockdown"),
+      source.indexOf("pub fn exit_lockdown"),
+    );
+
+    expect(enter).toMatch(/if let Err\(original_failure\) = cover_current_monitor/);
+    expect(enter).toContain("rollback_failed_lockdown");
+    expect(rollback).toContain("set_fullscreen(false)");
+    expect(rollback).toContain("set_always_on_top(false)");
+    expect(rollback).toContain("set_skip_taskbar(false)");
+    expect(rollback).toContain("set_decorations(true)");
+    expect(rollback).toMatch(/if rollback_errors\.is_empty\(\) \{\s*original_failure/);
+    expect(rollback).toContain('"{original_failure}; lockdown rollback also failed: {}"');
+    expect(rollback).toContain("= false");
+  });
 });

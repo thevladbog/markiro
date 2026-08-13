@@ -80,13 +80,18 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
       and SHA-256 with `SHA256SUMS`; verify the updater bundle signature against
       `latest.json`, its immutable release URL, and the recorded commit digest
       separately.
-- [ ] Install beta.1, then beta.2 while no shift is active; confirm installation
-      is blocked during an active shift and pending outbox data is retained.
+- [ ] Install beta.1 from the immutable NSIS `*.exe` produced by the workflow
+      step `Build signed Windows NSIS updater artifacts`, pin its taskbar
+      shortcut, then update through Station to beta.2 produced by the same step
+      while no shift is active. Confirm installation is blocked during an active
+      shift and pending outbox data is retained.
 - [ ] Record any SmartScreen prompt and operator decision in the beta acceptance
       table; CI cannot replace this Windows/hardware check.
-- [ ] After manual installation, installer shortcut, taskbar and application
-      window all show the branded Markiro Station icon. The old white-circle icon
-      is absent from every shipped icon surface.
+- [ ] After the beta.1 → beta.2 restart, the desktop shortcut, Start menu,
+      previously pinned taskbar shortcut and application window all show the
+      branded Markiro Station icon. The beta.1/old white-circle icon is absent
+      from every shipped icon surface. Record both versions, Windows build,
+      `Publish station beta` workflow URL and screenshots.
 - [ ] Pair the packaged Windows Tauri WebView with a real, currently valid code
       issued by `admin.markiro.app`; record only the outcome and release/station
       identity, never the pairing code. Confirm waiting, redeeming, error and
