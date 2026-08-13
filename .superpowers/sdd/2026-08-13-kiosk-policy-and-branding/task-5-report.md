@@ -49,3 +49,18 @@ No visual browser session, real S3/MinIO request, offline kiosk, hardware, or pr
 - Cabinet logo URLs are relative, revisioned, tenant-scoped, active-only, and WebP-only; UI preview accepts only the cabinet profile path and prepends the same-origin `/api` proxy.
 - No SVG/external URL, object-storage key, secret, kiosk token, or compatibility-only kiosk limit is submitted or exposed.
 - Unrelated admin lint warnings, API fixture repair, server compatibility fields, and prior task behavior were not refactored.
+
+## Fix round 1
+
+### Review findings resolved
+
+1. The bulk day-limit field now uses the same translated positive-integer error as the single-employee editor. Zero and decimal values set `aria-invalid`, expose the associated error text, and keep limit assignment disabled; entering a valid integer removes the error and restores the action.
+2. The single-employee policy editor now owns an explicit accepted baseline. A clean editor rehydrates when a background response changes the incoming policy, while a dirty editor preserves its local draft. A successful PATCH consumes the returned employee, updates every matching employee-list cache before invalidation, adopts the returned policy as the new baseline, and clears dirty state without waiting for a refetch.
+
+### TDD and verification evidence
+
+- RED: the strengthened employee suite had four intentional failures with 17 existing/new assertions passing: clean rehydration, successful baseline/cache adoption, invalid zero, and invalid decimal. The dirty-refetch draft-preservation regression already passed against the old implementation.
+- GREEN focused: `employees.test.tsx` passes 21/21; the combined employee component/routing group passes 54/54.
+- GREEN full admin: 51 files / 643 tests passed. The established jsdom canvas/navigation messages remain non-failing environment limitations.
+- Admin typecheck, lint, and build passed. Lint retains only the five pre-existing hook warnings in unmodified boxes/conflicts pages; Vite retains its established large-chunk warning.
+- Changed-file Prettier and `git diff --check` passed. No browser or external-system verification was added in this fix round.

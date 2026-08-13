@@ -195,6 +195,7 @@ export function EmployeesPage() {
   const [bulkError, setBulkError] = useState<string | null>(null);
   const bulkLimits = useBulkEmployeePickupLimits();
   const bulkWriteoff = useBulkEmployeePickupWriteoff();
+  const bulkDayLimitValid = /^[1-9]\d*$/.test(bulkDayLimit);
 
   useEffect(() => {
     if (query.data !== undefined) setEmployeesResolved(true);
@@ -353,11 +354,14 @@ export function EmployeesPage() {
                 label={t("pages.employees.pickupPolicy.dayLimitLabel")}
                 value={bulkDayLimit}
                 inputMode="numeric"
+                {...(!bulkDayLimitValid
+                  ? { error: t("pages.employees.pickupPolicy.dayLimitError") }
+                  : {})}
                 onChange={(event) => setBulkDayLimit(event.target.value)}
               />
               <Button
                 type="button"
-                disabled={selectedIds.size === 0 || !/^[1-9]\d*$/.test(bulkDayLimit)}
+                disabled={selectedIds.size === 0 || !bulkDayLimitValid}
                 onClick={() => setConfirmation("limits")}
               >
                 {t("pages.employees.bulk.limitAction")}

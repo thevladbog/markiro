@@ -200,11 +200,20 @@ function useInvalidateEmployeesMutation<TInput>(
 }
 
 export function useUpdateEmployeePickupPolicy(): UseMutationResult<
-  unknown,
+  EmployeeDto,
   Error,
   { id: string; input: EmployeePickupPolicyInput }
 > {
-  return useInvalidateEmployeesMutation(({ id, input }) => patchPickupPolicy(id, input));
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, input }) => patchPickupPolicy(id, input),
+    onSuccess: (savedEmployee) => {
+      queryClient.setQueriesData<EmployeeDto[]>({ queryKey: EMPLOYEES_QUERY_KEY }, (employees) =>
+        employees?.map((employee) => (employee.id === savedEmployee.id ? savedEmployee : employee)),
+      );
+      void queryClient.invalidateQueries({ queryKey: EMPLOYEES_QUERY_KEY });
+    },
+  });
 }
 
 export function useBulkEmployeePickupLimits(): UseMutationResult<

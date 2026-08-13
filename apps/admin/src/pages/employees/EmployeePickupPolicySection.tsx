@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Checkbox, Input, RadioGroup } from "@markiro/ui";
@@ -9,6 +9,7 @@ import {
   useUpdateEmployeePickupPolicy,
   type EmployeeDto,
   type EmployeePickupLimitMode,
+  type EmployeePickupPolicyInput,
 } from "./api.js";
 
 interface EmployeePickupPolicySectionProps {
@@ -26,33 +27,59 @@ export function EmployeePickupPolicySection({
 }: EmployeePickupPolicySectionProps) {
   const { t } = useTranslation();
   const mutation = useUpdateEmployeePickupPolicy();
-  const [limitMode, setLimitMode] = useState<EmployeePickupLimitMode>(
-    employee.pickupPolicy.limitMode,
-  );
-  const [dayLimit, setDayLimit] = useState(String(employee.pickupPolicy.dayLimit));
-  const [canWriteoff, setCanWriteoff] = useState(employee.pickupPolicy.canWriteoff);
+  const {
+    limitMode: incomingLimitMode,
+    dayLimit: incomingDayLimit,
+    canWriteoff: incomingCanWriteoff,
+  } = employee.pickupPolicy;
+  const [limitMode, setLimitMode] = useState<EmployeePickupLimitMode>(incomingLimitMode);
+  const [dayLimit, setDayLimit] = useState(String(incomingDayLimit));
+  const [canWriteoff, setCanWriteoff] = useState(incomingCanWriteoff);
+  const [baseline, setBaseline] = useState<EmployeePickupPolicyInput>(employee.pickupPolicy);
   const [error, setError] = useState<string | null>(null);
   const validDayLimit = /^[1-9]\d*$/.test(dayLimit);
   const dirty =
-    limitMode !== employee.pickupPolicy.limitMode ||
-    dayLimit !== String(employee.pickupPolicy.dayLimit) ||
-    canWriteoff !== employee.pickupPolicy.canWriteoff;
+    limitMode !== baseline.limitMode ||
+    dayLimit !== String(baseline.dayLimit) ||
+    canWriteoff !== baseline.canWriteoff;
+  const dirtyRef = useRef(false);
+  const employeeIdRef = useRef(employee.id);
 
-  useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+    onDirtyChange(dirty);
+  }, [dirty, onDirtyChange]);
   useEffect(() => onBusyChange(mutation.isPending), [mutation.isPending, onBusyChange]);
   useEffect(
     () => onErrorChange(error !== null || !validDayLimit),
     [error, validDayLimit, onErrorChange],
   );
+  useEffect(() => {
+    const employeeChanged = employeeIdRef.current !== employee.id;
+    if (!employeeChanged && dirtyRef.current) return;
+    employeeIdRef.current = employee.id;
+    setBaseline({
+      limitMode: incomingLimitMode,
+      dayLimit: incomingDayLimit,
+      canWriteoff: incomingCanWriteoff,
+    });
+    setLimitMode(incomingLimitMode);
+    setDayLimit(String(incomingDayLimit));
+    setCanWriteoff(incomingCanWriteoff);
+  }, [employee.id, incomingCanWriteoff, incomingDayLimit, incomingLimitMode]);
 
   const submit = async () => {
     if (!validDayLimit) return;
     try {
       setError(null);
-      await mutation.mutateAsync({
+      const savedEmployee = await mutation.mutateAsync({
         id: employee.id,
         input: { limitMode, dayLimit: Number(dayLimit), canWriteoff },
       });
+      setBaseline(savedEmployee.pickupPolicy);
+      setLimitMode(savedEmployee.pickupPolicy.limitMode);
+      setDayLimit(String(savedEmployee.pickupPolicy.dayLimit));
+      setCanWriteoff(savedEmployee.pickupPolicy.canWriteoff);
       toast("ok", t("pages.employees.pickupPolicy.toasts.success"));
     } catch (cause) {
       setError(
