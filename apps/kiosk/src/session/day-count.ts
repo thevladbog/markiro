@@ -198,6 +198,45 @@ export function takenTodayElsewhere(
   return taken as number;
 }
 
+export interface EffectivePickupPolicy {
+  limited: boolean;
+  dayLimit: number;
+  canWriteoff: boolean;
+}
+
+/**
+ * Resolves today's tenant + employee policy from an untrusted bootstrap.
+ * Missing fields mean an older cached snapshot, so the fallback remains
+ * limited, preserves the legacy kiosk limit, and never grants writeoff.
+ */
+export function effectivePickupPolicy(
+  bootstrap: KioskBootstrapDto,
+  employeeId: string,
+): EffectivePickupPolicy | null {
+  const employee = bootstrap.employees?.find((one) => one.id === employeeId);
+  if (!employee) return null;
+
+  const rawEmployee = employee as Partial<(typeof bootstrap.employees)[number]>;
+  const rawBootstrap = bootstrap as Partial<KioskBootstrapDto>;
+  const rawTenantPolicy = rawBootstrap.pickupPolicy as
+    { limitsEnabled?: unknown } | null | undefined;
+  const rawLegacyLimit = (rawBootstrap.config as { dayLimitPerEmployee?: unknown } | undefined)
+    ?.dayLimitPerEmployee;
+  const rawEmployeeLimit = rawEmployee.dayLimit as unknown;
+  const dayLimit =
+    Number.isInteger(rawEmployeeLimit) && (rawEmployeeLimit as number) >= 0
+      ? (rawEmployeeLimit as number)
+      : Number.isInteger(rawLegacyLimit) && (rawLegacyLimit as number) >= 0
+        ? (rawLegacyLimit as number)
+        : 0;
+
+  return {
+    limited: rawTenantPolicy?.limitsEnabled !== false && rawEmployee.limitMode !== "unlimited",
+    dayLimit,
+    canWriteoff: rawEmployee.canWriteoff === true,
+  };
+}
+
 /** One withdrawal, reduced to the three things the count needs. */
 interface Withdrawal {
   deviceSeq: number;

@@ -3,6 +3,7 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
   UnprocessableEntityException,
@@ -62,6 +63,17 @@ interface ResolvedItem {
   serial: string;
   kmKey: string;
   unitPrice: string | null;
+}
+
+interface EffectivePickupPolicy {
+  limited: boolean;
+  dayLimit: number;
+  canWriteoff: boolean;
+}
+
+interface ActiveEmployee {
+  id: string;
+  pickupPolicy: EffectivePickupPolicy;
 }
 
 /**
@@ -244,8 +256,8 @@ export class PickupOrdersService {
     // (`TERMINAL_STATUSES`, apps/kiosk/src/sync/worker.ts), so the queue
     // unblocks the moment this ships, including on a device still running an
     // older bundle.
-    const employeeId = await this.resolveActiveEmployeeId(tenantId, dto);
-    if (!employeeId) {
+    const employee = await this.resolveActiveEmployee(tenantId, dto);
+    if (!employee) {
       // An offline sync lands hours after the scan, so the badge may have
       // been revoked in between -- and this 422 fires before a single item
       // is examined, so without this the codes the worker walked off with
@@ -268,6 +280,29 @@ export class PickupOrdersService {
         await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
       });
       throw new UnprocessableEntityException("Unknown or inactive badge");
+    }
+    const employeeId = employee.id;
+
+    if (dto.reason === "writeoff" && !employee.pickupPolicy.canWriteoff) {
+      await this.db.transaction(async (tx) => {
+        if (dto.items.length > 0) {
+          await this.recordScanRejection(tx, {
+            tenantId,
+            kioskId,
+            employeeId,
+            badgeCode: null,
+            orderId: null,
+            deviceSeq: dto.deviceSeq,
+            codes: dto.items.map((item) => ({ rawKm: item.rawKm, reason: "writeoff_forbidden" })),
+            scannedAt: when,
+          });
+        }
+        await this.consumeKioskAdmission(tx, tenantId, kioskId, dto.deviceSeq);
+      });
+      throw new UnprocessableEntityException({
+        code: "writeoff_forbidden",
+        message: "Employee is not allowed to create writeoffs",
+      });
     }
 
     // 3. Writeoff orders require a non-archived reason belonging to this tenant.
@@ -305,17 +340,17 @@ export class PickupOrdersService {
     // 4. Per-item KM validation, allowlist resolution and in-request dedup.
     const { conflicts, candidates } = await this.resolveItems(tenantId, kioskId, dto.items);
 
-    // 5. Day-limit: accept up to dayLimitPerEmployee, flag the rest as over_limit.
+    // 5. Day-limit: apply the effective tenant + employee policy and flag overflow.
     // `when` is the server's decision, not the device's claim (see
     // `resolveScanTime`, settled at step 1b), and the SAME value then dates the
     // order row below -- so the limit is always counted against the day the
     // order is filed under.
     const { accepted, overflowConflicts } = await this.applyDayLimit(
       tenantId,
-      kioskId,
       employeeId,
       when,
       candidates,
+      employee.pickupPolicy,
     );
     conflicts.push(...overflowConflicts);
 
@@ -525,13 +560,22 @@ export class PickupOrdersService {
     );
     const subscription = this.entitlements.snapshotFrom(resolvedSubscription);
 
-    const [kiosk] = await this.db
-      .select({
-        dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
-        showPrices: schema.kiosks.showPrices,
-      })
-      .from(schema.kiosks)
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
+    const [[kiosk], [pickupPolicy]] = await Promise.all([
+      this.db
+        .select({
+          dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
+          showPrices: schema.kiosks.showPrices,
+        })
+        .from(schema.kiosks)
+        .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId))),
+      this.db
+        .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+        .from(schema.pickupTenantPolicies)
+        .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
+    ]);
+    if (!pickupPolicy) {
+      throw new InternalServerErrorException("Tenant pickup policy is not configured");
+    }
 
     const reasons = await this.db
       .select({ id: schema.pickupOrderReasons.id, name: schema.pickupOrderReasons.name })
@@ -567,16 +611,26 @@ export class PickupOrdersService {
     const badgeSalt = await getOrCreateBadgeSalt(this.db, tenantId);
 
     const employeeRows = await this.db
-      .select()
+      .select({ employee: schema.employees, pickupPolicy: schema.employeePickupPolicies })
       .from(schema.employees)
+      .leftJoin(
+        schema.employeePickupPolicies,
+        and(
+          eq(schema.employeePickupPolicies.tenantId, schema.employees.tenantId),
+          eq(schema.employeePickupPolicies.employeeId, schema.employees.id),
+        ),
+      )
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.status, "active")))
       .orderBy(asc(schema.employees.fullName));
+    if (employeeRows.some((row) => !row.pickupPolicy)) {
+      throw new InternalServerErrorException("Employee pickup policy is not configured");
+    }
 
     // Reuses the roster builder's hashing/backfill path, so kiosk and station
     // can never drift on how a badge verifier is produced.
     const badgeHashes = await this.operatorsService.badgeHashesFor(
       tenantId,
-      employeeRows.map((e) => e.id),
+      employeeRows.map((row) => row.employee.id),
     );
     const operators = await this.operatorsService.buildRoster(tenantId);
 
@@ -588,6 +642,7 @@ export class PickupOrdersService {
     return {
       generatedAt: generatedAt.toISOString(),
       subscription,
+      pickupPolicy,
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
@@ -595,16 +650,24 @@ export class PickupOrdersService {
       badgeSalt,
       reasons,
       products,
-      employees: employeeRows.map((e) => ({
-        id: e.id,
-        fullName: e.fullName,
-        role: e.role,
-        badgeHash: badgeHashes.get(e.id) ?? null,
-        // Absent from the grouped result means this employee took nothing at
-        // another kiosk today, which is `0` and not a missing field: the device
-        // reads this per employee and adds it to its own count.
-        takenTodayElsewhere: takenElsewhere.get(e.id) ?? 0,
-      })),
+      employees: employeeRows.map(({ employee, pickupPolicy: employeePolicy }) => {
+        if (!employeePolicy) {
+          throw new InternalServerErrorException("Employee pickup policy is not configured");
+        }
+        return {
+          id: employee.id,
+          fullName: employee.fullName,
+          role: employee.role,
+          badgeHash: badgeHashes.get(employee.id) ?? null,
+          limitMode: employeePolicy.limitMode,
+          dayLimit: employeePolicy.dayLimit,
+          canWriteoff: employeePolicy.canWriteoff,
+          // Absent from the grouped result means this employee took nothing at
+          // another kiosk today, which is `0` and not a missing field: the device
+          // reads this per employee and adds it to its own count.
+          takenTodayElsewhere: takenElsewhere.get(employee.id) ?? 0,
+        };
+      }),
       operators: operators.map((o) => ({
         employeeId: o.operatorId,
         name: o.name,
@@ -1367,10 +1430,10 @@ export class PickupOrdersService {
    * an archived employee is unresolvable either way, and a card reissued to
    * somebody else in between resolves to its new holder either way.
    */
-  private async resolveActiveEmployeeId(
+  private async resolveActiveEmployee(
     tenantId: string,
     dto: CreateOrderDto,
-  ): Promise<string | undefined> {
+  ): Promise<ActiveEmployee | undefined> {
     const presented = this.presentedBadge(dto);
     const match =
       "digest" in presented
@@ -1378,7 +1441,13 @@ export class PickupOrdersService {
         : eq(schema.employeeBadges.badgeCode, presented.code);
 
     const [badge] = await this.db
-      .select({ employeeId: schema.employeeBadges.employeeId })
+      .select({
+        employeeId: schema.employeeBadges.employeeId,
+        limitMode: schema.employeePickupPolicies.limitMode,
+        dayLimit: schema.employeePickupPolicies.dayLimit,
+        canWriteoff: schema.employeePickupPolicies.canWriteoff,
+        limitsEnabled: schema.pickupTenantPolicies.limitsEnabled,
+      })
       .from(schema.employeeBadges)
       .innerJoin(
         schema.employees,
@@ -1386,6 +1455,17 @@ export class PickupOrdersService {
           eq(schema.employees.tenantId, schema.employeeBadges.tenantId),
           eq(schema.employees.id, schema.employeeBadges.employeeId),
         ),
+      )
+      .leftJoin(
+        schema.employeePickupPolicies,
+        and(
+          eq(schema.employeePickupPolicies.tenantId, schema.employees.tenantId),
+          eq(schema.employeePickupPolicies.employeeId, schema.employees.id),
+        ),
+      )
+      .leftJoin(
+        schema.pickupTenantPolicies,
+        eq(schema.pickupTenantPolicies.tenantId, schema.employeeBadges.tenantId),
       )
       .where(
         and(
@@ -1395,7 +1475,21 @@ export class PickupOrdersService {
           eq(schema.employees.status, "active"),
         ),
       );
-    return badge?.employeeId;
+    if (!badge) return undefined;
+    if (badge.limitMode === null || badge.dayLimit === null || badge.canWriteoff === null) {
+      throw new InternalServerErrorException("Employee pickup policy is not configured");
+    }
+    if (badge.limitsEnabled === null) {
+      throw new InternalServerErrorException("Tenant pickup policy is not configured");
+    }
+    return {
+      id: badge.employeeId,
+      pickupPolicy: {
+        limited: badge.limitsEnabled && badge.limitMode === "limited",
+        dayLimit: badge.dayLimit,
+        canWriteoff: badge.canWriteoff,
+      },
+    };
   }
 
   /**
@@ -1697,19 +1791,15 @@ export class PickupOrdersService {
     return new Map(rows.map((row) => [row.employeeId, row.taken]));
   }
 
-  /** Accepts up to `dayLimitPerEmployee` items for today (UTC), flagging the rest `over_limit`. */
+  /** Applies the employee's effective tenant-aware limit for today (UTC). */
   private async applyDayLimit(
     tenantId: string,
-    kioskId: string,
     employeeId: string,
     when: Date,
     candidates: ResolvedItem[],
+    policy: EffectivePickupPolicy,
   ): Promise<{ accepted: ResolvedItem[]; overflowConflicts: OrderConflict[] }> {
-    const [kiosk] = await this.db
-      .select({ dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee })
-      .from(schema.kiosks)
-      .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId)));
-    const dayLimit = kiosk?.dayLimitPerEmployee ?? 0;
+    if (!policy.limited) return { accepted: candidates, overflowConflicts: [] };
 
     const dateStr = when.toISOString().slice(0, 10);
     const existingRows = await this.db
@@ -1736,7 +1826,7 @@ export class PickupOrdersService {
     const accepted: ResolvedItem[] = [];
     const overflowConflicts: OrderConflict[] = [];
     for (const c of candidates) {
-      if (count < dayLimit) {
+      if (count < policy.dayLimit) {
         accepted.push(c);
         count++;
       } else {

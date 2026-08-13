@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 import {
   countTakenToday,
+  effectivePickupPolicy,
   startOfUtcDay,
   takenTodayElsewhere,
   utcDayOf,
@@ -372,5 +373,77 @@ describe("takenTodayElsewhere", () => {
    */
   it("adds to this device's own count rather than replacing it", () => {
     expect(count([journalled({ acceptedCount: 2 })]) + takenTodayElsewhere(roster, ME)).toBe(5);
+  });
+});
+
+describe("effectivePickupPolicy", () => {
+  const bootstrap = (value: unknown): KioskBootstrapDto => value as KioskBootstrapDto;
+
+  it("combines the tenant limit switch with the employee policy", () => {
+    const snapshot = bootstrap({
+      pickupPolicy: { limitsEnabled: true },
+      config: { dayLimitPerEmployee: 5, showPrices: true },
+      employees: [
+        {
+          id: ME,
+          limitMode: "limited",
+          dayLimit: 3,
+          canWriteoff: true,
+        },
+      ],
+    });
+
+    expect(effectivePickupPolicy(snapshot, ME)).toEqual({
+      limited: true,
+      dayLimit: 3,
+      canWriteoff: true,
+    });
+
+    const tenantOff = bootstrap({
+      ...snapshot,
+      pickupPolicy: { limitsEnabled: false },
+    });
+    expect(effectivePickupPolicy(tenantOff, ME)).toEqual({
+      limited: false,
+      dayLimit: 3,
+      canWriteoff: true,
+    });
+  });
+
+  it("does not apply a limit for an explicitly unlimited employee", () => {
+    const snapshot = bootstrap({
+      pickupPolicy: { limitsEnabled: true },
+      config: { dayLimitPerEmployee: 5, showPrices: true },
+      employees: [
+        {
+          id: ME,
+          limitMode: "unlimited",
+          dayLimit: 1,
+          canWriteoff: false,
+        },
+      ],
+    });
+    expect(effectivePickupPolicy(snapshot, ME)).toEqual({
+      limited: false,
+      dayLimit: 1,
+      canWriteoff: false,
+    });
+  });
+
+  it("reads an old snapshot conservatively without granting unlimited or writeoff", () => {
+    const oldSnapshot = bootstrap({
+      config: { dayLimitPerEmployee: 4, showPrices: true },
+      employees: [{ id: ME }],
+    });
+    expect(effectivePickupPolicy(oldSnapshot, ME)).toEqual({
+      limited: true,
+      dayLimit: 4,
+      canWriteoff: false,
+    });
+  });
+
+  it("returns null for an employee absent from the snapshot", () => {
+    const snapshot = bootstrap({ pickupPolicy: { limitsEnabled: true }, employees: [] });
+    expect(effectivePickupPolicy(snapshot, ME)).toBeNull();
   });
 });

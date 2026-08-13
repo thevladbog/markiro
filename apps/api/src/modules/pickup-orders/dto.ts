@@ -126,6 +126,7 @@ export interface CreateOrderResultDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshot;
+  pickupPolicy: { limitsEnabled: boolean };
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
@@ -141,6 +142,9 @@ export interface KioskBootstrapDto {
     fullName: string;
     role: string | null;
     badgeHash: string | null;
+    limitMode: "limited" | "unlimited";
+    dayLimit: number;
+    canWriteoff: boolean;
     /**
      * How many items this employee has already taken TODAY AT EVERY KIOSK BUT
      * THE ONE ASKING. Not a total, and it must never become one.

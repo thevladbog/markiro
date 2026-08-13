@@ -91,6 +91,7 @@ export interface SubscriptionAccessSnapshotDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshotDto;
+  pickupPolicy?: { limitsEnabled: boolean };
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
@@ -106,6 +107,9 @@ export interface KioskBootstrapDto {
     fullName: string;
     role: string | null;
     badgeHash: string | null;
+    limitMode?: "limited" | "unlimited";
+    dayLimit?: number;
+    canWriteoff?: boolean;
     /**
      * What this employee has taken today AT EVERY KIOSK BUT THIS ONE. Not a
      * total, and reading it as one would break the very thing it fixes.
