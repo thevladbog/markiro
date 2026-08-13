@@ -108,16 +108,17 @@ describe("development screen gallery", () => {
 
     const box = view.container.querySelector<HTMLElement>(".work-box-fill");
     expect(box).not.toBeNull();
-    expect(within(box!).getByText("Короб № 1")).toBeDefined();
-    expect(within(box!).getByTestId("box-progress").textContent).toBe("2 / 20");
-    const cells = box?.querySelectorAll(".work-box-fill__cell") ?? [];
+    if (!box) throw new Error("work box fill was not rendered");
+    expect(within(box).getByText("Короб № 1")).toBeDefined();
+    expect(within(box).getByTestId("box-progress").textContent).toBe("2 / 20");
+    const cells = box.querySelectorAll(".work-box-fill__cell");
     expect(cells).toHaveLength(20);
     expect(cells[0]?.getAttribute("data-state")).toBe("filled");
     expect(cells[1]?.getAttribute("data-state")).toBe("filled");
     expect(cells[2]?.getAttribute("data-state")).toBe("next");
-    expect(within(box!).getByRole("button", { name: "Закрыть короб" })).toBeDefined();
-    expect(within(box!).getByRole("button", { name: "Отменить последний скан" })).toBeDefined();
-    expect(within(box!).getByRole("button", { name: "Очистить короб" })).toBeDefined();
+    expect(within(box).getByRole("button", { name: "Закрыть короб" })).toBeDefined();
+    expect(within(box).getByRole("button", { name: "Отменить последний скан" })).toBeDefined();
+    expect(within(box).getByRole("button", { name: "Очистить короб" })).toBeDefined();
 
     expect(view.container.querySelectorAll(".work-recent li")).toHaveLength(6);
   });

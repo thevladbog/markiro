@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
 
 /** Mirrors apps/station/src/lib/mirror.ts's applyMigrations against a raw node:sqlite handle. */
-function applyStationMigrations(db: DatabaseSync): void {
-  for (const stmt of STATION_MIGRATIONS) {
+function applyStatements(db: DatabaseSync, statements: readonly string[]): void {
+  for (const stmt of statements) {
     try {
       db.exec(stmt);
     } catch (err) {
@@ -16,6 +16,10 @@ function applyStationMigrations(db: DatabaseSync): void {
       }
     }
   }
+}
+
+function applyStationMigrations(db: DatabaseSync): void {
+  applyStatements(db, STATION_MIGRATIONS);
 }
 
 function migratedDb(): DatabaseSync {
@@ -139,15 +143,7 @@ describe("STATION_MIGRATIONS", () => {
     expect(firstPrintMigration).toBeGreaterThan(0);
 
     const db = new DatabaseSync(":memory:");
-    for (const stmt of STATION_MIGRATIONS.slice(0, firstPrintMigration)) {
-      try {
-        db.exec(stmt);
-      } catch (err) {
-        if (!/duplicate column name/i.test(err instanceof Error ? err.message : String(err))) {
-          throw err;
-        }
-      }
-    }
+    applyStatements(db, STATION_MIGRATIONS.slice(0, firstPrintMigration));
     db.prepare(
       `INSERT INTO boxes_mirror (box_id, shift_id, sscc, opened_at, closed_at)
        VALUES (?, ?, ?, ?, ?)`,

@@ -195,6 +195,39 @@ describe("PrintVerification", () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
+  it("does not let a matching scan or skip resolve while a reprint is pending", async () => {
+    const source = manualSource();
+    const onVerified = vi.fn();
+    const onSkip = vi.fn();
+    let releaseReprint: (() => void) | undefined;
+    const reprintPending = new Promise<void>((resolve) => {
+      releaseReprint = resolve;
+    });
+    render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={onVerified}
+        onReprint={() => reprintPending}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
+    act(() => source.emit(`]C100${SSCC}`));
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+
+    expect(onVerified).not.toHaveBeenCalled();
+    expect(onSkip).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", true);
+
+    if (!releaseReprint) throw new Error("reprint promise was not initialized");
+    releaseReprint();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", false),
+    );
+  });
+
   it("starts a fresh single-flight scan resolution for the next expected label", async () => {
     const source = manualSource();
     const onVerified = vi.fn(async () => true);

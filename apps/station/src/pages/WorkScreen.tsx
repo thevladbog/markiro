@@ -359,6 +359,8 @@ export function WorkScreen({
     setPrintAdmissionBlockedState(blocked);
   }, []);
   const [printRecoveryHydrated, setPrintRecoveryHydrated] = useState(issuerPrefix === null);
+  const [printRecoveryHydrationFailed, setPrintRecoveryHydrationFailed] = useState(false);
+  const [printRecoveryHydrationEpoch, setPrintRecoveryHydrationEpoch] = useState(0);
   const printRecoveryHydratedRef = useRef(issuerPrefix === null);
   printRecoveryHydratedRef.current = printRecoveryHydrated;
   const printRecoveryReady = useRef<Promise<boolean> | null>(null);
@@ -552,6 +554,7 @@ export function WorkScreen({
   // work rather than being printed automatically after restart.
   useEffect(() => {
     if (issuerPrefix === null) {
+      setPrintRecoveryHydrationFailed(false);
       updatePrintRecovery(null);
       updatePrintAdmissionBlocked(false);
       printRecoveryHydratedRef.current = true;
@@ -561,6 +564,7 @@ export function WorkScreen({
     }
     let cancelled = false;
     let hydrationSucceeded = false;
+    setPrintRecoveryHydrationFailed(false);
     updatePrintAdmissionBlocked(true);
     printRecoveryHydratedRef.current = false;
     setPrintRecoveryHydrated(false);
@@ -596,7 +600,10 @@ export function WorkScreen({
         return unresolved !== null;
       })
       .catch(() => {
-        if (!cancelled) console.error("station: failed to restore box print recovery");
+        if (!cancelled) {
+          console.error("station: failed to restore box print recovery");
+          setPrintRecoveryHydrationFailed(true);
+        }
         return true;
       })
       .finally(() => {
@@ -612,6 +619,7 @@ export function WorkScreen({
     ensureCurrentBox,
     exec,
     issuerPrefix,
+    printRecoveryHydrationEpoch,
     shiftId,
     terminalId,
     updatePrintAdmissionBlocked,
@@ -1306,14 +1314,16 @@ export function WorkScreen({
   function retryPrintRecovery(): void {
     const job = printRecoveryRef.current;
     if (!job || job.pending) return;
-    queue.enqueueJob(() => attemptRecoveryPrint(job));
+    if (!queue.enqueueJob(() => attemptRecoveryPrint(job))) {
+      console.error("station: box print retry was not admitted");
+    }
   }
 
   function skipPrintRecovery(): void {
     const job = printRecoveryRef.current;
     if (!job || job.pending) return;
     updatePrintRecovery({ ...job, pending: true });
-    queue.enqueueJob(async () => {
+    const admitted = queue.enqueueJob(async () => {
       try {
         const won = await markPrintSkipped(exec, job.boxId, new Date().toISOString());
         if (won) {
@@ -1328,6 +1338,10 @@ export function WorkScreen({
         updatePrintRecovery({ ...job, pending: false });
       }
     });
+    if (!admitted) {
+      console.error("station: box print skip was not admitted");
+      updatePrintRecovery({ ...job, pending: false });
+    }
   }
 
   const workLabels = buildWorkLabels(t, i18n.language, boxNumber);
@@ -1448,6 +1462,18 @@ export function WorkScreen({
           title={signal.title}
           {...(signal.detail === undefined ? {} : { detail: signal.detail })}
         />
+      ) : null}
+
+      {printRecoveryHydrationFailed ? (
+        <FullScreenDialog
+          open
+          title={t("box.printRecovery.restoreFailed")}
+          backLabel={t("box.printRecovery.retryRestore")}
+          onClose={() => setPrintRecoveryHydrationEpoch((epoch) => epoch + 1)}
+          initialFocus="dialog"
+        >
+          <Alert tone="error" title={t("box.printRecovery.restoreFailedDetail")} />
+        </FullScreenDialog>
       ) : null}
 
       {printRecovery ? (

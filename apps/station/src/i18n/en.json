@@ -409,7 +409,10 @@
       "confirmDetail": "The box is already closed. It must be labelled later.",
       "confirmContinue": "Confirm and continue",
       "cancel": "Cancel",
-      "pending": "Working…"
+      "pending": "Working…",
+      "restoreFailed": "Could not restore the print state",
+      "restoreFailedDetail": "Scanning is paused. Retry restoring the local box state.",
+      "retryRestore": "Retry recovery"
     },
     "invalidSerial": "Could not build a box number. Try closing the box again."
   }

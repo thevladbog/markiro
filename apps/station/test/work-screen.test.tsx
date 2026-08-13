@@ -1669,6 +1669,73 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(screen.getByText(SSCC)).toBeDefined();
   });
 
+  it("shows a blocking retry when print-recovery hydration fails", async () => {
+    const base = makeExec();
+    await seedPendingPrint(base, "transport_failed");
+    let hydrationAttempts = 0;
+    const exec: SqlExecutor = {
+      run: base.run,
+      all: async <T,>(sql: string, params: unknown[] = []) => {
+        if (sql.includes("JOIN shift_mirror s")) {
+          hydrationAttempts += 1;
+          if (hydrationAttempts === 1) throw new Error("sqlite temporarily unavailable");
+        }
+        return base.all<T>(sql, params);
+      },
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWorkTracked({ exec });
+
+      expect(
+        await screen.findByRole("dialog", { name: "Не удалось восстановить состояние печати" }),
+      ).toBeDefined();
+      fireEvent.click(screen.getByRole("button", { name: "Повторить восстановление" }));
+
+      expect(await screen.findByText("Принтер не принял задание")).toBeDefined();
+      expect(hydrationAttempts).toBe(2);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("keeps print recovery actionable when its queue rejects retry and skip jobs", async () => {
+    const exec = makeExec();
+    await seedPendingPrint(exec, "transport_failed");
+    const registeredQueue: { current: ScanQueue | null } = { current: null };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWorkTracked({
+        exec,
+        onScanQueueRegister(queue) {
+          registeredQueue.current = queue;
+          return () => {};
+        },
+      });
+      expect(await screen.findByText("Принтер не принял задание")).toBeDefined();
+      await waitFor(() => expect(registeredQueue.current).not.toBeNull());
+      const queue = registeredQueue.current;
+      if (!queue) throw new Error("scan queue was not registered");
+      await act(async () => {
+        await queue.close();
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: "Повторить печать" }));
+      expect(consoleError).toHaveBeenCalledWith("station: box print retry was not admitted");
+
+      fireEvent.click(screen.getByRole("button", { name: "Продолжить без этикетки" }));
+      fireEvent.click(screen.getByRole("button", { name: "Подтвердить продолжение" }));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Подтвердить продолжение" })).toHaveProperty(
+          "disabled",
+          false,
+        ),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
   it("regenerates a restart-restored printed label for the same persisted box and SSCC", async () => {
     const exec = makeExec();
     await seedPendingPrint(exec, null, "printed");

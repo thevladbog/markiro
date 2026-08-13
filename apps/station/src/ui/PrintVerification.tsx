@@ -47,15 +47,17 @@ export function PrintVerification({
     message: PrintVerificationMessage;
   }>({ expected, message: "waiting" });
   const [resolvingExpected, setResolvingExpected] = useState<string | null>(null);
-  const [reprinting, setReprinting] = useState(false);
+  const [reprintingExpected, setReprintingExpected] = useState<string | null>(null);
   const [reprintError, setReprintError] = useState<BoxPrintErrorCode | null>(null);
   const resolutionStartedFor = useRef<string | null>(null);
+  const reprintingFor = useRef<string | null>(null);
   const resolving = resolvingExpected === expected;
+  const reprinting = reprintingExpected === expected;
   const message = feedback.expected === expected ? feedback.message : "waiting";
 
   const beginResolution = useCallback(
     (action: () => void | boolean | Promise<void | boolean>): void => {
-      if (resolutionStartedFor.current === expected) return;
+      if (resolutionStartedFor.current === expected || reprintingFor.current === expected) return;
       const startedFor = expected;
       resolutionStartedFor.current = startedFor;
       setResolvingExpected(startedFor);
@@ -76,8 +78,10 @@ export function PrintVerification({
   );
 
   async function reprint(): Promise<void> {
-    if (reprinting || resolutionStartedFor.current === expected) return;
-    setReprinting(true);
+    if (reprintingFor.current === expected || resolutionStartedFor.current === expected) return;
+    const startedFor = expected;
+    reprintingFor.current = startedFor;
+    setReprintingExpected(startedFor);
     setReprintError(null);
     try {
       const result = await onReprint();
@@ -85,14 +89,22 @@ export function PrintVerification({
     } catch {
       setReprintError("transport_failed");
     } finally {
-      setReprinting(false);
+      if (reprintingFor.current === startedFor) {
+        reprintingFor.current = null;
+        setReprintingExpected((current) => (current === startedFor ? null : current));
+      }
     }
   }
 
   useEffect(() => {
     let active = true;
     const stop = scanSource.start((raw) => {
-      if (!active || resolutionStartedFor.current === expected) return;
+      if (
+        !active ||
+        resolutionStartedFor.current === expected ||
+        reprintingFor.current === expected
+      )
+        return;
       const parsed = parseScannedSscc(raw);
       if (parsed === null) {
         setFeedback({ expected, message: "notSscc" });
@@ -116,7 +128,7 @@ export function PrintVerification({
       open
       title={t("box.printExpected")}
       backLabel={t("box.printSkip")}
-      backDisabled={resolving}
+      backDisabled={resolving || reprinting}
       onClose={() => beginResolution(onSkip)}
       initialFocus="dialog"
       footer={

@@ -35,7 +35,7 @@ tasks. No manifest or lockfile was changed. All authoritative package results
 below used the repository-cached exact binary:
 
 ```text
-node /Users/thevladbog/.cache/node/corepack/v1/pnpm/11.10.0/bin/pnpm.cjs
+node <cached-pnpm>/pnpm.cjs
 ```
 
 The first DB suite attempt loaded the main-checkout environment but the sandbox
@@ -93,7 +93,7 @@ failure evidence and are not reported as a product result or a pass.
 
 ```bash
 set -a
-source /Users/thevladbog/PRSOME/q/.env
+source "$MAIN_CHECKOUT/.env"
 set +a
 DATABASE_URL=postgresql://<throwaway>@127.0.0.1:55433/markiro_task7 \
 PLATFORM_AUTH_URL=http://localhost:3000 \
@@ -110,7 +110,7 @@ tests were intentionally skipped:
 - `test/local-infrastructure.e2e.test.ts`: its single Mailpit/MinIO lifecycle
   test was skipped because `LOCAL_INFRA_SMOKE` was unset;
 - `test/provision-tenant-owner.e2e.test.ts`: only `prints only identifiers on
-  stdout through the real documented command` was skipped for the same
+stdout through the real documented command` was skipped for the same
   `LOCAL_INFRA_SMOKE` condition.
 
 The remaining database-backed API/e2e tests ran against the isolated migrated

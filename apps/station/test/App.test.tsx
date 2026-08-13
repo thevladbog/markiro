@@ -1096,6 +1096,23 @@ describe("App", () => {
     }
   });
 
+  it("releases the print-recovery setup latch when service reset returns to pairing", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch(true);
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+
+      await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+      expect(screen.getByRole("button", { name: /fullscreen/ })).toHaveProperty("disabled", false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("keeps one retired queue closed through timeout and retry until its write settles", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {

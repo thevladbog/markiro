@@ -434,7 +434,10 @@ Adjust `showTimedSignal` so its caller can avoid playing the same sound twice. K
 ```ts
 const playSignalToneSpy = vi.spyOn(signalSound, "playSignalTone");
 expect(screen.queryByRole("alert")).toBeNull();
-expect((await screen.findByRole("status")).textContent).toContain("ACCEPTED");
+const acceptedStatus = await screen.findByRole("status", {
+  name: `ACCEPTED: ${normalizedCode}`,
+});
+expect(acceptedStatus.textContent).toBe(`✓${normalizedCode}`);
 expect(playSignalToneSpy).toHaveBeenCalledWith("ok", expect.anything());
 ```
 

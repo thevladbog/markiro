@@ -88,7 +88,10 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
           continue;
         }
         const { raw } = entry;
-        if (deps.shouldProcess && !deps.shouldProcess(raw)) continue;
+        if (deps.shouldProcess && !deps.shouldProcess(raw)) {
+          console.warn("station: scan discarded by floor admission");
+          continue;
+        }
         let outcome: ScanOutcome;
         try {
           outcome = await deps.process(raw);

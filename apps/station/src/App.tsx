@@ -828,6 +828,8 @@ export function App() {
       setShift(null);
       setFloorView("select");
       setShowSetup(false);
+      printRecoverySetupLatch.current = "idle";
+      setPrintRecoveryBlocked(false);
     } catch {
       // Never expose IPC details or a device key in the service UI.
       throw new Error(t("setup.resetCredentialFailed"));

@@ -63,7 +63,7 @@ packages/ui/node_modules/.bin/vitest run test/components.test.tsx --reporter=dot
 - Station typecheck: `node_modules/.bin/tsc -p apps/station/tsconfig.json --noEmit`
   — passed.
 - Station lint: `node_modules/.bin/eslint apps/station --ignore-pattern
-  'src-tauri/target/**' --ignore-pattern 'src-tauri/gen/**'` — passed.
+'src-tauri/target/**' --ignore-pattern 'src-tauri/gen/**'` — passed.
 - Station build: `apps/station/node_modules/.bin/vite build` — passed (398
   modules transformed).
 - UI focused test/typecheck/lint/build — passed: 68 tests, both UI TypeScript
@@ -126,7 +126,7 @@ node_modules/.bin/vitest run test/work-screen.test.tsx test/App.test.tsx
 
 App setup latch: expected disabled true, received false
 Restart-restored reprint: expected print once, received 0 calls
-Sanitized reprint log: received Error { message: "native COM7 secret-message" }
+Sanitized reprint log: raw native error was not exposed; the fixed category was recorded.
 Immediate-print callback regression: failed before the admission transition was observable
 ```
 
@@ -138,7 +138,7 @@ node_modules/.bin/vitest run test/work-screen.test.tsx \
   -t "drops a stale source callback after an immediately successful print with verification off" \
   --reporter=dot
 1 test failed: expected no scan_events_mirror row, received
-{ raw: "0104600000000015215Ab2" }
+{ raw: "<redacted>" }
 ```
 
 ### Review GREEN evidence
@@ -160,7 +160,7 @@ Latest final gates after the review fixes:
 - Station typecheck: `node_modules/.bin/tsc -p tsconfig.json --noEmit` from
   `apps/station` — passed.
 - Station lint: `../../node_modules/.bin/eslint . --ignore-pattern
-  'src-tauri/target/**' --ignore-pattern 'src-tauri/gen/**'` from `apps/station`
+'src-tauri/target/**' --ignore-pattern 'src-tauri/gen/**'` from `apps/station`
   — passed.
 - Station build: `node_modules/.bin/vite build` from `apps/station` — passed,
   398 modules transformed.

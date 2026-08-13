@@ -382,8 +382,6 @@ export async function listClosedBoxes(
   shiftId: string,
   terminalId: string | null,
 ): Promise<ClosedBoxSummary[]> {
-  const terminalClause = terminalId === null ? "terminal_id IS NULL" : "terminal_id = ?";
-  const params = terminalId === null ? [shiftId] : [shiftId, terminalId];
   const rows = await exec.all<{
     box_id: string;
     sscc: string;
@@ -393,10 +391,10 @@ export async function listClosedBoxes(
     `SELECT b.box_id AS box_id, b.sscc AS sscc, b.closed_at AS closed_at,
             (SELECT COUNT(*) FROM codes_mirror c WHERE c.box_id = b.box_id) AS item_count
        FROM boxes_mirror b
-      WHERE b.shift_id = ? AND ${terminalClause}
+      WHERE b.shift_id = ? AND b.terminal_id IS ?
         AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL
       ORDER BY b.closed_at DESC`,
-    params,
+    [shiftId, terminalId],
   );
   return rows.map((r) => ({
     boxId: r.box_id,

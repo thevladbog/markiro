@@ -51,6 +51,7 @@ describe("scan queue", () => {
   });
 
   it("discards buffered scans when a blocking floor state starts before they run", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const seen: string[] = [];
     let blocked = false;
     const queue = createScanQueue({
@@ -68,6 +69,9 @@ describe("scan queue", () => {
     await queue.idle();
 
     expect(seen).toEqual(["closes-box"]);
+    expect(consoleWarn).toHaveBeenCalledWith("station: scan discarded by floor admission");
+    expect(consoleWarn).not.toHaveBeenCalledWith(expect.stringContaining("arrived-during-close"));
+    consoleWarn.mockRestore();
   });
 
   it("can discard scans buffered during a close while preserving ordered jobs", async () => {

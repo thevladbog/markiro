@@ -1692,7 +1692,7 @@ body,
 
 .work-scan-result__normalized {
   min-width: 0;
-  color: currentColor;
+  color: currentcolor;
   overflow-wrap: anywhere;
   font: var(--floor-body);
   font-family: var(--font-mono);
