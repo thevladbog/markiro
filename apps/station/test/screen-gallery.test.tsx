@@ -93,10 +93,17 @@ describe("development screen gallery", () => {
 
     const scan = view.container.querySelector<HTMLElement>(".work-scan-result");
     expect(scan).not.toBeNull();
-    expect(scan?.querySelector('[data-tone="ok"]')?.textContent).toContain("✓ Принято");
-    expect(scan?.textContent).toContain(
-      "(92) TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789",
+    expect(scan?.querySelector('[data-semantic="accepted-marker"]')?.textContent).toBe("✓");
+    expect(scan?.querySelector('[data-semantic="normalized-code"]')?.textContent).toBe(
+      "(01)04607000000042 (21)DEMO-SERIAL-000128 (91)ABCD " +
+        "(92)TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789 (93)XYZ1",
     );
+    expect(scan?.querySelector('[data-semantic="verdict"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="gtin"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="serial"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="crypto"]')).toBeNull();
+    expect(scan?.textContent).not.toContain("ПРИНЯТО");
+    expect(scan?.textContent).not.toContain("Криптохвост");
     expect(view.container.querySelector(".mk-signal-overlay")).toBeNull();
 
     const box = view.container.querySelector<HTMLElement>(".work-box-fill");
@@ -108,8 +115,29 @@ describe("development screen gallery", () => {
     expect(cells[0]?.getAttribute("data-state")).toBe("filled");
     expect(cells[1]?.getAttribute("data-state")).toBe("filled");
     expect(cells[2]?.getAttribute("data-state")).toBe("next");
+    expect(within(box!).getByRole("button", { name: "Закрыть короб" })).toBeDefined();
+    expect(within(box!).getByRole("button", { name: "Отменить последний скан" })).toBeDefined();
+    expect(within(box!).getByRole("button", { name: "Очистить короб" })).toBeDefined();
 
     expect(view.container.querySelectorAll(".work-recent li")).toHaveLength(6);
+  });
+
+  it.each([
+    {
+      locale: "ru" as const,
+      undo: "Отменить последний скан",
+      clear: "Очистить короб",
+    },
+    {
+      locale: "en" as const,
+      undo: "Undo last scan",
+      clear: "Clear box",
+    },
+  ])("uses the exact production work copy in $locale", ({ locale, undo, clear }) => {
+    render(<StationScreenGallery request={{ state: "work-aggregation", locale }} />);
+
+    expect(screen.getByRole("button", { name: undo })).toBeDefined();
+    expect(screen.getByRole("button", { name: clear })).toBeDefined();
   });
 
   it("renders standalone box states through the production grouped fill instrument", () => {

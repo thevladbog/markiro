@@ -48,9 +48,10 @@ import { PrintVerification } from "../ui/PrintVerification.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
-import { ScanResultInstrument, type ScanResultLabels } from "../ui/work/ScanResultInstrument.js";
+import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
 import { WorkCounters } from "../ui/work/WorkCounters.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
+import { buildWorkLabels } from "../ui/work/work-labels.js";
 import { ExceptionFlow } from "./ExceptionFlow.js";
 
 export interface WorkScreenProps {
@@ -1270,18 +1271,7 @@ export function WorkScreen({
     });
   }
 
-  const statusLabels: ScanResultLabels = {
-    waiting: t("work.waiting"),
-    ok: t("signal.ok"),
-    duplicate: t("signal.duplicate"),
-    invalid: t("signal.wrongCode"),
-    wrong_gtin: t("signal.wrongGtin"),
-    unknown: t("work.rejected"),
-    gtin: t("work.gtin"),
-    serial: t("work.serial"),
-    crypto: t("work.crypto"),
-  };
-  const locale = i18n.language.startsWith("ru") ? "ru-RU" : "en-US";
+  const workLabels = buildWorkLabels(t, i18n.language, boxNumber);
   const blockingState: WorkBlockingState | null = noSerials ? "serial-exhaustion" : null;
   const overlayState: WorkOverlayState | null = confirmExit
     ? "exit-pending"
@@ -1311,7 +1301,7 @@ export function WorkScreen({
                 productName={productName}
                 counterpartyName={counterpartyName ?? null}
                 operation={recentOperations[0] ?? null}
-                labels={statusLabels}
+                labels={workLabels.status}
               />
               {issuerPrefix !== null ? (
                 <BoxFillInstrument
@@ -1325,45 +1315,26 @@ export function WorkScreen({
                   capacity={boxCapacity}
                   canUndo={lastScanned?.boxId === box?.boxId}
                   closeDisabled={closing}
-                  labels={{
-                    title: t("work.openBox"),
-                    number: t("work.boxNumber", { number: boxNumber }),
-                    absent: t("work.noOpenBox"),
-                    count: t("work.boxItems"),
-                    capacityUnknown: t("work.capacityUnknown"),
-                    grouped: t("work.boxGrouped"),
-                    close: t("box.close"),
-                    undo: t("box.undoLastScan"),
-                    clear: t("box.clear"),
-                  }}
+                  labels={workLabels.box}
                   onClose={enqueueManualClose}
                   onUndo={() => void handleUndo()}
                   onClear={() => setConfirmClear(true)}
                 />
               ) : null}
             </div>
-            <aside className="work-screen__secondary" aria-label={t("work.summary")}>
+            <aside className="work-screen__secondary" aria-label={workLabels.summary}>
               <WorkCounters
                 accepted={accepted}
                 rejected={rejected}
                 pendingSync={pendingSync}
-                locale={locale}
-                labels={{
-                  accepted: t("work.accepted"),
-                  rejected: t("work.rejected"),
-                  synchronized: t("work.synchronized"),
-                  pending: (count) => t("work.pendingSync", { count }),
-                }}
+                locale={workLabels.locale}
+                labels={workLabels.counters}
               />
               <RecentOperations
                 operations={recentOperations}
-                labels={{
-                  title: t("work.recentOperations"),
-                  empty: t("work.noRecentOperations"),
-                  invalidTime: t("work.timeUnknown"),
-                }}
-                statusLabels={statusLabels}
-                locale={locale}
+                labels={workLabels.recent}
+                statusLabels={workLabels.status}
+                locale={workLabels.locale}
               />
             </aside>
           </div>
@@ -1371,7 +1342,7 @@ export function WorkScreen({
       </div>
 
       <WorkFooter
-        labels={{ exceptions: t("work.exceptions"), exit: t("work.pauseFinish") }}
+        labels={workLabels.footer}
         onExceptions={() => setShowExceptions(true)}
         onExit={requestExit}
       />

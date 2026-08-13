@@ -11,9 +11,10 @@ import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
-import { ScanResultInstrument, type ScanResultLabels } from "../ui/work/ScanResultInstrument.js";
+import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
 import { WorkCounters } from "../ui/work/WorkCounters.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
+import { buildWorkLabels } from "../ui/work/work-labels.js";
 import {
   getGalleryFixture,
   resolveGalleryRequest,
@@ -520,7 +521,7 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const aggregation = mode === "aggregation";
-  const labels = galleryScanLabels(locale);
+  const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
   const operations = galleryRecentOperations();
   return (
     <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
@@ -531,7 +532,7 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               productName={ru ? "Тестовый товар А" : "Sample product A"}
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
               operation={operations[0] ?? null}
-              labels={labels}
+              labels={workLabels.status}
             />
             {aggregation ? (
               <BoxFillInstrument
@@ -540,68 +541,37 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
                 acceptedToken="gallery-accepted-2"
                 capacity={20}
                 canUndo
-                labels={galleryBoxLabels(locale, 1)}
+                labels={workLabels.box}
                 onClose={() => undefined}
                 onUndo={() => undefined}
                 onClear={() => undefined}
               />
             ) : null}
           </div>
-          <aside
-            className="work-screen__secondary"
-            aria-label={ru ? "Итоги смены" : "Shift summary"}
-          >
+          <aside className="work-screen__secondary" aria-label={workLabels.summary}>
             <WorkCounters
               accepted={1248}
               rejected={3}
               pendingSync={7}
-              locale={ru ? "ru-RU" : "en-US"}
-              labels={{
-                accepted: ru ? "Принято" : "Accepted",
-                rejected: ru ? "Отклонено" : "Rejected",
-                synchronized: ru ? "Синхронизировано" : "Synchronized",
-                pending: (count) =>
-                  ru ? `Ожидают отправки: ${count}` : `${count} waiting to sync`,
-              }}
+              locale={workLabels.locale}
+              labels={workLabels.counters}
             />
             <RecentOperations
               operations={operations}
-              labels={{
-                title: ru ? "Последние операции" : "Recent operations",
-                empty: ru ? "Операций пока нет" : "No operations yet",
-                invalidTime: ru ? "Время неизвестно" : "Time unknown",
-              }}
-              statusLabels={labels}
-              locale={ru ? "ru-RU" : "en-US"}
+              labels={workLabels.recent}
+              statusLabels={workLabels.status}
+              locale={workLabels.locale}
             />
           </aside>
         </div>
       </div>
       <WorkFooter
-        labels={{
-          exceptions: ru ? "Исключения" : "Exceptions",
-          exit: ru ? "Пауза / завершить" : "Pause / finish",
-        }}
+        labels={workLabels.footer}
         onExceptions={() => undefined}
         onExit={() => undefined}
       />
     </main>
   );
-}
-
-function galleryScanLabels(locale: GalleryLocale): ScanResultLabels {
-  const ru = locale === "ru";
-  return {
-    waiting: ru ? "Ожидание сканирования" : "Waiting for scan",
-    ok: ru ? "✓ Принято" : "✓ Accepted",
-    duplicate: ru ? "Дубликат" : "Duplicate",
-    invalid: ru ? "Неверный код" : "Invalid code",
-    wrong_gtin: ru ? "Неверный GTIN" : "Wrong GTIN",
-    unknown: ru ? "Отклонено" : "Rejected",
-    gtin: "GTIN",
-    serial: ru ? "Серийный номер" : "Serial number",
-    crypto: ru ? "Криптохвост" : "Crypto tail",
-  };
 }
 
 function galleryRecentOperations(): RecentOperation[] {
@@ -631,21 +601,6 @@ function galleryRecentOperations(): RecentOperation[] {
     codeSuffix: null,
     identity: identityForSerial(`DEMO-SERIAL-00012${8 - index}`),
   }));
-}
-
-function galleryBoxLabels(locale: GalleryLocale, ordinal: number) {
-  const ru = locale === "ru";
-  return {
-    title: ru ? "Открытый короб" : "Open box",
-    number: ru ? `Короб № ${ordinal}` : `Box no. ${ordinal}`,
-    absent: ru ? "Открытого короба нет" : "No open box",
-    count: ru ? "единиц в коробе" : "items in box",
-    capacityUnknown: ru ? "вместимость не задана" : "capacity unknown",
-    grouped: ru ? "Одна ячейка показывает несколько единиц" : "Each cell represents multiple items",
-    close: ru ? "Закрыть короб" : "Close box",
-    undo: ru ? "Отменить скан" : "Undo scan",
-    clear: ru ? "Очистить" : "Clear",
-  };
 }
 
 function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: GalleryLocale }) {
@@ -718,6 +673,7 @@ function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) 
   const ru = locale === "ru";
   const capacity = full ? 120 : 20;
   const itemCount = full ? capacity : 0;
+  const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
   return (
     <StationScreen title={ru ? "Текущий короб" : "Current box"}>
       <BoxFillInstrument
@@ -726,7 +682,7 @@ function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) 
         acceptedToken={full ? "gallery-full" : null}
         capacity={capacity}
         canUndo={itemCount > 0}
-        labels={galleryBoxLabels(locale, 1)}
+        labels={workLabels.box}
         onClose={() => undefined}
         onUndo={() => undefined}
         onClear={() => undefined}

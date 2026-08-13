@@ -355,7 +355,7 @@ Run:
 pnpm --filter @markiro/station exec vitest run test/journal.test.ts test/work-instruments.test.tsx
 ```
 
-Expected: `RecentOperation` has no `identity`, and the UI cannot find GTIN, serial, or crypto labels.
+Expected: `RecentOperation` has no `identity`, and the UI cannot find the normalized code block.
 
 - [ ] **Step 3: Implement the presentation boundary**
 
@@ -395,29 +395,19 @@ Change `RecentOperation` to carry `identity: KmPresentation | null`. Build it on
 
 - [ ] **Step 4: Render the semantic identity in both instruments**
 
-In `ScanResultInstrument`, render labelled definition rows inside the existing `role="status"`:
+In `ScanResultInstrument`, render the approved compact accepted state inside
+the existing `role="status"`: a decorative check plus one normalized code
+block. Do not duplicate it into verdict, GTIN, serial, or crypto fact rows:
 
 ```tsx
 {
-  operation?.identity ? (
-    <dl className="work-code-identity">
-      <div>
-        <dt>{labels.gtin}</dt>
-        <dd>{operation.identity.gtin14}</dd>
-      </div>
-      <div>
-        <dt>{labels.serial}</dt>
-        <dd>{operation.identity.serial}</dd>
-      </div>
-      {operation.identity.crypto.length > 0 ? (
-        <div>
-          <dt>{labels.crypto}</dt>
-          <dd>
-            {operation.identity.crypto.map(({ ai, value }) => `(${ai}) ${value}`).join(" · ")}
-          </dd>
-        </div>
-      ) : null}
-    </dl>
+  operation?.verdict === "ok" && operation.identity ? (
+    <>
+      <span data-semantic="accepted-marker" aria-hidden="true">
+        ✓
+      </span>
+      <code data-semantic="normalized-code">{operation.identity.normalized}</code>
+    </>
   ) : operation?.codeSuffix ? (
     <span>{operation.codeSuffix}</span>
   ) : null;
@@ -1056,7 +1046,11 @@ Expected: the new IDs are missing and the synthetic aggregation screen still use
 
 Use a production-shaped accepted KM fixture with long AI 92 data and `filled=2`, `capacity=20`, `ordinal=1`. Render all recovery categories with a fixed valid SSCC. Do not make fixtures call SQLite, printer, network, or Tauri APIs.
 
-The accepted fixture must render a check glyph plus text and a local success edge. The `next` box cell must have a visible shape/border marker in addition to colour so the next physical position remains identifiable without colour perception.
+The accepted fixture must render the production compact green check plus one
+complete normalized GS1 block and a local success edge. It must not add a
+separate accepted verdict or GTIN/serial/crypto fact rows. The `next` box cell
+must have a visible shape/border marker in addition to colour so the next
+physical position remains identifiable without colour perception.
 
 - [ ] **Step 4: Run the automated gallery matrix**
 
@@ -1065,6 +1059,9 @@ Run the repository's acceptance commands from `docs/acceptance/station-touch-wor
 - exact document width/height;
 - zero document or nested scroll regions;
 - zero clipped visible interactives;
+- zero missing, mismatched, or clipped required semantic content; for the
+  accepted aggregation state this means the compact check and exact
+  `data-semantic="normalized-code"` value;
 - zero actions below 64 px;
 - loaded bundled font;
 - screenshot paths for long KM, 20-place grid, and transport recovery.

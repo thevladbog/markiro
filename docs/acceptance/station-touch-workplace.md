@@ -55,14 +55,18 @@ environment.
 
 ### 2026-08-13 aggregation gallery follow-up
 
-- Focused gallery/source suite: 2 files, 42 tests passed.
-- Full Station suite: 64 files, 739 tests passed. Existing intentional error-path
+- Focused corrected Task 2/6/WorkScreen suite: 4 files, 118 tests passed.
+- Full Station suite: 64 files, 741 tests passed. Existing intentional error-path
   logs, React `act(...)` notices, and jsdom's missing-canvas notice were emitted;
   there were no test failures or skips.
 - Station typecheck and lint passed without diagnostics.
-- Station production build passed with 398 modules transformed.
+- Station production build passed with 399 modules transformed.
 - Browser gallery: 366/366 state/locale/viewport rows passed. This is browser
   evidence only; no packaged Windows, touch, scanner, or printer claim is added.
+- Review-correction rerun: schema 4 additionally checks the required accepted
+  semantic content. All six aggregation locale/viewport rows show one compact
+  check plus the exact normalized GS1 block with no missing, mismatched, or
+  clipped content.
 
 No `node_modules` link or dependency output was changed to conceal the stale
 overlay. The mapped commands exercise the committed UI source/build from this
@@ -109,7 +113,7 @@ Audit scope: `apps/station/src` plus station-consumed floor primitives in
 | Hover-only affordances                | No station `:hover` rule or mouse-enter/leave handler exists. `title` attributes on scan result text duplicate already-visible content and are not the only disclosure path. Focus-visible and active feedback are defined for station actions.                                                                                                                                                                                                                                                                                                                                            |
 | Runtime asset/network dependency      | No image/CDN/runtime asset URL exists in station UI source. IBM Plex fonts remain bundled through `@fontsource`. The two `fetch` call sites are the authenticated station API client for business data, not visual assets. Browser acceptance also exposed a dependency leak: station imported SQLite migrations through root `@markiro/db`, which evaluated Postgres code and crashed without Node `Buffer`. Station now imports direct `@markiro/db/station-sqlite`; tests evaluate the entry and station mirror with `Buffer` absent, and the mapped bundle contains no Postgres graph. |
 | Scaling and transforms                | No `scale()` or CSS `zoom` exists. The only app-control transform is the deliberate 1 px active press translation, disabled controls explicitly receive no transform. Spinner rotation does not scale the application.                                                                                                                                                                                                                                                                                                                                                                     |
-| Clipping                              | Fixed screen/header/content/footer, dialogs, result slots, and bounded card grids intentionally use `overflow: hidden`. Ellipsis/line-clamp appears only where a visible bounded value has an accessible label or duplicated visible text. The 366-case browser matrix found no clipped or overlapping visible interactive at any required viewport.                                                                                                                                                                                                                                       |
+| Clipping                              | Fixed screen/header/content/footer, dialogs, result slots, and bounded card grids intentionally use `overflow: hidden`. Ellipsis/line-clamp appears only where a visible bounded value has an accessible label or duplicated visible text. The schema-4 366-case browser matrix found no clipped or overlapping visible interactive; its semantic gate also found no missing, mismatched, or clipped required accepted-scan content at any required viewport.                                                                                                                              |
 
 ## TDD fixes discovered during acceptance
 
@@ -137,22 +141,34 @@ PrintVerification floor-control case 1/1. The final broad mapped suite is
 
 ## Browser gallery matrix
 
-The 2026-08-13 controlled gallery rerun covered all 61 registered fixtures in
-Russian and English at all three required viewports: 366 combinations. The new
-coverage includes the production `ScanResultInstrument`, 20-place and grouped
-`BoxFillInstrument` states, six recent operations, all four persistent
-`BoxPrintRecovery` categories, and the explicit skip-confirmation state.
+The corrected 2026-08-13 controlled gallery rerun covered all 61 registered
+fixtures in Russian and English at all three required viewports: 366
+combinations. The coverage includes the production `ScanResultInstrument`,
+20-place and grouped `BoxFillInstrument` states, six recent operations, all
+four persistent `BoxPrintRecovery` categories, and the explicit
+skip-confirmation state.
 
-| Viewport  | Fixtures and locales | Exact document bounds | Scroll regions | Clipped interactives | Overlapping interactives | Floor target below 64 px | Result           |
-| --------- | -------------------- | --------------------- | -------------- | -------------------- | ------------------------ | ------------------------ | ---------------- |
-| 1280×800  | 122/122              | 122/122               | 0              | 0                    | 0                        | 0                        | PASS 122/122     |
-| 1024×768  | 122/122              | 122/122               | 0              | 0                    | 0                        | 0                        | PASS 122/122     |
-| 1280×1024 | 122/122              | 122/122               | 0              | 0                    | 0                        | 0                        | PASS 122/122     |
-| **Total** | **366/366**          | **366/366**           | **0**          | **0**                | **0**                    | **0**                    | **PASS 366/366** |
+| Viewport  | Fixtures/locales | Exact bounds | Scroll | Clipped actions | Overlaps | Below 64 px | Required semantics | Result       |
+| --------- | ---------------- | ------------ | ------ | --------------- | -------- | ----------- | ------------------ | ------------ |
+| 1280×800  | 122/122          | 122/122      | 0      | 0               | 0        | 0           | 2/2                | PASS 122/122 |
+| 1024×768  | 122/122          | 122/122      | 0      | 0               | 0        | 0           | 2/2                | PASS 122/122 |
+| 1280×1024 | 122/122          | 122/122      | 0      | 0               | 0        | 0           | 2/2                | PASS 122/122 |
+| **Total** | **366/366**      | **366/366**  | **0**  | **0**           | **0**    | **0**       | **6/6**            | **PASS**     |
 
 For every combination, document width and height exactly matched the viewport.
 The browser found no document scroll, actually scrollable nested region,
 clipped or overlapping visible interactive, or enabled action below 64 px.
+For `work-aggregation`, it also required exactly one visible compact
+`accepted-marker` and one exact `normalized-code`, checked each against the
+viewport and every clipping ancestor, and rejected the removed verdict and
+GTIN/serial/crypto fact hooks/copy. All six semantic rows passed with zero
+missing, wrong, clipped, or internally scrollable values.
+
+One `pairing-error` / English / 1280×800 navigation transiently returned a blank
+page during the full run. The exact row was rerun immediately and passed with
+the requested state, locale, dimensions, and font evidence; the retained
+366-row matrix therefore contains the verified product result rather than the
+navigation transient.
 
 The browser waited for `document.fonts.ready`, then checked a visible element's
 exact computed font shorthand and rendered text with `document.fonts.check`.
@@ -186,13 +202,14 @@ The DPR-aware exception capture is 2560×2048 pixels and contains the full
 inner/document/visual 1280×1024, DPR 2, visual scale 1, CSS zoom 1; the confirm
 action remained within bounds at right 1248 and bottom 1004.5 CSS pixels.
 
-The complete 424,686-byte
+The complete 485,002-byte
 [machine-readable browser matrix](station-touch-browser-matrix.json) uses schema
-version 3 and retains all 366 raw state/locale/viewport rows. Each row records
+version 4 and retains all 366 raw state/locale/viewport rows. Each row records
 requested and actual window/document/visual viewport geometry, DPR, zoom,
 computed and loaded font evidence, interactive count and minimum target,
 clipped/overlapping interactives, actual scroll regions, sub-64 actions, and
-pass status; its summary is 366 passed and zero failed.
+required semantic observations and pass status; its summary is 366 passed,
+zero failed, and 6/6 required semantic rows passed.
 Browser environment: in-app Chromium through local Vite with current UI/DB
 source aliases; exact Chromium version not recorded.
 

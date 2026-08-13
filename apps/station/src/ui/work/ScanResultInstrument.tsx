@@ -40,32 +40,31 @@ export function ScanResultInstrument({
         <h2 title={productName}>{productName}</h2>
         {counterpartyName ? <p title={counterpartyName}>{counterpartyName}</p> : null}
       </div>
-      <div className="work-scan-result__verdict" role="status" data-tone={tone}>
-        <strong>
-          {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
-        </strong>
-        {operation?.identity ? (
-          <dl className="work-code-identity">
-            <div>
-              <dt>{labels.gtin}</dt>
-              <dd>{operation.identity.gtin14}</dd>
-            </div>
-            <div>
-              <dt>{labels.serial}</dt>
-              <dd>{operation.identity.serial}</dd>
-            </div>
-            {operation.identity.crypto.length > 0 ? (
-              <div>
-                <dt>{labels.crypto}</dt>
-                <dd>
-                  {operation.identity.crypto.map(({ ai, value }) => `(${ai}) ${value}`).join(" · ")}
-                </dd>
-              </div>
-            ) : null}
-          </dl>
-        ) : operation?.codeSuffix ? (
-          <span>{operation.codeSuffix}</span>
-        ) : null}
+      <div
+        className="work-scan-result__verdict"
+        role="status"
+        data-tone={tone}
+        data-compact-success={tone === "ok" && operation?.identity ? "true" : undefined}
+      >
+        {tone === "ok" && operation?.identity ? (
+          <>
+            <span
+              className="work-scan-result__accepted-marker"
+              data-semantic="accepted-marker"
+              aria-hidden="true"
+            >
+              ✓
+            </span>
+            <code className="work-scan-result__normalized" data-semantic="normalized-code">
+              {operation.identity.normalized}
+            </code>
+          </>
+        ) : (
+          <strong>
+            {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
+          </strong>
+        )}
+        {tone !== "ok" && operation?.codeSuffix ? <span>{operation.codeSuffix}</span> : null}
       </div>
     </section>
   );

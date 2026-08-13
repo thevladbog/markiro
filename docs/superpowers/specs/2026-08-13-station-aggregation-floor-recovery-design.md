@@ -64,7 +64,7 @@ rather than adding another visual language.
 The left, dominant column contains:
 
 1. product and counterparty identity;
-2. the latest scan identity and verdict;
+2. the latest accepted scan as a compact success marker plus readable GS1 code;
 3. the open-box fill instrument;
 4. box actions in the same card surface, without a differently coloured strip
    behind the buttons.
@@ -77,19 +77,18 @@ force at 1280×800, 1024×768, and 1280×1024.
 ### Accepted code identity
 
 An accepted KM is rendered semantically, never as an unescaped raw scanner
-payload:
+payload. The success area contains only a compact green check and one readable
+normalized GS1 code block. Application identifiers stay inline with
+parentheses, for example `(01)046... (21)SERIAL... (91)... (92)... (93)...`.
+There is no separate `Принято`/`Accepted` line and no GTIN, serial, or crypto
+fact card/label in this area. The normalized block may wrap fully, but it must
+not clip at any accepted fixed viewport and must never render the GS control
+character.
 
-- `GTIN` — the normalized 14-digit value from AI `01`;
-- `Серийный номер` — the value from AI `21`;
-- `Криптохвост` — available AI `91`, `92`, and `93` segments, labelled by AI;
-- a compact normalized line that joins the visible AI/value segments without
-  rendering the GS control character.
-
-The center instrument may use multiple lines and larger mono typography. Recent
-operations use the same model at a smaller size: verdict, GTIN, serial, and
-time; the crypto tail may be visually truncated there but remains available in
-the dominant latest-scan instrument. The data is derived from the journal's
-existing captured KM rather than stored as a second, divergent representation.
+Recent operations retain their smaller verdict, GTIN, serial, and time model;
+the dominant latest-scan instrument alone presents the complete normalized
+code. The data is derived from the journal's existing captured KM rather than
+stored as a second, divergent representation.
 
 For invalid input that cannot be parsed, the UI shows a safe bounded suffix
 only. It does not echo an arbitrary raw payload onto the floor screen or into
@@ -99,7 +98,7 @@ logs.
 
 An accepted scan updates the latest-scan instrument in place:
 
-- green check icon plus `Принято`;
+- compact green check icon plus the complete normalized GS1 code block;
 - a slim green edge or short local highlight;
 - existing success sound;
 - no fixed full-screen overlay.

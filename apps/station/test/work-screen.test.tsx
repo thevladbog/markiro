@@ -420,8 +420,11 @@ describe("WorkScreen", () => {
 
     await waitFor(() => {
       expect(playSignalToneSpy).toHaveBeenCalledWith("ok", expect.anything());
-      expect(screen.getByRole("status").textContent).toContain("ACCEPTED");
+      expect(
+        screen.getByRole("status").querySelector('[data-semantic="normalized-code"]')?.textContent,
+      ).toBe("(01)04600000000015 (21)5Ab1");
     });
+    expect(screen.getByRole("status").textContent).not.toContain("ACCEPTED");
     expect(screen.queryByRole("alert")).toBeNull();
   });
 

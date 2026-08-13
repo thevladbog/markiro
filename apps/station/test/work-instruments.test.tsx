@@ -67,13 +67,20 @@ describe("work instruments", () => {
       />,
     );
     const status = screen.getByRole("status");
-    expect(status.textContent).toContain("Accepted");
-    expect(status.textContent).toContain("GTIN");
-    expect(status.textContent).toContain("04600000000015");
-    expect(status.textContent).toContain("Serial number");
-    expect(status.textContent).toContain("SERIAL-42");
-    expect(status.textContent).toContain("Crypto tail");
-    expect(status.textContent).toContain("(91) KEY · (92) SIGNATURE · (93) TAIL");
+    const acceptedMarker = status.querySelector('[data-semantic="accepted-marker"]');
+    expect(acceptedMarker?.textContent).toBe("✓");
+    expect(acceptedMarker?.getAttribute("aria-hidden")).toBe("true");
+    expect(status.querySelector('[data-semantic="normalized-code"]')?.textContent).toBe(
+      "(01)04600000000015 (21)SERIAL-42 (91)KEY (92)SIGNATURE (93)TAIL",
+    );
+    expect(status.querySelector('[data-semantic="verdict"]')).toBeNull();
+    expect(status.querySelector('[data-semantic="gtin"]')).toBeNull();
+    expect(status.querySelector('[data-semantic="serial"]')).toBeNull();
+    expect(status.querySelector('[data-semantic="crypto"]')).toBeNull();
+    expect(status.textContent).not.toContain("Accepted");
+    expect(status.textContent).not.toContain("GTIN");
+    expect(status.textContent).not.toContain("Serial number");
+    expect(status.textContent).not.toContain("Crypto tail");
     expect(status.textContent).not.toContain("\u001d");
   });
 
