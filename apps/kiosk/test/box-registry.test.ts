@@ -24,13 +24,14 @@ const NEW_SSCC = buildSscc(3, "4600682", 1);
 const BOX_ID = "00000000-0000-4000-8000-000000000001";
 const PRODUCT_ID = "00000000-0000-4000-8000-000000000002";
 const GENERATED_AT = "2026-08-13T12:00:00.000Z";
+let credentialGeneration = "";
 
 const cut = (
   owner: string,
   since: string | null,
   until: string,
   binding = BINDING,
-): BoxRegistryCut => ({ binding, owner, since, until });
+): BoxRegistryCut => ({ binding, credentialGeneration, owner, since, until });
 
 const upsert = (
   sscc: string,
@@ -57,13 +58,14 @@ async function activate(
 
 describe("offline box registry", () => {
   beforeEach(async () => {
-    await writeConfig({
+    const config = await writeConfig({
       ...BINDING,
       token: "token",
       kioskName: "Kiosk A",
       place: null,
       nextDeviceSeq: 0,
     });
+    credentialGeneration = config.credentialGeneration!;
   });
 
   it("does not replace active rows after an incomplete page sequence", async () => {
@@ -76,6 +78,7 @@ describe("offline box registry", () => {
     expect(await lookupBox(BINDING, NEW_SSCC)).toBeNull();
     expect(await readBoxRegistryMeta(BINDING)).toEqual({
       binding: BINDING,
+      credentialGeneration,
       version: "1",
       generatedAt: GENERATED_AT,
     });
@@ -126,7 +129,7 @@ describe("offline box registry", () => {
     expect(await readBoxRegistryMeta(OTHER_BINDING)).toBeNull();
     expect(await lookupBox(BINDING, OLD_SSCC)).not.toBeNull();
     await expect(beginBoxRegistryStage(cut("stale", null, "8", OTHER_BINDING))).rejects.toThrow(
-      /binding changed/,
+      /credential ownership changed/,
     );
     expect(await lookupBox(BINDING, OLD_SSCC)).not.toBeNull();
   });

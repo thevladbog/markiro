@@ -220,9 +220,12 @@ export function KioskShell(): React.JSX.Element {
       token: cfg.token,
       serverUrl: cfg.serverUrl,
       kioskId: cfg.kioskId,
+      ...(cfg.credentialGeneration !== undefined
+        ? { credentialGeneration: cfg.credentialGeneration }
+        : {}),
     });
     return {
-      ...(base.binding ? { binding: base.binding } : {}),
+      ...(base.registryOwner ? { registryOwner: base.registryOwner } : {}),
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
@@ -352,8 +355,7 @@ export function KioskShell(): React.JSX.Element {
       // durable nothing else should be undone, because a failed write here
       // leaves a working kiosk that simply retries on the next interval.
       const unpaired = { ...cfg, token: null };
-      await writeConfig(unpaired);
-      applyConfig(unpaired);
+      applyConfig(await writeConfig(unpaired));
     } catch (err) {
       console.error("kiosk: the revoked token could not be cleared", err);
       return;
@@ -771,8 +773,7 @@ export function KioskShell(): React.JSX.Element {
         // standing at a cart they can submit again. The reverse window loses an
         // order that WAS promised, to somebody who has already walked away.
         const advanced = { ...cfg, nextDeviceSeq: deviceSeq + 1 };
-        await writeConfig(advanced);
-        applyConfig(advanced);
+        applyConfig(await writeConfig(advanced));
         // DURABLE BEFORE ANY NETWORK ATTEMPT, and still before any of it. The
         // queue is what makes a pickup survive a crash, a reload or a battery
         // pull between here and the server, and `flushQueue`'s

@@ -17,14 +17,17 @@ import {
   beginBoxRegistryStage,
   lookupBox,
   readBoxRegistryMeta,
+  type BoxRegistryCut,
 } from "../src/store/box-registry.js";
 
 const REGISTRY_SSCC = "346006820000000021";
 const binding = (serverUrl: string, kioskId: string) => ({ serverUrl, kioskId });
 
 async function seedRegistry(serverUrl: string, kioskId: string, version = "7"): Promise<void> {
+  const config = await readConfig();
   const target = {
     binding: binding(serverUrl, kioskId),
+    credentialGeneration: config?.credentialGeneration ?? "missing",
     owner: "seed",
     since: null,
     until: version,
@@ -315,7 +318,7 @@ describe("config", () => {
 
     await writeConfig({
       serverUrl: "https://one.example/api/",
-      token: "new",
+      token: "old",
       kioskId: "k-1",
       kioskName: "A",
       place: null,
@@ -325,6 +328,49 @@ describe("config", () => {
     expect(
       await lookupBox(binding("https://one.example/api/", "k-1"), REGISTRY_SSCC),
     ).not.toBeNull();
+  });
+
+  it("rejects an old credential cut after same-binding token rotation and accepts the new owner", async () => {
+    const installation = binding("https://one.example/api", "k-1");
+    const oldConfig = await writeConfig({
+      ...installation,
+      token: "old-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    const oldCut = {
+      binding: installation,
+      credentialGeneration: oldConfig.credentialGeneration!,
+      owner: "old-refresh",
+      since: null,
+      until: "1",
+    } as BoxRegistryCut;
+    await beginBoxRegistryStage(oldCut);
+
+    const newConfig = await writeConfig({
+      ...installation,
+      token: "new-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    expect(newConfig.credentialGeneration).not.toBe(oldConfig.credentialGeneration);
+
+    await expect(activateBoxRegistryPage(oldCut, [], "2026-08-13T12:00:00Z")).rejects.toThrow(
+      /credential|ownership|lost/i,
+    );
+
+    const newCut = {
+      binding: installation,
+      credentialGeneration: newConfig.credentialGeneration!,
+      owner: "new-refresh",
+      since: null,
+      until: "2",
+    } as BoxRegistryCut;
+    await beginBoxRegistryStage(newCut);
+    await activateBoxRegistryPage(newCut, [], "2026-08-13T12:01:00Z");
+    expect(await readBoxRegistryMeta(installation)).toMatchObject({ version: "2" });
   });
 
   it.each([

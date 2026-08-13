@@ -1699,6 +1699,80 @@ describe("refreshSnapshot", () => {
     expect(client.boxRegistryPage).toHaveBeenCalledTimes(1);
   });
 
+  it("lets a new credential refresh win while an old same-binding client is held", async () => {
+    const binding = { serverUrl: "https://one.example/api", kioskId: "k-1" };
+    const oldConfig = await writeConfig({
+      ...binding,
+      token: "old-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    let releaseOld!: () => void;
+    const heldOld = new Promise<void>((resolve) => {
+      releaseOld = resolve;
+    });
+    let oldPageStarted!: () => void;
+    const oldStarted = new Promise<void>((resolve) => {
+      oldPageStarted = resolve;
+    });
+    const oldSscc = "346006820000000021";
+    const newSscc = "346006820000000014";
+    const change = (sscc: string) => ({
+      kind: "upsert" as const,
+      boxId: "00000000-0000-4000-8000-000000000001",
+      sscc,
+      productId: "00000000-0000-4000-8000-000000000002",
+      bottleCount: 1,
+      contentKeys: [`member-${sscc}`],
+      updatedAt: "2026-07-28T07:00:00Z",
+    });
+    const oldClient = {
+      registryOwner: {
+        binding,
+        credentialGeneration: oldConfig.credentialGeneration!,
+      },
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => {
+        oldPageStarted();
+        await heldOld;
+        return { until: "1", items: [change(oldSscc)] };
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    const oldRefresh = refreshSnapshot(oldClient as never, () => new Date("2026-07-28T07:00:01Z"));
+    await oldStarted;
+    const newConfig = await writeConfig({
+      ...binding,
+      token: "new-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const newClient = {
+      registryOwner: {
+        binding,
+        credentialGeneration: newConfig.credentialGeneration!,
+      },
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:01:00.000Z")),
+      boxRegistryPage: vi.fn(async () => ({ until: "2", items: [change(newSscc)] })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(newClient as never, () => new Date("2026-07-28T07:01:01Z"));
+    releaseOld();
+    await oldRefresh;
+
+    expect(newClient.boxRegistryPage).toHaveBeenCalledTimes(1);
+    expect(await lookupBox(binding, newSscc)).not.toBeNull();
+    expect(await lookupBox(binding, oldSscc)).toBeNull();
+    expect(await readBoxRegistryMeta(binding)).toMatchObject({
+      credentialGeneration: newConfig.credentialGeneration,
+      version: "2",
+    });
+  });
+
   it("leaves the cached snapshot untouched when the fetch fails — a blinking network must not brick the kiosk", async () => {
     const cached = bootstrap("2026-07-28T06:00:00.000Z");
     await replaceSnapshot(cached, new Date("2026-07-28T06:00:01.000Z"));
@@ -1740,6 +1814,14 @@ describe("refreshSnapshot", () => {
 
   it("keeps a successful bootstrap when a bounded registry refresh exhausts snapshot-change retries", async () => {
     const fresh = bootstrap("2026-07-28T07:00:00.000Z");
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
     const client = {
       binding: { serverUrl: "http://srv", kioskId: "k-1" },
       bootstrap: vi.fn(async () => fresh),
@@ -1806,6 +1888,14 @@ describe("refreshSnapshot", () => {
   });
 
   it("does not hide revocation between bootstrap and registry fetch", async () => {
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
     const client = {
       binding: { serverUrl: "http://srv", kioskId: "k-1" },
       bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
@@ -1848,14 +1938,20 @@ describe("refreshSnapshot", () => {
   it("bounds unique malicious cursors and discards the incomplete cut", async () => {
     const sscc = "346006820000000021";
     const binding = { serverUrl: "https://one.example/api", kioskId: "k-1" };
-    await writeConfig({
+    const config = await writeConfig({
       ...binding,
       token: "token",
       kioskName: "A",
       place: null,
       nextDeviceSeq: 0,
     });
-    const seed = { binding, owner: "seed", since: null, until: "1" };
+    const seed = {
+      binding,
+      credentialGeneration: config.credentialGeneration!,
+      owner: "seed",
+      since: null,
+      until: "1",
+    };
     await beginBoxRegistryStage(seed);
     await activateBoxRegistryPage(
       seed,

@@ -101,3 +101,15 @@ allows a token-B refresh. Queue and journal must remain intact.
 - Important: 1
 - Minor: 0
 - Approval: **CHANGES REQUESTED**
+
+## Implementer response: credential-ownership fix round
+
+The remaining Important finding is implemented and awaits independent re-review.
+
+- `KioskConfig` now owns a random non-secret UUID credential generation. It is created for legacy paired config and rotated whenever the stored token changes, including a same-server/same-kiosk re-pair. The token remains only in the pre-existing config record; registry staging and metadata contain the UUID generation, never token plaintext or reversible token-derived material.
+- Config writes serialize with registry stores. Token rotation atomically clears active/staging/meta while leaving queue, journal, quarantine, and snapshot untouched. Same binding plus the same token preserves the generation and active cut across ordinary config writes and URL normalization.
+- Every cut includes the credential generation. Begin, stage, discard, and activation compare it with the current config inside their IndexedDB transaction. An old-generation discard is a no-op and cannot erase the new generation's staging.
+- The worker's single-flight key is `(canonical serverUrl, kioskId, credentialGeneration)`, so a new credential refresh can proceed while an old credential request is still held.
+- Exact regression: token-A refresh is held before staging, the same binding is paired with token B, token-B refresh activates revision 2, then token A is released and rejected without publishing its row or clearing revision 2.
+
+Fix-round evidence: functional RED was 1 failed / 16 passed in `store.test.ts` because the old cut resolved instead of rejecting. Focused final GREEN was 4 files / 148 tests. Full kiosk passed 21 files / 487 tests on the final rerun; the first broad run had one existing timing-sensitive app assertion fail while its isolated rerun and the complete rerun passed. Typecheck, full ESLint, and Vite PWA build passed.

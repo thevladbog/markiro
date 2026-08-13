@@ -44,7 +44,7 @@ vi.mock("../src/store/config.js", async (importOriginal) => {
     ...actual,
     writeConfig: async (cfg: KioskConfig) => {
       await writes.writeConfig(cfg);
-      await actual.writeConfig(cfg);
+      return actual.writeConfig(cfg);
     },
   };
 });
@@ -271,6 +271,7 @@ describe("Pairing", () => {
       kioskName: "Склад №1",
       place: "Проходная",
       nextDeviceSeq: 7,
+      credentialGeneration: expect.any(String),
     });
     // The pair response embeds the bootstrap precisely so the device is usable
     // immediately -- a second round trip here would strand a kiosk paired at a
@@ -288,14 +289,20 @@ describe("Pairing", () => {
 
   it("clears a prior installation's registry when pairing binds this tablet elsewhere", async () => {
     const oldBinding = { serverUrl: "https://old.example", kioskId: "old-kiosk" };
-    await writeConfig({
+    const oldConfig = await writeConfig({
       ...oldBinding,
       token: "old-token",
       kioskName: "Old",
       place: null,
       nextDeviceSeq: 0,
     });
-    const oldCut = { binding: oldBinding, owner: "seed", since: null, until: "99" };
+    const oldCut = {
+      binding: oldBinding,
+      credentialGeneration: oldConfig.credentialGeneration!,
+      owner: "seed",
+      since: null,
+      until: "99",
+    };
     await beginBoxRegistryStage(oldCut);
     await activateBoxRegistryPage(
       oldCut,

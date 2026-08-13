@@ -10,8 +10,11 @@ import {
 } from "./db.js";
 import {
   boxRegistryBindingOf,
+  boxRegistryCredentialOwnerOf,
   sameBoxRegistryBinding,
+  sameBoxRegistryCredentialOwner,
   type BoxRegistryBinding,
+  type BoxRegistryCredentialOwner,
 } from "./installation-binding.js";
 
 export type { BoxRegistryBinding } from "./installation-binding.js";
@@ -38,13 +41,13 @@ export interface StoredBoxRegistryRow {
 
 export interface BoxRegistryMeta {
   binding: BoxRegistryBinding;
+  credentialGeneration: string;
   version: string;
   /** Server-generated bootstrap timestamp from the refresh that activated it. */
   generatedAt: string;
 }
 
-export interface BoxRegistryCut {
-  binding: BoxRegistryBinding;
+export interface BoxRegistryCut extends BoxRegistryCredentialOwner {
   owner: string;
   since: string | null;
   until: string;
@@ -63,14 +66,14 @@ function revision(value: unknown): string {
 }
 
 function checkedCut(value: BoxRegistryCut): BoxRegistryCut {
-  const binding = boxRegistryBindingOf(value.binding);
-  if (!binding) throw new Error("invalid box registry binding");
+  const credentialOwner = boxRegistryCredentialOwnerOf(value);
+  if (!credentialOwner) throw new Error("invalid box registry credential owner");
   if (typeof value.owner !== "string" || value.owner.length === 0 || value.owner.length > 128)
     throw new Error("invalid box registry owner");
   const since = value.since === null ? null : revision(value.since);
   const until = revision(value.until);
   if (since !== null && BigInt(until) < BigInt(since)) throw new Error("invalid box registry cut");
-  return { binding, owner: value.owner, since, until };
+  return { ...credentialOwner, owner: value.owner, since, until };
 }
 
 function sameCut(left: unknown, right: BoxRegistryCut): boolean {
@@ -80,22 +83,26 @@ function sameCut(left: unknown, right: BoxRegistryCut): boolean {
     candidate.owner === right.owner &&
     candidate.since === right.since &&
     candidate.until === right.until &&
-    sameBoxRegistryBinding(boxRegistryBindingOf(candidate.binding), right.binding)
+    sameBoxRegistryCredentialOwner(boxRegistryCredentialOwnerOf(candidate), right)
   );
 }
 
 function checkedMeta(value: unknown): BoxRegistryMeta | null {
   if (!value || typeof value !== "object") return null;
   const candidate = value as Partial<BoxRegistryMeta>;
-  const binding = boxRegistryBindingOf(candidate.binding);
+  const credentialOwner = boxRegistryCredentialOwnerOf(candidate);
   if (
-    !binding ||
+    !credentialOwner ||
     typeof candidate.generatedAt !== "string" ||
     Number.isNaN(Date.parse(candidate.generatedAt))
   )
     return null;
   try {
-    return { binding, version: revision(candidate.version), generatedAt: candidate.generatedAt };
+    return {
+      ...credentialOwner,
+      version: revision(candidate.version),
+      generatedAt: candidate.generatedAt,
+    };
   } catch {
     return null;
   }
@@ -107,10 +114,10 @@ function clearRegistry(tx: IDBTransaction): void {
   tx.objectStore(STORE_BOX_REGISTRY_META).clear();
 }
 
-function currentBinding(value: unknown): BoxRegistryBinding | null {
+function currentCredentialOwner(value: unknown): BoxRegistryCredentialOwner | null {
   const config = value as { token?: unknown } | null | undefined;
   return typeof config?.token === "string" && config.token.length > 0
-    ? boxRegistryBindingOf(value)
+    ? boxRegistryCredentialOwnerOf(value)
     : null;
 }
 
@@ -219,13 +226,14 @@ export async function readBoxRegistryMeta(
       const apply = () => {
         ready += 1;
         if (ready !== 2) return;
-        if (!sameBoxRegistryBinding(currentBinding(configRequest.result), binding)) return;
+        const current = currentCredentialOwner(configRequest.result);
+        if (!sameBoxRegistryBinding(current?.binding ?? null, binding)) return;
         const meta = checkedMeta(metaRequest.result);
         if (!meta) {
           if (metaRequest.result !== undefined) clearRegistry(tx);
           return;
         }
-        if (!sameBoxRegistryBinding(meta.binding, binding)) {
+        if (!sameBoxRegistryCredentialOwner(meta, current)) {
           clearRegistry(tx);
           return;
         }
@@ -255,9 +263,10 @@ export async function lookupBox(
       const apply = () => {
         ready += 1;
         if (ready !== 2) return;
-        if (!sameBoxRegistryBinding(currentBinding(configRequest.result), binding)) return;
+        const current = currentCredentialOwner(configRequest.result);
+        if (!sameBoxRegistryBinding(current?.binding ?? null, binding)) return;
         const meta = checkedMeta(metaRequest.result);
-        if (!meta || !sameBoxRegistryBinding(meta.binding, binding)) {
+        if (!meta || !sameBoxRegistryCredentialOwner(meta, current)) {
           clearRegistry(tx);
           return;
         }
@@ -299,8 +308,8 @@ export async function beginBoxRegistryStage(cutInput: BoxRegistryCut): Promise<v
     (tx) => {
       const configRequest = tx.objectStore(STORE_CONFIG).get(CONFIG_KEY);
       configRequest.onsuccess = () => {
-        if (!sameBoxRegistryBinding(currentBinding(configRequest.result), cut.binding)) {
-          abortTransaction(tx, new Error("box registry binding changed"));
+        if (!sameBoxRegistryCredentialOwner(currentCredentialOwner(configRequest.result), cut)) {
+          abortTransaction(tx, new Error("box registry credential ownership changed"));
           return;
         }
         tx.objectStore(STORE_BOX_REGISTRY_STAGING).clear();
@@ -313,16 +322,24 @@ export async function beginBoxRegistryStage(cutInput: BoxRegistryCut): Promise<v
 export async function discardBoxRegistryStage(cutInput: BoxRegistryCut): Promise<void> {
   const cut = checkedCut(cutInput);
   await withTransaction(
-    [STORE_BOX_REGISTRY_STAGING, STORE_BOX_REGISTRY_META],
+    [STORE_CONFIG, STORE_BOX_REGISTRY_STAGING, STORE_BOX_REGISTRY_META],
     "readwrite",
     (tx) => {
+      const configRequest = tx.objectStore(STORE_CONFIG).get(CONFIG_KEY);
       const meta = tx.objectStore(STORE_BOX_REGISTRY_META);
       const request = meta.get(STAGING_META_KEY);
-      request.onsuccess = () => {
+      let ready = 0;
+      const apply = () => {
+        ready += 1;
+        if (ready !== 2) return;
+        if (!sameBoxRegistryCredentialOwner(currentCredentialOwner(configRequest.result), cut))
+          return;
         if (!sameCut(request.result, cut)) return;
         tx.objectStore(STORE_BOX_REGISTRY_STAGING).clear();
         meta.delete(STAGING_META_KEY);
       };
+      configRequest.onsuccess = apply;
+      request.onsuccess = apply;
     },
   );
 }
@@ -344,8 +361,8 @@ export async function stageBoxRegistryPage(
       const apply = () => {
         ready += 1;
         if (ready !== 2) return;
-        if (!sameBoxRegistryBinding(currentBinding(configRequest.result), cut.binding)) {
-          abortTransaction(tx, new Error("box registry binding changed"));
+        if (!sameBoxRegistryCredentialOwner(currentCredentialOwner(configRequest.result), cut)) {
+          abortTransaction(tx, new Error("box registry credential ownership changed"));
           return;
         }
         if (!sameCut(request.result, cut)) {
@@ -386,8 +403,8 @@ export async function activateBoxRegistryPage(
       const apply = () => {
         ready += 1;
         if (ready !== 4) return;
-        if (!sameBoxRegistryBinding(currentBinding(configRequest.result), cut.binding)) {
-          abortTransaction(tx, new Error("box registry binding changed"));
+        if (!sameBoxRegistryCredentialOwner(currentCredentialOwner(configRequest.result), cut)) {
+          abortTransaction(tx, new Error("box registry credential ownership changed"));
           return;
         }
         if (!sameCut(stagingMetaRequest.result, cut)) {
@@ -395,8 +412,8 @@ export async function activateBoxRegistryPage(
           return;
         }
         const activeMeta = checkedMeta(activeMetaRequest.result);
-        if (activeMeta && !sameBoxRegistryBinding(activeMeta.binding, cut.binding)) {
-          abortTransaction(tx, new Error("box registry binding changed"));
+        if (activeMeta && !sameBoxRegistryCredentialOwner(activeMeta, cut)) {
+          abortTransaction(tx, new Error("box registry credential ownership changed"));
           return;
         }
         if (cut.since === null && activeMeta && BigInt(cut.until) <= BigInt(activeMeta.version)) {
@@ -419,7 +436,12 @@ export async function activateBoxRegistryPage(
             } satisfies StoredBoxRegistryRow);
         }
         meta.put(
-          { binding: cut.binding, version: cut.until, generatedAt } satisfies BoxRegistryMeta,
+          {
+            binding: cut.binding,
+            credentialGeneration: cut.credentialGeneration,
+            version: cut.until,
+            generatedAt,
+          } satisfies BoxRegistryMeta,
           ACTIVE_META_KEY,
         );
         staging.clear();

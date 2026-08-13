@@ -23,9 +23,9 @@ import {
   type BoxRegistryMeta,
 } from "../store/box-registry.js";
 import {
-  boxRegistryBindingKey,
-  boxRegistryBindingOf,
-  type BoxRegistryBinding,
+  boxRegistryCredentialOwnerKey,
+  boxRegistryCredentialOwnerOf,
+  type BoxRegistryCredentialOwner,
 } from "../store/installation-binding.js";
 import {
   attestQueuedOrder,
@@ -779,12 +779,12 @@ const BOX_REGISTRY_MAX_PAGES = 10_000;
 
 async function refreshBoxRegistry(
   client: KioskClient,
-  binding: BoxRegistryBinding,
+  registryOwner: BoxRegistryCredentialOwner,
   generatedAt: string,
   wait: (milliseconds: number) => Promise<void>,
   maxPages: number,
 ): Promise<void> {
-  let since = (await readBoxRegistryMeta(binding))?.version;
+  let since = (await readBoxRegistryMeta(registryOwner.binding))?.version;
   for (let attempt = 0; attempt < BOX_REGISTRY_RESTARTS; attempt += 1) {
     let cut: BoxRegistryCut | null = null;
     try {
@@ -820,7 +820,7 @@ async function refreshBoxRegistry(
         if (until === undefined) {
           until = page.until;
           cut = {
-            binding,
+            ...registryOwner,
             owner: crypto.randomUUID(),
             since: since ?? null,
             until,
@@ -856,7 +856,7 @@ async function refreshBoxRegistry(
         error.code === "registry_snapshot_changed" &&
         attempt + 1 < BOX_REGISTRY_RESTARTS
       ) {
-        since = (await readBoxRegistryMeta(binding))?.version;
+        since = (await readBoxRegistryMeta(registryOwner.binding))?.version;
         await wait(250 * 2 ** attempt);
         continue;
       }
@@ -868,10 +868,10 @@ async function refreshBoxRegistry(
 const registryRefreshes = new Map<string, Promise<void>>();
 
 function singleFlightRegistry(
-  binding: BoxRegistryBinding,
+  registryOwner: BoxRegistryCredentialOwner,
   run: () => Promise<void>,
 ): Promise<void> {
-  const key = boxRegistryBindingKey(binding);
+  const key = boxRegistryCredentialOwnerKey(registryOwner);
   const current = registryRefreshes.get(key);
   if (current) return current;
   const started = run().finally(() => {
@@ -895,11 +895,11 @@ export async function refreshSnapshot(
   // Older test doubles and old custom clients have no registry method. A real
   // current client does; registry failure never rolls back a good bootstrap.
   if (typeof client.boxRegistryPage !== "function") return;
-  const binding = client.binding ?? boxRegistryBindingOf(await readConfig());
-  if (!binding) return;
+  const registryOwner = client.registryOwner ?? boxRegistryCredentialOwnerOf(await readConfig());
+  if (!registryOwner) return;
   try {
-    await singleFlightRegistry(binding, () =>
-      refreshBoxRegistry(client, binding, bootstrap.generatedAt, wait, registryMaxPages),
+    await singleFlightRegistry(registryOwner, () =>
+      refreshBoxRegistry(client, registryOwner, bootstrap.generatedAt, wait, registryMaxPages),
     );
   } catch (error) {
     if (isDeviceRevoked(error)) throw error;

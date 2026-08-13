@@ -40,3 +40,15 @@ The first review of `739495a5` confirmed four Important gaps: concurrent full-cu
 - Re-pairing on the same normalized binding preserves a valid cut; another server, another kiosk, revocation, or metadata/config mismatch clears registry only. A new binding always starts with a full refresh even if the previous binding had a higher revision.
 
 Fix-round evidence: RED was 3 files with 12 expected failures and 108 existing passes. Focused final GREEN was 4 files / 146 tests; full kiosk was 21 files / 485 tests. Kiosk typecheck, full ESLint, Vite PWA production build, explicit changed-file Prettier check, and `git diff --check` passed. The checks used direct installed package binaries to avoid the worktree's intermittently stalled pnpm wrapper.
+
+## Credential-ownership fix round
+
+Re-review found that binding-only ownership still allowed a held token-A request to resume after a same-binding re-pair installed token B. The registry now uses a random UUID credential generation:
+
+- config creates/migrates the non-secret generation and rotates it on any token change;
+- registry cut and active metadata store only that UUID, never token plaintext or token-derived reversible material;
+- begin, page, discard, and activation compare binding plus generation with current config inside the same IndexedDB transaction;
+- token rotation clears registry stores atomically but preserves offline queue/journal custody;
+- single-flight includes the generation, allowing token B to refresh while token A remains held.
+
+Functional RED was 1 failed / 16 passed: old activation resolved after same-binding token rotation. Focused GREEN was 4 files / 148 tests, including the held-old-client/new-client winner sequence. Final full kiosk rerun passed 21 files / 487 tests; typecheck, full ESLint, Vite PWA build, changed-file Prettier, and diff-check passed. An earlier full run had one timing-sensitive app assertion fail; its isolated rerun and the complete final rerun both passed.
