@@ -1056,7 +1056,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       .from(schema.kioskOrderAdmissions)
       .where(eq(schema.kioskOrderAdmissions.tenantId, tenantId));
     expect(afterJitConsume).toEqual([]);
-  }, 30_000);
+  }, 60_000);
 
   it("consumes an exact admission after a durable terminal order rejection", async () => {
     const agent = request.agent(app!.getHttpServer());

@@ -257,22 +257,29 @@
     {
       "idx": 36,
       "version": "7",
-      "when": 1786584061647,
-      "tag": "0036_kiosk_pickup_policy",
+      "when": 1786648204178,
+      "tag": "0036_neat_quasar",
       "breakpoints": true
     },
     {
       "idx": 37,
       "version": "7",
-      "when": 1786589360929,
-      "tag": "0037_organization_branding",
+      "when": 1786648204179,
+      "tag": "0037_kiosk_pickup_policy",
       "breakpoints": true
     },
     {
       "idx": 38,
       "version": "7",
-      "when": 1786619026426,
-      "tag": "0038_kiosk_sscc_orders",
+      "when": 1786648204180,
+      "tag": "0038_organization_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786648204181,
+      "tag": "0039_kiosk_sscc_orders",
       "breakpoints": true
     }
   ]

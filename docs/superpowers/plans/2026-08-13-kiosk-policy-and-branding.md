@@ -30,7 +30,7 @@
 **Files:**
 
 - Modify: `packages/db/src/schema/pickup.ts`
-- Create: `packages/db/migrations/0036_kiosk_pickup_policy.sql`
+- Create: `packages/db/migrations/0037_kiosk_pickup_policy.sql`
 - Create: `packages/db/migrations/meta/0036_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Modify: `packages/db/test/pickup-schema.test.ts`
@@ -124,7 +124,7 @@ Run the generator once after the schema edit:
 pnpm --filter @markiro/db db:generate --name kiosk_pickup_policy
 ```
 
-Then append this seed rule to the generated `0036_kiosk_pickup_policy.sql`, not
+Then append this seed rule to the generated `0037_kiosk_pickup_policy.sql`, not
 to an already-applied earlier migration and not through a JavaScript loop:
 
 ```sql
@@ -154,7 +154,7 @@ Expected: PASS. Review generated SQL for both PKs, the positive check, cascade b
 - [ ] **Step 5: Commit the schema slice**
 
 ```bash
-git add packages/db/src/schema/pickup.ts packages/db/migrations/0036_kiosk_pickup_policy.sql packages/db/migrations/meta/0036_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/pickup-schema.test.ts packages/db/test/runtime-migrate.test.ts
+git add packages/db/src/schema/pickup.ts packages/db/migrations/0037_kiosk_pickup_policy.sql packages/db/migrations/meta/0037_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/pickup-schema.test.ts packages/db/test/runtime-migrate.test.ts
 git commit -m "feat(db): add employee pickup policies"
 ```
 
@@ -371,7 +371,7 @@ git commit -m "feat(kiosk): enforce employee pickup policy"
 
 - Modify: `packages/db/src/schema/org-profile.ts`
 - Modify: `packages/db/src/schema/media.ts`
-- Create: `packages/db/migrations/0037_organization_branding.sql`
+- Create: `packages/db/migrations/0038_organization_branding.sql`
 - Create: `packages/db/migrations/meta/0037_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Create: `apps/api/src/modules/org-profile/logo-processor.ts`
@@ -475,7 +475,7 @@ uses the options above. Define `organizationLogoAssets` with `id`, `tenantId`,
 `createdAt`, `updatedAt`, plus unique `(tenantId,id)` and `objectKey`. Add nullable
 `orgProfiles.logoAssetId` with composite `(tenantId,logoAssetId)` FK.
 
-Generate `0037_organization_branding.sql` only after these schema edits. Use
+Generate `0038_organization_branding.sql` only after these schema edits. Use
 object keys `tenants/${tenantId}/branding/${assetId}.webp`. Insert a staging
 metadata row, upload, lock the tenant profile, activate the new asset, mark the
 old one deleting, and write `organization.logo.updated` audit before deleting
@@ -503,7 +503,7 @@ Expected: PASS; malformed, animated, oversized, cross-tenant, missing-object and
 - [ ] **Step 5: Commit branding API**
 
 ```bash
-git add packages/db/src/schema packages/db/migrations/0037_organization_branding.sql packages/db/migrations/meta/0037_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/mail-media-schema.test.ts packages/db/test/runtime-migrate.test.ts apps/api/src/modules/org-profile apps/api/src/modules/profile/raster-image-processor.ts apps/api/src/modules/profile/avatar-processor.ts apps/api/src/modules/kiosk/kiosk.controller.ts apps/api/src/modules/pickup-orders apps/api/src/modules/storage/object-storage.service.ts apps/api/test/org-profile.e2e.test.ts apps/api/test/kiosk-bootstrap-hashes.e2e.test.ts apps/api/test/profile-assets.reconciler.test.ts
+git add packages/db/src/schema packages/db/migrations/0038_organization_branding.sql packages/db/migrations/meta/0038_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/mail-media-schema.test.ts packages/db/test/runtime-migrate.test.ts apps/api/src/modules/org-profile apps/api/src/modules/profile/raster-image-processor.ts apps/api/src/modules/profile/avatar-processor.ts apps/api/src/modules/kiosk/kiosk.controller.ts apps/api/src/modules/pickup-orders apps/api/src/modules/storage/object-storage.service.ts apps/api/test/org-profile.e2e.test.ts apps/api/test/kiosk-bootstrap-hashes.e2e.test.ts apps/api/test/profile-assets.reconciler.test.ts
 git commit -m "feat(kiosk): deliver tenant branding offline"
 ```
 
@@ -659,8 +659,8 @@ Expected: PASS with no tracked `dist`, coverage, or `.turbo` output.
 ```bash
 git status --short
 git diff --stat
-git diff -- packages/db/migrations/0036_kiosk_pickup_policy.sql
-git diff -- packages/db/migrations/0037_organization_branding.sql
+git diff -- packages/db/migrations/0037_kiosk_pickup_policy.sql
+git diff -- packages/db/migrations/0038_organization_branding.sql
 ```
 
 Expected: only policy/branding source, tests, migration metadata, and translations are changed; `.pnpm-store/` remains untracked and unstaged.

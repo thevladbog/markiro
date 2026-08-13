@@ -128,8 +128,8 @@ git commit -m "feat(domain): normalize scanned SSCC wrappers"
 
 - Modify: `packages/db/src/schema/platform.ts`
 - Modify: `packages/db/src/schema/pickup.ts`
-- Create: `packages/db/migrations/0038_kiosk_sscc_orders.sql`
-- Create: `packages/db/migrations/meta/0038_snapshot.json`
+- Create: `packages/db/migrations/0039_kiosk_sscc_orders.sql`
+- Create: `packages/db/migrations/meta/0039_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Modify: `packages/db/test/schema.test.ts`
 - Modify: `packages/db/test/pickup-schema.test.ts`
@@ -225,7 +225,7 @@ Expected: PASS after reviewing all tenant FKs, check constraints, indexes, backf
 - [ ] **Step 5: Commit persistence**
 
 ```bash
-git add packages/db/src/schema/platform.ts packages/db/src/schema/pickup.ts packages/db/migrations/0038_kiosk_sscc_orders.sql packages/db/migrations/meta/0038_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/schema.test.ts packages/db/test/pickup-schema.test.ts packages/db/test/runtime-migrate.test.ts
+git add packages/db/src/schema/platform.ts packages/db/src/schema/pickup.ts packages/db/migrations/0039_kiosk_sscc_orders.sql packages/db/migrations/meta/0039_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/schema.test.ts packages/db/test/pickup-schema.test.ts packages/db/test/runtime-migrate.test.ts
 git commit -m "feat(db): persist kiosk box order lines"
 ```
 
@@ -714,7 +714,7 @@ Expected: PASS.
 - [ ] **Step 4: Review migration and security-sensitive payloads**
 
 ```bash
-git diff -- packages/db/migrations/0038_kiosk_sscc_orders.sql
+git diff -- packages/db/migrations/0039_kiosk_sscc_orders.sql
 git diff -- apps/api/src/modules/pickup-orders/kiosk-admission-proof.ts
 git diff -- apps/kiosk/src/store/scrub.ts
 git status --short
