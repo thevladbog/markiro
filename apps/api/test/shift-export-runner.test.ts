@@ -108,7 +108,8 @@ function fakeDb(row = baseRow(), options: FakeDbOptions = {}): FakeDb {
         let updatePredicate: unknown;
         const apply = () => {
           if (typeof values.attemptCount !== "undefined") {
-            const { attemptCount: _incrementExpression, ...remainingValues } = values;
+            const remainingValues = { ...values };
+            delete remainingValues.attemptCount;
             Object.assign(target.row, remainingValues);
             target.row.attemptCount += 1;
           } else {
@@ -266,7 +267,7 @@ describe("ShiftExportRunnerService", () => {
     );
     expect(objects.putVerified).toHaveBeenCalledTimes(2);
     for (const [index, call] of objects.putVerified.mock.calls.entries()) {
-      const [key, body, _mime, hash] = call as [string, Buffer, string, string];
+      const [key, body, , hash] = call as [string, Buffer, string, string];
       expect(key).toBe(
         `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-1/part-${index + 1}.csv`,
       );
