@@ -84,7 +84,7 @@ function errorMessage(error: unknown, t: (key: string) => string): string {
   return t("pages.shifts.exports.errors.infrastructure");
 }
 
-function ExportParameters({ item, language }: { item: ShiftExportDto; language: string }) {
+function ExportParameters({ item, language, formatLabel }: { item: ShiftExportDto; language: string; formatLabel?: string }) {
   const { t } = useTranslation();
   const split = item.maxLines === null
     ? t("pages.shifts.exports.parameters.single")
@@ -94,7 +94,7 @@ function ExportParameters({ item, language }: { item: ShiftExportDto; language: 
     <dl className="mk-shift-exports__details">
       <div><dt>{t("pages.shifts.exports.details.actor")}</dt><dd>{item.createdByName ?? t("pages.shifts.exports.details.unknownActor")}</dd></div>
       <div><dt>{t("pages.shifts.exports.details.created")}</dt><dd>{formatDateTime(item.createdAt, language) ?? "—"}</dd></div>
-      <div><dt>{t("pages.shifts.exports.details.format")}</dt><dd>{item.formatId}</dd></div>
+      <div><dt>{t("pages.shifts.exports.details.format")}</dt><dd>{formatLabel ?? item.formatId}</dd></div>
       <div><dt>{t("pages.shifts.exports.details.parameters")}</dt><dd>{split}</dd></div>
       {item.totalCodeCount !== null ? <div><dt>{t("pages.shifts.exports.details.codes")}</dt><dd>{t("pages.shifts.exports.counts.codes", { count: formatNumber(item.totalCodeCount, language) })}</dd></div> : null}
       {item.totalBoxCount !== null && item.totalBoxCount > 0 ? <div><dt>{t("pages.shifts.exports.details.boxes")}</dt><dd>{t("pages.shifts.exports.counts.boxes", { count: formatNumber(item.totalBoxCount, language) })}</dd></div> : null}
@@ -149,7 +149,7 @@ function ArtifactRow({ item, artifact, language, onError }: {
   );
 }
 
-function HistoryRow({ item, language, onError }: { item: ShiftExportDto; language: string; onError: (error: unknown) => void }) {
+function HistoryRow({ item, language, formatLabel, onError }: { item: ShiftExportDto; language: string; formatLabel?: string; onError: (error: unknown) => void }) {
   const { t } = useTranslation();
   const retry = useRetryShiftExport();
   const [retryError, setRetryError] = useState<string | null>(null);
@@ -170,7 +170,7 @@ function HistoryRow({ item, language, onError }: { item: ShiftExportDto; languag
         <span>{formatDateTime(item.completedAt ?? item.createdAt, language) ?? "—"}</span>
       </div>
       {item.stale ? <Alert tone="warn">{t("pages.shifts.exports.stale")}</Alert> : null}
-      <ExportParameters item={item} language={language} />
+      <ExportParameters item={item} language={language} formatLabel={formatLabel} />
       {item.status === "failed" ? (
         <div className="mk-shift-exports__failed">
           <Alert tone="error">{item.errorCode && SAFE_ERROR_CODES.has(item.errorCode) ? t(`pages.shifts.exports.errors.${item.errorCode}`) : t("pages.shifts.exports.errors.infrastructure")}</Alert>
@@ -213,6 +213,10 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
     () => [...(exportsQuery.data ?? [])].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [exportsQuery.data],
   );
+  const formatLabels = useMemo(
+    () => new Map((formats.data ?? []).map((format) => [`${format.id}@${format.version}`, format.label])),
+    [formats.data],
+  );
 
   const close = () => {
     if (create.isPending) return;
@@ -244,7 +248,7 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
       open={open}
       title={t("pages.shifts.exports.title")}
       closeLabel={t("common.close")}
-      onClose={close}
+      onClose={create.isPending ? undefined : close}
       width="min(760px, calc(100vw - 32px))"
       className="mk-shift-exports"
       footer={<><Button type="button" variant="secondary" disabled={create.isPending} onClick={close}>{t("pages.shifts.cancel")}</Button><Button type="submit" form="shift-export-form" disabled={!canSubmit} loading={create.isPending}>{t("pages.shifts.exports.create")}</Button></>}
@@ -263,14 +267,14 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
           />
         )}
         <Checkbox label={t("pages.shifts.exports.splitLabel")} checked={split} disabled={create.isPending} onCheckedChange={setSplit} />
-        {split ? <Input label={t("pages.shifts.exports.lineLimitLabel")} type="number" inputMode="numeric" min={MIN_LINES_PER_PART} max={MAX_LINES_PER_PART} step={1} value={lineLimit} {...(lineLimitError ? { error: lineLimitError } : {})} disabled={create.isPending} onChange={(event) => setLineLimit(event.target.value)} /> : null}
+        {split ? <Input required label={t("pages.shifts.exports.lineLimitLabel")} type="number" inputMode="numeric" min={MIN_LINES_PER_PART} max={MAX_LINES_PER_PART} step={1} value={lineLimit} {...(lineLimitError ? { error: lineLimitError } : {})} disabled={create.isPending} onChange={(event) => setLineLimit(event.target.value)} /> : null}
       </form>
       <section className="mk-shift-exports__history" aria-label={t("pages.shifts.exports.historyLabel")}>
         <h3>{t("pages.shifts.exports.historyTitle")}</h3>
         {exportsQuery.isPending ? <Spinner label={t("common.loading")} /> : null}
         {exportsQuery.isError ? <Alert tone="error">{t("pages.shifts.exports.errors.infrastructure")}</Alert> : null}
         {!exportsQuery.isPending && !exportsQuery.isError && history.length === 0 ? <p className="mk-shift-exports__empty">{t("pages.shifts.exports.historyEmpty")}</p> : null}
-        {history.map((item) => <HistoryRow key={item.id} item={item} language={i18n.language} onError={(caught) => setError(errorMessage(caught, t))} />)}
+        {history.map((item) => <HistoryRow key={item.id} item={item} language={i18n.language} formatLabel={formatLabels.get(`${item.formatId}@${item.formatVersion}`)} onError={(caught) => setError(errorMessage(caught, t))} />)}
       </section>
     </Modal>
   );

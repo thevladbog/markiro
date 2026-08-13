@@ -124,6 +124,7 @@ describe("ShiftExportsDialog", () => {
     expect(await within(dialog).findByText("Готов"));
     expect(within(dialog).getByText("Данные смены изменились — сформируйте новую")).toBeDefined();
     expect(within(dialog).getByText("Иванов Иван")).toBeDefined();
+    expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(2);
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
     expect(within(dialog).getByText("2 коробов")).toBeDefined();
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
@@ -136,5 +137,39 @@ describe("ShiftExportsDialog", () => {
     expect(link.download).toBe("first.txt");
     expect(removeChild).toHaveBeenCalledWith(link);
     createElement.mockRestore();
+  });
+
+  it("renders retained statuses, safe failure text, newest-first history, and flat counts without boxes", async () => {
+    const failed = { ...READY_EXPORT, id: "33333333-3333-4333-8333-333333333333", formatId: "shift_csv_flat", status: "failed", errorCode: "GENERATION_FAILED", artifacts: [], totalBoxCount: 0, createdAt: "2026-08-13T17:00:00.000Z", completedAt: null };
+    const processing = { ...READY_EXPORT, id: "44444444-4444-4444-8444-444444444444", formatId: "shift_txt_flat", status: "processing", artifacts: [], totalBoxCount: 0, createdAt: "2026-08-13T16:30:00.000Z", completedAt: null };
+    const queued = { ...READY_EXPORT, id: "55555555-5555-4555-8555-555555555555", formatId: "shift_csv_flat", status: "queued", artifacts: [], totalBoxCount: 0, createdAt: "2026-08-13T16:20:00.000Z", completedAt: null };
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("/formats")) return response(FORMATS);
+      if (String(url).endsWith("/exports")) return response([queued, processing, failed]);
+      return response({});
+    }));
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
+    expect(await within(dialog).findByText("В очереди")).toBeDefined();
+    expect(within(dialog).getByText("Формируется")).toBeDefined();
+    expect(within(dialog).getByText("Не удалось сформировать отчет. Повторите попытку.")).toBeDefined();
+    expect(within(dialog).getAllByText("[CSV][Без коробов] Отчет смены")).toHaveLength(3);
+    const rows = within(dialog).getAllByRole("article");
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain("Не удалось сформировать отчет");
+  });
+
+  it("rejects empty, fractional, and out-of-range split limits", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => response(String(url).includes("/formats") ? FORMATS : [])));
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: "Разделить отчет на части" }));
+    const limit = within(dialog).getByLabelText("Максимум строк в части") as HTMLInputElement;
+    for (const value of ["", "1", "1000001", "1.5"]) {
+      fireEvent.change(limit, { target: { value } });
+      expect(within(dialog).getByText("Введите целое число от 2 до 1 000 000")).toBeDefined();
+      expect((within(dialog).getByRole("button", { name: "Сформировать отчет" }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    expect(limit.required).toBe(true);
   });
 });
