@@ -32,6 +32,15 @@ describe("StationScreen", () => {
     );
     expect(screenRegion.querySelector(".station-screen__actions")?.textContent).toContain("Back");
   });
+
+  it("does not nest a second panel behind its footer actions", () => {
+    const scopedFooterRule =
+      /\.station-screen__actions > \.station-floor-footer\s*\{([^}]*)\}/.exec(stationCss)?.[1];
+
+    expect(scopedFooterRule).toContain("padding: 0");
+    expect(scopedFooterRule).toContain("border-top: 0");
+    expect(scopedFooterRule).toContain("background: transparent");
+  });
 });
 
 const status = {
