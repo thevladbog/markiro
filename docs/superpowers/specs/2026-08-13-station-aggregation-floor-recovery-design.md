@@ -87,8 +87,10 @@ character.
 
 Recent operations retain their smaller verdict, GTIN, serial, and time model;
 the dominant latest-scan instrument alone presents the complete normalized
-code. The data is derived from the journal's existing captured KM rather than
-stored as a second, divergent representation.
+code. The dominant instrument reads the latest durably accepted journal row
+independently of the bounded recent-operations list, so later rejections and a
+restart cannot replace or evict it. The data is derived from the journal's
+existing captured KM rather than stored as a second, divergent representation.
 
 For invalid input that cannot be parsed, the UI shows a safe bounded suffix
 only. It does not echo an arbitrary raw payload onto the floor screen or into
@@ -166,6 +168,12 @@ It presents a sanitized, actionable category:
 - `Не удалось подготовить этикетку`;
 - `Принтер не принял задание`.
 
+A restored `pending` row without a classified error is presented honestly as
+an interrupted print with guidance to check the printer and retry. The station
+does not rewrite that legacy row or guess that a transport failure occurred.
+Retry and verification-screen reprint surface the resulting sanitized category
+when the print attempt fails; raw native errors remain hidden.
+
 Raw device errors, label contents, credentials, and scanner payloads are not
 shown or logged.
 
@@ -181,6 +189,12 @@ The skip action marks the outcome durably and sends the established print-skip
 audit event. Only after a successful print or explicit skip does the station
 admit ordinary scans for the next box. There is no automatic skip and no timer
 that dismisses the failure.
+
+Scan-back verification resolves through a synchronous single-flight UI latch
+and a conditional SQLite transition. Verified and skipped timestamps are
+mutually exclusive; only the winning transition advances the verification
+queue. Sync input carrying both timestamps is rejected at the API boundary,
+while an older client that omits both remains compatible.
 
 Reprint from exceptions continues to use the closed box's original SSCC and
 does not allocate another serial.
@@ -237,8 +251,13 @@ Automated coverage must include:
   its full-screen signal;
 - box grids at 20, 100, and grouped-capacity boundaries;
 - stable box ordinal and pending print recovery across remount/restart;
+- latest accepted identity surviving rejections, bounded-feed eviction, and
+  remount;
 - missing template, missing printer, render failure, transport failure, retry,
-  successful print, verification, and explicit skip;
+  interrupted recovery, successful print, classified reprint failure,
+  verification, and explicit skip;
+- adversarial scan-scan and scan-skip verification races with one durable
+  outcome and one queue advance;
 - retry and reprint retaining the original SSCC without another pool burn;
 - first server allocation starting at `1`, exact range boundaries, concurrent
   allocation, exhaustion, and migration of untouched zero counters;

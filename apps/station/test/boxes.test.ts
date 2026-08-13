@@ -210,6 +210,42 @@ describe("boxes", () => {
       });
     });
 
+    it("allows only one mutually exclusive verification outcome to win", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrinted(exec, "b1");
+
+      expect(await markPrintVerified(exec, "b1", "2026-07-29T10:06:00.000Z")).toBe(true);
+      expect(await markPrintSkipped(exec, "b1", "2026-07-29T10:06:01.000Z")).toBe(false);
+
+      const rows = await exec.all<{
+        print_verified_at: string | null;
+        print_skipped_at: string | null;
+      }>("SELECT print_verified_at, print_skipped_at FROM boxes_mirror WHERE box_id = ?", ["b1"]);
+      expect(rows[0]).toEqual({
+        print_verified_at: "2026-07-29T10:06:00.000Z",
+        print_skipped_at: null,
+      });
+    });
+
+    it("does not overwrite a winning skip with a later matching scan", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrinted(exec, "b1");
+
+      expect(await markPrintSkipped(exec, "b1", "2026-07-29T10:06:00.000Z")).toBe(true);
+      expect(await markPrintVerified(exec, "b1", "2026-07-29T10:06:01.000Z")).toBe(false);
+
+      const rows = await exec.all<{
+        print_verified_at: string | null;
+        print_skipped_at: string | null;
+      }>("SELECT print_verified_at, print_skipped_at FROM boxes_mirror WHERE box_id = ?", ["b1"]);
+      expect(rows[0]).toEqual({
+        print_verified_at: null,
+        print_skipped_at: "2026-07-29T10:06:00.000Z",
+      });
+    });
+
     // Task 13 review, Finding 1: the sync engine's box-closure query
     // (`sync.ts`'s `readClosedUnackedBoxes`) is gated on `acked_at IS NULL`,
     // and `ackBoxes` sets it on every successful drain -- typically within

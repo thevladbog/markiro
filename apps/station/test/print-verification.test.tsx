@@ -150,6 +150,51 @@ describe("PrintVerification", () => {
     await waitFor(() => expect(onVerified).toHaveBeenCalledOnce());
   });
 
+  it("resolves only once when two matching scans arrive before persistence finishes", async () => {
+    const source = manualSource();
+    const onVerified = vi.fn(() => new Promise<void>(() => {}));
+    const onSkip = vi.fn();
+    render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={onVerified}
+        onReprint={vi.fn()}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+
+    act(() => {
+      source.emit(`]C100${SSCC}`);
+      source.emit(`]C100${SSCC}`);
+    });
+
+    expect(onVerified).toHaveBeenCalledOnce();
+    expect(onSkip).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", true);
+  });
+
+  it("does not let skip race a matching scan that already started resolution", () => {
+    const source = manualSource();
+    const onVerified = vi.fn(() => new Promise<void>(() => {}));
+    const onSkip = vi.fn();
+    render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={onVerified}
+        onReprint={vi.fn()}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+
+    act(() => source.emit(`]C100${SSCC}`));
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+
+    expect(onVerified).toHaveBeenCalledOnce();
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
   it("does not accept a scan of a different label", async () => {
     const source = manualSource();
     const onVerified = vi.fn();
@@ -236,6 +281,22 @@ describe("PrintVerification", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
     expect(onReprint).toHaveBeenCalledOnce();
+  });
+
+  it("shows a sanitized classified failure returned by reprint", async () => {
+    render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={vi.fn()}
+        onReprint={() => Promise.resolve("transport_failed")}
+        onSkip={vi.fn()}
+        scanSource={manualSource()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
+
+    expect(await screen.findByText("Принтер не принял задание")).toBeDefined();
   });
 
   it("calls onSkip when the skip button is pressed", () => {

@@ -428,6 +428,39 @@ describe("WorkScreen", () => {
     expect(screen.queryByRole("alert")).toBeNull();
   });
 
+  it("keeps the latest accepted code through rejected activity and a remount", async () => {
+    const exec = makeExec();
+    const source = manualSource();
+    const first = renderWorkScreen({ exec, source });
+
+    act(() => source.emit(KM));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status").querySelector('[data-semantic="normalized-code"]')?.textContent,
+      ).toBe("(01)04600000000015 (21)5Ab1"),
+    );
+    act(() => {
+      for (let index = 0; index < 7; index += 1) source.emit(`invalid-${index}`);
+    });
+    await waitFor(async () => {
+      const rows = await exec.all<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM scan_events_mirror WHERE verdict = 'invalid'",
+      );
+      expect(rows[0]?.n).toBe(7);
+    });
+    expect(
+      screen.getByRole("status").querySelector('[data-semantic="normalized-code"]')?.textContent,
+    ).toBe("(01)04600000000015 (21)5Ab1");
+
+    first.unmount();
+    renderWorkScreen({ exec, source: manualSource() });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status").querySelector('[data-semantic="normalized-code"]')?.textContent,
+      ).toBe("(01)04600000000015 (21)5Ab1"),
+    );
+  });
+
   it("keeps an error verdict visible for exactly 1200 ms", async () => {
     vi.useFakeTimers();
     const source = manualSource();
@@ -1620,6 +1653,22 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
   });
 
+  it("restores a category-less pending print as interrupted work, not a transport failure", async () => {
+    const exec = makeExec();
+    await seedPendingPrint(exec, null);
+
+    renderWorkTracked({
+      exec,
+      printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
+    });
+
+    expect(
+      await screen.findByText("Печать была прервана. Проверьте принтер и повторите печать."),
+    ).toBeDefined();
+    expect(screen.queryByText("Принтер не принял задание")).toBeNull();
+    expect(screen.getByText(SSCC)).toBeDefined();
+  });
+
   it("regenerates a restart-restored printed label for the same persisted box and SSCC", async () => {
     const exec = makeExec();
     await seedPendingPrint(exec, null, "printed");
@@ -1644,6 +1693,32 @@ describe("WorkScreen box progress, closing and printing", () => {
       "SELECT box_id, sscc FROM boxes_mirror WHERE closed_at IS NOT NULL",
     );
     expect(boxes).toEqual([{ box_id: SEEDED_BOX_ID, sscc: SSCC }]);
+  });
+
+  it("shows classified feedback when restart verification reprint fails", async () => {
+    const exec = makeExec();
+    await seedPendingPrint(exec, null, "printed");
+    const secret = "native COM7 secret-message";
+    const print = vi.fn(async () => {
+      throw new Error(secret);
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWorkTracked({
+        exec,
+        verifyPrintedLabel: true,
+        printing: { target: PRINT_TARGET, language: "zpl", print },
+      });
+
+      await screen.findByText("Отсканируйте распечатанную этикетку");
+      fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
+
+      expect(await screen.findByText("Принтер не принял задание")).toBeDefined();
+      expect(document.body.textContent).not.toContain(secret);
+      expect(JSON.stringify(consoleError.mock.calls)).not.toContain(secret);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   // Self-review addition: none of the brief's own tests ever set
@@ -1890,7 +1965,12 @@ describe("WorkScreen box progress, closing and printing", () => {
       printing: { target: PRINT_TARGET, language: "zpl", print: vi.fn(async () => {}) },
     });
     act(() => scan(KM));
-    fireEvent.click(await screen.findByRole("button", { name: "Пропустить" }));
+    await screen.findByRole("button", { name: "Пропустить" });
+    await exec.run(
+      "UPDATE boxes_mirror SET sscc = ?, closed_at = ?, print_state = 'printed' WHERE box_id = ?",
+      [SSCC, "2026-08-13T10:00:00.000Z", SEEDED_BOX_ID],
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
     await waitFor(async () => {
       const rows = await exec.all<{ print_skipped_at: string | null }>(
@@ -1917,6 +1997,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
     act(() => scan(KM));
     await screen.findByText("Отсканируйте распечатанную этикетку");
+    await exec.run(
+      "UPDATE boxes_mirror SET sscc = ?, closed_at = ?, print_state = 'printed' WHERE box_id = ?",
+      [SSCC, "2026-08-13T10:00:00.000Z", SEEDED_BOX_ID],
+    );
     // The same scan source WorkScreen itself listens on -- PrintVerification
     // takes it over entirely while the prompt is up (see its own doc
     // comment). Same GS1 DataMatrix prefix `print-verification.test.tsx`'s
@@ -1953,14 +2037,14 @@ describe("WorkScreen box progress, closing and printing", () => {
       });
       const marker = outcome === "skip" ? "print_skipped_at" : "print_verified_at";
       const exec: SqlExecutor = {
-        all: base.all,
-        async run(sql, params = []) {
+        async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
           if (sql.includes(`${marker} = ?`)) {
             announceOutcome();
             await outcomeGate;
           }
-          await base.run(sql, params);
+          return base.all<T>(sql, params);
         },
+        run: base.run,
       };
       const registry = createFloorWorkRegistry();
       const view = renderWorkTracked({

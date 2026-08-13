@@ -3,20 +3,23 @@ import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
 import type { BoxPrintErrorCode } from "../lib/boxes.js";
 
+export type BoxPrintRecoveryErrorCode = BoxPrintErrorCode | "interrupted";
+
 export interface BoxPrintRecoveryProps {
   sscc: string;
-  errorCode: BoxPrintErrorCode;
+  errorCode: BoxPrintRecoveryErrorCode;
   pending: boolean;
   onRetry: () => void;
   onSetup: () => void;
   onSkip: () => void;
 }
 
-const ERROR_KEYS: Record<BoxPrintErrorCode, string> = {
+const ERROR_KEYS: Record<BoxPrintRecoveryErrorCode, string> = {
   template_missing: "box.printRecovery.errors.templateMissing",
   printer_unconfigured: "box.printRecovery.errors.printerUnconfigured",
   render_failed: "box.printRecovery.errors.renderFailed",
   transport_failed: "box.printRecovery.errors.transportFailed",
+  interrupted: "box.printRecovery.errors.interrupted",
 };
 
 export function BoxPrintRecovery({
@@ -29,7 +32,10 @@ export function BoxPrintRecovery({
 }: BoxPrintRecoveryProps) {
   const { t } = useTranslation();
   const [confirmingSkip, setConfirmingSkip] = useState(false);
-  const canOpenSetup = errorCode === "printer_unconfigured" || errorCode === "transport_failed";
+  const canOpenSetup =
+    errorCode === "printer_unconfigured" ||
+    errorCode === "transport_failed" ||
+    errorCode === "interrupted";
 
   if (confirmingSkip) {
     return (

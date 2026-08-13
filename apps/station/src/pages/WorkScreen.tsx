@@ -23,7 +23,6 @@ import {
   openBox,
   reprintBox,
   type ClosedBoxSummary,
-  type BoxPrintErrorCode,
   type DeviceBox,
   type UnresolvedBoxPrint,
 } from "../lib/boxes.js";
@@ -32,6 +31,7 @@ import type { PrintTarget } from "../lib/hardware.js";
 import type { PrinterLanguage } from "../lib/hardware-config.js";
 import {
   findFirstSeen,
+  findLatestAcceptedOperation,
   listRecentOperations,
   loadCodeKeys,
   recordScan,
@@ -45,7 +45,7 @@ import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-q
 import type { ScanSource } from "../lib/scan-source.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
-import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
+import { BoxPrintRecovery, type BoxPrintRecoveryErrorCode } from "../ui/BoxPrintRecovery.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
@@ -155,7 +155,15 @@ export function WorkScreen({
   const [confirmExit, setConfirmExit] = useState(false);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
+  const [latestAcceptedOperation, setLatestAcceptedOperation] = useState<RecentOperation | null>(
+    null,
+  );
   const recentReadState = useRef<RecentReadState>({
+    mounted: false,
+    active: false,
+    trailing: false,
+  });
+  const latestAcceptedReadState = useRef<RecentReadState>({
     mounted: false,
     active: false,
     trailing: false,
@@ -193,6 +201,35 @@ export function WorkScreen({
       });
   }, [exec, shiftId]);
 
+  const refreshLatestAcceptedOperation = useCallback((): void => {
+    const state = latestAcceptedReadState.current;
+    if (!state.mounted) return;
+    if (state.active) {
+      state.trailing = true;
+      return;
+    }
+    state.active = true;
+    void findLatestAcceptedOperation(exec, shiftId)
+      .then((operation) => {
+        if (latestAcceptedReadState.current === state && state.mounted && !state.trailing) {
+          setLatestAcceptedOperation(operation);
+        }
+      })
+      .catch((err: unknown) => {
+        if (latestAcceptedReadState.current === state && state.mounted) {
+          console.error("station: failed to read latest accepted scan", err);
+        }
+      })
+      .finally(() => {
+        if (latestAcceptedReadState.current !== state || !state.mounted) return;
+        state.active = false;
+        if (state.trailing) {
+          state.trailing = false;
+          refreshLatestAcceptedOperation();
+        }
+      });
+  }, [exec, shiftId]);
+
   useEffect(() => {
     const state: RecentReadState = { mounted: true, active: false, trailing: false };
     recentReadState.current = state;
@@ -202,6 +239,16 @@ export function WorkScreen({
       state.trailing = false;
     };
   }, [refreshRecentOperations]);
+
+  useEffect(() => {
+    const state: RecentReadState = { mounted: true, active: false, trailing: false };
+    latestAcceptedReadState.current = state;
+    refreshLatestAcceptedOperation();
+    return () => {
+      state.mounted = false;
+      state.trailing = false;
+    };
+  }, [refreshLatestAcceptedOperation]);
 
   // Box aggregation state -- null (never loaded / no `issuerPrefix`) means no
   // box UI at all, per Task 13's correction: a validation-mode shift, or a
@@ -289,8 +336,8 @@ export function WorkScreen({
   // now that Finding 3 makes a non-print visible -- show "print unavailable"
   // for a label that would have printed fine a moment later.
   const labelSpecReady = useRef<Promise<void> | null>(null);
-  type PrintRecoveryState = UnresolvedBoxPrint & {
-    errorCode: BoxPrintErrorCode;
+  type PrintRecoveryState = Omit<UnresolvedBoxPrint, "errorCode"> & {
+    errorCode: BoxPrintRecoveryErrorCode;
     pending: boolean;
   };
   const [printRecovery, setPrintRecoveryState] = useState<PrintRecoveryState | null>(null);
@@ -539,12 +586,9 @@ export function WorkScreen({
             boxId: unresolved.boxId,
           });
         } else {
-          const fallbackCode: BoxPrintErrorCode = !printingRef.current
-            ? "printer_unconfigured"
-            : "transport_failed";
           updatePrintRecovery({
             ...unresolved,
-            errorCode: unresolved.errorCode ?? fallbackCode,
+            errorCode: unresolved.errorCode ?? "interrupted",
             pending: false,
           });
         }
@@ -885,6 +929,7 @@ export function WorkScreen({
     operatorId,
     refreshBox: refreshBoxAndMaybeClose,
     refreshRecentOperations,
+    refreshLatestAcceptedOperation,
   });
   useEffect(() => {
     live.current = {
@@ -896,6 +941,7 @@ export function WorkScreen({
       operatorId,
       refreshBox: refreshBoxAndMaybeClose,
       refreshRecentOperations,
+      refreshLatestAcceptedOperation,
     };
   });
 
@@ -1020,6 +1066,9 @@ export function WorkScreen({
           // path. This display-only read is deliberately detached so a slow
           // mirror query cannot delay intake or the next queued scan.
           void live.current.refreshRecentOperations();
+          if (outcome.verdict.status === "ok") {
+            void live.current.refreshLatestAcceptedOperation();
+          }
         },
         onError() {
           // A throw from process() (e.g. the journal write) must never leave
@@ -1230,22 +1279,28 @@ export function WorkScreen({
   // the current box id through `verificationRef` (see above) rather than
   // closing over `verification` directly, which is what lets this have a
   // stable identity in the first place.
-  const handleVerified = useCallback(() => {
+  const handleVerified = useCallback((): Promise<boolean> => {
     const boxId = verificationRef.current?.boxId ?? null;
     // The outcome is an ordered queue job, so credential recovery waits it
     // alongside accepted scans and box/correction work. Keep the existing
     // console reporting: a locked DB must not become an unhandled rejection.
-    if (boxId) {
-      queue.enqueueJob(async () => {
+    if (!boxId) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      const accepted = queue.enqueueJob(async () => {
         try {
-          await markPrintVerified(exec, boxId, new Date().toISOString());
-          dequeueVerification();
-          void reloadClosedBoxes();
+          const won = await markPrintVerified(exec, boxId, new Date().toISOString());
+          if (won) {
+            dequeueVerification();
+            void reloadClosedBoxes();
+          }
+          resolve(won);
         } catch {
           console.error("station: recording print verification failed");
+          resolve(false);
         }
       });
-    }
+      if (!accepted) resolve(false);
+    });
   }, [exec, queue, reloadClosedBoxes]);
 
   function retryPrintRecovery(): void {
@@ -1260,10 +1315,14 @@ export function WorkScreen({
     updatePrintRecovery({ ...job, pending: true });
     queue.enqueueJob(async () => {
       try {
-        await markPrintSkipped(exec, job.boxId, new Date().toISOString());
-        updatePrintRecovery(null);
-        void reloadClosedBoxes();
-        live.current.onScanRecorded?.();
+        const won = await markPrintSkipped(exec, job.boxId, new Date().toISOString());
+        if (won) {
+          updatePrintRecovery(null);
+          void reloadClosedBoxes();
+          live.current.onScanRecorded?.();
+        } else {
+          updatePrintRecovery({ ...job, pending: false });
+        }
       } catch {
         console.error("station: recording box print skip failed");
         updatePrintRecovery({ ...job, pending: false });
@@ -1300,7 +1359,7 @@ export function WorkScreen({
               <ScanResultInstrument
                 productName={productName}
                 counterpartyName={counterpartyName ?? null}
-                operation={recentOperations[0] ?? null}
+                operation={latestAcceptedOperation}
                 labels={workLabels.status}
               />
               {issuerPrefix !== null ? (
@@ -1406,36 +1465,48 @@ export function WorkScreen({
         <PrintVerification
           expected={verification.sscc}
           onVerified={handleVerified}
-          onReprint={() => {
+          onReprint={async () => {
             // A restart restores the durable box/SSCC but not volatile bytes.
             // Regenerate from that exact persisted identity; never close a
             // second box or allocate another serial. In-session verification
             // still sends the exact bytes already rendered. Both routes share
             // the physical-printer queue and expose only a fixed error category.
-            void (async () => {
+            try {
               if (verification.bytes && printing) {
                 const reprintBytes = verification.bytes;
                 await serializePrint(() => printing.print(printing.target, reprintBytes));
-                return;
+                return undefined;
               }
-              await attemptClosedBoxPrint(verification);
-            })().catch(() => {
+              const attempt = await attemptClosedBoxPrint(verification);
+              if (attempt.kind === "failed") {
+                console.error("station: box label reprint failed");
+                return attempt.code;
+              }
+              return undefined;
+            } catch {
               console.error("station: box label reprint failed");
-            });
+              return "transport_failed";
+            }
           }}
           onSkip={() => {
             const boxId = verification.boxId;
-            if (boxId) {
-              queue.enqueueJob(async () => {
+            if (!boxId) return Promise.resolve(false);
+            return new Promise<boolean>((resolve) => {
+              const accepted = queue.enqueueJob(async () => {
                 try {
-                  await markPrintSkipped(exec, boxId, new Date().toISOString());
-                  dequeueVerification();
-                  void reloadClosedBoxes();
+                  const won = await markPrintSkipped(exec, boxId, new Date().toISOString());
+                  if (won) {
+                    dequeueVerification();
+                    void reloadClosedBoxes();
+                  }
+                  resolve(won);
                 } catch {
                   console.error("station: recording print skip failed");
+                  resolve(false);
                 }
               });
-            }
+              if (!accepted) resolve(false);
+            });
           }}
           scanSource={source}
         />

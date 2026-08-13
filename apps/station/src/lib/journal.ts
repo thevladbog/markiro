@@ -49,6 +49,24 @@ export interface RecentOperation {
 const RECENT_OPERATION_LIMIT = 6;
 const PRODUCT_CODE_VERDICTS = new Set(["ok", "duplicate", "wrong_gtin"]);
 
+function presentOperation(row: {
+  raw: string;
+  verdict: string;
+  scanned_at: string;
+}): RecentOperation {
+  const scan = PRODUCT_CODE_VERDICTS.has(row.verdict) ? classifyScan(row.raw) : null;
+  const characters =
+    scan?.kind === "km"
+      ? Array.from(scan.km.serial).filter((character) => /[\p{L}\p{N}]/u.test(character))
+      : [];
+  return {
+    verdict: row.verdict,
+    scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
+    codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
+    identity: scan?.kind === "km" ? presentKm(scan.km) : null,
+  };
+}
+
 /**
  * The latest bounded scan facts for one shift in durable journal order. The
  * monotonic id is both the operation sequence and SQLite's primary-key order,
@@ -73,19 +91,23 @@ export async function listRecentOperations(
     [shiftId, RECENT_OPERATION_LIMIT],
   );
 
-  return rows.map((row) => {
-    const scan = PRODUCT_CODE_VERDICTS.has(row.verdict) ? classifyScan(row.raw) : null;
-    const characters =
-      scan?.kind === "km"
-        ? Array.from(scan.km.serial).filter((character) => /[\p{L}\p{N}]/u.test(character))
-        : [];
-    return {
-      verdict: row.verdict,
-      scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
-      codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
-      identity: scan?.kind === "km" ? presentKm(scan.km) : null,
-    };
-  });
+  return rows.map(presentOperation);
+}
+
+/** Latest durably accepted code, independent of the bounded activity feed. */
+export async function findLatestAcceptedOperation(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<RecentOperation | null> {
+  const rows = await exec.all<{ raw: string; verdict: string; scanned_at: string }>(
+    `SELECT raw, verdict, scanned_at
+       FROM scan_events_mirror
+      WHERE shift_id = ? AND verdict = 'ok'
+      ORDER BY id DESC
+      LIMIT 1`,
+    [shiftId],
+  );
+  return rows[0] ? presentOperation(rows[0]) : null;
 }
 
 /**

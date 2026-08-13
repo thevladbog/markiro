@@ -250,14 +250,17 @@ export async function markPrintVerified(
   exec: SqlExecutor,
   boxId: string,
   at: string,
-): Promise<void> {
-  await exec.run(
+): Promise<boolean> {
+  const rows = await exec.all<{ box_id: string }>(
     `UPDATE boxes_mirror
         SET print_state = 'printed', print_error_code = NULL,
             print_verified_at = ?, acked_at = NULL
-      WHERE box_id = ?`,
+      WHERE box_id = ? AND print_state IN ('pending', 'printed')
+        AND print_verified_at IS NULL AND print_skipped_at IS NULL
+      RETURNING box_id`,
     [at, boxId],
   );
+  return rows.length === 1;
 }
 
 /**
@@ -271,14 +274,17 @@ export async function markPrintSkipped(
   exec: SqlExecutor,
   boxId: string,
   at: string,
-): Promise<void> {
-  await exec.run(
+): Promise<boolean> {
+  const rows = await exec.all<{ box_id: string }>(
     `UPDATE boxes_mirror
         SET print_state = 'skipped', print_error_code = NULL,
             print_skipped_at = ?, acked_at = NULL
-      WHERE box_id = ?`,
+      WHERE box_id = ? AND print_state IN ('pending', 'printed')
+        AND print_verified_at IS NULL AND print_skipped_at IS NULL
+      RETURNING box_id`,
     [at, boxId],
   );
+  return rows.length === 1;
 }
 
 export interface ClearBoxInput {

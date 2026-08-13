@@ -5,6 +5,7 @@ import type { SqlExecutor } from "../src/lib/mirror.js";
 import {
   appendScanEvent,
   findFirstSeen,
+  findLatestAcceptedOperation,
   listRecentOperations,
   loadCodeKeys,
   recordScan,
@@ -139,6 +140,30 @@ describe("journal", () => {
       "SERIAL-2",
     ]);
     expect(JSON.stringify(recent)).not.toContain("FOREIGN");
+  });
+
+  it("reads the latest accepted identity independently of later rejected activity", async () => {
+    const exec = makeExec();
+    await appendScanEvent(exec, {
+      ...EVENT,
+      raw: "0104600000000015215ACCEPTED",
+      scannedAt: "2026-08-13T10:00:00.000Z",
+      verdict: "ok",
+    });
+    for (let index = 0; index < 7; index += 1) {
+      await appendScanEvent(exec, {
+        ...EVENT,
+        raw: `invalid-${index}`,
+        scannedAt: `2026-08-13T10:00:0${index + 1}.000Z`,
+        verdict: "invalid",
+      });
+    }
+
+    expect(await findLatestAcceptedOperation(exec, "s1")).toMatchObject({
+      verdict: "ok",
+      identity: { normalized: "(01)04600000000015 (21)5ACCEPTED" },
+    });
+    expect(await findLatestAcceptedOperation(exec, "other-shift")).toBeNull();
   });
 
   it("uses journal insertion order for newest-first display and degrades malformed timestamps safely", async () => {

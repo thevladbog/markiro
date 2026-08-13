@@ -66,7 +66,7 @@ const EMPTY_PROFILE_VALUES: ProfileFormValues = { gln: "", inn: "", gs1Prefixes:
 
 /**
  * Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `ssccCounterSchema`
- * (`nextSerial`: 0..9_999_999 -- a 9-digit prefix leaves a 7-digit serial).
+ * (`nextSerial`: 1..9_999_999 -- a 9-digit prefix leaves a 7-digit serial).
  * Kept as a string in form state (like `ProductForm.tsx`'s capacity fields)
  * so an empty/in-progress value doesn't fight the numeric input.
  */
@@ -75,7 +75,10 @@ const ssccFormSchema = z.object({
     .string()
     .trim()
     .refine((v) => /^\d+$/.test(v), "pages.settings.sscc.errors.nextSerialInvalid")
-    .refine((v) => Number(v) <= 9_999_999, "pages.settings.sscc.errors.nextSerialInvalid"),
+    .refine(
+      (v) => Number(v) >= 1 && Number(v) <= 9_999_999,
+      "pages.settings.sscc.errors.nextSerialInvalid",
+    ),
 });
 type SsccFormValues = z.infer<typeof ssccFormSchema>;
 
@@ -224,12 +227,12 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
     formState: { errors },
   } = useForm<SsccFormValues>({
     resolver: zodResolver(ssccFormSchema),
-    defaultValues: { nextSerial: "0" },
+    defaultValues: { nextSerial: "1" },
   });
 
   useEffect(() => {
     if (ssccQuery.data) {
-      reset({ nextSerial: String(ssccQuery.data.nextSerial) });
+      reset({ nextSerial: String(Math.max(1, ssccQuery.data.nextSerial)) });
     }
   }, [ssccQuery.data, reset]);
 
