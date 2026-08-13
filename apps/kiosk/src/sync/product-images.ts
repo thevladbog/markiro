@@ -63,8 +63,18 @@ export async function syncProductImages(
         }
         const previous = await readPublishedProductImagePointer(product.id);
         if (previous?.checksum === descriptor.checksum && (await hasProductImageBlob(descriptor.checksum))) {
-          result.reused += 1;
-          continue;
+          const cached = await readProductImageBlob(descriptor.checksum);
+          if (cached) {
+            try {
+              await validate(cached, descriptor);
+              result.reused += 1;
+              continue;
+            } catch (error) {
+              console.warn("kiosk: cached product image failed validation", product.id, error);
+              await clearPublishedProductImage(product.id);
+              await deleteProductImageBlob(descriptor.checksum);
+            }
+          }
         }
         if (await hasProductImageBlob(descriptor.checksum)) {
           const blob = await readProductImageBlob(descriptor.checksum);
