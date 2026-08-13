@@ -219,8 +219,10 @@ export function KioskShell(): React.JSX.Element {
     const base = createKioskClient({
       token: cfg.token,
       serverUrl: cfg.serverUrl,
+      kioskId: cfg.kioskId,
     });
     return {
+      ...(base.binding ? { binding: base.binding } : {}),
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),

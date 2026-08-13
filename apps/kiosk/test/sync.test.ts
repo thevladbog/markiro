@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cacheAge,
+  boxRegistryAge,
   cancelFlushRetry,
   flushQueue,
   humaniseAge,
@@ -22,6 +23,7 @@ import { writeConfig } from "../src/store/config.js";
 import { readSnapshot, replaceSnapshot, type CachedSnapshot } from "../src/store/cache.js";
 import {
   activateBoxRegistryPage,
+  beginBoxRegistryStage,
   lookupBox,
   readBoxRegistryMeta,
 } from "../src/store/box-registry.js";
@@ -1630,6 +1632,73 @@ describe("refreshSnapshot", () => {
     });
   });
 
+  it("uses server-generated bootstrap time for registry freshness despite device clock skew", async () => {
+    const serverGeneratedAt = "2026-07-28T07:00:00.000Z";
+    const skewedFetchedAt = new Date("2036-07-28T07:00:03.000Z");
+    await writeConfig({
+      serverUrl: "https://one.example/api",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap(serverGeneratedAt)),
+      boxRegistryPage: vi.fn(async () => ({ until: "1", items: [] })),
+      submitOrder: vi.fn(),
+    };
+
+    await refreshSnapshot(client as never, () => skewedFetchedAt);
+
+    const meta = await readBoxRegistryMeta({
+      serverUrl: "https://one.example/api",
+      kioskId: "k-1",
+    });
+    const cached = await readSnapshot();
+    expect(meta?.generatedAt).toBe(serverGeneratedAt);
+    expect(
+      boxRegistryAge(meta, cached, new Date(skewedFetchedAt.getTime() + 30 * 60 * 60_000)),
+    ).toBe("warn");
+  });
+
+  it("single-flights overlapping refreshes for the same installation", async () => {
+    await writeConfig({
+      serverUrl: "https://one.example/api",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let markPageStarted!: () => void;
+    const pageStarted = new Promise<void>((resolve) => {
+      markPageStarted = resolve;
+    });
+    const client = {
+      bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
+      boxRegistryPage: vi.fn(async () => {
+        markPageStarted();
+        await held;
+        return { until: "1", items: [] };
+      }),
+      submitOrder: vi.fn(),
+    };
+
+    const first = refreshSnapshot(client as never, () => new Date("2026-07-28T07:00:03Z"));
+    await pageStarted;
+    const second = refreshSnapshot(client as never, () => new Date("2026-07-28T07:00:04Z"));
+    await Promise.resolve();
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(1);
+    release();
+    await Promise.all([first, second]);
+    expect(client.boxRegistryPage).toHaveBeenCalledTimes(1);
+  });
+
   it("leaves the cached snapshot untouched when the fetch fails — a blinking network must not brick the kiosk", async () => {
     const cached = bootstrap("2026-07-28T06:00:00.000Z");
     await replaceSnapshot(cached, new Date("2026-07-28T06:00:01.000Z"));
@@ -1672,6 +1741,7 @@ describe("refreshSnapshot", () => {
   it("keeps a successful bootstrap when a bounded registry refresh exhausts snapshot-change retries", async () => {
     const fresh = bootstrap("2026-07-28T07:00:00.000Z");
     const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
       bootstrap: vi.fn(async () => fresh),
       boxRegistryPage: vi.fn(async () => {
         throw new KioskApiError(409, "changed", "registry_snapshot_changed");
@@ -1696,6 +1766,14 @@ describe("refreshSnapshot", () => {
 
   it("restarts a changed multi-page registry from the old active version", async () => {
     const fresh = bootstrap("2026-07-28T07:00:00.000Z");
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
     const queries: unknown[] = [];
     const responses = [
       { until: "2", items: [], nextCursor: "page-2" },
@@ -1703,6 +1781,7 @@ describe("refreshSnapshot", () => {
       { until: "3", items: [], nextCursor: undefined },
     ];
     const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
       bootstrap: vi.fn(async () => fresh),
       boxRegistryPage: vi.fn(async (query: unknown) => {
         queries.push(query);
@@ -1728,6 +1807,7 @@ describe("refreshSnapshot", () => {
 
   it("does not hide revocation between bootstrap and registry fetch", async () => {
     const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
       bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
       boxRegistryPage: vi.fn(async () => {
         throw new KioskApiError(401, "revoked");
@@ -1741,7 +1821,16 @@ describe("refreshSnapshot", () => {
   });
 
   it("bounds an untrusted cursor cycle and keeps the old active cut", async () => {
+    await writeConfig({
+      serverUrl: "http://srv",
+      token: "token",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
     const client = {
+      binding: { serverUrl: "http://srv", kioskId: "k-1" },
       bootstrap: vi.fn(async () => bootstrap("2026-07-28T07:00:00.000Z")),
       boxRegistryPage: vi.fn(async () => ({ until: "2", items: [], nextCursor: "same" })),
       submitOrder: vi.fn(),
@@ -1758,21 +1847,30 @@ describe("refreshSnapshot", () => {
 
   it("bounds unique malicious cursors and discards the incomplete cut", async () => {
     const sscc = "346006820000000021";
+    const binding = { serverUrl: "https://one.example/api", kioskId: "k-1" };
+    await writeConfig({
+      ...binding,
+      token: "token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const seed = { binding, owner: "seed", since: null, until: "1" };
+    await beginBoxRegistryStage(seed);
     await activateBoxRegistryPage(
-      null,
-      "1",
+      seed,
       [
         {
           kind: "upsert",
-          boxId: "old",
+          boxId: "00000000-0000-4000-8000-000000000001",
           sscc,
-          productId: "product",
+          productId: "00000000-0000-4000-8000-000000000002",
           bottleCount: 1,
           contentKeys: ["member"],
           updatedAt: "2026-07-28T06:00:00Z",
         },
       ],
-      new Date("2026-07-28T06:00:00Z"),
+      "2026-07-28T06:00:00Z",
     );
     let cursor = 0;
     const client = {
@@ -1793,7 +1891,9 @@ describe("refreshSnapshot", () => {
     );
 
     expect(client.boxRegistryPage).toHaveBeenCalledTimes(2);
-    expect(await readBoxRegistryMeta()).toMatchObject({ version: "1" });
-    expect(await lookupBox(sscc)).toMatchObject({ boxId: "old" });
+    expect(await readBoxRegistryMeta(binding)).toMatchObject({ version: "1" });
+    expect(await lookupBox(binding, sscc)).toMatchObject({
+      boxId: "00000000-0000-4000-8000-000000000001",
+    });
   });
 });

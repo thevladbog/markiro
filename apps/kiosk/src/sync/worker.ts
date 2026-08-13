@@ -19,7 +19,14 @@ import {
   discardBoxRegistryStage,
   readBoxRegistryMeta,
   stageBoxRegistryPage,
+  type BoxRegistryCut,
+  type BoxRegistryMeta,
 } from "../store/box-registry.js";
+import {
+  boxRegistryBindingKey,
+  boxRegistryBindingOf,
+  type BoxRegistryBinding,
+} from "../store/installation-binding.js";
 import {
   attestQueuedOrder,
   dequeueOrder,
@@ -165,6 +172,17 @@ export function snapshotAgeMs(snapshot: CachedSnapshot | null, now: Date): numbe
   if (!snapshot) return null;
   const ageMs = serverNow(snapshot, now).getTime() - Date.parse(snapshot.bootstrap.generatedAt);
   return Number.isFinite(ageMs) ? ageMs : null;
+}
+
+/** One freshness verdict for the registry, on the same corrected clock as bootstrap. */
+export function boxRegistryAge(
+  meta: BoxRegistryMeta | null,
+  clock: CachedSnapshot | null,
+  now: Date,
+): CacheAge {
+  if (!meta || !clock) return "blocked";
+  const ageMs = serverNow(clock, now).getTime() - Date.parse(meta.generatedAt);
+  return Number.isFinite(ageMs) ? ageVerdict(ageMs) : "blocked";
 }
 
 /** How the plaque says «N назад»: a unit and a whole number, never a suffix. */
@@ -761,12 +779,14 @@ const BOX_REGISTRY_MAX_PAGES = 10_000;
 
 async function refreshBoxRegistry(
   client: KioskClient,
-  fetchedAt: Date,
+  binding: BoxRegistryBinding,
+  generatedAt: string,
   wait: (milliseconds: number) => Promise<void>,
   maxPages: number,
 ): Promise<void> {
-  let since = (await readBoxRegistryMeta())?.version;
+  let since = (await readBoxRegistryMeta(binding))?.version;
   for (let attempt = 0; attempt < BOX_REGISTRY_RESTARTS; attempt += 1) {
+    let cut: BoxRegistryCut | null = null;
     try {
       let until: string | undefined;
       let cursor: string | undefined;
@@ -799,7 +819,13 @@ async function refreshBoxRegistry(
         }
         if (until === undefined) {
           until = page.until;
-          await beginBoxRegistryStage(since ?? null, until);
+          cut = {
+            binding,
+            owner: crypto.randomUUID(),
+            since: since ?? null,
+            until,
+          };
+          await beginBoxRegistryStage(cut);
         } else if (page.until !== until) {
           throw new Error("box registry page changed its until revision");
         }
@@ -809,15 +835,15 @@ async function refreshBoxRegistry(
           seenCursors.add(cursor);
         }
         if (cursor !== undefined) {
-          await stageBoxRegistryPage(since ?? null, until, page.items);
+          await stageBoxRegistryPage(cut!, page.items);
         } else {
-          await activateBoxRegistryPage(since ?? null, until, page.items, fetchedAt);
+          await activateBoxRegistryPage(cut!, page.items, generatedAt);
         }
       } while (cursor !== undefined);
       return;
     } catch (error) {
       try {
-        await discardBoxRegistryStage();
+        if (cut) await discardBoxRegistryStage(cut);
       } catch (storeError) {
         // Revocation is the one verdict storage trouble must never hide: the
         // shell has to stop admitting workers immediately.
@@ -830,13 +856,29 @@ async function refreshBoxRegistry(
         error.code === "registry_snapshot_changed" &&
         attempt + 1 < BOX_REGISTRY_RESTARTS
       ) {
-        since = (await readBoxRegistryMeta())?.version;
+        since = (await readBoxRegistryMeta(binding))?.version;
         await wait(250 * 2 ** attempt);
         continue;
       }
       throw error;
     }
   }
+}
+
+const registryRefreshes = new Map<string, Promise<void>>();
+
+function singleFlightRegistry(
+  binding: BoxRegistryBinding,
+  run: () => Promise<void>,
+): Promise<void> {
+  const key = boxRegistryBindingKey(binding);
+  const current = registryRefreshes.get(key);
+  if (current) return current;
+  const started = run().finally(() => {
+    if (registryRefreshes.get(key) === started) registryRefreshes.delete(key);
+  });
+  registryRefreshes.set(key, started);
+  return started;
 }
 
 export async function refreshSnapshot(
@@ -853,8 +895,12 @@ export async function refreshSnapshot(
   // Older test doubles and old custom clients have no registry method. A real
   // current client does; registry failure never rolls back a good bootstrap.
   if (typeof client.boxRegistryPage !== "function") return;
+  const binding = client.binding ?? boxRegistryBindingOf(await readConfig());
+  if (!binding) return;
   try {
-    await refreshBoxRegistry(client, fetchedAt, wait, registryMaxPages);
+    await singleFlightRegistry(binding, () =>
+      refreshBoxRegistry(client, binding, bootstrap.generatedAt, wait, registryMaxPages),
+    );
   } catch (error) {
     if (isDeviceRevoked(error)) throw error;
     console.warn("kiosk: the box registry could not be refreshed", error);

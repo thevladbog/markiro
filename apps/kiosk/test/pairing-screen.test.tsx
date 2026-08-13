@@ -6,8 +6,14 @@ import type { ScanListener } from "../src/scanner/source.js";
 import type * as CacheModule from "../src/store/cache.js";
 import type * as ConfigModule from "../src/store/config.js";
 import { readSnapshot } from "../src/store/cache.js";
-import { readConfig, type KioskConfig } from "../src/store/config.js";
+import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import { Pairing } from "../src/screens/Pairing.js";
+import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  lookupBox,
+  readBoxRegistryMeta,
+} from "../src/store/box-registry.js";
 
 /**
  * The screen imports its two writes directly, so the module boundary is the
@@ -278,6 +284,51 @@ describe("Pairing", () => {
     expect(writes.replaceSnapshot.mock.invocationCallOrder[0]!).toBeLessThan(
       writes.writeConfig.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("clears a prior installation's registry when pairing binds this tablet elsewhere", async () => {
+    const oldBinding = { serverUrl: "https://old.example", kioskId: "old-kiosk" };
+    await writeConfig({
+      ...oldBinding,
+      token: "old-token",
+      kioskName: "Old",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const oldCut = { binding: oldBinding, owner: "seed", since: null, until: "99" };
+    await beginBoxRegistryStage(oldCut);
+    await activateBoxRegistryPage(
+      oldCut,
+      [
+        {
+          kind: "upsert",
+          boxId: "00000000-0000-4000-8000-000000000001",
+          sscc: "346006820000000021",
+          productId: "00000000-0000-4000-8000-000000000002",
+          bottleCount: 1,
+          contentKeys: ["member"],
+          updatedAt: "2026-07-28T07:00:00Z",
+        },
+      ],
+      "2026-07-28T07:00:00Z",
+    );
+    stubFetch(() => Promise.resolve(okResponse(bundle())));
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={fakeFanOut().subscribe}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    typeDigits("12345678");
+    fireEvent.click(submitButton());
+    await handOver();
+
+    const nextBinding = { serverUrl: SERVER, kioskId: "k-1" };
+    expect(await readBoxRegistryMeta(nextBinding)).toBeNull();
+    expect(await lookupBox(oldBinding, "346006820000000021")).toBeNull();
   });
 
   /**

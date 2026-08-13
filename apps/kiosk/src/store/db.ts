@@ -29,6 +29,13 @@ export const STORE_BOX_REGISTRY_ACTIVE = "boxRegistryActive";
 export const STORE_BOX_REGISTRY_STAGING = "boxRegistryStaging";
 export const STORE_BOX_REGISTRY_META = "boxRegistryMeta";
 
+const transactionAbortReasons = new WeakMap<IDBTransaction, Error>();
+
+export function abortTransaction(tx: IDBTransaction, reason: Error): void {
+  transactionAbortReasons.set(tx, reason);
+  tx.abort();
+}
+
 // Module-private: every caller reaches the database through `withStore` or
 // `withCursor` below, which are the only two places that open a connection
 // and are therefore the only two places responsible for closing it.
@@ -102,7 +109,10 @@ export async function withTransaction(
       resolve();
     };
     tx.onerror = () => fail(tx.error ?? new Error("IndexedDB transaction failed"));
-    tx.onabort = () => fail(tx.error ?? new Error("IndexedDB transaction aborted"));
+    tx.onabort = () =>
+      fail(
+        transactionAbortReasons.get(tx) ?? tx.error ?? new Error("IndexedDB transaction aborted"),
+      );
     try {
       run(tx);
     } catch (error) {

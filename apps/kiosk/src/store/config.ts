@@ -1,4 +1,12 @@
-import { STORE_CONFIG, withStore } from "./db.js";
+import {
+  STORE_BOX_REGISTRY_ACTIVE,
+  STORE_BOX_REGISTRY_META,
+  STORE_BOX_REGISTRY_STAGING,
+  STORE_CONFIG,
+  withStore,
+  withTransaction,
+} from "./db.js";
+import { boxRegistryBindingOf, sameBoxRegistryBinding } from "./installation-binding.js";
 
 const KEY = "current";
 const SCANNER_KEY = "scanner";
@@ -56,7 +64,40 @@ export async function readConfig(): Promise<KioskConfig | null> {
 }
 
 export async function writeConfig(cfg: KioskConfig): Promise<void> {
-  await withStore(STORE_CONFIG, "readwrite", (s) => s.put(cfg, KEY));
+  await withTransaction(
+    [STORE_CONFIG, STORE_BOX_REGISTRY_ACTIVE, STORE_BOX_REGISTRY_STAGING, STORE_BOX_REGISTRY_META],
+    "readwrite",
+    (tx) => {
+      const config = tx.objectStore(STORE_CONFIG);
+      const meta = tx.objectStore(STORE_BOX_REGISTRY_META);
+      const previousRequest = config.get(KEY);
+      const activeMetaRequest = meta.get("active");
+      let ready = 0;
+      const apply = () => {
+        ready += 1;
+        if (ready !== 2) return;
+        const previousBinding = boxRegistryBindingOf(previousRequest.result);
+        const nextBinding = boxRegistryBindingOf(cfg);
+        const activeBinding = boxRegistryBindingOf(
+          (activeMetaRequest.result as { binding?: unknown } | undefined)?.binding,
+        );
+        const mustClear =
+          cfg.token === null ||
+          nextBinding === null ||
+          !sameBoxRegistryBinding(previousBinding, nextBinding) ||
+          (activeMetaRequest.result !== undefined &&
+            !sameBoxRegistryBinding(activeBinding, nextBinding));
+        if (mustClear) {
+          tx.objectStore(STORE_BOX_REGISTRY_ACTIVE).clear();
+          tx.objectStore(STORE_BOX_REGISTRY_STAGING).clear();
+          meta.clear();
+        }
+        config.put(cfg, KEY);
+      };
+      previousRequest.onsuccess = apply;
+      activeMetaRequest.onsuccess = apply;
+    },
+  );
 }
 
 /** Which transport the scanner-setup screen was told to use. */

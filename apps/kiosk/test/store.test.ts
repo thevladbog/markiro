@@ -11,6 +11,41 @@ import {
 import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 import { IDBFactory } from "fake-indexeddb";
+import { appendJournal, readJournal } from "../src/store/journal.js";
+import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  lookupBox,
+  readBoxRegistryMeta,
+} from "../src/store/box-registry.js";
+
+const REGISTRY_SSCC = "346006820000000021";
+const binding = (serverUrl: string, kioskId: string) => ({ serverUrl, kioskId });
+
+async function seedRegistry(serverUrl: string, kioskId: string, version = "7"): Promise<void> {
+  const target = {
+    binding: binding(serverUrl, kioskId),
+    owner: "seed",
+    since: null,
+    until: version,
+  };
+  await beginBoxRegistryStage(target);
+  await activateBoxRegistryPage(
+    target,
+    [
+      {
+        kind: "upsert",
+        boxId: "00000000-0000-4000-8000-000000000001",
+        sscc: REGISTRY_SSCC,
+        productId: "00000000-0000-4000-8000-000000000002",
+        bottleCount: 1,
+        contentKeys: ["member"],
+        updatedAt: "2026-08-13T12:00:00Z",
+      },
+    ],
+    "2026-08-13T12:00:00Z",
+  );
+}
 
 const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto => ({
   generatedAt: "2026-07-28T06:00:00.000Z",
@@ -265,5 +300,97 @@ describe("config", () => {
       nextDeviceSeq: 1,
     });
     expect((await readConfig())?.kioskId).toBeNull();
+  });
+
+  it("preserves registry when the same installation is re-paired with a normalized URL", async () => {
+    await writeConfig({
+      serverUrl: "https://one.example/api",
+      token: "old",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    await seedRegistry("https://one.example/api", "k-1");
+
+    await writeConfig({
+      serverUrl: "https://one.example/api/",
+      token: "new",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 2,
+    });
+
+    expect(
+      await lookupBox(binding("https://one.example/api/", "k-1"), REGISTRY_SSCC),
+    ).not.toBeNull();
+  });
+
+  it.each([
+    ["another server", "https://two.example/api", "k-1"],
+    ["another kiosk", "https://one.example/api", "k-2"],
+  ])(
+    "atomically clears registry for %s but keeps queue and journal",
+    async (_label, serverUrl, kioskId) => {
+      await writeConfig({
+        serverUrl: "https://one.example/api",
+        token: "old",
+        kioskId: "k-1",
+        kioskName: "A",
+        place: null,
+        nextDeviceSeq: 1,
+      });
+      await seedRegistry("https://one.example/api", "k-1", "99");
+      await enqueueOrder(
+        { deviceSeq: 1, badgeDigest: "digest", reason: "buy", items: [{ rawKm: "wire" }] },
+        "e1",
+      );
+      await appendJournal({
+        at: "2026-08-13T12:00:00Z",
+        createdAt: "2026-08-13T12:00:00Z",
+        kioskId: "k-1",
+        deviceSeq: 0,
+        orderNo: "old",
+        employeeId: "e1",
+        acceptedCount: 1,
+        conflicts: [],
+      });
+
+      await writeConfig({
+        serverUrl,
+        token: "new",
+        kioskId,
+        kioskName: "B",
+        place: null,
+        nextDeviceSeq: 0,
+      });
+
+      expect(await readBoxRegistryMeta(binding(serverUrl, kioskId))).toBeNull();
+      expect(await listQueue()).toHaveLength(1);
+      expect(await readJournal(10)).toHaveLength(1);
+    },
+  );
+
+  it("clears registry on revocation without deleting queue or journal", async () => {
+    const config = {
+      serverUrl: "https://one.example/api",
+      token: "old",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    };
+    await writeConfig(config);
+    await seedRegistry(config.serverUrl, config.kioskId);
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "digest", reason: "buy", items: [{ rawKm: "wire" }] },
+      "e1",
+    );
+
+    await writeConfig({ ...config, token: null });
+
+    expect(await readBoxRegistryMeta(binding(config.serverUrl, config.kioskId))).toBeNull();
+    expect(await listQueue()).toHaveLength(1);
   });
 });

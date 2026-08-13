@@ -28,3 +28,15 @@ The kiosk now downloads the tenant box registry into IndexedDB through an isolat
 - Kiosk TypeScript typecheck, full ESLint, Vite production build, scoped Prettier check, and `git diff --check` passed.
 - Commands used direct installed package binaries because the pnpm wrapper stalled in this worktree.
 - No visual/touch cart flow from the later plan was implemented in this task.
+
+## Important review fix round
+
+The first review of `739495a5` confirmed four Important gaps: concurrent full-cut ownership, trusted freshness, string-allocation limits, and installation isolation. The fix round makes registry ownership installation-scoped and independently enforced in IndexedDB rather than relying only on worker scheduling.
+
+- A cut is the exact tuple `(serverUrl, kioskId, owner, since, until)`. A new cut disowns prior staging; only its owner may page, discard, or activate it. A full cut cannot replace an equal/newer active revision and a delta must still match its active base.
+- Refresh is single-flight per canonical installation. Registry and config operations also share IndexedDB transaction stores, so a re-pair/revocation serializes with activation. Begin, stage, and activation reject a stale binding; config change clears active/staging/meta atomically without clearing queue or journal.
+- Registry metadata is bound to the installation and stamped with the successful bootstrap's server `generatedAt`. `boxRegistryAge` uses the snapshot's server-corrected clock and the same fresh/warn/blocked thresholds.
+- Before page data reaches IndexedDB or dedupe, every string is limited to 1,024 UTF-8 bytes and the page to one MiB aggregate UTF-8, in addition to the existing 500-change/1,000-member bounds. UUID identifiers, SSCC checksum, page/cursor shape and stored rows are validated fail-closed.
+- Re-pairing on the same normalized binding preserves a valid cut; another server, another kiosk, revocation, or metadata/config mismatch clears registry only. A new binding always starts with a full refresh even if the previous binding had a higher revision.
+
+Fix-round evidence: RED was 3 files with 12 expected failures and 108 existing passes. Focused final GREEN was 4 files / 146 tests; full kiosk was 21 files / 485 tests. Kiosk typecheck, full ESLint, Vite PWA production build, explicit changed-file Prettier check, and `git diff --check` passed. The checks used direct installed package binaries to avoid the worktree's intermittently stalled pnpm wrapper.

@@ -8,6 +8,7 @@ import type {
   KioskBoxRegistryQuery,
   PairKioskResultDto,
 } from "./types.js";
+import { boxRegistryBindingOf, type BoxRegistryBinding } from "../store/installation-binding.js";
 
 export class KioskApiError extends Error {
   readonly status: number;
@@ -273,14 +274,20 @@ export async function pairKiosk(serverUrl: string, code: string): Promise<PairKi
 }
 
 export interface KioskClient {
+  readonly binding?: BoxRegistryBinding;
   bootstrap(): Promise<KioskBootstrapDto>;
   boxRegistryPage?(query: KioskBoxRegistryQuery): Promise<KioskBoxRegistryPage>;
   attestOrder(body: CreateOrderAdmissionDto): Promise<CreateOrderAdmissionResultDto>;
   submitOrder(body: CreateOrderDto): Promise<CreateOrderResultDto>;
 }
 
-export function createKioskClient(cfg: { token: string; serverUrl: string }): KioskClient {
+export function createKioskClient(cfg: {
+  token: string;
+  serverUrl: string;
+  kioskId?: string | null;
+}): KioskClient {
   const base = baseOf(cfg.serverUrl);
+  const binding = boxRegistryBindingOf(cfg);
 
   async function request<T>(
     method: "GET" | "POST",
@@ -307,6 +314,7 @@ export function createKioskClient(cfg: { token: string; serverUrl: string }): Ki
   }
 
   return {
+    ...(binding ? { binding } : {}),
     // Every authenticated call bumps `kiosks.last_seen_at` server-side, so a
     // periodic bootstrap doubles as the heartbeat — there is no separate one.
     bootstrap: () => request<KioskBootstrapDto>("GET", "/kiosk/bootstrap", BOOTSTRAP_TIMEOUT_MS),
