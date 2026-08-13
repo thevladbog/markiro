@@ -195,6 +195,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "GET /kiosk/bootstrap (KioskController.bootstrap)",
       "GET /kiosk/branding/logo/:revision (KioskController.logo)",
+      "GET /kiosk/box-registry (KioskController.boxRegistry)",
     ],
   },
   {

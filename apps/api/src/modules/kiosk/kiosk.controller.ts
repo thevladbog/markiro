@@ -6,6 +6,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   Req,
   StreamableFile,
   UnprocessableEntityException,
@@ -31,6 +32,8 @@ import {
 } from "../pickup-orders/dto";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { OrgProfileService } from "../org-profile/org-profile.service";
+import { boxRegistryQuerySchema, type BoxRegistryQueryDto } from "./box-registry.dto";
+import { BoxRegistryService } from "./box-registry.service";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
 
@@ -52,11 +55,20 @@ export class KioskController {
   constructor(
     private readonly pickupOrdersService: PickupOrdersService,
     private readonly orgProfileService: OrgProfileService,
+    private readonly boxRegistryService: BoxRegistryService,
   ) {}
 
   @Get("bootstrap")
   async bootstrap(@Req() req: RequestWithKiosk): Promise<KioskBootstrapDto> {
     return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!);
+  }
+
+  @Get("box-registry")
+  async boxRegistry(
+    @Req() req: RequestWithKiosk,
+    @Query(new ZodValidationPipe(boxRegistryQuerySchema)) query: BoxRegistryQueryDto,
+  ) {
+    return this.boxRegistryService.list(req.tenantId!, query);
   }
 
   @Get("branding/logo/:revision")
