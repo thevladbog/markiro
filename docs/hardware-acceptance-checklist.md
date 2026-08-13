@@ -150,6 +150,21 @@ gallery do not replace this record.
 - [ ] Exercise keyboard-wedge and configured serial scanner input on Windows/WebView2 hardware.
 - [ ] Reveal and hide the Windows taskbar; verify the footer and all floor actions remain recoverable.
 
+### Aggregation and box-label recovery (next Station beta)
+
+Keep every item unchecked until it has been exercised in the packaged Windows
+beta with the named scanner, printer, and display conditions. Automated tests
+and the browser gallery do not satisfy these checks.
+
+- [ ] Start a fresh issuer prefix and confirm the first printed box uses serial `0000001` plus a valid final check digit.
+- [ ] Scan production-like EAN-13 and KM DataMatrix; verify GTIN, serial, and AI 91/92/93 presentation.
+- [ ] Fill a 20-place box and confirm each cell, auto-close, and reset after print resolution.
+- [ ] Disconnect the printer during close; confirm the exact persistent category survives restart.
+- [ ] Retry after restoring the printer and confirm the same 18-digit SSCC prints once.
+- [ ] Repeat the failure and explicitly continue without a label; confirm the skip is synchronized and the next box accepts scans.
+- [ ] Enable scan-back verification and scan GS1-128 `(00)` plus the expected SSCC.
+- [ ] Repeat at packaged Windows 1280×800 and 1024×768 with the taskbar hidden in lockdown.
+
 ## Scanner and printer (plans 05b-2, 05b-3)
 
 - [ ] Serial scanner: real device, baud negotiation, payload terminators.
