@@ -209,8 +209,6 @@ const OTHER_KM = "0104600000000015215Ab2";
 const THIRD_KM = "0104600000000015215Ab3";
 
 const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
-const MISMATCH_SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 999);
-
 interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   issuerPrefix?: string | null;
   boxCapacity?: number | null;
@@ -229,6 +227,8 @@ interface RenderWorkOverrides extends RenderWorkScreenOverrides {
     language: PrinterLanguage;
     print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   } | null;
+  onOpenPrinterSetup?: () => void;
+  onPrintRecoveryChange?: (blocked: boolean) => void;
 }
 
 // A label spec whose only element resolves to ASCII-only text (the box's
@@ -301,6 +301,8 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     onScan,
     verifyPrintedLabel = false,
     printing,
+    onOpenPrinterSetup,
+    onPrintRecoveryChange,
   } = overrides;
 
   // Seeded regardless of `issuerPrefix`: the "no sscc block" test needs a
@@ -351,6 +353,8 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       {...(onScan ? { onScan } : {})}
       verifyPrintedLabel={verifyPrintedLabel}
       {...(printing !== undefined ? { printing } : {})}
+      {...(onOpenPrinterSetup ? { onOpenPrinterSetup } : {})}
+      {...(onPrintRecoveryChange ? { onPrintRecoveryChange } : {})}
     />,
   );
 }
@@ -892,6 +896,44 @@ describe("WorkScreen box progress, closing and printing", () => {
     );
   }
 
+  async function seedPendingPrint(
+    exec: SqlExecutor,
+    errorCode: string | null = null,
+  ): Promise<void> {
+    await seedLabelSpec(exec, "s1");
+    await exec.run("UPDATE shift_mirror SET issuer_prefix = ? WHERE id = ?", [
+      TEST_ISSUER_PREFIX,
+      "s1",
+    ]);
+    await exec.run(
+      `INSERT INTO boxes_mirror
+         (box_id, shift_id, terminal_id, sscc, opened_at, closed_at, print_state, print_error_code)
+       VALUES (?,?,?,?,?,?,?,?)`,
+      [
+        SEEDED_BOX_ID,
+        "s1",
+        "dev-1",
+        SSCC,
+        "2026-07-29T08:00:00.000Z",
+        "2026-07-29T09:00:00.000Z",
+        "pending",
+        errorCode,
+      ],
+    );
+    await exec.run(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+       VALUES (?,?,?,?,?,?)`,
+      [
+        "pending-code",
+        "s1",
+        "04600000000015",
+        "pending",
+        "2026-07-29T08:30:00.000Z",
+        SEEDED_BOX_ID,
+      ],
+    );
+  }
+
   function readExceptionFacts(exec: SqlExecutor): Promise<PendingException[]> {
     return readExceptions(exec, 100);
   }
@@ -1324,9 +1366,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(close).toHaveBeenCalledTimes(1);
 
     resolveClose?.({ status: "closed", sscc: SSCC, itemCount: 3 });
-    await waitFor(() => expect(button.disabled).toBe(false));
-    // Still just the one call, even after the in-flight close settles and
-    // the button re-enables.
+    expect(await screen.findByText("Для смены не выбран шаблон этикетки короба")).toBeDefined();
+    // The closed box now remains blocked on durable print recovery, and the
+    // original action cannot burn a second serial behind that dialog.
+    expect(button.disabled).toBe(true);
     expect(close).toHaveBeenCalledTimes(1);
   });
 
@@ -1448,43 +1491,83 @@ describe("WorkScreen box progress, closing and printing", () => {
   // `console.error` to show for it. Whether printing happened at all must be
   // visible regardless of whether a successful print would go on to be
   // verified.
-  it("shows the print-unavailable notice even when the verification setting is off", async () => {
+  it("keeps missing-printer recovery persistent with the complete SSCC and blocks scans", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
       .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+    const source = manualSource();
+    const onScan = vi.fn();
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
     renderWorkTracked({
+      exec,
+      source,
       boxCapacity: 10,
       boxItemCount: 9,
       closeCurrentBox: close,
       verifyPrintedLabel: false,
+      onScan,
       // No `printing` prop at all -- the "no printer configured" state.
     });
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
-    expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
+    expect(await screen.findByText("Принтер не настроен")).toBeDefined();
+    expect(screen.getByText(SSCC)).toBeDefined();
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
+    act(() => source.emit(OTHER_KM));
+    await act(async () => Promise.resolve());
+    expect(onScan).toHaveBeenCalledTimes(1);
   });
 
-  it("times a print failure out as an ordinary 1200 ms error", async () => {
-    vi.useFakeTimers();
-    const close = vi
-      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
-      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
+  it("restores a pending print, opens setup, retries the same SSCC, and explicitly confirms skip", async () => {
+    const exec = makeExec();
+    await seedPendingPrint(exec, "transport_failed");
+    const source = manualSource();
+    const onScan = vi.fn();
+    const onSetup = vi.fn();
+    const recovery = vi.fn();
+    const print = vi.fn(async () => {
+      throw new Error("offline printer detail");
+    });
     renderWorkTracked({
-      boxCapacity: 10,
-      boxItemCount: 9,
-      closeCurrentBox: close,
-      verifyPrintedLabel: false,
+      exec,
+      source,
+      onScan,
+      onOpenPrinterSetup: onSetup,
+      onPrintRecoveryChange: recovery,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
     });
 
-    act(() => scan(KM));
-    await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect(screen.getByRole("alert").textContent).toContain("Печать не выполнена");
+    expect(await screen.findByText("Принтер не принял задание")).toBeDefined();
+    expect(screen.getByText(SSCC)).toBeDefined();
+    expect(recovery).toHaveBeenCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    expect(onSetup).toHaveBeenCalledOnce();
 
-    await act(async () => vi.advanceTimersByTimeAsync(1199));
-    expect(screen.getByRole("alert")).toBeDefined();
-    await act(async () => vi.advanceTimersByTimeAsync(1));
-    expect(screen.queryByRole("alert")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить печать" }));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(screen.getByText(SSCC)).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить без этикетки" }));
+    expect(screen.getByText(/короб уже закрыт/i)).toBeDefined();
+    act(() => source.emit(KM));
+    await act(async () => Promise.resolve());
+    expect(onScan).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(screen.getByText("Принтер не принял задание")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Продолжить без этикетки" }));
+    fireEvent.click(screen.getByRole("button", { name: "Подтвердить продолжение" }));
+    await waitFor(async () => {
+      const rows = await exec.all<{ print_state: string }>(
+        "SELECT print_state FROM boxes_mirror WHERE box_id = ?",
+        [SEEDED_BOX_ID],
+      );
+      expect(rows[0]?.print_state).toBe("skipped");
+    });
+    await waitFor(() => expect(recovery).toHaveBeenLastCalledWith(false));
+    act(() => source.emit(KM));
+    await waitFor(() => expect(onScan).toHaveBeenCalledOnce());
   });
 
   // Self-review addition: none of the brief's own tests ever set
@@ -1524,7 +1607,7 @@ describe("WorkScreen box progress, closing and printing", () => {
   // even when no printer is configured at all, which is exactly this test.
   // With the fix, the operator is told plainly that nothing was printed
   // instead of being handed a prompt to verify a label that never existed.
-  it("says printing did not happen instead of opening a verification prompt when no printer is configured", async () => {
+  it("shows durable missing-printer recovery instead of opening a verification prompt", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
       .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 10 });
@@ -1540,7 +1623,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
-    expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
+    expect(await screen.findByText("Принтер не настроен")).toBeDefined();
     expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull();
   });
 
@@ -1623,7 +1706,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
     act(() => scan(KM));
     await waitFor(() => expect(close).toHaveBeenCalled());
-    expect(await screen.findByText(/печать не выполнена/i)).toBeDefined();
+    expect(await screen.findByText("Для смены не выбран шаблон этикетки короба")).toBeDefined();
     expect(print).not.toHaveBeenCalled();
   });
 
@@ -1761,7 +1844,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       const exec: SqlExecutor = {
         all: base.all,
         async run(sql, params = []) {
-          if (sql.includes(`SET ${marker} = ?`)) {
+          if (sql.includes(`${marker} = ?`)) {
             announceOutcome();
             await outcomeGate;
           }
@@ -1821,7 +1904,7 @@ describe("WorkScreen box progress, closing and printing", () => {
   // seeded item count keep the load path for both boxes as fast/simple as
   // possible (a single `currentBox` query each), maximising the chance this
   // reproduces the lag rather than merely asserting the happy path.
-  it("attributes the print-verification record to the box actually closed, not a stale one, across two back-to-back closes", async () => {
+  it("blocks a buffered second scan before it can close another box", async () => {
     const exec = makeExec();
     await seedLabelSpec(exec, "s1");
     // Real serials to burn -- deliberately NOT injecting `closeCurrentBox`
@@ -1856,7 +1939,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       const rows = await exec.all<{ n: number }>(
         `SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL`,
       );
-      expect(rows[0]?.n).toBe(2);
+      expect(rows[0]?.n).toBe(1);
     });
 
     // The FIRST of the two closes' verification prompts shows (CodeRabbit
@@ -1881,19 +1964,19 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(rows).toHaveLength(1);
       expect(rows[0]?.print_skipped_at).not.toBeNull();
     });
+    const journal = await exec.all<{ raw: string }>(
+      "SELECT raw FROM scan_events_mirror WHERE raw = ?",
+      [OTHER_KM],
+    );
+    const outbox = await exec.all<{ raw: string }>("SELECT raw FROM outbox WHERE raw = ?", [
+      OTHER_KM,
+    ]);
+    expect(journal).toHaveLength(0);
+    expect(outbox).toHaveLength(0);
   });
 
-  // CodeRabbit PR33 review, Finding 9: two boxes closing in quick succession
-  // (box capacity 1) used to fire `printing.print(...)` for both with no
-  // serialization at all, and the second's verification prompt would
-  // silently overwrite the first's (a single `verification` slot). This
-  // pins BOTH halves of the fix in one scenario: the printer mock tracks
-  // concurrent calls (never more than 1 in flight), and BOTH boxes' outcomes
-  // are resolved -- one at a time, via the queued prompts -- rather than
-  // the first one being silently lost.
-  it("serializes concurrent box-label prints and loses neither box's verification outcome", async () => {
+  it("admits a new box scan only after required verification is resolved", async () => {
     const exec = makeExec();
-    const source = retainingSource();
     await seedLabelSpec(exec, "s1");
     await addRange(exec, {
       issuerPrefix: TEST_ISSUER_PREFIX,
@@ -1902,80 +1985,32 @@ describe("WorkScreen box progress, closing and printing", () => {
       toSerial: 5,
     });
 
-    let inFlight = 0;
-    let maxInFlight = 0;
-    const print = vi.fn(async () => {
-      inFlight++;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      // A deliberately slow printer -- long enough that, without
-      // serialization, the SECOND box's print would start while the
-      // first's is still in flight.
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      inFlight--;
-    });
+    const print = vi.fn(async () => {});
 
     renderWorkTracked({
       exec,
-      source,
       boxCapacity: 1,
       boxItemCount: 0,
       verifyPrintedLabel: true,
       printing: { target: PRINT_TARGET, language: "zpl", print },
     });
 
-    // Two distinct codes, fired back-to-back: `boxCapacity: 1` closes a
-    // box (and fires a print) for each.
-    act(() => {
-      scan(KM);
-      scan(OTHER_KM);
-    });
-
-    await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
-    // The core serialization assertion: never more than one physical
-    // print call in flight, however close together the two boxes closed.
-    expect(maxInFlight).toBe(1);
-    await waitFor(() => expect(inFlight).toBe(0));
-
+    act(() => scan(KM));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    await screen.findByText("Отсканируйте распечатанную этикетку");
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull(),
+    );
+    await screen.findByText("Короб № 2");
+    act(() => scan(OTHER_KM));
     await waitFor(async () => {
       const rows = await exec.all<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL`,
+        "SELECT COUNT(*) AS n FROM boxes_mirror WHERE closed_at IS NOT NULL",
       );
       expect(rows[0]?.n).toBe(2);
     });
-
-    // First prompt: show a mismatch, resolve it (skip), then the SECOND must
-    // appear clean -- proving both that it was queued (not dropped) and that
-    // feedback belongs to the expected label which produced it.
-    const firstSscc = (await screen.findByText(/^\d{18}$/)).textContent;
-    const firstPromptListener = source.latestSubscribed();
-    act(() => scan(`]C100${MISMATCH_SSCC}`));
-    await screen.findByText("Это другая этикетка");
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
-
-    expect(screen.queryByText("Это другая этикетка")).toBeNull();
-
-    const secondSscc = await waitFor(() => {
-      const text = screen.getByText(/^\d{18}$/).textContent;
-      if (text === firstSscc) throw new Error("still showing the first prompt");
-      return text;
-    });
-    expect(secondSscc).not.toBe(firstSscc);
-    act(() => firstPromptListener(`]C100${MISMATCH_SSCC}`));
-    expect(screen.queryByText("Это другая этикетка")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
-
-    // Neither box was left without an outcome -- both boxes_mirror rows
-    // carry a resolved print_skipped_at, and the queue is now empty.
-    await waitFor(async () => {
-      const rows = await exec.all<{ sscc: string; print_skipped_at: string | null }>(
-        `SELECT sscc, print_skipped_at FROM boxes_mirror WHERE closed_at IS NOT NULL`,
-      );
-      expect(rows).toHaveLength(2);
-      for (const row of rows) {
-        expect(row.print_skipped_at).not.toBeNull();
-      }
-    });
-    expect(screen.queryByText(/^\d{18}$/)).toBeNull();
+    expect(print).toHaveBeenCalledTimes(2);
   });
 
   // Self-review addition: pins the exact mutation named in this task's

@@ -113,6 +113,18 @@ describe("fixed station viewport source contract", () => {
     expect(css).toMatch(/\.work-box-fill__cell\s*\{[^}]*height:\s*100%;/s);
   });
 
+  it("keeps every print-recovery action floor-sized in a bounded no-scroll dialog", () => {
+    const recovery = stationSource("ui/BoxPrintRecovery.tsx");
+    const css = stationSource("station.css");
+
+    expect(recovery.match(/<Button/g)).toHaveLength(3);
+    expect(recovery.match(/size="floor"/g)).toHaveLength(3);
+    expect(recovery).not.toContain('size="compact"');
+    expect(recovery).toContain('className="box-print-recovery"');
+    expect(css).toMatch(/\.box-print-recovery\s*\{[^}]*overflow:\s*hidden;/s);
+    expect(css).not.toMatch(/\.box-print-recovery\s*\{[^}]*overflow(?:-y)?:\s*(?:auto|scroll);/s);
+  });
+
   it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {
     const css = stationSource("station.css");
 

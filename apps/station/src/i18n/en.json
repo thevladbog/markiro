@@ -392,7 +392,24 @@
     "printNotSscc": "This is not a group code",
     "printReprint": "Print again",
     "printSkip": "Skip",
-    "printNotAvailable": "Printing did not happen, so there is nothing to verify.",
+    "printRecovery": {
+      "title": "The box label was not printed",
+      "sscc": "Box SSCC",
+      "errors": {
+        "templateMissing": "No box label template is selected for this shift",
+        "printerUnconfigured": "Printer is not configured",
+        "renderFailed": "Could not prepare the label",
+        "transportFailed": "The printer did not accept the job"
+      },
+      "retry": "Retry printing",
+      "setup": "Set up printer",
+      "continueWithoutLabel": "Continue without a label",
+      "confirmTitle": "Continue without a label?",
+      "confirmDetail": "The box is already closed. It must be labelled later.",
+      "confirmContinue": "Confirm and continue",
+      "cancel": "Cancel",
+      "pending": "Working…"
+    },
     "invalidSerial": "Could not build a box number. Try closing the box again."
   }
 }

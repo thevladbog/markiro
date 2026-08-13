@@ -1011,6 +1011,20 @@ describe("FullScreenDialog", () => {
     expect(document.activeElement).toBe(skip);
   });
 
+  it("can disable both the back action and Escape while blocking work is pending", () => {
+    const onClose = vi.fn();
+    render(
+      <FullScreenDialog open title="Printing" backLabel="Retry" backDisabled onClose={onClose}>
+        Printing a box label
+      </FullScreenDialog>,
+    );
+
+    const retry = screen.getByRole("button", { name: "Retry" }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Printing" }), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
   it("traps focus, closes on Escape, and restores focus to its opener", async () => {
     const user = userEvent.setup();
     render(<DialogHarness />);
