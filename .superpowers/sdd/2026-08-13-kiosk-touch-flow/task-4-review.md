@@ -48,3 +48,17 @@ Both Important findings are addressed in the follow-up fix:
 - The persistent strip now reserves one 61 px row, never wraps or scrolls, and keeps all status chips in the accessibility tree. The strip and chips use bounded overflow/ellipsis, while a combined full label is preserved as `aria-label` and `title`.
 
 Fix RED: 3 expected failures / 50 passes. Focused GREEN: 54/54. Full kiosk: 25 files / 559 tests. Typecheck, full ESLint, PWA build, Prettier and diff-check passed. Browser/physical acceptance remains separate.
+
+## Independent re-review of `3f4d15d4`
+
+**APPROVED.** Both Important findings are closed, with no new Critical, Important or Minor findings in the bounded fix scope.
+
+- Accepted one-line appends compare the new canonical line array against the previous array, navigate to the exact appended index page, mark only that stable KM/SSCC key, announce the product through a live status and clear the neutral outline after its bounded animation. The reduced-motion rule removes the animation. Length-preserving refusals/duplicates and length-decreasing removals cannot enter this append path; `PagedLines` continues to clamp invalid pages after remove/rotation. Focused coverage pins a synchronous KM, asynchronous box, duplicate staying on its current page and exact order on the final page.
+- `StatusStrip` reserves exactly one 61 px shell row, uses `nowrap` plus hidden overflow and shrinkable ellipsized chips, and never reduces the 48 px cart/pager touch floors. Offline + blocked age + quarantine all remain mounted. The combined untranslated-at-render full text is retained in `aria-label` and `title`, so visual clipping does not remove status information from assistive access. The existing 5-row portrait, 3-row landscape and fixed checkout/list budgets now consume a stable screen slot.
+
+Independent checks:
+
+- Focused cart/layout/i18n tests: **54/54 passed**.
+- Kiosk TypeScript check: passed.
+- `git diff --check 3f50ac1a..3f4d15d4`: passed.
+- Browser geometry and physical-device acceptance were not performed and remain Task 7/external gates, not evidence for this source-bounded approval.
