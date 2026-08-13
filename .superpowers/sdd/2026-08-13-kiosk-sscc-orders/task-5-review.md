@@ -2,13 +2,64 @@
 
 ## Verdict
 
-**CHANGES REQUESTED** — 0 Critical, 3 Important, 0 Minor.
+**APPROVED after fix commit `6c5a1f51`** — 0 Critical, 0 Important, 0 Minor.
 
 Reviewed commit `3f3608ec` against Task 5 in
 `docs/superpowers/plans/2026-08-13-kiosk-sscc-orders.md` and the accepted
 design specification, including tenant scoping, whole-box persistence,
 registry provenance, lock order, bounds, replay, OpenAPI, admin conflict
 rendering, and legacy item-only compatibility.
+
+## Fix re-review
+
+Re-reviewed `0cbe02be..6c5a1f51`. All three Important findings below are
+addressed, with no new blocking findings.
+
+### 1. Persisted vNext rejection idempotency — ADDRESSED
+
+Every explicit-vNext rejection now carries an internal versioned request
+marker with the terminal reason, including `boxes: []` loose-only and early
+badge/write-off failures. `findKioskRejectionOutcome` reconstructs an outcome
+from that marker, while retaining safe fallback replay for box-discriminated
+rows written by the first SSCC release.
+
+Normal admission now checks order then rejection after the established
+registry -> employee/day -> kiosk serialization and before mutable policy,
+registry, limit, or insert work. Early terminal failures take the kiosk row
+and perform the same order/rejection winner check before persisting. They do
+not acquire registry or employee locks after the kiosk lock, so no reverse
+lock edge was introduced. Whichever serialized order/rejection commits first
+is returned by the waiter; the other path cannot create a second outcome.
+
+Coverage now includes boxes-empty loose rejection replay, concurrent identical
+rejection winner behavior, early terminal replay, and the order-before-
+rejection winner helper. The PostgreSQL scenarios still require the isolated
+migration-0037 gate noted below.
+
+The request marker remains storage-only metadata. `PickupRejectionsService`
+filters it from both list and acknowledge DTO shaping; loose and box conflict
+entries remain visible. Focused tests cover marker-only and mixed unions.
+
+### 2. First-wins box overlap — ADDRESSED
+
+Box classification now seeds a claimed-key set with loose and already-used
+keys, then adds members only after a box is accepted. Consequently the first
+valid box remains accepted and only a later overlapping box receives one
+whole-box `duplicate` conflict. A box rejected by a loose key does not poison
+a later otherwise-valid box. Both cases are pinned by focused tests.
+
+### 3. Proof and processing order — ADDRESSED
+
+`kioskOrderProcessingLines` is now the single vNext ordering boundary for both
+proof canonicalization and order processing. It uses a locale-independent
+string comparator, sorts copies, and leaves the caller arrays untouched. The
+same canonical item/box arrays feed loose resolution, box resolution, limit
+application, and audit records, so two payload permutations with one digest
+cannot select different near-limit winners.
+
+The legacy branch remains selected only when the own `boxes` property is
+absent. It preserves historical item order, JSON shape, and the previously
+pinned digest.
 
 ## Important findings
 
@@ -105,16 +156,15 @@ vNext payload cannot change the accepted result under the same proof.
 
 ## Reviewer verification
 
-- `git diff --check a3c5a3d2..3f3608ec` — passed.
-- Focused API suites — 45/45 passed:
+- Original review: `git diff --check a3c5a3d2..3f3608ec` and 45/45 focused
+  tests passed.
+- Fix re-review: `git diff --check 0cbe02be..6c5a1f51` — passed.
+- Fix-focused API suites — 50/50 passed:
   `kiosk-admission-proof`, `box-order-resolver`, `pickup-order-locks`,
-  `kiosk-box-registry`, and `kiosk-box-registry-openapi`.
-- `pnpm --filter @markiro/api typecheck` — passed.
+  `kiosk-box-registry`, `kiosk-box-registry-openapi`, and
+  `pickup-rejections`.
+- `pnpm --filter @markiro/api typecheck` and
+  `pnpm --filter @markiro/admin typecheck` — passed.
 - PostgreSQL box-order e2e was not run green: the available shared database
   does not have migration `0037`. This review did not modify shared schema or
   data.
-
-The focused green run does not clear the findings above: one test currently
-asserts the incorrect reject-both overlap behavior, and there are no tests for
-loose-only vNext rejection replay, the rejection race, or proof/limit order
-equivalence.
