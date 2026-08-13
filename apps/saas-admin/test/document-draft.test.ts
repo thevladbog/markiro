@@ -110,8 +110,11 @@ describe("document draft reducer", () => {
         version: 3,
         nameRu: "Базовый",
         nameEn: "Basic",
+        descriptionRu: null,
+        descriptionEn: null,
         quantity: 1,
         unit: "месяц",
+        catalogUnitPrice: "120.00",
         agreedUnitPrice: "120.00",
         vatRateBps: 2000,
         vatIncluded: true,
@@ -347,13 +350,31 @@ describe("document draft validation and request adapters", () => {
         catalogVersionId: null,
         nameRu: "Архивная настройка",
         nameEn: "Legacy setup",
+        descriptionRu: null,
+        descriptionEn: null,
         quantity: 1,
         unit: "час",
+        catalogUnitPrice: "0.10",
         agreedUnitPrice: "0.10",
         vatRateBps: 113,
         vatIncluded: false,
         activationPolicy: null,
       },
+    ]);
+  });
+
+  it("includes a documented discounted-offer reason in the create payload", () => {
+    const discounted = {
+      ...createLineFromCatalog(plan, "line-discounted"),
+      agreedUnitPrice: "99.00",
+      priceOverrideReason: "Годовой контракт",
+    };
+
+    expect(toOfferCreateInput(draft([discounted])).lines).toEqual([
+      expect.objectContaining({
+        agreedUnitPrice: "99.00",
+        priceOverrideReason: "Годовой контракт",
+      }),
     ]);
   });
 

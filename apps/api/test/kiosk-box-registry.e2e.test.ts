@@ -53,7 +53,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
     if (!schemaProbe.rows[0]?.ready) {
       await setup.pool.end();
       throw new Error(
-        "Shared development DB schema drift: migration 0037 is not applied (boxes.registry_version missing); kiosk box registry e2e cannot run safely",
+        "Shared development DB schema drift: migration 0038 is not applied (boxes.registry_version missing); kiosk box registry e2e cannot run safely",
       );
     }
 

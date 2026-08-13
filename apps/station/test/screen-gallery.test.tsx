@@ -109,6 +109,52 @@ describe("development screen gallery", () => {
     ).not.toBeNull();
   });
 
+  it.each([
+    [
+      "ru",
+      "Доступно критическое обновление 0.1.0-beta.123",
+      "Сменить оператора",
+      "Выйти из полноэкранного режима",
+    ],
+    ["en", "Critical update 0.1.0-beta.123 is available", "Change operator", "Exit fullscreen"],
+  ] as const)(
+    "renders the real %s floor-header controls with long labels for viewport review",
+    async (locale, updateLabel, operatorLabel, windowLabel) => {
+      const view = render(
+        <StationScreenGallery request={{ state: "floor-header-actions", locale }} />,
+      );
+
+      const header = screen.getByRole("banner", {
+        name: locale === "ru" ? "Состояние станции" : "Station status",
+      });
+      const actions = within(header).getByRole("group");
+      const update = within(actions).getByRole("button", { name: `! ${updateLabel}` });
+      const operator = within(actions).getByRole("button", { name: operatorLabel });
+      const windowMode = await within(actions).findByRole("button", { name: windowLabel });
+
+      expect(actions.children).toHaveLength(3);
+      expect(update.getAttribute("data-update-severity")).toBe("urgent");
+      expect(operator.classList.contains("mk-btn--floor")).toBe(true);
+      expect(operator.style.height).toBe("var(--control-floor)");
+      expect(windowMode.closest(".window-mode-control")).not.toBeNull();
+      expect(view.container.querySelector(".station-floor-window-chrome")).toBeNull();
+    },
+  );
+
+  it("renders the real window-mode error inside the header action rail", async () => {
+    render(<StationScreenGallery request={{ state: "floor-header-window-error", locale: "ru" }} />);
+
+    const actions = within(screen.getByRole("banner", { name: "Состояние станции" })).getByRole(
+      "group",
+    );
+    const error = await within(actions).findByRole("alert");
+    expect(error.textContent).toContain("Производство продолжается");
+    expect(
+      within(error).getByRole("button", { name: "Закрыть сообщение об ошибке режима окна" }),
+    ).toBeDefined();
+    expect(error.closest(".window-mode-control")).not.toBeNull();
+  });
+
   it("renders the five-result name-search worst case with floor-sized targets", () => {
     const view = render(
       <StationScreenGallery request={{ state: "login-name-search", locale: "ru" }} />,

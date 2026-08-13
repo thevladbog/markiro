@@ -125,6 +125,7 @@ export async function rejectCredentialGeneration(
 }
 
 export interface FloorWorkBarrier {
+  close?: () => Promise<void>;
   idle(): Promise<void>;
 }
 
@@ -163,11 +164,11 @@ export class FloorWorkBarrierTimeoutError extends Error {
 
 export const FLOOR_WORK_BARRIER_TIMEOUT_MS = 5_000;
 
-async function waitForFloorWork(
-  barriers: Iterable<FloorWorkBarrier>,
-  timeoutMs: number,
-): Promise<void> {
-  const pending = [...barriers].map((barrier) => barrier.idle());
+export interface FloorWorkRetirement {
+  wait(timeoutMs?: number): Promise<void>;
+}
+
+async function waitForPendingFloorWork(pending: Promise<void>[], timeoutMs: number): Promise<void> {
   if (pending.length === 0) return;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -180,6 +181,44 @@ async function waitForFloorWork(
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
+}
+
+async function waitForFloorWork(
+  barriers: Iterable<FloorWorkBarrier>,
+  timeoutMs: number,
+): Promise<void> {
+  await waitForPendingFloorWork(
+    [...barriers].map((barrier) => barrier.idle()),
+    timeoutMs,
+  );
+}
+
+/** Stops new floor intake, then waits for every already accepted local write. */
+export function beginFloorWorkRetirement(
+  barriers: Iterable<FloorWorkBarrier>,
+): FloorWorkRetirement {
+  const snapshot = [...barriers];
+  const pending = snapshot.map((barrier) => {
+    try {
+      return barrier.close ? barrier.close() : barrier.idle();
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+  });
+  const settled = Promise.all(pending).then(() => undefined);
+  return {
+    wait(timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS) {
+      return waitForPendingFloorWork([settled], timeoutMs);
+    },
+  };
+}
+
+/** Stops new floor intake, then waits for every already accepted local write. */
+export async function retireFloorWork(
+  barriers: Iterable<FloorWorkBarrier>,
+  timeoutMs = FLOOR_WORK_BARRIER_TIMEOUT_MS,
+): Promise<void> {
+  await beginFloorWorkRetirement(barriers).wait(timeoutMs);
 }
 
 /** Counts only facts that have not yet received a server acknowledgement. */

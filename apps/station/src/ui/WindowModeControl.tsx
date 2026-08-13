@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
 import type { LockdownSnapshot } from "../lib/lockdown.js";
@@ -6,6 +6,7 @@ import type { LockdownSnapshot } from "../lib/lockdown.js";
 export interface WindowModeControlProps {
   snapshot: LockdownSnapshot;
   activeShift: boolean;
+  disabled?: boolean;
   onEnter: () => void | Promise<void>;
   onExit: () => void | Promise<void>;
   onDismissError: () => void;
@@ -14,6 +15,7 @@ export interface WindowModeControlProps {
 export function WindowModeControl({
   snapshot,
   activeShift,
+  disabled = false,
   onEnter,
   onExit,
   onDismissError,
@@ -24,8 +26,12 @@ export function WindowModeControl({
     ? t("windowMode.pending")
     : t(snapshot.mode === "locked" ? "windowMode.exit" : "windowMode.enter");
 
+  useEffect(() => {
+    if (disabled) setConfirmExit(false);
+  }, [disabled]);
+
   function handleAction(): void {
-    if (snapshot.pending) return;
+    if (disabled || snapshot.pending) return;
     if (snapshot.mode === "windowed") {
       void onEnter();
     } else if (activeShift) {
@@ -41,7 +47,7 @@ export function WindowModeControl({
         size="floor"
         variant="secondary"
         className="window-mode-control__action"
-        disabled={snapshot.pending}
+        disabled={disabled || snapshot.pending}
         aria-label={actionLabel}
         onClick={handleAction}
         icon={
@@ -63,7 +69,10 @@ export function WindowModeControl({
             size="floor"
             variant="secondary"
             aria-label={t("windowMode.dismissError")}
-            onClick={onDismissError}
+            disabled={disabled}
+            onClick={() => {
+              if (!disabled) onDismissError();
+            }}
           >
             {t("windowMode.dismiss")}
           </Button>
@@ -71,14 +80,18 @@ export function WindowModeControl({
       ) : null}
 
       <FullScreenDialog
-        open={confirmExit}
+        open={confirmExit && !disabled}
         title={t("windowMode.confirmTitle")}
         backLabel={t("windowMode.cancel")}
-        onClose={() => setConfirmExit(false)}
+        onClose={() => {
+          if (!disabled) setConfirmExit(false);
+        }}
         footer={
           <Button
             size="floor"
+            disabled={disabled}
             onClick={() => {
+              if (disabled) return;
               setConfirmExit(false);
               void onExit();
             }}

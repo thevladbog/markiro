@@ -56,15 +56,15 @@ const databaseUrlFromEnvironment = process.env.DATABASE_URL;
 const migrationsFolderOnDisk = fileURLToPath(new URL("../migrations", import.meta.url));
 const runtimeMigrateModule = fileURLToPath(new URL("../src/runtime-migrate.ts", import.meta.url));
 const pickupPolicyMigration = new URL(
-  "../migrations/0035_kiosk_pickup_policy.sql",
+  "../migrations/0036_kiosk_pickup_policy.sql",
   import.meta.url,
 );
 const organizationBrandingMigration = new URL(
-  "../migrations/0036_organization_branding.sql",
+  "../migrations/0037_organization_branding.sql",
   import.meta.url,
 );
 const kioskSsccOrdersMigration = new URL(
-  "../migrations/0037_kiosk_sscc_orders.sql",
+  "../migrations/0038_kiosk_sscc_orders.sql",
   import.meta.url,
 );
 const migrationJournal = new URL("../migrations/meta/_journal.json", import.meta.url);
@@ -221,7 +221,7 @@ describe("runRuntimeMigrations", () => {
     expect(migration).toContain('CREATE TYPE "public"."pickup_limit_mode"');
     expect(migration).toContain("INSERT INTO pickup_tenant_policies (tenant_id, limits_enabled)");
     expect(migration).toContain("INSERT INTO employee_pickup_policies");
-    expect(journal.entries.map((entry) => entry.tag)).toContain("0035_kiosk_pickup_policy");
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0036_kiosk_pickup_policy");
   });
 
   test("packages tenant-owned organization branding metadata", () => {
@@ -233,7 +233,7 @@ describe("runRuntimeMigrations", () => {
     expect(migration).toContain('CREATE TABLE "organization_logo_assets"');
     expect(migration).toContain('CONSTRAINT "org_profiles_logo_tenant_fk"');
     expect(migration).toContain('FOREIGN KEY ("tenant_id","logo_asset_id")');
-    expect(journal.entries.map((entry) => entry.tag)).toContain("0036_organization_branding");
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0037_organization_branding");
   });
 
   test("packages kiosk box provenance with a committed tenant registry revision", () => {
@@ -268,7 +268,7 @@ describe("runRuntimeMigrations", () => {
     expect(migration).toContain(
       'FOREIGN KEY ("tenant_id","order_id","order_box_id") REFERENCES "public"."pickup_order_boxes"("tenant_id","order_id","id")',
     );
-    expect(journal.entries.map((entry) => entry.tag)).toContain("0037_kiosk_sscc_orders");
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0038_kiosk_sscc_orders");
   });
 
   test("holds one session advisory lock across the runtime migration", async () => {

@@ -42,7 +42,10 @@ export class BillingController {
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
   ) {
-    return this.billing.issue(req.platformPrincipal!, id);
+    return this.billing.issue(req.platformPrincipal!, id).then(async (invoice) => {
+      const documents = await this.documents.renderInvoice(id);
+      return { ...invoice, documents };
+    });
   }
 
   @Post(":id/document")
@@ -51,10 +54,31 @@ export class BillingController {
     return this.documents.renderAndStore(id);
   }
 
+  @Get(":id/documents")
+  @RequirePlatformCapabilities("billing.read")
+  documentsList(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+    return this.documents.list(id);
+  }
+
+  @Post(":id/documents")
+  @RequirePlatformCapabilities("billing.write")
+  documentsRender(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
+    return this.documents.renderInvoice(id);
+  }
+
   @Get(":id/document")
   @RequirePlatformCapabilities("billing.read")
   documentUrl(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return this.documents.url(id);
+  }
+
+  @Get(":id/documents/:documentId/download")
+  @RequirePlatformCapabilities("billing.read")
+  documentDownload(
+    @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+    @Param("documentId") documentId: string,
+  ) {
+    return this.documents.url(id, documentId);
   }
 
   @Post(":id/apply")

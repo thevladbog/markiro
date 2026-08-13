@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
-import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 
 import { ThemeProvider, useTheme } from "../src/theme.js";
 
@@ -25,6 +25,7 @@ describe("ThemeProvider", () => {
   afterEach(() => {
     cleanup();
     localStorage.clear();
+    vi.useRealTimers();
   });
 
   it("sets data-theme on documentElement", () => {
@@ -82,6 +83,30 @@ describe("ThemeProvider", () => {
 
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(screen.getByTestId("theme").textContent).toBe("light");
+
+    unmount();
+  });
+
+  it("keeps a scrollbar visible while scrolling and hides it after inactivity", () => {
+    vi.useFakeTimers();
+
+    const { unmount } = render(
+      <ThemeProvider defaultTheme="light">
+        <div data-testid="scroller" />
+      </ThemeProvider>,
+    );
+    const scroller = screen.getByTestId("scroller");
+
+    scroller.dispatchEvent(new Event("scroll"));
+    expect(scroller.dataset.scrollbarActive).toBe("true");
+
+    vi.advanceTimersByTime(800);
+    scroller.dispatchEvent(new Event("scroll"));
+    vi.advanceTimersByTime(800);
+    expect(scroller.dataset.scrollbarActive).toBe("true");
+
+    vi.runOnlyPendingTimers();
+    expect(scroller.hasAttribute("data-scrollbar-active")).toBe(false);
 
     unmount();
   });

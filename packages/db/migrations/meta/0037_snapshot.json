@@ -1,6 +1,6 @@
 {
-  "id": "e1f13879-8789-4df5-b748-ffb26a50bd76",
-  "prevId": "c47ac141-6c0e-4581-acc3-4348f2c35004",
+  "id": "c47ac141-6c0e-4581-acc3-4348f2c35004",
+  "prevId": "73820b80-8735-4150-ba1d-20b135272cfa",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1200,53 +1200,6 @@
       },
       "isRLSEnabled": false
     },
-    "public.box_registry_versions": {
-      "name": "box_registry_versions",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "current_version": {
-          "name": "current_version",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "0"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "box_registry_versions_tenant_fk": {
-          "name": "box_registry_versions_tenant_fk",
-          "tableFrom": "box_registry_versions",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
     "public.boxes": {
       "name": "boxes",
       "schema": "",
@@ -1330,51 +1283,9 @@
           "type": "timestamp with time zone",
           "primaryKey": false,
           "notNull": false
-        },
-        "registry_version": {
-          "name": "registry_version",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "0"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
         }
       },
-      "indexes": {
-        "boxes_registry_cursor_idx": {
-          "name": "boxes_registry_cursor_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "registry_version",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "boxes_tenant_id_organization_id_fk": {
           "name": "boxes_tenant_id_organization_id_fk",
@@ -4225,166 +4136,6 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
-    "public.pickup_order_boxes": {
-      "name": "pickup_order_boxes",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "order_id": {
-          "name": "order_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "box_id": {
-          "name": "box_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sscc": {
-          "name": "sscc",
-          "type": "char(18)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "bottle_count": {
-          "name": "bottle_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "unit_price": {
-          "name": "unit_price",
-          "type": "numeric(12, 2)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "pickup_order_boxes_tenant_id_organization_id_fk": {
-          "name": "pickup_order_boxes_tenant_id_organization_id_fk",
-          "tableFrom": "pickup_order_boxes",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pickup_order_boxes_tenant_order_fk": {
-          "name": "pickup_order_boxes_tenant_order_fk",
-          "tableFrom": "pickup_order_boxes",
-          "tableTo": "pickup_orders",
-          "columnsFrom": [
-            "tenant_id",
-            "order_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pickup_order_boxes_tenant_box_fk": {
-          "name": "pickup_order_boxes_tenant_box_fk",
-          "tableFrom": "pickup_order_boxes",
-          "tableTo": "boxes",
-          "columnsFrom": [
-            "tenant_id",
-            "box_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pickup_order_boxes_tenant_product_fk": {
-          "name": "pickup_order_boxes_tenant_product_fk",
-          "tableFrom": "pickup_order_boxes",
-          "tableTo": "products",
-          "columnsFrom": [
-            "tenant_id",
-            "product_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "pickup_order_boxes_tenant_id_uq": {
-          "name": "pickup_order_boxes_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "pickup_order_boxes_tenant_order_id_uq": {
-          "name": "pickup_order_boxes_tenant_order_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "order_id",
-            "id"
-          ]
-        },
-        "pickup_order_boxes_order_box_uq": {
-          "name": "pickup_order_boxes_order_box_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "order_id",
-            "box_id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "pickup_order_boxes_bottle_count_check": {
-          "name": "pickup_order_boxes_bottle_count_check",
-          "value": "\"pickup_order_boxes\".\"bottle_count\" > 0"
-        }
-      },
-      "isRLSEnabled": false
-    },
     "public.pickup_order_counters": {
       "name": "pickup_order_counters",
       "schema": "",
@@ -4447,12 +4198,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "order_box_id": {
-          "name": "order_box_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "product_id": {
           "name": "product_id",
@@ -4552,23 +4297,6 @@
           ],
           "columnsTo": [
             "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "pickup_order_items_tenant_order_box_fk": {
-          "name": "pickup_order_items_tenant_order_box_fk",
-          "tableFrom": "pickup_order_items",
-          "tableTo": "pickup_order_boxes",
-          "columnsFrom": [
-            "tenant_id",
-            "order_id",
-            "order_box_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "order_id",
             "id"
           ],
           "onDelete": "no action",
@@ -7913,6 +7641,12 @@
           "notNull": true,
           "default": "'draft'"
         },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "total": {
           "name": "total",
           "type": "numeric(14, 2)",
@@ -7923,6 +7657,12 @@
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terms_markdown": {
+          "name": "terms_markdown",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -8030,6 +7770,13 @@
           "columns": [
             "tenant_id",
             "id"
+          ]
+        },
+        "commercial_offers_number_uq": {
+          "name": "commercial_offers_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
           ]
         },
         "commercial_offers_tenant_family_revision_uq": {
@@ -11029,6 +10776,311 @@
         "tenant_billing_profiles_revision_positive": {
           "name": "tenant_billing_profiles_revision_positive",
           "value": "\"tenant_billing_profiles\".\"revision\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.commercial_offer_documents": {
+      "name": "commercial_offer_documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "format": {
+          "name": "format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "renderer_version": {
+          "name": "renderer_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "commercial_offer_documents_tenant_offer_fk": {
+          "name": "commercial_offer_documents_tenant_offer_fk",
+          "tableFrom": "commercial_offer_documents",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "commercial_offer_documents_tenant_id_uq": {
+          "name": "commercial_offer_documents_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "commercial_offer_documents_offer_revision_format_uq": {
+          "name": "commercial_offer_documents_offer_revision_format_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "offer_id",
+            "revision",
+            "format"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "commercial_offer_documents_revision_positive": {
+          "name": "commercial_offer_documents_revision_positive",
+          "value": "\"commercial_offer_documents\".\"revision\" > 0"
+        },
+        "commercial_offer_documents_format_check": {
+          "name": "commercial_offer_documents_format_check",
+          "value": "\"commercial_offer_documents\".\"format\" in ('pdf', 'html')"
+        },
+        "commercial_offer_documents_status_check": {
+          "name": "commercial_offer_documents_status_check",
+          "value": "\"commercial_offer_documents\".\"status\" in ('pending', 'ready', 'failed')"
+        },
+        "commercial_offer_documents_ready_metadata_check": {
+          "name": "commercial_offer_documents_ready_metadata_check",
+          "value": "\"commercial_offer_documents\".\"status\" <> 'ready' or (\"commercial_offer_documents\".\"object_key\" is not null and \"commercial_offer_documents\".\"sha256\" is not null and \"commercial_offer_documents\".\"byte_size\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.commercial_offer_print_snapshots": {
+      "name": "commercial_offer_print_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "seller_snapshot": {
+          "name": "seller_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "buyer_snapshot": {
+          "name": "buyer_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lines_snapshot": {
+          "name": "lines_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subtotal": {
+          "name": "subtotal",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vat_total": {
+          "name": "vat_total",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "terms_markdown": {
+          "name": "terms_markdown",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terms_html": {
+          "name": "terms_html",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "commercial_offer_print_snapshots_tenant_offer_fk": {
+          "name": "commercial_offer_print_snapshots_tenant_offer_fk",
+          "tableFrom": "commercial_offer_print_snapshots",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "commercial_offer_print_snapshots_tenant_id_uq": {
+          "name": "commercial_offer_print_snapshots_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "commercial_offer_print_snapshots_offer_revision_uq": {
+          "name": "commercial_offer_print_snapshots_offer_revision_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "offer_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "commercial_offer_print_snapshots_revision_positive": {
+          "name": "commercial_offer_print_snapshots_revision_positive",
+          "value": "\"commercial_offer_print_snapshots\".\"revision\" > 0"
+        },
+        "commercial_offer_print_snapshots_totals_nonnegative": {
+          "name": "commercial_offer_print_snapshots_totals_nonnegative",
+          "value": "\"commercial_offer_print_snapshots\".\"subtotal\" >= 0 and \"commercial_offer_print_snapshots\".\"vat_total\" >= 0 and \"commercial_offer_print_snapshots\".\"total\" >= 0"
         }
       },
       "isRLSEnabled": false

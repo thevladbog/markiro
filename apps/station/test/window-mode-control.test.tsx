@@ -12,6 +12,7 @@ function renderControl(
   snapshot: LockdownSnapshot,
   options: {
     activeShift?: boolean;
+    disabled?: boolean;
     onEnter?: () => void;
     onExit?: () => void;
     onDismissError?: () => void;
@@ -21,6 +22,7 @@ function renderControl(
     <WindowModeControl
       snapshot={snapshot}
       activeShift={options.activeShift ?? false}
+      disabled={options.disabled ?? false}
       onEnter={options.onEnter ?? vi.fn()}
       onExit={options.onExit ?? vi.fn()}
       onDismissError={options.onDismissError ?? vi.fn()}
@@ -87,6 +89,45 @@ describe("WindowModeControl", () => {
     expect(dismiss.style.minWidth).toBe("var(--control-floor)");
     fireEvent.click(dismiss);
     expect(onDismissError).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps error dismissal inert while another floor action owns recovery", () => {
+    const onDismissError = vi.fn();
+    renderControl(
+      { mode: "locked", pending: false, error: "exit" },
+      { disabled: true, onDismissError },
+    );
+
+    const dismiss = screen.getByRole("button", { name: "Dismiss window mode error" });
+    expect((dismiss as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(dismiss);
+    expect(onDismissError).not.toHaveBeenCalled();
+  });
+
+  it("closes an already-open exit confirmation when another floor action takes ownership", () => {
+    const onExit = vi.fn();
+    const view = renderControl(
+      { mode: "locked", pending: false, error: null },
+      { activeShift: true, onExit },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+    expect(screen.getByRole("dialog", { name: "Exit fullscreen?" })).toBeDefined();
+
+    view.rerender(
+      <WindowModeControl
+        snapshot={{ mode: "locked", pending: false, error: null }}
+        activeShift
+        disabled
+        onEnter={vi.fn()}
+        onExit={onExit}
+        onDismissError={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("dialog", { name: "Exit fullscreen?" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Confirm exit fullscreen" })).toBeNull();
+    expect(onExit).not.toHaveBeenCalled();
   });
 
   it("keeps the persistent action touch-sized and accessibly named", () => {

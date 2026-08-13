@@ -84,7 +84,7 @@ export function ShiftSelection({
       })
       .catch((err: unknown) => {
         if (cancelled) return;
-        setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+        setError(err instanceof StationApiError ? err.message : t("shifts.serverUnavailable"));
         setLoadFailed(true);
         setLoading(false);
       });

@@ -77,6 +77,9 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /pickup-rejections (PickupRejectionsController.list)",
       "GET /products (ProductsController.listProducts)",
       "GET /products/:id (ProductsController.getProduct)",
+      "GET /billing/invoices (TenantBillingController.list)",
+      "GET /billing/invoices/:id (TenantBillingController.detail)",
+      "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.download)",
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/:id (ShiftsController.getShift)",
       "GET /station-devices (StationDevicesController.list)",
@@ -242,6 +245,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingController.document": platform(
     "platform invoice document rendering is guarded by platform billing capabilities",
   ),
+  "BillingController.documentsRender": platform(
+    "platform invoice document rendering is guarded by platform billing capabilities",
+  ),
   "BillingController.apply": platform(
     "platform invoice application is guarded by platform billing capabilities",
   ),
@@ -265,6 +271,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformOffersController.publish": platform(
     "platform billing offer publication is guarded by platform capabilities",
+  ),
+  "PlatformOffersController.documentsRender": platform(
+    "platform billing offer document rendering is guarded by platform capabilities",
   ),
   "PlatformOffersController.cancel": platform(
     "platform billing offer cancellation is guarded by platform capabilities",

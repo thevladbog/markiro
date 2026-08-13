@@ -1,6 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
-import { applyMigrations, type SqlExecutor, type StationBundle } from "../src/lib/mirror.js";
+import {
+  applyMigrations,
+  readOperatorsMirror,
+  type SqlExecutor,
+  type StationBundle,
+} from "../src/lib/mirror.js";
+import { syncOperatorRoster } from "../src/lib/roster-sync.js";
 import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
 import { remaining } from "../src/lib/sscc-pool.js";
 import {
@@ -66,6 +72,57 @@ const bundle: StationBundle = {
 };
 
 describe("mirrorShiftBundle", () => {
+  it("does not let a late stale bundle overwrite the authoritative live roster", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const oldRoster: StationBundle["operators"] = [
+      {
+        operatorId: "removed",
+        name: "Removed Operator",
+        login: "1001",
+        role: "operator",
+        pinHash: "old-removed-pin",
+        badgeHash: null,
+        active: true,
+      },
+      {
+        operatorId: "deactivated",
+        name: "Deactivated Operator",
+        login: "1002",
+        role: "operator",
+        pinHash: "old-deactivated-pin",
+        badgeHash: null,
+        active: true,
+      },
+    ];
+    const newRoster: StationBundle["operators"] = [
+      {
+        operatorId: "added",
+        name: "Added Operator",
+        login: "1003",
+        role: "operator",
+        pinHash: "new-added-pin",
+        badgeHash: null,
+        active: true,
+      },
+    ];
+    let resolveBundle!: (value: StationBundle) => void;
+    const staleResponse = new Promise<StationBundle>((resolve) => {
+      resolveBundle = resolve;
+    });
+    const lateBundle = mirrorShiftBundle(
+      { get: vi.fn().mockReturnValue(staleResponse) },
+      exec,
+      "s1",
+    );
+
+    await syncOperatorRoster({ get: vi.fn().mockResolvedValue({ items: newRoster }) }, exec);
+    resolveBundle({ ...bundle, operators: oldRoster });
+    await lateBundle;
+
+    expect(await readOperatorsMirror(exec)).toEqual(newRoster);
+  });
+
   it("downloads the bundle via the client and mirrors it into shift_mirror/product_mirror", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);
