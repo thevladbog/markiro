@@ -86,7 +86,7 @@
   "login": {
     "title": "Operator sign-in",
     "badgePrimary": "Scan your badge to sign in",
-    "badgeReady": "Badge scanner ready",
+    "badgeReady": "Barcode scanner ready",
     "badgeInstruction": "Hold the badge near the scanner",
     "badgeExplanation": "The station recognizes the code automatically. If the operator was just added, the roster will refresh from the server.",
     "loginPrompt": "Enter your personnel number",

@@ -900,6 +900,9 @@ body,
 
 .station-screen__actions > .station-floor-footer {
   width: 100%;
+  padding: 0;
+  border-top: 0;
+  background: transparent;
 }
 
 .workstation-setup {
@@ -1343,6 +1346,41 @@ body,
   gap: var(--sp-3);
   grid-template-rows: 64px minmax(0, 1fr);
   justify-items: center;
+}
+
+.operator-login__body--badge {
+  grid-template-rows: minmax(0, 1fr);
+}
+
+.operator-login__scanner-status {
+  position: fixed;
+  z-index: 89;
+  top: calc(var(--sp-3) + var(--control-floor) + var(--sp-2));
+  right: var(--sp-3);
+  display: flex;
+  min-height: 40px;
+  max-width: min(360px, calc(100vw - 2 * var(--sp-3)));
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-1);
+  color: var(--fg-1);
+  font: var(--text-body);
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.operator-login__scanner-status-icon {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--ok-solid);
+  color: var(--fg-on-ok-solid);
+  font: var(--text-body-strong);
+  flex: 0 0 auto;
+  place-items: center;
 }
 
 .operator-login__readout {

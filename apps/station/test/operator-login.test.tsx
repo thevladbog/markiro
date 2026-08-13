@@ -125,6 +125,10 @@ describe("OperatorLogin", () => {
     );
 
     expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
+    const scannerStatus = screen.getByRole("status", { name: "Barcode scanner ready" });
+    expect(scannerStatus.className).toContain("operator-login__scanner-status");
+    expect(scannerStatus.closest(".operator-login__body")).toBeNull();
+    expect(scannerStatus.querySelector("[aria-hidden='true']")).not.toBeNull();
     expect(screen.getByText("Hold the badge near the scanner")).toBeDefined();
     expect(
       screen.getByText(

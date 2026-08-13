@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { createStationClient } from "../src/lib/api-client.js";
@@ -14,8 +14,152 @@ const client = createStationClient({
   apiKey: "k",
   serverUrl: "http://localhost:3000",
 });
+const resolvedProduct = {
+  id: "p1",
+  gtin14: "04600000000015",
+  name: "Cola",
+  status: "active",
+  boxCapacity: null,
+};
+
+function deferredResponse() {
+  let settle: (response: Response) => void = () => {};
+  const promise = new Promise<Response>((resolve) => {
+    settle = resolve;
+  });
+  return { promise, resolve: settle };
+}
+
+function expectButtonDisabled(button: HTMLElement, disabled: boolean) {
+  expect(button).toBeInstanceOf(HTMLButtonElement);
+  if (!(button instanceof HTMLButtonElement)) throw new Error("expected a button element");
+  expect(button.disabled).toBe(disabled);
+}
+
+function submitGtin() {
+  const input = screen.getByLabelText("Type or scan a GTIN");
+  fireEvent.change(input, { target: { value: "4600000000015" } });
+  const form = input.closest("form");
+  expect(form).not.toBeNull();
+  if (!form) throw new Error("new shift GTIN form is missing");
+  fireEvent.submit(form);
+}
 
 describe("NewShift", () => {
+  it("returns from the initial GTIN screen to shift selection", () => {
+    const onBack = vi.fn();
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("returns from the resolved-product screen to shift selection", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [resolvedProduct],
+          }),
+          { status: 200 },
+        ),
+      );
+    const onBack = vi.fn();
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
+    submitGtin();
+    await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Back disabled while GTIN resolution is pending", async () => {
+    const gtinCheck = deferredResponse();
+    vi.spyOn(globalThis, "fetch")
+      .mockImplementationOnce(() => gtinCheck.promise)
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [resolvedProduct],
+          }),
+          { status: 200 },
+        ),
+      );
+    const onBack = vi.fn();
+    render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
+    submitGtin();
+
+    const pendingBack = screen.getByRole("button", { name: "Back" });
+    await waitFor(() => expectButtonDisabled(pendingBack, true));
+    fireEvent.click(pendingBack);
+    expect(onBack).not.toHaveBeenCalled();
+
+    await act(async () => {
+      gtinCheck.resolve(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+          status: 200,
+        }),
+      );
+    });
+    const idleBack = await screen.findByRole("button", { name: "Back" });
+    await waitFor(() => expectButtonDisabled(idleBack, false));
+    fireEvent.click(idleBack);
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Back disabled while shift start is pending", async () => {
+    const createShift = deferredResponse();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
+          status: 200,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [resolvedProduct],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockImplementationOnce(() => createShift.promise)
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
+          status: 200,
+        }),
+      );
+    const onBack = vi.fn();
+    const onStarted = vi.fn();
+    render(<NewShift client={client} onStarted={onStarted} onBack={onBack} />);
+    submitGtin();
+    fireEvent.click(await screen.findByRole("button", { name: "Start" }));
+
+    const pendingBack = screen.getByRole("button", { name: "Back" });
+    await waitFor(() => expectButtonDisabled(pendingBack, true));
+    fireEvent.click(pendingBack);
+    expect(onBack).not.toHaveBeenCalled();
+
+    await act(async () => {
+      createShift.resolve(
+        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "validation" }), {
+          status: 201,
+        }),
+      );
+    });
+    await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
+    await waitFor(() => expectButtonDisabled(pendingBack, false));
+    fireEvent.click(pendingBack);
+    expect(onBack).toHaveBeenCalledOnce();
+  });
+
   it("renders input, found, and missing as mutually exclusive fixed state panels", async () => {
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(

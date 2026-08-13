@@ -301,7 +301,22 @@ export function OperatorLogin({
         ) : null}
       </div>
 
-      <div className="operator-login__body">
+      {stage === "badge" ? (
+        <div
+          className="operator-login__scanner-status"
+          role="status"
+          aria-label={t("login.badgeReady")}
+        >
+          <span className="operator-login__scanner-status-icon" aria-hidden="true">
+            ✓
+          </span>
+          <span>{t("login.badgeReady")}</span>
+        </div>
+      ) : null}
+
+      <div
+        className={`operator-login__body${stage === "badge" ? " operator-login__body--badge" : ""}`}
+      >
         {stage === "search" ? (
           <OperatorNameSearch
             operators={roster}
@@ -313,16 +328,14 @@ export function OperatorLogin({
           />
         ) : (
           <>
-            <div
-              className="operator-login__readout"
-              aria-label={stage === "login" ? "login" : stage === "pin" ? "pin" : undefined}
-            >
-              {stage === "badge"
-                ? t("login.badgeReady")
-                : stage === "login"
-                  ? login
-                  : "•".repeat(pin.length)}
-            </div>
+            {stage !== "badge" ? (
+              <div
+                className="operator-login__readout"
+                aria-label={stage === "login" ? "login" : "pin"}
+              >
+                {stage === "login" ? login : "•".repeat(pin.length)}
+              </div>
+            ) : null}
             <div className="operator-login__keypad-zone">
               {stage === "badge" ? (
                 <div className="operator-login__badge-panel">
