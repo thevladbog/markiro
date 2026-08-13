@@ -59,8 +59,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0032_cute_frank_castle" &&
         entry.tag !== "0033_common_magdalene" &&
         entry.tag !== "0034_overconfident_harrier" &&
-        entry.tag !== "0035_stormy_ser_duncan",
-      entry.tag !== "0036_neat_quasar",
+        entry.tag !== "0035_stormy_ser_duncan" &&
+        entry.tag !== "0036_neat_quasar",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
