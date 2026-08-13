@@ -46,40 +46,37 @@ export function PrintVerification({
     expected: string;
     message: PrintVerificationMessage;
   }>({ expected, message: "waiting" });
-  const [resolving, setResolving] = useState(false);
+  const [resolvingExpected, setResolvingExpected] = useState<string | null>(null);
   const [reprinting, setReprinting] = useState(false);
   const [reprintError, setReprintError] = useState<BoxPrintErrorCode | null>(null);
-  const resolutionStarted = useRef(false);
+  const resolutionStartedFor = useRef<string | null>(null);
+  const resolving = resolvingExpected === expected;
   const message = feedback.expected === expected ? feedback.message : "waiting";
 
   const beginResolution = useCallback(
     (action: () => void | boolean | Promise<void | boolean>): void => {
-      if (resolutionStarted.current) return;
-      resolutionStarted.current = true;
-      setResolving(true);
+      if (resolutionStartedFor.current === expected) return;
+      const startedFor = expected;
+      resolutionStartedFor.current = startedFor;
+      setResolvingExpected(startedFor);
+      const release = (): void => {
+        if (resolutionStartedFor.current !== startedFor) return;
+        resolutionStartedFor.current = null;
+        setResolvingExpected((current) => (current === startedFor ? null : current));
+      };
       try {
-        void Promise.resolve(action()).then(
-          (won) => {
-            if (won === false) {
-              resolutionStarted.current = false;
-              setResolving(false);
-            }
-          },
-          () => {
-            resolutionStarted.current = false;
-            setResolving(false);
-          },
-        );
+        void Promise.resolve(action()).then((won) => {
+          if (won === false) release();
+        }, release);
       } catch {
-        resolutionStarted.current = false;
-        setResolving(false);
+        release();
       }
     },
-    [],
+    [expected],
   );
 
   async function reprint(): Promise<void> {
-    if (reprinting || resolutionStarted.current) return;
+    if (reprinting || resolutionStartedFor.current === expected) return;
     setReprinting(true);
     setReprintError(null);
     try {
@@ -95,7 +92,7 @@ export function PrintVerification({
   useEffect(() => {
     let active = true;
     const stop = scanSource.start((raw) => {
-      if (!active || resolutionStarted.current) return;
+      if (!active || resolutionStartedFor.current === expected) return;
       const parsed = parseScannedSscc(raw);
       if (parsed === null) {
         setFeedback({ expected, message: "notSscc" });

@@ -195,6 +195,81 @@ describe("PrintVerification", () => {
     expect(onSkip).not.toHaveBeenCalled();
   });
 
+  it("starts a fresh single-flight scan resolution for the next expected label", async () => {
+    const source = manualSource();
+    const onVerified = vi.fn(async () => true);
+    const onSkip = vi.fn(async () => true);
+    const view = render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={onVerified}
+        onReprint={vi.fn()}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+
+    act(() => {
+      source.emit(`]C100${SSCC}`);
+      source.emit(`]C100${SSCC}`);
+    });
+    await waitFor(() => expect(onVerified).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", true);
+
+    view.rerender(
+      <PrintVerification
+        expected={OTHER_SSCC}
+        onVerified={onVerified}
+        onReprint={vi.fn()}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+    expect(screen.getByText(OTHER_SSCC)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", false);
+
+    act(() => {
+      source.emit(`]C100${OTHER_SSCC}`);
+      source.emit(`]C100${OTHER_SSCC}`);
+    });
+    await waitFor(() => expect(onVerified).toHaveBeenCalledTimes(2));
+    expect(onSkip).not.toHaveBeenCalled();
+  });
+
+  it("starts a fresh single-flight skip resolution for the next expected label", async () => {
+    const source = manualSource();
+    const onSkip = vi.fn(async () => true);
+    const view = render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={vi.fn()}
+        onReprint={vi.fn()}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
+    await waitFor(() => expect(onSkip).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", true);
+
+    view.rerender(
+      <PrintVerification
+        expected={OTHER_SSCC}
+        onVerified={vi.fn()}
+        onReprint={vi.fn()}
+        onSkip={onSkip}
+        scanSource={source}
+      />,
+    );
+    const nextSkip = screen.getByRole("button", { name: "Пропустить" });
+    expect(nextSkip).toHaveProperty("disabled", false);
+
+    fireEvent.click(nextSkip);
+    fireEvent.click(nextSkip);
+    await waitFor(() => expect(onSkip).toHaveBeenCalledTimes(2));
+  });
+
   it("does not accept a scan of a different label", async () => {
     const source = manualSource();
     const onVerified = vi.fn();
