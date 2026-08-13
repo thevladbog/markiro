@@ -31,9 +31,11 @@ import {
   utcDayOf,
 } from "../session/day-count.js";
 import {
+  createConfirmedOrderBody,
   initialKioskFlowState,
   kioskFlowReducer,
   type ActiveKioskSession,
+  type ConfirmedKioskFlowState,
   type KioskFlowState,
   type KioskOutcome,
 } from "../session/flow.js";
@@ -709,10 +711,7 @@ export function KioskShell(): React.JSX.Element {
    * snapshot the match was made against, even if a refresh lands during the
    * derivation.
    */
-  const admitting = useRef<Omit<
-    ActiveKioskSession,
-    "id" | "cart" | "reason" | "writeoffReasonId"
-  > | null>(null);
+  const admitting = useRef<Omit<ActiveKioskSession, "id" | "cart"> | null>(null);
   const sessions = useRef(0);
 
   /**
@@ -747,30 +746,26 @@ export function KioskShell(): React.JSX.Element {
   const submitting = useRef(false);
 
   const submitCart = useCallback(
-    async (state: CartState, active: ActiveKioskSession) => {
+    async (confirmed: ConfirmedKioskFlowState) => {
+      const active = confirmed.session;
+      const state = active.cart;
       const cfg = configRef.current;
       if (!cfg) return;
       const policy = snapshotRef.current
         ? effectivePickupPolicy(snapshotRef.current.bootstrap, active.employee.id)
         : null;
-      if (state.reason === "writeoff" && !policy?.canWriteoff) return;
+      if (state.reason === "writeoff" && !policy?.canWriteoff) {
+        dispatchFlow({ type: "submitFailed" });
+        return;
+      }
       const deviceSeq = cfg.nextDeviceSeq;
-      const content = {
+      // The scan time, not the sync time: an order queued through an outage
+      // replays hours later and must still be filed under when it happened.
+      const body: CreateOrderDto = createConfirmedOrderBody(
+        confirmed,
         deviceSeq,
-        badgeDigest: active.badgeDigest,
-        reason: state.reason,
-        writeoffReasonId: state.writeoffReasonId,
-        items: state.items.map((item) => ({ rawKm: item.rawKm })),
-      };
-      const body: CreateOrderDto = {
-        ...content,
-        // The scan time, not the sync time: an order queued through an outage
-        // replays hours later and must still be filed under when it happened.
-        // Read off the SERVER's clock (`scannedAt`), because this stamp is what
-        // the server dates the order by and therefore which UTC day its day
-        // limit charges it to — a field the tablet's own date must not decide.
-        createdAt: scannedAt().toISOString(),
-      };
+        scannedAt().toISOString(),
+      );
       try {
         // THE COUNTER FIRST, and this ordering is load-bearing.
         //
@@ -827,6 +822,7 @@ export function KioskShell(): React.JSX.Element {
         // write is the one that failed, under the next one if it succeeded and
         // the queue write did not. Neither path can use a sequence twice.
         awaited.current = null;
+        dispatchFlow({ type: "submitFailed" });
         console.error("kiosk: the order could not be filed", err);
       }
     },
@@ -974,33 +970,14 @@ export function KioskShell(): React.JSX.Element {
         onScan={subscribe}
         onSubmit={(state) => {
           if (submitting.current) return;
-          let next: KioskFlowState = kioskFlowReducer(flow, { type: "cartChanged", cart: state });
-          next = kioskFlowReducer(next, { type: "continue" });
-          if (next.screen === "operation") {
-            next = kioskFlowReducer(next, {
-              type: "chooseOperation",
-              reason: state.reason,
-            });
-          }
-          if (next.screen === "reason" && state.writeoffReasonId) {
-            next = kioskFlowReducer(next, {
-              type: "chooseWriteoffReason",
-              id: state.writeoffReasonId,
-            });
-            next = kioskFlowReducer(next, { type: "continue" });
-          }
+          const next: KioskFlowState = kioskFlowReducer(flow, {
+            type: "legacySubmit",
+            cart: state,
+          });
           if (next.screen !== "confirmation") return;
-          dispatchFlow({ type: "cartChanged", cart: state });
-          dispatchFlow({ type: "continue" });
-          if (session.employee.canWriteoff) {
-            dispatchFlow({ type: "chooseOperation", reason: state.reason });
-            if (state.reason === "writeoff" && state.writeoffReasonId) {
-              dispatchFlow({ type: "chooseWriteoffReason", id: state.writeoffReasonId });
-              dispatchFlow({ type: "continue" });
-            }
-          }
+          dispatchFlow({ type: "legacySubmit", cart: state });
           submitting.current = true;
-          void submitCart(state, next.session).finally(() => {
+          void submitCart(next).finally(() => {
             submitting.current = false;
           });
         }}
@@ -1050,8 +1027,6 @@ export function KioskShell(): React.JSX.Element {
               id: sessions.current,
               ...admitted,
               cart: initialCartState,
-              reason: "buy",
-              writeoffReasonId: null,
             },
           });
         }}

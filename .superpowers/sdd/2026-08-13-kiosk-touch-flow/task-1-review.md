@@ -99,3 +99,15 @@ Required regression tests:
   work around that environment issue.
 - No browser/tablet/physical-scanner or live-service check was performed. This
   review changes documentation only.
+
+## Implementer disposition
+
+The Important bridge finding is fixed and awaits independent re-review.
+
+- `ActiveKioskSession` now has one canonical order draft: `cart`. Duplicate session-level reason fields were removed. Operation and writeoff-reason actions update that canonical cart.
+- `legacySubmit` is one atomic pure transition accepted only from `cart`. It checks non-empty items, requires a writeoff reason, clears stale buy sub-reasons, and canonicalizes a no-writeoff employee's stale legacy writeoff to exact buy.
+- The bridge computes that transition synchronously, dispatches the same action, and gives the returned confirmation state to the side effect. `createConfirmedOrderBody` accepts only a confirmation state and builds reason, sub-reason and items only from its canonical cart; raw legacy state is never a second wire source.
+- `submitFailed` returns confirmation to cart with the same canonical cart, so every retry must pass `legacySubmit` validation again. `cartChanged` is accepted only from cart and cannot edit a confirmed draft.
+- Finish is accepted only from outcome; other reset actions require an active session. Invalid source-screen reset actions are no-ops.
+
+Fix RED: 5 failed / 10 passed. Focused GREEN: flow/app/app-view 73/73. Full kiosk: 22 files / 505 tests. Typecheck, full ESLint, Vite PWA production build, Prettier, and diff-check passed.

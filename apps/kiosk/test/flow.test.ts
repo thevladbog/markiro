@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CartItem, CartState } from "../src/session/cart.js";
 import {
+  createConfirmedOrderBody,
   kioskFlowReducer,
   type ActiveKioskSession,
   type KioskFlowState,
@@ -34,8 +35,6 @@ const active = (canWriteoff: boolean): ActiveKioskSession => ({
     canWriteoff,
   },
   cart: cart(),
-  reason: "buy",
-  writeoffReasonId: null,
 });
 
 const at = (
@@ -55,7 +54,7 @@ describe("kioskFlowReducer", () => {
   it("skips operation choice for an employee without writeoff permission", () => {
     expect(kioskFlowReducer(at("cart", false), { type: "continue" })).toMatchObject({
       screen: "confirmation",
-      session: { reason: "buy", writeoffReasonId: null },
+      session: { cart: { reason: "buy", writeoffReasonId: null } },
     });
   });
 
@@ -75,7 +74,10 @@ describe("kioskFlowReducer", () => {
       type: "chooseOperation",
       reason: "writeoff",
     });
-    expect(writeoff).toMatchObject({ screen: "reason", session: { reason: "writeoff" } });
+    expect(writeoff).toMatchObject({
+      screen: "reason",
+      session: { cart: { reason: "writeoff" } },
+    });
     expect(kioskFlowReducer(writeoff, { type: "continue" })).toBe(writeoff);
 
     const withReason = kioskFlowReducer(writeoff, {
@@ -84,7 +86,84 @@ describe("kioskFlowReducer", () => {
     });
     expect(kioskFlowReducer(withReason, { type: "continue" })).toMatchObject({
       screen: "confirmation",
-      session: { writeoffReasonId: "damage" },
+      session: { cart: { writeoffReasonId: "damage" } },
+    });
+  });
+
+  it("atomically validates and canonicalizes a legacy submit draft", () => {
+    const staleWriteoff = { ...cart(), reason: "writeoff" as const, writeoffReasonId: null };
+    const noWriteoff = kioskFlowReducer(at("cart", false), {
+      type: "legacySubmit",
+      cart: staleWriteoff,
+    });
+    expect(noWriteoff).toMatchObject({
+      screen: "confirmation",
+      session: { cart: { reason: "buy", writeoffReasonId: null } },
+    });
+    if (noWriteoff.screen !== "confirmation") throw new Error("expected confirmation");
+    expect(createConfirmedOrderBody(noWriteoff, 7, "2026-08-13T12:00:00Z")).toEqual({
+      deviceSeq: 7,
+      badgeDigest: "digest",
+      reason: "buy",
+      writeoffReasonId: null,
+      items: [{ rawKm: "raw-km" }],
+      createdAt: "2026-08-13T12:00:00Z",
+    });
+
+    const allowed = at("cart", true);
+    if (!("session" in allowed)) throw new Error("test fixture must be active");
+    const writeoff = kioskFlowReducer(allowed, {
+      type: "legacySubmit",
+      cart: staleWriteoff,
+    });
+    expect(writeoff).toMatchObject({ screen: "cart" });
+    expect("session" in writeoff ? writeoff.session.cart : null).toBe(allowed.session.cart);
+  });
+
+  it("returns a failed confirmation to cart and revalidates the edited retry", () => {
+    const confirmation = kioskFlowReducer(at("cart", true), {
+      type: "legacySubmit",
+      cart: cart(),
+    });
+    expect(confirmation.screen).toBe("confirmation");
+    const retry = kioskFlowReducer(confirmation, { type: "submitFailed" });
+    expect(retry).toMatchObject({ screen: "cart", session: { cart: cart() } });
+
+    const empty = kioskFlowReducer(retry, { type: "legacySubmit", cart: cart([]) });
+    expect(empty).toBe(retry);
+    const missingReason = kioskFlowReducer(retry, {
+      type: "legacySubmit",
+      cart: { ...cart(), reason: "writeoff", writeoffReasonId: null },
+    });
+    expect(missingReason).toBe(retry);
+  });
+
+  it("does not edit the confirmed draft from non-cart screens", () => {
+    const confirmation = kioskFlowReducer(at("cart", true), {
+      type: "legacySubmit",
+      cart: cart(),
+    });
+    const edit = kioskFlowReducer(confirmation, { type: "cartChanged", cart: cart([]) });
+    expect(edit).toBe(confirmation);
+  });
+
+  it("keeps operation and writeoff reason only in the canonical cart", () => {
+    const writeoff = kioskFlowReducer(at("operation"), {
+      type: "chooseOperation",
+      reason: "writeoff",
+    });
+    const chosen = kioskFlowReducer(writeoff, { type: "chooseWriteoffReason", id: "damage" });
+    expect(chosen).toMatchObject({
+      session: { cart: { reason: "writeoff", writeoffReasonId: "damage" } },
+    });
+  });
+
+  it("source-bounds reset actions", () => {
+    expect(kioskFlowReducer({ screen: "login" }, { type: "finish" })).toEqual({
+      screen: "login",
+    });
+    expect(kioskFlowReducer({ screen: "pairing" }, { type: "idleReset" })).toEqual({
+      screen: "pairing",
     });
   });
 

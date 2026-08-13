@@ -19,3 +19,15 @@ The kiosk now has one explicit pure session state machine for pairing, login, ca
 - Full kiosk: 22 files / 500 tests passed.
 - Kiosk typecheck, full ESLint, Vite PWA production build, changed-file Prettier, and `git diff --check` passed.
 - No visual redesign, browser viewport acceptance, physical scanner, tablet, or live-service test was performed in Task 1.
+
+## Review fix: canonical confirmed draft
+
+Review found that a failed enqueue left the reducer on confirmation while the editable legacy Cart remained visible, allowing a retry to bypass validation and letting the side effect read a second raw reason source.
+
+- The session now stores operation and sub-reason only inside its canonical cart.
+- `legacySubmit` atomically canonicalizes and validates a legacy cart only from the cart screen. Empty carts and writeoffs without a reason remain in cart; employees without writeoff permission get an exact buy draft.
+- The wire builder accepts only the reducer-returned confirmation state. Enqueue, count and outcome consume that same canonical cart.
+- A durable-write failure dispatches `submitFailed`, returning to cart without losing the draft. Editing and retrying therefore replays the same validation.
+- Confirmed drafts reject `cartChanged`; reset actions are bounded to their valid source states.
+
+Fix RED was 5 failed / 10 passed. Focused GREEN was 73/73; full kiosk was 22 files / 505 tests. Typecheck, full ESLint, Vite PWA build, Prettier, and diff-check passed.
