@@ -624,9 +624,9 @@ export class PickupOrdersService {
           ? ({
               checksum: product.imageChecksum,
               contentType: "image/webp",
-              byteSize: product.imageByteSize,
-              width: product.imageWidth,
-              height: product.imageHeight,
+              byteSize: product.imageByteSize ?? 0,
+              width: product.imageWidth ?? 0,
+              height: product.imageHeight ?? 0,
             } satisfies ProductImageDescriptor)
           : null,
       })),

@@ -35,6 +35,12 @@ import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
+type JoinedShiftRow = Omit<ShiftDto, "image"> & {
+  imageChecksum: string | null;
+  imageByteSize: number | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+};
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
 
 /**
@@ -76,13 +82,28 @@ export class ShiftsService {
       .select(this.joinedSelection())
       .from(schema.shifts)
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(...conditions))
       .orderBy(schema.shifts.createdAt);
 
-    return { items: rows };
+    return { items: rows.map((row) => this.mapShiftRow(row as unknown as JoinedShiftRow)) };
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
@@ -91,6 +112,21 @@ export class ShiftsService {
       .select(this.joinedSelection())
       .from(schema.shifts)
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
@@ -99,7 +135,7 @@ export class ShiftsService {
     if (!row) {
       throw new NotFoundException();
     }
-    return row;
+    return this.mapShiftRow(row as unknown as JoinedShiftRow);
   }
 
   /**
@@ -559,7 +595,13 @@ export class ShiftsService {
       )
       .limit(1);
     return row
-      ? { ...row, contentType: "image/webp" }
+      ? {
+          checksum: row.checksum,
+          contentType: "image/webp",
+          byteSize: row.byteSize ?? 0,
+          width: row.width ?? 0,
+          height: row.height ?? 0,
+        }
       : null;
   }
 
@@ -588,6 +630,10 @@ export class ShiftsService {
       mode: schema.shifts.mode,
       productId: schema.shifts.productId,
       productName: schema.products.name,
+      imageChecksum: schema.mediaAssets.checksum,
+      imageByteSize: schema.mediaAssets.byteSize,
+      imageWidth: schema.mediaAssets.width,
+      imageHeight: schema.mediaAssets.height,
       lineId: schema.shifts.lineId,
       lineName: schema.lines.name,
       counterpartyId: schema.shifts.counterpartyId,
@@ -607,6 +653,22 @@ export class ShiftsService {
       closeReason: schema.shifts.closeReason,
       lateDataAt: schema.shifts.lateDataAt,
       createdAt: schema.shifts.createdAt,
+    };
+  }
+
+  private mapShiftRow(row: JoinedShiftRow): ShiftDto {
+    const { imageChecksum, imageByteSize, imageWidth, imageHeight, ...shift } = row;
+    return {
+      ...shift,
+      image: imageChecksum
+        ? {
+            checksum: imageChecksum,
+            contentType: "image/webp",
+            byteSize: imageByteSize ?? 0,
+            width: imageWidth ?? 0,
+            height: imageHeight ?? 0,
+          }
+        : null,
     };
   }
 

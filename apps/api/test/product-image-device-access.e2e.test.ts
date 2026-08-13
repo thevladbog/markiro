@@ -12,7 +12,7 @@ describe("device product-image delivery contracts", () => {
     const response = { redirect: vi.fn() };
 
     await controller.readProductImage(
-      { tenantId: "tenant-1", kioskId: "kiosk-1" },
+      { tenantId: "tenant-1", kioskId: "kiosk-1" } as never,
       "product-1",
       "a".repeat(64),
       response as never,
@@ -37,7 +37,7 @@ describe("device product-image delivery contracts", () => {
     const response = { redirect: vi.fn() };
 
     await controller.readProductImage(
-      { tenantId: "tenant-1", deviceId: "station-1" },
+      { tenantId: "tenant-1", deviceId: "station-1" } as never,
       "product-1",
       "b".repeat(64),
       response as never,
