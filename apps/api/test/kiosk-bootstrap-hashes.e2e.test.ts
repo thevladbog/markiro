@@ -13,6 +13,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { hashSecret } from "../src/lib/pin-hash";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
+import { createTestEmployee } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import sharp from "sharp";
 
@@ -72,9 +73,12 @@ describe.skipIf(!ready)("kiosk bootstrap hashes e2e", () => {
     tenantId = await signUpAndActivate(ownerAgent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: employeeId, tenantId, fullName: "Оператор Бейджев", role: "оператор" });
+    await createTestEmployee(db, {
+      id: employeeId,
+      tenantId,
+      fullName: "Оператор Бейджев",
+      role: "оператор",
+    });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     const pinHash = await hashSecret("4321");

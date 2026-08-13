@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
+import { createTestEmployee } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.service";
 
@@ -58,9 +59,16 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await createTestEmployee(
+      db,
+      {
+        id: employeeId,
+        tenantId,
+        fullName: "Иван Иванов",
+        role: "оператор",
+      },
+      { dayLimit: 20, canWriteoff: true },
+    );
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();

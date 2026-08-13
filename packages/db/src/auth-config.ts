@@ -20,6 +20,7 @@ import * as authSchema from "./schema/auth.js";
 // `buildAuth`/`Auth` below restore that one contract with a narrow companion
 // type layered back on top, without reintroducing the unnameable-type problem.
 function buildAuthImpl(db: Db, opts: BuildAuthOptions) {
+  const afterCreateOrganization = opts.afterCreateOrganization;
   return betterAuth<BetterAuthOptions>({
     secret: opts.secret,
     baseURL: opts.baseURL,
@@ -40,6 +41,14 @@ function buildAuthImpl(db: Db, opts: BuildAuthOptions) {
       organization({
         ac: organizationAccessControl,
         roles: organizationRoles,
+        ...(afterCreateOrganization
+          ? {
+              organizationHooks: {
+                afterCreateOrganization: ({ organization }) =>
+                  afterCreateOrganization(organization.id),
+              },
+            }
+          : {}),
       }),
       apiKey([
         {
@@ -162,6 +171,7 @@ export interface BuildAuthOptions {
   secret: string;
   baseURL: string;
   trustedOrigins?: string[];
+  afterCreateOrganization?: (organizationId: string) => Promise<void>;
   sendResetPassword?: (
     data: { user: AuthEmailUser; url: string; token: string },
     request?: Request,

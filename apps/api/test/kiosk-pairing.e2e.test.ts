@@ -24,7 +24,7 @@ import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.
 import { PairingService } from "../src/modules/kiosk/pairing.service";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { createTestStationDevice } from "./support/auth";
+import { createTestEmployee, createTestStationDevice } from "./support/auth";
 import { SecurityAuditService } from "../src/authorization/security-audit.service";
 
 // Only `randomInt` is ever mocked (F3 below, one call, one test) -- every
@@ -259,7 +259,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
     // the "no orders yet" case; tests that care about continuation give it a
     // real deviceSeq explicitly.
     const employeeId = randomUUID();
-    await db.insert(schema.employees).values({ id: employeeId, tenantId, fullName: "Сотрудник" });
+    await createTestEmployee(db, { id: employeeId, tenantId, fullName: "Сотрудник" });
     seededOrder = randomUUID();
     await db.insert(schema.pickupOrders).values({
       id: seededOrder,
@@ -374,6 +374,12 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
           status: "unmanaged",
           startsAt: null,
           endsAt: null,
+        },
+        pickupPolicy: { limitsEnabled: true },
+        branding: {
+          organizationName: "Test Plant",
+          logoUrl: null,
+          logoRevision: null,
         },
         config: {
           dayLimitPerEmployee: expect.any(Number),
@@ -895,9 +901,11 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
   // a false replay of this one.
   it("does not let a re-pair's deviceSeq allocation miss an order still mid-transaction", async () => {
     const raceEmployeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: raceEmployeeId, tenantId, fullName: "Ночная смена" });
+    await createTestEmployee(db, {
+      id: raceEmployeeId,
+      tenantId,
+      fullName: "Ночная смена",
+    });
 
     const orderTxDone = db.transaction(async (tx) => {
       await tx

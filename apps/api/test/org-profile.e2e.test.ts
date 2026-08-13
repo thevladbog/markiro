@@ -100,7 +100,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
     const orgId = org.body.id as string;
     await setup.db
       .insert(schema.pickupTenantPolicies)
-      .values({ tenantId: orgId, limitsEnabled: true });
+      .values({ tenantId: orgId, limitsEnabled: true })
+      .onConflictDoNothing();
     return orgId;
   }
 

@@ -10,7 +10,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
-import { createTestStationDevice, signUpAndActivate } from "./support/auth";
+import { createTestEmployee, createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 import { createManagedSubscription, createPublishedPlan } from "./support/subscription-fixtures";
@@ -537,7 +537,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `kiosk-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Recovery employee",
@@ -644,7 +644,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const otherTenantId = await signUpAndActivate(otherAgent);
     const otherEmployeeId = randomUUID();
     const otherBadgeCode = `badge-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: otherEmployeeId,
       tenantId: otherTenantId,
       fullName: "Other tenant employee",
@@ -682,7 +682,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `kiosk-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Untrusted recovery employee",
@@ -738,7 +738,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `proof-bootstrap-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Attested employee",
@@ -879,7 +879,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const otherTenantId = await signUpAndActivate(otherAgent);
     const otherEmployeeId = randomUUID();
     const otherTenantKioskToken = `proof-other-tenant-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: otherEmployeeId,
       tenantId: otherTenantId,
       fullName: "Other attestation tenant employee",
@@ -915,7 +915,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const tenantId = await signUpAndActivate(agent);
     const volumeEmployeeId = randomUUID();
     const volumeBadge = `volume-badge-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: volumeEmployeeId,
       tenantId,
       fullName: "Admission volume employee",
@@ -1076,7 +1076,7 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
     const badgeCode = `badge-${randomUUID()}`;
     const kioskId = randomUUID();
     const kioskToken = `proof-idempotent-${randomUUID()}`;
-    await db.insert(schema.employees).values({
+    await createTestEmployee(db, {
       id: employeeId,
       tenantId,
       fullName: "Idempotent admission employee",

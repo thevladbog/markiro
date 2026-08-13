@@ -1,6 +1,6 @@
 import { toNodeHandler } from "better-auth/node";
 import type { Express } from "express";
-import { buildAuth, createDb, type Auth } from "@markiro/db";
+import { buildAuth, createDb, schema, type Auth } from "@markiro/db";
 import { sessionAllowedOrigins, type Env } from "../env";
 import { MailCryptoService } from "../modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../modules/mail/mail-delivery.service";
@@ -19,9 +19,18 @@ export function setupAuth(env: Env): DbConnection & { auth: Auth } {
   const mailDelivery = new MailDeliveryService(
     new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY),
   );
+  const afterCreateOrganization =
+    process.env.NODE_ENV === "test"
+      ? async (organizationId: string) => {
+          await db
+            .insert(schema.pickupTenantPolicies)
+            .values({ tenantId: organizationId, limitsEnabled: true });
+        }
+      : undefined;
   const auth = buildAuth(db, {
     secret: env.BETTER_AUTH_SECRET,
     baseURL: env.BETTER_AUTH_URL,
+    ...(afterCreateOrganization ? { afterCreateOrganization } : {}),
     // Exactly the list the CORS middleware applies to non-kiosk routes, on
     // purpose -- /api/auth/* is one of those routes, so the two describe the
     // same surface and must not drift (see `sessionAllowedOrigins`).

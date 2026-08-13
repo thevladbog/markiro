@@ -12,7 +12,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { createTestStationDevice } from "./support/auth";
+import { createTestEmployee, createTestStationDevice } from "./support/auth";
 
 /** Check-digit VALID GTINs. GTIN is allowlisted on the kiosk; GTIN_NOT_ALLOWED is not. */
 const GTIN = "04600682000013";
@@ -62,9 +62,16 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await createTestEmployee(
+      db,
+      {
+        id: employeeId,
+        tenantId,
+        fullName: "Иван Иванов",
+        role: "оператор",
+      },
+      { dayLimit: 20, canWriteoff: true },
+    );
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
@@ -200,7 +207,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
   it("recovers the plaintext code for a revoked badge the device named only by digest", async () => {
     const goneId = randomUUID();
     const goneBadge = `badge-gone-${randomUUID()}`;
-    await db.insert(schema.employees).values({ id: goneId, tenantId, fullName: "Ушедшев У." });
+    await createTestEmployee(db, { id: goneId, tenantId, fullName: "Ушедшев У." });
     await db
       .insert(schema.employeeBadges)
       .values({ tenantId, employeeId: goneId, badgeCode: goneBadge });

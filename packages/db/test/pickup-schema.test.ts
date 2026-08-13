@@ -43,12 +43,10 @@ describe.skipIf(!url)("pickup schema constraints", () => {
 
   beforeAll(async () => {
     await db.insert(organization).values([org, foreignOrg]);
-    await db
-      .insert(schema.employees)
-      .values([
-        { id: empId, tenantId: org.id, fullName: "Смирнов А." },
-        { id: foreignEmpId, tenantId: foreignOrg.id, fullName: "Чужой С." },
-      ]);
+    await db.insert(schema.employees).values([
+      { id: empId, tenantId: org.id, fullName: "Смирнов А." },
+      { id: foreignEmpId, tenantId: foreignOrg.id, fullName: "Чужой С." },
+    ]);
     await db.insert(schema.kiosks).values({ id: kioskId, tenantId: org.id, name: "Киоск-1" });
     await db.insert(schema.products).values({
       id: productId,
