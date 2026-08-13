@@ -33,9 +33,11 @@ async function validateBlob(blob: Blob, descriptor: StationProductImageDescripto
 export async function prefetchStationProductImage(
   client: Pick<StationClient, "download">,
   product: { id: string; image?: StationProductImageDescriptor | null },
+  isSealed?: () => boolean,
 ): Promise<void> {
   if (!product.image) return;
   try {
+    if (isSealed?.()) return;
     const cache = await openImageCache();
     const key = cacheKey(product.id, product.image.checksum);
     const existing = await cache.match(key);
@@ -50,6 +52,7 @@ export async function prefetchStationProductImage(
     const blob = await client.download(
       `/station/products/${encodeURIComponent(product.id)}/image/${encodeURIComponent(product.image.checksum)}`,
     );
+    if (isSealed?.()) return;
     await validateBlob(blob, product.image);
     await cache.put(key, new Response(blob, { headers: { "Content-Type": product.image.contentType } }));
   } catch (error) {

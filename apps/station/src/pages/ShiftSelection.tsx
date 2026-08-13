@@ -6,7 +6,7 @@ import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
 import { StationScreen } from "../ui/StationScreen.js";
-import { prefetchStationProductImage } from "../lib/product-image-cache.js";
+import { prefetchStationProductImage, trackStationProductImageSync } from "../lib/product-image-cache.js";
 
 const SHIFT_PAGE_SIZE = 3;
 
@@ -90,10 +90,11 @@ export function ShiftSelection({
         if (cancelled) return;
         setItems(response.items);
         for (const shift of response.items) {
-          void prefetchStationProductImage(client, {
+          const prefetch = prefetchStationProductImage(client, {
             id: shift.productId,
             ...(shift.image === undefined ? {} : { image: shift.image }),
-          });
+          }, isCurrent ? () => !isCurrent() : undefined);
+          trackStationProductImageSync(prefetch);
         }
         setLoading(false);
       })
