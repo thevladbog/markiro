@@ -201,7 +201,10 @@ export async function findUnresolvedBoxPrint(
             (SELECT COUNT(*) FROM codes_mirror c WHERE c.box_id = b.box_id) AS item_count,
             b.print_state AS print_state, b.print_error_code AS print_error_code
        FROM boxes_mirror b
-       JOIN shift_mirror s ON s.id = b.shift_id AND s.mode = 'aggregation'
+       JOIN shift_mirror s
+         ON s.id = b.shift_id
+        AND s.mode = 'aggregation'
+        AND s.issuer_prefix IS NOT NULL
       WHERE b.shift_id = ? AND b.terminal_id IS ?
         AND b.closed_at IS NOT NULL AND b.sscc IS NOT NULL
         AND b.disassembled_at IS NULL

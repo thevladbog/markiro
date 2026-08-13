@@ -1,4 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
@@ -329,12 +332,11 @@ describe("boxes", () => {
     });
 
     it("restores the oldest unresolved pending print for this aggregation shift and terminal", async () => {
-      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
-        "s1",
-        "active",
-        "aggregation",
-        "p1",
-      ]);
+      await exec.run(
+        `INSERT INTO shift_mirror (id, status, mode, product_id, issuer_prefix)
+         VALUES (?,?,?,?,?)`,
+        ["s1", "active", "aggregation", "p1", "460123456"],
+      );
       await openBox(exec, "s1", "newer", "2026-07-29T10:01:00.000Z", "dev-1");
       await closeBox(exec, "newer", "004601234560000024", "2026-07-29T10:06:00.000Z", null);
       await openBox(exec, "s1", "older", "2026-07-29T10:00:00.000Z", "dev-1");
@@ -352,12 +354,11 @@ describe("boxes", () => {
     });
 
     it("includes an unverified printed box only when verification recovery is requested", async () => {
-      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
-        "s1",
-        "active",
-        "aggregation",
-        "p1",
-      ]);
+      await exec.run(
+        `INSERT INTO shift_mirror (id, status, mode, product_id, issuer_prefix)
+         VALUES (?,?,?,?,?)`,
+        ["s1", "active", "aggregation", "p1", "460123456"],
+      );
       await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", null);
       await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
       await markBoxPrinted(exec, "b1");
@@ -392,12 +393,11 @@ describe("boxes", () => {
       );
       expect(await findUnresolvedBoxPrint(exec, "validation", "dev-1", true)).toBeNull();
 
-      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
-        "aggregation",
-        "active",
-        "aggregation",
-        "p1",
-      ]);
+      await exec.run(
+        `INSERT INTO shift_mirror (id, status, mode, product_id, issuer_prefix)
+         VALUES (?,?,?,?,?)`,
+        ["aggregation", "active", "aggregation", "p1", "460123456"],
+      );
       await openBox(exec, "aggregation", "retired", "2026-07-29T10:00:00.000Z", "dev-1");
       await closeBox(exec, "retired", "004601234560000024", "2026-07-29T10:05:00.000Z", null);
       await exec.run(`UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = ?`, [
@@ -405,6 +405,59 @@ describe("boxes", () => {
         "retired",
       ]);
       expect(await findUnresolvedBoxPrint(exec, "aggregation", "dev-1", true)).toBeNull();
+    });
+
+    it("does not restore an aggregation shift without a local issuer prefix", async () => {
+      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
+        "s1",
+        "active",
+        "aggregation",
+        "p1",
+      ]);
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+
+      expect(await findUnresolvedBoxPrint(exec, "s1", "dev-1", true)).toBeNull();
+    });
+
+    it("restores a pending print after the SQLite file is closed and reopened", async () => {
+      const fixtureDir = mkdtempSync(join(tmpdir(), "markiro-box-print-"));
+      const databasePath = join(fixtureDir, "station.sqlite");
+      try {
+        const firstDb = new DatabaseSync(databasePath);
+        try {
+          const firstExec = makeExec(firstDb);
+          await applyMigrations(firstExec);
+          await firstExec.run(
+            `INSERT INTO shift_mirror (id, status, mode, product_id, issuer_prefix)
+             VALUES (?,?,?,?,?)`,
+            ["s1", "active", "aggregation", "p1", "460123456"],
+          );
+          await openBox(firstExec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+          await recordScan(firstExec, event("restart"), code("restart", "b1"));
+          await closeBox(firstExec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+          await markBoxPrintFailed(firstExec, "b1", "transport_failed");
+        } finally {
+          firstDb.close();
+        }
+
+        const reopenedDb = new DatabaseSync(databasePath);
+        try {
+          const reopenedExec = makeExec(reopenedDb);
+          await applyMigrations(reopenedExec);
+          expect(await findUnresolvedBoxPrint(reopenedExec, "s1", "dev-1", false)).toEqual({
+            boxId: "b1",
+            sscc: "004601234560000017",
+            itemCount: 1,
+            state: "pending",
+            errorCode: "transport_failed",
+          });
+        } finally {
+          reopenedDb.close();
+        }
+      } finally {
+        rmSync(fixtureDir, { force: true, recursive: true });
+      }
     });
   });
 
