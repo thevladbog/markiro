@@ -236,7 +236,7 @@ describe("runRuntimeMigrations", () => {
     expect(journal.entries.map((entry) => entry.tag)).toContain("0036_organization_branding");
   });
 
-  test("packages kiosk box provenance with a bounded fast-default registry cursor", () => {
+  test("packages kiosk box provenance with a committed tenant registry revision", () => {
     expect(existsSync(kioskSsccOrdersMigration)).toBe(true);
     if (!existsSync(kioskSsccOrdersMigration)) return;
 
@@ -246,12 +246,23 @@ describe("runRuntimeMigrations", () => {
     };
 
     expect(migration).toContain('CREATE TABLE "pickup_order_boxes"');
+    expect(migration).toContain('CREATE TABLE "box_registry_versions"');
+    expect(migration).toContain('"current_version" bigint DEFAULT 0 NOT NULL');
     expect(migration).toContain(
       'ALTER TABLE "boxes" ADD COLUMN "updated_at" timestamp with time zone DEFAULT now() NOT NULL;',
     );
+    expect(migration).toContain(
+      'ALTER TABLE "boxes" ADD COLUMN "registry_version" bigint DEFAULT 0 NOT NULL;',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "box_registry_versions_tenant_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id")',
+    );
+    expect(migration).toContain(
+      'INSERT INTO "box_registry_versions" ("tenant_id", "current_version") SELECT "id", 0 FROM "organization" ON CONFLICT ("tenant_id") DO NOTHING;',
+    );
     expect(migration).not.toMatch(/\bUPDATE\s+"?boxes"?/iu);
     expect(migration).toContain(
-      'CREATE INDEX "boxes_registry_cursor_idx" ON "boxes" USING btree ("tenant_id","updated_at","id");',
+      'CREATE INDEX "boxes_registry_cursor_idx" ON "boxes" USING btree ("tenant_id","registry_version","id");',
     );
     expect(migration).toContain('CONSTRAINT "pickup_order_items_tenant_order_box_fk"');
     expect(migration).toContain(

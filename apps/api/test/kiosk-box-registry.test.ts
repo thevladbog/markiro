@@ -7,8 +7,11 @@ import {
   resolveBoxRegistryWindow,
 } from "../src/modules/kiosk/box-registry.dto";
 import {
+  MAX_REGISTRY_PAGE_MEMBER_KEYS,
   MAX_BOX_REGISTRY_MEMBERS,
   evaluateBoxRegistryCandidate,
+  isRegistryRevisionInWindow,
+  selectBoxRegistryCandidatePrefix,
   shapeBoxRegistryPage,
   type BoxRegistryCandidate,
   type BoxRegistryMemberFact,
@@ -19,16 +22,20 @@ const UPDATED = new Date("2026-08-13T10:01:00.000Z");
 const SSCC = buildSscc(3, "4600682", 42);
 const GTIN = "04006381333931";
 const GS = "\u001d";
+const SHIFT_ID = "00000000-0000-4000-8000-000000000099";
 
 function candidate(overrides: Partial<BoxRegistryCandidate> = {}): BoxRegistryCandidate {
   return {
     id: randomUUID(),
+    shiftId: SHIFT_ID,
+    terminalId: "terminal-a",
     sscc: SSCC,
     productId: randomUUID(),
     productGtin14: GTIN,
     closedAt: CLOSED,
     closureReceivedAt: CLOSED,
     disassembledAt: null,
+    registryVersion: 7n,
     updatedAt: UPDATED,
     ...overrides,
   };
@@ -47,6 +54,8 @@ function member(
     addedAt,
     displacedAt: null,
     removedAt: null,
+    registryShiftId: overrides.registryShiftId ?? SHIFT_ID,
+    registryTerminalId: overrides.registryTerminalId ?? "terminal-a",
     registryScannedAt: addedAt,
     registryUpdatedAt: addedAt,
     canonicalRaw: parsed.raw,
@@ -59,10 +68,10 @@ function member(
 describe("box registry cursor", () => {
   it("round-trips a canonical versioned cursor and binds both snapshot bounds", () => {
     const value = {
-      v: 1 as const,
-      since: "2026-08-13T09:00:00.000Z",
-      until: "2026-08-13T10:00:00.000Z",
-      updatedAt: "2026-08-13T09:30:00.000Z",
+      v: 2 as const,
+      since: "9007199254740993",
+      until: "9007199254741999",
+      registryVersion: "9007199254741001",
       id: randomUUID(),
     };
     const encoded = encodeBoxRegistryCursor(value);
@@ -70,12 +79,12 @@ describe("box registry cursor", () => {
     expect(
       resolveBoxRegistryWindow(
         { since: value.since, until: value.until, cursor: encoded, limit: 17 },
-        "2026-08-13T11:00:00.000Z",
+        value.until,
       ),
     ).toEqual({
       since: value.since,
       until: value.until,
-      afterUpdatedAt: value.updatedAt,
+      afterRegistryVersion: value.registryVersion,
       afterId: value.id,
       limit: 17,
     });
@@ -86,10 +95,10 @@ describe("box registry cursor", () => {
     Buffer.from("{}", "utf8").toString("base64url"),
     Buffer.from(
       JSON.stringify({
-        v: 2,
+        v: 1,
         since: null,
-        until: "2026-08-13T10:00:00.000Z",
-        updatedAt: "2026-08-13T09:30:00.000Z",
+        until: "7",
+        registryVersion: "6",
         id: randomUUID(),
       }),
       "utf8",
@@ -101,40 +110,43 @@ describe("box registry cursor", () => {
 
   it("rejects moving bounds, omitted bound parameters, and future cursor positions", () => {
     const cursor = encodeBoxRegistryCursor({
-      v: 1,
+      v: 2,
       since: null,
-      until: "2026-08-13T10:00:00.000Z",
-      updatedAt: "2026-08-13T09:30:00.000Z",
+      until: "10",
+      registryVersion: "9",
       id: randomUUID(),
     });
-    expect(() =>
-      resolveBoxRegistryWindow(
-        { cursor, until: "2026-08-13T10:00:01.000Z", limit: 250 },
-        "2026-08-13T11:00:00.000Z",
-      ),
-    ).toThrow();
-    expect(() =>
-      resolveBoxRegistryWindow({ cursor, limit: 250 }, "2026-08-13T11:00:00.000Z"),
-    ).toThrow();
-    expect(() =>
-      resolveBoxRegistryWindow(
-        { since: "2026-08-13T12:00:00.000Z", limit: 250 },
-        "2026-08-13T11:00:00.000Z",
-      ),
-    ).toThrow();
-    expect(() =>
-      resolveBoxRegistryWindow(
-        { until: "2026-08-13T10:00:00.000Z", limit: 250 },
-        "2026-08-13T11:00:00.000Z",
-      ),
-    ).toThrow();
+    expect(() => resolveBoxRegistryWindow({ cursor, until: "11", limit: 250 }, "12")).toThrow();
+    expect(() => resolveBoxRegistryWindow({ cursor, limit: 250 }, "12")).toThrow();
+    expect(() => resolveBoxRegistryWindow({ since: "13", limit: 250 }, "12")).toThrow();
+    expect(() => resolveBoxRegistryWindow({ until: "10", limit: 250 }, "12")).toThrow();
+  });
+
+  it.each(["-1", "01", "+1", "1.0", "9223372036854775808", "9007199254740993 "])(
+    "rejects noncanonical or out-of-range revision %s without Number coercion",
+    (revision) =>
+      expect(() => resolveBoxRegistryWindow({ since: revision, limit: 250 }, "20")).toThrow(),
+  );
+
+  it("models a committed cut without losing a concurrent revision", () => {
+    // Revision 8 is allocated inside an uncommitted mutation transaction.
+    // A reader still sees committed tenant cut 7 and excludes it. Once the
+    // mutation commits, a delta (7,8] includes it exactly once.
+    expect(isRegistryRevisionInWindow("8", null, "7")).toBe(false);
+    expect(isRegistryRevisionInWindow("8", "7", "8")).toBe(true);
+    expect(isRegistryRevisionInWindow("7", "7", "8")).toBe(false);
   });
 });
 
 describe("box registry eligibility", () => {
   it("returns a sorted, unique 12-bottle upsert without raw KM material", () => {
     const box = candidate();
-    const facts = Array.from({ length: 12 }, (_, index) => member(box.id, `S-${12 - index}`));
+    const facts = Array.from({ length: 12 }, (_, index) =>
+      member(box.id, `S-${12 - index}`, {
+        registryShiftId: box.shiftId,
+        registryTerminalId: box.terminalId,
+      }),
+    );
     for (const fact of facts) fact.totalMembershipCount = 12;
 
     const change = evaluateBoxRegistryCandidate(box, facts, false);
@@ -158,7 +170,12 @@ describe("box registry eligibility", () => {
     ["disassembled", { disassembledAt: UPDATED }],
   ] as const)("omits %s boxes in a full snapshot and removes them in a delta", (_label, patch) => {
     const box = candidate(patch);
-    const facts = [member(box.id, "one")];
+    const facts = [
+      member(box.id, "one", {
+        registryShiftId: box.shiftId,
+        registryTerminalId: box.terminalId,
+      }),
+    ];
     expect(evaluateBoxRegistryCandidate(box, facts, false)).toBeNull();
     expect(evaluateBoxRegistryCandidate(box, facts, true)).toEqual({
       kind: "remove",
@@ -177,11 +194,36 @@ describe("box registry eligibility", () => {
     ["mixed product", { canonicalGtin14: "04600511789539" }],
   ] as const)("rejects %s", (_label, patch) => {
     const box = candidate();
-    expect(evaluateBoxRegistryCandidate(box, [member(box.id, "one", patch)], true)).toEqual({
+    expect(
+      evaluateBoxRegistryCandidate(
+        box,
+        [
+          member(box.id, "one", {
+            registryShiftId: box.shiftId,
+            registryTerminalId: box.terminalId,
+            ...patch,
+          }),
+        ],
+        true,
+      ),
+    ).toEqual({
       kind: "remove",
       sscc: SSCC,
       updatedAt: UPDATED.toISOString(),
     });
+  });
+
+  it.each([
+    ["different shift", { registryShiftId: randomUUID() }],
+    ["different terminal", { registryTerminalId: "terminal-b" }],
+  ])("rejects same timestamp owned by a %s", (_label, patch) => {
+    const box = candidate();
+    const fact = member(box.id, "owner", {
+      registryShiftId: box.shiftId,
+      registryTerminalId: box.terminalId,
+      ...patch,
+    });
+    expect(evaluateBoxRegistryCandidate(box, [fact], true)?.kind).toBe("remove");
   });
 
   it("rejects missing, duplicate, ambiguous, and oversized membership", () => {
@@ -216,19 +258,45 @@ describe("box registry page shaping", () => {
     const invalid2 = candidate({ id: id2, closedAt: null });
     const window = {
       since: null,
-      until: "2026-08-13T11:00:00.000Z",
-      afterUpdatedAt: null,
+      until: "7",
+      afterRegistryVersion: null,
       afterId: null,
       limit: 2,
     };
     const page = shapeBoxRegistryPage([invalid1, invalid2], new Map(), window, true);
     expect(page.items).toEqual([]);
     expect(decodeBoxRegistryCursor(page.nextCursor!)).toEqual({
-      v: 1,
+      v: 2,
       since: null,
       until: window.until,
-      updatedAt: UPDATED.toISOString(),
+      registryVersion: "7",
       id: id2,
     });
+  });
+
+  it("splits three 500-member candidates into deterministic 2/1 pages", () => {
+    const candidates = [candidate(), candidate(), candidate()];
+    const counts = new Map(candidates.map((box) => [box.id, 500]));
+    expect(MAX_REGISTRY_PAGE_MEMBER_KEYS).toBe(1000);
+    const first = selectBoxRegistryCandidatePrefix(candidates, counts, false);
+    expect(first.candidates.map((box) => box.id)).toEqual(
+      candidates.slice(0, 2).map((box) => box.id),
+    );
+    expect(first.hasMoreCandidates).toBe(true);
+    const second = selectBoxRegistryCandidatePrefix(candidates.slice(2), counts, false);
+    expect(second.candidates.map((box) => box.id)).toEqual([candidates[2]!.id]);
+    expect(second.hasMoreCandidates).toBe(false);
+  });
+
+  it("always advances over an oversized first candidate at zero payload cost", () => {
+    const oversized = candidate();
+    const selected = selectBoxRegistryCandidatePrefix(
+      [oversized],
+      new Map([[oversized.id, MAX_BOX_REGISTRY_MEMBERS + 1]]),
+      false,
+    );
+    expect(selected.candidates).toEqual([oversized]);
+    expect(selected.memberKeyBudget).toBe(0);
+    expect(selected.hasMoreCandidates).toBe(false);
   });
 });

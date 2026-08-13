@@ -1,5 +1,5 @@
 {
-  "id": "baa7aec7-abe7-439d-a522-eb604a6fe420",
+  "id": "e1f13879-8789-4df5-b748-ffb26a50bd76",
   "prevId": "c47ac141-6c0e-4581-acc3-4348f2c35004",
   "version": "7",
   "dialect": "postgresql",
@@ -1200,6 +1200,53 @@
       },
       "isRLSEnabled": false
     },
+    "public.box_registry_versions": {
+      "name": "box_registry_versions",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "current_version": {
+          "name": "current_version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "box_registry_versions_tenant_fk": {
+          "name": "box_registry_versions_tenant_fk",
+          "tableFrom": "box_registry_versions",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.boxes": {
       "name": "boxes",
       "schema": "",
@@ -1284,6 +1331,13 @@
           "primaryKey": false,
           "notNull": false
         },
+        "registry_version": {
+          "name": "registry_version",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "0"
+        },
         "updated_at": {
           "name": "updated_at",
           "type": "timestamp with time zone",
@@ -1303,7 +1357,7 @@
               "nulls": "last"
             },
             {
-              "expression": "updated_at",
+              "expression": "registry_version",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

@@ -12,7 +12,14 @@ import {
   UnprocessableEntityException,
   UseGuards,
 } from "@nestjs/common";
-import { ApiHeader, ApiTags } from "@nestjs/swagger";
+import {
+  ApiBadRequestResponse,
+  ApiHeader,
+  ApiOkResponse,
+  ApiQuery,
+  ApiTags,
+  ApiUnauthorizedResponse,
+} from "@nestjs/swagger";
 import { KioskDeviceGuard, type RequestWithKiosk } from "../../tenancy/kiosk-device.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -32,7 +39,12 @@ import {
 } from "../pickup-orders/dto";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { OrgProfileService } from "../org-profile/org-profile.service";
-import { boxRegistryQuerySchema, type BoxRegistryQueryDto } from "./box-registry.dto";
+import {
+  BOX_REGISTRY_REVISION_PATTERN,
+  boxRegistryQuerySchema,
+  type BoxRegistryQueryDto,
+  type KioskBoxRegistryPage,
+} from "./box-registry.dto";
 import { BoxRegistryService } from "./box-registry.service";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
@@ -64,10 +76,88 @@ export class KioskController {
   }
 
   @Get("box-registry")
+  @ApiQuery({
+    name: "since",
+    required: false,
+    schema: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
+    description: "Exclusive tenant registry revision. Omit for a full snapshot.",
+  })
+  @ApiQuery({
+    name: "until",
+    required: false,
+    schema: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
+    description: "Server-assigned inclusive revision; required unchanged with cursor pages.",
+  })
+  @ApiQuery({
+    name: "cursor",
+    required: false,
+    schema: { type: "string", maxLength: 1024 },
+    description: "Opaque versioned cursor bound to since and until revisions.",
+  })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    schema: { type: "integer", minimum: 1, maximum: 500, default: 250 },
+    description: "Maximum candidate boxes considered before the member-key budget.",
+  })
+  @ApiOkResponse({
+    description: "A stable committed box-registry revision page.",
+    schema: {
+      type: "object",
+      required: ["until", "items"],
+      properties: {
+        until: { type: "string", pattern: BOX_REGISTRY_REVISION_PATTERN },
+        nextCursor: { type: "string" },
+        items: {
+          type: "array",
+          items: {
+            oneOf: [
+              {
+                type: "object",
+                required: [
+                  "kind",
+                  "boxId",
+                  "sscc",
+                  "productId",
+                  "bottleCount",
+                  "contentKeys",
+                  "updatedAt",
+                ],
+                properties: {
+                  kind: { type: "string", enum: ["upsert"] },
+                  boxId: { type: "string", format: "uuid" },
+                  sscc: { type: "string", pattern: "^[0-9]{18}$" },
+                  productId: { type: "string", format: "uuid" },
+                  bottleCount: { type: "integer", minimum: 1, maximum: 500 },
+                  contentKeys: {
+                    type: "array",
+                    maxItems: 500,
+                    items: { type: "string" },
+                  },
+                  updatedAt: { type: "string", format: "date-time" },
+                },
+              },
+              {
+                type: "object",
+                required: ["kind", "sscc", "updatedAt"],
+                properties: {
+                  kind: { type: "string", enum: ["remove"] },
+                  sscc: { type: "string", pattern: "^[0-9]{18}$" },
+                  updatedAt: { type: "string", format: "date-time" },
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  })
+  @ApiBadRequestResponse({ description: "Malformed bounds, cursor, or page size." })
+  @ApiUnauthorizedResponse({ description: "Missing, unknown, revoked, or archived kiosk token." })
   async boxRegistry(
     @Req() req: RequestWithKiosk,
     @Query(new ZodValidationPipe(boxRegistryQuerySchema)) query: BoxRegistryQueryDto,
-  ) {
+  ): Promise<KioskBoxRegistryPage> {
     return this.boxRegistryService.list(req.tenantId!, query);
   }
 

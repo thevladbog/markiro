@@ -1,21 +1,27 @@
 import { BadRequestException } from "@nestjs/common";
 import { z } from "zod";
 
-const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const CURSOR_MAX_LENGTH = 1024;
+const MAX_PG_BIGINT = 9_223_372_036_854_775_807n;
+export const BOX_REGISTRY_REVISION_PATTERN = "^(0|[1-9][0-9]*)$";
 
-const isoInstantSchema = z
+function isCanonicalRevision(value: string): boolean {
+  if (!/^(0|[1-9][0-9]{0,18})$/.test(value)) return false;
+  try {
+    return BigInt(value) <= MAX_PG_BIGINT;
+  } catch {
+    return false;
+  }
+}
+
+export const boxRegistryRevisionSchema = z
   .string()
-  .regex(ISO_INSTANT)
-  .refine((value) => {
-    const parsed = new Date(value);
-    return !Number.isNaN(parsed.getTime()) && parsed.toISOString() === value;
-  }, "must be a canonical UTC ISO instant");
+  .refine(isCanonicalRevision, "must be a canonical unsigned bigint revision");
 
 export const boxRegistryQuerySchema = z
   .object({
-    since: isoInstantSchema.optional(),
-    until: isoInstantSchema.optional(),
+    since: boxRegistryRevisionSchema.optional(),
+    until: boxRegistryRevisionSchema.optional(),
     cursor: z.string().min(1).max(CURSOR_MAX_LENGTH).optional(),
     limit: z.coerce.number().int().min(1).max(500).default(250),
   })
@@ -25,10 +31,10 @@ export type BoxRegistryQueryDto = z.infer<typeof boxRegistryQuerySchema>;
 
 const cursorSchema = z
   .object({
-    v: z.literal(1),
-    since: isoInstantSchema.nullable(),
-    until: isoInstantSchema,
-    updatedAt: isoInstantSchema,
+    v: z.literal(2),
+    since: boxRegistryRevisionSchema.nullable(),
+    until: boxRegistryRevisionSchema,
+    registryVersion: boxRegistryRevisionSchema,
     id: z.string().uuid(),
   })
   .strict();
@@ -38,7 +44,7 @@ export type BoxRegistryCursor = z.infer<typeof cursorSchema>;
 export interface ResolvedBoxRegistryWindow {
   since: string | null;
   until: string;
-  afterUpdatedAt: string | null;
+  afterRegistryVersion: string | null;
   afterId: string | null;
   limit: number;
 }
@@ -70,21 +76,21 @@ export function decodeBoxRegistryCursor(raw: string): BoxRegistryCursor {
 
 export function resolveBoxRegistryWindow(
   query: BoxRegistryQueryDto,
-  serverNow: string,
+  committedVersion: string,
 ): ResolvedBoxRegistryWindow {
-  const now = isoInstantSchema.parse(serverNow);
+  query = boxRegistryQuerySchema.parse(query);
+  const current = boxRegistryRevisionSchema.parse(committedVersion);
   if (!query.cursor) {
     if (query.until !== undefined) {
       throw new BadRequestException("Box registry until is server-assigned on the first page");
     }
-    const until = now;
-    if (query.since && Date.parse(query.since) > Date.parse(until)) {
+    if (query.since && BigInt(query.since) > BigInt(current)) {
       throw new BadRequestException("Box registry since must not exceed until");
     }
     return {
       since: query.since ?? null,
-      until,
-      afterUpdatedAt: null,
+      until: current,
+      afterRegistryVersion: null,
       afterId: null,
       limit: query.limit,
     };
@@ -96,16 +102,16 @@ export function resolveBoxRegistryWindow(
     throw new BadRequestException("Box registry cursor bounds do not match query parameters");
   }
   if (
-    Date.parse(cursor.until) > Date.parse(now) ||
-    Date.parse(cursor.updatedAt) > Date.parse(cursor.until) ||
-    (cursor.since !== null && Date.parse(cursor.since) > Date.parse(cursor.updatedAt))
+    BigInt(cursor.until) > BigInt(current) ||
+    BigInt(cursor.registryVersion) > BigInt(cursor.until) ||
+    (cursor.since !== null && BigInt(cursor.since) > BigInt(cursor.registryVersion))
   ) {
     throw badCursor();
   }
   return {
     since: cursor.since,
     until: cursor.until,
-    afterUpdatedAt: cursor.updatedAt,
+    afterRegistryVersion: cursor.registryVersion,
     afterId: cursor.id,
     limit: query.limit,
   };

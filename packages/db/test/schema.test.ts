@@ -6,6 +6,7 @@ import { createDb, schema } from "../src/index.js";
 import {
   boxExceptions,
   boxItems,
+  boxRegistryVersions,
   boxes,
   codeConflicts,
   codeRegistry,
@@ -49,6 +50,7 @@ describe("platform schema", () => {
         "shiftId",
         "terminalId",
         "closedAt",
+        "registryVersion",
         "updatedAt",
       ]),
     );
@@ -91,7 +93,19 @@ describe("platform schema", () => {
       cursorIndex?.config.columns.map((column) =>
         is(column, IndexedColumn) ? column.name : undefined,
       ),
-    ).toEqual(["tenant_id", "updated_at", "id"]);
+    ).toEqual(["tenant_id", "registry_version", "id"]);
+  });
+
+  it("declares a tenant-owned committed box registry revision", () => {
+    expect(getTableName(boxRegistryVersions)).toBe("box_registry_versions");
+    expect(boxRegistryVersions.currentVersion.notNull).toBe(true);
+    expect(boxRegistryVersions.currentVersion.hasDefault).toBe(true);
+    const fk = getTableConfig(boxRegistryVersions).foreignKeys.find(
+      (one) => one.getName() === "box_registry_versions_tenant_fk",
+    );
+    expect(fk).toBeDefined();
+    expect(fk?.reference().columns.map((column) => column.name)).toEqual(["tenant_id"]);
+    expect(fk?.reference().foreignColumns.map((column) => column.name)).toEqual(["id"]);
   });
 
   it("gives boxes.operator_id a composite tenant FK to employees", () => {

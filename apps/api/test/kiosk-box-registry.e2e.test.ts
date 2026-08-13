@@ -11,6 +11,7 @@ import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
+import { advanceBoxRegistryVersion } from "../src/modules/boxes/box-registry-version";
 import { createTestStationDevice, signUpAndActivate } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -44,13 +45,13 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
         select 1 from information_schema.columns
         where table_schema = current_schema()
           and table_name = 'boxes'
-          and column_name = 'updated_at'
+          and column_name = 'registry_version'
       ) as ready
     `);
     if (!schemaProbe.rows[0]?.ready) {
       await setup.pool.end();
       throw new Error(
-        "Shared development DB schema drift: migration 0037 is not applied (boxes.updated_at missing); kiosk box registry e2e cannot run safely",
+        "Shared development DB schema drift: migration 0037 is not applied (boxes.registry_version missing); kiosk box registry e2e cannot run safely",
       );
     }
 
@@ -66,6 +67,13 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
 
     agent = request.agent(app.getHttpServer());
     tenantId = await signUpAndActivate(agent);
+    await db
+      .insert(schema.boxRegistryVersions)
+      .values({ tenantId, currentVersion: 1n })
+      .onConflictDoUpdate({
+        target: schema.boxRegistryVersions.tenantId,
+        set: { currentVersion: 1n },
+      });
     token = `registry-${randomUUID()}`;
     kioskId = randomUUID();
     await db.insert(schema.kiosks).values({
@@ -102,6 +110,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       sscc: eligibleSscc,
       closedAt: closure,
       closureReceivedAt: closure,
+      registryVersion: 1n,
       updatedAt: timestamp,
     });
     await ensurePartitions(db, [closure]);
@@ -165,6 +174,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       sscc: buildSscc(3, "4600682", 999),
       closedAt: closure,
       closureReceivedAt: closure,
+      registryVersion: 1n,
       updatedAt: timestamp,
     });
   });
@@ -194,6 +204,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       sscc: buildSscc(3, "4600682", input.serial),
       closedAt: closure,
       closureReceivedAt: closure,
+      registryVersion: 1n,
       updatedAt: input.updatedAt,
     });
     await db.insert(schema.codes).values({
@@ -241,7 +252,7 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
     expect(JSON.stringify(response.body)).not.toContain(buildSscc(3, "4600682", 999));
   });
 
-  it("pages tied timestamps with immutable bounds", async () => {
+  it("pages tied registry revisions with immutable bounds", async () => {
     const first = await request(app!.getHttpServer())
       .get("/kiosk/box-registry?limit=2")
       .set("x-kiosk-token", token)
@@ -257,18 +268,74 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
     await request(app!.getHttpServer())
       .get("/kiosk/box-registry")
       .query({
-        until: new Date(Date.parse(first.body.until) + 1).toISOString(),
+        until: (BigInt(first.body.until as string) + 1n).toString(),
         cursor: first.body.nextCursor,
       })
       .set("x-kiosk-token", token)
       .expect(400);
   });
 
+  it("does not advertise an uncommitted allocated revision and exposes it after commit", async () => {
+    const client = await setup.pool.connect();
+    let committed = false;
+    try {
+      await client.query("begin");
+      const revision = await client.query<{ currentVersion: string }>(
+        `insert into box_registry_versions (tenant_id, current_version)
+         values ($1, 1)
+         on conflict (tenant_id) do update
+         set current_version = box_registry_versions.current_version + 1,
+             updated_at = clock_timestamp()
+         returning current_version as "currentVersion"`,
+        [tenantId],
+      );
+      const nextRevision = revision.rows[0]!.currentVersion;
+      await client.query(
+        `update boxes set registry_version = $1, updated_at = clock_timestamp()
+         where tenant_id = $2 and id = $3`,
+        [nextRevision, tenantId, eligibleBoxId],
+      );
+
+      const beforeCommit = await request(app!.getHttpServer())
+        .get("/kiosk/box-registry")
+        .query({ since: initialUntil })
+        .set("x-kiosk-token", token)
+        .expect(200);
+      expect(beforeCommit.body.until).toBe(initialUntil);
+      expect(beforeCommit.body.items).not.toContainEqual(
+        expect.objectContaining({ boxId: eligibleBoxId }),
+      );
+
+      await client.query("commit");
+      committed = true;
+      const afterCommit = await request(app!.getHttpServer())
+        .get("/kiosk/box-registry")
+        .query({ since: initialUntil })
+        .set("x-kiosk-token", token)
+        .expect(200);
+      expect(BigInt(afterCommit.body.until as string)).toBeGreaterThan(BigInt(initialUntil));
+      expect(afterCommit.body.items).toContainEqual(
+        expect.objectContaining({ kind: "upsert", boxId: eligibleBoxId }),
+      );
+    } finally {
+      if (!committed) await client.query("rollback");
+      client.release();
+    }
+  });
+
   it("emits a remove delta after disassembly", async () => {
-    await db
-      .update(schema.boxes)
-      .set({ disassembledAt: new Date(), updatedAt: new Date() })
-      .where(eq(schema.boxes.id, eligibleBoxId));
+    await db.transaction(async (tx) => {
+      const changed = await tx
+        .update(schema.boxes)
+        .set({ disassembledAt: new Date() })
+        .where(eq(schema.boxes.id, eligibleBoxId))
+        .returning({ id: schema.boxes.id });
+      await advanceBoxRegistryVersion(
+        tx,
+        tenantId,
+        changed.map((box) => box.id),
+      );
+    });
     const response = await request(app!.getHttpServer())
       .get("/kiosk/box-registry")
       .query({ since: initialUntil })

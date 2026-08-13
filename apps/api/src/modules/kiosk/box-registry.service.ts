@@ -1,5 +1,5 @@
-import { BadRequestException, Inject, Injectable } from "@nestjs/common";
-import { and, asc, count, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
+import { Inject, Injectable } from "@nestjs/common";
+import { and, asc, eq, gt, inArray, isNotNull, lte, or, sql } from "drizzle-orm";
 import { canonicalizeKm, isValidSscc, kmKey } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -13,15 +13,19 @@ import {
 } from "./box-registry.dto";
 
 export const MAX_BOX_REGISTRY_MEMBERS = 500;
+export const MAX_REGISTRY_PAGE_MEMBER_KEYS = 1000;
 
 export interface BoxRegistryCandidate {
   id: string;
+  shiftId: string;
+  terminalId: string | null;
   sscc: string | null;
   productId: string;
   productGtin14: string;
   closedAt: Date | null;
   closureReceivedAt: Date | null;
   disassembledAt: Date | null;
+  registryVersion: bigint;
   updatedAt: Date;
 }
 
@@ -31,6 +35,8 @@ export interface BoxRegistryMemberFact {
   addedAt: Date;
   displacedAt: Date | null;
   removedAt: Date | null;
+  registryShiftId: string | null;
+  registryTerminalId: string | null;
   registryScannedAt: Date | null;
   registryUpdatedAt: Date | null;
   canonicalRaw: string | null;
@@ -40,83 +46,142 @@ export interface BoxRegistryMemberFact {
 
 export type BoxRegistrySelectExecutor = Pick<Db, "select">;
 
+export async function loadBoxRegistryMembershipCounts(
+  executor: BoxRegistrySelectExecutor,
+  tenantId: string,
+  candidates: readonly BoxRegistryCandidate[],
+): Promise<Map<string, number>> {
+  if (candidates.length === 0) return new Map();
+  const rows = await executor
+    .select({
+      boxId: schema.boxItems.boxId,
+      total: sql<number>`least(count(*), ${MAX_BOX_REGISTRY_MEMBERS + 1})::int`,
+    })
+    .from(schema.boxItems)
+    .where(
+      and(
+        eq(schema.boxItems.tenantId, tenantId),
+        inArray(
+          schema.boxItems.boxId,
+          candidates.map((candidate) => candidate.id),
+        ),
+      ),
+    )
+    .groupBy(schema.boxItems.boxId);
+  return new Map(rows.map((row) => [row.boxId, row.total]));
+}
+
+export interface BoxRegistryCandidatePrefix {
+  candidates: BoxRegistryCandidate[];
+  memberKeyBudget: number;
+  hasMoreCandidates: boolean;
+}
+
+export function selectBoxRegistryCandidatePrefix(
+  candidates: readonly BoxRegistryCandidate[],
+  membershipCounts: ReadonlyMap<string, number>,
+  databaseHasMore: boolean,
+): BoxRegistryCandidatePrefix {
+  const selected: BoxRegistryCandidate[] = [];
+  let memberKeyBudget = 0;
+  for (const candidate of candidates) {
+    const count = membershipCounts.get(candidate.id) ?? 0;
+    const cost = count > MAX_BOX_REGISTRY_MEMBERS ? 0 : count;
+    if (selected.length > 0 && memberKeyBudget + cost > MAX_REGISTRY_PAGE_MEMBER_KEYS) break;
+    selected.push(candidate);
+    memberKeyBudget += cost;
+  }
+  // The first legal box costs at most 500, and oversized boxes cost zero, so
+  // every non-empty candidate page must make progress. Keep this assertion
+  // explicit: changing either bound later must not create a cursor stall.
+  if (candidates.length > 0 && selected.length === 0) selected.push(candidates[0]!);
+  return {
+    candidates: selected,
+    memberKeyBudget,
+    hasMoreCandidates: databaseHasMore || selected.length < candidates.length,
+  };
+}
+
 /**
- * Resolves bounded membership/current-owner/canonical-code facts in two
- * set-based queries. It is intentionally Nest-free and accepts a transaction
- * handle as well as the root DB so order admission can reuse exactly the same
- * evidence and eligibility evaluator.
+ * Resolves bounded membership/current-owner/canonical-code facts in one
+ * set-based detail query. Callers that already loaded counts for pagination
+ * pass them in, while Task 5 may omit them and pay one bounded count query.
  */
 export async function resolveBoxRegistryFacts(
   executor: BoxRegistrySelectExecutor,
   tenantId: string,
   candidates: readonly BoxRegistryCandidate[],
+  suppliedCounts?: ReadonlyMap<string, number>,
 ): Promise<Map<string, BoxRegistryMemberFact[]>> {
   const result = new Map<string, BoxRegistryMemberFact[]>();
   if (candidates.length === 0) return result;
-  const boxIds = candidates.map((candidate) => candidate.id);
-  const counts = await executor
-    .select({ boxId: schema.boxItems.boxId, total: count() })
-    .from(schema.boxItems)
-    .where(and(eq(schema.boxItems.tenantId, tenantId), inArray(schema.boxItems.boxId, boxIds)))
-    .groupBy(schema.boxItems.boxId);
-  const countByBox = new Map(counts.map((row) => [row.boxId, Number(row.total)]));
-  const boundedBoxIds = boxIds.filter(
-    (boxId) => (countByBox.get(boxId) ?? 0) <= MAX_BOX_REGISTRY_MEMBERS,
-  );
-
-  for (const boxId of boxIds) result.set(boxId, []);
-  if (boundedBoxIds.length === 0) return result;
-
-  const rows = await executor
-    .select({
-      boxId: schema.boxItems.boxId,
-      codeHash: schema.boxItems.codeHash,
-      addedAt: schema.boxItems.addedAt,
-      displacedAt: schema.boxItems.displacedAt,
-      removedAt: schema.boxItems.removedAt,
-      registryScannedAt: schema.codeRegistry.scannedAt,
-      registryUpdatedAt: schema.codeRegistry.updatedAt,
-      canonicalRaw: schema.codes.canonicalRaw,
-      canonicalGtin14: schema.codes.gtin14,
-    })
-    .from(schema.boxItems)
-    .leftJoin(
-      schema.codeRegistry,
-      and(
-        eq(schema.codeRegistry.tenantId, schema.boxItems.tenantId),
-        eq(schema.codeRegistry.codeHash, schema.boxItems.codeHash),
-      ),
-    )
-    .leftJoin(
-      schema.codes,
-      and(
-        eq(schema.codes.tenantId, schema.boxItems.tenantId),
-        eq(schema.codes.codeHash, schema.boxItems.codeHash),
-        eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
-      ),
-    )
-    .where(
-      and(eq(schema.boxItems.tenantId, tenantId), inArray(schema.boxItems.boxId, boundedBoxIds)),
-    )
-    .orderBy(asc(schema.boxItems.boxId), asc(schema.boxItems.codeHash));
-
-  for (const row of rows) {
-    result.get(row.boxId)!.push({
-      ...row,
-      totalMembershipCount: countByBox.get(row.boxId) ?? 0,
+  const counts =
+    suppliedCounts ?? (await loadBoxRegistryMembershipCounts(executor, tenantId, candidates));
+  const boundedBoxIds = candidates
+    .map((candidate) => candidate.id)
+    .filter((boxId) => {
+      const total = counts.get(boxId) ?? 0;
+      return total > 0 && total <= MAX_BOX_REGISTRY_MEMBERS;
     });
+  for (const candidate of candidates) result.set(candidate.id, []);
+
+  if (boundedBoxIds.length > 0) {
+    const rows = await executor
+      .select({
+        boxId: schema.boxItems.boxId,
+        codeHash: schema.boxItems.codeHash,
+        addedAt: schema.boxItems.addedAt,
+        displacedAt: schema.boxItems.displacedAt,
+        removedAt: schema.boxItems.removedAt,
+        registryShiftId: schema.codeRegistry.shiftId,
+        registryTerminalId: schema.codeRegistry.terminalId,
+        registryScannedAt: schema.codeRegistry.scannedAt,
+        registryUpdatedAt: schema.codeRegistry.updatedAt,
+        canonicalRaw: schema.codes.canonicalRaw,
+        canonicalGtin14: schema.codes.gtin14,
+      })
+      .from(schema.boxItems)
+      .leftJoin(
+        schema.codeRegistry,
+        and(
+          eq(schema.codeRegistry.tenantId, schema.boxItems.tenantId),
+          eq(schema.codeRegistry.codeHash, schema.boxItems.codeHash),
+        ),
+      )
+      .leftJoin(
+        schema.codes,
+        and(
+          eq(schema.codes.tenantId, schema.boxItems.tenantId),
+          eq(schema.codes.codeHash, schema.boxItems.codeHash),
+          eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
+        ),
+      )
+      .where(
+        and(eq(schema.boxItems.tenantId, tenantId), inArray(schema.boxItems.boxId, boundedBoxIds)),
+      )
+      .orderBy(asc(schema.boxItems.boxId), asc(schema.boxItems.codeHash));
+
+    for (const row of rows) {
+      result.get(row.boxId)!.push({
+        ...row,
+        totalMembershipCount: counts.get(row.boxId) ?? 0,
+      });
+    }
   }
+
   // Preserve the oversized signal without reading any member payloads.
-  for (const boxId of boxIds) {
-    const total = countByBox.get(boxId) ?? 0;
+  for (const candidate of candidates) {
+    const total = counts.get(candidate.id) ?? 0;
     if (total > MAX_BOX_REGISTRY_MEMBERS) {
-      result.set(boxId, [
+      result.set(candidate.id, [
         {
-          boxId,
+          boxId: candidate.id,
           codeHash: "",
           addedAt: new Date(0),
           displacedAt: null,
           removedAt: null,
+          registryShiftId: null,
+          registryTerminalId: null,
           registryScannedAt: null,
           registryUpdatedAt: null,
           canonicalRaw: null,
@@ -183,6 +248,8 @@ export function evaluateBoxRegistryCandidate(
   for (const fact of activeFacts) {
     if (
       seenHashes.has(fact.codeHash) ||
+      fact.registryShiftId !== candidate.shiftId ||
+      fact.registryTerminalId !== candidate.terminalId ||
       fact.registryScannedAt === null ||
       fact.registryUpdatedAt === null ||
       fact.registryScannedAt.getTime() !== fact.addedAt.getTime() ||
@@ -218,6 +285,15 @@ export function evaluateBoxRegistryCandidate(
   };
 }
 
+export function isRegistryRevisionInWindow(
+  registryVersion: string,
+  since: string | null,
+  until: string,
+): boolean {
+  const revision = BigInt(registryVersion);
+  return revision <= BigInt(until) && (since === null || revision > BigInt(since));
+}
+
 export function shapeBoxRegistryPage(
   candidates: readonly BoxRegistryCandidate[],
   factsByBox: ReadonlyMap<string, readonly BoxRegistryMemberFact[]>,
@@ -234,10 +310,10 @@ export function shapeBoxRegistryPage(
   const nextCursor =
     hasMoreCandidates && last
       ? encodeBoxRegistryCursor({
-          v: 1,
+          v: 2,
           since: window.since,
           until: window.until,
-          updatedAt: last.updatedAt.toISOString(),
+          registryVersion: last.registryVersion.toString(),
           id: last.id,
         })
       : undefined;
@@ -249,34 +325,40 @@ export class BoxRegistryService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async list(tenantId: string, query: BoxRegistryQueryDto): Promise<KioskBoxRegistryPage> {
-    const nowResult = await this.db.execute<{ serverNow: Date }>(
-      sql`select clock_timestamp() as "serverNow"`,
-    );
-    const serverNow = nowResult.rows[0]?.serverNow;
-    if (!(serverNow instanceof Date)) throw new BadRequestException("Server clock unavailable");
-    const window = resolveBoxRegistryWindow(query, serverNow.toISOString());
-    const since = window.since === null ? null : new Date(window.since);
-    const until = new Date(window.until);
-    const afterUpdatedAt = window.afterUpdatedAt === null ? null : new Date(window.afterUpdatedAt);
+    const [versionRow] = await this.db
+      .select({ currentVersion: schema.boxRegistryVersions.currentVersion })
+      .from(schema.boxRegistryVersions)
+      .where(eq(schema.boxRegistryVersions.tenantId, tenantId));
+    const window = resolveBoxRegistryWindow(query, (versionRow?.currentVersion ?? 0n).toString());
+    const since = window.since === null ? null : BigInt(window.since);
+    const until = BigInt(window.until);
+    const afterRegistryVersion =
+      window.afterRegistryVersion === null ? null : BigInt(window.afterRegistryVersion);
     const lowerBound =
-      afterUpdatedAt !== null && window.afterId !== null
+      afterRegistryVersion !== null && window.afterId !== null
         ? or(
-            gt(schema.boxes.updatedAt, afterUpdatedAt),
-            and(eq(schema.boxes.updatedAt, afterUpdatedAt), gt(schema.boxes.id, window.afterId)),
+            gt(schema.boxes.registryVersion, afterRegistryVersion),
+            and(
+              eq(schema.boxes.registryVersion, afterRegistryVersion),
+              gt(schema.boxes.id, window.afterId),
+            ),
           )
         : since === null
           ? undefined
-          : gt(schema.boxes.updatedAt, since);
+          : gt(schema.boxes.registryVersion, since);
 
     const rows = await this.db
       .select({
         id: schema.boxes.id,
+        shiftId: schema.boxes.shiftId,
+        terminalId: schema.boxes.terminalId,
         sscc: schema.boxes.sscc,
         productId: schema.shifts.productId,
         productGtin14: schema.products.gtin14,
         closedAt: schema.boxes.closedAt,
         closureReceivedAt: schema.boxes.closureReceivedAt,
         disassembledAt: schema.boxes.disassembledAt,
+        registryVersion: schema.boxes.registryVersion,
         updatedAt: schema.boxes.updatedAt,
       })
       .from(schema.boxes)
@@ -298,15 +380,21 @@ export class BoxRegistryService {
         and(
           eq(schema.boxes.tenantId, tenantId),
           isNotNull(schema.boxes.sscc),
-          lte(schema.boxes.updatedAt, until),
+          lte(schema.boxes.registryVersion, until),
           lowerBound,
         ),
       )
-      .orderBy(asc(schema.boxes.updatedAt), asc(schema.boxes.id))
+      .orderBy(asc(schema.boxes.registryVersion), asc(schema.boxes.id))
       .limit(window.limit + 1);
-    const hasMoreCandidates = rows.length > window.limit;
-    const candidates = rows.slice(0, window.limit);
-    const facts = await resolveBoxRegistryFacts(this.db, tenantId, candidates);
-    return shapeBoxRegistryPage(candidates, facts, window, hasMoreCandidates);
+
+    const candidateWindow = rows.slice(0, window.limit);
+    const counts = await loadBoxRegistryMembershipCounts(this.db, tenantId, candidateWindow);
+    const prefix = selectBoxRegistryCandidatePrefix(
+      candidateWindow,
+      counts,
+      rows.length > window.limit,
+    );
+    const facts = await resolveBoxRegistryFacts(this.db, tenantId, prefix.candidates, counts);
+    return shapeBoxRegistryPage(prefix.candidates, facts, window, prefix.hasMoreCandidates);
   }
 }

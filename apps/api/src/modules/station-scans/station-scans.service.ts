@@ -13,6 +13,7 @@ import {
 import type { MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
+import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import type {
   BatchConflictDto,
   DeniedStationRecordDto,
@@ -126,10 +127,6 @@ function canonicalJson(value: unknown): string {
 
 function payloadDigest(body: SyncBatchDto): string {
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
-}
-
-function nextBoxRegistryVersion() {
-  return sql`GREATEST(clock_timestamp(), ${schema.boxes.updatedAt} + interval '1 millisecond')`;
 }
 
 @Injectable()
@@ -1103,7 +1100,7 @@ export class StationScansService {
           // into the rowCount === 0 no-op branch below, which is a correct
           // no-op for that case (box stays closed with the same values it
           // already carries).
-          const result = await tx
+          const changedBoxes = await tx
             .update(schema.boxes)
             .set({
               sscc: closure.sscc,
@@ -1114,7 +1111,6 @@ export class StationScansService {
               // `contentsChangedAfterClose` must compare against this, never
               // the client-supplied `closedAt` above.
               closureReceivedAt: sql`now()`,
-              updatedAt: nextBoxRegistryVersion(),
             })
             .where(
               and(
@@ -1124,8 +1120,14 @@ export class StationScansService {
                 eq(schema.boxes.deviceBoxId, closure.boxId),
                 isNull(schema.boxes.closedAt),
               ),
-            );
-          const rowCount = result.rowCount ?? 0;
+            )
+            .returning({ id: schema.boxes.id });
+          const rowCount = changedBoxes.length;
+          await this.advanceBoxRegistryVersions(
+            tx,
+            tenantId,
+            changedBoxes.map((box) => box.id),
+          );
 
           // `boxes_device_box_uq` (platform.ts) uniquely identifies a box by
           // exactly these four columns, so matching more than one row is a
@@ -1608,16 +1610,11 @@ export class StationScansService {
   }
 
   private async advanceBoxRegistryVersions(
-    tx: Pick<Db, "update">,
+    tx: Pick<Db, "insert" | "update">,
     tenantId: string,
     boxIds: Iterable<string>,
   ): Promise<void> {
-    const changedBoxIds = [...new Set(boxIds)].sort();
-    if (changedBoxIds.length === 0) return;
-    await tx
-      .update(schema.boxes)
-      .set({ updatedAt: nextBoxRegistryVersion() })
-      .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, changedBoxIds)));
+    await advanceBoxRegistryVersion(tx, tenantId, boxIds);
   }
 
   /**

@@ -1,0 +1,76 @@
+# Kiosk SSCC orders SDD ledger
+
+Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-sscc-orders.md`, spec `docs/superpowers/specs/2026-08-13-kiosk-self-service-redesign-design.md`, base `ac7c4590dfd373c560d5cb3a1ffb13fd32d747d5`.
+
+## Preflight
+
+| Task | Status | Dependencies and overlap | Preflight ruling |
+| --- | --- | --- | --- |
+| 1. Domain SSCC normalization | completed | Feeds kiosk classification in Task 6 | Parse one bounded wrapper stack; classifier trims once and delegates; GS/oversize/check-digit failures remain unknown. |
+| 2. DB registry versioning and provenance | completed | Shares `boxes.updatedAt` with Task 3; schema consumed by Tasks 4-5 | Migration follows existing journal as `0037`; assert named composite tenant FKs and cross-tenant denial, not total FK counts. Preserve order snapshots independently of later production-box exceptions. |
+| 3. Stamp every box mutation | completed | Must finish before Task 4 delta semantics | Cover every production mutation found in station scans and box exceptions, including insert/displace/remove/close/disassemble. Advance in the same transaction as the eligibility change. |
+| 4. Compact device registry | in progress | Reads Task 2 cursor and Task 3 timestamps; shares eligibility rules with Task 5 | One tenant-wide eligibility predicate for closed, active, unchanged, non-empty, one-product boxes. Cursor binds `(since, until, updatedAt, id)` so bounds cannot change between pages. |
+| 5. Atomic box order admission | pending | Uses Tasks 2 and 4; DTO/error contract consumed by Task 6 | Resolve boxes, expand member KMs, apply bottle limits, persist provenance and consume admission inside the existing employee/day advisory-locked transaction. Do not accept client product, quantity, price or KM membership. Preserve legacy item-only proof hashing. |
+| 6. Offline kiosk registry and queue | pending | Uses Tasks 1, 4, 5 | Activate staged registry only after a complete download; keep old snapshot on failure. Queue canonical SSCC only; validate and minimize durable conflict details; preserve legacy queued `badgeCode`. |
+| 7. Slice gates and review | pending | All tasks | Verify migration path, cross-tenant denial, old-client compatibility, offline refresh failure, all-or-none conflicts and package gates before whole-plan review. |
+
+## Cross-task interfaces
+
+| Producer | Consumer | Shared contract | Verification |
+| --- | --- | --- | --- |
+| Task 1 | Task 6 | Canonical 18-digit SSCC from approved scanner wrappers | Domain table tests plus kiosk scan/cart tests |
+| Task 2 | Task 3 | `boxes.updatedAt` is the registry change clock | Schema/migration tests plus mutation advancement e2e |
+| Task 3 | Task 4 | Every eligibility-changing mutation advances `(updatedAt, id)` | Delta add/remove/update tests around all mutation classes |
+| Task 4 | Task 5 | Registry and order admission use the same tenant-scoped eligibility definition | Shared resolver/query helper tests and stale-registry rejection |
+| Task 2 | Task 5 | Order-box snapshot and expanded item provenance | Composite FK/cross-tenant tests and order insertion e2e |
+| Task 5 | Task 6 | Canonical `boxes: string[]`, all-or-none conflict details, admission proof | API contract tests and durable kiosk queue tests |
+
+## Decisions
+
+1. SSCC box admission remains inside the existing employee/day advisory-lock transaction introduced by the policy plan. Cost if wrong: longer lock hold time for box orders; benefit is no cross-kiosk limit race and one atomic decision.
+2. Old item-only admission proofs retain their historical canonical body. `boxes` participates only when the new field is present, so previously attested offline requests remain replayable. Cost if wrong: two canonicalization branches during the compatibility horizon.
+3. The registry delta cursor binds the fixed lower and upper snapshot bounds, not only the last row. Cost if wrong: larger opaque cursor; benefit is no page-splicing or moving-window gaps.
+4. `pickup_order_items` binds `(tenant_id, order_id, order_box_id)` to the box line, not only `(tenant_id, order_box_id)`, so provenance cannot cross orders inside one tenant. Cost if wrong: one additional column in the supporting unique/FK definition; benefit is a database-enforced same-order invariant.
+5. Existing boxes receive one migration-time `updated_at` via PostgreSQL's fast non-volatile default rather than a historical `COALESCE` full-table rewrite. Cost if wrong: the initial cursor cannot reconstruct pre-migration chronology; benefit is a bounded metadata-only deployment and a full initial registry remains correct because every historical box is visible at the migration version.
+6. Mutation stamps use `GREATEST(clock_timestamp(), updated_at + interval '1 millisecond')`, not transaction `now()`, so several eligibility changes in one transaction or millisecond remain strictly observable through a JavaScript millisecond cursor. Cost if wrong: timestamps may lead wall clock by a few milliseconds under a burst; benefit is monotonic, testable delta ordering.
+7. `unchanged after close` is proven from server-time evidence: active owners' `code_registry.updated_at` must be no later than `closure_received_at`, and no membership may have `removed_at` or `displaced_at` after closure. Cost if wrong: a delayed pre-close device scan delivered after closure is removed from the registry, intentionally favoring physical-box integrity over device event time.
+8. Registry cursors are versioned base64url objects binding mode/lower tenant revision/upper tenant revision plus last `(boxRegistryVersion,id)`; follow-up query parameters must match the bound snapshot. Cost if wrong: a new tenant revision row and stricter client contract; benefit is an actual commit-atomic cut with no MVCC time-watermark gaps or page splicing.
+9. One registry page may resolve at most 1,000 member keys across a deterministic candidate prefix; oversized/ineligible candidates cost zero member payload and at least one candidate always advances. Cost if wrong: more HTTP pages for tenants with many large boxes; benefit is a worst-case raw-key allocation near 1 MB rather than hundreds of MB.
+
+## Task log
+
+### Task 1
+
+- Base: `ac7c4590dfd373c560d5cb3a1ffb13fd32d747d5`
+- Implementer: `sscc_domain_impl`, commit `1e39b3fa566965f2622dfa0ecd54e856b4e67245`
+- RED: 7 expected failures, 38 passes.
+- GREEN: focused 45/45; full domain 207/207; typecheck/lint/build/diff-check passed.
+- Task review: APPROVED by `sscc_domain_review`; no Critical, Important, or Minor findings; scoped 45/45 and diff-check passed.
+
+### Task 2
+
+- Base: `1e39b3fa566965f2622dfa0ecd54e856b4e67245`
+- Implementer: `sscc_db_impl`, initial commit `5e5c4b1abe1f8199bcd569ab7453949a74cb09d5`
+- RED: 4 expected failures, 20 passes, 14 DB skips.
+- Initial GREEN: focused 24/24 non-DB with 14 DB skips; full DB 68 passes/51 DB skips; typecheck/lint/build/format/diff-check passed; repeat generate found no drift.
+- Task review: CHANGES REQUESTED by `sscc_db_review`: Important full-table backfill under migration transaction lock; Important missing `(tenant_id, updated_at, id)` cursor index.
+- Fix round 1: commit `bbc3e373f06a13679bc4aec34a35dfbe0ead0398`; RED 2 expected failures; final focused 25 passes/14 DB skips, full DB 69 passes/51 DB skips; typecheck/lint/build/format/diff-check and regeneration drift probe passed.
+- Re-review: APPROVED; both prior Important findings ADDRESSED, no new Critical/Important. Residual maintenance-window note for ordinary index build recorded for production-like migration timing.
+
+### Task 3
+
+- Base: `bbc3e373f06a13679bc4aec34a35dfbe0ead0398`
+- Implementer: `sscc_mutation_impl`, commit `b444df3a`.
+- RED: real service closure path, 1 expected failure / 4 passes.
+- GREEN: unit 5/5; DB e2e 72 explicitly skipped without a migrated schema; typecheck/lint/build/Prettier/diff-check passed.
+- Full API evidence: 1173 passes, 83 failures, 19 skips; shared dev DB journal stops at 0036 and lacks both 0037 columns, so PostgreSQL e2e is NOT green and the schema-drift failures are recorded as infrastructure coverage gap.
+- Task review: APPROVED by `sscc_mutation_review`; no Critical/Important/Minor findings; reviewer unit 5/5 and typecheck passed.
+
+### Task 4
+
+- Base: `b444df3a`
+- Implementer: `sscc_registry_impl`, initial commit `3d6da35d`.
+- RED: 1 failed suite / 0 tests collected on missing production registry module.
+- Initial GREEN: unit/guard 24/24, route inventory 2/2, typecheck/lint/Prettier/build/diff-check passed; DB e2e NOT GREEN because shared DB lacks 0037.
+- Task review: CHANGES REQUESTED by `sscc_registry_review`: Important timestamp watermark is not an MVCC snapshot cut; Important ~250 MB aggregate allocation ceiling; Important incomplete owner tuple; Minor missing explicit OpenAPI contract.
+- Fix round 1: committed tenant `bigint` revision protocol, 1,000-key aggregate page budget, full `(shiftId, terminalId, scannedAt)` owner identity, and exact OpenAPI contract implemented. RED: API 10 failed/27 passed; DB 4 failed/19 passed/2 skipped. GREEN: registry/OpenAPI/mutation unit 37/37, route inventory 2/2, DB full 70 passed/51 skipped, typecheck/lint/build/format/diff and regeneration parity passed. Shared DB registry e2e remains explicitly NOT GREEN because 0037 is unapplied (1 failed suite/5 skipped). Commit: `fix(api): stabilize kiosk box registry snapshots`.

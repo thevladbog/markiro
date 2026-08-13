@@ -46,18 +46,25 @@ const entitlementsServiceStub = {
 describe("StationScansService box registry versioning", () => {
   it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
     const boxUpdates: Array<Record<string, unknown>> = [];
+    const insertedTables: unknown[] = [];
     const shiftId = "11111111-1111-1111-1111-111111111111";
     const terminalId = "22222222-2222-2222-2222-222222222222";
     const dbStub = {
       transaction: async (run: (tx: unknown) => Promise<unknown>) => {
         const tx = {
-          insert: () => ({
-            values: () => ({
-              onConflictDoNothing: () => ({
-                returning: () => Promise.resolve([{ batchId: "box-close-1" }]),
+          insert: (table: unknown) => {
+            insertedTables.push(table);
+            return {
+              values: () => ({
+                onConflictDoNothing: () => ({
+                  returning: () => Promise.resolve([{ batchId: "box-close-1" }]),
+                }),
+                onConflictDoUpdate: () => ({
+                  returning: () => Promise.resolve([{ currentVersion: 1n }]),
+                }),
               }),
-            }),
-          }),
+            };
+          },
           select: () => ({
             from: () => ({
               where: () => ({
@@ -71,7 +78,14 @@ describe("StationScansService box registry versioning", () => {
           update: (table: unknown) => ({
             set: (values: Record<string, unknown>) => {
               if (table === schema.boxes) boxUpdates.push(values);
-              return { where: () => Promise.resolve({ rowCount: 1 }) };
+              return {
+                where: () => {
+                  const result = Promise.resolve({ rowCount: 1 });
+                  return Object.assign(result, {
+                    returning: () => Promise.resolve([{ id: "box-1" }]),
+                  });
+                },
+              };
             },
           }),
         };
@@ -105,8 +119,11 @@ describe("StationScansService box registry versioning", () => {
       terminalId,
     );
 
-    expect(boxUpdates).toHaveLength(1);
-    const updatedAt = boxUpdates[0]?.updatedAt;
+    expect(insertedTables).toContain(schema.boxRegistryVersions);
+    expect(boxUpdates).toHaveLength(2);
+    expect(boxUpdates[0]).not.toHaveProperty("registryVersion");
+    expect(boxUpdates[1]?.registryVersion).toBe(1n);
+    const updatedAt = boxUpdates[1]?.updatedAt;
     expect(updatedAt).toBeInstanceOf(SQL);
     const query = new PgDialect().sqlToQuery(updatedAt as SQL).sql;
     expect(query).toMatch(
