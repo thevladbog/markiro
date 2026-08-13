@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Query,
@@ -112,7 +113,7 @@ export class EmployeesController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updatePickupPolicy(
     @Req() req: RequestWithTenant,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(employeePickupPolicySchema)) body: UpdateEmployeePickupPolicyDto,
   ): Promise<EmployeeDto> {
     return this.employeesService.updatePickupPolicy(req.tenantId!, req.userId!, id, body);

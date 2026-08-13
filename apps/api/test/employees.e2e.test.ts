@@ -398,6 +398,54 @@ describe.skipIf(!ready)("employees e2e", () => {
       .expect(400);
   });
 
+  it("canonicalizes uppercase bulk employee ids while preserving request order", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+    const first = await owner.post("/employees").send({ fullName: "Первый UUID" }).expect(201);
+    const second = await owner.post("/employees").send({ fullName: "Второй UUID" }).expect(201);
+
+    const result = await owner
+      .patch("/employees/pickup-policy/limits")
+      .send({
+        employeeIds: [
+          (second.body.id as string).toUpperCase(),
+          (first.body.id as string).toUpperCase(),
+        ],
+        limitMode: "unlimited",
+        dayLimit: 13,
+      })
+      .expect(200);
+
+    expect(result.body.items.map((item: { employeeId: string }) => item.employeeId)).toEqual([
+      second.body.id,
+      first.body.id,
+    ]);
+  });
+
+  it("rejects mixed-case aliases of one employee in a bulk assignment", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+    const employee = await owner.post("/employees").send({ fullName: "Дубликат UUID" }).expect(201);
+
+    await owner
+      .patch("/employees/pickup-policy/writeoff-permission")
+      .send({
+        employeeIds: [employee.body.id, (employee.body.id as string).toUpperCase()],
+        canWriteoff: true,
+      })
+      .expect(400);
+  });
+
+  it("rejects a malformed employee pickup policy path UUID", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+
+    await owner
+      .patch("/employees/not-a-uuid/pickup-policy")
+      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: false })
+      .expect(400);
+  });
+
   it("fails a bulk assignment atomically when any employee belongs to another tenant", async () => {
     const owner = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(owner);

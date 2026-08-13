@@ -26,7 +26,12 @@ export const employeePickupPolicySchema = z.object({
 export type UpdateEmployeePickupPolicyDto = z.infer<typeof employeePickupPolicySchema>;
 
 const bulkEmployeeIdsSchema = z
-  .array(z.string().uuid())
+  .array(
+    z
+      .string()
+      .uuid()
+      .transform((employeeId) => employeeId.toLowerCase()),
+  )
   .min(1)
   .max(500)
   .refine((ids) => new Set(ids).size === ids.length, "employeeIds must be unique");
