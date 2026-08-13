@@ -208,6 +208,92 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
     expect(image).toMatchObject({ tenantId: orgA.id, productId: productA!.id, assetId: assetA!.id });
   });
 
+  it("rejects a second asset binding for the same tenant product", async () => {
+    const [productA] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: "04012345678908", name: "Cardinality product" })
+      .returning();
+    productIds.push(productA!.id);
+    productImageProductIds.push(productA!.id);
+
+    const [firstAsset, secondAsset] = await db
+      .insert(mediaAssets)
+      .values([
+        {
+          ownerTenantId: orgA.id,
+          objectKey: `products/${randomUUID()}.png`,
+          contentType: "image/png",
+          byteSize: 1,
+          checksum: "c".repeat(64),
+        },
+        {
+          ownerTenantId: orgA.id,
+          objectKey: `products/${randomUUID()}.png`,
+          contentType: "image/png",
+          byteSize: 1,
+          checksum: "d".repeat(64),
+        },
+      ])
+      .returning();
+    mediaAssetIds.push(firstAsset!.id, secondAsset!.id);
+
+    await db.insert(productImages).values({
+      tenantId: orgA.id,
+      productId: productA!.id,
+      assetId: firstAsset!.id,
+    });
+
+    await expect(
+      db.insert(productImages).values({
+        tenantId: orgA.id,
+        productId: productA!.id,
+        assetId: secondAsset!.id,
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: UNIQUE_VIOLATION, constraint: "product_images_tenant_id_product_id_pk" },
+    });
+  });
+
+  it("rejects binding the same asset to a second product", async () => {
+    const [firstProduct, secondProduct] = await db
+      .insert(products)
+      .values([
+        { tenantId: orgA.id, gtin14: "04012345678909", name: "First asset product" },
+        { tenantId: orgA.id, gtin14: "04012345678910", name: "Second asset product" },
+      ])
+      .returning();
+    productIds.push(firstProduct!.id, secondProduct!.id);
+    productImageProductIds.push(firstProduct!.id, secondProduct!.id);
+
+    const [asset] = await db
+      .insert(mediaAssets)
+      .values({
+        ownerTenantId: orgA.id,
+        objectKey: `products/${randomUUID()}.png`,
+        contentType: "image/png",
+        byteSize: 1,
+        checksum: "e".repeat(64),
+      })
+      .returning();
+    mediaAssetIds.push(asset!.id);
+
+    await db.insert(productImages).values({
+      tenantId: orgA.id,
+      productId: firstProduct!.id,
+      assetId: asset!.id,
+    });
+
+    await expect(
+      db.insert(productImages).values({
+        tenantId: orgA.id,
+        productId: secondProduct!.id,
+        assetId: asset!.id,
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: UNIQUE_VIOLATION, constraint: "product_images_asset_id_uq" },
+    });
+  });
+
   it("allows a station without an API key to reference a line in its own tenant", async () => {
     const [line] = await db.insert(lines).values({ tenantId: orgA.id, name: "Line A" }).returning();
     lineIds.push(line!.id);

@@ -76,7 +76,16 @@ describe("mail and media schema", () => {
 
   it("assigns each product one tenant-owned media asset", () => {
     expect(getTableName(schema.productImages)).toBe("product_images");
-    expect(getTableConfig(schema.productImages).foreignKeys.map((one) => one.getName())).toEqual(
+    const productImagesConfig = getTableConfig(schema.productImages);
+    expect(
+      productImagesConfig.primaryKeys.map((one) => one.columns.map((column) => column.name)),
+    ).toContainEqual(["tenant_id", "product_id"]);
+    expect(
+      productImagesConfig.uniqueConstraints
+        .find((one) => one.getName() === "product_images_asset_id_uq")
+        ?.columns.map((column) => column.name),
+    ).toEqual(["asset_id"]);
+    expect(productImagesConfig.foreignKeys.map((one) => one.getName())).toEqual(
       expect.arrayContaining(["product_images_tenant_product_fk", "product_images_tenant_asset_fk"]),
     );
 
