@@ -246,6 +246,13 @@
       "when": 1786481010105,
       "tag": "0034_overconfident_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786635948093,
+      "tag": "0035_whole_firebird",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,6 @@
 import { getTableName } from "drizzle-orm";
 import { getTableConfig, type AnyPgTable } from "drizzle-orm/pg-core";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { schema } from "../src/index.js";
 
@@ -24,6 +25,26 @@ function uniqueColumns(table: AnyPgTable, name: string) {
 }
 
 describe("shift export persistence schema", () => {
+  it("generates the queue and integrity checks into the runtime migration", () => {
+    const migration = readFileSync(
+      new URL("../migrations/0035_whole_firebird.sql", import.meta.url),
+      "utf8",
+    );
+
+    expect(migration).toContain(
+      'CREATE INDEX "shift_exports_queued_created_idx" ON "shift_exports" USING btree ("created_at") WHERE "shift_exports"."status" = \'queued\';',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "shift_exports_max_lines_range" CHECK ("shift_exports"."max_lines" is null or "shift_exports"."max_lines" between 2 and 1000000)',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "shift_export_artifacts_sha256_check" CHECK ("shift_export_artifacts"."sha256" ~ \'^[0-9a-f]{64}$\')',
+    );
+    expect(migration).toContain(
+      'CONSTRAINT "shift_exports_status_consistency" CHECK (("shift_exports"."status" = \'ready\' and "shift_exports"."completed_at" is not null and "shift_exports"."error_code" is null)',
+    );
+  });
+
   it("persists a tenant-scoped export request with its queue state", () => {
     const exports = table("shiftExports");
     const config = getTableConfig(exports);
