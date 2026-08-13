@@ -103,6 +103,14 @@ describe("fixed station viewport source contract", () => {
     expect(css).toMatch(
       /\.work-box-fill__actions\s*\{(?![^}]*background:)[^}]*min-height:\s*64px;/s,
     );
+    expect(css).toMatch(
+      /\.work-box-fill\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) minmax\(64px, auto\);/s,
+    );
+    expect(css).toMatch(
+      /\.work-box-fill\[data-grouped="true"\]\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto minmax\(64px, auto\);/s,
+    );
+    expect(css).toMatch(/\.work-box-fill__grid\s*\{[^}]*height:\s*100%;/s);
+    expect(css).toMatch(/\.work-box-fill__cell\s*\{[^}]*height:\s*100%;/s);
   });
 
   it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {

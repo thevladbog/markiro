@@ -87,6 +87,7 @@ describe("work instruments", () => {
       <BoxFillInstrument
         box={null}
         ordinal={null}
+        acceptedToken={null}
         capacity={null}
         canUndo={false}
         labels={boxLabels}
@@ -100,6 +101,7 @@ describe("work instruments", () => {
       <BoxFillInstrument
         box={{ boxId: "b1", itemCount: 12 }}
         ordinal={1}
+        acceptedToken={null}
         capacity={0}
         canUndo={false}
         labels={boxLabels}
@@ -113,6 +115,7 @@ describe("work instruments", () => {
       <BoxFillInstrument
         box={{ boxId: "b1", itemCount: 12 }}
         ordinal={1}
+        acceptedToken={null}
         capacity={10}
         canUndo
         labels={boxLabels}
@@ -147,6 +150,7 @@ describe("work instruments", () => {
       <BoxFillInstrument
         box={{ boxId: "b1", itemCount: 2 }}
         ordinal={1}
+        acceptedToken="scan-2"
         capacity={20}
         canUndo={false}
         labels={boxLabels}
@@ -163,6 +167,60 @@ describe("work instruments", () => {
     expect(container.querySelector('.work-box-fill__cell[data-state="next"]')).not.toBeNull();
     expect(container.querySelector('.work-box-fill__cell[data-latest="true"]')).not.toBeNull();
     expect(container.querySelector(".work-box-fill__track")).toBeNull();
+  });
+
+  it.each([
+    { capacity: 20, rows: 2, grouped: "false" },
+    { capacity: 100, rows: 10, grouped: "false" },
+    { capacity: 101, rows: 6, grouped: "true" },
+  ])("bounds a $capacity-place grid to $rows explicit rows", ({ capacity, rows, grouped }) => {
+    const { container } = render(
+      <BoxFillInstrument
+        box={{ boxId: "b1", itemCount: 0 }}
+        ordinal={1}
+        acceptedToken={null}
+        capacity={capacity}
+        canUndo={false}
+        labels={boxLabels}
+        onClose={vi.fn()}
+        onUndo={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+
+    const section = container.querySelector(".work-box-fill");
+    const grid = container.querySelector<HTMLElement>(".work-box-fill__grid");
+    expect(section?.getAttribute("data-grouped")).toBe(grouped);
+    expect(grid?.style.gridTemplateRows).toBe(`repeat(${rows}, minmax(0, 1fr))`);
+  });
+
+  it("restarts the grouped-cell animation for consecutive accepts but not on remount", () => {
+    const props = {
+      ordinal: 1,
+      capacity: 101,
+      canUndo: false,
+      labels: boxLabels,
+      onClose: vi.fn(),
+      onUndo: vi.fn(),
+      onClear: vi.fn(),
+    };
+    const { container, rerender } = render(
+      <BoxFillInstrument {...props} box={{ boxId: "b1", itemCount: 1 }} acceptedToken={null} />,
+    );
+    expect(container.querySelector('[data-latest="true"]')).toBeNull();
+
+    rerender(
+      <BoxFillInstrument {...props} box={{ boxId: "b1", itemCount: 1 }} acceptedToken="scan-1" />,
+    );
+    const firstAnimationCell = container.querySelector('[data-latest="true"]');
+    expect(firstAnimationCell?.getAttribute("aria-label")).toBe("1–2");
+
+    rerender(
+      <BoxFillInstrument {...props} box={{ boxId: "b1", itemCount: 2 }} acceptedToken="scan-2" />,
+    );
+    const secondAnimationCell = container.querySelector('[data-latest="true"]');
+    expect(secondAnimationCell?.getAttribute("aria-label")).toBe("1–2");
+    expect(secondAnimationCell).not.toBe(firstAnimationCell);
   });
 
   it("shows large counters and explicit synchronized or pending state", () => {

@@ -445,7 +445,7 @@ export function WorkScreen({
       .then(async (existing: DeviceBox | null) => {
         if (cancelled) return;
         if (existing) {
-          const ordinal = await boxOrdinal(exec, shiftId, terminalId, existing.boxId);
+          const ordinal = await boxOrdinal(exec, shiftId, existing.terminalId, existing.boxId);
           if (cancelled) return;
           setBoxNumber(ordinal);
           updateBox({ boxId: existing.boxId, itemCount: existing.itemCount });
@@ -1102,6 +1102,11 @@ export function WorkScreen({
                 <BoxFillInstrument
                   box={box}
                   ordinal={boxNumber}
+                  acceptedToken={
+                    lastScanned !== null && lastScanned.boxId === box?.boxId
+                      ? `${lastScanned.codeHash}:${lastScanned.scannedAt}`
+                      : null
+                  }
                   capacity={boxCapacity}
                   canUndo={lastScanned?.boxId === box?.boxId}
                   closeDisabled={closing}

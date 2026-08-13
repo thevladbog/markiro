@@ -1207,6 +1207,37 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(await screen.findByRole("heading", { name: "Короб № 2" })).toBeDefined();
   });
 
+  it.each([
+    { persistedTerminalId: "old-terminal", label: "re-enrolled" },
+    { persistedTerminalId: null, label: "nullable legacy" },
+  ])(
+    "uses the $label box's persisted terminal identity instead of rendering ordinal zero",
+    async ({ persistedTerminalId }) => {
+      const exec = makeExec();
+      await exec.run(
+        `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at, closed_at)
+         VALUES (?,?,?,?,?)`,
+        [
+          "previous-box",
+          "s1",
+          persistedTerminalId,
+          "2026-07-29T08:00:00.000Z",
+          "2026-07-29T08:30:00.000Z",
+        ],
+      );
+      await exec.run(
+        `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at)
+         VALUES (?,?,?,?)`,
+        ["current-box", "s1", persistedTerminalId, "2026-07-29T09:00:00.000Z"],
+      );
+
+      renderWorkTracked({ exec, terminalId: "new-terminal", boxCapacity: 20 });
+
+      expect(await screen.findByRole("heading", { name: "Короб № 2" })).toBeDefined();
+      expect(screen.queryByRole("heading", { name: "Короб № 0" })).toBeNull();
+    },
+  );
+
   it("closes the box automatically when it reaches capacity", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()

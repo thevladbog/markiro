@@ -13,6 +13,7 @@ import type { SqlExecutor } from "./mirror.js";
 export interface DeviceBox {
   boxId: string;
   shiftId: string;
+  terminalId: string | null;
   sscc: string | null;
   itemCount: number;
   openedAt: string;
@@ -32,12 +33,13 @@ export async function currentBox(exec: SqlExecutor, shiftId: string): Promise<De
   const rows = await exec.all<{
     box_id: string;
     shift_id: string;
+    terminal_id: string | null;
     sscc: string | null;
     opened_at: string;
     closed_at: string | null;
     item_count: number;
   }>(
-    `SELECT b.box_id AS box_id, b.shift_id AS shift_id, b.sscc AS sscc,
+    `SELECT b.box_id AS box_id, b.shift_id AS shift_id, b.terminal_id AS terminal_id, b.sscc AS sscc,
             b.opened_at AS opened_at, b.closed_at AS closed_at,
             (SELECT COUNT(*) FROM codes_mirror c WHERE c.box_id = b.box_id) AS item_count
      FROM boxes_mirror b
@@ -49,6 +51,7 @@ export async function currentBox(exec: SqlExecutor, shiftId: string): Promise<De
   return {
     boxId: row.box_id,
     shiftId: row.shift_id,
+    terminalId: row.terminal_id,
     sscc: row.sscc,
     itemCount: Number(row.item_count),
     openedAt: row.opened_at,
@@ -74,7 +77,10 @@ export async function boxOrdinal(
     [shiftId, terminalId, boxId],
   );
   const openedAt = currentRows[0]?.opened_at;
-  if (openedAt === undefined) return 0;
+  // A legacy/re-enrolled row can carry an identity the caller cannot resolve.
+  // The ordinal is only a floor aid, so degrade to the first human number
+  // rather than ever rendering the impossible "Box no. 0".
+  if (openedAt === undefined) return 1;
 
   const rows = await exec.all<{ ordinal: number }>(
     `SELECT COUNT(*) AS ordinal
@@ -87,7 +93,7 @@ export async function boxOrdinal(
         )`,
     [shiftId, terminalId, openedAt, openedAt, boxId],
   );
-  return Number(rows[0]?.ordinal ?? 0);
+  return Math.max(1, Number(rows[0]?.ordinal ?? 0));
 }
 
 /**

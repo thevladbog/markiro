@@ -15,6 +15,7 @@ export interface BoxFillLabels {
 export interface BoxFillInstrumentProps {
   box: { boxId: string; itemCount: number } | null;
   ordinal: number | null;
+  acceptedToken: string | null;
   capacity: number | null;
   canUndo: boolean;
   closeDisabled?: boolean;
@@ -62,6 +63,7 @@ export function boxFillPersistentState(
 export function BoxFillInstrument({
   box,
   ordinal,
+  acceptedToken,
   capacity,
   canUndo,
   closeDisabled = false,
@@ -74,11 +76,13 @@ export function BoxFillInstrument({
   const fill = box && usableCapacity ? Math.min(box.itemCount, usableCapacity) : 0;
   const cells = usableCapacity ? buildBoxCells(fill, usableCapacity) : [];
   const grouped = usableCapacity !== null && usableCapacity > 100;
+  const rowCount = Math.ceil(cells.length / 10);
   const persistentState = boxFillPersistentState(box, capacity);
   return (
     <section
       className="work-instrument work-box-fill"
       aria-labelledby="work-box-fill-title"
+      data-grouped={grouped}
       data-persistent-state={persistentState}
     >
       <h2 id="work-box-fill-title">{box && ordinal !== null ? labels.number : labels.title}</h2>
@@ -95,6 +99,7 @@ export function BoxFillInstrument({
               className="work-box-fill__grid"
               data-dense={cells.length > 20}
               data-grouped={grouped}
+              style={{ gridTemplateRows: `repeat(${rowCount}, minmax(0, 1fr))` }}
               role="progressbar"
               aria-label={labels.title}
               aria-valuemin={0}
@@ -102,18 +107,20 @@ export function BoxFillInstrument({
               aria-valuenow={fill}
               aria-valuetext={`${box.itemCount} / ${usableCapacity}`}
             >
-              {cells.map((cell) => (
-                <span
-                  key={cell.from}
-                  className="work-box-fill__cell"
-                  data-state={cell.state}
-                  data-latest={
-                    fill > 0 && fill >= cell.from && fill <= cell.to ? "true" : undefined
-                  }
-                  aria-label={cell.from === cell.to ? `${cell.from}` : `${cell.from}–${cell.to}`}
-                  aria-hidden="true"
-                />
-              ))}
+              {cells.map((cell) => {
+                const isLatest =
+                  acceptedToken !== null && fill > 0 && fill >= cell.from && fill <= cell.to;
+                return (
+                  <span
+                    key={`${cell.from}:${isLatest ? acceptedToken : "stable"}`}
+                    className="work-box-fill__cell"
+                    data-state={cell.state}
+                    data-latest={isLatest ? "true" : undefined}
+                    aria-label={cell.from === cell.to ? `${cell.from}` : `${cell.from}–${cell.to}`}
+                    aria-hidden="true"
+                  />
+                );
+              })}
             </div>
           ) : null}
           {grouped ? <p className="work-box-fill__grouped">{labels.grouped}</p> : null}

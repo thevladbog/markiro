@@ -89,6 +89,20 @@ describe("boxes", () => {
     expect(await boxOrdinal(exec, "s1", "t2", "other-terminal-box")).toBe(1);
   });
 
+  it("keeps the persisted terminal identity on the current box", async () => {
+    await openBox(exec, "s1", "box-1", "2026-07-29T10:00:00.000Z", "old-terminal");
+
+    expect((await currentBox(exec, "s1"))?.terminalId).toBe("old-terminal");
+  });
+
+  it("orders nullable legacy boxes and never returns ordinal zero for an identity mismatch", async () => {
+    await openBox(exec, "s1", "legacy-1", "2026-07-29T10:00:00.000Z", null);
+    await openBox(exec, "s1", "legacy-2", "2026-07-29T10:01:00.000Z", null);
+
+    expect(await boxOrdinal(exec, "s1", null, "legacy-2")).toBe(2);
+    expect(await boxOrdinal(exec, "s1", "re-enrolled-terminal", "legacy-2")).toBe(1);
+  });
+
   // Self-review: currentBox's itemCount must be scoped by box, not shift --
   // a mutation that correlated the COUNT(*) subquery by shift_id instead of
   // box_id would double-count a code scanned into an earlier (or otherwise
