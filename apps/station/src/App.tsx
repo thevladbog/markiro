@@ -102,6 +102,9 @@ const legacyGatedClient: StationClient = {
   post<T>() {
     return Promise.reject<T>(new Error("legacy station identity is not yet available"));
   },
+  download() {
+    return Promise.reject<Blob>(new Error("legacy station identity is not yet available"));
+  },
   whoami() {
     return Promise.reject(new Error("legacy station identity is not yet available"));
   },

@@ -22,6 +22,7 @@ export function isStationCredentialRejection(error: unknown): error is StationAp
 
 export interface StationClient {
   get<T>(path: string): Promise<T>;
+  download(path: string): Promise<Blob>;
   post<T>(path: string, body?: unknown): Promise<T>;
   whoami(signal?: AbortSignal): Promise<{ ok: true }>;
 }
@@ -178,6 +179,24 @@ export function createStationClient(
 
   return {
     get: (path) => request("GET", path),
+    download: async (path) => {
+      if (credentialBoundary?.generation.sealed) throw new Error("station credential generation is sealed");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${base}${path}`, {
+          headers: {
+            "x-station-capabilities": STATION_CAPABILITIES,
+            ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new StationApiError(res.status, await readError(res));
+        return await res.blob();
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     post: (path, body) => request("POST", path, body),
     // A cheap reachability + auth probe used by enrollment; GET /shifts is
     // TenantGuard-protected, so a 200 proves the key resolves a tenant.

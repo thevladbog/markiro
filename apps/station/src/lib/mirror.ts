@@ -37,6 +37,7 @@ export interface StationBundle {
     status: string;
     defaultCounterpartyId: string | null;
     defaultLabelTemplateId: string | null;
+    image?: StationProductImageDescriptor | null;
   };
   labelTemplate: { id: string; name: string; spec: unknown } | null;
   /**
@@ -68,6 +69,14 @@ export interface StationBundle {
     toSerial: number;
     consumedThroughSerial: number | null;
   } | null;
+}
+
+export interface StationProductImageDescriptor {
+  checksum: string;
+  contentType: "image/webp";
+  byteSize: number;
+  width: number;
+  height: number;
 }
 
 export interface ShiftMirrorRow {
@@ -188,16 +197,26 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
   );
 
   const p = bundle.product;
+  const imageColumns = p.image === undefined
+    ? ""
+    : ", image_checksum, image_content_type, image_byte_size, image_width, image_height";
+  const imageValues = p.image === undefined ? "" : ", ?, ?, ?, ?, ?";
+  const imageUpdate = p.image === undefined
+    ? ""
+    : `, image_checksum=excluded.image_checksum, image_content_type=excluded.image_content_type,
+       image_byte_size=excluded.image_byte_size, image_width=excluded.image_width,
+       image_height=excluded.image_height,
+       image_pointer_checksum=CASE WHEN excluded.image_checksum IS NULL THEN NULL ELSE product_mirror.image_pointer_checksum END`;
   await exec.run(
     `INSERT INTO product_mirror (
        id, gtin14, name, product_group, box_capacity, pallet_capacity, status,
-       default_counterparty_id, default_label_template_id
-     ) VALUES (?,?,?,?,?,?,?,?,?)
+       default_counterparty_id, default_label_template_id${imageColumns}
+     ) VALUES (?,?,?,?,?,?,?,?,?${imageValues})
      ON CONFLICT(id) DO UPDATE SET
        gtin14=excluded.gtin14, name=excluded.name, product_group=excluded.product_group,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
-       default_label_template_id=excluded.default_label_template_id`,
+       default_label_template_id=excluded.default_label_template_id${imageUpdate}`,
     [
       p.id,
       p.gtin14,
@@ -208,6 +227,9 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       p.status,
       p.defaultCounterpartyId,
       p.defaultLabelTemplateId,
+      ...(p.image === undefined
+        ? []
+        : [p.image?.checksum ?? null, p.image?.contentType ?? null, p.image?.byteSize ?? null, p.image?.width ?? null, p.image?.height ?? null]),
     ],
   );
 }
