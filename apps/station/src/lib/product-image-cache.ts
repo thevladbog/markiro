@@ -82,20 +82,22 @@ export async function syncStationProductImage(
     const cache = await openImageCache();
     const key = cacheKey(product.id, product.image.checksum);
     const existing = await cache.match(key);
-    if (!existing) {
+    let usable = false;
+    if (existing) {
+      try {
+        await validateBlob(await existing.blob(), product.image);
+        usable = true;
+      } catch {
+        await cache.delete(key);
+      }
+    }
+    if (!usable) {
       const blob = await client.download(
         `/station/products/${encodeURIComponent(product.id)}/image/${encodeURIComponent(product.image.checksum)}`,
       );
       if (isSealed?.()) return;
       await validateBlob(blob, product.image);
       await cache.put(key, new Response(blob, { headers: { "Content-Type": product.image.contentType } }));
-    } else {
-      try {
-        await validateBlob(await existing.blob(), product.image);
-      } catch (error) {
-        await cache.delete(key);
-        throw error;
-      }
     }
     if (isSealed?.()) return;
     await exec.run("UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ? AND image_checksum = ?", [
