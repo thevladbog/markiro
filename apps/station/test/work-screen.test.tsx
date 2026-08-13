@@ -1181,6 +1181,32 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect((await screen.findByTestId("box-progress")).textContent).toBe("3 / 10");
   });
 
+  it("shows the persisted terminal-local box ordinal after remount", async () => {
+    const exec = makeExec();
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at, closed_at)
+       VALUES (?,?,?,?,?)`,
+      ["closed-box", "s1", "dev-1", "2026-07-29T08:00:00.000Z", "2026-07-29T08:30:00.000Z"],
+    );
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at)
+       VALUES (?,?,?,?)`,
+      ["current-box", "s1", "dev-1", "2026-07-29T09:00:00.000Z"],
+    );
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, terminal_id, opened_at)
+       VALUES (?,?,?,?)`,
+      ["other-terminal-box", "s1", "dev-2", "2026-07-29T07:00:00.000Z"],
+    );
+
+    const first = renderWorkTracked({ exec, boxCapacity: 20 });
+    expect(await screen.findByRole("heading", { name: "Короб № 2" })).toBeDefined();
+    first.unmount();
+
+    renderWorkTracked({ exec, boxCapacity: 20 });
+    expect(await screen.findByRole("heading", { name: "Короб № 2" })).toBeDefined();
+  });
+
   it("closes the box automatically when it reaches capacity", async () => {
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()

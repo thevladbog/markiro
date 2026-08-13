@@ -89,6 +89,22 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
+  it("keeps the box cells and actions on one bounded instrument surface", () => {
+    const css = stationSource("station.css");
+    const instrument = stationSource("ui/work/BoxFillInstrument.tsx");
+
+    expect(instrument).toContain('className="work-box-fill__grid"');
+    expect(instrument).not.toContain('className="work-box-fill__track"');
+    expect(css).not.toContain(".work-box-fill__track");
+    expect(css).toMatch(
+      /\.work-box-fill__grid\s*\{[^}]*grid-template-columns:\s*repeat\(10, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(/\.work-box-fill__grid\[data-grouped="true"\]\s*\{/s);
+    expect(css).toMatch(
+      /\.work-box-fill__actions\s*\{(?![^}]*background:)[^}]*min-height:\s*64px;/s,
+    );
+  });
+
   it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {
     const css = stationSource("station.css");
 

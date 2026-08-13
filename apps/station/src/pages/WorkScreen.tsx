@@ -9,6 +9,7 @@ import {
 import { Alert, Button, FullScreenDialog, SignalOverlay, type SignalTone } from "@markiro/ui";
 import { boxLabelFields } from "../lib/box-label.js";
 import {
+  boxOrdinal,
   clearBox,
   currentBox,
   disassembleBox,
@@ -193,6 +194,7 @@ export function WorkScreen({
   // device the server could not resolve an issuer prefix for, has no box
   // section to show.
   const [box, setBox] = useState<{ boxId: string; itemCount: number } | null>(null);
+  const [boxNumber, setBoxNumber] = useState<number | null>(null);
   const [lastScanned, setLastScanned] = useState<{
     boxId: string;
     codeHash: string;
@@ -434,6 +436,7 @@ export function WorkScreen({
   useEffect(() => {
     if (issuerPrefix === null) {
       updateBox(null);
+      setBoxNumber(null);
       boxReady.current = Promise.resolve();
       return;
     }
@@ -442,12 +445,19 @@ export function WorkScreen({
       .then(async (existing: DeviceBox | null) => {
         if (cancelled) return;
         if (existing) {
+          const ordinal = await boxOrdinal(exec, shiftId, terminalId, existing.boxId);
+          if (cancelled) return;
+          setBoxNumber(ordinal);
           updateBox({ boxId: existing.boxId, itemCount: existing.itemCount });
           return;
         }
         const boxId = crypto.randomUUID();
         await openBox(exec, shiftId, boxId, new Date().toISOString(), terminalId);
-        if (!cancelled) updateBox({ boxId, itemCount: 0 });
+        const ordinal = await boxOrdinal(exec, shiftId, terminalId, boxId);
+        if (!cancelled) {
+          setBoxNumber(ordinal);
+          updateBox({ boxId, itemCount: 0 });
+        }
       })
       .catch((err: unknown) => {
         console.error("station: failed to load or open the current box", err);
@@ -646,9 +656,12 @@ export function WorkScreen({
       const newBoxId = crypto.randomUUID();
       try {
         await openBox(exec, shiftId, newBoxId, new Date().toISOString(), terminalId);
+        const ordinal = await boxOrdinal(exec, shiftId, terminalId, newBoxId);
+        setBoxNumber(ordinal);
         updateBox({ boxId: newBoxId, itemCount: 0 });
       } catch (err) {
         console.error("station: failed to open the next box after closing", err);
+        setBoxNumber(null);
         updateBox(null);
       }
       void reloadClosedBoxes();
@@ -1088,14 +1101,17 @@ export function WorkScreen({
               {issuerPrefix !== null ? (
                 <BoxFillInstrument
                   box={box}
+                  ordinal={boxNumber}
                   capacity={boxCapacity}
                   canUndo={lastScanned?.boxId === box?.boxId}
                   closeDisabled={closing}
                   labels={{
                     title: t("work.openBox"),
+                    number: t("work.boxNumber", { number: boxNumber }),
                     absent: t("work.noOpenBox"),
                     count: t("work.boxItems"),
                     capacityUnknown: t("work.capacityUnknown"),
+                    grouped: t("work.boxGrouped"),
                     close: t("box.close"),
                     undo: t("box.undoLastScan"),
                     clear: t("box.clear"),

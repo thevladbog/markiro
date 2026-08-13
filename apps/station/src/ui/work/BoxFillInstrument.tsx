@@ -2,9 +2,11 @@ import { Button } from "@markiro/ui";
 
 export interface BoxFillLabels {
   title: string;
+  number: string;
   absent: string;
   count: string;
   capacityUnknown: string;
+  grouped: string;
   close: string;
   undo: string;
   clear: string;
@@ -12,6 +14,7 @@ export interface BoxFillLabels {
 
 export interface BoxFillInstrumentProps {
   box: { boxId: string; itemCount: number } | null;
+  ordinal: number | null;
   capacity: number | null;
   canUndo: boolean;
   closeDisabled?: boolean;
@@ -22,6 +25,30 @@ export interface BoxFillInstrumentProps {
 }
 
 export type BoxFillPersistentState = "empty" | "partial" | "full";
+
+export interface BoxCell {
+  from: number;
+  to: number;
+  state: "filled" | "partial" | "next" | "empty";
+}
+
+export function buildBoxCells(filled: number, capacity: number): BoxCell[] {
+  const size = capacity <= 100 ? 1 : Math.ceil(capacity / 100);
+  const cells: BoxCell[] = [];
+  for (let from = 1; from <= capacity; from += size) {
+    const to = Math.min(capacity, from + size - 1);
+    const state =
+      filled >= to
+        ? "filled"
+        : filled >= from
+          ? "partial"
+          : filled + 1 >= from && filled + 1 <= to
+            ? "next"
+            : "empty";
+    cells.push({ from, to, state });
+  }
+  return cells;
+}
 
 export function boxFillPersistentState(
   box: { itemCount: number } | null,
@@ -34,6 +61,7 @@ export function boxFillPersistentState(
 
 export function BoxFillInstrument({
   box,
+  ordinal,
   capacity,
   canUndo,
   closeDisabled = false,
@@ -44,6 +72,8 @@ export function BoxFillInstrument({
 }: BoxFillInstrumentProps) {
   const usableCapacity = capacity !== null && capacity > 0 ? capacity : null;
   const fill = box && usableCapacity ? Math.min(box.itemCount, usableCapacity) : 0;
+  const cells = usableCapacity ? buildBoxCells(fill, usableCapacity) : [];
+  const grouped = usableCapacity !== null && usableCapacity > 100;
   const persistentState = boxFillPersistentState(box, capacity);
   return (
     <section
@@ -51,7 +81,7 @@ export function BoxFillInstrument({
       aria-labelledby="work-box-fill-title"
       data-persistent-state={persistentState}
     >
-      <h2 id="work-box-fill-title">{labels.title}</h2>
+      <h2 id="work-box-fill-title">{box && ordinal !== null ? labels.number : labels.title}</h2>
       {box ? (
         <>
           <div className="work-box-fill__readout">
@@ -62,16 +92,31 @@ export function BoxFillInstrument({
           </div>
           {usableCapacity ? (
             <div
-              className="work-box-fill__track"
+              className="work-box-fill__grid"
+              data-dense={cells.length > 20}
+              data-grouped={grouped}
               role="progressbar"
               aria-label={labels.title}
               aria-valuemin={0}
               aria-valuemax={usableCapacity}
               aria-valuenow={fill}
+              aria-valuetext={`${box.itemCount} / ${usableCapacity}`}
             >
-              <span style={{ width: `${(fill / usableCapacity) * 100}%` }} />
+              {cells.map((cell) => (
+                <span
+                  key={cell.from}
+                  className="work-box-fill__cell"
+                  data-state={cell.state}
+                  data-latest={
+                    fill > 0 && fill >= cell.from && fill <= cell.to ? "true" : undefined
+                  }
+                  aria-label={cell.from === cell.to ? `${cell.from}` : `${cell.from}–${cell.to}`}
+                  aria-hidden="true"
+                />
+              ))}
             </div>
           ) : null}
+          {grouped ? <p className="work-box-fill__grouped">{labels.grouped}</p> : null}
           <div className="work-box-fill__actions">
             <Button size="floor" variant="secondary" disabled={closeDisabled} onClick={onClose}>
               {labels.close}

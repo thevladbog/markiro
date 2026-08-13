@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { BoxFillInstrument } from "../src/ui/work/BoxFillInstrument.js";
+import { BoxFillInstrument, buildBoxCells } from "../src/ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../src/ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../src/ui/work/ScanResultInstrument.js";
 import { WorkCounters } from "../src/ui/work/WorkCounters.js";
@@ -16,6 +16,18 @@ const labels = {
   gtin: "GTIN",
   serial: "Serial number",
   crypto: "Crypto tail",
+};
+
+const boxLabels = {
+  title: "Open box",
+  number: "Box no. 1",
+  absent: "No open box",
+  count: "Items",
+  capacityUnknown: "Capacity not set",
+  grouped: "Cells group several positions",
+  close: "Close box",
+  undo: "Undo last scan",
+  clear: "Clear box",
 };
 
 describe("work instruments", () => {
@@ -74,17 +86,10 @@ describe("work instruments", () => {
     const { rerender } = render(
       <BoxFillInstrument
         box={null}
+        ordinal={null}
         capacity={null}
         canUndo={false}
-        labels={{
-          title: "Open box",
-          absent: "No open box",
-          count: "Items",
-          capacityUnknown: "Capacity not set",
-          close: "Close box",
-          undo: "Undo last scan",
-          clear: "Clear box",
-        }}
+        labels={boxLabels}
         {...callbacks}
       />,
     );
@@ -94,17 +99,10 @@ describe("work instruments", () => {
     rerender(
       <BoxFillInstrument
         box={{ boxId: "b1", itemCount: 12 }}
+        ordinal={1}
         capacity={0}
         canUndo={false}
-        labels={{
-          title: "Open box",
-          absent: "No open box",
-          count: "Items",
-          capacityUnknown: "Capacity not set",
-          close: "Close box",
-          undo: "Undo last scan",
-          clear: "Clear box",
-        }}
+        labels={boxLabels}
         {...callbacks}
       />,
     );
@@ -114,17 +112,10 @@ describe("work instruments", () => {
     rerender(
       <BoxFillInstrument
         box={{ boxId: "b1", itemCount: 12 }}
+        ordinal={1}
         capacity={10}
         canUndo
-        labels={{
-          title: "Open box",
-          absent: "No open box",
-          count: "Items",
-          capacityUnknown: "Capacity not set",
-          close: "Close box",
-          undo: "Undo last scan",
-          clear: "Clear box",
-        }}
+        labels={boxLabels}
         {...callbacks}
       />,
     );
@@ -135,6 +126,43 @@ describe("work instruments", () => {
     expect(undo.classList.contains("mk-btn--floor")).toBe(true);
     fireEvent.click(undo);
     expect(callbacks.onUndo).toHaveBeenCalledOnce();
+  });
+
+  it("builds exact cells and marks the next physical position", () => {
+    expect(buildBoxCells(2, 20)).toHaveLength(20);
+    expect(buildBoxCells(2, 20).filter((cell) => cell.state === "filled")).toHaveLength(2);
+    expect(buildBoxCells(2, 20)[2]).toMatchObject({ state: "next", from: 3, to: 3 });
+    expect(buildBoxCells(100, 100)).toHaveLength(100);
+  });
+
+  it("groups capacities over one hundred without hiding the exact range", () => {
+    const grouped = buildBoxCells(37, 101);
+    expect(grouped.length).toBeLessThanOrEqual(100);
+    expect(grouped[0]).toEqual(expect.objectContaining({ from: 1, to: 2 }));
+    expect(grouped.at(-1)?.to).toBe(101);
+  });
+
+  it("renders one cell per position and exposes the exact box progress", () => {
+    const { container } = render(
+      <BoxFillInstrument
+        box={{ boxId: "b1", itemCount: 2 }}
+        ordinal={1}
+        capacity={20}
+        canUndo={false}
+        labels={boxLabels}
+        onClose={vi.fn()}
+        onUndo={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+
+    const progress = screen.getByRole("progressbar", { name: "Open box" });
+    expect(progress.getAttribute("aria-valuenow")).toBe("2");
+    expect(progress.getAttribute("aria-valuetext")).toBe("2 / 20");
+    expect(container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
+    expect(container.querySelector('.work-box-fill__cell[data-state="next"]')).not.toBeNull();
+    expect(container.querySelector('.work-box-fill__cell[data-latest="true"]')).not.toBeNull();
+    expect(container.querySelector(".work-box-fill__track")).toBeNull();
   });
 
   it("shows large counters and explicit synchronized or pending state", () => {

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/journal.js";
 import {
+  boxOrdinal,
   clearBox,
   closeBox,
   currentBox,
@@ -76,6 +77,16 @@ describe("boxes", () => {
   it("keeps boxes of different shifts apart", async () => {
     await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     expect(await currentBox(exec, "s2")).toBeNull();
+  });
+
+  it("derives a stable box ordinal within one shift and terminal", async () => {
+    await openBox(exec, "s1", "box-1", "2026-07-29T10:00:00.000Z", "t1");
+    await openBox(exec, "s1", "box-2", "2026-07-29T10:00:00.000Z", "t1");
+    await openBox(exec, "s1", "other-terminal-box", "2026-07-29T09:00:00.000Z", "t2");
+
+    expect(await boxOrdinal(exec, "s1", "t1", "box-1")).toBe(1);
+    expect(await boxOrdinal(exec, "s1", "t1", "box-2")).toBe(2);
+    expect(await boxOrdinal(exec, "s1", "t2", "other-terminal-box")).toBe(1);
   });
 
   // Self-review: currentBox's itemCount must be scoped by box, not shift --

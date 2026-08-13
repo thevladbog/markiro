@@ -57,6 +57,40 @@ export async function currentBox(exec: SqlExecutor, shiftId: string): Promise<De
 }
 
 /**
+ * Stable display-only box number within this shift and terminal. The SSCC is
+ * deliberately unrelated: this count is derived from persisted local rows so
+ * a restart cannot reset the floor aid or consume a serial.
+ */
+export async function boxOrdinal(
+  exec: SqlExecutor,
+  shiftId: string,
+  terminalId: string | null,
+  boxId: string,
+): Promise<number> {
+  const currentRows = await exec.all<{ opened_at: string }>(
+    `SELECT opened_at
+       FROM boxes_mirror
+      WHERE shift_id = ? AND terminal_id IS ? AND box_id = ?`,
+    [shiftId, terminalId, boxId],
+  );
+  const openedAt = currentRows[0]?.opened_at;
+  if (openedAt === undefined) return 0;
+
+  const rows = await exec.all<{ ordinal: number }>(
+    `SELECT COUNT(*) AS ordinal
+       FROM boxes_mirror candidate
+      WHERE candidate.shift_id = ?
+        AND candidate.terminal_id IS ?
+        AND (
+          candidate.opened_at < ?
+          OR (candidate.opened_at = ? AND candidate.box_id <= ?)
+        )`,
+    [shiftId, terminalId, openedAt, openedAt, boxId],
+  );
+  return Number(rows[0]?.ordinal ?? 0);
+}
+
+/**
  * Opens a new box for this shift. One INSERT; every other column defaults
  * to null.
  *
