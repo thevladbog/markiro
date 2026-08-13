@@ -469,7 +469,7 @@ export class OrgProfileService {
    * The tenant's own box SSCC counter (Task 5). Always reads
    * `BOX_EXTENSION_DIGIT` -- 06c only has boxes; 06d's pallets (extension
    * digit 1) will need their own read path once that counter exists.
-   * Returns `nextSerial: 0` if no row has been seeded yet, same convention
+   * Returns `nextSerial: 1` if no row has been seeded yet, same convention
    * as `getProfile`'s `EMPTY_PROFILE` fallback.
    */
   async getSscc(tenantId: string): Promise<SsccCounterDto> {
@@ -484,7 +484,7 @@ export class OrgProfileService {
           eq(schema.ssccCounters.extensionDigit, BOX_EXTENSION_DIGIT),
         ),
       );
-    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 0 };
+    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 1 };
   }
 
   /**

@@ -36,6 +36,13 @@ Windows.
    из `docs/hardware-acceptance-checklist.md`: иконки, production pairing,
    touch/keyboard/scanner input, viewport и fullscreen. Это отдельное
    acceptance; workflow не закрывает эти пункты.
+   Для beta с агрегацией и восстановлением печати отдельно выполните
+   весь раздел `Aggregation and box-label recovery (next Station beta)`:
+   новый issuer prefix с первым serial `0000001`, реальные EAN-13/KM,
+   короб на 20 мест, отказ принтера с перезапуском, повторную печать того же
+   SSCC, явный пропуск этикетки и scan-back GS1-128 на packaged Windows в 1280×800 и
+   1024×768. До реального прогона все эти пункты остаются
+   неотмеченными.
 
 ## Перед запуском
 

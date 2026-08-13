@@ -143,7 +143,7 @@ export class CounterpartiesService {
           eq(schema.ssccCounters.extensionDigit, BOX_EXTENSION_DIGIT),
         ),
       );
-    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 0 };
+    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 1 };
   }
 
   /**

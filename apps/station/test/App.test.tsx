@@ -489,7 +489,7 @@ async function renderAtFloorStage(
   return outbox;
 }
 
-async function renderActiveShiftForOperatorSwitch() {
+async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
   lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
   lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
   const firstPinHash = await hashSecret(OPERATOR_PIN);
@@ -528,6 +528,17 @@ async function renderActiveShiftForOperatorSwitch() {
             name: "Maria",
             login: SECOND_OPERATOR_LOGIN,
           }),
+        ]);
+      }
+      if (pendingBoxPrint && query.includes("b.print_state = 'pending'")) {
+        return Promise.resolve([
+          {
+            box_id: "box-closed",
+            sscc: "046012345600000016",
+            item_count: 10,
+            print_state: "pending",
+            print_error_code: "printer_unconfigured",
+          },
         ]);
       }
       if (query.includes("FROM boxes_mirror") && query.includes("closed_at IS NULL")) {
@@ -628,7 +639,12 @@ async function renderActiveShiftForOperatorSwitch() {
   await signInAsOperator();
   fireEvent.click(await screen.findByRole("button", { name: "Open" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined());
-  await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("3 / 10"));
+  if (pendingBoxPrint) {
+    await screen.findByText("Printer is not configured");
+  } else {
+    await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("3 / 10"));
+    await screen.findByRole("button", { name: "Change operator" });
+  }
 
   return {
     emitScan(raw: string) {
@@ -1035,6 +1051,63 @@ describe("App", () => {
 
       floor.releaseFirstJournal();
       await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("locks ordinary floor navigation during print recovery but keeps printer setup available", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch(true);
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
+      expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: /fullscreen/ }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("releases the print-recovery setup latch when service reset returns to pairing", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch(true);
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+
+      await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+      expect(screen.getByRole("button", { name: /fullscreen/ })).toHaveProperty("disabled", false);
     } finally {
       consoleErrorSpy.mockRestore();
     }

@@ -208,6 +208,29 @@ export function App() {
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
+  const [printRecoveryBlocked, setPrintRecoveryBlocked] = useState(false);
+  // Printer Setup deliberately unmounts WorkScreen. Its cleanup publishes
+  // `false`, but that does not resolve the persisted recovery which opened
+  // Setup. Keep the App-level block latched until the remounted WorkScreen
+  // first rehydrates that row (`true`) and later reports its real resolution
+  // (`false`).
+  const printRecoverySetupLatch = useRef<"idle" | "awaiting-remount" | "remounted">("idle");
+  const handlePrintRecoveryChange = useCallback((blocked: boolean): void => {
+    const phase = printRecoverySetupLatch.current;
+    if (blocked) {
+      if (phase === "awaiting-remount") printRecoverySetupLatch.current = "remounted";
+      setPrintRecoveryBlocked(true);
+      return;
+    }
+    if (phase === "awaiting-remount") return;
+    if (phase === "remounted") printRecoverySetupLatch.current = "idle";
+    setPrintRecoveryBlocked(false);
+  }, []);
+  const openPrintRecoverySetup = useCallback((): void => {
+    printRecoverySetupLatch.current = "awaiting-remount";
+    setPrintRecoveryBlocked(true);
+    setShowSetup(true);
+  }, []);
   const [showConflicts, setShowConflicts] = useState(false);
   const [showUpdates, setShowUpdates] = useState(false);
   const [operatorSwitchState, setOperatorSwitchState] = useState<"idle" | "settling" | "failed">(
@@ -603,6 +626,8 @@ export function App() {
     setIssuerPrefix(null);
     setFloorView("select");
     setShowSetup(false);
+    printRecoverySetupLatch.current = "idle";
+    setPrintRecoveryBlocked(false);
     setShowConflicts(false);
     setCredentialRecovery((current) => current ?? { event, phase: "sealing" });
   }, []);
@@ -803,6 +828,8 @@ export function App() {
       setShift(null);
       setFloorView("select");
       setShowSetup(false);
+      printRecoverySetupLatch.current = "idle";
+      setPrintRecoveryBlocked(false);
     } catch {
       // Never expose IPC details or a device key in the service UI.
       throw new Error(t("setup.resetCredentialFailed"));
@@ -830,6 +857,7 @@ export function App() {
   }
 
   async function switchOperator(): Promise<void> {
+    if (printRecoveryBlocked) return;
     if (operatorSwitchAttempt.current) return operatorSwitchAttempt.current;
     const attempt = performOperatorSwitch();
     operatorSwitchAttempt.current = attempt;
@@ -846,7 +874,7 @@ export function App() {
     <WindowModeControl
       snapshot={lockdownSnapshot}
       activeShift={shift !== null}
-      disabled={operatorSwitchState !== "idle"}
+      disabled={operatorSwitchState !== "idle" || printRecoveryBlocked}
       onEnter={enterLockdown}
       onExit={exitLockdown}
       onDismissError={clearLockdownError}
@@ -1021,7 +1049,7 @@ export function App() {
   const operatorControl = (
     <OperatorSwitchControl
       activeShift={shift !== null}
-      pending={operatorSwitchState === "settling"}
+      pending={operatorSwitchState === "settling" || printRecoveryBlocked}
       error={operatorSwitchState === "failed"}
       onSwitch={switchOperator}
       onDismissError={() => {
@@ -1061,7 +1089,7 @@ export function App() {
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
       update={updateIndicator}
-      actionsDisabled={operatorSwitchState !== "idle"}
+      actionsDisabled={operatorSwitchState !== "idle" || printRecoveryBlocked}
       onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
     >
@@ -1146,6 +1174,8 @@ export function App() {
                   }
                 : null
             }
+            onOpenPrinterSetup={openPrintRecoverySetup}
+            onPrintRecoveryChange={handlePrintRecoveryChange}
           />
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>

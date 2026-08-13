@@ -540,7 +540,33 @@ describe("OrgProfilePage", () => {
     ).length;
     fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
 
-    expect(await screen.findByText("Введите целое число от 0 до 9 999 999")).toBeDefined();
+    expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
+    const putCallsAfter = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
+    ).length;
+    expect(putCallsAfter).toBe(putCallsBefore);
+  });
+
+  it("normalizes a historical zero counter to one and refuses a new zero value", async () => {
+    const fetchMock = routeFetch({
+      sscc: () => jsonResponse(200, { extensionDigit: 0, nextSerial: 0 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    const ssccCard = await cardOf("Счётчик SSCC для коробов");
+    const nextSerialInput = (await within(ssccCard).findByLabelText(
+      "Начальный серийный номер",
+    )) as HTMLInputElement;
+    expect(nextSerialInput.value).toBe("1");
+
+    fireEvent.change(nextSerialInput, { target: { value: "0" } });
+    const putCallsBefore = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
+    ).length;
+    fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
     const putCallsAfter = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
     ).length;

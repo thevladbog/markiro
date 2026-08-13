@@ -36,6 +36,7 @@ export type GalleryFixtureKind =
   | "work-overlay"
   | "signal"
   | "box"
+  | "box-print-recovery"
   | "serial-recovery"
   | "exception"
   | "conflicts"
@@ -134,6 +135,36 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "work-error", kind: "signal", variant: "error", source: "synthetic" },
   { id: "box-empty", kind: "box", variant: "empty", source: "synthetic" },
   { id: "box-full", kind: "box", variant: "full", source: "synthetic" },
+  {
+    id: "box-print-template-missing",
+    kind: "box-print-recovery",
+    variant: "template_missing",
+    source: "synthetic",
+  },
+  {
+    id: "box-print-printer-unconfigured",
+    kind: "box-print-recovery",
+    variant: "printer_unconfigured",
+    source: "synthetic",
+  },
+  {
+    id: "box-print-render-failed",
+    kind: "box-print-recovery",
+    variant: "render_failed",
+    source: "synthetic",
+  },
+  {
+    id: "box-print-transport-failed",
+    kind: "box-print-recovery",
+    variant: "transport_failed",
+    source: "synthetic",
+  },
+  {
+    id: "box-print-skip-confirm",
+    kind: "box-print-recovery",
+    variant: "skip-confirm",
+    source: "synthetic",
+  },
   {
     id: "serial-exhaustion",
     kind: "serial-recovery",

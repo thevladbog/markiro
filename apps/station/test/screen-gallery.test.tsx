@@ -60,6 +60,11 @@ describe("development screen gallery", () => {
         "print-verification",
         "print-mismatch",
         "print-not-sscc",
+        "box-print-template-missing",
+        "box-print-printer-unconfigured",
+        "box-print-render-failed",
+        "box-print-transport-failed",
+        "box-print-skip-confirm",
       ]),
     );
 
@@ -70,6 +75,139 @@ describe("development screen gallery", () => {
       findMissingGalleryStates(withoutPrintVerification, PERSISTENT_GALLERY_STATE_IDS),
     ).toEqual(["print-verification"]);
     expect(EXPECTED_GALLERY_STATE_IDS).toContain("print-verification");
+    expect(EXPECTED_GALLERY_STATE_IDS).toEqual(
+      expect.arrayContaining([
+        "box-print-template-missing",
+        "box-print-printer-unconfigured",
+        "box-print-render-failed",
+        "box-print-transport-failed",
+        "box-print-skip-confirm",
+      ]),
+    );
+  });
+
+  it("renders aggregation with the production scan, 20-place box, and six-row history instruments", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,
+    );
+
+    const scan = view.container.querySelector<HTMLElement>(".work-scan-result");
+    expect(scan).not.toBeNull();
+    expect(scan?.querySelector('[data-semantic="accepted-marker"]')?.textContent).toBe("✓");
+    expect(scan?.querySelector('[data-semantic="normalized-code"]')?.textContent).toBe(
+      "(01)04607000000042 (21)DEMO-SERIAL-000128 (91)ABCD " +
+        "(92)TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789 (93)XYZ1",
+    );
+    expect(scan?.querySelector('[data-semantic="verdict"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="gtin"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="serial"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="crypto"]')).toBeNull();
+    expect(scan?.textContent).not.toContain("ПРИНЯТО");
+    expect(scan?.textContent).not.toContain("Криптохвост");
+    expect(view.container.querySelector(".mk-signal-overlay")).toBeNull();
+
+    const box = view.container.querySelector<HTMLElement>(".work-box-fill");
+    expect(box).not.toBeNull();
+    if (!box) throw new Error("work box fill was not rendered");
+    expect(within(box).getByText("Короб № 1")).toBeDefined();
+    expect(within(box).getByTestId("box-progress").textContent).toBe("2 / 20");
+    const cells = box.querySelectorAll(".work-box-fill__cell");
+    expect(cells).toHaveLength(20);
+    expect(cells[0]?.getAttribute("data-state")).toBe("filled");
+    expect(cells[1]?.getAttribute("data-state")).toBe("filled");
+    expect(cells[2]?.getAttribute("data-state")).toBe("next");
+    expect(within(box).getByRole("button", { name: "Закрыть короб" })).toBeDefined();
+    expect(within(box).getByRole("button", { name: "Отменить последний скан" })).toBeDefined();
+    expect(within(box).getByRole("button", { name: "Очистить короб" })).toBeDefined();
+
+    expect(view.container.querySelectorAll(".work-recent li")).toHaveLength(6);
+  });
+
+  it.each([
+    {
+      locale: "ru" as const,
+      undo: "Отменить последний скан",
+      clear: "Очистить короб",
+    },
+    {
+      locale: "en" as const,
+      undo: "Undo last scan",
+      clear: "Clear box",
+    },
+  ])("uses the exact production work copy in $locale", ({ locale, undo, clear }) => {
+    render(<StationScreenGallery request={{ state: "work-aggregation", locale }} />);
+
+    expect(screen.getByRole("button", { name: undo })).toBeDefined();
+    expect(screen.getByRole("button", { name: clear })).toBeDefined();
+  });
+
+  it.each([
+    { locale: "ru" as const, accepted: "ПРИНЯТО" },
+    { locale: "en" as const, accepted: "ACCEPTED" },
+  ])(
+    "announces the localized accepted result without adding visual fact copy in $locale",
+    ({ locale, accepted }) => {
+      const normalized =
+        "(01)04607000000042 (21)DEMO-SERIAL-000128 (91)ABCD " +
+        "(92)TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789 (93)XYZ1";
+      render(<StationScreenGallery request={{ state: "work-aggregation", locale }} />);
+
+      const status = screen.getByRole("status", { name: `${accepted}: ${normalized}` });
+      expect(status.textContent).toBe(`✓${normalized}`);
+      expect(status.textContent).not.toContain(accepted);
+      expect(status.textContent).not.toContain("GTIN");
+      expect(status.textContent).not.toContain("Серийный номер");
+      expect(status.textContent).not.toContain("Serial number");
+      expect(status.textContent).not.toContain("Криптохвост");
+      expect(status.textContent).not.toContain("Crypto tail");
+      expect(status.querySelector('[data-semantic="verdict"]')).toBeNull();
+      expect(status.querySelector('[data-semantic="gtin"]')).toBeNull();
+      expect(status.querySelector('[data-semantic="serial"]')).toBeNull();
+      expect(status.querySelector('[data-semantic="crypto"]')).toBeNull();
+    },
+  );
+
+  it("renders standalone box states through the production grouped fill instrument", () => {
+    const view = render(<StationScreenGallery request={{ state: "box-empty", locale: "ru" }} />);
+    expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
+
+    view.rerender(<StationScreenGallery request={{ state: "box-full", locale: "ru" }} />);
+    const grouped = view.container.querySelector<HTMLElement>(".work-box-fill__grid");
+    expect(grouped?.getAttribute("data-grouped")).toBe("true");
+    expect(grouped?.getAttribute("aria-valuemax")).toBe("120");
+    expect(view.container.querySelector(".work-box-fill")?.textContent).toContain("120 / 120");
+  });
+
+  it.each([
+    ["box-print-template-missing", "Для смены не выбран шаблон этикетки короба", false],
+    ["box-print-printer-unconfigured", "Принтер не настроен", true],
+    ["box-print-render-failed", "Не удалось подготовить этикетку", false],
+    ["box-print-transport-failed", "Принтер не принял задание", true],
+  ] as const)(
+    "renders persistent recovery %s through the production recovery dialog",
+    (state, message, hasSetup) => {
+      const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
+
+      expect(view.container.querySelector(".box-print-recovery")).not.toBeNull();
+      expect(screen.getByRole("alert").textContent).toBe(message);
+      expect(screen.getByText("046012345600000016")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Повторить печать" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Продолжить без этикетки" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Настроить принтер" }) !== null).toBe(hasSetup);
+    },
+  );
+
+  it("opens the production skip confirmation deterministically for viewport acceptance", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "box-print-skip-confirm", locale: "ru" }} />,
+    );
+
+    expect(view.container.querySelector(".box-print-recovery")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Продолжить без этикетки?" })).toBeDefined();
+    expect(
+      screen.getByText("Короб уже закрыт. Его нужно будет промаркировать этикеткой позже."),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Подтвердить продолжение" })).toBeDefined();
   });
 
   it("renders every expected state through the real fixed station shell without external reads", () => {

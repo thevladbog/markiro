@@ -466,7 +466,7 @@ export const ssccCounters = pgTable(
     tenantId: tenantId(),
     issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
     extensionDigit: integer("extension_digit").notNull(),
-    nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(0),
+    nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(1),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.issuerPrefix, t.extensionDigit] })],

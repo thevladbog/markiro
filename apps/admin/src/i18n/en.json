@@ -547,7 +547,7 @@
         },
         "sscc": {
           "cardTitle": "Box SSCC counter",
-          "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+          "description": "The box starting serial must be from 1 to 9,999,999 within the prefix below. Set it when migrating numbers already issued by another system under this GLN.",
           "prefixLabel": "Derived prefix",
           "nextSerialLabel": "Starting serial",
           "save": "Save SSCC",
@@ -555,7 +555,7 @@
           "retry": "Retry",
           "prefixUnavailable": "Saving is unavailable because a prefix could not be derived from the GLN.",
           "errors": {
-            "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+            "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999"
           },
           "toasts": {
             "updateSuccess": "Counter saved",
@@ -1742,13 +1742,13 @@
       },
       "sscc": {
         "cardTitle": "Box SSCC counter",
-        "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+        "description": "The box starting serial must be from 1 to 9,999,999 within the prefix below. Set it when migrating numbers already issued by another system under this GLN.",
         "prefixLabel": "Derived prefix",
         "prefixUnavailable": "Set the GLN above to see the derived prefix",
         "nextSerialLabel": "Starting serial",
         "save": "Save",
         "errors": {
-          "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+          "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999"
         },
         "toasts": {
           "updateSuccess": "Counter saved",

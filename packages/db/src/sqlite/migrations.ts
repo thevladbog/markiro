@@ -227,4 +227,9 @@ export const STATION_MIGRATIONS: string[] = [
        DELETE FROM codes_mirror WHERE box_id = NEW.box_id;
        UPDATE boxes_mirror SET disassembled_at = NEW.at WHERE box_id = NEW.box_id;
      END;`,
+  // Durable box-label recovery. These must remain trailing ALTERs rather
+  // than changing CREATE TABLE: installed stations already have boxes_mirror,
+  // and their historical rows must migrate to `legacy`, never `pending`.
+  `ALTER TABLE boxes_mirror ADD COLUMN print_state TEXT NOT NULL DEFAULT 'legacy';`,
+  `ALTER TABLE boxes_mirror ADD COLUMN print_error_code TEXT;`,
 ];

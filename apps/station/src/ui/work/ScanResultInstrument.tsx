@@ -7,6 +7,9 @@ export interface ScanResultLabels {
   invalid: string;
   wrong_gtin: string;
   unknown: string;
+  gtin: string;
+  serial: string;
+  crypto: string;
 }
 
 export interface ScanResultInstrumentProps {
@@ -37,11 +40,36 @@ export function ScanResultInstrument({
         <h2 title={productName}>{productName}</h2>
         {counterpartyName ? <p title={counterpartyName}>{counterpartyName}</p> : null}
       </div>
-      <div className="work-scan-result__verdict" role="status" data-tone={tone}>
-        <strong>
-          {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
-        </strong>
-        {operation?.codeSuffix ? <span>{operation.codeSuffix}</span> : null}
+      <div
+        className="work-scan-result__verdict"
+        role="status"
+        data-tone={tone}
+        data-compact-success={tone === "ok" && operation?.identity ? "true" : undefined}
+        aria-label={
+          tone === "ok" && operation?.identity
+            ? `${labels.ok}: ${operation.identity.normalized}`
+            : undefined
+        }
+      >
+        {tone === "ok" && operation?.identity ? (
+          <>
+            <span
+              className="work-scan-result__accepted-marker"
+              data-semantic="accepted-marker"
+              aria-hidden="true"
+            >
+              ✓
+            </span>
+            <code className="work-scan-result__normalized" data-semantic="normalized-code">
+              {operation.identity.normalized}
+            </code>
+          </>
+        ) : (
+          <strong>
+            {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
+          </strong>
+        )}
+        {tone !== "ok" && operation?.codeSuffix ? <span>{operation.codeSuffix}</span> : null}
       </div>
     </section>
   );

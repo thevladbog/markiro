@@ -6,6 +6,8 @@
 - Browser-bootstrap fixes present during acceptance:
   `dc5ce9c276f3b242894efd8762ccd4323ffd9bea` and
   `3ce18d4bfc4609f2a4c2e42fadaf95594f1ac493`
+- Aggregation/print-recovery gallery follow-up: 2026-08-13 on
+  `codex/station-aggregation-recovery-design`, baseline `0a32f0b4`.
 
 ## Decision status
 
@@ -50,6 +52,21 @@ environment.
 | `corepack pnpm --filter @markiro/db build`                         | PASS                           | Built the narrow station entry before station gates.                                                                                                                                                                                                                    |
 | `corepack pnpm format:check`                                       | PASS                           | All repository files match Prettier; two earlier tracked branch documents received the approved mechanical-only format pass.                                                                                                                                            |
 | `git diff --check`                                                 | PASS                           | No whitespace errors after the final report and acceptance edits.                                                                                                                                                                                                       |
+
+### 2026-08-13 aggregation gallery follow-up
+
+- Focused corrected Task 2/6/WorkScreen suite: 4 files, 118 tests passed.
+- Full Station suite: 64 files, 741 tests passed. Existing intentional error-path
+  logs, React `act(...)` notices, and jsdom's missing-canvas notice were emitted;
+  there were no test failures or skips.
+- Station typecheck and lint passed without diagnostics.
+- Station production build passed with 399 modules transformed.
+- Browser gallery: 366/366 state/locale/viewport rows passed. This is browser
+  evidence only; no packaged Windows, touch, scanner, or printer claim is added.
+- Review-correction rerun: schema 4 additionally checks the required accepted
+  semantic content. All six aggregation locale/viewport rows show one compact
+  check plus the exact normalized GS1 block with no missing, mismatched, or
+  clipped content.
 
 No `node_modules` link or dependency output was changed to conceal the stale
 overlay. The mapped commands exercise the committed UI source/build from this
@@ -96,7 +113,7 @@ Audit scope: `apps/station/src` plus station-consumed floor primitives in
 | Hover-only affordances                | No station `:hover` rule or mouse-enter/leave handler exists. `title` attributes on scan result text duplicate already-visible content and are not the only disclosure path. Focus-visible and active feedback are defined for station actions.                                                                                                                                                                                                                                                                                                                                            |
 | Runtime asset/network dependency      | No image/CDN/runtime asset URL exists in station UI source. IBM Plex fonts remain bundled through `@fontsource`. The two `fetch` call sites are the authenticated station API client for business data, not visual assets. Browser acceptance also exposed a dependency leak: station imported SQLite migrations through root `@markiro/db`, which evaluated Postgres code and crashed without Node `Buffer`. Station now imports direct `@markiro/db/station-sqlite`; tests evaluate the entry and station mirror with `Buffer` absent, and the mapped bundle contains no Postgres graph. |
 | Scaling and transforms                | No `scale()` or CSS `zoom` exists. The only app-control transform is the deliberate 1 px active press translation, disabled controls explicitly receive no transform. Spinner rotation does not scale the application.                                                                                                                                                                                                                                                                                                                                                                     |
-| Clipping                              | Fixed screen/header/content/footer, dialogs, result slots, and bounded card grids intentionally use `overflow: hidden`. Ellipsis/line-clamp appears only where a visible bounded value has an accessible label or duplicated visible text. The 336-case browser matrix found no clipped visible interactive at any required viewport.                                                                                                                                                                                                                                                      |
+| Clipping                              | Fixed screen/header/content/footer, dialogs, result slots, and bounded card grids intentionally use `overflow: hidden`. Ellipsis/line-clamp appears only where a visible bounded value has an accessible label or duplicated visible text. The schema-4 366-case browser matrix found no clipped or overlapping visible interactive; its semantic gate also found no missing, mismatched, or clipped required accepted-scan content at any required viewport.                                                                                                                              |
 
 ## TDD fixes discovered during acceptance
 
@@ -124,26 +141,39 @@ PrintVerification floor-control case 1/1. The final broad mapped suite is
 
 ## Browser gallery matrix
 
-The controlled gallery run covered all 56 registered fixtures in Russian and
-English/long-copy modes at all three required viewports: 336 combinations.
+The corrected 2026-08-13 controlled gallery rerun covered all 61 registered
+fixtures in Russian and English at all three required viewports: 366
+combinations. The coverage includes the production `ScanResultInstrument`,
+20-place and grouped `BoxFillInstrument` states, six recent operations, all
+four persistent `BoxPrintRecovery` categories, and the explicit
+skip-confirmation state.
 
-| Viewport  | Fixtures and locales | Exact document bounds | Scroll regions | Clipped visible interactives | Floor target below 64 px | Result           |
-| --------- | -------------------- | --------------------- | -------------- | ---------------------------- | ------------------------ | ---------------- |
-| 1280×800  | 112/112              | 112/112               | 0              | 0                            | 0                        | PASS 112/112     |
-| 1024×768  | 112/112              | 112/112               | 0              | 0                            | 0                        | PASS 112/112     |
-| 1280×1024 | 112/112              | 112/112               | 0              | 0                            | 0                        | PASS 112/112     |
-| **Total** | **336/336**          | **336/336**           | **0**          | **0**                        | **0**                    | **PASS 336/336** |
+| Viewport  | Fixtures/locales | Exact bounds | Scroll | Clipped actions | Overlaps | Below 64 px | Required semantics | Result       |
+| --------- | ---------------- | ------------ | ------ | --------------- | -------- | ----------- | ------------------ | ------------ |
+| 1280×800  | 122/122          | 122/122      | 0      | 0               | 0        | 0           | 2/2                | PASS 122/122 |
+| 1024×768  | 122/122          | 122/122      | 0      | 0               | 0        | 0           | 2/2                | PASS 122/122 |
+| 1280×1024 | 122/122          | 122/122      | 0      | 0               | 0        | 0           | 2/2                | PASS 122/122 |
+| **Total** | **366/366**      | **366/366**  | **0**  | **0**           | **0**    | **0**       | **6/6**            | **PASS**     |
 
-For every combination, document width and height exactly matched the viewport,
-there were zero `[data-scroll-region]` elements, no visible interactive was
-clipped, and no measured floor hit target was below 64 px. A separate scan of
-all visible interactives in Russian at all three viewports also found no target
-below 64 px.
+For every combination, document width and height exactly matched the viewport.
+The browser found no document scroll, actually scrollable nested region,
+clipped or overlapping visible interactive, or enabled action below 64 px.
+For `work-aggregation`, it also required exactly one visible compact
+`accepted-marker` and one exact `normalized-code`, checked each against the
+viewport and every clipping ancestor, and rejected the removed verdict and
+GTIN/serial/crypto fact hooks/copy. All six semantic rows passed with zero
+missing, wrong, clipped, or internally scrollable values.
 
-This final matrix was rerun after the typography fix with the real bundled fonts
-loaded. `document.fonts.check` succeeded, `--font-ui` resolved to IBM Plex Sans,
-and computed `#root`, `.station-root`, `main`, and representative button copy all
-used IBM Plex Sans rather than the browser serif default.
+One `pairing-error` / English / 1280×800 navigation transiently returned a blank
+page during the full run. The exact row was rerun immediately and passed with
+the requested state, locale, dimensions, and font evidence; the retained
+366-row matrix therefore contains the verified product result rather than the
+navigation transient.
+
+The browser waited for `document.fonts.ready`, then checked a visible element's
+exact computed font shorthand and rendered text with `document.fonts.check`.
+All 366 rows loaded a matching IBM Plex Sans face; mono code values retained the
+separate bundled mono family.
 
 The 1024×768 name-search fixture displayed five 64 px result buttons; the last
 button ended at y=613 while the document remained exactly 1024×768. In the
@@ -160,8 +190,10 @@ press remains part of external physical acceptance.
 
 Representative captures:
 
+- [Long accepted KM at 1280×800](screenshots/station-work-aggregation-long-km-1280x800-ru.jpg)
+- [20-place grid at 1024×768](screenshots/station-work-aggregation-20-grid-1024x768-ru.jpg)
+- [Transport recovery at 1024×768](screenshots/station-box-print-transport-failed-1024x768-ru.jpg)
 - [Russian name search at 1024×768](screenshots/station-login-name-search-1024x768-ru.jpg)
-- [Russian aggregation work screen at 1280×800](screenshots/station-work-aggregation-1280x800-ru.jpg)
 - [Russian exception confirmation at CSS 1280×1024, DPR 2](screenshots/station-exception-confirm-1280x1024-at-2x.jpg)
 - [English long-copy state at 1024×768](screenshots/station-long-copy-1024x768-en.jpg)
 
@@ -170,12 +202,14 @@ The DPR-aware exception capture is 2560×2048 pixels and contains the full
 inner/document/visual 1280×1024, DPR 2, visual scale 1, CSS zoom 1; the confirm
 action remained within bounds at right 1248 and bottom 1004.5 CSS pixels.
 
-The complete 318,015-byte
+The complete 485,002-byte
 [machine-readable browser matrix](station-touch-browser-matrix.json) uses schema
-version 2 and retains all 336 raw state/locale/viewport rows. Each row records
+version 4 and retains all 366 raw state/locale/viewport rows. Each row records
 requested and actual window/document/visual viewport geometry, DPR, zoom,
-computed font, interactive count and minimum target, clipped interactives,
-scroll regions, and pass status; its summary is 336 passed and zero failed.
+computed and loaded font evidence, interactive count and minimum target,
+clipped/overlapping interactives, actual scroll regions, sub-64 actions, and
+required semantic observations and pass status; its summary is 366 passed,
+zero failed, and 6/6 required semantic rows passed.
 Browser environment: in-app Chromium through local Vite with current UI/DB
 source aliases; exact Chromium version not recorded.
 
