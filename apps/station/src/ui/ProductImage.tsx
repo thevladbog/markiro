@@ -68,5 +68,17 @@ export function ProductImage({ exec, productId, productName, image, className }:
   if (!objectUrl || failed) {
     return <div className={`${classes} product-image--fallback`} aria-label={label}>{label}</div>;
   }
-  return <img className={classes} src={objectUrl} alt={label} onError={() => setFailed(true)} />;
+  return (
+    <img
+      className={classes}
+      src={objectUrl}
+      alt={label}
+      onError={() => {
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+        setObjectUrl(null);
+        setFailed(true);
+      }}
+    />
+  );
 }
