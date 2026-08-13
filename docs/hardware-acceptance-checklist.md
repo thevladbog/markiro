@@ -69,8 +69,10 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
 - [ ] After that deployment and before the beta workflow, run
       `pnpm verify:station-production-cors` against production and record a
       PASS. The live preflight must prove the exact Windows `Origin` and Station
-      capability header for `https://admin.markiro.app/station/pair`; CI or a
-      browser run is not a substitute.
+      capability header for every Station route at
+      `https://admin.markiro.app` (pairing, roster, shifts and their open/bundle
+      actions, product lookup, and GTIN check); CI or a browser run is not a
+      substitute.
 - [ ] Only after the preceding preflight passes, run `Publish station beta` from
       `main` for the approved commit SHA. Record the workflow URL and result;
       the build must not be treated as Windows acceptance.
@@ -128,6 +130,20 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
       film used on the line. Confirm taps near adjacent actions do not select
       the wrong control and that repeated scanning does not leave focus on a
       destructive or exit action.
+
+### Live roster and floor recovery (next Station beta)
+
+These checks apply to the packaged Windows beta. Keep them unchecked until the
+named environment and hardware have been exercised; host tests and a browser
+gallery do not replace this record.
+
+- [ ] Create an active Station operator while badge login is already open; scan the new badge without restarting.
+- [ ] Disconnect the network; authenticate a previously cached operator without an HTTP request.
+- [ ] Load, open, create, and rejoin a shift through `https://admin.markiro.app`.
+- [ ] At 1280×800, 1024×768, and 1280×720, verify Update, Change operator, and window-mode controls do not overlap status or each other.
+- [ ] During an active shift, queue a scan, change operator, and verify the same shift resumes with correct old/new attribution.
+- [ ] Exercise keyboard-wedge and configured serial scanner input on Windows/WebView2 hardware.
+- [ ] Reveal and hide the Windows taskbar; verify the footer and all floor actions remain recoverable.
 
 ## Scanner and printer (plans 05b-2, 05b-3)
 

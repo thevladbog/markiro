@@ -1,4 +1,6 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import type { ServerReachability } from "../lib/api-client.js";
 
 /** What the station can honestly say about its scanner. */
 export type ScannerIndicator = "keyboard" | "connected" | "disconnected";
@@ -13,11 +15,11 @@ export interface UpdateIndicatorModel {
 }
 
 export function floorConnectivityState(
-  online: boolean,
+  serverReachable: boolean,
   syncStuck: boolean,
 ): FloorConnectivityState {
   if (syncStuck) return "sync-stuck";
-  return online ? "online" : "offline";
+  return serverReachable ? "online" : "offline";
 }
 
 export interface StatusBarProps {
@@ -25,7 +27,7 @@ export interface StatusBarProps {
   lineName: string | null;
   operatorName: string;
   shiftLabel: string | null;
-  online: boolean;
+  serverReachability: ServerReachability;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
   /** Scans queued on this device, not yet accepted by the server. */
@@ -40,6 +42,9 @@ export interface StatusBarProps {
   conflicts: number;
   update?: UpdateIndicatorModel;
   onOpenUpdates?: () => void;
+  actionsDisabled?: boolean;
+  operatorControl?: ReactNode;
+  windowControl?: ReactNode;
 }
 
 // Persistent floor status bar. Scanner/printer indicators reflect the live
@@ -50,7 +55,7 @@ export function StatusBar({
   lineName,
   operatorName,
   shiftLabel,
-  online,
+  serverReachability,
   scanner,
   printerConfigured,
   syncPending,
@@ -58,6 +63,9 @@ export function StatusBar({
   conflicts,
   update,
   onOpenUpdates,
+  actionsDisabled = false,
+  operatorControl,
+  windowControl,
 }: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
@@ -75,7 +83,28 @@ export function StatusBar({
       : scanner === "disconnected"
         ? t("shell.scannerDisconnected")
         : t("shell.scannerKeyboard");
-  const connectivityState = floorConnectivityState(online, syncStuck);
+  const connectivityState = floorConnectivityState(serverReachability === "reachable", syncStuck);
+  const serverLabel =
+    serverReachability === "checking"
+      ? t("shell.serverChecking")
+      : serverReachability === "reachable"
+        ? t("shell.serverAvailable")
+        : t("shell.serverUnavailable");
+  const updateButton =
+    update && onOpenUpdates ? (
+      <button
+        type="button"
+        className="station-update-indicator"
+        data-update-severity={update.severity}
+        aria-label={`${update.glyph} ${update.label}`}
+        disabled={actionsDisabled}
+        onClick={onOpenUpdates}
+      >
+        <span aria-hidden="true">{update.glyph}</span>
+        <span>{update.label}</span>
+      </button>
+    ) : null;
+
   return (
     <header
       className="station-status-bar"
@@ -94,10 +123,15 @@ export function StatusBar({
       </dl>
       <dl className="station-status-group station-status-group--sync">
         <StatusValue
-          label={t("shell.network")}
-          value={online ? t("shell.online") : t("shell.offline")}
-          tone={online ? "ok" : "warn"}
-          testId="network-status"
+          label={t("shell.server")}
+          value={serverLabel}
+          {...(serverReachability === "reachable"
+            ? { tone: "ok" as const }
+            : serverReachability === "unreachable"
+              ? { tone: "warn" as const }
+              : {})}
+          testId="server-status"
+          live="polite"
         />
         <StatusValue
           label={t("shell.sync")}
@@ -124,18 +158,11 @@ export function StatusBar({
           testId="printer-status"
         />
       </dl>
-      {update && onOpenUpdates ? (
-        <button
-          type="button"
-          className="station-update-indicator"
-          data-update-severity={update.severity}
-          aria-label={`${update.glyph} ${update.label}`}
-          onClick={onOpenUpdates}
-        >
-          <span aria-hidden="true">{update.glyph}</span>
-          <span>{update.label}</span>
-        </button>
-      ) : null}
+      <div className="station-status-actions" role="group" aria-label={t("shell.stationActions")}>
+        {updateButton}
+        {operatorControl}
+        {windowControl}
+      </div>
     </header>
   );
 }
@@ -145,13 +172,16 @@ interface StatusValueProps {
   value: string;
   testId: string;
   tone?: "ok" | "warn";
+  live?: "polite";
 }
 
-function StatusValue({ label, value, testId, tone }: StatusValueProps) {
+function StatusValue({ label, value, testId, tone, live }: StatusValueProps) {
   return (
     <div className="station-status-item" data-tone={tone}>
       <dt>{label}</dt>
-      <dd data-testid={testId}>{value}</dd>
+      <dd data-testid={testId} {...(live ? { role: "status", "aria-live": live } : {})}>
+        {value}
+      </dd>
     </div>
   );
 }

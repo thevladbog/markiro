@@ -122,13 +122,13 @@ const b = (v: boolean) => (v ? 1 : 0);
  * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
  * calls does not actually group these statements — see `journal.ts`'s
  * `recordScan` doc comment for the full story. These are therefore
- * individual statements: the shift upsert, then the product upsert, then
- * `replaceOperatorsMirror`. A failure during the shift or product upsert
- * leaves that half applied until the next successful sync repairs it.
- * Operators no longer share that risk: `replaceOperatorsMirror` publishes
- * the roster atomically on its own (see its doc comment), so a failure
- * partway through it never exposes a removed or deactivated operator to
- * offline sign-in.
+ * individual statements: the shift upsert, then the product upsert. A failure
+ * during either upsert leaves that half applied until the next successful
+ * sync repairs it. `bundle.operators` is deliberately ignored: the live
+ * `/station/operators` sync and initial pairing are the authoritative roster
+ * publishers. Letting an unversioned bundle response publish too would allow
+ * a request captured earlier to overwrite a newer removal, deactivation, or
+ * credential rotation when it finishes later.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
   await upsertBundleBody(exec, bundle);
@@ -210,12 +210,10 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       p.defaultLabelTemplateId,
     ],
   );
-
-  await replaceOperatorsMirror(exec, bundle.operators);
 }
 
 const ACTIVE_SLOT_KEY = "operators_slot";
-const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
+export const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
 type RosterSlot = keyof typeof SLOT_TABLES;
 
 function otherSlot(slot: RosterSlot): RosterSlot {
@@ -244,9 +242,7 @@ async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
 /**
  * Serializes publishes so two overlapping refreshes can never both resolve
  * the same INACTIVE slot as their target. `App.tsx` fires `syncOperatorRoster`
- * unawaited on mount AND again on every `online` event, and `upsertBundle` is
- * a third entry point (see `journal.ts`'s doc comment for the same kind of
- * overlap observed on real devices). Without this, a second refresh that
+ * unawaited on mount AND again on every `online` event. Without this, a second refresh that
  * starts before the first has flipped `station_meta` would resolve the same
  * target slot, race its DELETE/INSERT against the first's, and could end up
  * inserting into what has since become the LIVE slot.
@@ -471,6 +467,29 @@ export async function readShiftContext(
   };
 }
 
+export interface OperatorRosterSnapshot {
+  operators: OperatorMirrorRecord[];
+  generation: string;
+}
+
+function operatorRosterGeneration(operators: OperatorMirrorRecord[]): string {
+  return JSON.stringify(
+    [...operators]
+      .sort((left, right) =>
+        left.operatorId < right.operatorId ? -1 : left.operatorId > right.operatorId ? 1 : 0,
+      )
+      .map((operator) => [
+        operator.operatorId,
+        operator.name,
+        operator.login,
+        operator.role,
+        operator.pinHash,
+        operator.badgeHash,
+        operator.active,
+      ]),
+  );
+}
+
 /**
  * Reads the currently active roster.
  *
@@ -506,8 +525,15 @@ export async function readShiftContext(
  * this upgrade path works before migrations have run. The table names come
  * from `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
  * `publishOperatorsMirror` use — never caller input.
+ * It also derives a content generation from every
+ * field that can affect authentication or the admitted operator identity.
+ * The generation never leaves the device; callers can use it to reject a
+ * credential result if a concurrent double-slot publication changed the
+ * roster while PBKDF2 was running.
  */
-export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+export async function readOperatorRosterSnapshot(
+  exec: SqlExecutor,
+): Promise<OperatorRosterSnapshot> {
   const rows = await exec.all<{
     operator_id: string;
     name: string;
@@ -528,7 +554,7 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
         AND COALESCE((SELECT value FROM station_meta WHERE key = ?), '0') <> '1'`,
     [ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY, ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY],
   );
-  return rows.map((r) => ({
+  const operators = rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,
     // Legacy rows (mirrored before the column existed) read as "", which never
@@ -540,4 +566,9 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     badgeHash: r.badge_hash,
     active: r.active === 1,
   }));
+  return { operators, generation: operatorRosterGeneration(operators) };
+}
+
+export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+  return (await readOperatorRosterSnapshot(exec)).operators;
 }
