@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-13
 
-**Status:** Design approved in chat; written specification review pending
+**Status:** Approved
 
 **Scope:** Station aggregation work screen, box-label recovery, and the default
 SSCC allocation policy
