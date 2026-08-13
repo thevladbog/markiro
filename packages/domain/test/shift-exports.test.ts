@@ -90,24 +90,25 @@ describe("shift export formats", () => {
       },
     ]);
     expect(getShiftExportFormat("shift_txt_flat", 1)).toBe(SHIFT_EXPORT_FORMATS[0]);
+    expect(SHIFT_EXPORT_FORMATS.every(Object.isFrozen)).toBe(true);
   });
 
   it("renders each format with its exact bytes", () => {
-    expect(decode(render("shift_txt_flat", flat).bytes)).toBe("KM-1\\nKM-2\\n");
+    expect(decode(render("shift_txt_flat", flat).bytes)).toBe("KM-1\nKM-2\n");
     expect(decode(render("shift_txt_boxes", boxes).bytes)).toBe(
-      "001234567890123456\\nKM-1\\nKM-2\\n\\n009876543210123456\\nKM-3\\n\\n",
+      "001234567890123456\nKM-1\nKM-2\n\n009876543210123456\nKM-3\n\n",
     );
-    expect(stripBom(render("shift_csv_flat", flat).bytes)).toBe("code\\r\\nKM-1\\r\\nKM-2\\r\\n");
+    expect(stripBom(render("shift_csv_flat", flat).bytes)).toBe("code\r\nKM-1\r\nKM-2\r\n");
     expect(stripBom(render("shift_csv_boxes", boxes).bytes)).toBe(
-      "box_sscc;code\\r\\n001234567890123456;KM-1\\r\\n001234567890123456;KM-2\\r\\n009876543210123456;KM-3\\r\\n",
+      "box_sscc;code\r\n001234567890123456;KM-1\r\n001234567890123456;KM-2\r\n009876543210123456;KM-3\r\n",
     );
   });
 
   it("preserves GS separators, escapes CSV fields, and leaves TXT unprefixed", () => {
-    expect(render("shift_txt_flat", { mode: "flat", codes: ["A\\u001dB"] }).bytes[1]).toBe(0x1d);
+    expect(render("shift_txt_flat", { mode: "flat", codes: ["A\u001dB"] }).bytes[1]).toBe(0x1d);
     expect([...render("shift_txt_flat", flat).bytes.slice(0, 3)]).not.toEqual([0xef, 0xbb, 0xbf]);
-    expect(stripBom(render("shift_csv_flat", { mode: "flat", codes: ["a;b", 'a"b', "a\\rb", "a\\nb"] }).bytes)).toBe(
-      'code\\r\\n"a;b"\\r\\n"a""b"\\r\\n"a\\rb"\\r\\n"a\\nb"\\r\\n',
+    expect(stripBom(render("shift_csv_flat", { mode: "flat", codes: ["a;b", 'a"b', "a\rb", "a\nb"] }).bytes)).toBe(
+      'code\r\n"a;b"\r\n"a""b"\r\n"a\rb"\r\n"a\nb"\r\n',
     );
   });
 });
@@ -122,8 +123,8 @@ describe("shift export splitting", () => {
       boxCount: part.boxCount,
       body: decode(part.bytes),
     }))).toEqual([
-      { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-1\\nKM-2\\n" },
-      { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-3\\nKM-4\\n" },
+      { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-1\nKM-2\n" },
+      { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-3\nKM-4\n" },
     ]);
     expect(renderParts("shift_txt_flat", codes, 3).map((part) => ({
       physicalLineCount: part.physicalLineCount,
@@ -131,8 +132,8 @@ describe("shift export splitting", () => {
       boxCount: part.boxCount,
       body: decode(part.bytes),
     }))).toEqual([
-      { physicalLineCount: 3, codeCount: 3, boxCount: 0, body: "KM-1\\nKM-2\\nKM-3\\n" },
-      { physicalLineCount: 1, codeCount: 1, boxCount: 0, body: "KM-4\\n" },
+      { physicalLineCount: 3, codeCount: 3, boxCount: 0, body: "KM-1\nKM-2\nKM-3\n" },
+      { physicalLineCount: 1, codeCount: 1, boxCount: 0, body: "KM-4\n" },
     ]);
   });
 
@@ -143,8 +144,56 @@ describe("shift export splitting", () => {
       boxCount: part.boxCount,
       body: stripBom(part.bytes),
     }))).toEqual([
-      { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\\r\\nKM-1\\r\\n" },
-      { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\\r\\nKM-2\\r\\n" },
+      { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\r\nKM-1\r\n" },
+      { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\r\nKM-2\r\n" },
+    ]);
+  });
+
+  it("counts embedded CSV line breaks before splitting flat records", () => {
+    expect(
+      renderParts("shift_csv_flat", { mode: "flat", codes: ["A\r\nB", "KM-2"] }, 3).map(
+        (part) => ({
+          physicalLineCount: part.physicalLineCount,
+          codeCount: part.codeCount,
+          body: stripBom(part.bytes),
+        }),
+      ),
+    ).toEqual([
+      { physicalLineCount: 3, codeCount: 1, body: 'code\r\n"A\r\nB"\r\n' },
+      { physicalLineCount: 2, codeCount: 1, body: "code\r\nKM-2\r\n" },
+    ]);
+    expect(() => renderParts("shift_csv_flat", { mode: "flat", codes: ["A\r\nB"] }, 2)).toThrow(
+      new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT"),
+    );
+  });
+
+  it("counts embedded CSV line breaks in indivisible box blocks", () => {
+    const multilineBoxes: ShiftExportSource = {
+      mode: "boxes",
+      boxes: [
+        { sscc: "001234567890123456", codes: ["A\nB"] },
+        { sscc: "009876543210123456", codes: ["KM-2"] },
+      ],
+    };
+
+    expect(renderParts("shift_csv_boxes", multilineBoxes, 3).map((part) => ({
+      physicalLineCount: part.physicalLineCount,
+      codeCount: part.codeCount,
+      boxCount: part.boxCount,
+      body: stripBom(part.bytes),
+    }))).toEqual([
+      {
+        physicalLineCount: 3,
+        codeCount: 1,
+        boxCount: 1,
+        body: 'box_sscc;code\r\n001234567890123456;"A\nB"\r\n',
+      },
+      {
+        physicalLineCount: 2,
+        codeCount: 1,
+        boxCount: 1,
+        body: "box_sscc;code\r\n009876543210123456;KM-2\r\n",
+      },
     ]);
   });
 
@@ -159,13 +208,13 @@ describe("shift export splitting", () => {
         physicalLineCount: 4,
         codeCount: 2,
         boxCount: 1,
-        body: "001234567890123456\\nKM-1\\nKM-2\\n\\n",
+        body: "001234567890123456\nKM-1\nKM-2\n\n",
       },
       {
         physicalLineCount: 3,
         codeCount: 1,
         boxCount: 1,
-        body: "009876543210123456\\nKM-3\\n\\n",
+        body: "009876543210123456\nKM-3\n\n",
       },
     ]);
   });
@@ -181,13 +230,13 @@ describe("shift export splitting", () => {
         physicalLineCount: 3,
         codeCount: 2,
         boxCount: 1,
-        body: "box_sscc;code\\r\\n001234567890123456;KM-1\\r\\n001234567890123456;KM-2\\r\\n",
+        body: "box_sscc;code\r\n001234567890123456;KM-1\r\n001234567890123456;KM-2\r\n",
       },
       {
         physicalLineCount: 2,
         codeCount: 1,
         boxCount: 1,
-        body: "box_sscc;code\\r\\n009876543210123456;KM-3\\r\\n",
+        body: "box_sscc;code\r\n009876543210123456;KM-3\r\n",
       },
     ]);
   });
@@ -238,7 +287,7 @@ describe("shift export splitting", () => {
 describe("shift export filenames", () => {
   it("sanitizes the product segment without losing Cyrillic", () => {
     expect(sanitizeShiftExportFilenameSegment('  Вода / "газ"  ')).toBe("Вода_газ");
-    expect(sanitizeShiftExportFilenameSegment("\\u0000///:::***")).toBe("продукция");
+    expect(sanitizeShiftExportFilenameSegment("\u0000///:::***")).toBe("продукция");
   });
 
   it("uses per-part counts, box counts, and part suffixes only for multipart exports", () => {

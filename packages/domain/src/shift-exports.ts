@@ -53,38 +53,38 @@ export class ShiftExportDomainError extends Error {
 }
 
 export const SHIFT_EXPORT_FORMATS = Object.freeze([
-  {
+  Object.freeze({
     id: "shift_txt_flat",
     version: 1,
     label: "[TXT][Без коробов] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "flat",
-  },
-  {
+  } as const),
+  Object.freeze({
     id: "shift_txt_boxes",
     version: 1,
     label: "[TXT][С коробами] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "boxes",
-  },
-  {
+  } as const),
+  Object.freeze({
     id: "shift_csv_flat",
     version: 1,
     label: "[CSV][Без коробов] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
     boxMode: "flat",
-  },
-  {
+  } as const),
+  Object.freeze({
     id: "shift_csv_boxes",
     version: 1,
     label: "[CSV][С коробами] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
     boxMode: "boxes",
-  },
+  } as const),
 ] as const satisfies readonly ShiftExportFormatDescriptor[]);
 
 const UTF8_BOM = Uint8Array.of(0xef, 0xbb, 0xbf);
@@ -92,6 +92,7 @@ const textEncoder = new TextEncoder();
 
 interface ShiftExportBlock {
   lines: readonly string[];
+  physicalLineCount: number;
   codeCount: number;
   boxCount: number;
 }
@@ -185,21 +186,34 @@ function createBlocks(
   source: ShiftExportSource,
 ): ShiftExportBlock[] {
   if (source.mode === "flat") {
-    return source.codes.map((code) => ({
-      lines: [descriptor.extension === "csv" ? csvField(code) : code],
-      codeCount: 1,
-      boxCount: 0,
-    }));
+    return source.codes.map((code) => {
+      const line = descriptor.extension === "csv" ? csvField(code) : code;
+
+      return {
+        lines: [line],
+        physicalLineCount: descriptor.extension === "csv" ? countCsvPhysicalLines(line) : 1,
+        codeCount: 1,
+        boxCount: 0,
+      };
+    });
   }
 
-  return source.boxes.map((box) => ({
-    lines:
+  return source.boxes.map((box) => {
+    const lines =
       descriptor.extension === "txt"
         ? [box.sscc, ...box.codes, ""]
-        : box.codes.map((code) => `${csvField(box.sscc)};${csvField(code)}`),
-    codeCount: box.codes.length,
-    boxCount: 1,
-  }));
+        : box.codes.map((code) => `${csvField(box.sscc)};${csvField(code)}`);
+
+    return {
+      lines,
+      physicalLineCount:
+        descriptor.extension === "csv"
+          ? lines.reduce((total, line) => total + countCsvPhysicalLines(line), 0)
+          : lines.length,
+      codeCount: box.codes.length,
+      boxCount: 1,
+    };
+  });
 }
 
 function splitBlocks(
@@ -213,7 +227,8 @@ function splitBlocks(
     return [
       {
         blocks,
-        physicalLineCount: headerLines + blocks.reduce((total, block) => total + block.lines.length, 0),
+        physicalLineCount:
+          headerLines + blocks.reduce((total, block) => total + block.physicalLineCount, 0),
       },
     ];
   }
@@ -223,13 +238,13 @@ function splitBlocks(
   let currentPhysicalLineCount = headerLines;
 
   for (const block of blocks) {
-    if (headerLines + block.lines.length > maxLines) {
+    if (headerLines + block.physicalLineCount > maxLines) {
       throw new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT");
     }
 
     if (
       currentBlocks.length > 0 &&
-      currentPhysicalLineCount + block.lines.length > maxLines
+      currentPhysicalLineCount + block.physicalLineCount > maxLines
     ) {
       parts.push({ blocks: currentBlocks, physicalLineCount: currentPhysicalLineCount });
       currentBlocks = [];
@@ -237,7 +252,7 @@ function splitBlocks(
     }
 
     currentBlocks.push(block);
-    currentPhysicalLineCount += block.lines.length;
+    currentPhysicalLineCount += block.physicalLineCount;
   }
 
   parts.push({ blocks: currentBlocks, physicalLineCount: currentPhysicalLineCount });
@@ -282,4 +297,22 @@ function createFilename(input: {
 
 function csvField(value: string): string {
   return /[;"\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value;
+}
+
+function countCsvPhysicalLines(value: string): number {
+  let count = 1;
+
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === "\r") {
+      count += 1;
+      if (value[index + 1] === "\n") {
+        index += 1;
+      }
+    } else if (character === "\n") {
+      count += 1;
+    }
+  }
+
+  return count;
 }
