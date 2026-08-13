@@ -14,6 +14,13 @@ const client = createStationClient({
   apiKey: "k",
   serverUrl: "http://localhost:3000",
 });
+const resolvedProduct = {
+  id: "p1",
+  gtin14: "04600000000015",
+  name: "Cola",
+  status: "active",
+  boxCapacity: null,
+};
 
 function deferredResponse() {
   let settle: (response: Response) => void = () => {};
@@ -27,6 +34,15 @@ function expectButtonDisabled(button: HTMLElement, disabled: boolean) {
   expect(button).toBeInstanceOf(HTMLButtonElement);
   if (!(button instanceof HTMLButtonElement)) throw new Error("expected a button element");
   expect(button.disabled).toBe(disabled);
+}
+
+function submitGtin() {
+  const input = screen.getByLabelText("Type or scan a GTIN");
+  fireEvent.change(input, { target: { value: "4600000000015" } });
+  const form = input.closest("form");
+  expect(form).not.toBeNull();
+  if (!form) throw new Error("new shift GTIN form is missing");
+  fireEvent.submit(form);
 }
 
 describe("NewShift", () => {
@@ -49,28 +65,14 @@ describe("NewShift", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            items: [
-              {
-                id: "p1",
-                gtin14: "04600000000015",
-                name: "Cola",
-                status: "active",
-                boxCapacity: null,
-              },
-            ],
+            items: [resolvedProduct],
           }),
           { status: 200 },
         ),
       );
     const onBack = vi.fn();
     render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
-    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
-      target: { value: "4600000000015" },
-    });
-    const form = screen.getByLabelText("Type or scan a GTIN").closest("form");
-    expect(form).not.toBeNull();
-    if (!form) throw new Error("new shift GTIN form is missing");
-    fireEvent.submit(form);
+    submitGtin();
     await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
 
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -85,28 +87,14 @@ describe("NewShift", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            items: [
-              {
-                id: "p1",
-                gtin14: "04600000000015",
-                name: "Cola",
-                status: "active",
-                boxCapacity: null,
-              },
-            ],
+            items: [resolvedProduct],
           }),
           { status: 200 },
         ),
       );
     const onBack = vi.fn();
     render(<NewShift client={client} onStarted={vi.fn()} onBack={onBack} />);
-    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
-      target: { value: "4600000000015" },
-    });
-    const form = screen.getByLabelText("Type or scan a GTIN").closest("form");
-    expect(form).not.toBeNull();
-    if (!form) throw new Error("new shift GTIN form is missing");
-    fireEvent.submit(form);
+    submitGtin();
 
     const pendingBack = screen.getByRole("button", { name: "Back" });
     await waitFor(() => expectButtonDisabled(pendingBack, true));
@@ -137,15 +125,7 @@ describe("NewShift", () => {
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
-            items: [
-              {
-                id: "p1",
-                gtin14: "04600000000015",
-                name: "Cola",
-                status: "active",
-                boxCapacity: null,
-              },
-            ],
+            items: [resolvedProduct],
           }),
           { status: 200 },
         ),
@@ -159,13 +139,7 @@ describe("NewShift", () => {
     const onBack = vi.fn();
     const onStarted = vi.fn();
     render(<NewShift client={client} onStarted={onStarted} onBack={onBack} />);
-    fireEvent.change(screen.getByLabelText("Type or scan a GTIN"), {
-      target: { value: "4600000000015" },
-    });
-    const form = screen.getByLabelText("Type or scan a GTIN").closest("form");
-    expect(form).not.toBeNull();
-    if (!form) throw new Error("new shift GTIN form is missing");
-    fireEvent.submit(form);
+    submitGtin();
     fireEvent.click(await screen.findByRole("button", { name: "Start" }));
 
     const pendingBack = screen.getByRole("button", { name: "Back" });
