@@ -39,7 +39,7 @@ export class OrgProfileController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(putOrgProfileSchema)) body: PutOrgProfileDto,
   ): Promise<OrgProfileDto> {
-    return this.orgProfileService.upsertProfile(req.tenantId!, body);
+    return this.orgProfileService.upsertProfile(req.tenantId!, req.userId!, body);
   }
 
   @Get("sscc")

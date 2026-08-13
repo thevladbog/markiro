@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { schema } from "@markiro/db";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -66,6 +68,27 @@ describe.skipIf(!ready)("employees e2e", () => {
     return orgId;
   }
 
+  async function ownerUserId(orgId: string): Promise<string> {
+    const [owner] = await setup.db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(and(eq(schema.member.organizationId, orgId), eq(schema.member.role, "owner")));
+    if (!owner) throw new Error(`Expected owner for organization ${orgId}`);
+    return owner.userId;
+  }
+
+  async function employeePolicy(employeeId: string) {
+    const [policy] = await setup.db
+      .select({
+        limitMode: schema.employeePickupPolicies.limitMode,
+        dayLimit: schema.employeePickupPolicies.dayLimit,
+        canWriteoff: schema.employeePickupPolicies.canWriteoff,
+      })
+      .from(schema.employeePickupPolicies)
+      .where(eq(schema.employeePickupPolicies.employeeId, employeeId));
+    return policy;
+  }
+
   it("creates an employee, issues and revokes a badge", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
@@ -76,6 +99,12 @@ describe.skipIf(!ready)("employees e2e", () => {
       .expect(201);
     const id = created.body.id as string;
     expect(created.body.status).toBe("active");
+    expect(created.body.pickupPolicy).toEqual({
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: false,
+    });
+    expect(await employeePolicy(id)).toEqual(created.body.pickupPolicy);
 
     const withBadge = await agent
       .post(`/employees/${id}/badges`)
@@ -177,6 +206,236 @@ describe.skipIf(!ready)("employees e2e", () => {
     expect(patched.body.status).toBe(created.body.status);
 
     await agent.patch(`/employees/${randomUUID()}`).send({}).expect(404);
+  });
+
+  it("updates only this tenant employee pickup policy and audits exact before/after", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(owner);
+    const actorUserId = await ownerUserId(tenantId);
+    const created = await owner.post("/employees").send({ fullName: "Политика" }).expect(201);
+    const employeeId = created.body.id as string;
+
+    const response = await owner
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "unlimited", dayLimit: 12, canWriteoff: true })
+      .expect(200);
+
+    expect(response.body.pickupPolicy).toEqual({
+      limitMode: "unlimited",
+      dayLimit: 12,
+      canWriteoff: true,
+    });
+    const [audit] = await setup.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+          eq(schema.tenantAuditEvents.targetId, employeeId),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      organizationId: tenantId,
+      actorUserId,
+      action: "employee.pickup_policy.updated",
+      outcome: "success",
+      targetType: "employee",
+      targetId: employeeId,
+      before: { limitMode: "limited", dayLimit: 5, canWriteoff: false },
+      after: { limitMode: "unlimited", dayLimit: 12, canWriteoff: true },
+    });
+
+    const foreign = request.agent(app!.getHttpServer());
+    await signUpAndActivate(foreign);
+    await foreign
+      .patch(`/employees/${employeeId}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 3, canWriteoff: false })
+      .expect(404);
+    expect(await employeePolicy(employeeId)).toEqual(response.body.pickupPolicy);
+  });
+
+  it("reports a missing active employee pickup policy as a configuration error", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(owner);
+    const created = await owner.post("/employees").send({ fullName: "Без политики" }).expect(201);
+    const employeeId = created.body.id as string;
+    await setup.db
+      .delete(schema.employeePickupPolicies)
+      .where(
+        and(
+          eq(schema.employeePickupPolicies.tenantId, tenantId),
+          eq(schema.employeePickupPolicies.employeeId, employeeId),
+        ),
+      );
+
+    const response = await owner.get("/employees").expect(500);
+    expect(response.body.message).toBe("Employee pickup policy is not configured");
+  });
+
+  it("bulk limit assignment preserves writeoff permission", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(owner);
+    const actorUserId = await ownerUserId(tenantId);
+    const first = await owner.post("/employees").send({ fullName: "Первый" }).expect(201);
+    const second = await owner.post("/employees").send({ fullName: "Второй" }).expect(201);
+    await owner
+      .patch(`/employees/${first.body.id}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 5, canWriteoff: true })
+      .expect(200);
+
+    const result = await owner
+      .patch("/employees/pickup-policy/limits")
+      .send({
+        employeeIds: [first.body.id, second.body.id],
+        limitMode: "unlimited",
+        dayLimit: 17,
+      })
+      .expect(200);
+
+    expect(result.body.items).toEqual([
+      {
+        employeeId: first.body.id,
+        limitMode: "unlimited",
+        dayLimit: 17,
+        canWriteoff: true,
+      },
+      {
+        employeeId: second.body.id,
+        limitMode: "unlimited",
+        dayLimit: 17,
+        canWriteoff: false,
+      },
+    ]);
+    const audits = await setup.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+          inArray(schema.tenantAuditEvents.targetId, [first.body.id, second.body.id]),
+        ),
+      );
+    const bulkAudits = audits
+      .filter((audit) => (audit.after as { dayLimit?: number } | null)?.dayLimit === 17)
+      .sort((left, right) => left.targetId!.localeCompare(right.targetId!));
+    expect(bulkAudits).toEqual(
+      [
+        {
+          employeeId: first.body.id,
+          before: { limitMode: "limited", dayLimit: 5, canWriteoff: true },
+          after: { limitMode: "unlimited", dayLimit: 17, canWriteoff: true },
+        },
+        {
+          employeeId: second.body.id,
+          before: { limitMode: "limited", dayLimit: 5, canWriteoff: false },
+          after: { limitMode: "unlimited", dayLimit: 17, canWriteoff: false },
+        },
+      ]
+        .sort((left, right) => left.employeeId.localeCompare(right.employeeId))
+        .map(({ employeeId, before, after }) =>
+          expect.objectContaining({
+            organizationId: tenantId,
+            actorUserId,
+            outcome: "success",
+            targetType: "employee",
+            targetId: employeeId,
+            before,
+            after,
+          }),
+        ),
+    );
+  });
+
+  it("bulk writeoff assignment preserves each numeric limit and mode", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+    const first = await owner.post("/employees").send({ fullName: "Первый" }).expect(201);
+    const second = await owner.post("/employees").send({ fullName: "Второй" }).expect(201);
+    await owner
+      .patch(`/employees/${first.body.id}/pickup-policy`)
+      .send({ limitMode: "unlimited", dayLimit: 11, canWriteoff: false })
+      .expect(200);
+    await owner
+      .patch(`/employees/${second.body.id}/pickup-policy`)
+      .send({ limitMode: "limited", dayLimit: 7, canWriteoff: false })
+      .expect(200);
+
+    const result = await owner
+      .patch("/employees/pickup-policy/writeoff-permission")
+      .send({ employeeIds: [first.body.id, second.body.id], canWriteoff: true })
+      .expect(200);
+
+    expect(result.body.items).toEqual([
+      {
+        employeeId: first.body.id,
+        limitMode: "unlimited",
+        dayLimit: 11,
+        canWriteoff: true,
+      },
+      {
+        employeeId: second.body.id,
+        limitMode: "limited",
+        dayLimit: 7,
+        canWriteoff: true,
+      },
+    ]);
+  });
+
+  it("bounds bulk employee policy assignments to 500 ids", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(owner);
+    await owner
+      .patch("/employees/pickup-policy/limits")
+      .send({
+        employeeIds: Array.from({ length: 501 }, () => randomUUID()),
+        limitMode: "limited",
+        dayLimit: 5,
+      })
+      .expect(400);
+  });
+
+  it("fails a bulk assignment atomically when any employee belongs to another tenant", async () => {
+    const owner = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(owner);
+    const local = await owner.post("/employees").send({ fullName: "Свой" }).expect(201);
+    const foreignOwner = request.agent(app!.getHttpServer());
+    await signUpAndActivate(foreignOwner);
+    const foreign = await foreignOwner.post("/employees").send({ fullName: "Чужой" }).expect(201);
+
+    await owner
+      .patch("/employees/pickup-policy/limits")
+      .send({
+        employeeIds: [local.body.id, foreign.body.id],
+        limitMode: "limited",
+        dayLimit: 19,
+      })
+      .expect(404);
+
+    expect(await employeePolicy(local.body.id)).toEqual({
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: false,
+    });
+    expect(await employeePolicy(foreign.body.id)).toEqual({
+      limitMode: "limited",
+      dayLimit: 5,
+      canWriteoff: false,
+    });
+    const localAudits = await setup.db
+      .select({ id: schema.tenantAuditEvents.id })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "employee.pickup_policy.updated"),
+          eq(schema.tenantAuditEvents.targetId, local.body.id),
+        ),
+      );
+    expect(localAudits).toHaveLength(0);
   });
 
   // Routes carry no global prefix — only Better Auth's own `/api/auth/*` mount

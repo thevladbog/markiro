@@ -103,6 +103,9 @@ export class TenantProvisioningService {
         slug: input.tenantSlug,
         createdAt: operationAt,
       });
+      await tx
+        .insert(schema.pickupTenantPolicies)
+        .values({ tenantId: tenant.id, limitsEnabled: true, updatedAt: operationAt });
     }
 
     let [user] = await tx

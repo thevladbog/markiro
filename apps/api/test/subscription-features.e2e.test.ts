@@ -86,7 +86,10 @@ describe("subscription route classification", () => {
     [CounterpartiesController.prototype, "deleteCounterparty", { mode: "write" }],
     [CounterpartiesController.prototype, "putSscc", { mode: "write" }],
     [EmployeesController.prototype, "createEmployee", { mode: "write" }],
+    [EmployeesController.prototype, "bulkUpdatePickupLimits", { mode: "write" }],
+    [EmployeesController.prototype, "bulkUpdatePickupWriteoff", { mode: "write" }],
     [EmployeesController.prototype, "updateEmployee", { mode: "write" }],
+    [EmployeesController.prototype, "updatePickupPolicy", { mode: "write" }],
     [EmployeesController.prototype, "archiveEmployee", { mode: "write" }],
     [EmployeesController.prototype, "issueBadge", { mode: "write" }],
     [

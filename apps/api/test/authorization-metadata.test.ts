@@ -90,7 +90,10 @@ const OPERATIONAL_CONTROLLERS: readonly [
     {
       listEmployees: readPolicy,
       createEmployee: writePolicy,
+      bulkUpdatePickupLimits: writePolicy,
+      bulkUpdatePickupWriteoff: writePolicy,
       updateEmployee: writePolicy,
+      updatePickupPolicy: writePolicy,
       archiveEmployee: writePolicy,
       issueBadge: writePolicy,
       revokeBadge: writePolicy,

@@ -23,16 +23,23 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  bulkEmployeePickupLimitsSchema,
+  bulkEmployeePickupWriteoffSchema,
   createEmployeeSchema,
+  employeePickupPolicySchema,
   issueBadgeSchema,
   listEmployeesQuerySchema,
   updateEmployeeSchema,
+  type BulkEmployeePickupLimitsDto,
+  type BulkEmployeePickupPolicyResponseDto,
+  type BulkEmployeePickupWriteoffDto,
   type CreateEmployeeDto,
   type EmployeeDto,
   type IssueBadgeDto,
   type ListEmployeesQueryDto,
   type ListEmployeesResponseDto,
   type UpdateEmployeeDto,
+  type UpdateEmployeePickupPolicyDto,
 } from "./dto";
 import { EmployeesService } from "./employees.service";
 
@@ -67,6 +74,28 @@ export class EmployeesController {
     return this.employeesService.createEmployee(req.tenantId!, body);
   }
 
+  @Patch("pickup-policy/limits")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  async bulkUpdatePickupLimits(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(bulkEmployeePickupLimitsSchema))
+    body: BulkEmployeePickupLimitsDto,
+  ): Promise<BulkEmployeePickupPolicyResponseDto> {
+    return this.employeesService.bulkUpdatePickupLimits(req.tenantId!, req.userId!, body);
+  }
+
+  @Patch("pickup-policy/writeoff-permission")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  async bulkUpdatePickupWriteoff(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(bulkEmployeePickupWriteoffSchema))
+    body: BulkEmployeePickupWriteoffDto,
+  ): Promise<BulkEmployeePickupPolicyResponseDto> {
+    return this.employeesService.bulkUpdatePickupWriteoff(req.tenantId!, req.userId!, body);
+  }
+
   @Patch(":id")
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
@@ -76,6 +105,17 @@ export class EmployeesController {
     @Body(new ZodValidationPipe(updateEmployeeSchema)) body: UpdateEmployeeDto,
   ): Promise<EmployeeDto> {
     return this.employeesService.updateEmployee(req.tenantId!, id, body);
+  }
+
+  @Patch(":id/pickup-policy")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  async updatePickupPolicy(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(employeePickupPolicySchema)) body: UpdateEmployeePickupPolicyDto,
+  ): Promise<EmployeeDto> {
+    return this.employeesService.updatePickupPolicy(req.tenantId!, req.userId!, id, body);
   }
 
   @Delete(":id")

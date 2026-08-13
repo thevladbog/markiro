@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { and, desc, eq } from "drizzle-orm";
+import { schema } from "@markiro/db";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
@@ -66,7 +68,11 @@ describe.skipIf(!ready)("org profile e2e", () => {
       })
       .expect(200);
 
-    return org.body.id as string;
+    const orgId = org.body.id as string;
+    await setup.db
+      .insert(schema.pickupTenantPolicies)
+      .values({ tenantId: orgId, limitsEnabled: true });
+    return orgId;
   }
 
   it("GET /org/profile is unauthorized without a session", async () => {
@@ -87,7 +93,12 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .expect(200);
 
     const res = await agent.get("/org/profile").expect(200);
-    expect(res.body).toEqual({ gln: null, gs1Prefixes: [], inn: null });
+    expect(res.body).toEqual({
+      gln: null,
+      gs1Prefixes: [],
+      inn: null,
+      pickupLimitsEnabled: true,
+    });
   });
 
   it("PUT /org/profile upserts and roundtrips through GET", async () => {
@@ -106,6 +117,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: ["4600000", "4600001"],
       inn: "7701234567",
+      pickupLimitsEnabled: true,
     });
 
     const get = await agent.get("/org/profile").expect(200);
@@ -127,6 +139,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7709876543",
+      pickupLimitsEnabled: true,
     });
   });
 
@@ -169,6 +182,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7701234567",
+      pickupLimitsEnabled: true,
     });
 
     // Verify GET sees the merged state
@@ -177,6 +191,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7701234567",
+      pickupLimitsEnabled: true,
     });
   });
 
@@ -197,7 +212,60 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .expect(200);
 
     const res = await agent2.get("/org/profile").expect(200);
-    expect(res.body).toEqual({ gln: null, gs1Prefixes: [], inn: null });
+    expect(res.body).toEqual({
+      gln: null,
+      gs1Prefixes: [],
+      inn: null,
+      pickupLimitsEnabled: true,
+    });
+  });
+
+  it("updates the tenant pickup limit switch and audits exact before/after", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+    const [owner] = await setup.db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(and(eq(schema.member.organizationId, orgId), eq(schema.member.role, "owner")));
+    if (!owner) throw new Error(`Expected owner for organization ${orgId}`);
+
+    const updated = await agent
+      .put("/org/profile")
+      .send({ pickupLimitsEnabled: false })
+      .expect(200);
+    expect(updated.body).toEqual({
+      gln: null,
+      gs1Prefixes: [],
+      inn: null,
+      pickupLimitsEnabled: false,
+    });
+
+    const [audit] = await setup.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, orgId),
+          eq(schema.tenantAuditEvents.action, "tenant.pickup_policy.updated"),
+          eq(schema.tenantAuditEvents.targetId, orgId),
+        ),
+      )
+      .orderBy(desc(schema.tenantAuditEvents.createdAt))
+      .limit(1);
+    expect(audit).toMatchObject({
+      organizationId: orgId,
+      actorUserId: owner.userId,
+      action: "tenant.pickup_policy.updated",
+      outcome: "success",
+      targetType: "tenant",
+      targetId: orgId,
+      before: { limitsEnabled: true },
+      after: { limitsEnabled: false },
+    });
   });
 
   // Routes carry no global prefix -- only Better Auth's own `/api/auth/*`
