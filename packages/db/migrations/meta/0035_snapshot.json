@@ -1,5 +1,5 @@
 {
-  "id": "b68cc4bc-78bb-42ab-bed7-9e9e1a0a41b6",
+  "id": "ff1d30ba-a96b-468e-b82f-b7840bf41930",
   "prevId": "b7e29bb3-78d3-4ec0-9079-68d42ed30cc6",
   "version": "7",
   "dialect": "postgresql",
@@ -7109,6 +7109,158 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.commercial_offer_documents": {
+      "name": "commercial_offer_documents",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "format": {
+          "name": "format",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'pending'"
+        },
+        "object_key": {
+          "name": "object_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "content_type": {
+          "name": "content_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sha256": {
+          "name": "sha256",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "renderer_version": {
+          "name": "renderer_version",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "commercial_offer_documents_tenant_offer_fk": {
+          "name": "commercial_offer_documents_tenant_offer_fk",
+          "tableFrom": "commercial_offer_documents",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "commercial_offer_documents_tenant_id_uq": {
+          "name": "commercial_offer_documents_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "commercial_offer_documents_offer_revision_format_uq": {
+          "name": "commercial_offer_documents_offer_revision_format_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "offer_id",
+            "revision",
+            "format"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "commercial_offer_documents_revision_positive": {
+          "name": "commercial_offer_documents_revision_positive",
+          "value": "\"commercial_offer_documents\".\"revision\" > 0"
+        },
+        "commercial_offer_documents_format_check": {
+          "name": "commercial_offer_documents_format_check",
+          "value": "\"commercial_offer_documents\".\"format\" in ('pdf', 'html')"
+        },
+        "commercial_offer_documents_status_check": {
+          "name": "commercial_offer_documents_status_check",
+          "value": "\"commercial_offer_documents\".\"status\" in ('pending', 'ready', 'failed')"
+        },
+        "commercial_offer_documents_ready_metadata_check": {
+          "name": "commercial_offer_documents_ready_metadata_check",
+          "value": "\"commercial_offer_documents\".\"status\" <> 'ready' or (\"commercial_offer_documents\".\"object_key\" is not null and \"commercial_offer_documents\".\"sha256\" is not null and \"commercial_offer_documents\".\"byte_size\" is not null)"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.commercial_offer_lines": {
       "name": "commercial_offer_lines",
       "schema": "",
@@ -7319,6 +7471,159 @@
       },
       "isRLSEnabled": false
     },
+    "public.commercial_offer_print_snapshots": {
+      "name": "commercial_offer_print_snapshots",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "offer_id": {
+          "name": "offer_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "revision": {
+          "name": "revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "published_at": {
+          "name": "published_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "seller_snapshot": {
+          "name": "seller_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "buyer_snapshot": {
+          "name": "buyer_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "lines_snapshot": {
+          "name": "lines_snapshot",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "subtotal": {
+          "name": "subtotal",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "vat_total": {
+          "name": "vat_total",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total": {
+          "name": "total",
+          "type": "numeric(14, 2)",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "terms_markdown": {
+          "name": "terms_markdown",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terms_html": {
+          "name": "terms_html",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "commercial_offer_print_snapshots_tenant_offer_fk": {
+          "name": "commercial_offer_print_snapshots_tenant_offer_fk",
+          "tableFrom": "commercial_offer_print_snapshots",
+          "tableTo": "commercial_offers",
+          "columnsFrom": [
+            "tenant_id",
+            "offer_id"
+          ],
+          "columnsTo": [
+            "tenant_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "commercial_offer_print_snapshots_tenant_id_uq": {
+          "name": "commercial_offer_print_snapshots_tenant_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "id"
+          ]
+        },
+        "commercial_offer_print_snapshots_offer_revision_uq": {
+          "name": "commercial_offer_print_snapshots_offer_revision_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "offer_id",
+            "revision"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "commercial_offer_print_snapshots_revision_positive": {
+          "name": "commercial_offer_print_snapshots_revision_positive",
+          "value": "\"commercial_offer_print_snapshots\".\"revision\" > 0"
+        },
+        "commercial_offer_print_snapshots_totals_nonnegative": {
+          "name": "commercial_offer_print_snapshots_totals_nonnegative",
+          "value": "\"commercial_offer_print_snapshots\".\"subtotal\" >= 0 and \"commercial_offer_print_snapshots\".\"vat_total\" >= 0 and \"commercial_offer_print_snapshots\".\"total\" >= 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
     "public.commercial_offers": {
       "name": "commercial_offers",
       "schema": "",
@@ -7363,6 +7668,12 @@
           "notNull": true,
           "default": "'draft'"
         },
+        "number": {
+          "name": "number",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "total": {
           "name": "total",
           "type": "numeric(14, 2)",
@@ -7373,6 +7684,12 @@
         "expires_at": {
           "name": "expires_at",
           "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "terms_markdown": {
+          "name": "terms_markdown",
+          "type": "text",
           "primaryKey": false,
           "notNull": false
         },
@@ -7480,6 +7797,13 @@
           "columns": [
             "tenant_id",
             "id"
+          ]
+        },
+        "commercial_offers_number_uq": {
+          "name": "commercial_offers_number_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "number"
           ]
         },
         "commercial_offers_tenant_family_revision_uq": {
@@ -10482,433 +10806,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.shift_export_artifacts": {
-      "name": "shift_export_artifacts",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "export_id": {
-          "name": "export_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "part_number": {
-          "name": "part_number",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "physical_line_count": {
-          "name": "physical_line_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "code_count": {
-          "name": "code_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "box_count": {
-          "name": "box_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "filename": {
-          "name": "filename",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "mime_type": {
-          "name": "mime_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "bigint",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sha256": {
-          "name": "sha256",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "object_key": {
-          "name": "object_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "shift_export_artifacts_tenant_id_organization_id_fk": {
-          "name": "shift_export_artifacts_tenant_id_organization_id_fk",
-          "tableFrom": "shift_export_artifacts",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "shift_export_artifacts_tenant_export_fk": {
-          "name": "shift_export_artifacts_tenant_export_fk",
-          "tableFrom": "shift_export_artifacts",
-          "tableTo": "shift_exports",
-          "columnsFrom": [
-            "tenant_id",
-            "export_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "shift_export_artifacts_tenant_id_uq": {
-          "name": "shift_export_artifacts_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "shift_export_artifacts_tenant_export_part_uq": {
-          "name": "shift_export_artifacts_tenant_export_part_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "export_id",
-            "part_number"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "shift_export_artifacts_part_number_positive": {
-          "name": "shift_export_artifacts_part_number_positive",
-          "value": "\"shift_export_artifacts\".\"part_number\" > 0"
-        },
-        "shift_export_artifacts_physical_line_count_positive": {
-          "name": "shift_export_artifacts_physical_line_count_positive",
-          "value": "\"shift_export_artifacts\".\"physical_line_count\" > 0"
-        },
-        "shift_export_artifacts_code_count_positive": {
-          "name": "shift_export_artifacts_code_count_positive",
-          "value": "\"shift_export_artifacts\".\"code_count\" > 0"
-        },
-        "shift_export_artifacts_box_count_nonnegative": {
-          "name": "shift_export_artifacts_box_count_nonnegative",
-          "value": "\"shift_export_artifacts\".\"box_count\" >= 0"
-        },
-        "shift_export_artifacts_byte_size_positive": {
-          "name": "shift_export_artifacts_byte_size_positive",
-          "value": "\"shift_export_artifacts\".\"byte_size\" > 0"
-        },
-        "shift_export_artifacts_sha256_check": {
-          "name": "shift_export_artifacts_sha256_check",
-          "value": "\"shift_export_artifacts\".\"sha256\" ~ '^[0-9a-f]{64}$'"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.shift_exports": {
-      "name": "shift_exports",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "shift_id": {
-          "name": "shift_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "format_id": {
-          "name": "format_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "format_version": {
-          "name": "format_version",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "max_lines": {
-          "name": "max_lines",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "shift_export_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'queued'"
-        },
-        "error_code": {
-          "name": "error_code",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "product_name_snapshot": {
-          "name": "product_name_snapshot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "shift_date_snapshot": {
-          "name": "shift_date_snapshot",
-          "type": "date",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "total_code_count": {
-          "name": "total_code_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "total_box_count": {
-          "name": "total_box_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "created_by_user_id": {
-          "name": "created_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "idempotency_key": {
-          "name": "idempotency_key",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "source_snapshot_started_at": {
-          "name": "source_snapshot_started_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "completed_at": {
-          "name": "completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "attempt_count": {
-          "name": "attempt_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "shift_exports_tenant_shift_created_idx": {
-          "name": "shift_exports_tenant_shift_created_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "shift_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "shift_exports_queued_created_idx": {
-          "name": "shift_exports_queued_created_idx",
-          "columns": [
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "where": "\"shift_exports\".\"status\" = 'queued'",
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "shift_exports_tenant_id_organization_id_fk": {
-          "name": "shift_exports_tenant_id_organization_id_fk",
-          "tableFrom": "shift_exports",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "shift_exports_created_by_user_id_user_id_fk": {
-          "name": "shift_exports_created_by_user_id_user_id_fk",
-          "tableFrom": "shift_exports",
-          "tableTo": "user",
-          "columnsFrom": [
-            "created_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "shift_exports_tenant_shift_fk": {
-          "name": "shift_exports_tenant_shift_fk",
-          "tableFrom": "shift_exports",
-          "tableTo": "shifts",
-          "columnsFrom": [
-            "tenant_id",
-            "shift_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "shift_exports_tenant_id_uq": {
-          "name": "shift_exports_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "shift_exports_tenant_idempotency_uq": {
-          "name": "shift_exports_tenant_idempotency_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "created_by_user_id",
-            "idempotency_key"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "shift_exports_format_version_positive": {
-          "name": "shift_exports_format_version_positive",
-          "value": "\"shift_exports\".\"format_version\" > 0"
-        },
-        "shift_exports_max_lines_range": {
-          "name": "shift_exports_max_lines_range",
-          "value": "\"shift_exports\".\"max_lines\" is null or \"shift_exports\".\"max_lines\" between 2 and 1000000"
-        },
-        "shift_exports_total_code_count_positive": {
-          "name": "shift_exports_total_code_count_positive",
-          "value": "\"shift_exports\".\"total_code_count\" is null or \"shift_exports\".\"total_code_count\" > 0"
-        },
-        "shift_exports_total_box_count_nonnegative": {
-          "name": "shift_exports_total_box_count_nonnegative",
-          "value": "\"shift_exports\".\"total_box_count\" is null or \"shift_exports\".\"total_box_count\" >= 0"
-        },
-        "shift_exports_attempt_count_nonnegative": {
-          "name": "shift_exports_attempt_count_nonnegative",
-          "value": "\"shift_exports\".\"attempt_count\" >= 0"
-        },
-        "shift_exports_status_consistency": {
-          "name": "shift_exports_status_consistency",
-          "value": "(\"shift_exports\".\"status\" = 'ready' and \"shift_exports\".\"completed_at\" is not null and \"shift_exports\".\"error_code\" is null)\n        or (\"shift_exports\".\"status\" = 'failed' and \"shift_exports\".\"completed_at\" is not null and \"shift_exports\".\"error_code\" is not null)\n        or (\"shift_exports\".\"status\" in ('queued', 'processing') and \"shift_exports\".\"completed_at\" is null and \"shift_exports\".\"error_code\" is null)"
-        }
-      },
-      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -11226,16 +11123,6 @@
       "values": [
         "manual",
         "bank_import"
-      ]
-    },
-    "public.shift_export_status": {
-      "name": "shift_export_status",
-      "schema": "public",
-      "values": [
-        "queued",
-        "processing",
-        "ready",
-        "failed"
       ]
     }
   },

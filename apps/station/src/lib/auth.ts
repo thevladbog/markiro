@@ -1,5 +1,5 @@
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
-import { readOperatorsMirror, type SqlExecutor } from "./mirror.js";
+import { readOperatorRosterSnapshot, type SqlExecutor } from "./mirror.js";
 import { verifyBadge, verifyPin } from "./crypto.js";
 
 /**
@@ -40,9 +40,11 @@ export async function verifyOperatorPin(
 ): Promise<OperatorMirrorRecord | null> {
   if (!/^\d{4,6}$/.test(pin)) return null;
   if (!/^\d{3,12}$/.test(login)) return null;
-  const operator = (await readOperatorsMirror(exec)).find((op) => op.active && op.login === login);
+  const snapshot = await readOperatorRosterSnapshot(exec);
+  const operator = snapshot.operators.find((op) => op.active && op.login === login);
   const ok = await verifyPin(pin, operator ? operator.pinHash : DUMMY_PHC);
-  return ok && operator ? operator : null;
+  const current = await readOperatorRosterSnapshot(exec);
+  return ok && operator && current.generation === snapshot.generation ? operator : null;
 }
 
 /** Returns the matching active operator for a scanned badge string, or null. */
@@ -51,8 +53,12 @@ export async function verifyOperatorBadge(
   code: string,
 ): Promise<OperatorMirrorRecord | null> {
   if (code.length === 0) return null;
-  for (const op of await readOperatorsMirror(exec)) {
-    if (op.active && op.badgeHash && (await verifyBadge(code, op.badgeHash))) return op;
+  const snapshot = await readOperatorRosterSnapshot(exec);
+  for (const op of snapshot.operators) {
+    if (op.active && op.badgeHash && (await verifyBadge(code, op.badgeHash))) {
+      const current = await readOperatorRosterSnapshot(exec);
+      return current.generation === snapshot.generation ? op : null;
+    }
   }
   return null;
 }

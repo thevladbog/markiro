@@ -1,5 +1,9 @@
 {
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
-  "compilerOptions": { "tsConfigPath": "tsconfig.build.json" }
+  "compilerOptions": {
+    "tsConfigPath": "tsconfig.build.json",
+    "assets": ["modules/billing/assets/**/*"],
+    "watchAssets": true
+  }
 }

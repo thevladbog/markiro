@@ -5,6 +5,8 @@ import {
 
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "pairing-recovery",
+  "floor-header-actions",
+  "floor-header-window-error",
   "long-copy-ru",
   "long-copy-en",
 ] as const;
@@ -41,6 +43,7 @@ export type GalleryFixtureKind =
   | "sync"
   | "print"
   | "updates"
+  | "floor-header"
   | "long-copy";
 
 export interface GalleryFixture {
@@ -164,6 +167,18 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "update-urgent", kind: "updates", variant: "urgent", source: "synthetic" },
   { id: "update-error", kind: "updates", variant: "error", source: "synthetic" },
   { id: "update-active-shift", kind: "updates", variant: "active-shift", source: "synthetic" },
+  {
+    id: "floor-header-actions",
+    kind: "floor-header",
+    variant: "actions",
+    source: "synthetic",
+  },
+  {
+    id: "floor-header-window-error",
+    kind: "floor-header",
+    variant: "window-error",
+    source: "synthetic",
+  },
   { id: "print-verification", kind: "print", variant: "waiting", source: "synthetic" },
   { id: "print-mismatch", kind: "print", variant: "mismatch", source: "synthetic" },
   { id: "print-not-sscc", kind: "print", variant: "not-sscc", source: "synthetic" },
