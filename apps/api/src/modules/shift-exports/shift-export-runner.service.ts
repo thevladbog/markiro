@@ -7,7 +7,7 @@ import {
   type ShiftExportPart,
 } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, lte, or, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import {
@@ -31,6 +31,8 @@ export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
 type ShiftExportSafeErrorCode = (typeof SHIFT_EXPORT_SAFE_ERROR_CODES)[number];
 type ShiftExportRow = typeof schema.shiftExports.$inferSelect;
 type ShiftExportTx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+const PROCESSING_LEASE_MS = 60 * 60 * 1_000;
 
 interface AttemptContext {
   retryCount: number;
@@ -57,13 +59,15 @@ export class ShiftExportRunnerService {
     if (!claimed) return;
 
     const uploaded: UploadedArtifact[] = [];
+    const attemptedObjectKeys: string[] = [];
     let infrastructureErrorCode: ShiftExportSafeErrorCode = "GENERATION_FAILED";
+    let publicationAttempted = false;
 
     try {
       const format = getShiftExportFormat(claimed.formatId, claimed.formatVersion);
       const snapshot = await this.source.load(claimed.tenantId, claimed.shiftId, format.boxMode);
 
-      await this.db
+      const snapshotUpdates = await this.db
         .update(schema.shiftExports)
         .set({
           productNameSnapshot: snapshot.productName,
@@ -73,11 +77,11 @@ export class ShiftExportRunnerService {
         })
         .where(
           and(
-            eq(schema.shiftExports.tenantId, claimed.tenantId),
-            eq(schema.shiftExports.id, claimed.id),
-            eq(schema.shiftExports.status, "processing"),
+            this.ownedProcessingAttempt(claimed),
           ),
-        );
+        )
+        .returning({ id: schema.shiftExports.id });
+      if (snapshotUpdates.length === 0) throw new ShiftExportClaimLostError();
 
       const parts = renderShiftExport({
         formatId: format.id,
@@ -90,17 +94,31 @@ export class ShiftExportRunnerService {
 
       infrastructureErrorCode = "STORAGE_FAILED";
       for (const part of parts) {
+        await this.refreshLease(claimed);
         const body = Buffer.from(part.bytes);
         const sha256 = createHash("sha256").update(body).digest("hex");
         const objectKey = this.objectKey(claimed, part, format.extension);
+        attemptedObjectKeys.push(objectKey);
         const stored = await this.storage.putVerified(objectKey, body, part.mimeType, sha256);
         uploaded.push({ part, objectKey, byteSize: stored.byteSize, sha256 });
       }
 
       infrastructureErrorCode = "GENERATION_FAILED";
+      publicationAttempted = true;
       await this.publishReady(claimed, uploaded);
     } catch (error) {
-      await Promise.allSettled(uploaded.map(({ objectKey }) => this.storage.delete(objectKey)));
+      if (publicationAttempted) {
+        try {
+          if (await this.hasCommittedPublication(claimed)) return;
+        } catch {
+          // The commit outcome is still ambiguous. Preserve objects and let the lease expire.
+          throw error;
+        }
+      }
+
+      await Promise.allSettled(attemptedObjectKeys.map((key) => this.storage.delete(key)));
+
+      if (error instanceof ShiftExportClaimLostError) return;
 
       const safeErrorCode = safeDomainErrorCode(error);
       if (safeErrorCode !== null) {
@@ -125,6 +143,7 @@ export class ShiftExportRunnerService {
       .limit(1);
     if (!candidate) return undefined;
 
+    const leaseCutoff = new Date(Date.now() - PROCESSING_LEASE_MS);
     const [claimed] = await this.db
       .update(schema.shiftExports)
       .set({
@@ -136,12 +155,28 @@ export class ShiftExportRunnerService {
         and(
           eq(schema.shiftExports.tenantId, candidate.tenantId),
           eq(schema.shiftExports.id, exportId),
-          eq(schema.shiftExports.status, "queued"),
+          eq(schema.shiftExports.attemptCount, candidate.attemptCount),
+          or(
+            eq(schema.shiftExports.status, "queued"),
+            and(
+              eq(schema.shiftExports.status, "processing"),
+              lte(schema.shiftExports.updatedAt, leaseCutoff),
+            ),
+          ),
         ),
       )
       .returning();
 
     return claimed;
+  }
+
+  private async refreshLease(claimed: ShiftExportRow): Promise<void> {
+    const refreshed = await this.db
+      .update(schema.shiftExports)
+      .set({ updatedAt: new Date() })
+      .where(this.ownedProcessingAttempt(claimed))
+      .returning({ id: schema.shiftExports.id });
+    if (refreshed.length === 0) throw new ShiftExportClaimLostError();
   }
 
   private objectKey(
@@ -176,7 +211,7 @@ export class ShiftExportRunnerService {
           objectKey,
         })),
       );
-      await tx
+      const ready = await tx
         .update(schema.shiftExports)
         .set({
           status: "ready",
@@ -188,15 +223,14 @@ export class ShiftExportRunnerService {
         })
         .where(
           and(
-            eq(schema.shiftExports.tenantId, claimed.tenantId),
-            eq(schema.shiftExports.id, claimed.id),
-            eq(schema.shiftExports.status, "processing"),
+            this.ownedProcessingAttempt(claimed),
           ),
-        );
+        )
+        .returning({ id: schema.shiftExports.id });
+      if (ready.length === 0) throw new ShiftExportClaimLostError();
       await this.writeAudit(tx, claimed, "shift_export.completed", "success", {
         status: "ready",
-        formatId: claimed.formatId,
-        formatVersion: claimed.formatVersion,
+        attemptCount: claimed.attemptCount,
         partCount: uploaded.length,
         totalCodeCount,
         totalBoxCount,
@@ -208,13 +242,7 @@ export class ShiftExportRunnerService {
     await this.db
       .update(schema.shiftExports)
       .set({ status: "queued", errorCode: null, completedAt: null, updatedAt: new Date() })
-      .where(
-        and(
-          eq(schema.shiftExports.tenantId, claimed.tenantId),
-          eq(schema.shiftExports.id, claimed.id),
-          eq(schema.shiftExports.status, "processing"),
-        ),
-      );
+      .where(this.ownedProcessingAttempt(claimed));
   }
 
   private async publishFailed(
@@ -223,18 +251,19 @@ export class ShiftExportRunnerService {
   ): Promise<void> {
     const completedAt = new Date();
     await this.db.transaction(async (tx) => {
-      await tx
+      const failed = await tx
         .update(schema.shiftExports)
         .set({ status: "failed", errorCode, completedAt, updatedAt: completedAt })
         .where(
           and(
-            eq(schema.shiftExports.tenantId, claimed.tenantId),
-            eq(schema.shiftExports.id, claimed.id),
-            eq(schema.shiftExports.status, "processing"),
+            this.ownedProcessingAttempt(claimed),
           ),
-        );
+        )
+        .returning({ id: schema.shiftExports.id });
+      if (failed.length === 0) throw new ShiftExportClaimLostError();
       await this.writeAudit(tx, claimed, "shift_export.failed", "failure", {
         status: "failed",
+        attemptCount: claimed.attemptCount,
         errorCode,
       });
     });
@@ -245,7 +274,7 @@ export class ShiftExportRunnerService {
     claimed: ShiftExportRow,
     action: string,
     outcome: "success" | "failure",
-    after: Record<string, unknown>,
+    metadata: Record<string, unknown>,
   ): Promise<void> {
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: claimed.tenantId,
@@ -254,8 +283,58 @@ export class ShiftExportRunnerService {
       outcome,
       targetType: "shift_export",
       targetId: claimed.id,
-      after,
+      after: {
+        tenantId: claimed.tenantId,
+        actorUserId: claimed.createdByUserId,
+        shiftId: claimed.shiftId,
+        exportId: claimed.id,
+        formatId: claimed.formatId,
+        formatVersion: claimed.formatVersion,
+        maxLines: claimed.maxLines,
+        outcome,
+        ...metadata,
+      },
     });
+  }
+
+  private ownedProcessingAttempt(claimed: ShiftExportRow) {
+    return and(
+      eq(schema.shiftExports.tenantId, claimed.tenantId),
+      eq(schema.shiftExports.id, claimed.id),
+      eq(schema.shiftExports.status, "processing"),
+      eq(schema.shiftExports.attemptCount, claimed.attemptCount),
+    );
+  }
+
+  private async hasCommittedPublication(claimed: ShiftExportRow): Promise<boolean> {
+    const [current] = await this.db
+      .select({ status: schema.shiftExports.status })
+      .from(schema.shiftExports)
+      .where(
+        and(
+          eq(schema.shiftExports.tenantId, claimed.tenantId),
+          eq(schema.shiftExports.id, claimed.id),
+        ),
+      )
+      .limit(1);
+    const artifacts = await this.db
+      .select({ id: schema.shiftExportArtifacts.id })
+      .from(schema.shiftExportArtifacts)
+      .where(
+        and(
+          eq(schema.shiftExportArtifacts.tenantId, claimed.tenantId),
+          eq(schema.shiftExportArtifacts.exportId, claimed.id),
+        ),
+      );
+
+    return current?.status === "ready" || artifacts.length > 0;
+  }
+}
+
+class ShiftExportClaimLostError extends Error {
+  constructor() {
+    super("Shift export processing claim was lost");
+    this.name = "ShiftExportClaimLostError";
   }
 }
 

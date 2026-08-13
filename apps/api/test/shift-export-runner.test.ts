@@ -34,6 +34,7 @@ interface ExportRow {
   sourceSnapshotStartedAt: Date | null;
   completedAt: Date | null;
   attemptCount: number;
+  updatedAt: Date;
 }
 
 interface State {
@@ -47,6 +48,11 @@ interface FakeDb {
   state: State;
   transactions: { insertedArtifacts: number; markedReady: boolean }[];
   updatePredicates: unknown[];
+}
+
+interface FakeDbOptions {
+  failArtifactPublication?: boolean;
+  commitThenThrow?: boolean;
 }
 
 function baseRow(overrides: Partial<ExportRow> = {}): ExportRow {
@@ -67,19 +73,22 @@ function baseRow(overrides: Partial<ExportRow> = {}): ExportRow {
     sourceSnapshotStartedAt: null,
     completedAt: null,
     attemptCount: 0,
+    updatedAt: new Date("2099-01-01T00:00:00.000Z"),
     ...overrides,
   };
 }
 
-function fakeDb(row = baseRow(), failArtifactPublication = false): FakeDb {
+function fakeDb(row = baseRow(), options: FakeDbOptions = {}): FakeDb {
   const state: State = { row: { ...row }, artifacts: [], audits: [] };
   const transactions: FakeDb["transactions"] = [];
   const updatePredicates: unknown[] = [];
 
   const createBoundary = (target: State, txLog?: FakeDb["transactions"][number]) => {
     const select = () => ({
-      from: () => {
-        const result = Promise.resolve([target.row]);
+      from: (table: unknown) => {
+        const result = Promise.resolve(
+          table === schema.shiftExportArtifacts ? target.artifacts : [target.row],
+        );
         const node = {
           where: () => node,
           limit: () => node,
@@ -91,6 +100,7 @@ function fakeDb(row = baseRow(), failArtifactPublication = false): FakeDb {
 
     const update = (table: unknown) => ({
       set: (values: Record<string, unknown>) => {
+        let updatePredicate: unknown;
         const apply = () => {
           if (typeof values.attemptCount !== "undefined") {
             const { attemptCount: _incrementExpression, ...remainingValues } = values;
@@ -104,11 +114,18 @@ function fakeDb(row = baseRow(), failArtifactPublication = false): FakeDb {
         };
         const node = {
           where: (predicate: unknown) => {
+            updatePredicate = predicate;
             updatePredicates.push(predicate);
             return node;
           },
           returning: async () => {
-            if (table === schema.shiftExports && target.row.status !== "queued") return [];
+            if (table === schema.shiftExports && typeof values.attemptCount !== "undefined") {
+              const canReclaimAbandoned =
+                target.row.status === "processing" &&
+                target.row.updatedAt.getTime() < Date.now() - 60 * 60 * 1_000 &&
+                sqlText(updatePredicate).includes('"shift_exports"."updated_at" <=');
+              if (target.row.status !== "queued" && !canReclaimAbandoned) return [];
+            }
             return apply();
           },
           then: (resolve: (value: unknown) => unknown, reject: (reason: unknown) => unknown) =>
@@ -122,7 +139,9 @@ function fakeDb(row = baseRow(), failArtifactPublication = false): FakeDb {
       values: async (values: Record<string, unknown> | Record<string, unknown>[]) => {
         const rows = Array.isArray(values) ? values : [values];
         if (table === schema.shiftExportArtifacts) {
-          if (failArtifactPublication) throw new Error("database publication failed: sensitive");
+          if (options.failArtifactPublication) {
+            throw new Error("database publication failed: sensitive");
+          }
           target.artifacts.push(...rows);
           if (txLog) txLog.insertedArtifacts += rows.length;
         } else if (table === schema.tenantAuditEvents) {
@@ -149,6 +168,9 @@ function fakeDb(row = baseRow(), failArtifactPublication = false): FakeDb {
       state.row = working.row;
       state.artifacts = working.artifacts;
       state.audits = working.audits;
+      if (options.commitThenThrow && txLog.markedReady) {
+        throw new Error("commit acknowledgement lost: sensitive");
+      }
       return result;
     },
   } as unknown as Db;
@@ -171,15 +193,21 @@ function source(snapshot?: Partial<ShiftExportSnapshot>): ShiftExportSourceServi
 function storage(options: { rejectPut?: number } = {}): ObjectStorageService & {
   putVerified: ReturnType<typeof vi.fn>;
   delete: ReturnType<typeof vi.fn>;
+  objects: Set<string>;
 } {
   let calls = 0;
+  const objects = new Set<string>();
   return {
-    putVerified: vi.fn(async (_key: string, body: Buffer, _mime: string, sha256: string) => {
+    objects,
+    putVerified: vi.fn(async (key: string, body: Buffer, _mime: string, sha256: string) => {
       calls += 1;
+      objects.add(key);
       if (calls === options.rejectPut) throw new Error("storage secret detail");
       return { byteSize: body.byteLength, sha256 };
     }),
-    delete: vi.fn().mockResolvedValue(undefined),
+    delete: vi.fn(async (key: string) => {
+      objects.delete(key);
+    }),
   } as never;
 }
 
@@ -253,6 +281,21 @@ describe("ShiftExportRunnerService", () => {
       outcome: "success",
       targetType: "shift_export",
       targetId: EXPORT_ID,
+      after: {
+        tenantId: "tenant-1",
+        actorUserId: "user-1",
+        shiftId: "22222222-2222-4222-8222-222222222222",
+        exportId: EXPORT_ID,
+        formatId: "shift_csv_flat",
+        formatVersion: 1,
+        maxLines: 2,
+        outcome: "success",
+        status: "ready",
+        attemptCount: 1,
+        partCount: 2,
+        totalCodeCount: 2,
+        totalBoxCount: 0,
+      },
     });
   });
 
@@ -271,6 +314,33 @@ describe("ShiftExportRunnerService", () => {
     expect(fake.state.row).toMatchObject({ status, attemptCount: 0 });
   });
 
+  it("reclaims an abandoned processing attempt without stealing an active attempt", async () => {
+    const abandoned = fakeDb(
+      baseRow({
+        status: "processing",
+        attemptCount: 1,
+        updatedAt: new Date("2020-01-01T00:00:00.000Z"),
+      }),
+    );
+    const abandonedStorage = storage();
+
+    await new ShiftExportRunnerService(abandoned.db, source(), abandonedStorage).run(EXPORT_ID, {
+      retryCount: 1,
+      retryLimit: 5,
+    });
+
+    expect(abandoned.state.row).toMatchObject({ status: "ready", attemptCount: 2 });
+    expect(abandonedStorage.objects).toEqual(
+      new Set([
+        `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-1.csv`,
+        `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-2/part-2.csv`,
+      ]),
+    );
+    const claimSql = abandoned.updatePredicates.map(sqlText).join("\n");
+    expect(claimSql).toContain('"shift_exports"."updated_at" <=');
+    expect(claimSql).toContain('"shift_exports"."attempt_count" =');
+  });
+
   it("cleans uploaded objects and leaves a transient storage failure queued for pg-boss", async () => {
     const fake = fakeDb();
     const objects = storage({ rejectPut: 2 });
@@ -284,6 +354,10 @@ describe("ShiftExportRunnerService", () => {
     expect(objects.delete).toHaveBeenCalledWith(
       `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-1/part-1.csv`,
     );
+    expect(objects.delete).toHaveBeenCalledWith(
+      `tenants/tenant-1/shift-exports/${EXPORT_ID}/attempt-1/part-2.csv`,
+    );
+    expect(objects.objects).toEqual(new Set());
     expect(fake.state.row).toMatchObject({ status: "queued", errorCode: null, completedAt: null });
     expect(fake.state.audits).toEqual([]);
   });
@@ -300,6 +374,24 @@ describe("ShiftExportRunnerService", () => {
     expect(fake.state.row).toMatchObject({ status: "failed", errorCode: "STORAGE_FAILED" });
     expect(fake.state.row.completedAt).toBeInstanceOf(Date);
     expect(JSON.stringify(fake.state.audits)).not.toContain("storage secret detail");
+    expect(fake.state.audits.at(-1)).toMatchObject({
+      organizationId: "tenant-1",
+      actorUserId: "user-1",
+      outcome: "failure",
+      after: {
+        tenantId: "tenant-1",
+        actorUserId: "user-1",
+        shiftId: "22222222-2222-4222-8222-222222222222",
+        exportId: EXPORT_ID,
+        formatId: "shift_csv_flat",
+        formatVersion: 1,
+        maxLines: 2,
+        outcome: "failure",
+        status: "failed",
+        attemptCount: 1,
+        errorCode: "STORAGE_FAILED",
+      },
+    });
   });
 
   it.each([
@@ -308,7 +400,7 @@ describe("ShiftExportRunnerService", () => {
   ] as const)(
     "rolls back database publication and applies retry metadata (%s/%s)",
     async (retryCount, retryLimit, status, errorCode) => {
-      const fake = fakeDb(baseRow(), true);
+      const fake = fakeDb(baseRow(), { failArtifactPublication: true });
       const objects = storage();
       const runner = new ShiftExportRunnerService(fake.db, source(), objects);
 
@@ -323,6 +415,25 @@ describe("ShiftExportRunnerService", () => {
       expect(fake.state.audits).toHaveLength(status === "queued" ? 0 : 1);
     },
   );
+
+  it("preserves committed objects when publication commits but its acknowledgement fails", async () => {
+    const fake = fakeDb(baseRow(), { commitThenThrow: true });
+    const objects = storage();
+
+    await expect(
+      new ShiftExportRunnerService(fake.db, source(), objects).run(EXPORT_ID, {
+        retryCount: 1,
+        retryLimit: 5,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(fake.state.row).toMatchObject({ status: "ready", attemptCount: 1 });
+    expect(fake.state.artifacts).toHaveLength(2);
+    expect(objects.delete).not.toHaveBeenCalled();
+    expect(objects.objects.size).toBe(2);
+    expect(fake.state.audits).toHaveLength(1);
+    expect(JSON.stringify(fake.state.audits)).not.toMatch(/code-a|code-b|tenants\/|https?:\/\//);
+  });
 
   it("finishes safe source errors immediately without leaking their message", async () => {
     const fake = fakeDb();
