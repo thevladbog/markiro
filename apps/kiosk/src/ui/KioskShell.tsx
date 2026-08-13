@@ -304,10 +304,6 @@ export function KioskShell(): React.JSX.Element {
       submitOrder: async (body) => {
         try {
           const result = await base.submitOrder(body);
-          // A DELIVERY IS PROOF OF A LINK, whatever `navigator.onLine`
-          // believes — and the browser believes nothing useful when it was the
-          // API that went away and came back.
-          setOnline(true);
           // Only the order somebody is waiting on. Everything else the drain
           // acknowledges is already in the journal, which is where a screen
           // that was not there at the time is supposed to read it from.
@@ -340,6 +336,10 @@ export function KioskShell(): React.JSX.Element {
           throw err;
         }
       },
+      // Do not publish the link recovery at the earlier HTTP-response edge.
+      // The order has only "landed" for this offline-first client after its
+      // outcome/journal are durable and the queue row is gone.
+      orderCommitted: () => setOnline(true),
     };
   }, []);
 
@@ -1033,12 +1033,16 @@ export function KioskShell(): React.JSX.Element {
         // Hidden rather than defaulted-on if the snapshot is somehow gone: a
         // kiosk that cannot read its own config must not invent a price.
         showPrices={snapshot?.bootstrap.config.showPrices ?? false}
-        onReset={() => {
-          const owner = outcomeOwnerOf(configRef.current);
+        onReset={async () => {
+          // A result is owned by the installation that produced it, not by
+          // whatever pairing happens to be current when its timer fires. The
+          // screen normally unmounts on re-pair; this captured owner is the
+          // second boundary that prevents an old same-seq result from
+          // acknowledging a new installation's row.
+          const owner = submitted.storedOutcome?.owner ?? outcomeOwnerOf(configRef.current);
           if ((submitted.storedOutcome || submitted.result !== null) && owner) {
-            void acknowledgeOutcome(owner, submitted.deviceSeq, now().toISOString()).then(() =>
-              dispatchFlow({ type: "finish" }),
-            );
+            await acknowledgeOutcome(owner, submitted.deviceSeq, now().toISOString());
+            dispatchFlow({ type: "finish" });
             return;
           }
           dispatchFlow({ type: "finish" });

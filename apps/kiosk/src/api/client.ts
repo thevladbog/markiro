@@ -282,6 +282,9 @@ export interface KioskClient {
   boxRegistryPage?(query: KioskBoxRegistryQuery): Promise<KioskBoxRegistryPage>;
   attestOrder(body: CreateOrderAdmissionDto): Promise<CreateOrderAdmissionResultDto>;
   submitOrder(body: CreateOrderDto): Promise<CreateOrderResultDto>;
+  /** Optional UI signal after the server result, local outcome/journal and
+   * queue removal have all committed. Network clients do not need it. */
+  orderCommitted?(): void;
 }
 
 export function createKioskClient(cfg: {

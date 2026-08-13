@@ -94,8 +94,8 @@ function renderDone(
   result: CreateOrderResultDto | null,
   cart: Pick<CartState, "lines" | "reason"> = cartOf(THREE_BOTTLES),
   showPrices = true,
+  onReset = vi.fn(),
 ) {
-  const onReset = vi.fn();
   const view = render(
     <Done result={result} cart={cart} showPrices={showPrices} onReset={onReset} />,
   );
@@ -220,6 +220,51 @@ describe("Done", () => {
     // shell moved to — a fresh session someone else has already started.
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     act(() => vi.advanceTimersByTime(AUTO_RESET_MS * 3));
+
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the worker retry when durable acknowledgement fails", async () => {
+    const onReset = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("IndexedDB failed"))
+      .mockResolvedValueOnce();
+    renderDone(resultWith(), cartOf(THREE_BOTTLES), true, onReset);
+    const button = screen.getByRole("button", { name: "Готово" });
+
+    await act(async () => fireEvent.click(button));
+    await act(async () => fireEvent.click(button));
+
+    expect(onReset).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-arms auto reset after acknowledgement storage fails", async () => {
+    const onReset = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("IndexedDB failed"))
+      .mockResolvedValueOnce();
+    renderDone(resultWith(), cartOf(THREE_BOTTLES), true, onReset);
+
+    await act(async () => vi.advanceTimersByTimeAsync(AUTO_RESET_MS));
+    expect(onReset).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(AUTO_RESET_MS));
+
+    expect(onReset).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-arm an old result after it unmounts while acknowledgement is failing", async () => {
+    let rejectAck: ((reason: Error) => void) | undefined;
+    const onReset = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectAck = reject;
+        }),
+    );
+    const { unmount } = renderDone(resultWith(), cartOf(THREE_BOTTLES), true, onReset);
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    unmount();
+    await act(async () => rejectAck?.(new Error("IndexedDB failed")));
+    await act(async () => vi.advanceTimersByTimeAsync(AUTO_RESET_MS * 2));
 
     expect(onReset).toHaveBeenCalledTimes(1);
   });

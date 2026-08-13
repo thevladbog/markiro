@@ -48,8 +48,18 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-touch-flow.md`, accepted
 
 ### Task 6: honest durable outcomes
 
-- Status: implemented, awaiting review.
+- Status: implemented; review findings resolved, awaiting re-review.
 - RED: missing outcome store/migration and result semantics, absent sync persistence, and restart badge routing reproduced; existing focused assertions remained green.
 - GREEN: focused Task 6/App 239/239; full kiosk 583/583; direct typecheck passed.
 - Decision: only a server result can produce green. Unknown delivery remains amber; terminal and partial results are red. Sanitized outcomes are idempotently stored before journal/dequeue under server URL + kiosk + credential generation + device sequence, bounded to 100 rows per owner generation. The same employee sees the oldest unviewed result after restart and explicit finish atomically acknowledges it.
 - External: no browser/tablet/physical-scanner or installed-PWA acceptance performed; Task 7 remains open.
+- Review fix: replay preserves stable ordering and acknowledgement in one
+  transaction; failed acknowledgement re-arms the Done action and timer; the
+  store rejects non-canonical owner/key/date/SSCC/reason and bounded-text rows.
+  RED reproduced five original failures plus UTF-8 overflow; focused integrated
+  verification passed 231/231 and direct typecheck passed.
+- Final re-review fix: acknowledgement now requires one canonical UUID-owned
+  row and canonical ISO time; failure after unmount cannot re-arm the old
+  screen; the displayed outcome supplies its immutable owner. Link recovery is
+  published only after local outcome/journal persistence and dequeue commit.
+  Final full kiosk suite: 105 files / 589 tests.

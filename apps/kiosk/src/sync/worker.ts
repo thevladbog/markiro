@@ -829,6 +829,7 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           isTerminalRejection(err) &&
           (await quarantine(order, err as KioskApiError, now, kioskId, outcomeOwner))
         ) {
+          client.orderCommitted?.();
           continue;
         }
         // AN ANSWER FROM THE APPLICATION IS NOT AN OUTAGE — BUT AN ANSWER FROM
@@ -854,6 +855,7 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         return;
       }
       await dequeueOrder(order.deviceSeq);
+      client.orderCommitted?.();
     }
   } catch {
     // The store itself failed (`listQueue`, `dequeueOrder`). Nothing is lost:

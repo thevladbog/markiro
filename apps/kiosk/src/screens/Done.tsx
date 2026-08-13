@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { BoxConflictReason, CreateOrderResultDto, OrderConflict } from "../api/types.js";
 import type { CartState } from "../session/cart.js";
@@ -44,7 +44,7 @@ export interface DoneProps {
    * false, and this screen must not be the one that leaks it back.
    */
   showPrices: boolean;
-  onReset: () => void;
+  onReset: () => void | Promise<void>;
 }
 
 /** The words for the reason, borrowed from the screen the worker chose it on.
@@ -157,30 +157,48 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
    */
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spent = useRef(false);
+  const mounted = useRef(false);
+  const resetRef = useRef<() => void>(() => undefined);
+  const [resetting, setResetting] = useState(false);
+
+  const armTimer = useCallback(() => {
+    if (!mounted.current) return;
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = setTimeout(() => resetRef.current(), AUTO_RESET_MS);
+  }, []);
 
   const reset = useCallback(() => {
     if (spent.current) return;
     spent.current = true;
+    setResetting(true);
     if (timer.current !== null) {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    latest.current();
-  }, []);
+    void Promise.resolve(latest.current()).catch(() => {
+      if (!mounted.current) return;
+      spent.current = false;
+      setResetting(false);
+      armTimer();
+    });
+  }, [armTimer]);
+  resetRef.current = reset;
 
   useEffect(() => {
-    timer.current = setTimeout(reset, AUTO_RESET_MS);
+    mounted.current = true;
+    armTimer();
     // Cleared on unmount, always. A timer that outlives this screen is one
     // leaked timer per order, each still holding the shell's `onReset`: the
     // kiosk would throw the NEXT worker back to idle mid-cart, on a schedule
     // set by somebody else's order.
     return () => {
+      mounted.current = false;
       if (timer.current !== null) {
         clearTimeout(timer.current);
         timer.current = null;
       }
     };
-  }, [reset]);
+  }, [armTimer]);
 
   // An empty `orderNo` is the server's way of saying it took nothing at all,
   // not a number it forgot to send.
@@ -398,6 +416,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         className="kiosk-control"
         type="button"
         onClick={reset}
+        disabled={resetting}
         style={{
           height: 72,
           padding: "0 48px",

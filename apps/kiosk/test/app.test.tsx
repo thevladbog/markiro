@@ -116,7 +116,10 @@ const MILK = "Молоко 3,2%";
 const KM = `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`;
 const SSCC = "346006820000000021";
 const BOX_PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
-const EMPLOYEE = { id: "e1", fullName: "Смирнов Алексей" };
+const EMPLOYEE = {
+  id: "22222222-2222-4222-8222-222222222222",
+  fullName: "Смирнов Алексей",
+};
 
 const IDLE_TITLE = "Отсканируйте пропуск";
 const CART_TITLE = "Вы берёте";
@@ -336,7 +339,7 @@ function setOnLine(value: boolean): void {
 
 /** The gate this device is bound to, as pairing records it — and what the
  * journal's entries have to name to be counted as this gate's. */
-const KIOSK_ID = "k-1";
+const KIOSK_ID = "11111111-1111-4111-8111-111111111111";
 
 const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
   serverUrl: "/api",

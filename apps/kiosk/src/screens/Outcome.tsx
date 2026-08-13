@@ -8,7 +8,7 @@ export interface OutcomeProps {
   result: CreateOrderResultDto | null;
   cart: Pick<CartState, "lines" | "reason">;
   showPrices: boolean;
-  onReset: () => void;
+  onReset: () => void | Promise<void>;
 }
 
 export function Outcome({

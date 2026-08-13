@@ -20,6 +20,30 @@ The result screen now distinguishes four honest states without recolouring neutr
 - Complete kiosk suite: 105 files / 583 tests passed with zero skips.
 - Direct kiosk TypeScript check passed.
 
+## Review fix
+
+All three Important review findings are addressed. Replay now performs a single
+read/write transaction and preserves the first-observed timestamp plus any
+durable `viewedAt` acknowledgement. A failed acknowledgement leaves the result
+unviewed and re-enables both the explicit action and its auto-reset timer. The
+store accepts only canonical owner/key pairs, UUID credential generations,
+canonical ISO dates, valid SSCCs and allowlisted conflict reasons; all public
+text is control-free and bounded by both characters and UTF-8 bytes. RED
+reproduced five original failures plus the multibyte boundary; focused outcome,
+screen, sync, App, store and reducer verification passed 231/231, followed by a
+clean TypeScript check.
+
+The bounded re-review found two residual acknowledgement boundaries. They are
+also closed: acknowledgement requires exactly one canonical row and a canonical
+ISO timestamp; missing/corrupt rows stay on the result screen. A failed promise
+cannot re-arm a timer after unmount, and the shell acknowledges the owner
+captured by the displayed result rather than a later pairing. Kiosk and employee
+identifiers are now UUID-only. Moving the online indicator to the post-dequeue
+commit signal also keeps “link restored” from racing ahead of durable local
+completion. Terminal responses publish the same signal only after durable
+outcome/quarantine/dequeue; a failed quarantine publishes nothing. The final
+full kiosk suite passed 105 files / 589 tests.
+
 ## External checks not performed
 
 No browser geometry, tablet rotation, physical HID/Web Serial, installed-PWA restart or hardware acceptance was performed. Those remain Task 7/external gates.

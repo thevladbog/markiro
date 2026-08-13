@@ -36,11 +36,14 @@ import {
 import type { KioskBootstrapDto } from "../src/api/types.js";
 import { findOldestUnviewedOutcome } from "../src/store/outcomes.js";
 
+const OUTCOME_KIOSK_ID = "11111111-1111-4111-8111-111111111111";
+const OUTCOME_EMPLOYEE_ID = "22222222-2222-4222-8222-222222222222";
+
 async function outcomeOwner() {
   const config = await writeConfig({
     serverUrl: "https://tenant.example/api",
     token: "token",
-    kioskId: "k-1",
+    kioskId: OUTCOME_KIOSK_ID,
     kioskName: "Gate",
     place: null,
     nextDeviceSeq: 2,
@@ -142,7 +145,7 @@ describe("flushQueue", () => {
     const owner = await outcomeOwner();
     await enqueueOrder(
       { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "loose" }] },
-      "e1",
+      OUTCOME_EMPLOYEE_ID,
       undefined,
       13,
     );
@@ -161,7 +164,7 @@ describe("flushQueue", () => {
     await flushQueue(client as never, () => new Date("2026-08-13T12:00:00.000Z"));
     await flushQueue(client as never, () => new Date("2026-08-13T12:01:00.000Z"));
 
-    await expect(findOldestUnviewedOutcome(owner, "e1")).resolves.toMatchObject({
+    await expect(findOldestUnviewedOutcome(owner, OUTCOME_EMPLOYEE_ID)).resolves.toMatchObject({
       kind: "accepted",
       orderNo: "ORD-1",
       acceptedCount: 13,
@@ -171,25 +174,29 @@ describe("flushQueue", () => {
 
   it("persists a safe rejected result for a terminal response", async () => {
     const owner = await outcomeOwner();
+    const orderCommitted = vi.fn();
     await enqueueOrder(
       { deviceSeq: 1, badgeDigest: "B", reason: "buy", items: [{ rawKm: "secret-prefix-ABC123" }] },
-      "e1",
+      OUTCOME_EMPLOYEE_ID,
       undefined,
       13,
     );
     await flushQueue(
-      refusingClient(
-        new KioskApiError(422, "rejected", "order_rejected", {
-          conflicts: [{ rawKm: "secret-prefix-ABC123", reason: "duplicate" }],
-          boxConflicts: [
-            { sscc: "346006820000000021", bottleCount: 12, reason: "duplicate", members: ["no"] },
-          ],
-        }),
-      ) as never,
+      {
+        ...refusingClient(
+          new KioskApiError(422, "rejected", "order_rejected", {
+            conflicts: [{ rawKm: "secret-prefix-ABC123", reason: "duplicate" }],
+            boxConflicts: [
+              { sscc: "346006820000000021", bottleCount: 12, reason: "duplicate", members: ["no"] },
+            ],
+          }),
+        ),
+        orderCommitted,
+      } as never,
       () => new Date("2026-08-13T12:00:00.000Z"),
     );
 
-    const result = await findOldestUnviewedOutcome(owner, "e1");
+    const result = await findOldestUnviewedOutcome(owner, OUTCOME_EMPLOYEE_ID);
     expect(result).toMatchObject({ kind: "rejected", acceptedCount: 0 });
     expect(JSON.stringify(result)).not.toContain("secret-prefix");
     expect(JSON.stringify(result)).not.toContain("members");
@@ -197,6 +204,7 @@ describe("flushQueue", () => {
       { kind: "loose", codeTail: "…ABC123", reason: "duplicate" },
       { kind: "box", sscc: "346006820000000021", bottleCount: 12, reason: "duplicate" },
     ]);
+    expect(orderCommitted).toHaveBeenCalledTimes(1);
   });
   it("serializes a crash-safe pending attestation before submit even when the response crosses expiry", async () => {
     let resolveAdmission!: (value: { claimedAt: string; admissionProof: string }) => void;
@@ -394,10 +402,11 @@ describe("flushQueue", () => {
    * new one.
    */
   it("stamps the entry with the kiosk the device is bound to when the server answers", async () => {
+    const filedKioskId = "33333333-3333-4333-8333-333333333333";
     await writeConfig({
       serverUrl: "/api",
       token: "tok",
-      kioskId: "k-gate-b",
+      kioskId: filedKioskId,
       kioskName: "Проходная Б",
       place: null,
       nextDeviceSeq: 2,
@@ -410,7 +419,7 @@ describe("flushQueue", () => {
         items: [{ rawKm: "01…" }],
         createdAt: "2026-07-28T06:00:00.000Z",
       },
-      "e1",
+      OUTCOME_EMPLOYEE_ID,
     );
     const client = {
       bootstrap: vi.fn(),
@@ -424,7 +433,7 @@ describe("flushQueue", () => {
 
     await flushQueue(client as never, () => new Date("2026-07-28T07:00:00.000Z"));
 
-    expect((await journalStore.readJournal(10))[0]).toMatchObject({ kioskId: "k-gate-b" });
+    expect((await journalStore.readJournal(10))[0]).toMatchObject({ kioskId: filedKioskId });
   });
 
   // With no `createdAt` in the body the server stamps the order as it arrives
