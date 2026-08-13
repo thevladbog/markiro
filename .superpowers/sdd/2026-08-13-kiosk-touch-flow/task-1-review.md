@@ -2,7 +2,8 @@
 
 ## Verdict
 
-**CHANGES REQUESTED — 1 Important.**
+**APPROVED.** The single Important finding from the first review is addressed by
+follow-up commit `9dc71d4f`.
 
 Commit reviewed: `dafaf109` against parent `3d35ea38` and the Task 1 touch-flow
 contracts. The reducer removes the old parallel React `session` / `submitted`
@@ -111,3 +112,30 @@ The Important bridge finding is fixed and awaits independent re-review.
 - Finish is accepted only from outcome; other reset actions require an active session. Invalid source-screen reset actions are no-ops.
 
 Fix RED: 5 failed / 10 passed. Focused GREEN: flow/app/app-view 73/73. Full kiosk: 22 files / 505 tests. Typecheck, full ESLint, Vite PWA production build, Prettier, and diff-check passed.
+
+## Independent re-review of `9dc71d4f`
+
+The Important authority gap is closed:
+
+- `legacySubmit` is one source-bounded, atomic reducer transition from `cart`.
+  It rejects empty drafts and allowed writeoffs without a reason, while a stale
+  writeoff from an employee without writeoff permission is canonicalized to buy.
+- `submitFailed` returns confirmation to cart with the same canonical cart, so a
+  retry cannot start from confirmation and must pass `legacySubmit` validation
+  again. `cartChanged` can no longer mutate confirmation.
+- Operation and writeoff reason now live only in `session.cart`.
+  `createConfirmedOrderBody` accepts a confirmation state and the enqueue,
+  bottle count and outcome all consume that same canonical cart; the raw legacy
+  callback state is no longer a second wire source.
+- Reset actions are source-bounded: `finish` only changes outcome, the other
+  session resets require a session, and unpair remains the global revocation
+  transition. A late submission cannot restore a cleared session.
+
+Independent checks:
+
+- `git diff --check ad318888..9dc71d4f` — passed.
+- Focused `flow.test.ts`, `app.test.tsx`, `app-view.test.ts` — **73/73 passed**.
+- Kiosk `tsc -p tsconfig.json --noEmit` — passed.
+
+No Critical, Important or Minor findings remain within the bounded Task 1
+re-review scope.
