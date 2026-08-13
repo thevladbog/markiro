@@ -1861,11 +1861,33 @@ body,
 .work-recent__identity {
   display: grid;
   min-width: 0;
+  margin: 0;
   font: var(--text-code);
 }
 
-.work-recent__identity span {
-  display: block;
+.work-recent__identity > div {
+  display: grid;
+  min-width: 0;
+  gap: var(--sp-1);
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.work-recent__identity dt,
+.work-recent__identity dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-recent__identity dt {
+  color: var(--fg-2);
+  font-weight: 600;
+}
+
+.work-recent__identity dt::after {
+  content: ":";
 }
 
 .work-recent__empty {

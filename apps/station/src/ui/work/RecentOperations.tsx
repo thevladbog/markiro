@@ -29,10 +29,16 @@ export function RecentOperations({
             >
               <strong>{operationStatusLabel(operation.verdict, statusLabels)}</strong>
               {operation.identity ? (
-                <span className="work-recent__identity">
-                  <span>{operation.identity.gtin14}</span>
-                  <span>{operation.identity.serial}</span>
-                </span>
+                <dl className="work-recent__identity">
+                  <div>
+                    <dt>{statusLabels.gtin}</dt>
+                    <dd>{operation.identity.gtin14}</dd>
+                  </div>
+                  <div>
+                    <dt>{statusLabels.serial}</dt>
+                    <dd>{operation.identity.serial}</dd>
+                  </div>
+                </dl>
               ) : (
                 <span>{operation.codeSuffix ?? "—"}</span>
               )}

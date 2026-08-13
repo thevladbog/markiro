@@ -408,9 +408,11 @@ describe("WorkScreen", () => {
 
     act(() => source.emit(KM));
 
+    await waitFor(() => {
+      expect(playSignalToneSpy).toHaveBeenCalledWith("ok", expect.anything());
+      expect(screen.getByRole("status").textContent).toContain("ACCEPTED");
+    });
     expect(screen.queryByRole("alert")).toBeNull();
-    expect((await screen.findByRole("status")).textContent).toContain("ACCEPTED");
-    expect(playSignalToneSpy).toHaveBeenCalledWith("ok", expect.anything());
   });
 
   it("keeps an error verdict visible for exactly 1200 ms", async () => {
