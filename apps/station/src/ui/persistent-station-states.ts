@@ -2,6 +2,7 @@ import type { SignalTone } from "@markiro/ui";
 
 import type { CredentialRecoveryPhase, LegacyIdentityState, StationView } from "../App.js";
 import type { PairingError } from "../lib/pairing.js";
+import type { BoxPrintErrorCode } from "../lib/boxes.js";
 import type { ConflictListPersistentState } from "../pages/ConflictList.js";
 import type { EnrollmentErrorState, EnrollmentState } from "../pages/Enrollment.js";
 import type { ExceptionStage } from "../pages/ExceptionFlow.js";
@@ -84,6 +85,13 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     partial: "work-aggregation",
     full: "box-full",
   } as const satisfies Record<BoxFillPersistentState, string>,
+  boxPrint: {
+    template_missing: "box-print-template-missing",
+    printer_unconfigured: "box-print-printer-unconfigured",
+    render_failed: "box-print-render-failed",
+    transport_failed: "box-print-transport-failed",
+    "skip-confirm": "box-print-skip-confirm",
+  } as const satisfies Record<BoxPrintErrorCode | "skip-confirm", string>,
   exception: {
     action: "exception-action",
     target: "exception-target",

@@ -111,6 +111,9 @@ describe("fixed station viewport source contract", () => {
     );
     expect(css).toMatch(/\.work-box-fill__grid\s*\{[^}]*height:\s*100%;/s);
     expect(css).toMatch(/\.work-box-fill__cell\s*\{[^}]*height:\s*100%;/s);
+    expect(css).toMatch(
+      /\.work-box-fill__cell\[data-state="next"\]\s*\{[^}]*outline:\s*3px solid var\(--focus-ring\);/s,
+    );
   });
 
   it("keeps every print-recovery action floor-sized in a bounded no-scroll dialog", () => {

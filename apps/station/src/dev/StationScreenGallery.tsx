@@ -1,11 +1,19 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 
 import i18n from "../i18n/index.js";
+import type { BoxPrintErrorCode } from "../lib/boxes.js";
+import type { RecentOperation } from "../lib/journal.js";
+import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
+import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
+import { RecentOperations } from "../ui/work/RecentOperations.js";
+import { ScanResultInstrument, type ScanResultLabels } from "../ui/work/ScanResultInstrument.js";
+import { WorkCounters } from "../ui/work/WorkCounters.js";
+import { WorkFooter } from "../ui/work/WorkFooter.js";
 import {
   getGalleryFixture,
   resolveGalleryRequest,
@@ -152,6 +160,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <SignalFixture tone={fixture.variant} locale={locale} />;
     case "box":
       return <BoxFixture full={fixture.variant === "full"} locale={locale} />;
+    case "box-print-recovery":
+      return <BoxPrintRecoveryFixture variant={fixture.variant} />;
     case "serial-recovery":
       return <SerialRecoveryFixture locale={locale} />;
     case "exception":
@@ -510,39 +520,132 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const aggregation = mode === "aggregation";
+  const labels = galleryScanLabels(locale);
+  const operations = galleryRecentOperations();
   return (
-    <StationScreen
-      title={
-        aggregation
-          ? ru
-            ? "Агрегация короба"
-            : "Box aggregation"
-          : ru
-            ? "Проверка кодов"
-            : "Code validation"
-      }
-      actions={<GalleryFooter locale={locale} primary={ru ? "Исключения" : "Exceptions"} />}
-    >
-      <div className="gallery-work-grid">
-        <Card className="gallery-counter" title={ru ? "Принято" : "Accepted"}>
-          <strong>1 248</strong>
-        </Card>
-        <Card
-          className="gallery-counter"
-          title={aggregation ? (ru ? "В коробе" : "In box") : ru ? "Ошибки" : "Errors"}
-        >
-          <strong>{aggregation ? "18 / 24" : "3"}</strong>
-        </Card>
-        <Card
-          className="gallery-card gallery-wide"
-          title={ru ? "Последняя операция" : "Latest operation"}
-        >
-          <p className="gallery-mono">TEST-GTIN-04607000000042 · DEMO-SERIAL-000128</p>
-          <p>{ru ? "Синтетическая операция · 14:32:08" : "Synthetic operation · 14:32:08"}</p>
-        </Card>
+    <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
+      <div className="work-screen__content">
+        <div className="work-screen__instruments">
+          <div className="work-screen__primary">
+            <ScanResultInstrument
+              productName={ru ? "Тестовый товар А" : "Sample product A"}
+              counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
+              operation={operations[0] ?? null}
+              labels={labels}
+            />
+            {aggregation ? (
+              <BoxFillInstrument
+                box={{ boxId: "gallery-box-1", itemCount: 2 }}
+                ordinal={1}
+                acceptedToken="gallery-accepted-2"
+                capacity={20}
+                canUndo
+                labels={galleryBoxLabels(locale, 1)}
+                onClose={() => undefined}
+                onUndo={() => undefined}
+                onClear={() => undefined}
+              />
+            ) : null}
+          </div>
+          <aside
+            className="work-screen__secondary"
+            aria-label={ru ? "Итоги смены" : "Shift summary"}
+          >
+            <WorkCounters
+              accepted={1248}
+              rejected={3}
+              pendingSync={7}
+              locale={ru ? "ru-RU" : "en-US"}
+              labels={{
+                accepted: ru ? "Принято" : "Accepted",
+                rejected: ru ? "Отклонено" : "Rejected",
+                synchronized: ru ? "Синхронизировано" : "Synchronized",
+                pending: (count) =>
+                  ru ? `Ожидают отправки: ${count}` : `${count} waiting to sync`,
+              }}
+            />
+            <RecentOperations
+              operations={operations}
+              labels={{
+                title: ru ? "Последние операции" : "Recent operations",
+                empty: ru ? "Операций пока нет" : "No operations yet",
+                invalidTime: ru ? "Время неизвестно" : "Time unknown",
+              }}
+              statusLabels={labels}
+              locale={ru ? "ru-RU" : "en-US"}
+            />
+          </aside>
+        </div>
       </div>
-    </StationScreen>
+      <WorkFooter
+        labels={{
+          exceptions: ru ? "Исключения" : "Exceptions",
+          exit: ru ? "Пауза / завершить" : "Pause / finish",
+        }}
+        onExceptions={() => undefined}
+        onExit={() => undefined}
+      />
+    </main>
   );
+}
+
+function galleryScanLabels(locale: GalleryLocale): ScanResultLabels {
+  const ru = locale === "ru";
+  return {
+    waiting: ru ? "Ожидание сканирования" : "Waiting for scan",
+    ok: ru ? "✓ Принято" : "✓ Accepted",
+    duplicate: ru ? "Дубликат" : "Duplicate",
+    invalid: ru ? "Неверный код" : "Invalid code",
+    wrong_gtin: ru ? "Неверный GTIN" : "Wrong GTIN",
+    unknown: ru ? "Отклонено" : "Rejected",
+    gtin: "GTIN",
+    serial: ru ? "Серийный номер" : "Serial number",
+    crypto: ru ? "Криптохвост" : "Crypto tail",
+  };
+}
+
+function galleryRecentOperations(): RecentOperation[] {
+  const identityForSerial = (serial: string) => {
+    const crypto = [
+      { ai: "91" as const, value: "ABCD" },
+      {
+        ai: "92" as const,
+        value: "TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789",
+      },
+      { ai: "93" as const, value: "XYZ1" },
+    ];
+    return {
+      gtin14: "04607000000042",
+      serial,
+      crypto,
+      normalized: [
+        "(01)04607000000042",
+        `(21)${serial}`,
+        ...crypto.map(({ ai, value }) => `(${ai})${value}`),
+      ].join(" "),
+    };
+  };
+  return Array.from({ length: 6 }, (_, index) => ({
+    verdict: "ok",
+    scannedAt: `2026-08-13T14:32:0${8 - index}+03:00`,
+    codeSuffix: null,
+    identity: identityForSerial(`DEMO-SERIAL-00012${8 - index}`),
+  }));
+}
+
+function galleryBoxLabels(locale: GalleryLocale, ordinal: number) {
+  const ru = locale === "ru";
+  return {
+    title: ru ? "Открытый короб" : "Open box",
+    number: ru ? `Короб № ${ordinal}` : `Box no. ${ordinal}`,
+    absent: ru ? "Открытого короба нет" : "No open box",
+    count: ru ? "единиц в коробе" : "items in box",
+    capacityUnknown: ru ? "вместимость не задана" : "capacity unknown",
+    grouped: ru ? "Одна ячейка показывает несколько единиц" : "Each cell represents multiple items",
+    close: ru ? "Закрыть короб" : "Close box",
+    undo: ru ? "Отменить скан" : "Undo scan",
+    clear: ru ? "Очистить" : "Clear",
+  };
 }
 
 function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: GalleryLocale }) {
@@ -613,25 +716,57 @@ function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }
 
 function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const capacity = full ? 120 : 20;
+  const itemCount = full ? capacity : 0;
   return (
-    <StationScreen
-      title={ru ? "Текущий короб" : "Current box"}
-      actions={<GalleryFooter locale={locale} primary={ru ? "Закрыть короб" : "Close box"} />}
-    >
-      <div className="gallery-box">
-        <div className="gallery-box-count">
-          <strong>{full ? "24 / 24" : "0 / 24"}</strong>
-          <span>
-            {full ? (ru ? "Короб заполнен" : "Box is full") : ru ? "Короб пуст" : "Box is empty"}
-          </span>
-        </div>
-        <div className="gallery-box-meter">
-          <span style={{ width: full ? "100%" : "0%" }} />
-        </div>
-        <p className="gallery-mono">SSCC TEST 000000000000000000</p>
-      </div>
+    <StationScreen title={ru ? "Текущий короб" : "Current box"}>
+      <BoxFillInstrument
+        box={{ boxId: "gallery-box-standalone", itemCount }}
+        ordinal={1}
+        acceptedToken={full ? "gallery-full" : null}
+        capacity={capacity}
+        canUndo={itemCount > 0}
+        labels={galleryBoxLabels(locale, 1)}
+        onClose={() => undefined}
+        onUndo={() => undefined}
+        onClear={() => undefined}
+      />
     </StationScreen>
   );
+}
+
+const GALLERY_RECOVERY_SSCC = "046012345600000016";
+
+function BoxPrintRecoveryFixture({ variant }: { variant: string }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const errorCode = galleryRecoveryErrorCode(variant);
+
+  useLayoutEffect(() => {
+    if (variant !== "skip-confirm") return;
+    rootRef.current
+      ?.querySelector<HTMLButtonElement>(".mk-full-screen-dialog > footer button:last-of-type")
+      ?.click();
+  }, [variant]);
+
+  return (
+    <div ref={rootRef} className="gallery-production-recovery">
+      <BoxPrintRecovery
+        sscc={GALLERY_RECOVERY_SSCC}
+        errorCode={errorCode}
+        pending={false}
+        onRetry={() => undefined}
+        onSetup={() => undefined}
+        onSkip={() => undefined}
+      />
+    </div>
+  );
+}
+
+function galleryRecoveryErrorCode(variant: string): BoxPrintErrorCode {
+  if (variant === "template_missing") return "template_missing";
+  if (variant === "printer_unconfigured") return "printer_unconfigured";
+  if (variant === "render_failed") return "render_failed";
+  return "transport_failed";
 }
 
 function SerialRecoveryFixture({ locale }: { locale: GalleryLocale }) {

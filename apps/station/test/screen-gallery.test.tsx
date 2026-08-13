@@ -60,6 +60,11 @@ describe("development screen gallery", () => {
         "print-verification",
         "print-mismatch",
         "print-not-sscc",
+        "box-print-template-missing",
+        "box-print-printer-unconfigured",
+        "box-print-render-failed",
+        "box-print-transport-failed",
+        "box-print-skip-confirm",
       ]),
     );
 
@@ -70,6 +75,84 @@ describe("development screen gallery", () => {
       findMissingGalleryStates(withoutPrintVerification, PERSISTENT_GALLERY_STATE_IDS),
     ).toEqual(["print-verification"]);
     expect(EXPECTED_GALLERY_STATE_IDS).toContain("print-verification");
+    expect(EXPECTED_GALLERY_STATE_IDS).toEqual(
+      expect.arrayContaining([
+        "box-print-template-missing",
+        "box-print-printer-unconfigured",
+        "box-print-render-failed",
+        "box-print-transport-failed",
+        "box-print-skip-confirm",
+      ]),
+    );
+  });
+
+  it("renders aggregation with the production scan, 20-place box, and six-row history instruments", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,
+    );
+
+    const scan = view.container.querySelector<HTMLElement>(".work-scan-result");
+    expect(scan).not.toBeNull();
+    expect(scan?.querySelector('[data-tone="ok"]')?.textContent).toContain("✓ Принято");
+    expect(scan?.textContent).toContain(
+      "(92) TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789",
+    );
+    expect(view.container.querySelector(".mk-signal-overlay")).toBeNull();
+
+    const box = view.container.querySelector<HTMLElement>(".work-box-fill");
+    expect(box).not.toBeNull();
+    expect(within(box!).getByText("Короб № 1")).toBeDefined();
+    expect(within(box!).getByTestId("box-progress").textContent).toBe("2 / 20");
+    const cells = box?.querySelectorAll(".work-box-fill__cell") ?? [];
+    expect(cells).toHaveLength(20);
+    expect(cells[0]?.getAttribute("data-state")).toBe("filled");
+    expect(cells[1]?.getAttribute("data-state")).toBe("filled");
+    expect(cells[2]?.getAttribute("data-state")).toBe("next");
+
+    expect(view.container.querySelectorAll(".work-recent li")).toHaveLength(6);
+  });
+
+  it("renders standalone box states through the production grouped fill instrument", () => {
+    const view = render(<StationScreenGallery request={{ state: "box-empty", locale: "ru" }} />);
+    expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
+
+    view.rerender(<StationScreenGallery request={{ state: "box-full", locale: "ru" }} />);
+    const grouped = view.container.querySelector<HTMLElement>(".work-box-fill__grid");
+    expect(grouped?.getAttribute("data-grouped")).toBe("true");
+    expect(grouped?.getAttribute("aria-valuemax")).toBe("120");
+    expect(view.container.querySelector(".work-box-fill")?.textContent).toContain("120 / 120");
+  });
+
+  it.each([
+    ["box-print-template-missing", "Для смены не выбран шаблон этикетки короба", false],
+    ["box-print-printer-unconfigured", "Принтер не настроен", true],
+    ["box-print-render-failed", "Не удалось подготовить этикетку", false],
+    ["box-print-transport-failed", "Принтер не принял задание", true],
+  ] as const)(
+    "renders persistent recovery %s through the production recovery dialog",
+    (state, message, hasSetup) => {
+      const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
+
+      expect(view.container.querySelector(".box-print-recovery")).not.toBeNull();
+      expect(screen.getByRole("alert").textContent).toBe(message);
+      expect(screen.getByText("046012345600000016")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Повторить печать" })).toBeDefined();
+      expect(screen.getByRole("button", { name: "Продолжить без этикетки" })).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Настроить принтер" }) !== null).toBe(hasSetup);
+    },
+  );
+
+  it("opens the production skip confirmation deterministically for viewport acceptance", () => {
+    const view = render(
+      <StationScreenGallery request={{ state: "box-print-skip-confirm", locale: "ru" }} />,
+    );
+
+    expect(view.container.querySelector(".box-print-recovery")).not.toBeNull();
+    expect(screen.getByRole("heading", { name: "Продолжить без этикетки?" })).toBeDefined();
+    expect(
+      screen.getByText("Короб уже закрыт. Его нужно будет промаркировать этикеткой позже."),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Подтвердить продолжение" })).toBeDefined();
   });
 
   it("renders every expected state through the real fixed station shell without external reads", () => {
