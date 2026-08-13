@@ -33,7 +33,7 @@ export function ShiftCard({
   return (
     <Card className="shift-card" padding="var(--sp-3)">
       <div className="shift-card__body">
-        {productId ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} refreshKey={imageRefreshKey} /> : null}
+        {productId && image ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} refreshKey={imageRefreshKey} /> : null}
         <div className="shift-card__product">{productName ?? "—"}</div>
         <div className="shift-card__counterparty">
           {counterpartyName ? `${counterpartyLabel} ${counterpartyName}` : null}

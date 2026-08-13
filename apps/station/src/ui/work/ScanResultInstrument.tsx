@@ -22,6 +22,7 @@ export interface ScanResultInstrumentProps {
   exec?: SqlExecutor | undefined;
   productId?: string | undefined;
   image?: StationProductImageDescriptor | null | undefined;
+  refreshKey?: number;
 }
 
 export function operationStatusLabel(verdict: string, labels: ScanResultLabels): string {
@@ -40,12 +41,13 @@ export function ScanResultInstrument({
   exec,
   productId,
   image,
+  refreshKey,
 }: ScanResultInstrumentProps) {
   const tone = operation?.verdict === "ok" ? "ok" : operation ? "error" : "neutral";
   return (
     <section className="work-instrument work-scan-result" aria-label={productName}>
       <div className="work-scan-result__identity">
-        {productId ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} className="work-scan-result__image" /> : null}
+        {productId && image ? <ProductImage exec={exec} productId={productId} productName={productName} image={image} refreshKey={refreshKey} className="work-scan-result__image" /> : null}
         <h2 title={productName}>{productName}</h2>
         {counterpartyName ? <p title={counterpartyName}>{counterpartyName}</p> : null}
       </div>

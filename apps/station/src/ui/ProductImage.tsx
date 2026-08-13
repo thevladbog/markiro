@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
 import {
+  readCachedStationProductImage,
   readStationProductImage,
-  stationProductImageCacheKey,
 } from "../lib/product-image-cache.js";
 
 export interface ProductImageProps {
@@ -11,13 +11,14 @@ export interface ProductImageProps {
   productName: string | null;
   image?: StationProductImageDescriptor | null | undefined;
   className?: string;
-  refreshKey?: number;
+  refreshKey?: number | undefined;
 }
 
 /** Offline-first product photo. A missing/corrupt photo deliberately degrades to text. */
-export function ProductImage({ exec, productId, productName, image, className }: ProductImageProps) {
+export function ProductImage({ exec, productId, productName, image, className, refreshKey }: ProductImageProps) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
+  const [retryKey, setRetryKey] = useState(0);
   const objectUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -32,16 +33,8 @@ export function ProductImage({ exec, productId, productName, image, className }:
 
     void (async () => {
       let blob: Blob | null = await readStationProductImage(exec, productId);
-      if (!blob && typeof caches !== "undefined") {
-        try {
-          const response = await (await caches.open("markiro-station-product-images-v1")).match(
-            stationProductImageCacheKey(productId, image.checksum),
-          );
-          blob = response ? await response.blob() : null;
-        } catch {
-          blob = null;
-        }
-      }
+      if (blob && (blob.type !== image.contentType || blob.size !== image.byteSize)) blob = null;
+      if (!blob) blob = await readCachedStationProductImage(productId, image);
       if (cancelled || !blob || typeof URL.createObjectURL !== "function") return;
       const nextUrl = URL.createObjectURL(blob);
       if (cancelled) {
@@ -53,10 +46,14 @@ export function ProductImage({ exec, productId, productName, image, className }:
     })().catch(() => {
       if (!cancelled) setFailed(true);
     });
+    const retry = retryKey < 2 ? window.setTimeout(() => {
+      if (!cancelled) setRetryKey((key) => key + 1);
+    }, 350) : undefined;
     return () => {
       cancelled = true;
+      if (retry !== undefined) window.clearTimeout(retry);
     };
-  }, [exec, image, productId, refreshKey]);
+  }, [exec, image, productId, refreshKey, retryKey]);
 
   useEffect(() => () => {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);

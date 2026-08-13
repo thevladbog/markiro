@@ -135,6 +135,22 @@ export async function readStationProductImage(exec: SqlExecutor, productId: stri
   }
 }
 
+export async function readCachedStationProductImage(
+  productId: string,
+  descriptor: StationProductImageDescriptor,
+): Promise<Blob | null> {
+  try {
+    const cache = await openImageCache();
+    const response = await cache.match(cacheKey(productId, descriptor.checksum));
+    if (!response) return null;
+    const blob = await response.blob();
+    await validateBlob(blob, descriptor);
+    return blob;
+  } catch {
+    return null;
+  }
+}
+
 export async function clearStationProductImages(exec: SqlExecutor): Promise<void> {
   await exec.run("UPDATE product_mirror SET image_pointer_checksum = NULL");
   try {

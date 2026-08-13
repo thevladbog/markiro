@@ -145,6 +145,15 @@ export function WorkScreen({
   const [confirmExit, setConfirmExit] = useState(false);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
+  useEffect(() => {
+    const first = window.setTimeout(() => setImageRefreshKey((key) => key + 1), 300);
+    const second = window.setTimeout(() => setImageRefreshKey((key) => key + 1), 1_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearTimeout(second);
+    };
+  }, [shiftId]);
   const recentReadState = useRef<RecentReadState>({
     mounted: false,
     active: false,
@@ -1076,6 +1085,7 @@ export function WorkScreen({
                 exec={exec}
                 productId={productId}
                 image={productImage}
+                refreshKey={imageRefreshKey}
               />
               {issuerPrefix !== null ? (
                 <BoxFillInstrument
