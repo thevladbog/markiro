@@ -3,6 +3,7 @@ import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
+  HeadObjectCommand,
   PutObjectCommand,
   S3Client,
 } from "@aws-sdk/client-s3";
@@ -84,22 +85,81 @@ export class ObjectStorageService implements OnModuleDestroy {
     );
   }
 
+  async putVerified(
+    key: string,
+    body: Buffer,
+    contentType: string,
+    sha256: string,
+  ): Promise<{ byteSize: number; sha256: string }> {
+    assertSafeKey(key);
+    assertSha256(sha256);
+    await this.#client.send(
+      new PutObjectCommand({
+        Bucket: this.#bucket,
+        Key: key,
+        Body: body,
+        ContentType: contentType,
+        Metadata: { sha256 },
+      }),
+    );
+
+    const stored = await this.#client.send(
+      new HeadObjectCommand({ Bucket: this.#bucket, Key: key }),
+    );
+    const byteSize = stored.ContentLength;
+    const storedSha256 = stored.Metadata?.sha256;
+    if (byteSize !== body.byteLength || storedSha256 !== sha256) {
+      throw new Error("Object upload verification failed");
+    }
+
+    return { byteSize, sha256: storedSha256 };
+  }
+
   async delete(key: string): Promise<void> {
     assertSafeKey(key);
     await this.#client.send(new DeleteObjectCommand({ Bucket: this.#bucket, Key: key }));
   }
 
-  async presignRead(key: string, expiresInSeconds = 300): Promise<string> {
+  async presignRead(
+    key: string,
+    expiresInSeconds = 300,
+    options?: { downloadFilename: string },
+  ): Promise<string> {
     assertSafeKey(key);
     if (expiresInSeconds < 1 || expiresInSeconds > 300) {
       throw new Error("Signed object reads must expire within five minutes");
     }
     return this.presign(
       this.#client as S3Client,
-      new GetObjectCommand({ Bucket: this.#bucket, Key: key }),
+      new GetObjectCommand({
+        Bucket: this.#bucket,
+        Key: key,
+        ...(options === undefined
+          ? {}
+          : {
+              ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeRfc5987Filename(
+                options.downloadFilename,
+              )}`,
+            }),
+      }),
       { expiresIn: expiresInSeconds },
     );
   }
+}
+
+function assertSha256(sha256: string): void {
+  if (!/^[0-9a-f]{64}$/.test(sha256)) {
+    throw new Error("Invalid SHA-256 checksum");
+  }
+}
+
+function encodeRfc5987Filename(filename: string): string {
+  if (/[\r\n]/.test(filename)) {
+    throw new Error("Download filename must not contain CR or LF");
+  }
+  return encodeURIComponent(filename).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
 }
 
 function assertSafeKey(key: string): void {
