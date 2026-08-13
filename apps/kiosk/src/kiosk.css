@@ -143,6 +143,64 @@ body,
   gap: 10px;
 }
 
+.markiro-logo {
+  display: block;
+  width: min(280px, 100%);
+  height: 64px;
+}
+
+.markiro-logo--compact {
+  width: 48px;
+  height: 48px;
+}
+
+.markiro-logo__tile,
+.markiro-logo__wordmark {
+  fill: var(--fg-1);
+}
+
+.markiro-logo__pixels {
+  fill: var(--surface-page);
+}
+
+.markiro-logo__signal {
+  fill: var(--ok-fg);
+}
+
+.markiro-logo__wordmark {
+  font: 600 34px/1 var(--font-mono);
+  letter-spacing: -0.5px;
+}
+
+.kiosk-pairing__brand {
+  flex: 0 0 auto;
+}
+
+.kiosk-pairing__code {
+  width: min(100%, 34rem);
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: clamp(5px, 1vw, 10px);
+}
+
+.kiosk-pairing__code-cell {
+  min-width: 0;
+  height: clamp(48px, 8dvh, 68px);
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: var(--floor-counter-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.kiosk-pairing__code-cell[data-empty="true"]::before {
+  content: "·";
+  color: var(--fg-3);
+}
+
 .kiosk-pairing__details h1,
 .kiosk-pairing__details p {
   margin: 0;
@@ -168,8 +226,168 @@ body,
 .kiosk-pairing__actions {
   width: min(100%, 312px);
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
+}
+
+.kiosk-login {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: clamp(12px, 2dvh, 24px);
+  padding: clamp(18px, 3dvh, 32px) clamp(24px, 4vw, 56px);
+}
+
+.kiosk-login__brand {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+.kiosk-login__brand .markiro-logo,
+.kiosk-login__company-logo {
+  width: auto;
+  max-width: min(260px, 45vw);
+  height: clamp(48px, 8dvh, 64px);
+  object-fit: contain;
+  object-position: left center;
+}
+
+.kiosk-login__brand p,
+.kiosk-login__footer,
+.kiosk-login__copy p,
+.kiosk-login__copy h1 {
+  margin: 0;
+}
+
+.kiosk-login__brand p {
+  overflow: hidden;
+  color: var(--fg-2);
+  font: var(--text-body-lg);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kiosk-login__center {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+}
+
+.kiosk-login__visual {
+  justify-self: center;
+}
+
+.kiosk-login__copy {
+  width: min(100%, 34rem);
+  justify-self: stretch;
+  display: grid;
+  align-content: center;
+  gap: clamp(10px, 2dvh, 18px);
+  padding-inline: clamp(24px, 5vw, 72px);
+  text-align: left;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+.kiosk-login__copy h1 {
+  font: var(--text-display);
+}
+
+.kiosk-login__eyebrow {
+  color: var(--fg-3);
+  font: 600 0.875rem/1.25 var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kiosk-login__subtitle {
+  max-width: 32rem;
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.kiosk-login > .mk-alert {
+  position: absolute;
+  inset-inline: 50%;
+  bottom: 76px;
+  width: min(90vw, 40rem);
+  transform: translateX(-50%);
+}
+
+.kiosk-login__footer {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
+
+.badge-scan-animation {
+  width: clamp(180px, 26vw, 280px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+}
+
+.badge-scan-animation__reader {
+  position: relative;
+  width: 66%;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 28%;
+  background: var(--surface-card);
+  box-shadow: 0 0 0 18px color-mix(in srgb, var(--surface-panel) 65%, transparent);
+}
+
+.badge-scan-animation__reader svg {
+  width: 64%;
+  fill: none;
+  stroke: var(--fg-2);
+  stroke-width: 2.5;
+}
+
+.badge-scan-animation__beam {
+  position: absolute;
+  z-index: 1;
+  left: 10%;
+  right: 10%;
+  top: 18%;
+  height: 2px;
+  background: var(--fg-1);
+  box-shadow: 0 0 18px var(--fg-1);
+  animation: kiosk-badge-scan 2.2s ease-in-out infinite;
+}
+
+.badge-scan-animation__base {
+  width: 40%;
+  height: 5px;
+  margin-top: 30px;
+  border-radius: 999px;
+  background: var(--line-strong);
+}
+
+@keyframes kiosk-badge-scan {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(clamp(72px, 10vw, 108px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .badge-scan-animation *,
+  .badge-scan-animation {
+    animation: none !important;
+  }
 }
 
 .kiosk-pairing__service {
@@ -359,6 +577,23 @@ body,
     padding: 16px 28px 24px;
   }
 
+  .kiosk-login__center {
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    text-align: center;
+  }
+
+  .kiosk-login__copy {
+    justify-self: center;
+    justify-items: center;
+    padding-inline: 0;
+    text-align: center;
+  }
+
+  .kiosk-login__brand {
+    justify-content: center;
+  }
+
   .kiosk-credential-gate {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
@@ -382,5 +617,19 @@ body,
   .kiosk-setup__panel + .kiosk-setup__panel {
     border-left: 0;
     border-top: 1px solid var(--line);
+  }
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .kiosk-pairing {
+    --control-keypad: 72px;
+  }
+
+  .kiosk-pairing__details {
+    gap: 10px;
+  }
+
+  .kiosk-pairing__details .markiro-logo {
+    height: 48px;
   }
 }

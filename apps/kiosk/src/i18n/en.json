@@ -5,6 +5,9 @@
     "prompt": "Enter the eight-digit pairing code from the admin panel",
     "submit": "Connect",
     "clear": "Clear",
+    "backspace": "Backspace",
+    "keypad": "Pairing code numeric keypad",
+    "codeValue": "Entered code: {{code}}",
     "scan": "Scan code",
     "scanHint": "The scanner is already on — you can scan the code at any time",
     "scanWaiting": "Waiting for the scan",
@@ -26,14 +29,16 @@
     "boundContinue": "Start working"
   },
   "idle": {
-    "title": "Take products for yourself",
-    "subtitle": "Checkout and payment happen at the administrator's till",
+    "eyebrow": "Employee kiosk",
+    "title": "Scan your badge",
+    "subtitle": "Hold your badge up to the scanner. You can scan products after signing in.",
     "scan": "Scan the QR code",
     "scanTarget": "on your badge",
     "hint": "The QR code is on the back of your badge. Hold it up to the scanner below the screen, then scan the marking codes on the bottles.",
     "badgeUnknown": "Badge not recognised. Scan it again, or ask an administrator.",
     "notABadge": "Scan your badge first — you can scan the bottles right after that.",
-    "settingsHold": "Keep holding — the settings sign-in will open"
+    "settingsHold": "Keep holding — the settings sign-in will open",
+    "footer": "Self-service kiosk"
   },
   "cart": {
     "logo": "markiro · for yourself",

@@ -221,8 +221,10 @@ describe("Pairing", () => {
     expect(details.contains(scannerSetupButton())).toBe(true);
     expect(keypad.contains(submitButton())).toBe(true);
     expect(submitButton().classList.contains("kiosk-control")).toBe(true);
+    expect(screen.getByLabelText("Маркиро")).toBeDefined();
+    expect(document.querySelectorAll(".kiosk-pairing__code-cell")).toHaveLength(8);
     expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Backspace" })).toBeDefined();
   });
 
   it("enables the submit only once all eight digits are entered", () => {

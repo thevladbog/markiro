@@ -40,6 +40,12 @@ import {
   type KioskOutcome,
 } from "../session/flow.js";
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
+import {
+  brandingOwnerOf,
+  loadCachedBranding,
+  refreshCachedBranding,
+  type CachedBranding,
+} from "../store/branding.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
 import { readJournalSince } from "../store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue, quarantineQueue } from "../store/queue.js";
@@ -144,6 +150,11 @@ export function KioskShell(): React.JSX.Element {
   const [configLoaded, setConfigLoaded] = useState(false);
   const [config, setConfig] = useState<KioskConfig | null>(null);
   const [snapshot, setSnapshot] = useState<CachedSnapshot | null>(null);
+  const [branding, setBranding] = useState<CachedBranding>({
+    organizationName: "Маркиро",
+    logoBlob: null,
+    revision: null,
+  });
   const [online, setOnline] = useState(() => navigator.onLine);
   const [queuedCount, setQueuedCount] = useState(0);
   /**
@@ -198,6 +209,29 @@ export function KioskShell(): React.JSX.Element {
     snapshotRef.current = next;
     setSnapshot(next);
   }, []);
+
+  const refreshBranding = useCallback(
+    async (cfg: KioskConfig | null, snap: CachedSnapshot | null): Promise<void> => {
+      const owner = brandingOwnerOf(cfg);
+      if (!cfg?.token || !owner || !snap?.bootstrap.branding) {
+        setBranding(await loadCachedBranding());
+        return;
+      }
+      try {
+        setBranding(
+          await refreshCachedBranding({
+            owner,
+            token: cfg.token,
+            branding: snap.bootstrap.branding,
+          }),
+        );
+      } catch (error) {
+        console.warn("kiosk: company branding could not be refreshed", error);
+        setBranding(await loadCachedBranding());
+      }
+    },
+    [],
+  );
 
   /**
    * The ONE order a worker is standing here waiting on, and what the server
@@ -428,14 +462,16 @@ export function KioskShell(): React.JSX.Element {
       }
       if (reached) {
         try {
-          applySnapshot(await readSnapshot());
+          const refreshed = await readSnapshot();
+          applySnapshot(refreshed);
+          void refreshBranding(configRef.current, refreshed);
         } catch (err) {
           console.error("kiosk: the refreshed snapshot could not be read back", err);
         }
       }
     }
     await drain();
-  }, [applySnapshot, clientFor, drain, revoke]);
+  }, [applySnapshot, clientFor, drain, refreshBranding, revoke]);
 
   /** Re-reads everything the device persists. Used at boot and again the moment
    * pairing writes a token and a dataset. */
@@ -454,6 +490,11 @@ export function KioskShell(): React.JSX.Element {
       if (snap) await scrubStoredBadgeCodes(snap.bootstrap.badgeSalt);
       applyConfig(cfg);
       applySnapshot(snap);
+      setBranding(await loadCachedBranding());
+      // Logo delivery is best-effort and must not hold the post-pair handoff or
+      // turn a usable bootstrap into a failed pairing. The cached/fallback
+      // identity is already rendered while this private request runs.
+      void refreshBranding(cfg, snap);
     } catch (err) {
       // Nothing is rendered from a half-read store, and the device is not
       // stuck: an unreadable config reads as unpaired, which routes to the
@@ -461,7 +502,7 @@ export function KioskShell(): React.JSX.Element {
       console.error("kiosk: the device state could not be read", err);
     }
     await refreshCounts();
-  }, [applyConfig, applySnapshot, refreshCounts]);
+  }, [applyConfig, applySnapshot, refreshBranding, refreshCounts]);
 
   useEffect(() => {
     let alive = true;
@@ -990,6 +1031,7 @@ export function KioskShell(): React.JSX.Element {
     // screen that is safe to show a stranger.
     screen = (
       <Idle
+        branding={branding}
         onScan={subscribe}
         resolveBadge={async (raw) => {
           if (!roster) return null;

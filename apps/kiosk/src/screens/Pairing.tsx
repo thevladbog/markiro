@@ -9,9 +9,21 @@ import {
   UnusableBootstrapError,
 } from "../store/cache.js";
 import { kioskIdOf, writeConfig } from "../store/config.js";
+import { MarkiroLogo } from "../ui/MarkiroLogo.js";
 
 /** `POST /kiosk/pair` accepts `/^\d{8}$/` — the admin panel issues nothing else. */
 const CODE_LENGTH = 8;
+
+export function nextPairCode(
+  current: string,
+  action: { type: "digit"; digit: string } | { type: "clear" } | { type: "backspace" },
+): string {
+  if (action.type === "clear") return "";
+  if (action.type === "backspace") return current.slice(0, -1);
+  return current.length < CODE_LENGTH && /^\d$/.test(action.digit)
+    ? current + action.digit
+    : current;
+}
 
 /**
  * How long the success confirmation stands before the device goes to work.
@@ -337,6 +349,7 @@ export function Pairing({
   return (
     <main className="kiosk-screen kiosk-pairing" aria-labelledby="kiosk-pairing-title">
       <section className="kiosk-pairing__details" aria-labelledby="kiosk-pairing-title">
+        <MarkiroLogo className="kiosk-pairing__brand" />
         <header>
           <h1 id="kiosk-pairing-title" style={{ fontSize: "2.25rem" }}>
             {t("pairing.title")}
@@ -346,8 +359,21 @@ export function Pairing({
         {/* `role="status"`: what has been entered so far is announced as it
             changes, which is what a worker filling it by scanner needs. It was an
             `aria-label="code"` — a test hook no screen reader reads out. */}
-        <div role="status" style={{ fontSize: "3rem", letterSpacing: "0.5rem", minHeight: "3rem" }}>
-          {code}
+        <div
+          role="status"
+          className="kiosk-pairing__code"
+          aria-label={t("pairing.codeValue", { code })}
+        >
+          {Array.from({ length: CODE_LENGTH }, (_, index) => (
+            <span
+              key={index}
+              className="kiosk-pairing__code-cell"
+              data-empty={code[index] === undefined ? "true" : undefined}
+              aria-hidden="true"
+            >
+              {code[index] ?? ""}
+            </span>
+          ))}
         </div>
         {/* Binding in progress. Redeeming the code also pulls the whole dataset
             down in the same response, and on a gate link that is long enough for
@@ -436,7 +462,7 @@ export function Pairing({
           <Button
             className="kiosk-control"
             variant="secondary"
-            style={{ minHeight: 44 }}
+            style={{ minHeight: 48 }}
             disabled={busy}
             onClick={onConfigureScanner}
           >
@@ -448,7 +474,7 @@ export function Pairing({
           <Button
             className="kiosk-control"
             variant="secondary"
-            style={{ minHeight: 44 }}
+            style={{ minHeight: 48 }}
             onClick={() => {
               setServerOpen((open) => !open);
               // The wedge is paused while this field has the keyboard, so a
@@ -477,22 +503,23 @@ export function Pairing({
             // claiming it is waiting for a scan. The listener stays armed either
             // way — only the announcement ends.
             onChange={(next) => {
-              setCode(next);
+              const action =
+                next === ""
+                  ? ({ type: "clear" } as const)
+                  : next.length < code.length
+                    ? ({ type: "backspace" } as const)
+                    : ({ type: "digit", digit: next.at(-1) ?? "" } as const);
+              setCode(nextPairCode(code, action));
               setAwaitingScan(false);
             }}
             maxLength={CODE_LENGTH}
+            size="floor"
+            ariaLabel={t("pairing.keypad")}
+            backspaceLabel={t("pairing.backspace")}
+            clearLabel={t("pairing.clear")}
           />
         </div>
         <div className="kiosk-pairing__actions">
-          <Button
-            className="kiosk-control"
-            variant="secondary"
-            style={{ minHeight: 64 }}
-            disabled={busy || code.length === 0}
-            onClick={() => setCode("")}
-          >
-            {t("pairing.clear")}
-          </Button>
           <Button
             className="kiosk-control"
             style={{ minHeight: 64 }}
