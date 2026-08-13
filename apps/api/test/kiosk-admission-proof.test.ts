@@ -4,12 +4,10 @@ import {
   issueOpaqueKioskAdmissionToken,
   kioskAdmissionTokenHash,
   kioskOrderPayloadDigest,
+  kioskOrderProcessingLines,
 } from "../src/modules/pickup-orders/kiosk-admission-proof";
 import { admissionSequenceWithinWindow } from "../src/modules/pickup-orders/kiosk-admission-proof";
-import {
-  createOrderAdmissionSchema,
-  createOrderSchema,
-} from "../src/modules/pickup-orders/dto";
+import { createOrderAdmissionSchema, createOrderSchema } from "../src/modules/pickup-orders/dto";
 import { buildSscc } from "@markiro/domain";
 
 const order = {
@@ -94,6 +92,11 @@ describe("durable kiosk order admission", () => {
     });
     expect(items).toEqual([{ rawKm: "z" }, { rawKm: "a" }]);
     expect(boxes).toEqual([{ sscc: ssccB }, { sscc: ssccA }]);
+    expect(kioskOrderProcessingLines(vNext)).toEqual({
+      items: [{ rawKm: "a" }, { rawKm: "z" }],
+      boxes: [{ sscc: ssccA }, { sscc: ssccB }],
+      vNext: true,
+    });
   });
 
   it("requires at least one unique canonical loose item or box", () => {

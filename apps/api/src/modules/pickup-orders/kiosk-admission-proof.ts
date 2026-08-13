@@ -20,6 +20,64 @@ type CanonicalOrderContent = Pick<CreateOrderAdmissionDto, "deviceSeq" | "reason
   boxes?: { sscc: string }[];
 };
 
+export type KioskRejectionTerminalReason =
+  | "order_rejected"
+  | "unknown_badge"
+  | "writeoff_forbidden"
+  | "writeoff_reason_required"
+  | "unknown_reason";
+
+export interface KioskOrderRequestMarker {
+  source: "request";
+  version: 2;
+  terminalReason: KioskRejectionTerminalReason;
+}
+
+function compareCanonicalStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * vNext attestation deliberately makes request order irrelevant, so admission
+ * processing must consume the exact same locale-independent order as the
+ * proof. Legacy requests keep their historical item order byte-for-byte.
+ */
+export function kioskOrderProcessingLines(
+  dto: Pick<CreateOrderAdmissionDto | CreateOrderDto, "items" | "boxes">,
+): {
+  items: { rawKm: string }[];
+  boxes: { sscc: string }[];
+  vNext: boolean;
+} {
+  const items = dto.items.map((item) => ({ rawKm: item.rawKm }));
+  if (!Object.prototype.hasOwnProperty.call(dto, "boxes")) {
+    return { items, boxes: [], vNext: false };
+  }
+  return {
+    items: items.toSorted((left, right) => compareCanonicalStrings(left.rawKm, right.rawKm)),
+    boxes: (dto.boxes ?? [])
+      .map((box) => ({ sscc: box.sscc }))
+      .toSorted((left, right) => compareCanonicalStrings(left.sscc, right.sscc)),
+    vNext: true,
+  };
+}
+
+export function kioskOrderRequestMarker(
+  dto: Pick<CreateOrderAdmissionDto | CreateOrderDto, "boxes">,
+  terminalReason: KioskRejectionTerminalReason,
+): KioskOrderRequestMarker | null {
+  return Object.prototype.hasOwnProperty.call(dto, "boxes")
+    ? { source: "request", version: 2, terminalReason }
+    : null;
+}
+
+export async function findSerializedKioskWinner<T>(input: {
+  findOrder: () => Promise<T | null>;
+  findRejection?: () => Promise<T | null>;
+}): Promise<T | null> {
+  return (await input.findOrder()) ?? (input.findRejection ? await input.findRejection() : null);
+}
+
 /**
  * Canonical post-validation business content. Caller timestamps and opaque
  * proofs are deliberately absent: the reservation supplies its own server
@@ -28,6 +86,7 @@ type CanonicalOrderContent = Pick<CreateOrderAdmissionDto, "deviceSeq" | "reason
 export function canonicalKioskOrderContent(
   dto: CreateOrderAdmissionDto | CreateOrderDto,
 ): CanonicalOrderContent {
+  const processing = kioskOrderProcessingLines(dto);
   const legacy = {
     deviceSeq: dto.deviceSeq,
     badgeDigest: dto.badgeDigest ?? null,
@@ -36,13 +95,11 @@ export function canonicalKioskOrderContent(
     writeoffReasonId: dto.writeoffReasonId ?? null,
     items: dto.items.map((item) => ({ rawKm: item.rawKm })),
   };
-  if (!Object.prototype.hasOwnProperty.call(dto, "boxes")) return legacy;
+  if (!processing.vNext) return legacy;
   return {
     ...legacy,
-    items: legacy.items.toSorted((left, right) => left.rawKm.localeCompare(right.rawKm)),
-    boxes: (dto.boxes ?? [])
-      .map((box) => ({ sscc: box.sscc }))
-      .toSorted((left, right) => left.sscc.localeCompare(right.sscc)),
+    items: processing.items,
+    boxes: processing.boxes,
   };
 }
 

@@ -41,3 +41,14 @@
 ## Known external gate
 
 Run the compiled box-order e2e against an isolated PostgreSQL database with migration 0037 applied. It exercises 12-bottle expansion, current price, exact provenance/replay, and all-rejected used-member behavior.
+
+## Review fix round 1
+
+The three Important findings in `task-5-review.md` are addressed:
+
+- Every explicit-vNext terminal rejection now carries an internal request marker, including `boxes: []` loose-only and early badge/policy/reason failures. Replays derive only allowlisted terminal outcomes from that marker. The marker is filtered at the pickup-rejections API boundary, so it never changes admin line counts or rendering.
+- The serialized order transaction checks an existing order and then a persisted rejection after registry/employee/kiosk locks and before mutable policy or registry resolution. Early vNext failures additionally serialize on the kiosk row and recheck both winners without adding an employee-lock reverse edge.
+- Box overlap is first-wins: loose lines claim keys first, then only accepted boxes claim their complete member sets. A rejected box does not poison a later independent box.
+- One locale-independent code-unit comparator now controls both vNext proof hashing and vNext limit processing; copied arrays are sorted without mutating callers. The legacy boxes-absent proof and processing order remain unchanged.
+
+Review-fix RED was 4 failed / 7 passed, followed by one focused RED for the serialized winner helper. Final focused non-DB verification is 50/50; DB and API TypeScript compilation, scoped ESLint, API build, Prettier, and diff-check pass. The DB e2e sources compile and now cover concurrent `boxes: []` rejection replay plus exact early-terminal replay, but live execution was not authorized against the shared mutable database; no shared schema or data was changed.

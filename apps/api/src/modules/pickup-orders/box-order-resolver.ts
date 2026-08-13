@@ -85,11 +85,17 @@ export async function resolveOrderBoxes(
     .from(schema.boxes)
     .innerJoin(
       schema.shifts,
-      and(eq(schema.shifts.tenantId, schema.boxes.tenantId), eq(schema.shifts.id, schema.boxes.shiftId)),
+      and(
+        eq(schema.shifts.tenantId, schema.boxes.tenantId),
+        eq(schema.shifts.id, schema.boxes.shiftId),
+      ),
     )
     .innerJoin(
       schema.products,
-      and(eq(schema.products.tenantId, schema.shifts.tenantId), eq(schema.products.id, schema.shifts.productId)),
+      and(
+        eq(schema.products.tenantId, schema.shifts.tenantId),
+        eq(schema.products.id, schema.shifts.productId),
+      ),
     )
     .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.sscc, ssccs)))
     .orderBy(asc(schema.boxes.id))
@@ -148,21 +154,20 @@ export function classifyResolvedBoxConflicts(input: {
   looseKeys: ReadonlySet<string>;
   usedKeys?: ReadonlySet<string>;
 }): { accepted: ResolvedOrderBox[]; conflicts: BoxConflict[] } {
-  const frequency = new Map<string, number>();
-  for (const box of input.boxes) {
-    for (const member of box.members) frequency.set(member.kmKey, (frequency.get(member.kmKey) ?? 0) + 1);
-  }
+  // Loose lines are processed first. Each accepted box then claims all of its
+  // members atomically, so only a later overlapping box is rejected.
+  const claimedKeys = new Set(input.looseKeys);
+  for (const key of input.usedKeys ?? []) claimedKeys.add(key);
   const accepted: ResolvedOrderBox[] = [];
   const conflicts: BoxConflict[] = [];
   for (const box of input.boxes) {
-    const duplicate = box.members.some(
-      (member) =>
-        input.looseKeys.has(member.kmKey) ||
-        input.usedKeys?.has(member.kmKey) ||
-        (frequency.get(member.kmKey) ?? 0) > 1,
-    );
-    if (duplicate) conflicts.push({ sscc: box.sscc, bottleCount: box.bottleCount, reason: "duplicate" });
-    else accepted.push(box);
+    const duplicate = box.members.some((member) => claimedKeys.has(member.kmKey));
+    if (duplicate)
+      conflicts.push({ sscc: box.sscc, bottleCount: box.bottleCount, reason: "duplicate" });
+    else {
+      accepted.push(box);
+      for (const member of box.members) claimedKeys.add(member.kmKey);
+    }
   }
   return { accepted, conflicts };
 }
@@ -195,7 +200,8 @@ export function applyOrderLineLimit<TLoose>(input: {
     if (!input.limited || count + box.bottleCount <= input.dayLimit) {
       acceptedBoxes.push(box);
       count += box.bottleCount;
-    } else boxConflicts.push({ sscc: box.sscc, bottleCount: box.bottleCount, reason: "over_limit" });
+    } else
+      boxConflicts.push({ sscc: box.sscc, bottleCount: box.bottleCount, reason: "over_limit" });
   }
   return { acceptedLoose, looseConflicts, acceptedBoxes, boxConflicts };
 }

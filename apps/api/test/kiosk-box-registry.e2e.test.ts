@@ -405,19 +405,14 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       .expect(201);
     expect(first.body).toMatchObject({ itemCount: 13, conflicts: [], boxConflicts: [] });
     expect(first.body.acceptedBoxes).toEqual(
-      [...ssccs]
-        .sort()
-        .map((sscc) => ({ sscc, bottleCount: sscc === eligibleSscc ? 12 : 1 })),
+      [...ssccs].sort().map((sscc) => ({ sscc, bottleCount: sscc === eligibleSscc ? 12 : 1 })),
     );
 
     const [order] = await db
       .select({ id: schema.pickupOrders.id, totalPrice: schema.pickupOrders.totalPrice })
       .from(schema.pickupOrders)
       .where(
-        and(
-          eq(schema.pickupOrders.tenantId, tenantId),
-          eq(schema.pickupOrders.deviceSeq, 900),
-        ),
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 900)),
       );
     expect(order?.totalPrice).toBe("227.50");
     expect(
@@ -445,7 +440,9 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
     const before = await db
       .select({ id: schema.pickupOrders.id })
       .from(schema.pickupOrders)
-      .where(and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 901)));
+      .where(
+        and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 901)),
+      );
     expect(before).toEqual([]);
 
     const response = await request(app!.getHttpServer())
@@ -513,6 +510,66 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
           and(eq(schema.pickupOrders.tenantId, tenantId), eq(schema.pickupOrders.deviceSeq, 902)),
         ),
     ).toEqual([]);
+  });
+
+  it("replays boxes-empty loose rejection exactly and lets one concurrent rejection win", async () => {
+    const body = {
+      deviceSeq: 903,
+      badgeCode: pickupBadge,
+      reason: "buy" as const,
+      items: [{ rawKm: "not-a-km" }],
+      boxes: [],
+    };
+    const submit = () =>
+      request(app!.getHttpServer()).post("/kiosk/orders").set("x-kiosk-token", token).send(body);
+    const [first, concurrent] = await Promise.all([submit(), submit()]);
+    expect(first.status).toBe(422);
+    expect(concurrent.status).toBe(422);
+    expect(concurrent.body).toEqual(first.body);
+    expect(first.body).toEqual({
+      code: "order_rejected",
+      message: "No submitted order lines were accepted",
+      conflicts: [{ rawKm: "not-a-km", reason: "not_km" }],
+      boxConflicts: [],
+      acceptedBoxes: [],
+    });
+    expect(
+      await db
+        .select({ id: schema.pickupScanRejections.id })
+        .from(schema.pickupScanRejections)
+        .where(
+          and(
+            eq(schema.pickupScanRejections.tenantId, tenantId),
+            eq(schema.pickupScanRejections.kioskId, kioskId),
+            eq(schema.pickupScanRejections.deviceSeq, 903),
+          ),
+        ),
+    ).toHaveLength(1);
+    const replay = await submit();
+    expect(replay.status).toBe(422);
+    expect(replay.body).toEqual(first.body);
+  });
+
+  it("replays a boxes-empty early terminal rejection exactly", async () => {
+    const body = {
+      deviceSeq: 904,
+      badgeCode: `unknown-${randomUUID()}`,
+      reason: "buy" as const,
+      items: [{ rawKm: "not-a-km" }],
+      boxes: [],
+    };
+    const first = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send(body)
+      .expect(422);
+    const replay = await request(app!.getHttpServer())
+      .post("/kiosk/orders")
+      .set("x-kiosk-token", token)
+      .send(body)
+      .expect(422);
+    expect(replay.body).toEqual(first.body);
+    expect(replay.body.message).toBe("Unknown or inactive badge");
   });
 
   it("emits a remove delta after disassembly", async () => {

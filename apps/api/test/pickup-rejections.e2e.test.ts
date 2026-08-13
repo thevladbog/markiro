@@ -154,8 +154,9 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.badgeCode).toBeNull();
     expect(
       rows[0]!.codes
-        .filter((code): code is Extract<(typeof rows)[number]["codes"][number], { rawKm: string }> =>
-          "rawKm" in code,
+        .filter(
+          (code): code is Extract<(typeof rows)[number]["codes"][number], { rawKm: string }> =>
+            "rawKm" in code,
         )
         .map((code) => code.rawKm)
         .sort(),
@@ -448,6 +449,23 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(row.orderNo).toBeNull();
     expect(row.codes).toHaveLength(2);
     expect(row.acknowledgedAt).toBeNull();
+  });
+
+  it("keeps the internal vNext replay marker out of admin rejection codes", async () => {
+    await db.insert(schema.pickupScanRejections).values({
+      tenantId,
+      kioskId,
+      employeeId,
+      deviceSeq: 79,
+      codes: [
+        { rawKm: "not-a-km", reason: "not_km" },
+        { source: "request", version: 2, terminalReason: "order_rejected" },
+      ],
+      scannedAt: new Date(),
+    });
+    const res = await agent.get("/pickup-rejections").expect(200);
+    const row = res.body.items.find((item: { deviceSeq: number }) => item.deviceSeq === 79);
+    expect(row.codes).toEqual([{ rawKm: "not-a-km", reason: "not_km" }]);
   });
 
   it("reports an unrecognised badge as its own kind", async () => {

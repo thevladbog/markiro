@@ -556,6 +556,11 @@ export const pickupScanRejections = pgTable(
               bottleCount: number | null;
               reason: string;
             }
+          | {
+              source: "request";
+              version: 2;
+              terminalReason: string;
+            }
         )[]
       >()
       .notNull(),
