@@ -1,6 +1,7 @@
 import { isCanonicalDigestB64 } from "@markiro/domain";
 import { z } from "zod";
 import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
+import type { KioskBrandingDto } from "../org-profile/dto";
 
 /** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
 export const pairKioskSchema = z.object({ code: z.string().regex(/^\d{8}$/) });
@@ -126,6 +127,7 @@ export interface CreateOrderResultDto {
 export interface KioskBootstrapDto {
   generatedAt: string; // ISO 8601, server time -- see doc comment above
   subscription: SubscriptionAccessSnapshot;
+  branding: KioskBrandingDto;
   pickupPolicy: { limitsEnabled: boolean };
   config: { dayLimitPerEmployee: number; showPrices: boolean };
   badgeSalt: string; // base64; the salt every badgeHash below shares

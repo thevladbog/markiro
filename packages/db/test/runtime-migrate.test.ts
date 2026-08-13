@@ -59,6 +59,10 @@ const pickupPolicyMigration = new URL(
   "../migrations/0035_kiosk_pickup_policy.sql",
   import.meta.url,
 );
+const organizationBrandingMigration = new URL(
+  "../migrations/0036_organization_branding.sql",
+  import.meta.url,
+);
 const migrationJournal = new URL("../migrations/meta/_journal.json", import.meta.url);
 
 const legacyStationMigrationFixture = String.raw`
@@ -214,6 +218,18 @@ describe("runRuntimeMigrations", () => {
     expect(migration).toContain("INSERT INTO pickup_tenant_policies (tenant_id, limits_enabled)");
     expect(migration).toContain("INSERT INTO employee_pickup_policies");
     expect(journal.entries.map((entry) => entry.tag)).toContain("0035_kiosk_pickup_policy");
+  });
+
+  test("packages tenant-owned organization branding metadata", () => {
+    const migration = readFileSync(organizationBrandingMigration, "utf8");
+    const journal = JSON.parse(readFileSync(migrationJournal, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+
+    expect(migration).toContain('CREATE TABLE "organization_logo_assets"');
+    expect(migration).toContain('CONSTRAINT "org_profiles_logo_tenant_fk"');
+    expect(migration).toContain('FOREIGN KEY ("tenant_id","logo_asset_id")');
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0036_organization_branding");
   });
 
   test("holds one session advisory lock across the runtime migration", async () => {

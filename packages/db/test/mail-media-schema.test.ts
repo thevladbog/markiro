@@ -63,4 +63,33 @@ describe("mail and media schema", () => {
       getTableConfig(schema.userProfiles).checks.map((constraint) => constraint.name),
     ).toContain("user_profiles_avatar_owner_matches_user");
   });
+
+  it("keeps organization logos tenant-owned through the profile reference", () => {
+    expect(getTableName(schema.organizationLogoAssets)).toBe("organization_logo_assets");
+    expect(Object.keys(schema.organizationLogoAssets)).toEqual(
+      expect.arrayContaining([
+        "id",
+        "tenantId",
+        "objectKey",
+        "contentType",
+        "byteSize",
+        "checksum",
+        "width",
+        "height",
+        "status",
+      ]),
+    );
+    expect(
+      getTableConfig(schema.organizationLogoAssets).uniqueConstraints.map((item) => item.getName()),
+    ).toEqual(
+      expect.arrayContaining([
+        "organization_logo_assets_object_key_uq",
+        "organization_logo_assets_tenant_id_uq",
+      ]),
+    );
+    expect(Object.keys(schema.orgProfiles)).toContain("logoAssetId");
+    expect(
+      getTableConfig(schema.orgProfiles).foreignKeys.map((foreignKey) => foreignKey.getName()),
+    ).toContain("org_profiles_logo_tenant_fk");
+  });
 });

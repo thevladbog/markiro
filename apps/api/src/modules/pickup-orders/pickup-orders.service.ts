@@ -34,6 +34,7 @@ import type { PickupSlipData } from "../../pickup/slip";
 import { OperatorsService } from "../operators/operators.service";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
+import { OrgProfileService } from "../org-profile/org-profile.service";
 import {
   issueOpaqueKioskAdmissionToken,
   kioskAdmissionTokenHash,
@@ -147,6 +148,7 @@ export class PickupOrdersService {
     @Inject(DB) private readonly db: Db,
     private readonly operatorsService: OperatorsService,
     private readonly entitlements: EntitlementsService,
+    private readonly orgProfiles: OrgProfileService,
   ) {}
 
   /**
@@ -560,7 +562,7 @@ export class PickupOrdersService {
     );
     const subscription = this.entitlements.snapshotFrom(resolvedSubscription);
 
-    const [[kiosk], [pickupPolicy]] = await Promise.all([
+    const [[kiosk], [pickupPolicy], branding] = await Promise.all([
       this.db
         .select({
           dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
@@ -572,6 +574,7 @@ export class PickupOrdersService {
         .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
         .from(schema.pickupTenantPolicies)
         .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
+      this.orgProfiles.getKioskBranding(tenantId),
     ]);
     if (!pickupPolicy) {
       throw new InternalServerErrorException("Tenant pickup policy is not configured");
@@ -642,6 +645,7 @@ export class PickupOrdersService {
     return {
       generatedAt: generatedAt.toISOString(),
       subscription,
+      branding,
       pickupPolicy,
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,

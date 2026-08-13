@@ -14,6 +14,8 @@ import type { Env } from "../../env";
 type S3Boundary = Pick<S3Client, "send"> & { destroy?: () => void };
 type Presigner = typeof getSignedUrl;
 
+const MAX_PRIVATE_OBJECT_BYTES = 5 * 1024 * 1024;
+
 const S3_CONNECTION_TIMEOUT_MS = 3_000;
 const S3_REQUEST_TIMEOUT_MS = 15_000;
 const S3_SOCKET_TIMEOUT_MS = 10_000;
@@ -89,6 +91,27 @@ export class ObjectStorageService implements OnModuleDestroy {
     await this.#client.send(new DeleteObjectCommand({ Bucket: this.#bucket, Key: key }));
   }
 
+  async get(key: string): Promise<{ body: Buffer; contentType: string | null }> {
+    assertSafeKey(key);
+    const response = (await this.#client.send(
+      new GetObjectCommand({ Bucket: this.#bucket, Key: key }),
+    )) as {
+      Body?: unknown;
+      ContentLength?: number;
+      ContentType?: string;
+    };
+    if (
+      typeof response.ContentLength === "number" &&
+      response.ContentLength > MAX_PRIVATE_OBJECT_BYTES
+    ) {
+      throw new Error("Private object exceeds 5 MiB response limit");
+    }
+    return {
+      body: await readBoundedBody(response.Body),
+      contentType: response.ContentType ?? null,
+    };
+  }
+
   async presignRead(key: string, expiresInSeconds = 300): Promise<string> {
     assertSafeKey(key);
     if (expiresInSeconds < 1 || expiresInSeconds > 300) {
@@ -100,6 +123,39 @@ export class ObjectStorageService implements OnModuleDestroy {
       { expiresIn: expiresInSeconds },
     );
   }
+}
+
+async function readBoundedBody(body: unknown): Promise<Buffer> {
+  if (body instanceof Uint8Array) {
+    if (body.byteLength > MAX_PRIVATE_OBJECT_BYTES) {
+      throw new Error("Private object exceeds 5 MiB response limit");
+    }
+    return Buffer.from(body);
+  }
+  if (!body || typeof body !== "object" || !(Symbol.asyncIterator in body)) {
+    throw new Error("Private object has no readable body");
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  for await (const chunk of body as AsyncIterable<Uint8Array>) {
+    const bytes = Buffer.from(chunk);
+    total += bytes.byteLength;
+    if (total > MAX_PRIVATE_OBJECT_BYTES) {
+      throw new Error("Private object exceeds 5 MiB response limit");
+    }
+    chunks.push(bytes);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+export function isMissingObjectError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const value = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
+  return (
+    value.name === "NoSuchKey" ||
+    value.name === "NotFound" ||
+    value.$metadata?.httpStatusCode === 404
+  );
 }
 
 function assertSafeKey(key: string): void {

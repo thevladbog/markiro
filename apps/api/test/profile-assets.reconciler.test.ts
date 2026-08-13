@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { ProfileAssetsReconciler } from "../src/modules/profile/profile-assets.reconciler";
+import type { OrgProfileService } from "../src/modules/org-profile/org-profile.service";
 import type { ProfileService } from "../src/modules/profile/profile.service";
 
 describe("ProfileAssetsReconciler", () => {
@@ -11,12 +12,16 @@ describe("ProfileAssetsReconciler", () => {
     const profiles = {
       reconcileAssets: vi.fn().mockReturnValue(cleanup),
     } as unknown as ProfileService;
-    const reconciler = new ProfileAssetsReconciler(profiles);
+    const organizations = {
+      reconcileLogoAssets: vi.fn().mockResolvedValue(0),
+    } as unknown as OrgProfileService;
+    const reconciler = new ProfileAssetsReconciler(profiles, organizations);
 
     const initialization = reconciler.onModuleInit();
 
     expect(initialization).toBeUndefined();
     expect(profiles.reconcileAssets).toHaveBeenCalledOnce();
+    expect(organizations.reconcileLogoAssets).toHaveBeenCalledOnce();
 
     finishCleanup(0);
     await cleanup;

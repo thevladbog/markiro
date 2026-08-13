@@ -51,6 +51,54 @@ describe("ObjectStorageService", () => {
     expect(presign).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a bounded private object body and its content type", async () => {
+    const send = vi.fn().mockResolvedValue({
+      Body: (async function* () {
+        yield Buffer.from("logo-");
+        yield Buffer.from("bytes");
+      })(),
+      ContentLength: 10,
+      ContentType: "image/webp",
+    });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.get("tenants/t/branding/a.webp")).resolves.toEqual({
+      body: Buffer.from("logo-bytes"),
+      contentType: "image/webp",
+    });
+    expect(send.mock.calls[0]?.[0]?.constructor.name).toBe("GetObjectCommand");
+  });
+
+  it("rejects an oversized private object before consuming its body", async () => {
+    let consumed = false;
+    const send = vi.fn().mockResolvedValue({
+      Body: (async function* () {
+        consumed = true;
+        yield Buffer.from("unexpected");
+      })(),
+      ContentLength: 5 * 1024 * 1024 + 1,
+      ContentType: "image/webp",
+    });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.get("tenants/t/branding/a.webp")).rejects.toThrow(/5 MiB/);
+    expect(consumed).toBe(false);
+  });
+
+  it("stops a lying object stream at the same response-size bound", async () => {
+    const send = vi.fn().mockResolvedValue({
+      Body: (async function* () {
+        yield Buffer.alloc(5 * 1024 * 1024);
+        yield Buffer.from("overflow");
+      })(),
+      ContentLength: 1,
+      ContentType: "image/webp",
+    });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.get("tenants/t/branding/a.webp")).rejects.toThrow(/5 MiB/);
+  });
+
   it("rejects unsafe object keys before calling S3", async () => {
     const send = vi.fn();
     const storage = new ObjectStorageService(env, { send } as never);

@@ -4,6 +4,7 @@ import { PickupOrdersModule } from "../pickup-orders/pickup-orders.module";
 import { KioskController } from "./kiosk.controller";
 import { KioskPairController } from "./kiosk-pair.controller";
 import { PairingService } from "./pairing.service";
+import { OrgProfileModule } from "../org-profile/org-profile.module";
 
 /**
  * `PairingService` lives here (its file is under this module) and is
@@ -12,7 +13,7 @@ import { PairingService } from "./pairing.service";
  * the class, which would silently give each controller its own instance.
  */
 @Module({
-  imports: [DevicePairingModule, PickupOrdersModule],
+  imports: [DevicePairingModule, PickupOrdersModule, OrgProfileModule],
   controllers: [KioskController, KioskPairController],
   providers: [PairingService],
   exports: [PairingService],

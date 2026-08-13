@@ -25,6 +25,16 @@ export interface OrgProfileDto {
   pickupLimitsEnabled: boolean;
 }
 
+export interface OrganizationLogoDto {
+  logoRevision: string;
+}
+
+export interface KioskBrandingDto {
+  organizationName: string;
+  logoUrl: string | null;
+  logoRevision: string | null;
+}
+
 /**
  * A 9-digit issuer prefix leaves a 7-digit serial, so the space is
  * 0..9_999_999 per extension digit. Seeding beyond it cannot produce a valid

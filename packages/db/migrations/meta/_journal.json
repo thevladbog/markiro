@@ -253,6 +253,13 @@
       "when": 1786584061647,
       "tag": "0035_kiosk_pickup_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786589360929,
+      "tag": "0036_organization_branding",
+      "breakpoints": true
     }
   ]
 }

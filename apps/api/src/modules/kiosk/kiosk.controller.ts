@@ -3,8 +3,11 @@ import {
   Controller,
   Get,
   Headers,
+  Param,
+  ParseUUIDPipe,
   Post,
   Req,
+  StreamableFile,
   UnprocessableEntityException,
   UseGuards,
 } from "@nestjs/common";
@@ -27,6 +30,7 @@ import {
   type KioskBootstrapDto,
 } from "../pickup-orders/dto";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
+import { OrgProfileService } from "../org-profile/org-profile.service";
 
 const KIOSK_RECOVERY_CAPABILITY = "subscription-recovery-v1";
 
@@ -45,11 +49,27 @@ function hasKioskRecoveryCapability(header: string | undefined): boolean {
 @UseGuards(KioskDeviceGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 export class KioskController {
-  constructor(private readonly pickupOrdersService: PickupOrdersService) {}
+  constructor(
+    private readonly pickupOrdersService: PickupOrdersService,
+    private readonly orgProfileService: OrgProfileService,
+  ) {}
 
   @Get("bootstrap")
   async bootstrap(@Req() req: RequestWithKiosk): Promise<KioskBootstrapDto> {
     return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!);
+  }
+
+  @Get("branding/logo/:revision")
+  async logo(
+    @Req() req: RequestWithKiosk,
+    @Param("revision", new ParseUUIDPipe()) revision: string,
+  ): Promise<StreamableFile> {
+    const logo = await this.orgProfileService.getKioskLogo(req.tenantId!, revision);
+    return new StreamableFile(logo.body, {
+      type: logo.contentType,
+      disposition: "inline",
+      length: logo.body.byteLength,
+    });
   }
 
   @Post("order-admissions")

@@ -137,6 +137,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "DELETE /counterparties/:id (CounterpartiesController.deleteCounterparty)",
       "DELETE /employees/:id (EmployeesController.archiveEmployee)",
       "DELETE /lines/:id (LinesController.deleteLine)",
+      "DELETE /org/profile/logo (OrgProfileController.deleteLogo)",
       "DELETE /pickup-reasons/:id (PickupReasonsController.archiveReason)",
       "DELETE /products/:id (ProductsController.deleteProduct)",
       "DELETE /products/:id/external-link (ProductExternalLinkController.unlink)",
@@ -168,6 +169,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /kiosks/:id/enroll (KiosksController.enroll)",
       "POST /kiosks/:id/pairing-code (KiosksController.issuePairingCode)",
       "POST /lines (LinesController.createLine)",
+      "POST /org/profile/logo (OrgProfileController.uploadLogo)",
       "POST /pickup-orders/:id/cancel (PickupOrdersController.cancel)",
       "POST /pickup-orders/:id/resolve (PickupOrdersController.resolve)",
       "POST /pickup-reasons (PickupReasonsController.createReason)",
@@ -189,7 +191,10 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "read_only_allowed", reason: "read" }),
-    routes: ["GET /kiosk/bootstrap (KioskController.bootstrap)"],
+    routes: [
+      "GET /kiosk/bootstrap (KioskController.bootstrap)",
+      "GET /kiosk/branding/logo/:revision (KioskController.logo)",
+    ],
   },
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "recovery", kind: "kiosk" }),

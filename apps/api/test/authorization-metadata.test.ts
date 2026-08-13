@@ -196,10 +196,12 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
   [
     OrgProfileController,
     {
+      deleteLogo: settingsPolicy,
       getProfile: settingsPolicy,
       putProfile: settingsPolicy,
       getSscc: settingsPolicy,
       putSscc: settingsPolicy,
+      uploadLogo: settingsPolicy,
     },
   ],
   [
