@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
@@ -17,6 +17,7 @@ beforeAll(async () => {
 
 const GS = String.fromCharCode(0x1d);
 const GTIN = "04600682000013";
+const REVISION = "11111111-1111-4111-8111-111111111111";
 
 describe("Idle", () => {
   it("renders tenant identity with a bundled Markiro fallback and the approved login grid", () => {
@@ -46,6 +47,30 @@ describe("Idle", () => {
     expect(css).toMatch(
       /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*\.badge-scan-animation/,
     );
+  });
+
+  it("revokes and durably invalidates a cached logo that the browser cannot render", () => {
+    const logo = new Blob(["platform-broken"], { type: "image/webp" });
+    const onLogoError = vi.fn();
+    const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:company");
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    render(
+      <Idle
+        branding={{ organizationName: "Северная вода", logoBlob: logo, revision: REVISION }}
+        onBrandingError={onLogoError}
+        onEmployee={vi.fn()}
+        resolveBadge={vi.fn()}
+        onScan={vi.fn()}
+      />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "Северная вода" }));
+
+    expect(revoke).toHaveBeenCalledWith("blob:company");
+    expect(onLogoError).toHaveBeenCalledTimes(1);
+    expect(screen.getAllByLabelText("Маркиро").length).toBeGreaterThan(0);
+    create.mockRestore();
+    revoke.mockRestore();
   });
 
   it("hands the recognised employee to its caller", async () => {

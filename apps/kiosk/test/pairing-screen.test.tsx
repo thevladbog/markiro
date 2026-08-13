@@ -818,8 +818,17 @@ describe("Pairing", () => {
     expect(codeDisplay().textContent).toBe("");
     expect(submitButton().disabled).toBe(true);
 
-    // Still listening: the real code lands without anything being pressed.
-    scanner.emit(" 12345678 ");
+    // Arbitrary non-digits are payload, not transport framing. Removing them
+    // would turn a different scanner value into a valid credential.
+    for (const raw of ["12AB345678", "1234-5678", "X12345678", "12345678#"]) {
+      scanner.emit(raw);
+      expect(codeDisplay().textContent).toBe("");
+      expect(submitButton().disabled).toBe(true);
+    }
+
+    // CR/LF and surrounding whitespace are the only tolerated terminal
+    // framing. Still listening: the real code lands without a reset.
+    scanner.emit("\r\n 12345678 \r\n");
     expect(codeDisplay().textContent).toBe("12345678");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(submitButton().disabled).toBe(false);

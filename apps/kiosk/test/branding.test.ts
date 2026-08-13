@@ -1,18 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { KioskBrandingDto, KioskBootstrapDto } from "../src/api/types.js";
 import {
+  invalidateCachedBranding,
   loadCachedBranding,
   refreshCachedBranding,
+  shouldActivateBranding,
   type BrandingOwner,
 } from "../src/store/branding.js";
 import { replaceSnapshot } from "../src/store/cache.js";
 import { writeConfig } from "../src/store/config.js";
 
 const SERVER = "https://kiosk.example";
+const REV_1 = "11111111-1111-4111-8111-111111111111";
+const REV_2 = "22222222-2222-4222-8222-222222222222";
 const OWNER: BrandingOwner = {
   serverUrl: SERVER,
   kioskId: "kiosk-1",
-  credentialGeneration: "generation-1",
+  credentialGeneration: "33333333-3333-4333-8333-333333333333",
 };
 
 function bootstrap(branding: KioskBrandingDto): KioskBootstrapDto {
@@ -68,12 +72,12 @@ describe("offline kiosk branding", () => {
   it("fetches a changed same-origin WebP privately and persists it for offline login", async () => {
     const owner = await seedBinding({
       organizationName: "Северная вода",
-      logoUrl: "/kiosk/branding/logo/rev-2",
-      logoRevision: "rev-2",
+      logoUrl: `/kiosk/branding/logo/${REV_2}`,
+      logoRevision: REV_2,
     });
     const logo = new Blob(["valid-webp"], { type: "image/webp" });
     const fetchLogo = vi.fn(
-      async () => ({ ok: true, status: 200, blob: async () => logo }) as Response,
+      async () => new Response(logo, { headers: { "Content-Type": "image/webp" } }),
     );
 
     await refreshCachedBranding({
@@ -81,15 +85,15 @@ describe("offline kiosk branding", () => {
       token: "private-token",
       branding: bootstrap({
         organizationName: "Северная вода",
-        logoUrl: "/kiosk/branding/logo/rev-2",
-        logoRevision: "rev-2",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
       }).branding,
       fetch: fetchLogo as typeof fetch,
       decode: async () => true,
     });
 
     expect(fetchLogo).toHaveBeenCalledWith(
-      "https://kiosk.example/kiosk/branding/logo/rev-2",
+      `https://kiosk.example/kiosk/branding/logo/${REV_2}`,
       expect.objectContaining({
         headers: expect.objectContaining({ "x-kiosk-token": "private-token" }),
       }),
@@ -97,15 +101,15 @@ describe("offline kiosk branding", () => {
     await expect(loadCachedBranding()).resolves.toEqual({
       organizationName: "Северная вода",
       logoBlob: logo,
-      revision: "rev-2",
+      revision: REV_2,
     });
   });
 
   it("keeps the prior valid blob when a refresh fails or returns an undecodable image", async () => {
     const owner = await seedBinding({
       organizationName: "Северная вода",
-      logoUrl: "/kiosk/branding/logo/rev-1",
-      logoRevision: "rev-1",
+      logoUrl: `/kiosk/branding/logo/${REV_1}`,
+      logoRevision: REV_1,
     });
     const oldLogo = new Blob(["old"], { type: "image/webp" });
     await refreshCachedBranding({
@@ -113,19 +117,19 @@ describe("offline kiosk branding", () => {
       token: "private-token",
       branding: {
         organizationName: "Северная вода",
-        logoUrl: "/kiosk/branding/logo/rev-1",
-        logoRevision: "rev-1",
+        logoUrl: `/kiosk/branding/logo/${REV_1}`,
+        logoRevision: REV_1,
       },
       fetch: vi.fn(
-        async () => ({ ok: true, blob: async () => oldLogo }) as Response,
+        async () => new Response(oldLogo, { headers: { "Content-Type": "image/webp" } }),
       ) as typeof fetch,
       decode: async () => true,
     });
     await replaceSnapshot(
       bootstrap({
         organizationName: "Северная вода — новая",
-        logoUrl: "/kiosk/branding/logo/rev-2",
-        logoRevision: "rev-2",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
       }),
       new Date("2026-08-13T08:01:00.000Z"),
     );
@@ -135,8 +139,8 @@ describe("offline kiosk branding", () => {
       token: "private-token",
       branding: {
         organizationName: "Северная вода — новая",
-        logoUrl: "/kiosk/branding/logo/rev-2",
-        logoRevision: "rev-2",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
       },
       fetch: vi.fn(async () => {
         throw new TypeError("offline");
@@ -148,15 +152,11 @@ describe("offline kiosk branding", () => {
       token: "private-token",
       branding: {
         organizationName: "Северная вода — новая",
-        logoUrl: "/kiosk/branding/logo/rev-2",
-        logoRevision: "rev-2",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
       },
       fetch: vi.fn(
-        async () =>
-          ({
-            ok: true,
-            blob: async () => new Blob(["broken"], { type: "image/webp" }),
-          }) as Response,
+        async () => new Response("broken", { headers: { "Content-Type": "image/webp" } }),
       ) as typeof fetch,
       decode: async () => false,
     });
@@ -164,7 +164,7 @@ describe("offline kiosk branding", () => {
     await expect(loadCachedBranding()).resolves.toEqual({
       organizationName: "Северная вода — новая",
       logoBlob: oldLogo,
-      revision: "rev-1",
+      revision: REV_1,
     });
   });
 
@@ -182,7 +182,313 @@ describe("offline kiosk branding", () => {
         fetch: fetchLogo as typeof fetch,
         decode: async () => true,
       }),
-    ).resolves.toEqual({ organizationName: "Новый tenant", logoBlob: null, revision: null });
+    ).resolves.toMatchObject({
+      applied: false,
+      branding: { organizationName: "Новый tenant", logoBlob: null, revision: null },
+    });
     expect(fetchLogo).not.toHaveBeenCalled();
+  });
+
+  it("does not send the token to an arbitrary same-origin path and removes stale same-owner cache", async () => {
+    const owner = await seedBinding({
+      organizationName: "Северная вода",
+      logoUrl: `/kiosk/branding/logo/${REV_1}`,
+      logoRevision: REV_1,
+    });
+    await refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding: {
+        organizationName: "Северная вода",
+        logoUrl: `/kiosk/branding/logo/${REV_1}`,
+        logoRevision: REV_1,
+      },
+      fetch: vi.fn(
+        async () => new Response("old", { headers: { "Content-Type": "image/webp" } }),
+      ) as typeof fetch,
+      decode: async () => true,
+    });
+    const fetchLogo = vi.fn();
+
+    await refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding: {
+        organizationName: "Северная вода",
+        logoUrl: "/kiosk/orders",
+        logoRevision: REV_2,
+      },
+      fetch: fetchLogo as typeof fetch,
+      decode: async () => true,
+    });
+
+    expect(fetchLogo).not.toHaveBeenCalled();
+    expect((await loadCachedBranding()).logoBlob).toBeNull();
+  });
+
+  it("bounds a chunked logo body even when content-length is missing or lying", async () => {
+    const owner = await seedBinding({
+      organizationName: "Северная вода",
+      logoUrl: `/kiosk/branding/logo/${REV_2}`,
+      logoRevision: REV_2,
+    });
+    let cancelled = false;
+    const chunks = [new Uint8Array(1024 * 1024), new Uint8Array(1024 * 1024), new Uint8Array(1)];
+    const reader = {
+      read: vi.fn(async () => ({ done: false as const, value: chunks.shift()! })),
+      cancel: vi.fn(async () => {
+        cancelled = true;
+      }),
+      releaseLock: vi.fn(),
+    };
+
+    const result = await refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding: {
+        organizationName: "Северная вода",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
+      },
+      fetch: vi.fn(
+        async () =>
+          ({
+            ok: true,
+            status: 200,
+            headers: new Headers({ "Content-Type": "image/webp", "Content-Length": "8" }),
+            body: { getReader: () => reader },
+          }) as unknown as Response,
+      ) as typeof fetch,
+      decode: async () => true,
+    });
+
+    expect(result.branding.logoBlob).toBeNull();
+    expect(cancelled).toBe(true);
+  });
+
+  it("rejects oversized declared length and wrong MIME before reading the body", async () => {
+    const owner = await seedBinding({
+      organizationName: "Северная вода",
+      logoUrl: `/kiosk/branding/logo/${REV_2}`,
+      logoRevision: REV_2,
+    });
+    const read = vi.fn();
+    for (const headers of [
+      { "Content-Type": "image/webp", "Content-Length": String(2 * 1024 * 1024 + 1) },
+      { "Content-Type": "image/png", "Content-Length": "12" },
+    ]) {
+      await refreshCachedBranding({
+        owner,
+        token: "private-token",
+        branding: {
+          organizationName: "Северная вода",
+          logoUrl: `/kiosk/branding/logo/${REV_2}`,
+          logoRevision: REV_2,
+        },
+        fetch: vi.fn(
+          async () =>
+            ({
+              ok: true,
+              status: 200,
+              headers: new Headers(headers),
+              body: { getReader: () => ({ read, cancel: vi.fn(), releaseLock: vi.fn() }) },
+            }) as unknown as Response,
+        ) as typeof fetch,
+        decode: async () => true,
+      });
+    }
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it("retains the prior valid logo for a valid route when network or 5xx fails", async () => {
+    const owner = await seedBinding({
+      organizationName: "Северная вода",
+      logoUrl: `/kiosk/branding/logo/${REV_1}`,
+      logoRevision: REV_1,
+    });
+    await refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding: {
+        organizationName: "Северная вода",
+        logoUrl: `/kiosk/branding/logo/${REV_1}`,
+        logoRevision: REV_1,
+      },
+      fetch: vi.fn(
+        async () => new Response("old", { headers: { "Content-Type": "image/webp" } }),
+      ) as typeof fetch,
+      decode: async () => true,
+    });
+
+    const result = await refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding: {
+        organizationName: "Северная вода",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
+      },
+      fetch: vi.fn(async () => new Response("down", { status: 503 })) as typeof fetch,
+      decode: async () => true,
+    });
+
+    expect(result.applied).toBe(true);
+    expect(result.branding.revision).toBe(REV_1);
+    expect((await loadCachedBranding()).revision).toBe(REV_1);
+  });
+
+  it("discards a stale success after same-kiosk token rotation", async () => {
+    const owner = await seedBinding({
+      organizationName: "Old tenant",
+      logoUrl: `/kiosk/branding/logo/${REV_1}`,
+      logoRevision: REV_1,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const pending = refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding: {
+        organizationName: "Old tenant",
+        logoUrl: `/kiosk/branding/logo/${REV_1}`,
+        logoRevision: REV_1,
+      },
+      fetch: vi.fn(async () => {
+        await gate;
+        return new Response("old", { headers: { "Content-Type": "image/webp" } });
+      }) as typeof fetch,
+      decode: async () => true,
+    });
+    const rotated = await writeConfig({
+      serverUrl: SERVER,
+      token: "rotated-token",
+      kioskId: "kiosk-1",
+      kioskName: "Gate",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    release();
+
+    await expect(pending).resolves.toMatchObject({ applied: false });
+    expect(rotated.credentialGeneration).not.toBe(owner.credentialGeneration);
+    expect((await loadCachedBranding()).logoBlob).toBeNull();
+  });
+
+  it("does not let stale null cleanup erase a newly rotated owner's logo", async () => {
+    const oldOwner = await seedBinding({
+      organizationName: "Old",
+      logoUrl: null,
+      logoRevision: null,
+    });
+    const rotated = await writeConfig({
+      serverUrl: SERVER,
+      token: "new-token",
+      kioskId: "kiosk-1",
+      kioskName: "Gate",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const newOwner: BrandingOwner = {
+      serverUrl: SERVER,
+      kioskId: "kiosk-1",
+      credentialGeneration: rotated.credentialGeneration!,
+    };
+    await replaceSnapshot(
+      bootstrap({
+        organizationName: "New",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
+      }),
+      new Date(),
+    );
+    await refreshCachedBranding({
+      owner: newOwner,
+      token: "new-token",
+      branding: {
+        organizationName: "New",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
+      },
+      fetch: vi.fn(
+        async () => new Response("new", { headers: { "Content-Type": "image/webp" } }),
+      ) as typeof fetch,
+      decode: async () => true,
+    });
+
+    await expect(invalidateCachedBranding(oldOwner)).resolves.toBe(false);
+    expect((await loadCachedBranding()).revision).toBe(REV_2);
+  });
+
+  it("does not let a previous tenant's deferred success overwrite a new binding", async () => {
+    const oldOwner = await seedBinding({
+      organizationName: "Old",
+      logoUrl: `/kiosk/branding/logo/${REV_1}`,
+      logoRevision: REV_1,
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const pending = refreshCachedBranding({
+      owner: oldOwner,
+      token: "private-token",
+      branding: {
+        organizationName: "Old",
+        logoUrl: `/kiosk/branding/logo/${REV_1}`,
+        logoRevision: REV_1,
+      },
+      fetch: vi.fn(async () => {
+        await gate;
+        return new Response("old", { headers: { "Content-Type": "image/webp" } });
+      }) as typeof fetch,
+      decode: async () => true,
+    });
+    const config = await writeConfig({
+      serverUrl: "https://new.example",
+      token: "new-token",
+      kioskId: "kiosk-2",
+      kioskName: "New",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const newOwner: BrandingOwner = {
+      serverUrl: config.serverUrl,
+      kioskId: config.kioskId!,
+      credentialGeneration: config.credentialGeneration!,
+    };
+    await replaceSnapshot(
+      bootstrap({
+        organizationName: "New",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
+      }),
+      new Date(),
+    );
+    await refreshCachedBranding({
+      owner: newOwner,
+      token: "new-token",
+      branding: {
+        organizationName: "New",
+        logoUrl: `/kiosk/branding/logo/${REV_2}`,
+        logoRevision: REV_2,
+      },
+      fetch: vi.fn(
+        async () => new Response("new", { headers: { "Content-Type": "image/webp" } }),
+      ) as typeof fetch,
+      decode: async () => true,
+    });
+    release();
+
+    await expect(pending).resolves.toMatchObject({ applied: false });
+    expect((await loadCachedBranding()).revision).toBe(REV_2);
+  });
+
+  it("activates only the latest request for the still-current owner", () => {
+    const branding = { organizationName: "Current", logoBlob: null, revision: null };
+    const result = { applied: true, owner: OWNER, branding };
+
+    expect(shouldActivateBranding(result, OWNER, 4, 5)).toBe(false);
+    expect(shouldActivateBranding(result, OWNER, 5, 5)).toBe(true);
+    expect(shouldActivateBranding(result, { ...OWNER, credentialGeneration: "other" }, 5, 5)).toBe(
+      false,
+    );
   });
 });

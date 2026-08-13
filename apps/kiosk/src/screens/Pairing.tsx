@@ -149,12 +149,15 @@ export function Pairing({
       // marking code as though the worker had meant to, and dropping a short
       // one silently leaves the dead button the pad exists to avoid. Say what
       // was wrong and keep listening — the next scan needs no reset.
-      const digits = raw.replace(/\D/g, "");
-      if (digits.length !== CODE_LENGTH) {
+      // Wedge/serial transports may retain terminal whitespace (notably CR/LF),
+      // but every other byte belongs to the credential. Never delete arbitrary
+      // characters: that would turn a different scanner payload into a code.
+      const framed = raw.trim();
+      if (!/^\d{8}$/.test(framed)) {
         setError("scan");
         return;
       }
-      setCode(digits);
+      setCode(framed);
       setError(null);
       // What the waiting state was waiting for has arrived, so the state ends.
       // A rejected scan deliberately leaves it standing: still listening, and

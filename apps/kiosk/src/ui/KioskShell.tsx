@@ -42,8 +42,11 @@ import {
 import { readSnapshot, type CachedSnapshot } from "../store/cache.js";
 import {
   brandingOwnerOf,
+  invalidateCachedBranding,
   loadCachedBranding,
   refreshCachedBranding,
+  sameBrandingOwner,
+  shouldActivateBranding,
   type CachedBranding,
 } from "../store/branding.js";
 import { readConfig, readScannerSettings, writeConfig, type KioskConfig } from "../store/config.js";
@@ -210,24 +213,40 @@ export function KioskShell(): React.JSX.Element {
     setSnapshot(next);
   }, []);
 
+  const brandingRequest = useRef(0);
+
   const refreshBranding = useCallback(
     async (cfg: KioskConfig | null, snap: CachedSnapshot | null): Promise<void> => {
+      const requestId = ++brandingRequest.current;
       const owner = brandingOwnerOf(cfg);
       if (!cfg?.token || !owner || !snap?.bootstrap.branding) {
-        setBranding(await loadCachedBranding());
+        const cached = await loadCachedBranding();
+        if (requestId === brandingRequest.current) setBranding(cached);
         return;
       }
       try {
-        setBranding(
-          await refreshCachedBranding({
-            owner,
-            token: cfg.token,
-            branding: snap.bootstrap.branding,
-          }),
-        );
+        const result = await refreshCachedBranding({
+          owner,
+          token: cfg.token,
+          branding: snap.bootstrap.branding,
+        });
+        if (
+          shouldActivateBranding(
+            result,
+            brandingOwnerOf(configRef.current),
+            requestId,
+            brandingRequest.current,
+          )
+        )
+          setBranding(result.branding);
       } catch (error) {
         console.warn("kiosk: company branding could not be refreshed", error);
-        setBranding(await loadCachedBranding());
+        const cached = await loadCachedBranding();
+        if (
+          requestId === brandingRequest.current &&
+          sameBrandingOwner(owner, brandingOwnerOf(configRef.current))
+        )
+          setBranding(cached);
       }
     },
     [],
@@ -1032,6 +1051,11 @@ export function KioskShell(): React.JSX.Element {
     screen = (
       <Idle
         branding={branding}
+        onBrandingError={() => {
+          const owner = brandingOwnerOf(configRef.current);
+          if (!owner) return;
+          void invalidateCachedBranding(owner);
+        }}
         onScan={subscribe}
         resolveBadge={async (raw) => {
           if (!roster) return null;

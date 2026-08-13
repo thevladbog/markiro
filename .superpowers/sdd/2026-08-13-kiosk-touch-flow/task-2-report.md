@@ -27,3 +27,14 @@ Pairing and badge login now use the approved dark, fixed-viewport touch treatmen
 - Full kiosk suite completed with exit 0; its final summary was truncated by the existing volume of app-test React `act(...)` and intentional registry/revocation warning logs, so no exact full count is claimed here.
 - Kiosk typecheck, full ESLint, Vite PWA production build, changed-file Prettier, `git diff --check`, and the no-scan-zone source check passed.
 - Browser viewport inspection, physical tablet/scanner acceptance, real private object-storage logo delivery and offline browser restart were not performed in this task; they remain manual/external acceptance gates.
+
+## Review fix: exact scanner input and generation-atomic branding
+
+Review confirmed that scanner input deleted arbitrary non-digits, logo refresh committed after credential rotation, the private token could follow an arbitrary same-origin path, and the byte limit ran after complete body allocation.
+
+- Scanner input now trims only terminal whitespace and then requires exactly eight ASCII digits. Embedded letters, punctuation, marking codes and longer values are rejected without changing the code cells; CR/LF-framed exact values remain accepted.
+- Logo commit/delete/retention now compares the request owner with current config inside one `config + snapshot` IndexedDB transaction. Cross-tenant re-pair, same-kiosk token rotation, stale null cleanup and stale success cannot mutate the current owner's row.
+- Refresh returns explicit `{ applied, owner, branding }`. `KioskShell` additionally requires the latest request id and current owner before activating it, so an old result cannot flash in React state.
+- Only `/kiosk/branding/logo/{UUID revision}` matching the advertised revision can receive the token. MIME and declared length are checked before reading; streamed chunks are accumulated only through a 2 MiB budget and the reader is cancelled on overflow.
+- Invalid advertised path/revision CAS-removes a same-owner stale row. Valid-route network, 5xx, MIME or decode failures retain the prior valid same-owner asset. Display-time `img.onerror` immediately revokes the object URL, falls back to bundled Markiro, and CAS-invalidates the persisted asset.
+- Fix RED reproduced scanner canonicalisation and three branding boundary failures. Focused GREEN passed 56/56; full kiosk suite exited 0. Typecheck, ESLint, PWA build, Prettier and diff-check passed.

@@ -1,11 +1,17 @@
 import type { KioskBrandingDto, KioskBootstrapSnapshotDto } from "../api/types.js";
 import { readSnapshot } from "./cache.js";
 import { readConfig } from "./config.js";
-import { STORE_SNAPSHOT, withStore } from "./db.js";
+import { STORE_CONFIG, STORE_SNAPSHOT, withStore, withTransaction } from "./db.js";
+import {
+  boxRegistryCredentialOwnerOf,
+  sameBoxRegistryCredentialOwner,
+} from "./installation-binding.js";
 
+const CONFIG_KEY = "current";
 const BRANDING_KEY = "branding";
 const MAX_LOGO_BYTES = 2 * 1024 * 1024;
 const LOGO_TIMEOUT_MS = 15_000;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface BrandingOwner {
   serverUrl: string;
@@ -17,6 +23,12 @@ export interface CachedBranding {
   organizationName: string;
   logoBlob: Blob | null;
   revision: string | null;
+}
+
+export interface BrandingRefreshResult {
+  applied: boolean;
+  owner: BrandingOwner;
+  branding: CachedBranding;
 }
 
 interface StoredBranding {
@@ -35,27 +47,41 @@ function nonEmpty(value: unknown): string | null {
 }
 
 function ownerOf(value: unknown): BrandingOwner | null {
-  const row = value as Partial<BrandingOwner> | null | undefined;
-  const serverUrl = nonEmpty(row?.serverUrl);
-  const kioskId = nonEmpty(row?.kioskId);
-  const credentialGeneration = nonEmpty(row?.credentialGeneration);
-  return serverUrl && kioskId && credentialGeneration
-    ? { serverUrl, kioskId, credentialGeneration }
+  const registry = boxRegistryCredentialOwnerOf(value);
+  return registry
+    ? {
+        serverUrl: registry.binding.serverUrl,
+        kioskId: registry.binding.kioskId,
+        credentialGeneration: registry.credentialGeneration,
+      }
     : null;
 }
 
-function sameOwner(left: BrandingOwner | null, right: BrandingOwner | null): boolean {
-  return (
-    left !== null &&
-    right !== null &&
-    left.serverUrl === right.serverUrl &&
-    left.kioskId === right.kioskId &&
-    left.credentialGeneration === right.credentialGeneration
+export function sameBrandingOwner(
+  left: BrandingOwner | null,
+  right: BrandingOwner | null,
+): boolean {
+  return sameBoxRegistryCredentialOwner(
+    left ? boxRegistryCredentialOwnerOf(left) : null,
+    right ? boxRegistryCredentialOwnerOf(right) : null,
   );
 }
 
 export function brandingOwnerOf(value: unknown): BrandingOwner | null {
   return ownerOf(value);
+}
+
+export function shouldActivateBranding(
+  result: BrandingRefreshResult,
+  currentOwner: BrandingOwner | null,
+  requestId: number,
+  currentRequestId: number,
+): boolean {
+  return (
+    result.applied &&
+    requestId === currentRequestId &&
+    sameBrandingOwner(result.owner, currentOwner)
+  );
 }
 
 function organizationNameOf(bootstrap: KioskBootstrapSnapshotDto | null): string {
@@ -64,7 +90,7 @@ function organizationNameOf(bootstrap: KioskBootstrapSnapshotDto | null): string
 
 function checkedStored(value: unknown, owner: BrandingOwner | null): CheckedBranding | null {
   const row = value as Partial<StoredBranding> | null | undefined;
-  if (!sameOwner(ownerOf(row?.owner), owner)) return null;
+  if (!sameBrandingOwner(ownerOf(row?.owner), owner)) return null;
   const organizationName = nonEmpty(row?.organizationName);
   const revision = nonEmpty(row?.revision);
   const logoBytes = row?.logoBytes;
@@ -90,7 +116,8 @@ export async function loadCachedBranding(): Promise<CachedBranding> {
     readConfig(),
     withStore<unknown>(STORE_SNAPSHOT, "readonly", (store) => store.get(BRANDING_KEY)),
   ]);
-  const cached = checkedStored(raw, ownerOf(config));
+  const owner = ownerOf(config);
+  const cached = checkedStored(raw, owner);
   return {
     organizationName: organizationNameOf(snapshot?.bootstrap ?? null),
     logoBlob: cached?.logoBlob ?? null,
@@ -122,17 +149,74 @@ async function defaultDecode(blob: Blob): Promise<boolean> {
   }
 }
 
-function logoRequestUrl(serverUrl: string, logoUrl: string): string | null {
-  if (!logoUrl.startsWith("/") || logoUrl.startsWith("//")) return null;
-  const base = serverUrl.replace(/\/+$/, "");
-  const candidate = `${base}${logoUrl}`;
+function exactLogoUrl(serverUrl: string, branding: KioskBrandingDto): string | null {
+  const revision = nonEmpty(branding.logoRevision);
+  const advertised = nonEmpty(branding.logoUrl);
+  if (!revision || !advertised || !UUID.test(revision)) return null;
+  const expectedPath = `/kiosk/branding/logo/${encodeURIComponent(revision)}`;
+  if (advertised !== expectedPath) return null;
   try {
-    const server = new URL(serverUrl, globalThis.location?.origin ?? "https://local.invalid");
-    const target = new URL(candidate, globalThis.location?.origin ?? "https://local.invalid");
-    return target.origin === server.origin ? target.toString() : null;
+    return new URL(expectedPath, `${serverUrl.replace(/\/+$/, "")}/`).toString();
   } catch {
     return null;
   }
+}
+
+async function readBoundedWebp(response: Response): Promise<Blob> {
+  if (response.headers.get("Content-Type")?.split(";", 1)[0]?.trim().toLowerCase() !== "image/webp")
+    throw new Error("logo is not a WebP");
+  const declared = response.headers.get("Content-Length");
+  if (declared !== null) {
+    const bytes = Number(declared);
+    if (!Number.isSafeInteger(bytes) || bytes < 1 || bytes > MAX_LOGO_BYTES)
+      throw new Error("logo content length is invalid");
+  }
+  if (!response.body) throw new Error("logo has no response body");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      total += next.value.byteLength;
+      if (total > MAX_LOGO_BYTES) {
+        await reader.cancel("logo exceeded byte budget");
+        throw new Error("logo exceeded byte budget");
+      }
+      chunks.push(next.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (total === 0) throw new Error("logo is empty");
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new Blob([bytes], { type: "image/webp" });
+}
+
+async function commitIfCurrent(
+  owner: BrandingOwner,
+  mutate: (store: IDBObjectStore) => void,
+): Promise<boolean> {
+  let applied = false;
+  await withTransaction([STORE_CONFIG, STORE_SNAPSHOT], "readwrite", (tx) => {
+    const request = tx.objectStore(STORE_CONFIG).get(CONFIG_KEY);
+    request.onsuccess = () => {
+      if (!sameBrandingOwner(ownerOf(request.result), owner)) return;
+      mutate(tx.objectStore(STORE_SNAPSHOT));
+      applied = true;
+    };
+  });
+  return applied;
+}
+
+export async function invalidateCachedBranding(owner: BrandingOwner): Promise<boolean> {
+  return commitIfCurrent(owner, (store) => store.delete(BRANDING_KEY));
 }
 
 export async function refreshCachedBranding(input: {
@@ -141,7 +225,12 @@ export async function refreshCachedBranding(input: {
   branding: KioskBrandingDto;
   fetch?: typeof fetch;
   decode?: (blob: Blob) => Promise<boolean>;
-}): Promise<CachedBranding> {
+}): Promise<BrandingRefreshResult> {
+  const result = (branding: CachedBranding, applied: boolean): BrandingRefreshResult => ({
+    branding,
+    applied,
+    owner: input.owner,
+  });
   const organizationName = nonEmpty(input.branding.organizationName) ?? "Маркиро";
   const existingRaw = await withStore<unknown>(STORE_SNAPSHOT, "readonly", (store) =>
     store.get(BRANDING_KEY),
@@ -150,13 +239,16 @@ export async function refreshCachedBranding(input: {
   const revision = nonEmpty(input.branding.logoRevision);
   const path = nonEmpty(input.branding.logoUrl);
   if (!revision || !path) {
-    await withStore(STORE_SNAPSHOT, "readwrite", (store) => store.delete(BRANDING_KEY));
-    return { organizationName, logoBlob: null, revision: null };
+    const applied = await commitIfCurrent(input.owner, (store) => store.delete(BRANDING_KEY));
+    return result({ organizationName, logoBlob: null, revision: null }, applied);
   }
   if (existing?.revision === revision)
-    return { organizationName, logoBlob: existing.logoBlob, revision };
-  const url = logoRequestUrl(input.owner.serverUrl, path);
-  if (!url) return { organizationName, logoBlob: null, revision: null };
+    return result({ organizationName, logoBlob: existing.logoBlob, revision }, true);
+  const url = exactLogoUrl(input.owner.serverUrl, input.branding);
+  if (!url) {
+    const applied = await commitIfCurrent(input.owner, (store) => store.delete(BRANDING_KEY));
+    return result({ organizationName, logoBlob: null, revision: null }, applied);
+  }
 
   try {
     const controller = new AbortController();
@@ -173,23 +265,23 @@ export async function refreshCachedBranding(input: {
       clearTimeout(timeout);
     }
     if (!response.ok) throw new Error(`logo request failed with ${response.status}`);
-    const blob = await response.blob();
-    if (
-      blob.size === 0 ||
-      blob.size > MAX_LOGO_BYTES ||
-      blob.type !== "image/webp" ||
-      !(await (input.decode ?? defaultDecode)(blob))
-    ) {
-      throw new Error("logo is not a decodable WebP");
-    }
+    const blob = await readBoundedWebp(response);
+    if (!(await (input.decode ?? defaultDecode)(blob))) throw new Error("logo cannot be decoded");
     const stored: StoredBranding = {
       owner: input.owner,
       organizationName,
       revision,
       logoBytes: await blob.arrayBuffer(),
     };
-    await withStore(STORE_SNAPSHOT, "readwrite", (store) => store.put(stored, BRANDING_KEY));
-    return { organizationName, logoBlob: blob, revision };
+    const applied = await commitIfCurrent(input.owner, (store) => store.put(stored, BRANDING_KEY));
+    return result(
+      {
+        organizationName,
+        logoBlob: applied ? blob : null,
+        revision: applied ? revision : null,
+      },
+      applied,
+    );
   } catch {
     if (existing) {
       const retained: StoredBranding = {
@@ -198,9 +290,18 @@ export async function refreshCachedBranding(input: {
         revision: existing.revision,
         logoBytes: existing.logoBytes,
       };
-      await withStore(STORE_SNAPSHOT, "readwrite", (store) => store.put(retained, BRANDING_KEY));
-      return { organizationName, logoBlob: existing.logoBlob, revision: retained.revision };
+      const applied = await commitIfCurrent(input.owner, (store) =>
+        store.put(retained, BRANDING_KEY),
+      );
+      return result(
+        {
+          organizationName,
+          logoBlob: applied ? existing.logoBlob : null,
+          revision: applied ? retained.revision : null,
+        },
+        applied,
+      );
     }
-    return { organizationName, logoBlob: null, revision: null };
+    return result({ organizationName, logoBlob: null, revision: null }, false);
   }
 }

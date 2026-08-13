@@ -47,6 +47,7 @@ const NOTICE: Record<IdleNotice, { key: string; tone: AlertTone }> = {
 
 export interface IdleProps {
   branding?: CachedBranding;
+  onBrandingError?: () => void;
   /**
    * Subscribes `listener` to the device's scans, and MAY return a teardown —
    * which this screen calls on unmount. The return is optional so a caller with
@@ -93,6 +94,7 @@ export interface IdleProps {
  */
 export function Idle({
   branding = { organizationName: "Маркиро", logoBlob: null, revision: null },
+  onBrandingError,
   onScan,
   resolveBadge,
   onEmployee,
@@ -103,16 +105,25 @@ export function Idle({
   /** Whether a press is currently being held long enough to be worth saying so. */
   const [holding, setHolding] = useState(false);
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const liveLogoUrl = useRef<string | null>(null);
+
+  const releaseLogoUrl = useCallback(() => {
+    if (!liveLogoUrl.current) return;
+    URL.revokeObjectURL(liveLogoUrl.current);
+    liveLogoUrl.current = null;
+  }, []);
 
   useEffect(() => {
+    releaseLogoUrl();
     if (!branding.logoBlob || typeof URL.createObjectURL !== "function") {
       setLogoUrl(null);
       return;
     }
     const next = URL.createObjectURL(branding.logoBlob);
+    liveLogoUrl.current = next;
     setLogoUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [branding.logoBlob]);
+    return releaseLogoUrl;
+  }, [branding.logoBlob, releaseLogoUrl]);
 
   // The callbacks, held in a ref so the listener below can read the current
   // ones without listing them as dependencies. The `useRef` initializer already
@@ -268,7 +279,11 @@ export function Idle({
             className="kiosk-login__company-logo"
             src={logoUrl}
             alt={branding.organizationName}
-            onError={() => setLogoUrl(null)}
+            onError={() => {
+              releaseLogoUrl();
+              setLogoUrl(null);
+              onBrandingError?.();
+            }}
           />
         ) : (
           <MarkiroLogo />
