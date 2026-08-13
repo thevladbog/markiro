@@ -108,3 +108,54 @@ the bundled Markiro fallback. Add reboot and `img.onerror` tests.
   tenant/revision behavior; database-backed API tests were not rerun.
 - No viewport browser, tablet, physical-scanner, slow-stream/proxy or live
   object-storage validation was performed. This review changes docs only.
+
+## Independent bounded re-review of `36244975`
+
+### Verdict
+
+**CHANGES REQUESTED — 2 Important remain.**
+
+The credential-generation CAS for asynchronous refresh commits, stale-request
+UI guard, exact UUID/revision logo route, private-token path restriction,
+streamed MIME/declared/chunk aggregate bounds, valid-route retention and durable
+invalid-path cleanup address the original cache/fetch findings. Two scoped
+issues remain:
+
+#### I1 remains — `trim()` still changes the scanned credential
+
+`Pairing` now tests `/^\d{8}$/` only after `raw.trim()`. The two scanner sources
+already remove their actual framing: keyboard Enter calls `flush()` without
+being appended, and Web Serial slices the line before CR/LF. Consequently a
+space, tab, or extra line break delivered in `raw` is payload, not transport
+framing. The new test explicitly accepts `"\r\n 12345678 \r\n"`, while the API
+accepts exact raw `/^\d{8}$/` only.
+
+Validate `raw` directly and reject every prefix/suffix/interleaving byte. Add
+spaces, tabs and CR/LF passed to the Pairing listener to the rejection table;
+the transport unit tests remain responsible for proving their terminators are
+removed before delivery.
+
+#### I2 remains — image-error invalidation can delete the new owner's valid logo
+
+`Idle` reports an unrenderable displayed blob through an ownerless
+`onBrandingError`. `KioskShell` then reads *the current config owner* and calls
+`invalidateCachedBranding(currentOwner)`. Race: tenant A's image is still mounted;
+the device is re-paired to tenant B and B's cache is committed; A's pending image
+decode emits `error`; the handler reads B and atomically deletes B's valid row.
+The store CAS works exactly as coded but is checking the wrong owner.
+
+Carry the owner and revision of the displayed blob with `CachedBranding` (or an
+equivalent immutable display handle). On error, delete only when both current
+config owner and cached row owner/revision still match that displayed handle.
+Never derive the invalidation target only at callback time. Add a deferred image
+error test where A is displayed after B has become current and assert B remains;
+also assert a current owner's matching broken revision is deleted.
+
+### Re-review verification
+
+- `git diff --check fabb9612..36244975` — passed.
+- Focused `pairing-screen`, `branding`, and `idle-screen` suites — **55/55
+  passed**, but their whitespace and ownerless image-error expectations encode
+  the two residual issues above.
+- Kiosk `tsc -p tsconfig.json --noEmit` — passed.
+- No new scope was reviewed.
