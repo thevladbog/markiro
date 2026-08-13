@@ -1,29 +1,103 @@
-# Task 6 review findings and fix disposition
+# Task 6 re-review
 
-Review target: initial Task 6 implementation at `739495a5`.
+Initial implementation: `739495a5`
 
-Status: **CHANGES REQUESTED at the reviewed commit; implementation fix complete and awaiting independent re-review.**
+Fix round 1: `739495a5..e6277324`
 
-## Confirmed Important findings
+Verdict: **CHANGES REQUESTED**. Three of the four original Important findings are
+addressed. Installation isolation is improved, but the required current-token
+ownership check is still absent, leaving one Important same-binding re-pair race.
 
-1. Concurrent full refreshes shared one staging namespace. Interleaved initial cuts could replace one another's staged rows, a losing discard could erase a winner, and an older full cut could overwrite a newer active revision.
-2. Registry freshness used the tablet fetch clock. A skewed device clock could make an otherwise valid server cut look incorrectly fresh or stale, and there was no single registry freshness verdict aligned with the bootstrap warn/block thresholds.
-3. Page count guards did not bound string allocation. Very large strings and aggregate multi-byte content could be cloned into IndexedDB before rejection; server UUID-shaped identifiers were also only checked as non-empty strings.
-4. Active, staging, and metadata rows were not bound to the installed kiosk. Re-pairing or revocation could expose or retain a previous tenant's registry, and a new kiosk could incorrectly start from a prior kiosk's higher revision.
+## Remaining Important finding
 
-## Fix disposition
+### A refresh is not owned by the current persisted token
 
-- Every staging cut now carries canonical `serverUrl + kioskId`, a unique owner, `since`, and `until`. Stage, discard, and activation require the exact owner tuple. Full activation is strictly monotonic; delta activation requires the exact active base and preserves unaffected active rows.
-- Registry storage operations share the config store transaction boundary. Begin, stage, and activation verify the currently paired binding and token; config writes atomically clear only registry stores on binding change or revocation while preserving queue and journal. A stale old-binding caller cannot clear or activate the new binding.
-- The worker additionally single-flights refresh by installation binding. This reduces redundant foreground work, while the IndexedDB ownership/CAS checks remain the independent correctness boundary.
-- Activated metadata stores the successful bootstrap's server `generatedAt`. `boxRegistryAge` applies the same corrected server clock and warn/block thresholds as the bootstrap snapshot.
-- Untrusted pages are preflighted before durable copying/deduplication: at most 500 changes, 1,000 member keys, 1,024 UTF-8 bytes per string, one MiB aggregate UTF-8, valid SSCC checksum, bounded revisions, UUID box/product IDs, and cursor/page limits. Stored rows are revalidated before lookup.
+`BoxRegistryCut` and `BoxRegistryMeta` carry only canonicalized
+`{serverUrl,kioskId}`. `beginBoxRegistryStage`, `stageBoxRegistryPage`, and
+`activateBoxRegistryPage` atomically verify that the persisted config has the same
+binding and merely contains some non-empty token. They do not verify that the
+token which authenticated the refresh is still the persisted token. The
+single-flight key is also binding-only.
 
-## Fix verification
+Consequently, this sequence is still possible:
 
-- RED: 3 files failed, 12 expected assertions failed, 108 existing assertions passed.
-- Focused GREEN after binding-storage CAS: 4 files / 146 tests passed.
-- Full kiosk GREEN: 21 files / 485 tests passed.
-- Kiosk typecheck, full ESLint, Vite PWA production build, explicit changed-file Prettier check, and diff check passed.
+1. Client A starts a registry refresh under token A for server S and kiosk K.
+2. The device is re-paired to the same S/K and `writeConfig` installs token B.
+   Because the binding is unchanged, the implementation deliberately preserves
+   active and staging registry stores.
+3. Client A resumes. Its cut still passes every binding/current-token-presence
+   check and can stage or activate after token B became authoritative.
 
-No Task 7 visual/touch flow was implemented in this fix round.
+This violates the required invariant that an activation belongs to both the
+current persisted binding and credential. It can publish a response authenticated
+under a revoked/replaced credential after re-pairing. Bind each cut to a
+credential generation or non-reversible token fingerprint and compare it with the
+current config in the same IndexedDB transactions; do not persist another badge or
+reusable credential. Add a regression that holds token-A refresh, re-pairs the
+same server/kiosk with token B, requires the old stage/activation to fail, then
+allows a token-B refresh. Queue and journal must remain intact.
+
+## Addressed original findings
+
+### Concurrent initial snapshots — addressed
+
+- Staging metadata has a unique owner and exact cut tuple.
+- Stage, discard, and activation require that exact owner; a losing discard cannot
+  clear the winner's staging rows.
+- Full activation rejects `until <= active.version`, so an older full snapshot
+  cannot regress the active cut.
+- The regression interleaves two `since=null` cuts and proves no row mixing,
+  winner erasure, or active-version regression.
+
+### Trusted freshness — addressed for the Task 6 persistence contract
+
+- Activated metadata receives `bootstrap.generatedAt`, the server timestamp from
+  the successful refresh, rather than the tablet fetch time.
+- `boxRegistryAge` uses the bootstrap snapshot's corrected server clock and the
+  same fresh/warn/blocked thresholds, failing closed when either half is missing
+  or unmeasurable.
+- UI consumption of this single verdict belongs to the later cart/touch-flow
+  task; Task 6 now exposes the required trusted verdict rather than claiming the
+  device timestamp is authoritative.
+
+### Runtime and allocation bounds — addressed
+
+- Page preflight runs before copying/deduplication and enforces 500 changes,
+  1,000 member keys, 1,024 UTF-8 bytes per string, and one MiB aggregate string
+  bytes.
+- Box/product identifiers must be UUID-shaped; SSCC, revision, timestamp, field
+  allowlists, bottle count, duplicate keys, cursor length/cycles, and total pages
+  remain bounded.
+- Active rows are revalidated, including the same string budgets, before lookup.
+
+### Cross-installation binding and lifecycle clearing — partially addressed
+
+- Metadata and storage operations are bound to normalized `serverUrl+kioskId`.
+- Changing server or kiosk and revoking the token atomically clear only registry
+  stores; queue and journal are preserved.
+- Stale callers for another binding cannot read, clear, stage, or activate the
+  current binding.
+- The same-binding token-rotation race above remains open.
+
+## Compatibility review
+
+- IndexedDB remains version 3 and the v2-to-v3 upgrade creates only the new
+  registry stores; existing snapshot and legacy queue records are retained.
+- Registry clearing transactions do not include queue, journal, quarantine, or
+  snapshot stores.
+- No new badge plaintext path was introduced, and Task 6 queue/scrub wire
+  compatibility is unchanged from the initial implementation.
+
+## Verification
+
+- Focused registry/store/sync/pairing tests: **4 files, 146 tests passed**.
+- Kiosk TypeScript typecheck: **passed**.
+- `git diff --check 739495a5..e6277324`: **passed**.
+- No browser, physical scanner, tablet, or live-service check was run or claimed.
+
+## Classification
+
+- Critical: 0
+- Important: 1
+- Minor: 0
+- Approval: **CHANGES REQUESTED**
