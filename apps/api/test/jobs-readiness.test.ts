@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
 import type { WipData, WorkerState } from "pg-boss";
-import { PgBossService } from "../src/jobs/jobs.module";
+import { BUILD_SHIFT_EXPORT_QUEUE, PgBossService } from "../src/jobs/jobs.module";
 import type { ExchangeSessionService } from "../src/modules/exchange/exchange-session.service";
 import type { JournalService } from "../src/modules/integrations/journal.service";
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
+import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
 
 const pgBossMock = vi.hoisted(() => ({
@@ -28,7 +29,7 @@ vi.mock("@markiro/db", async (importOriginal) => {
   };
 });
 
-const WORKER_IDS = Array.from({ length: 10 }, (_, index) => `worker-${index + 1}`);
+const WORKER_IDS = Array.from({ length: 11 }, (_, index) => `worker-${index + 1}`);
 
 function wip(id: string, state: WorkerState = "active"): WipData {
   return {
@@ -59,7 +60,7 @@ function fakeBoss(options: { workIds?: string[]; failWorkAt?: number } = {}) {
     stop: vi.fn(async () => undefined),
     createQueue: vi.fn(async () => undefined),
     schedule: vi.fn(async () => undefined),
-    work: vi.fn(async () => {
+    work: vi.fn(async (_name?: string) => {
       const index = workIndex;
       workIndex += 1;
       if (index === options.failWorkAt) throw new Error("worker registration failed");
@@ -104,6 +105,9 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
   const subscriptionStatus = {
     run: vi.fn(async () => undefined),
   } as unknown as SubscriptionStatusJob;
+  const shiftExportRunner = {
+    run: vi.fn(async () => undefined),
+  } as unknown as ShiftExportRunnerService;
   return {
     service: new PgBossService(
       db,
@@ -113,6 +117,7 @@ function serviceWith(boss: ReturnType<typeof fakeBoss>) {
       mailJobs,
       mailRetention,
       subscriptionStatus,
+      shiftExportRunner,
     ),
     subscriptionStatus,
   };
@@ -123,14 +128,15 @@ describe("PgBossService readiness", () => {
     pgBossMock.instances.length = 0;
   });
 
-  it("accepts the exact ten successfully registered active workers and runs status materialization", async () => {
+  it("accepts the exact eleven successfully registered active workers including shift exports", async () => {
     const boss = fakeBoss();
     const { service, subscriptionStatus } = serviceWith(boss);
 
     await service.onModuleInit();
 
     await expect(service.checkReady()).resolves.toBeUndefined();
-    expect(boss.work).toHaveBeenCalledTimes(10);
+    expect(boss.work).toHaveBeenCalledTimes(11);
+    expect(boss.work.mock.calls.map(([queue]) => queue)).toContain(BUILD_SHIFT_EXPORT_QUEUE);
     expect(subscriptionStatus.run).toHaveBeenCalledTimes(1);
   });
 
