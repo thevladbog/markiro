@@ -1,7 +1,9 @@
 import { BadRequestException } from "@nestjs/common";
+import { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
-import type { Db } from "@markiro/db";
+import { schema, type Db } from "@markiro/db";
 
 // Hoisted so the `vi.mock` factory below (itself hoisted above this file's
 // other imports) can close over it -- same discipline `App.test.tsx` uses
@@ -40,6 +42,78 @@ const ssccServiceStub = { recordConsumedSerial: vi.fn() } as unknown as SsccServ
 const entitlementsServiceStub = {
   resolveRecovery: async () => ({ access: "managed" }),
 } as unknown as EntitlementsService;
+
+describe("StationScansService box registry versioning", () => {
+  it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
+    const boxUpdates: Array<Record<string, unknown>> = [];
+    const shiftId = "11111111-1111-1111-1111-111111111111";
+    const terminalId = "22222222-2222-2222-2222-222222222222";
+    const dbStub = {
+      transaction: async (run: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          insert: () => ({
+            values: () => ({
+              onConflictDoNothing: () => ({
+                returning: () => Promise.resolve([{ batchId: "box-close-1" }]),
+              }),
+            }),
+          }),
+          select: () => ({
+            from: () => ({
+              where: () => ({
+                orderBy: () => ({
+                  for: () => Promise.resolve([{ id: shiftId, openedAt: new Date() }]),
+                }),
+              }),
+            }),
+          }),
+          execute: () => Promise.resolve(),
+          update: (table: unknown) => ({
+            set: (values: Record<string, unknown>) => {
+              if (table === schema.boxes) boxUpdates.push(values);
+              return { where: () => Promise.resolve({ rowCount: 1 }) };
+            },
+          }),
+        };
+        return run(tx);
+      },
+    } as unknown as Db;
+    const ssccService = {
+      recordConsumedSerial: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SsccService;
+    const service = new StationScansService(dbStub, ssccService, entitlementsServiceStub);
+
+    await service.applyBatch(
+      "tenant-1",
+      {
+        batchId: "box-close-1",
+        items: [],
+        boxes: [
+          {
+            boxId: "device-box-1",
+            shiftId,
+            terminalId,
+            sscc: "123456789012345675",
+            closedAt: "2026-07-29T11:00:00.000Z",
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+        ],
+        exceptions: [],
+      },
+      terminalId,
+    );
+
+    expect(boxUpdates).toHaveLength(1);
+    const updatedAt = boxUpdates[0]?.updatedAt;
+    expect(updatedAt).toBeInstanceOf(SQL);
+    const query = new PgDialect().sqlToQuery(updatedAt as SQL).sql;
+    expect(query).toMatch(
+      /^GREATEST\(clock_timestamp\(\), .*updated_at.* \+ interval '1 millisecond'\)$/i,
+    );
+  });
+});
 
 /**
  * `monthsAgo` months before "now" (real wall clock), on the 15th at

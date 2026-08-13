@@ -128,6 +128,10 @@ function payloadDigest(body: SyncBatchDto): string {
   return createHash("sha256").update(canonicalJson(body)).digest("hex");
 }
 
+function nextBoxRegistryVersion() {
+  return sql`GREATEST(clock_timestamp(), ${schema.boxes.updatedAt} + interval '1 millisecond')`;
+}
+
 @Injectable()
 export class StationScansService {
   private readonly logger = new Logger(StationScansService.name);
@@ -661,6 +665,7 @@ export class StationScansService {
             terminalId: string | null;
             scannedAt: Date;
           }> = [];
+          const membershipChangedBoxIds = new Set<string>();
 
           if (boxed.length > 0) {
             const boxKey = (shiftId: string, terminalId: string | null, boxId: string): string =>
@@ -821,7 +826,7 @@ export class StationScansService {
               ).values(),
             ];
             if (ownerRows.length > 0) {
-              await tx
+              const changedMemberships = await tx
                 .insert(schema.boxItems)
                 .values(
                   ownerRows.map((row) => ({
@@ -847,7 +852,9 @@ export class StationScansService {
                   // scan may be either earlier (late winner) or later
                   // (post-release rescan), so inequality is intentional.
                   setWhere: sql`excluded.added_at <> ${schema.boxItems.addedAt}`,
-                });
+                })
+                .returning({ boxId: schema.boxItems.boxId });
+              for (const row of changedMemberships) membershipChangedBoxIds.add(row.boxId);
             }
 
             const displacedRows = [
@@ -871,7 +878,7 @@ export class StationScansService {
                 )
                 .onConflictDoNothing();
 
-              await tx
+              const displacedMemberships = await tx
                 .update(schema.boxItems)
                 .set({ displacedAt: sql`now()` })
                 .where(
@@ -889,7 +896,9 @@ export class StationScansService {
                       ),
                     ),
                   ),
-                );
+                )
+                .returning({ boxId: schema.boxItems.boxId });
+              for (const row of displacedMemberships) membershipChangedBoxIds.add(row.boxId);
             }
           }
 
@@ -929,7 +938,7 @@ export class StationScansService {
                   losingTerminalCondition,
                 ),
               );
-            await tx
+            const displacedMemberships = await tx
               .update(schema.boxItems)
               .set({ displacedAt: sql`now()` })
               .where(
@@ -941,7 +950,9 @@ export class StationScansService {
                   isNull(schema.boxItems.displacedAt),
                   isNull(schema.boxItems.removedAt),
                 ),
-              );
+              )
+              .returning({ boxId: schema.boxItems.boxId });
+            for (const row of displacedMemberships) membershipChangedBoxIds.add(row.boxId);
           }
 
           // One read covers every owner in this batch. Besides avoiding a
@@ -996,7 +1007,7 @@ export class StationScansService {
             return true;
           });
           if (duplicateMemberships.length > 0) {
-            await tx
+            const duplicateRows = await tx
               .update(schema.boxItems)
               .set({ displacedAt: sql`now()` })
               .where(
@@ -1014,8 +1025,12 @@ export class StationScansService {
                     ),
                   ),
                 ),
-              );
+              )
+              .returning({ boxId: schema.boxItems.boxId });
+            for (const row of duplicateRows) membershipChangedBoxIds.add(row.boxId);
           }
+
+          await this.advanceBoxRegistryVersions(tx, tenantId, membershipChangedBoxIds);
 
           for (const retired of retiredBoxScans) {
             const represented = activeOwnerMemberships.some(
@@ -1099,6 +1114,7 @@ export class StationScansService {
               // `contentsChangedAfterClose` must compare against this, never
               // the client-supplied `closedAt` above.
               closureReceivedAt: sql`now()`,
+              updatedAt: nextBoxRegistryVersion(),
             })
             .where(
               and(
@@ -1361,6 +1377,7 @@ export class StationScansService {
     exceptions: ExceptionDto[],
   ): Promise<void> {
     for (const ex of exceptions) {
+      const changedBoxIds = new Set<string>();
       // Resolve the device-local `ex.boxId` to the server's `boxes.id`
       // UUID, matching on ALL FOUR of `boxes_device_box_uq`'s own columns --
       // copied from the box-closures loop's `terminalCondition`/WHERE shape
@@ -1414,7 +1431,7 @@ export class StationScansService {
           authenticatedTerminalId,
           targetScannedAt,
         );
-        await tx
+        const removedMemberships = await tx
           .update(schema.boxItems)
           .set({ removedAt: sql`now()` })
           .where(
@@ -1426,7 +1443,9 @@ export class StationScansService {
               isNull(schema.boxItems.displacedAt),
               isNull(schema.boxItems.removedAt),
             ),
-          );
+          )
+          .returning({ boxId: schema.boxItems.boxId });
+        for (const row of removedMemberships) changedBoxIds.add(row.boxId);
       } else if (ex.kind === "clear") {
         // A current clear acts on an open box. A delayed clear may also act
         // after its later closure has already arrived, but only when its
@@ -1450,7 +1469,7 @@ export class StationScansService {
             ),
           );
         if (openBox && (openBox.closedAt === null || new Date(ex.occurredAt) <= openBox.closedAt)) {
-          await this.emptyBox(
+          const changed = await this.emptyBox(
             tx,
             tenantId,
             resolvedBoxId,
@@ -1458,6 +1477,7 @@ export class StationScansService {
             authenticatedTerminalId,
             new Date(ex.occurredAt),
           );
+          if (changed) changedBoxIds.add(resolvedBoxId);
         }
       } else if (ex.kind === "disassemble") {
         // Guarded to a box that is CLOSED (`closedAt IS NOT NULL`) and not
@@ -1487,7 +1507,7 @@ export class StationScansService {
             ),
           );
         if (closedBox) {
-          await this.emptyBox(
+          const membershipChanged = await this.emptyBox(
             tx,
             tenantId,
             resolvedBoxId,
@@ -1495,6 +1515,7 @@ export class StationScansService {
             authenticatedTerminalId,
             null,
           );
+          if (membershipChanged) changedBoxIds.add(resolvedBoxId);
 
           // The box's own retirement. `sscc` is deliberately left
           // untouched -- it stays on the row as a historical record of what
@@ -1508,15 +1529,25 @@ export class StationScansService {
           // sscc.e2e.test.ts's "disassemble retires an SSCC for good" test,
           // which locks that existing property down against this new
           // caller.
-          await tx
+          const retiredBoxes = await tx
             .update(schema.boxes)
             .set({ disassembledAt: new Date(ex.occurredAt) })
-            .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, resolvedBoxId)));
+            .where(
+              and(
+                eq(schema.boxes.tenantId, tenantId),
+                eq(schema.boxes.id, resolvedBoxId),
+                isNotNull(schema.boxes.closedAt),
+                isNull(schema.boxes.disassembledAt),
+              ),
+            )
+            .returning({ id: schema.boxes.id });
+          for (const row of retiredBoxes) changedBoxIds.add(row.id);
         }
       }
       // "reprint" writes only the audit row below, added in Task 7. Every
       // branch above (and every one still to come) uses `resolvedBoxId`,
       // never `ex.boxId`.
+      await this.advanceBoxRegistryVersions(tx, tenantId, changedBoxIds);
       await tx.insert(schema.boxExceptions).values({
         tenantId,
         kind: ex.kind,
@@ -1540,7 +1571,7 @@ export class StationScansService {
     shiftId: string,
     terminalId: string,
     occurredAt: Date | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     // Another box's scan may have reconciled this code while this transaction
     // waited for its globally ordered code locks. Read under those locks.
     const activeItems = await tx
@@ -1560,7 +1591,7 @@ export class StationScansService {
       await this.releaseCode(tx, tenantId, item.codeHash, shiftId, terminalId, item.addedAt);
     }
 
-    await tx
+    const removedMemberships = await tx
       .update(schema.boxItems)
       .set({ removedAt: sql`now()` })
       .where(
@@ -1571,7 +1602,22 @@ export class StationScansService {
           isNull(schema.boxItems.displacedAt),
           isNull(schema.boxItems.removedAt),
         ),
-      );
+      )
+      .returning({ boxId: schema.boxItems.boxId });
+    return removedMemberships.length > 0;
+  }
+
+  private async advanceBoxRegistryVersions(
+    tx: Pick<Db, "update">,
+    tenantId: string,
+    boxIds: Iterable<string>,
+  ): Promise<void> {
+    const changedBoxIds = [...new Set(boxIds)].sort();
+    if (changedBoxIds.length === 0) return;
+    await tx
+      .update(schema.boxes)
+      .set({ updatedAt: nextBoxRegistryVersion() })
+      .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, changedBoxIds)));
   }
 
   /**
