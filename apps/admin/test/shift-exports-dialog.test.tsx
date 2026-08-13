@@ -189,7 +189,9 @@ describe("ShiftExportsDialog", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
     expect(await within(dialog).findByText("Готов"));
-    expect(within(dialog).getByText("Данные смены изменились — сформируйте новый отчет.")).toBeDefined();
+    expect(
+      within(dialog).getByText("Данные смены изменились — сформируйте новый отчет."),
+    ).toBeDefined();
     expect(within(dialog).getByText("Иванов Иван")).toBeDefined();
     expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(2);
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
@@ -306,17 +308,20 @@ describe("ShiftExportsDialog", () => {
   it("reuses the idempotency key when the first create response is lost", async () => {
     const requests: string[] = [];
     let createAttempts = 0;
-    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
-      if (String(url).includes("/formats")) return response(FORMATS);
-      if (String(url).includes("/shifts/") && init?.method === "POST") {
-        const body = JSON.parse(String(init.body)) as { idempotencyKey: string };
-        requests.push(body.idempotencyKey);
-        createAttempts += 1;
-        if (createAttempts === 1) throw new Error("response lost");
-        return response({ ...READY_EXPORT, status: "queued", artifacts: [] });
-      }
-      return response([]);
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/formats")) return response(FORMATS);
+        if (String(url).includes("/shifts/") && init?.method === "POST") {
+          const body = JSON.parse(String(init.body)) as { idempotencyKey: string };
+          requests.push(body.idempotencyKey);
+          createAttempts += 1;
+          if (createAttempts === 1) throw new Error("response lost");
+          return response({ ...READY_EXPORT, status: "queued", artifacts: [] });
+        }
+        return response([]);
+      }),
+    );
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
     const createButton = within(dialog).getByRole("button", { name: "Сформировать отчет" });

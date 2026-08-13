@@ -218,9 +218,7 @@ function ShiftExportAction({ shift }: { shift: ShiftDto }) {
           {t("pages.shifts.exports.action")}
         </Button>
       </RowActions>
-      {open ? (
-        <ShiftExportsDialog shift={shift} open onClose={() => setOpen(false)} />
-      ) : null}
+      {open ? <ShiftExportsDialog shift={shift} open onClose={() => setOpen(false)} /> : null}
     </>
   );
 }

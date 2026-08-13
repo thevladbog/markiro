@@ -99,10 +99,7 @@ describe("shift export persistence schema", () => {
     const shiftReference = foreignKey(exports, "shift_exports_tenant_shift_fk");
     expect(getTableName(shiftReference.foreignTable)).toBe("shifts");
     expect(shiftReference.columns.map((column) => column.name)).toEqual(["tenant_id", "shift_id"]);
-    expect(shiftReference.foreignColumns.map((column) => column.name)).toEqual([
-      "tenant_id",
-      "id",
-    ]);
+    expect(shiftReference.foreignColumns.map((column) => column.name)).toEqual(["tenant_id", "id"]);
   });
 
   it("persists each export artifact under its tenant-scoped export", () => {
@@ -147,12 +144,12 @@ describe("shift export persistence schema", () => {
       ]),
     );
 
-    const exportReference = foreignKey(
-      artifacts,
-      "shift_export_artifacts_tenant_export_fk",
-    );
+    const exportReference = foreignKey(artifacts, "shift_export_artifacts_tenant_export_fk");
     expect(getTableName(exportReference.foreignTable)).toBe("shift_exports");
-    expect(exportReference.columns.map((column) => column.name)).toEqual(["tenant_id", "export_id"]);
+    expect(exportReference.columns.map((column) => column.name)).toEqual([
+      "tenant_id",
+      "export_id",
+    ]);
     expect(exportReference.foreignColumns.map((column) => column.name)).toEqual([
       "tenant_id",
       "id",

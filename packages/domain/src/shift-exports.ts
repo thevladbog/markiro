@@ -1,8 +1,5 @@
 export type ShiftExportFormatId =
-  | "shift_txt_flat"
-  | "shift_txt_boxes"
-  | "shift_csv_flat"
-  | "shift_csv_boxes";
+  "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes";
 
 export type ShiftExportBoxMode = "flat" | "boxes";
 
@@ -173,10 +170,7 @@ export function sanitizeShiftExportFilenameSegment(value: string): string {
 }
 
 function validateLineLimit(maxLines: number | null): void {
-  if (
-    maxLines !== null &&
-    (!Number.isInteger(maxLines) || maxLines < 2 || maxLines > 1_000_000)
-  ) {
+  if (maxLines !== null && (!Number.isInteger(maxLines) || maxLines < 2 || maxLines > 1_000_000)) {
     throw new ShiftExportDomainError("INVALID_LINE_LIMIT");
   }
 }
@@ -242,10 +236,7 @@ function splitBlocks(
       throw new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT");
     }
 
-    if (
-      currentBlocks.length > 0 &&
-      currentPhysicalLineCount + block.physicalLineCount > maxLines
-    ) {
+    if (currentBlocks.length > 0 && currentPhysicalLineCount + block.physicalLineCount > maxLines) {
       parts.push({ blocks: currentBlocks, physicalLineCount: currentPhysicalLineCount });
       currentBlocks = [];
       currentPhysicalLineCount = headerLines;

@@ -401,10 +401,10 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
           label={t("pages.shifts.exports.splitLabel")}
           checked={split}
           disabled={create.isPending}
-            onCheckedChange={(value) => {
-              idempotencyKey.current = null;
-              setSplit(value);
-            }}
+          onCheckedChange={(value) => {
+            idempotencyKey.current = null;
+            setSplit(value);
+          }}
         />
         {split ? (
           <Input

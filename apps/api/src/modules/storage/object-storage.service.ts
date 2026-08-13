@@ -160,8 +160,9 @@ function encodeRfc5987Filename(filename: string): string {
   if (/[\r\n]/.test(filename)) {
     throw new Error("Download filename must not contain CR or LF");
   }
-  return encodeURIComponent(filename).replace(/[!'()*]/g, (character) =>
-    `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  return encodeURIComponent(filename).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
   );
 }
 

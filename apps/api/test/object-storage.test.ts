@@ -90,7 +90,12 @@ describe("ObjectStorageService", () => {
     const storage = new ObjectStorageService(env, { send } as never);
 
     await expect(
-      storage.putVerified("tenants/t/shifts/s/export.csv", Buffer.from("export"), "text/csv", "ABC"),
+      storage.putVerified(
+        "tenants/t/shifts/s/export.csv",
+        Buffer.from("export"),
+        "text/csv",
+        "ABC",
+      ),
     ).rejects.toThrow();
     expect(send).not.toHaveBeenCalled();
   });

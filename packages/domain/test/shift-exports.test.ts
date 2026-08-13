@@ -28,7 +28,10 @@ const boxes: ShiftExportSource = {
   ],
 };
 
-function render(formatId: "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes", source: ShiftExportSource) {
+function render(
+  formatId: "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes",
+  source: ShiftExportSource,
+) {
   const [part] = renderParts(formatId, source);
 
   if (!part) {
@@ -107,9 +110,11 @@ describe("shift export formats", () => {
   it("preserves GS separators, escapes CSV fields, and leaves TXT unprefixed", () => {
     expect(render("shift_txt_flat", { mode: "flat", codes: ["A\u001dB"] }).bytes[1]).toBe(0x1d);
     expect([...render("shift_txt_flat", flat).bytes.slice(0, 3)]).not.toEqual([0xef, 0xbb, 0xbf]);
-    expect(stripBom(render("shift_csv_flat", { mode: "flat", codes: ["a;b", 'a"b', "a\rb", "a\nb"] }).bytes)).toBe(
-      'code\r\n"a;b"\r\n"a""b"\r\n"a\rb"\r\n"a\nb"\r\n',
-    );
+    expect(
+      stripBom(
+        render("shift_csv_flat", { mode: "flat", codes: ["a;b", 'a"b', "a\rb", "a\nb"] }).bytes,
+      ),
+    ).toBe('code\r\n"a;b"\r\n"a""b"\r\n"a\rb"\r\n"a\nb"\r\n');
   });
 });
 
@@ -117,33 +122,39 @@ describe("shift export splitting", () => {
   it("fills flat TXT parts through their physical-line limit", () => {
     const codes: ShiftExportSource = { mode: "flat", codes: ["KM-1", "KM-2", "KM-3", "KM-4"] };
 
-    expect(renderParts("shift_txt_flat", codes, 2).map((part) => ({
-      physicalLineCount: part.physicalLineCount,
-      codeCount: part.codeCount,
-      boxCount: part.boxCount,
-      body: decode(part.bytes),
-    }))).toEqual([
+    expect(
+      renderParts("shift_txt_flat", codes, 2).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: decode(part.bytes),
+      })),
+    ).toEqual([
       { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-1\nKM-2\n" },
       { physicalLineCount: 2, codeCount: 2, boxCount: 0, body: "KM-3\nKM-4\n" },
     ]);
-    expect(renderParts("shift_txt_flat", codes, 3).map((part) => ({
-      physicalLineCount: part.physicalLineCount,
-      codeCount: part.codeCount,
-      boxCount: part.boxCount,
-      body: decode(part.bytes),
-    }))).toEqual([
+    expect(
+      renderParts("shift_txt_flat", codes, 3).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: decode(part.bytes),
+      })),
+    ).toEqual([
       { physicalLineCount: 3, codeCount: 3, boxCount: 0, body: "KM-1\nKM-2\nKM-3\n" },
       { physicalLineCount: 1, codeCount: 1, boxCount: 0, body: "KM-4\n" },
     ]);
   });
 
   it("reserves a CSV header in every split part", () => {
-    expect(renderParts("shift_csv_flat", flat, 2).map((part) => ({
-      physicalLineCount: part.physicalLineCount,
-      codeCount: part.codeCount,
-      boxCount: part.boxCount,
-      body: stripBom(part.bytes),
-    }))).toEqual([
+    expect(
+      renderParts("shift_csv_flat", flat, 2).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: stripBom(part.bytes),
+      })),
+    ).toEqual([
       { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\r\nKM-1\r\n" },
       { physicalLineCount: 2, codeCount: 1, boxCount: 0, body: "code\r\nKM-2\r\n" },
     ]);
@@ -151,13 +162,11 @@ describe("shift export splitting", () => {
 
   it("counts embedded CSV line breaks before splitting flat records", () => {
     expect(
-      renderParts("shift_csv_flat", { mode: "flat", codes: ["A\r\nB", "KM-2"] }, 3).map(
-        (part) => ({
-          physicalLineCount: part.physicalLineCount,
-          codeCount: part.codeCount,
-          body: stripBom(part.bytes),
-        }),
-      ),
+      renderParts("shift_csv_flat", { mode: "flat", codes: ["A\r\nB", "KM-2"] }, 3).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        body: stripBom(part.bytes),
+      })),
     ).toEqual([
       { physicalLineCount: 3, codeCount: 1, body: 'code\r\n"A\r\nB"\r\n' },
       { physicalLineCount: 2, codeCount: 1, body: "code\r\nKM-2\r\n" },
@@ -176,12 +185,14 @@ describe("shift export splitting", () => {
       ],
     };
 
-    expect(renderParts("shift_csv_boxes", multilineBoxes, 3).map((part) => ({
-      physicalLineCount: part.physicalLineCount,
-      codeCount: part.codeCount,
-      boxCount: part.boxCount,
-      body: stripBom(part.bytes),
-    }))).toEqual([
+    expect(
+      renderParts("shift_csv_boxes", multilineBoxes, 3).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: stripBom(part.bytes),
+      })),
+    ).toEqual([
       {
         physicalLineCount: 3,
         codeCount: 1,
@@ -198,12 +209,14 @@ describe("shift export splitting", () => {
   });
 
   it("keeps TXT boxes indivisible and starts the next box in a new part", () => {
-    expect(renderParts("shift_txt_boxes", boxes, 5).map((part) => ({
-      physicalLineCount: part.physicalLineCount,
-      codeCount: part.codeCount,
-      boxCount: part.boxCount,
-      body: decode(part.bytes),
-    }))).toEqual([
+    expect(
+      renderParts("shift_txt_boxes", boxes, 5).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: decode(part.bytes),
+      })),
+    ).toEqual([
       {
         physicalLineCount: 4,
         codeCount: 2,
@@ -220,12 +233,14 @@ describe("shift export splitting", () => {
   });
 
   it("counts a CSV box as its item records plus its part header", () => {
-    expect(renderParts("shift_csv_boxes", boxes, 3).map((part) => ({
-      physicalLineCount: part.physicalLineCount,
-      codeCount: part.codeCount,
-      boxCount: part.boxCount,
-      body: stripBom(part.bytes),
-    }))).toEqual([
+    expect(
+      renderParts("shift_csv_boxes", boxes, 3).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        codeCount: part.codeCount,
+        boxCount: part.boxCount,
+        body: stripBom(part.bytes),
+      })),
+    ).toEqual([
       {
         physicalLineCount: 3,
         codeCount: 2,

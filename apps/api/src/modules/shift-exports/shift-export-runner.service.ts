@@ -10,10 +10,7 @@ import { schema, type Db } from "@markiro/db";
 import { and, eq, lte, or, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
-import {
-  ShiftExportSourceError,
-  ShiftExportSourceService,
-} from "./shift-export-source.service";
+import { ShiftExportSourceError, ShiftExportSourceService } from "./shift-export-source.service";
 
 export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
   "SHIFT_NOT_CLOSED",
@@ -80,11 +77,7 @@ export class ShiftExportRunnerService {
           sourceSnapshotStartedAt: snapshot.sourceSnapshotStartedAt,
           updatedAt: new Date(),
         })
-        .where(
-          and(
-            this.ownedProcessingAttempt(claimed),
-          ),
-        )
+        .where(and(this.ownedProcessingAttempt(claimed)))
         .returning({ id: schema.shiftExports.id });
       if (snapshotUpdates.length === 0) throw new ShiftExportClaimLostError();
 
@@ -184,11 +177,7 @@ export class ShiftExportRunnerService {
     if (refreshed.length === 0) throw new ShiftExportClaimLostError();
   }
 
-  private objectKey(
-    claimed: ShiftExportRow,
-    part: ShiftExportPart,
-    extension: string,
-  ): string {
+  private objectKey(claimed: ShiftExportRow, part: ShiftExportPart, extension: string): string {
     return `tenants/${claimed.tenantId}/shift-exports/${claimed.id}/attempt-${claimed.attemptCount}/part-${part.partNumber}.${extension}`;
   }
 
@@ -226,11 +215,7 @@ export class ShiftExportRunnerService {
           completedAt,
           updatedAt: completedAt,
         })
-        .where(
-          and(
-            this.ownedProcessingAttempt(claimed),
-          ),
-        )
+        .where(and(this.ownedProcessingAttempt(claimed)))
         .returning({ id: schema.shiftExports.id });
       if (ready.length === 0) throw new ShiftExportClaimLostError();
       await this.writeAudit(tx, claimed, "shift_export.completed", "success", {
@@ -259,11 +244,7 @@ export class ShiftExportRunnerService {
       const failed = await tx
         .update(schema.shiftExports)
         .set({ status: "failed", errorCode, completedAt, updatedAt: completedAt })
-        .where(
-          and(
-            this.ownedProcessingAttempt(claimed),
-          ),
-        )
+        .where(and(this.ownedProcessingAttempt(claimed)))
         .returning({ id: schema.shiftExports.id });
       if (failed.length === 0) throw new ShiftExportClaimLostError();
       await this.writeAudit(tx, claimed, "shift_export.failed", "failure", {
