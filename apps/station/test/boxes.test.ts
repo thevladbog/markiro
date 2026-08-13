@@ -8,10 +8,14 @@ import {
   closeBox,
   currentBox,
   disassembleBox,
+  findUnresolvedBoxPrint,
   listClosedBoxes,
+  markBoxPrinted,
+  markBoxPrintFailed,
   markPrintSkipped,
   markPrintVerified,
   openBox,
+  type BoxPrintErrorCode,
 } from "../src/lib/boxes.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
@@ -74,6 +78,27 @@ describe("boxes", () => {
     expect(rows[0]!.sscc).toBe("004601234560000017");
   });
 
+  it("closes a box into pending print state in the same write that records its SSCC", async () => {
+    await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+
+    await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", "op1");
+
+    expect(
+      await exec.all(
+        `SELECT sscc, closed_at, print_state, print_error_code
+           FROM boxes_mirror WHERE box_id = ?`,
+        ["b1"],
+      ),
+    ).toEqual([
+      {
+        sscc: "004601234560000017",
+        closed_at: "2026-07-29T10:05:00.000Z",
+        print_state: "pending",
+        print_error_code: null,
+      },
+    ]);
+  });
+
   it("keeps boxes of different shifts apart", async () => {
     await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
     expect(await currentBox(exec, "s2")).toBeNull();
@@ -131,14 +156,25 @@ describe("boxes", () => {
     it("records that a closed box's label was verified", async () => {
       await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
       await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrinted(exec, "b1");
 
       await markPrintVerified(exec, "b1", "2026-07-29T10:06:00.000Z");
 
       const rows = await exec.all<{
+        sscc: string;
+        print_state: string;
+        print_error_code: string | null;
         print_verified_at: string | null;
         print_skipped_at: string | null;
-      }>(`SELECT print_verified_at, print_skipped_at FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+      }>(
+        `SELECT sscc, print_state, print_error_code, print_verified_at, print_skipped_at
+           FROM boxes_mirror WHERE box_id = ?`,
+        ["b1"],
+      );
       expect(rows[0]).toEqual({
+        sscc: "004601234560000017",
+        print_state: "printed",
+        print_error_code: null,
         print_verified_at: "2026-07-29T10:06:00.000Z",
         print_skipped_at: null,
       });
@@ -147,14 +183,25 @@ describe("boxes", () => {
     it("records that the operator skipped verifying a closed box's label", async () => {
       await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
       await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrintFailed(exec, "b1", "transport_failed");
 
       await markPrintSkipped(exec, "b1", "2026-07-29T10:06:00.000Z");
 
       const rows = await exec.all<{
+        sscc: string;
+        print_state: string;
+        print_error_code: string | null;
         print_verified_at: string | null;
         print_skipped_at: string | null;
-      }>(`SELECT print_verified_at, print_skipped_at FROM boxes_mirror WHERE box_id = ?`, ["b1"]);
+      }>(
+        `SELECT sscc, print_state, print_error_code, print_verified_at, print_skipped_at
+           FROM boxes_mirror WHERE box_id = ?`,
+        ["b1"],
+      );
       expect(rows[0]).toEqual({
+        sscc: "004601234560000017",
+        print_state: "skipped",
+        print_error_code: null,
         print_verified_at: null,
         print_skipped_at: "2026-07-29T10:06:00.000Z",
       });
@@ -224,6 +271,140 @@ describe("boxes", () => {
         ["b2"],
       );
       expect(rows[0]!.print_verified_at).toBeNull();
+    });
+  });
+
+  describe("durable print lifecycle", () => {
+    const errorCodes: BoxPrintErrorCode[] = [
+      "template_missing",
+      "printer_unconfigured",
+      "render_failed",
+      "transport_failed",
+    ];
+
+    it.each(errorCodes)(
+      "persists only the sanitized %s failure without changing the SSCC",
+      async (code) => {
+        await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+        await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+
+        await markBoxPrintFailed(exec, "b1", code);
+
+        expect(
+          await exec.all(
+            `SELECT sscc, print_state, print_error_code
+             FROM boxes_mirror WHERE box_id = ?`,
+            ["b1"],
+          ),
+        ).toEqual([
+          {
+            sscc: "004601234560000017",
+            print_state: "pending",
+            print_error_code: code,
+          },
+        ]);
+      },
+    );
+
+    it("marks the same box printed and clears its sanitized error", async () => {
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrintFailed(exec, "b1", "render_failed");
+
+      await markBoxPrinted(exec, "b1");
+
+      expect(
+        await exec.all(
+          `SELECT sscc, print_state, print_error_code
+             FROM boxes_mirror WHERE box_id = ?`,
+          ["b1"],
+        ),
+      ).toEqual([
+        {
+          sscc: "004601234560000017",
+          print_state: "printed",
+          print_error_code: null,
+        },
+      ]);
+    });
+
+    it("restores the oldest unresolved pending print for this aggregation shift and terminal", async () => {
+      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
+        "s1",
+        "active",
+        "aggregation",
+        "p1",
+      ]);
+      await openBox(exec, "s1", "newer", "2026-07-29T10:01:00.000Z", "dev-1");
+      await closeBox(exec, "newer", "004601234560000024", "2026-07-29T10:06:00.000Z", null);
+      await openBox(exec, "s1", "older", "2026-07-29T10:00:00.000Z", "dev-1");
+      await recordScan(exec, event("a"), code("aa", "older"));
+      await closeBox(exec, "older", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrintFailed(exec, "older", "printer_unconfigured");
+
+      expect(await findUnresolvedBoxPrint(exec, "s1", "dev-1", false)).toEqual({
+        boxId: "older",
+        sscc: "004601234560000017",
+        itemCount: 1,
+        state: "pending",
+        errorCode: "printer_unconfigured",
+      });
+    });
+
+    it("includes an unverified printed box only when verification recovery is requested", async () => {
+      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
+        "s1",
+        "active",
+        "aggregation",
+        "p1",
+      ]);
+      await openBox(exec, "s1", "b1", "2026-07-29T10:00:00.000Z", null);
+      await closeBox(exec, "b1", "004601234560000017", "2026-07-29T10:05:00.000Z", null);
+      await markBoxPrinted(exec, "b1");
+
+      expect(await findUnresolvedBoxPrint(exec, "s1", null, false)).toBeNull();
+      expect(await findUnresolvedBoxPrint(exec, "s1", null, true)).toEqual({
+        boxId: "b1",
+        sscc: "004601234560000017",
+        itemCount: 0,
+        state: "printed",
+        errorCode: null,
+      });
+
+      await markPrintVerified(exec, "b1", "2026-07-29T10:06:00.000Z");
+      expect(await findUnresolvedBoxPrint(exec, "s1", null, true)).toBeNull();
+    });
+
+    it("does not restore print recovery for validation shifts or disassembled boxes", async () => {
+      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
+        "validation",
+        "active",
+        "validation",
+        "p1",
+      ]);
+      await openBox(exec, "validation", "validation-box", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(
+        exec,
+        "validation-box",
+        "004601234560000017",
+        "2026-07-29T10:05:00.000Z",
+        null,
+      );
+      expect(await findUnresolvedBoxPrint(exec, "validation", "dev-1", true)).toBeNull();
+
+      await exec.run(`INSERT INTO shift_mirror (id, status, mode, product_id) VALUES (?,?,?,?)`, [
+        "aggregation",
+        "active",
+        "aggregation",
+        "p1",
+      ]);
+      await openBox(exec, "aggregation", "retired", "2026-07-29T10:00:00.000Z", "dev-1");
+      await closeBox(exec, "retired", "004601234560000024", "2026-07-29T10:05:00.000Z", null);
+      await exec.run(`UPDATE boxes_mirror SET disassembled_at = ? WHERE box_id = ?`, [
+        "2026-07-29T10:06:00.000Z",
+        "retired",
+      ]);
+      expect(await findUnresolvedBoxPrint(exec, "aggregation", "dev-1", true)).toBeNull();
     });
   });
 

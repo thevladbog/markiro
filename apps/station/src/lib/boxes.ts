@@ -20,6 +20,19 @@ export interface DeviceBox {
   closedAt: string | null;
 }
 
+export type BoxPrintState = "legacy" | "pending" | "printed" | "skipped";
+
+export type BoxPrintErrorCode =
+  "template_missing" | "printer_unconfigured" | "render_failed" | "transport_failed";
+
+export interface UnresolvedBoxPrint {
+  boxId: string;
+  sscc: string;
+  itemCount: number;
+  state: "pending" | "printed";
+  errorCode: BoxPrintErrorCode | null;
+}
+
 /**
  * The one box open for this shift right now (`closed_at IS NULL`), or null
  * if none is open. `itemCount` is a `COUNT(*)` over `codes_mirror` correlated
@@ -123,9 +136,8 @@ export async function openBox(
 }
 
 /**
- * Closes a box once its SSCC has been assigned. One UPDATE, setting `sscc`,
- * `closed_at` and `closed_by` (the operator who closed it, if known) — this
- * is what removes the box from `currentBox`'s `closed_at IS NULL` filter.
+ * Closes a box once its SSCC has been assigned. The same UPDATE records the
+ * local pending label, so a crash cannot persist the close without recovery.
  */
 export async function closeBox(
   exec: SqlExecutor,
@@ -135,9 +147,84 @@ export async function closeBox(
   operatorId: string | null,
 ): Promise<void> {
   await exec.run(
-    `UPDATE boxes_mirror SET sscc = ?, closed_at = ?, closed_by = ? WHERE box_id = ?`,
+    `UPDATE boxes_mirror
+        SET sscc = ?, closed_at = ?, closed_by = ?,
+            print_state = 'pending', print_error_code = NULL
+      WHERE box_id = ?`,
     [sscc, closedAt, operatorId, boxId],
   );
+}
+
+/** Records an actionable category without persisting a native printer error. */
+export async function markBoxPrintFailed(
+  exec: SqlExecutor,
+  boxId: string,
+  code: BoxPrintErrorCode,
+): Promise<void> {
+  await exec.run(
+    `UPDATE boxes_mirror
+        SET print_state = 'pending', print_error_code = ?
+      WHERE box_id = ? AND print_state = 'pending'`,
+    [code, boxId],
+  );
+}
+
+/** Records successful output for this already-numbered box. */
+export async function markBoxPrinted(exec: SqlExecutor, boxId: string): Promise<void> {
+  await exec.run(
+    `UPDATE boxes_mirror
+        SET print_state = 'printed', print_error_code = NULL
+      WHERE box_id = ? AND print_state = 'pending'`,
+    [boxId],
+  );
+}
+
+/**
+ * Returns the oldest unresolved label owned by this aggregation shift and
+ * terminal. Printed labels are included only while scan-back verification is
+ * active and neither durable verification outcome has been recorded.
+ */
+export async function findUnresolvedBoxPrint(
+  exec: SqlExecutor,
+  shiftId: string,
+  terminalId: string | null,
+  includePrintedForVerification: boolean,
+): Promise<UnresolvedBoxPrint | null> {
+  const rows = await exec.all<{
+    box_id: string;
+    sscc: string;
+    item_count: number;
+    print_state: "pending" | "printed";
+    print_error_code: BoxPrintErrorCode | null;
+  }>(
+    `SELECT b.box_id AS box_id, b.sscc AS sscc,
+            (SELECT COUNT(*) FROM codes_mirror c WHERE c.box_id = b.box_id) AS item_count,
+            b.print_state AS print_state, b.print_error_code AS print_error_code
+       FROM boxes_mirror b
+       JOIN shift_mirror s ON s.id = b.shift_id AND s.mode = 'aggregation'
+      WHERE b.shift_id = ? AND b.terminal_id IS ?
+        AND b.closed_at IS NOT NULL AND b.sscc IS NOT NULL
+        AND b.disassembled_at IS NULL
+        AND (
+          b.print_state = 'pending'
+          OR (
+            ? = 1 AND b.print_state = 'printed'
+            AND b.print_verified_at IS NULL AND b.print_skipped_at IS NULL
+          )
+        )
+      ORDER BY b.closed_at ASC, b.box_id ASC
+      LIMIT 1`,
+    [shiftId, terminalId, includePrintedForVerification ? 1 : 0],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    boxId: row.box_id,
+    sscc: row.sscc,
+    itemCount: Number(row.item_count),
+    state: row.print_state,
+    errorCode: row.print_error_code,
+  };
 }
 
 /**
@@ -162,7 +249,10 @@ export async function markPrintVerified(
   at: string,
 ): Promise<void> {
   await exec.run(
-    `UPDATE boxes_mirror SET print_verified_at = ?, acked_at = NULL WHERE box_id = ?`,
+    `UPDATE boxes_mirror
+        SET print_state = 'printed', print_error_code = NULL,
+            print_verified_at = ?, acked_at = NULL
+      WHERE box_id = ?`,
     [at, boxId],
   );
 }
@@ -179,10 +269,13 @@ export async function markPrintSkipped(
   boxId: string,
   at: string,
 ): Promise<void> {
-  await exec.run(`UPDATE boxes_mirror SET print_skipped_at = ?, acked_at = NULL WHERE box_id = ?`, [
-    at,
-    boxId,
-  ]);
+  await exec.run(
+    `UPDATE boxes_mirror
+        SET print_state = 'skipped', print_error_code = NULL,
+            print_skipped_at = ?, acked_at = NULL
+      WHERE box_id = ?`,
+    [at, boxId],
+  );
 }
 
 export interface ClearBoxInput {

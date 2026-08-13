@@ -173,6 +173,8 @@ export const boxesMirror = sqliteTable("boxes_mirror", {
   printVerifiedAt: text("print_verified_at"),
   printSkippedAt: text("print_skipped_at"),
   disassembledAt: text("disassembled_at"),
+  printState: text("print_state").notNull().default("legacy"),
+  printErrorCode: text("print_error_code"),
 });
 
 /**

@@ -72,11 +72,24 @@ describe("closeCurrentBox", () => {
     // The box itself must actually be closed, under the operator who closed
     // it -- not just a serial handed back with the mirror row left open.
     expect(await currentBox(exec, SHIFT)).toBeNull();
-    const rows = await exec.all<{ sscc: string; closed_by: string | null; closed_at: string }>(
-      `SELECT sscc, closed_by, closed_at FROM boxes_mirror WHERE box_id = ?`,
+    const rows = await exec.all<{
+      sscc: string;
+      closed_by: string | null;
+      closed_at: string;
+      print_state: string;
+      print_error_code: string | null;
+    }>(
+      `SELECT sscc, closed_by, closed_at, print_state, print_error_code
+         FROM boxes_mirror WHERE box_id = ?`,
       ["b1"],
     );
-    expect(rows[0]).toEqual({ sscc: res.sscc, closed_by: "op-1", closed_at: ISO });
+    expect(rows[0]).toEqual({
+      sscc: res.sscc,
+      closed_by: "op-1",
+      closed_at: ISO,
+      print_state: "pending",
+      print_error_code: null,
+    });
   });
 
   it("refuses to close when the pool is dry, and burns nothing", async () => {
