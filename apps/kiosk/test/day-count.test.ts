@@ -442,6 +442,84 @@ describe("effectivePickupPolicy", () => {
     });
   });
 
+  it("does not grant employee privileges when the tenant policy field is missing", () => {
+    const partial = bootstrap({
+      config: { dayLimitPerEmployee: 4, showPrices: true },
+      employees: [
+        {
+          id: ME,
+          limitMode: "unlimited",
+          dayLimit: 1,
+          canWriteoff: true,
+        },
+      ],
+    });
+    expect(effectivePickupPolicy(partial, ME)).toEqual({
+      limited: true,
+      dayLimit: 4,
+      canWriteoff: false,
+    });
+  });
+
+  it("does not disable limits when only the tenant policy field is present", () => {
+    const partial = bootstrap({
+      pickupPolicy: { limitsEnabled: false },
+      config: { dayLimitPerEmployee: 4, showPrices: true },
+      employees: [{ id: ME }],
+    });
+    expect(effectivePickupPolicy(partial, ME)).toEqual({
+      limited: true,
+      dayLimit: 4,
+      canWriteoff: false,
+    });
+  });
+
+  it.each([
+    {
+      what: "tenant switch is not boolean",
+      pickupPolicy: { limitsEnabled: "false" },
+      employee: { limitMode: "unlimited", dayLimit: 1, canWriteoff: true },
+    },
+    {
+      what: "limit mode is unknown",
+      pickupPolicy: { limitsEnabled: false },
+      employee: { limitMode: "forever", dayLimit: 1, canWriteoff: true },
+    },
+    {
+      what: "day limit is not a positive integer",
+      pickupPolicy: { limitsEnabled: false },
+      employee: { limitMode: "unlimited", dayLimit: 0, canWriteoff: true },
+    },
+    {
+      what: "writeoff flag is missing",
+      pickupPolicy: { limitsEnabled: false },
+      employee: { limitMode: "unlimited", dayLimit: 1 },
+    },
+  ])("falls back atomically when $what", ({ pickupPolicy, employee }) => {
+    const malformed = bootstrap({
+      pickupPolicy,
+      config: { dayLimitPerEmployee: 6, showPrices: true },
+      employees: [{ id: ME, ...employee }],
+    });
+    expect(effectivePickupPolicy(malformed, ME)).toEqual({
+      limited: true,
+      dayLimit: 6,
+      canWriteoff: false,
+    });
+  });
+
+  it("uses a deny-all limit when the legacy fallback is not a positive integer", () => {
+    const malformed = bootstrap({
+      config: { dayLimitPerEmployee: 0, showPrices: true },
+      employees: [{ id: ME, limitMode: "unlimited", dayLimit: 1, canWriteoff: true }],
+    });
+    expect(effectivePickupPolicy(malformed, ME)).toEqual({
+      limited: true,
+      dayLimit: 0,
+      canWriteoff: false,
+    });
+  });
+
   it("returns null for an employee absent from the snapshot", () => {
     const snapshot = bootstrap({ pickupPolicy: { limitsEnabled: true }, employees: [] });
     expect(effectivePickupPolicy(snapshot, ME)).toBeNull();

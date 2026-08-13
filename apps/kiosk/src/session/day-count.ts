@@ -204,10 +204,31 @@ export interface EffectivePickupPolicy {
   canWriteoff: boolean;
 }
 
+interface CompleteCurrentPickupPolicy {
+  limitsEnabled: boolean;
+  limitMode: "limited" | "unlimited";
+  dayLimit: number;
+  canWriteoff: boolean;
+}
+
+function isCompleteCurrentPickupPolicy(
+  value: Record<keyof CompleteCurrentPickupPolicy, unknown>,
+): value is CompleteCurrentPickupPolicy {
+  return (
+    typeof value.limitsEnabled === "boolean" &&
+    (value.limitMode === "limited" || value.limitMode === "unlimited") &&
+    Number.isInteger(value.dayLimit) &&
+    (value.dayLimit as number) > 0 &&
+    typeof value.canWriteoff === "boolean"
+  );
+}
+
 /**
  * Resolves today's tenant + employee policy from an untrusted bootstrap.
- * Missing fields mean an older cached snapshot, so the fallback remains
- * limited, preserves the legacy kiosk limit, and never grants writeoff.
+ * Only one complete, type-valid current tuple can grant tenant-off,
+ * employee-unlimited, or writeoff privileges. Missing/malformed fields mean
+ * an older cached snapshot, so the whole tuple falls back atomically: limited,
+ * the positive legacy kiosk limit (or deny-all zero), and no writeoff.
  */
 export function effectivePickupPolicy(
   bootstrap: KioskBootstrapDto,
@@ -220,20 +241,31 @@ export function effectivePickupPolicy(
   const rawBootstrap = bootstrap as Partial<KioskBootstrapDto>;
   const rawTenantPolicy = rawBootstrap.pickupPolicy as
     { limitsEnabled?: unknown } | null | undefined;
+  const currentPolicy = {
+    limitsEnabled: rawTenantPolicy?.limitsEnabled,
+    limitMode: rawEmployee.limitMode,
+    dayLimit: rawEmployee.dayLimit,
+    canWriteoff: rawEmployee.canWriteoff,
+  };
+  if (isCompleteCurrentPickupPolicy(currentPolicy)) {
+    return {
+      limited: currentPolicy.limitsEnabled && currentPolicy.limitMode === "limited",
+      dayLimit: currentPolicy.dayLimit,
+      canWriteoff: currentPolicy.canWriteoff,
+    };
+  }
+
   const rawLegacyLimit = (rawBootstrap.config as { dayLimitPerEmployee?: unknown } | undefined)
     ?.dayLimitPerEmployee;
-  const rawEmployeeLimit = rawEmployee.dayLimit as unknown;
   const dayLimit =
-    Number.isInteger(rawEmployeeLimit) && (rawEmployeeLimit as number) >= 0
-      ? (rawEmployeeLimit as number)
-      : Number.isInteger(rawLegacyLimit) && (rawLegacyLimit as number) >= 0
-        ? (rawLegacyLimit as number)
-        : 0;
+    Number.isInteger(rawLegacyLimit) && (rawLegacyLimit as number) > 0
+      ? (rawLegacyLimit as number)
+      : 0;
 
   return {
-    limited: rawTenantPolicy?.limitsEnabled !== false && rawEmployee.limitMode !== "unlimited",
+    limited: true,
     dayLimit,
-    canWriteoff: rawEmployee.canWriteoff === true,
+    canWriteoff: false,
   };
 }
 
