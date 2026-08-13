@@ -1166,6 +1166,7 @@ export function App() {
       ) : (
         <NewShift
           client={activeClient}
+          source={scanSource}
           onStarted={handleShiftEntered}
           onBack={() => setFloorView("select")}
         />
