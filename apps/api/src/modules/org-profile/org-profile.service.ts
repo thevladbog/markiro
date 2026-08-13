@@ -20,6 +20,7 @@ import {
   seedFloor,
 } from "../sscc/sscc.service";
 import { processLogo } from "./logo-processor";
+import { RasterImageInputError } from "../profile/raster-image-processor";
 import type {
   KioskBrandingDto,
   OrganizationLogoDto,
@@ -125,7 +126,11 @@ export class OrgProfileService {
     try {
       logo = await processLogo(source);
     } catch (error) {
-      throw new BadRequestException(error instanceof Error ? error.message : "Invalid logo");
+      if (error instanceof RasterImageInputError) {
+        throw new BadRequestException(error.message);
+      }
+      this.logger.warn(`Could not process organization logo for tenant ${tenantId}`);
+      throw new ServiceUnavailableException("Logo processing is unavailable");
     }
 
     const assetId = randomUUID();

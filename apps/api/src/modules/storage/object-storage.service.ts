@@ -104,6 +104,7 @@ export class ObjectStorageService implements OnModuleDestroy {
       typeof response.ContentLength === "number" &&
       response.ContentLength > MAX_PRIVATE_OBJECT_BYTES
     ) {
+      await closeObjectBody(response.Body);
       throw new Error("Private object exceeds 5 MiB response limit");
     }
     return {
@@ -122,6 +123,24 @@ export class ObjectStorageService implements OnModuleDestroy {
       new GetObjectCommand({ Bucket: this.#bucket, Key: key }),
       { expiresIn: expiresInSeconds },
     );
+  }
+}
+
+async function closeObjectBody(body: unknown): Promise<void> {
+  if (!body || typeof body !== "object") return;
+  const closeable = body as {
+    destroy?: () => unknown;
+    cancel?: () => unknown;
+  };
+  try {
+    if (typeof closeable.destroy === "function") {
+      await closeable.destroy.call(body);
+    } else if (typeof closeable.cancel === "function") {
+      await closeable.cancel.call(body);
+    }
+  } catch {
+    // Preserve the response-bound error: cleanup must not replace it with a
+    // provider-specific stream error.
   }
 }
 

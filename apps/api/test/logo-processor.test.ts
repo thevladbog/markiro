@@ -1,6 +1,7 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import { processLogo } from "../src/modules/org-profile/logo-processor";
+import { RasterImageInputError } from "../src/modules/profile/raster-image-processor";
 
 describe("processLogo", () => {
   it.each(["jpeg", "png", "webp"] as const)(
@@ -40,9 +41,10 @@ describe("processLogo", () => {
   });
 
   it("rejects SVG and malformed content", async () => {
-    await expect(processLogo(Buffer.from("<svg><script>alert(1)</script></svg>"))).rejects.toThrow(
-      /JPEG, PNG, or WebP/,
-    );
+    const result = processLogo(Buffer.from("<svg><script>alert(1)</script></svg>"));
+
+    await expect(result).rejects.toBeInstanceOf(RasterImageInputError);
+    await expect(result).rejects.toThrow(/JPEG, PNG, or WebP/);
   });
 
   it("rejects dimensions above 8192 before normalization", async () => {

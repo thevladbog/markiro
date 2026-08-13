@@ -71,11 +71,15 @@ describe("ObjectStorageService", () => {
 
   it("rejects an oversized private object before consuming its body", async () => {
     let consumed = false;
+    const destroy = vi.fn();
     const send = vi.fn().mockResolvedValue({
-      Body: (async function* () {
-        consumed = true;
-        yield Buffer.from("unexpected");
-      })(),
+      Body: {
+        destroy,
+        async *[Symbol.asyncIterator]() {
+          consumed = true;
+          yield Buffer.from("unexpected");
+        },
+      },
       ContentLength: 5 * 1024 * 1024 + 1,
       ContentType: "image/webp",
     });
@@ -83,6 +87,7 @@ describe("ObjectStorageService", () => {
 
     await expect(storage.get("tenants/t/branding/a.webp")).rejects.toThrow(/5 MiB/);
     expect(consumed).toBe(false);
+    expect(destroy).toHaveBeenCalledOnce();
   });
 
   it("stops a lying object stream at the same response-size bound", async () => {
@@ -97,6 +102,19 @@ describe("ObjectStorageService", () => {
     const storage = new ObjectStorageService(env, { send } as never);
 
     await expect(storage.get("tenants/t/branding/a.webp")).rejects.toThrow(/5 MiB/);
+  });
+
+  it("cancels an oversized web response body when destroy is unavailable", async () => {
+    const cancel = vi.fn().mockResolvedValue(undefined);
+    const send = vi.fn().mockResolvedValue({
+      Body: { cancel },
+      ContentLength: 5 * 1024 * 1024 + 1,
+      ContentType: "image/webp",
+    });
+    const storage = new ObjectStorageService(env, { send } as never);
+
+    await expect(storage.get("tenants/t/branding/a.webp")).rejects.toThrow(/5 MiB/);
+    expect(cancel).toHaveBeenCalledOnce();
   });
 
   it("rejects unsafe object keys before calling S3", async () => {

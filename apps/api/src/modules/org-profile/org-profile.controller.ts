@@ -71,7 +71,14 @@ export class OrgProfileController {
   @UseInterceptors(
     FileInterceptor("logo", {
       storage: memoryStorage(),
-      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+      limits: {
+        fileSize: 5 * 1024 * 1024,
+        files: 1,
+        fields: 0,
+        // Busboy emits partsLimit at this count. Two is therefore the exclusive
+        // threshold that accepts one file and rejects every subsequent part.
+        parts: 2,
+      },
     }),
   )
   uploadLogo(

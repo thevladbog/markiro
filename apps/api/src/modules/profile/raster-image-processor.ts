@@ -30,13 +30,21 @@ export interface ProcessedRasterImage {
   height: number;
 }
 
+export class RasterImageInputError extends Error {
+  override readonly name = "RasterImageInputError";
+}
+
+export class RasterImageProcessingError extends Error {
+  override readonly name = "RasterImageProcessingError";
+}
+
 export async function processRasterImage(
   input: Buffer,
   options: RasterImageOptions,
 ): Promise<ProcessedRasterImage> {
   const sourceLimitMiB = options.maxSourceBytes / (1024 * 1024);
   if (input.byteLength > options.maxSourceBytes) {
-    throw new Error(`${options.label} source exceeds ${sourceLimitMiB} MiB`);
+    throw new RasterImageInputError(`${options.label} source exceeds ${sourceLimitMiB} MiB`);
   }
 
   let metadata: Awaited<ReturnType<ReturnType<typeof sharp>["metadata"]>>;
@@ -45,25 +53,44 @@ export async function processRasterImage(
     // the worker is allowed to allocate decoded pixels.
     metadata = await sharp(input, { limitInputPixels: false, animated: true }).metadata();
   } catch {
-    throw new Error(`${options.label} must contain valid JPEG, PNG, or WebP content`);
+    throw new RasterImageInputError(
+      `${options.label} must contain valid JPEG, PNG, or WebP content`,
+    );
   }
   if (!metadata.format || !["jpeg", "png", "webp"].includes(metadata.format)) {
-    throw new Error(`${options.label} must contain valid JPEG, PNG, or WebP content`);
+    throw new RasterImageInputError(
+      `${options.label} must contain valid JPEG, PNG, or WebP content`,
+    );
   }
   if ((metadata.pages ?? 1) > options.maxFrames) {
-    throw new Error(`Animated ${options.pluralLabel} are not supported`);
+    throw new RasterImageInputError(`Animated ${options.pluralLabel} are not supported`);
   }
   const width = metadata.width ?? 0;
   const height = metadata.height ?? 0;
-  if (width < 1 || height < 1) throw new Error(`${options.label} dimensions are invalid`);
+  if (width < 1 || height < 1) {
+    throw new RasterImageInputError(`${options.label} dimensions are invalid`);
+  }
   if (width > options.maxDimension || height > options.maxDimension) {
-    throw new Error(`${options.label} dimensions must not exceed ${options.maxDimension} pixels`);
+    throw new RasterImageInputError(
+      `${options.label} dimensions must not exceed ${options.maxDimension} pixels`,
+    );
   }
   if (width * height > options.maxPixels) {
-    throw new Error(`${options.label} exceeds ${formatPixelLimit(options.maxPixels)}`);
+    throw new RasterImageInputError(
+      `${options.label} exceeds ${formatPixelLimit(options.maxPixels)}`,
+    );
   }
 
-  return workerLimiter.run(() => normalizeInWorker(input, options));
+  try {
+    return await workerLimiter.run(() => normalizeInWorker(input, options));
+  } catch (error) {
+    if (error instanceof RasterImageInputError || error instanceof RasterImageProcessingError) {
+      throw error;
+    }
+    throw new RasterImageProcessingError(`${options.label} processing is unavailable`, {
+      cause: error,
+    });
+  }
 }
 
 async function normalizeInWorker(
@@ -80,7 +107,7 @@ async function normalizeInWorker(
     });
     const timeout = setTimeout(() => {
       void worker.terminate();
-      reject(new Error(`${options.label} processing exceeded 5 seconds`));
+      reject(new RasterImageProcessingError(`${options.label} processing exceeded 5 seconds`));
     }, WORKER_TIMEOUT_MS);
     worker.once(
       "message",
@@ -106,19 +133,19 @@ async function normalizeInWorker(
             height: message.height,
           });
         } else {
-          reject(new Error(message.error ?? `${options.label} processing failed`));
+          reject(new RasterImageInputError(message.error ?? `${options.label} processing failed`));
         }
       },
     );
     worker.once("error", (error) => {
       clearTimeout(timeout);
       const message = error instanceof Error ? error.message : "unknown worker error";
-      reject(new Error(`${options.label} worker failed: ${message}`));
+      reject(new RasterImageProcessingError(`${options.label} worker failed: ${message}`));
     });
     worker.once("exit", (code) => {
       if (code !== 0) {
         clearTimeout(timeout);
-        reject(new Error(`${options.label} worker exited before completing`));
+        reject(new RasterImageProcessingError(`${options.label} worker exited before completing`));
       }
     });
   });
