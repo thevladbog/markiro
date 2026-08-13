@@ -49,7 +49,33 @@ describe("product image sync", () => {
   });
 
   it("treats undefined as legacy retention and null as deletion", async () => {
-    await syncProductImages({ downloadProductImage: async () => new Blob(["x"], { type: "image/webp" }) }, [product(null)]);
+    const bytes = new Uint8Array([7, 8, 9]);
+    const hash = await crypto.subtle.digest("SHA-256", bytes);
+    const oldImage = {
+      ...descriptor(bytes),
+      checksum: [...new Uint8Array(hash)]
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join(""),
+    };
+    await syncProductImages(
+      { downloadProductImage: async () => new Blob([bytes], { type: "image/webp" }) },
+      [product(oldImage)],
+    );
+    const before = await readPublishedProductImagePointer("p1");
+
+    // A pre-image server response omits the field entirely. It must not erase
+    // the pointer already published by a newer response, or an old kiosk
+    // would lose its offline picture when it refreshes the catalog.
+    await syncProductImages(
+      { downloadProductImage: async () => new Blob(["unused"], { type: "image/webp" }) },
+      [product()],
+    );
+    expect(await readPublishedProductImagePointer("p1")).toEqual(before);
+
+    await syncProductImages(
+      { downloadProductImage: async () => new Blob(["x"], { type: "image/webp" }) },
+      [product(null)],
+    );
     expect(await readPublishedProductImagePointer("p1")).toBeNull();
     await clearProductImages();
   });
