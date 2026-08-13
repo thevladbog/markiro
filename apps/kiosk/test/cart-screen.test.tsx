@@ -281,6 +281,62 @@ describe("Cart", () => {
     expect(screen.getByText("2 / 2")).toBeDefined();
   });
 
+  it("moves to and announces the page containing a newly accepted KM, but a refusal stays put", () => {
+    setViewport(480, 800);
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 30 }),
+      initialState: {
+        lines: Array.from({ length: 10 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+    });
+    click("Далее");
+    expect(screen.getByText("2 / 2")).toBeDefined();
+
+    scan(km(GTIN_MILK, "NEWPAGE11"));
+    expect(screen.getByText("3 / 3")).toBeDefined();
+    const added = screen.getByText(/NEWPAGE11/).closest("button");
+    expect(added).not.toBeNull();
+    expect(added?.getAttribute("data-new")).toBe("true");
+    expect(screen.getByRole("status", { name: /Добавлена позиция/ }).textContent).toContain(MILK);
+
+    click("Назад");
+    expect(screen.getByText("2 / 3")).toBeDefined();
+    scan(km(GTIN_MILK, "SERIAL6"));
+    expect(screen.getByText("2 / 3")).toBeDefined();
+  });
+
+  it("keeps scan order and opens the last page for a newly resolved box", async () => {
+    setViewport(800, 480);
+    let resolve!: (value: { kind: "resolved"; box: BoxLine }) => void;
+    const resolution = new Promise<{ kind: "resolved"; box: BoxLine }>((done) => {
+      resolve = done;
+    });
+    const { scan } = renderCart({
+      bootstrap: bootstrapWith({ dayLimitPerEmployee: 30 }),
+      initialState: {
+        lines: Array.from({ length: 6 }, (_, index) => looseLine(index + 1)),
+        reason: "buy",
+        writeoffReasonId: null,
+        notice: null,
+      },
+      resolveBox: vi.fn(() => resolution),
+    });
+    click("Далее");
+    expect(screen.getByText("2 / 2")).toBeDefined();
+
+    scan(payload("sscc", SSCC));
+    resolve({ kind: "resolved", box: twelveBottleBox() });
+
+    await waitFor(() => expect(screen.getByText("3 / 3")).toBeDefined());
+    const added = screen.getByRole("button", { name: /Открыть позицию.*12/ });
+    expect(added.getAttribute("data-new")).toBe("true");
+    expect(rows()).toHaveLength(1);
+    expect(rows()[0]).toContain(MILK);
+  });
+
   it("uses explicit DataMatrix and box icons without exposing protocol abbreviations", () => {
     renderCart({
       bootstrap: bootstrapWith({ dayLimitPerEmployee: 20 }),

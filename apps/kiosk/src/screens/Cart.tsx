@@ -317,7 +317,19 @@ export function Cart({
   const bottles = bottleCount(state);
   const [page, setPage] = useState(0);
   const [selected, setSelected] = useState<KioskCartLine | null>(null);
+  const [newLineKey, setNewLineKey] = useState<string | null>(null);
   const pageSize = pageSizeFor(window.innerWidth, window.innerHeight);
+  const previousLines = useRef(state.lines);
+  useEffect(() => {
+    const before = previousLines.current;
+    previousLines.current = state.lines;
+    if (state.lines.length !== before.length + 1) return;
+    const appended = state.lines[state.lines.length - 1];
+    if (!appended || before.includes(appended)) return;
+    const key = appended.kind === "km" ? appended.kmKey : appended.sscc;
+    setPage(Math.floor((state.lines.length - 1) / pageSize));
+    setNewLineKey(key);
+  }, [pageSize, state.lines]);
   const summary = t("cart.summary", {
     positions: t("cart.positions", { count }),
     bottles: t("cart.bottles", { count: bottles }),
@@ -423,6 +435,15 @@ export function Cart({
                   <button
                     className="kiosk-control kiosk-line"
                     type="button"
+                    data-new={
+                      newLineKey === (item.kind === "km" ? item.kmKey : item.sscc)
+                        ? "true"
+                        : undefined
+                    }
+                    onAnimationEnd={() => {
+                      const key = item.kind === "km" ? item.kmKey : item.sscc;
+                      setNewLineKey((current) => (current === key ? null : current));
+                    }}
                     aria-label={t("cart.openLine", {
                       name: item.name,
                       quantity: t("cart.bottles", { count: item.bottleCount }),
@@ -484,6 +505,15 @@ export function Cart({
           {t("cart.submit")}
         </button>
       </footer>
+
+      {newLineKey ? (
+        <span className="kiosk-visually-hidden" role="status" aria-label={t("cart.addedLine")}>
+          {t("cart.addedLine")}:{" "}
+          {state.lines.find((line) =>
+            line.kind === "km" ? line.kmKey === newLineKey : line.sscc === newLineKey,
+          )?.name ?? ""}
+        </span>
+      ) : null}
 
       <CartLineDialog
         line={selected}

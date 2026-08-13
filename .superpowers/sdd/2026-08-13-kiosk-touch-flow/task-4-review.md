@@ -39,3 +39,12 @@ Required correction: make the status surface a fixed single-row budget at suppor
 - `git diff --check 840d85fb^..840d85fb`: passed.
 - Implementer evidence in `task-4-report.md`: complete kiosk suite 556/556, ESLint and PWA build passed.
 - No browser, tablet, physical scanner or installed-PWA acceptance was performed. Geometry at 480×800 and 800×480 therefore remains unverified, in addition to the source-level status-strip finding above.
+
+## Implementer disposition
+
+Both Important findings are addressed in the follow-up fix:
+
+- A one-line append is detected against the previous canonical line array. Successful KM and async box additions navigate to the appended line's page, render a brief neutral outline and announce the item through a live status. Refusals, duplicates and removal do not move the page; ordinary pagination clamping remains authoritative.
+- The persistent strip now reserves one 61 px row, never wraps or scrolls, and keeps all status chips in the accessibility tree. The strip and chips use bounded overflow/ellipsis, while a combined full label is preserved as `aria-label` and `title`.
+
+Fix RED: 3 expected failures / 50 passes. Focused GREEN: 54/54. Full kiosk: 25 files / 559 tests. Typecheck, full ESLint, PWA build, Prettier and diff-check passed. Browser/physical acceptance remains separate.

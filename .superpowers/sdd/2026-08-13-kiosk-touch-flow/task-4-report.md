@@ -30,3 +30,9 @@ The scan/cart surface is now a dark, fixed-viewport, touch-first screen over the
 ## External checks not performed
 
 No browser screenshot/viewport measurement, tablet rotation, physical HID/Web Serial scan, installed PWA restart or hardware acceptance was performed. Those remain explicit later visual/hardware gates.
+
+## Review fix
+
+- Accepted KM and async box appends now open the page containing the new final line, briefly outline it with a reduced-motion-safe neutral treatment, and announce it through a live status. Duplicate/refused scans and removal do not move a still-valid page.
+- `StatusStrip` now has a fixed 61 px single-row shell budget. It retains every semantic chip and one full accessible combined label while visual chip copy shrinks/ellipsizes instead of wrapping or scrolling.
+- Fix RED: 3 failures / 50 passes. Focused GREEN: 54/54; complete kiosk 559/559; typecheck, full ESLint, PWA build, Prettier and diff-check passed.

@@ -3,6 +3,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { KioskLayout } from "../src/ui/KioskLayout.js";
+import { StatusStrip } from "../src/ui/StatusStrip.js";
 
 afterEach(cleanup);
 
@@ -26,6 +27,36 @@ describe("KioskLayout", () => {
     );
     expect(css).toContain("--kiosk-cart-page-size: 5");
     expect(css).toContain("--kiosk-cart-page-size: 3");
+  });
+
+  it("keeps the worst persistent status in one fixed bounded row", () => {
+    const { container } = render(
+      <KioskLayout
+        status={
+          <StatusStrip
+            online={false}
+            age="blocked"
+            ageMs={9 * 24 * 60 * 60 * 1_000}
+            quarantined={99}
+          />
+        }
+      >
+        <main>Screen</main>
+      </KioskLayout>,
+    );
+
+    const strip = container.querySelector(".kiosk-status-strip");
+    expect(strip?.children).toHaveLength(3);
+    expect(strip?.getAttribute("aria-label")).toContain("Нет связи");
+    expect(strip?.getAttribute("aria-label")).toContain("9 сут");
+    expect(strip?.getAttribute("aria-label")).toContain("99");
+
+    const css = readFileSync(`${process.cwd()}/src/kiosk.css`, "utf8");
+    expect(css).toMatch(/\.kiosk-status-strip\s*{[\s\S]*?height:\s*61px/);
+    expect(css).toMatch(/\.kiosk-status-strip\s*{[\s\S]*?flex-wrap:\s*nowrap/);
+    expect(css).toMatch(/\.kiosk-status-strip\s*{[\s\S]*?overflow:\s*hidden/);
+    expect(css).toMatch(/\.kiosk-status-strip\s+\.mk-chip\s*{[\s\S]*?min-width:\s*0/);
+    expect(css).toMatch(/\.kiosk-status-strip\s+\.mk-chip\s*{[\s\S]*?text-overflow:\s*ellipsis/);
   });
   it("keeps the status in shell flow and gives the screen its own bounded slot", () => {
     const { container } = render(
