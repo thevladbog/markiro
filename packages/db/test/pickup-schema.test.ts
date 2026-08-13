@@ -28,17 +28,27 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     slug: `t-${randomUUID()}`,
     createdAt: new Date(),
   };
+  const foreignOrg = {
+    id: `org-${randomUUID()}`,
+    name: "Foreign",
+    slug: `foreign-${randomUUID()}`,
+    createdAt: new Date(),
+  };
   const empId = randomUUID();
+  const foreignEmpId = randomUUID();
   const kioskId = randomUUID();
   const productId = randomUUID();
   const order1 = randomUUID();
   const order2 = randomUUID();
 
   beforeAll(async () => {
-    await db.insert(organization).values(org);
+    await db.insert(organization).values([org, foreignOrg]);
     await db
       .insert(schema.employees)
-      .values({ id: empId, tenantId: org.id, fullName: "Смирнов А." });
+      .values([
+        { id: empId, tenantId: org.id, fullName: "Смирнов А." },
+        { id: foreignEmpId, tenantId: foreignOrg.id, fullName: "Чужой С." },
+      ]);
     await db.insert(schema.kiosks).values({ id: kioskId, tenantId: org.id, name: "Киоск-1" });
     await db.insert(schema.products).values({
       id: productId,
@@ -71,15 +81,15 @@ describe.skipIf(!url)("pickup schema constraints", () => {
   afterAll(async () => {
     await db
       .delete(schema.employeePickupPolicies)
-      .where(eq(schema.employeePickupPolicies.employeeId, empId));
+      .where(inArray(schema.employeePickupPolicies.employeeId, [empId, foreignEmpId]));
     await db
       .delete(schema.pickupOrderItems)
       .where(inArray(schema.pickupOrderItems.orderId, [order1, order2]));
     await db.delete(schema.pickupOrders).where(inArray(schema.pickupOrders.id, [order1, order2]));
     await db.delete(schema.kiosks).where(inArray(schema.kiosks.id, [kioskId]));
     await db.delete(schema.products).where(inArray(schema.products.id, [productId]));
-    await db.delete(schema.employees).where(inArray(schema.employees.id, [empId]));
-    await db.delete(organization).where(inArray(organization.id, [org.id]));
+    await db.delete(schema.employees).where(inArray(schema.employees.id, [empId, foreignEmpId]));
+    await db.delete(organization).where(inArray(organization.id, [org.id, foreignOrg.id]));
     await pool.end();
   });
 
@@ -166,5 +176,17 @@ describe.skipIf(!url)("pickup schema constraints", () => {
         canWriteoff: false,
       }),
     ).rejects.toMatchObject({ cause: { code: "23514" } });
+  });
+
+  it("rejects a tenant policy for an employee from another tenant", async () => {
+    await expect(
+      db.insert(schema.employeePickupPolicies).values({
+        tenantId: org.id,
+        employeeId: foreignEmpId,
+        limitMode: "limited",
+        dayLimit: 5,
+        canWriteoff: false,
+      }),
+    ).rejects.toMatchObject({ cause: { code: "23503" } });
   });
 });
