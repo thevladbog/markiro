@@ -2,7 +2,7 @@
 
 ## Verdict
 
-**APPROVED after fix.** Commit `628d5249` correctly separates cart, operation, reason and confirmation routing and preserves the canonical mixed cart. The follow-up fix closes the Important submission race and the Minor custom-radio accessibility issue below.
+**APPROVED after final re-review.** Commit `628d5249` correctly separates cart, operation, reason and confirmation routing and preserves the canonical mixed cart. Follow-up commit `3650571c` closes the Important submission race and the Minor custom-radio accessibility issue below; no open Task 5 findings remain.
 
 ## Important finding
 
@@ -53,3 +53,13 @@ Resolution: the six-item bounded section is now a labelled `radiogroup`; cards r
 - Deferred App integration: passed with one durable queue entry and one order POST while Back, Cancel and repeated confirmation were attempted before settlement.
 - Complete kiosk suite: 103/103 files, 572/572 tests passed; direct kiosk TypeScript check passed.
 - Browser/device acceptance remains unperformed and is not inferred.
+
+## Final re-review of `3650571c`
+
+- The reducer owns the authoritative `submitting` flag. Only a non-pending confirmation accepts `submissionStarted`; pending confirmation rejects Back, cancel, logout, idle reset, reason invalidation and repeat-start actions. `submitted` and `submitFailed` settle only a pending confirmation, while `unpaired` is intentionally handled first and returns pairing.
+- The shell derives `pendingFlow` synchronously from the exact rendered confirmation, dispatches the same state transition before asynchronous work, and passes that pinned session to `submitCart`/`createConfirmedOrderBody`. Its process-local ref and the component-local ref remain additional same-tick guards.
+- Confirmation disables its Back, Cancel and primary controls from either authoritative or local pending state. The cancel modal's destructive confirmation is also disabled when that prop is active.
+- The deferred App scenario observes one durable queue entry and one order request, rejects Back/Cancel/repeat-confirm attempts, stays on Confirmation until settlement, and then reaches the expected success outcome. Reducer coverage pins exact-cart failure return and unpair override.
+- Writeoff reasons form one labelled `radiogroup`; radio cards use roving tab stops, all four arrow keys select active reasons, controlled paging follows selection, and cross-page arrow movement restores focus.
+- Fresh re-review gates: focused reducer/Confirmation/WriteoffReason **29/29 passed**; deferred App integration **1/1 passed**; kiosk TypeScript and commit diff-check passed. Existing React `act(...)` and intentionally rejected registry-request stderr remained warnings, not test failures.
+- No browser, tablet, physical scanner or installed-PWA acceptance was performed or inferred.
