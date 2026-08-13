@@ -83,6 +83,31 @@ const TEAM_MUTATION_PATHS = new Set([
   "/api/auth/organization/update-member-role",
 ]);
 const RAW_TENANT_PROVISIONING_PATH = "/api/auth/organization/create";
+const AUTH_PATH_CANONICALIZATION_ORIGIN = "http://auth-path.invalid";
+
+/**
+ * Canonicalizes the raw request target the same way Better Call does before
+ * routing: its Node adapter prefixes an HTTP origin, constructs a WHATWG
+ * Request, and its router reads `new URL(request.url).pathname`. This removes
+ * literal and percent-encoded dot segments and treats backslashes as path
+ * separators without recursively decoding `%25` escapes or encoded slashes.
+ *
+ * A malformed percent escape has no unambiguous path spelling. Return null so
+ * the organization guard can fail closed instead of delegating a path that a
+ * later adapter or version might interpret differently. Query escapes do not
+ * participate in pathname routing and are deliberately left alone.
+ */
+function canonicalizeAuthRequestPath(rawUrl: string): string | null {
+  const pathEnd = rawUrl.search(/[?#]/);
+  const rawPath = pathEnd === -1 ? rawUrl : rawUrl.slice(0, pathEnd);
+  if (/%(?![0-9a-fA-F]{2})/.test(rawPath)) return null;
+
+  try {
+    return new URL(`${AUTH_PATH_CANONICALIZATION_ORIGIN}${rawUrl}`).pathname.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Better Auth needs the raw (unparsed) request body — mount BEFORE any json
@@ -109,7 +134,11 @@ export function mountAuth(
     response.sendStatus(404);
   });
   server.all("/api/auth/organization/*splat", (request, response, next) => {
-    const normalizedPath = request.path.replace(/\/+$/, "");
+    const normalizedPath = canonicalizeAuthRequestPath(request.originalUrl);
+    if (normalizedPath === null) {
+      response.sendStatus(404);
+      return;
+    }
     // Production tenants must go through TenantProvisioningService, which
     // atomically establishes the owner, subscription/default entitlements and
     // pickup policy. Better Auth's generic organization endpoint creates only

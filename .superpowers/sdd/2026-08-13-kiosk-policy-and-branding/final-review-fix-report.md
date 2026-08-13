@@ -199,3 +199,94 @@ provisioning smoke. No test relevant to the five findings skipped its database.
 
 These are external acceptance limits, not failing automated gates for this fix
 wave.
+
+## Second fix wave — canonical raw organization-create denial
+
+### Behavior changed
+
+- The production Better Auth organization guard now canonicalizes the original
+  request target through one WHATWG URL parse, matching the normalization used
+  by Better Call's Node adapter and router before route selection.
+- Literal and percent-encoded dot segments (including case and mixed variants),
+  backslash separators, the exact/trailing-slash route, and query/fragment
+  spellings that resolve to `/api/auth/organization/create` all return 404 when
+  the explicit test bootstrap is disabled.
+- Malformed percent escapes in the organization path fail closed. Valid
+  double-encoded dots and encoded slash/backslash spellings are not decoded a
+  second time; they remain unmatched downstream routes and return 404.
+- The explicit test bootstrap still creates organizations for e2e fixtures.
+  Production `TenantProvisioningService` was not changed. Better Auth's
+  organization list and slug-check routes remain available to authenticated
+  callers outside test bootstrap mode.
+- The adversarial tests use Node's native HTTP client against a bound Express
+  server. Supertest was not used for the raw path matrix because it canonicalizes
+  dot segments on the client and therefore cannot reproduce the production
+  request target.
+
+### RED/GREEN evidence
+
+Commands below ran from `apps/api`. The existing parent development env was
+loaded without printing it, with the documented local platform URL/origin added
+for `loadEnv()`:
+
+```bash
+set -a
+source ../../../../.env
+set +a
+PLATFORM_AUTH_URL=http://localhost:3000 \
+  SAAS_ADMIN_ORIGIN=http://localhost:5473 \
+  CI=true ./node_modules/.bin/vitest run test/auth.e2e.test.ts \
+  -t "canonical aliases"
+```
+
+- RED: the raw `/api/auth/organization/ignored/../create` request returned 200,
+  while the test required 404. This proved that the literal `request.path`
+  comparison ran before Better Call normalized the request to its create route.
+- GREEN: the same raw-path matrix passed 1/1 after the canonical guard was
+  introduced. The complete auth file then passed 9/9, including exact,
+  trailing-slash, plain/encoded/mixed-case dot segments, double encoding,
+  malformed escapes, query/fragment and separator cases, retained test helper
+  creation, and two allowed non-create organization routes.
+
+### Verification
+
+```bash
+# apps/api
+set -a
+source ../../../../.env
+set +a
+PLATFORM_AUTH_URL=http://localhost:3000 \
+  SAAS_ADMIN_ORIGIN=http://localhost:5473 \
+  CI=true ./node_modules/.bin/vitest run test/auth.e2e.test.ts
+
+PLATFORM_AUTH_URL=http://localhost:3000 \
+  SAAS_ADMIN_ORIGIN=http://localhost:5473 \
+  CI=true ./node_modules/.bin/vitest run \
+  test/authorization-metadata.test.ts \
+  test/subscription-route-inventory.test.ts
+
+./node_modules/.bin/tsc -p tsconfig.json --noEmit
+../../node_modules/.bin/eslint .
+./node_modules/.bin/nest build
+
+# Full API suite, with the same loaded development env and local URL/origin
+CI=true ./node_modules/.bin/vitest run
+
+# Repository root
+./node_modules/.bin/prettier --check .
+git diff --check
+```
+
+- Auth e2e: 1 file / 9 tests passed.
+- Authorization metadata and subscription route inventory: 2 files / 26 tests
+  passed.
+- Full API suite: 122 files passed, 1 file skipped; 1271 tests passed, 2 tests
+  skipped.
+- API typecheck, lint and build passed.
+- Repository Prettier and `git diff --check` passed.
+
+The two full-suite skips remain the explicitly gated `LOCAL_INFRA_SMOKE`
+Mailpit/MinIO lifecycle and real tenant-owner subprocess checks. No auth,
+authorization, database-backed, or path-canonicalization test skipped. No
+browser, hardware, mail/object-storage lifecycle, DNS, TLS, registry, cloud or
+production deployment check was run for this narrowly scoped server-side fix.
