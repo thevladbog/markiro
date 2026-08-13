@@ -89,6 +89,35 @@ body,
   text-align: center;
 }
 
+.kiosk-unsupported {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: var(--sp-4);
+  padding: var(--sp-6);
+  text-align: center;
+}
+
+.kiosk-unsupported h1,
+.kiosk-unsupported p {
+  max-width: 38rem;
+  margin: 0;
+}
+
+.kiosk-unsupported h1 {
+  font: var(--text-display);
+}
+
+.kiosk-unsupported p {
+  color: var(--fg-2);
+  font: var(--floor-body);
+}
+
+.kiosk-unsupported__measure {
+  color: var(--fg-3);
+  font: 700 40px/1 var(--font-mono);
+}
+
 .kiosk-control {
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -130,6 +159,11 @@ body,
 
 .kiosk-done__verdict {
   font: 700 18px/24px var(--font-ui);
+}
+
+.kiosk-done > .kiosk-control {
+  flex: 0 0 auto;
+  min-height: 48px;
 }
 
 .kiosk-done [data-tone="success"] .kiosk-done__verdict {
@@ -704,8 +738,7 @@ body,
 .kiosk-pairing__details {
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -716,6 +749,15 @@ body,
 .kiosk-pairing__details > header {
   display: grid;
   gap: 10px;
+}
+
+.kiosk-pairing__title {
+  font: var(--text-display);
+}
+
+.kiosk-pairing__prompt {
+  color: var(--fg-2);
+  font: var(--floor-body);
 }
 
 .markiro-logo {
@@ -803,6 +845,36 @@ body,
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+}
+
+.kiosk-pairing__scan,
+.kiosk-pairing__scan-waiting {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+}
+
+.kiosk-pairing__scan {
+  gap: 8px;
+}
+
+.kiosk-pairing__scan-waiting {
+  gap: 6px;
+}
+
+.kiosk-pairing__scan-button {
+  min-width: 320px;
+  min-height: 88px;
+  font-size: 1.5rem;
+}
+
+.kiosk-pairing__scan-waiting-title {
+  font: var(--floor-lg);
+}
+
+.kiosk-pairing__scan-hint {
+  color: var(--fg-3);
+  font: var(--text-body-sm);
 }
 
 .kiosk-login {
@@ -963,6 +1035,14 @@ body,
   .badge-scan-animation,
   .kiosk-line[data-new="true"] {
     animation: none !important;
+  }
+
+  .badge-scan-animation__beam {
+    transform: translateY(31px);
+  }
+
+  .kiosk-control {
+    transition: none !important;
   }
 }
 
@@ -1134,8 +1214,9 @@ body,
   min-width: 15rem;
 }
 
-@media (orientation: portrait), (max-width: 899px) {
+@media (orientation: portrait) {
   .kiosk-pairing {
+    --control-keypad: 64px;
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr) auto;
     gap: 0;
@@ -1144,13 +1225,50 @@ body,
 
   .kiosk-pairing__details {
     justify-content: flex-start;
-    padding: 24px 28px 16px;
+    gap: 8px;
+    padding: 12px 20px 10px;
   }
 
   .kiosk-pairing__keypad {
     border-left: 0;
     border-top: 1px solid var(--line);
-    padding: 16px 28px 24px;
+    gap: 12px;
+    padding: 12px 20px;
+  }
+
+  .kiosk-pairing__keypad .kiosk-pairing__actions .kiosk-control {
+    min-height: 56px !important;
+  }
+
+  .kiosk-pairing__details .markiro-logo {
+    height: 40px;
+  }
+
+  .kiosk-pairing__copy {
+    gap: 4px !important;
+  }
+
+  .kiosk-pairing__title {
+    font: 700 24px/28px var(--font-ui);
+  }
+
+  .kiosk-pairing__prompt {
+    font: 400 15px/20px var(--font-ui);
+  }
+
+  .kiosk-pairing__code-cell {
+    height: 40px;
+  }
+
+  .kiosk-pairing__scan-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 56px;
+    font-size: 18px;
+  }
+
+  .kiosk-pairing__service {
+    gap: 8px;
   }
 
   .kiosk-login__center {
@@ -1199,6 +1317,9 @@ body,
 @media (orientation: landscape) and (max-height: 540px) {
   .kiosk-pairing {
     --control-keypad: 72px;
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+    gap: 16px;
+    padding: 16px 20px;
   }
 
   .kiosk-pairing__details {
@@ -1206,7 +1327,87 @@ body,
   }
 
   .kiosk-pairing__details .markiro-logo {
+    height: 40px;
+  }
+
+  .kiosk-pairing__title {
+    font: 700 26px/30px var(--font-ui);
+  }
+
+  .kiosk-pairing__prompt {
+    font: 400 15px/20px var(--font-ui);
+  }
+
+  .kiosk-pairing__code-cell {
     height: 48px;
+  }
+
+  .kiosk-pairing__scan-button {
+    min-height: 64px;
+    font-size: 18px;
+  }
+
+  .kiosk-pairing__actions .kiosk-control {
+    min-height: 56px !important;
+  }
+
+  .kiosk-done {
+    gap: 8px;
+    padding: 12px 24px;
+  }
+
+  .kiosk-done > svg {
+    width: 40px;
+    height: 40px;
+    flex: 0 0 40px;
+  }
+
+  .kiosk-done > [role="status"] {
+    flex: 0 0 auto;
+    gap: 4px !important;
+  }
+
+  .kiosk-done > [role="status"] h1 {
+    font: 700 28px/32px var(--font-ui) !important;
+  }
+
+  .kiosk-done > [role="status"] p {
+    font: 400 16px/21px var(--font-ui) !important;
+  }
+
+  .kiosk-done > span {
+    height: 40px !important;
+    flex: 0 0 40px;
+    padding-inline: 18px !important;
+    font: 600 16px/1 var(--font-mono) !important;
+  }
+
+  .kiosk-done__conflicts {
+    max-height: 116px;
+    flex: 0 1 116px;
+    gap: 4px !important;
+    padding: 8px 16px !important;
+  }
+
+  .kiosk-done__conflicts > span:first-child {
+    font: 700 17px/20px var(--font-ui) !important;
+  }
+
+  .kiosk-done__conflicts ul,
+  .kiosk-done__conflicts > span:last-child {
+    font: 400 14px/18px var(--font-ui) !important;
+  }
+
+  .kiosk-done > .kiosk-control {
+    height: 48px !important;
+    min-height: 48px;
+    padding-inline: 32px !important;
+    font: 600 18px/1 var(--font-ui) !important;
+  }
+
+  .kiosk-done > p:last-child {
+    flex: 0 0 auto;
+    font: 400 12px/16px var(--font-ui) !important;
   }
 }
 

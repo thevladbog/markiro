@@ -1,5 +1,10 @@
 {
   "app": { "title": "Markiro — Kiosk", "booting": "Starting the kiosk…" },
+  "layout": {
+    "tooSmallTitle": "This device screen is too small",
+    "tooSmallBody": "The touch kiosk needs at least a 480 × 800 or 800 × 480 screen.",
+    "viewport": "{{width}} × {{height}}"
+  },
   "pairing": {
     "title": "Connect this kiosk",
     "prompt": "Enter the eight-digit pairing code from the admin panel",

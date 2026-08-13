@@ -1,13 +1,47 @@
 import { readFileSync } from "node:fs";
-import { cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { KioskLayout } from "../src/ui/KioskLayout.js";
+import { KioskLayout, supportsKioskViewport } from "../src/ui/KioskLayout.js";
 import { StatusStrip } from "../src/ui/StatusStrip.js";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+  Object.defineProperty(window, "innerHeight", { configurable: true, value: 768 });
+});
 
 describe("KioskLayout", () => {
+  it("accepts both exact kiosk minima and rejects a viewport below both", () => {
+    expect(supportsKioskViewport(480, 800)).toBe(true);
+    expect(supportsKioskViewport(800, 480)).toBe(true);
+    expect(supportsKioskViewport(479, 799)).toBe(false);
+    expect(supportsKioskViewport(799, 479)).toBe(false);
+  });
+
+  it("replaces the active flow with a bounded diagnostic below the supported minima", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 479 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 799 });
+
+    render(
+      <KioskLayout status={<div>status</div>}>
+        <main>Active flow</main>
+      </KioskLayout>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Экран устройства слишком мал" })).toBeDefined();
+    expect(screen.getByText("479 × 799")).toBeDefined();
+    expect(screen.queryByText("Active flow")).toBeNull();
+    expect(screen.queryByText("status")).toBeNull();
+
+    act(() => {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 480 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 800 });
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(screen.getByText("Active flow")).toBeDefined();
+  });
+
   it("bounds the document and cart screen to 100dvh without scrollable cart regions", () => {
     const css = readFileSync(`${process.cwd()}/src/kiosk.css`, "utf8");
 
@@ -27,6 +61,13 @@ describe("KioskLayout", () => {
     );
     expect(css).toContain("--kiosk-cart-page-size: 5");
     expect(css).toContain("--kiosk-cart-page-size: 3");
+    expect(css).toMatch(
+      /@media \(orientation: portrait\)[\s\S]*?\.kiosk-pairing\s*{[\s\S]*?--control-keypad:\s*64px/,
+    );
+    expect(css).toMatch(
+      /@media \(orientation: landscape\) and \(max-height: 540px\)[\s\S]*?\.kiosk-pairing\s*{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\) minmax\(280px, 0\.8fr\)/,
+    );
+    expect(css).toMatch(/\.kiosk-pairing__details\s*{[\s\S]*?overflow:\s*hidden/);
   });
 
   it("keeps the worst persistent status in one fixed bounded row", () => {

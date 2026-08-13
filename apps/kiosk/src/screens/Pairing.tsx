@@ -351,11 +351,11 @@ export function Pairing({
     <main className="kiosk-screen kiosk-pairing" aria-labelledby="kiosk-pairing-title">
       <section className="kiosk-pairing__details" aria-labelledby="kiosk-pairing-title">
         <MarkiroLogo className="kiosk-pairing__brand" />
-        <header>
-          <h1 id="kiosk-pairing-title" style={{ fontSize: "2.25rem" }}>
+        <header className="kiosk-pairing__copy">
+          <h1 id="kiosk-pairing-title" className="kiosk-pairing__title">
             {t("pairing.title")}
           </h1>
-          <p style={{ fontSize: "1.25rem" }}>{t("pairing.prompt")}</p>
+          <p className="kiosk-pairing__prompt">{t("pairing.prompt")}</p>
         </header>
         {/* `role="status"`: what has been entered so far is announced as it
             changes, which is what a worker filling it by scanner needs. It was an
@@ -426,11 +426,10 @@ export function Pairing({
             and a serial source exists only where a port was granted), so a
             «scanning is impossible» state cannot be reached. */}
         {!serverOpen ? (
-          <div style={{ display: "grid", justifyItems: "center", gap: 12 }}>
+          <div className="kiosk-pairing__scan">
             <Button
-              className="kiosk-control"
+              className="kiosk-control kiosk-pairing__scan-button"
               variant="secondary"
-              style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }}
               aria-pressed={awaitingScan}
               disabled={busy}
               onClick={() => setAwaitingScan(true)}
@@ -438,21 +437,16 @@ export function Pairing({
               {t("pairing.scan")}
             </Button>
             {awaitingScan ? (
-              <div
-                aria-live="polite"
-                style={{ display: "grid", justifyItems: "center", gap: 8, textAlign: "center" }}
-              >
+              <div aria-live="polite" className="kiosk-pairing__scan-waiting">
                 <Spinner size={40} aria-hidden="true" />
-                <p style={{ fontSize: "1.75rem" }}>{t("pairing.scanWaiting")}</p>
-                <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>
-                  {t("pairing.scanWaitingHint")}
-                </p>
+                <p className="kiosk-pairing__scan-waiting-title">{t("pairing.scanWaiting")}</p>
+                <p className="kiosk-pairing__scan-hint">{t("pairing.scanWaitingHint")}</p>
               </div>
             ) : (
               // The line the previous round put here on its own. It stays, folded
               // under the button, because it carries the one thing the button
               // cannot say: pressing it is optional.
-              <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>{t("pairing.scanHint")}</p>
+              <p className="kiosk-pairing__scan-hint">{t("pairing.scanHint")}</p>
             )}
           </div>
         ) : null}

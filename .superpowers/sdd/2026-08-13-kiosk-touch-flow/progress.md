@@ -63,3 +63,13 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-touch-flow.md`, accepted
   screen; the displayed outcome supplies its immutable owner. Link recovery is
   published only after local outcome/journal persistence and dequeue commit.
   Final full kiosk suite: 105 files / 589 tests.
+
+### Task 7: fixed viewport, accessibility and browser acceptance
+
+- Status: implemented, browser-verified, awaiting review.
+- RED: real in-app browser inspection reproduced overlapping Pairing halves at both exact minima and a 24–32 px compressed `Готово` target on low-landscape queued/rejected/partial outcomes. Focused contracts also failed for the missing below-minimum diagnostic and reduced-motion transition handling.
+- GREEN: Pairing is a true stacked 480×800 grid and a true two-column 800×480 grid; the below-minimum gate renders exact measured dimensions; low-landscape outcomes retain a 48 px acknowledgement target. Reduced motion removes both animation and control transitions.
+- Browser: exact 480×800 and 800×480 checks covered pairing (idle scan, waiting scan and server-address states), branded login, a 100-line mixed cart, operation, six reasons, confirmation, accepted, queued, rejected and partial outcomes. Document and active-screen scroll dimensions matched their viewport slots; cart pages rendered 5 portrait / 3 landscape lines; CTA and focusable targets remained in bounds. A real keyboard-wedge badge + SSCC + cash-submit path reached server-confirmed `ORD-26-40` through the local acceptance API.
+- Accessibility: semantic browser snapshots retained headings/status/alerts/radiogroup labels and text beside icons; checked touch controls were at least 48 px; visible focus ring was 2 px; sampled primary/secondary text contrast measured 16.36:1 / 8.16:1.
+- Automated: focused Task 7 11/11; full kiosk 30 files / 595 tests; typecheck, full ESLint, Vite PWA build (305 modules + service worker), Prettier and diff-check passed.
+- External: no physical tablet, physical HID/Web Serial scanner, installed-PWA restart, real private logo delivery or burn-in observation was performed.
