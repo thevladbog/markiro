@@ -1,11 +1,79 @@
 # Touch flow Task 7 independent review
 
-## Verdict
+## Final re-review verdict
 
-**CHANGES REQUESTED** — 0 Critical, 3 Important, 0 Minor.
+**APPROVED** — 0 Critical, 0 Important, 0 Minor.
 
-Commit reviewed: `f630e3fc feat(kiosk): verify fixed touch viewport flow`.
-The review was bounded to Task 7. No production files were changed.
+Fix commit reviewed: `d8441258 fix(kiosk): close touch viewport browser gaps`.
+The re-review was bounded to the three findings below plus Task 8 report honesty. No
+production files were changed by review.
+
+## Disposition of prior Important findings
+
+### I1 — Resolved: outcome details are bounded without scroll or clipping
+
+`Done` now renders no more than two safe concrete rejection lines and an additional-count
+summary, while preserving bottle-aware total rejection copy. The conflict panel uses bounded
+`overflow: hidden`, not a nested scrolling affordance. The committed fixture exercises a
+fully rejected result with one loose and one box reason and a partial result with a box
+reason.
+
+The reproducible Chromium gate passed both cases at exactly 480×800 and 800×480. For each
+case it independently asserted no document or active-screen scroll, no scrollable descendant,
+and no clipped conflict panel (`scrollHeight <= clientHeight`). Result: 19/19 browser
+scenarios passed, including rejected and partial in both orientations.
+
+### I2 — Resolved: Pairing scan CTA computes to the shared 64 px floor
+
+Pairing now passes `size="floor"` to the shared Button. The real production `App` test measured
+the resulting computed `min-height` as 64 px at both exact minima, and the generic bounding-box
+invariant found no interactive control below 48 px or outside the viewport. This closes the
+previous inline-style precedence failure rather than merely adding another CSS declaration.
+
+### I3 — Resolved: committed real-browser gate is reproducible and scoped honestly
+
+`tools/production-browser` now exposes `test:kiosk` with a committed Playwright config,
+self-managed Vite web server and 19-test Chromium matrix. An independent clean invocation of
+`corepack pnpm run test:kiosk` passed all 19 scenarios. Two scenarios drive the real production
+`App` through Pairing, durable pairing storage and branded Login at 480×800 and 800×480. The
+remaining deterministic post-login states use the explicitly described visual fixture rather
+than claiming to exercise production routing.
+
+The gate also covers both exact minima, below-minimum diagnostics, 5/3 cart rows, descendant
+overflow/clipping, computed 48 px floors, viewport bounds, visible focus and reduced motion.
+A fresh production Vite/PWA build completed with 305 modules and 89 precache entries; neither
+test files nor a `touch-flow` reference appeared in `dist`. The fixture therefore does not
+become a production PWA entry or precached route.
+
+## Task 8 report honesty
+
+The final report is explicit that database/API coverage is incomplete in this checkout:
+`DATABASE_URL` is absent, 51 PostgreSQL-backed DB tests are reported skipped, and the API
+aggregate is stated as not fully green with environment/socket failures, skips and a CLI
+timeout. It does not turn those infrastructure gaps into product passes, says the shared DB
+was not migrated or mutated, and keeps physical tablet/scanner/PWA/object-storage/burn-in
+acceptance unchecked. This matches the independently observed absent DB environment. The
+review did not rerun infrastructure-dependent API/DB suites.
+
+## Final re-review verification
+
+- Focused kiosk: 4 files / 56 tests passed.
+- Kiosk TypeScript: `tsc -p apps/kiosk/tsconfig.json --noEmit` passed.
+- Production-browser TypeScript: `pnpm run typecheck` passed.
+- Committed browser gate: `corepack pnpm run test:kiosk` passed 19/19 in Chromium.
+- Production Vite/PWA build passed; 305 modules and 89 precache entries; test fixture absent
+  from `dist`.
+- `git diff --check d8441258^ d8441258` passed.
+
+No physical tablet, HID/Web Serial scanner, installed-PWA restart or real private-logo test
+was performed. Those remain external acceptance items, as the Task 8 report states.
+
+---
+
+## Original review of `f630e3fc`
+
+Original verdict: **CHANGES REQUESTED** — 0 Critical, 3 Important, 0 Minor. The sections
+below preserve the evidence that led to `d8441258`.
 
 ## Important findings
 
