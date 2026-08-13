@@ -21,6 +21,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { labelTemplates } from "./labels.js";
+import { mediaAssets } from "./media.js";
 import { employees } from "./pickup.js";
 
 export const productStatus = pgEnum("product_status", ["draft", "active"]);
@@ -84,6 +85,32 @@ export const products = pgTable(
       name: "products_tenant_default_label_template_fk",
       columns: [t.tenantId, t.defaultLabelTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+  ],
+);
+
+/** One tenant-owned media asset serves as the current product image. */
+export const productImages = pgTable(
+  "product_images",
+  {
+    tenantId: tenantId(),
+    productId: uuid("product_id").notNull(),
+    assetId: uuid("asset_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.productId] }),
+    unique("product_images_asset_id_uq").on(table.assetId),
+    foreignKey({
+      name: "product_images_tenant_product_fk",
+      columns: [table.tenantId, table.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+    foreignKey({
+      name: "product_images_tenant_asset_fk",
+      columns: [table.tenantId, table.assetId],
+      foreignColumns: [mediaAssets.ownerTenantId, mediaAssets.id],
     }),
   ],
 );

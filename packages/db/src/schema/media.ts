@@ -23,9 +23,10 @@ export const mediaAssets = pgTable(
   "media_assets",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    ownerUserId: text("owner_user_id")
-      .notNull()
-      .references(() => user.id, { onDelete: "cascade" }),
+    ownerUserId: text("owner_user_id").references(() => user.id, { onDelete: "cascade" }),
+    ownerTenantId: text("owner_tenant_id").references(() => organization.id, {
+      onDelete: "cascade",
+    }),
     objectKey: text("object_key").notNull(),
     contentType: text("content_type").notNull(),
     byteSize: bigint("byte_size", { mode: "number" }).notNull(),
@@ -39,6 +40,11 @@ export const mediaAssets = pgTable(
   (table) => [
     unique("media_assets_object_key_uq").on(table.objectKey),
     unique("media_assets_owner_id_uq").on(table.ownerUserId, table.id),
+    unique("media_assets_owner_tenant_id_uq").on(table.ownerTenantId, table.id),
+    check(
+      "media_assets_owner_xor",
+      sql`num_nonnulls(${table.ownerUserId}, ${table.ownerTenantId}) = 1`,
+    ),
   ],
 );
 
