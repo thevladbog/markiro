@@ -51,6 +51,7 @@ import {
 import { mirrorShiftBundle } from "./lib/shift-bundle.js";
 import { createOperatorRosterRefresher } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
+import { createActivityAwareScanSource, createOperatorIdleLock } from "./lib/operator-idle-lock.js";
 import { canonicalStationApiUrl } from "./lib/station-api-url.js";
 import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
@@ -220,6 +221,20 @@ export function App() {
   const recoveryCleanupStarted = useRef<CredentialRejectedEvent | null>(null);
   const floorWorkRegistry = useMemo(() => createFloorWorkRegistry(), []);
   const operatorRetirement = useRef<FloorWorkRetirement | null>(null);
+  const operatorSwitchAttempt = useRef<Promise<void> | null>(null);
+  const switchOperatorRef = useRef<() => Promise<void>>(async () => {});
+  const operatorIdleLock = useMemo(
+    () =>
+      createOperatorIdleLock({
+        target: window,
+        onIdle: () => {
+          void switchOperatorRef.current().catch(() => {
+            // The switch state exposes the recoverable failure on the floor.
+          });
+        },
+      }),
+    [],
+  );
   const lockdown = useMemo(() => createLockdownLifecycle({ dev: import.meta.env.DEV }), []);
   const subscribeLockdown = useCallback(
     (listener: () => void) => lockdown.subscribe(listener),
@@ -380,7 +395,21 @@ export function App() {
   // A serial scanner is opted into from the workstation setup screen.
   const wedgeSource = useMemo(() => createKeyboardWedgeSource(), []);
   const hardwareSource = useMemo(() => createHardwareScanSource(tauriHardware), []);
-  const scanSource = pickScanSource(hardwareConfig) === "hardware" ? hardwareSource : wedgeSource;
+  const selectedScanSource =
+    pickScanSource(hardwareConfig) === "hardware" ? hardwareSource : wedgeSource;
+  const scanSource = useMemo(
+    () => createActivityAwareScanSource(selectedScanSource, () => operatorIdleLock.activity()),
+    [operatorIdleLock, selectedScanSource],
+  );
+
+  useEffect(() => {
+    if (!operator || operatorSwitchState !== "idle") {
+      operatorIdleLock.stop();
+      return;
+    }
+    operatorIdleLock.start();
+    return () => operatorIdleLock.stop();
+  }, [operator, operatorIdleLock, operatorSwitchState]);
 
   useEffect(() => {
     if (!shift) {
@@ -780,7 +809,7 @@ export function App() {
     }
   }
 
-  async function switchOperator(): Promise<void> {
+  async function performOperatorSwitch(): Promise<void> {
     setOperatorSwitchState("settling");
     const retirement =
       operatorRetirement.current ?? beginFloorWorkRetirement(floorWorkRegistry.current());
@@ -799,6 +828,19 @@ export function App() {
       throw new Error("operator switch did not settle");
     }
   }
+
+  async function switchOperator(): Promise<void> {
+    if (operatorSwitchAttempt.current) return operatorSwitchAttempt.current;
+    const attempt = performOperatorSwitch();
+    operatorSwitchAttempt.current = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (operatorSwitchAttempt.current === attempt) operatorSwitchAttempt.current = null;
+    }
+  }
+
+  switchOperatorRef.current = switchOperator;
 
   const windowModeControl = (
     <WindowModeControl

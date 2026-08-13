@@ -116,6 +116,7 @@ import type * as LockdownModule from "../src/lib/lockdown.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
+import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 beforeAll(async () => {
@@ -894,6 +895,29 @@ describe("App", () => {
     }
   });
 
+  it("locks the operator after ten inactive minutes without clearing credentials or queued work", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const queued = await renderAtFloorStage();
+      vi.useFakeTimers();
+      fireEvent.pointerDown(window);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OPERATOR_IDLE_TIMEOUT_MS - 1);
+      });
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText("Operator sign-in")).toBeDefined();
+      expect(queued).toHaveLength(1);
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("drains accepted local work, resumes the same shift and open box, and changes journal attribution", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
@@ -927,6 +951,52 @@ describe("App", () => {
       expect(floor.outboxOperatorIds).toEqual(["op1", "op2"]);
       expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
       expect(counters.getAllByRole("definition")[0]?.textContent).toBe("1");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("auto-locks safely and lets another operator resume the same shift and open box", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+      vi.useFakeTimers();
+      fireEvent.pointerDown(window);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OPERATOR_IDLE_TIMEOUT_MS - 1);
+      });
+
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OPERATOR_IDLE_TIMEOUT_MS - 1);
+      });
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByTestId("operator-switch-settling").textContent).toContain(
+        "Saving the current operation…",
+      );
+
+      floor.releaseFirstJournal();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Operator sign-in")).toBeDefined();
+
+      vi.useRealTimers();
+      await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
+      expect(await screen.findByRole("button", { name: "Pause / finish" })).toBeDefined();
+      expect(screen.getByText("Maria")).toBeDefined();
+      await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
+
+      act(() => floor.emitScan(SECOND_KM));
+      await waitFor(() => expect(floor.journalOperatorIds).toEqual(["op1", "op2"]));
+      expect(floor.outboxOperatorIds).toEqual(["op1", "op2"]);
+      expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
     } finally {
       consoleErrorSpy.mockRestore();
     }
