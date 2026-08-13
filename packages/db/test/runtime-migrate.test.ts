@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -61,6 +61,10 @@ const pickupPolicyMigration = new URL(
 );
 const organizationBrandingMigration = new URL(
   "../migrations/0036_organization_branding.sql",
+  import.meta.url,
+);
+const kioskSsccOrdersMigration = new URL(
+  "../migrations/0037_kiosk_sscc_orders.sql",
   import.meta.url,
 );
 const migrationJournal = new URL("../migrations/meta/_journal.json", import.meta.url);
@@ -230,6 +234,26 @@ describe("runRuntimeMigrations", () => {
     expect(migration).toContain('CONSTRAINT "org_profiles_logo_tenant_fk"');
     expect(migration).toContain('FOREIGN KEY ("tenant_id","logo_asset_id")');
     expect(journal.entries.map((entry) => entry.tag)).toContain("0036_organization_branding");
+  });
+
+  test("packages kiosk box provenance and backfills the registry cursor", () => {
+    expect(existsSync(kioskSsccOrdersMigration)).toBe(true);
+    if (!existsSync(kioskSsccOrdersMigration)) return;
+
+    const migration = readFileSync(kioskSsccOrdersMigration, "utf8");
+    const journal = JSON.parse(readFileSync(migrationJournal, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+
+    expect(migration).toContain('CREATE TABLE "pickup_order_boxes"');
+    expect(migration).toContain('ADD COLUMN "updated_at" timestamp with time zone');
+    expect(migration).toContain("COALESCE(closure_received_at, closed_at, opened_at, now())");
+    expect(migration).toContain('ALTER COLUMN "updated_at" SET NOT NULL');
+    expect(migration).toContain('CONSTRAINT "pickup_order_items_tenant_order_box_fk"');
+    expect(migration).toContain(
+      'FOREIGN KEY ("tenant_id","order_id","order_box_id") REFERENCES "public"."pickup_order_boxes"("tenant_id","order_id","id")',
+    );
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0037_kiosk_sscc_orders");
   });
 
   test("holds one session advisory lock across the runtime migration", async () => {

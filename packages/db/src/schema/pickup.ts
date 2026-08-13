@@ -18,7 +18,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { organization } from "./auth.js";
-import { products } from "./platform.js";
+import { boxes, products } from "./platform.js";
 import { tenantSubscriptions } from "./saas.js";
 
 export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
@@ -311,12 +311,55 @@ export const pickupOrders = pgTable(
   ],
 );
 
+/**
+ * An immutable order-time snapshot of an accepted production box. The
+ * production box stays linked for provenance, while the copied SSCC/product/
+ * quantity/price preserve what the kiosk order contained if the box later
+ * receives an exception.
+ */
+export const pickupOrderBoxes = pgTable(
+  "pickup_order_boxes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: tenantId(),
+    orderId: uuid("order_id").notNull(),
+    boxId: uuid("box_id").notNull(),
+    sscc: char("sscc", { length: 18 }).notNull(),
+    productId: uuid("product_id").notNull(),
+    bottleCount: integer("bottle_count").notNull(),
+    unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("pickup_order_boxes_tenant_id_uq").on(t.tenantId, t.id),
+    unique("pickup_order_boxes_tenant_order_id_uq").on(t.tenantId, t.orderId, t.id),
+    unique("pickup_order_boxes_order_box_uq").on(t.tenantId, t.orderId, t.boxId),
+    check("pickup_order_boxes_bottle_count_check", sql`${t.bottleCount} > 0`),
+    foreignKey({
+      name: "pickup_order_boxes_tenant_order_fk",
+      columns: [t.tenantId, t.orderId],
+      foreignColumns: [pickupOrders.tenantId, pickupOrders.id],
+    }),
+    foreignKey({
+      name: "pickup_order_boxes_tenant_box_fk",
+      columns: [t.tenantId, t.boxId],
+      foreignColumns: [boxes.tenantId, boxes.id],
+    }),
+    foreignKey({
+      name: "pickup_order_boxes_tenant_product_fk",
+      columns: [t.tenantId, t.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+  ],
+);
+
 export const pickupOrderItems = pgTable(
   "pickup_order_items",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: tenantId(),
     orderId: uuid("order_id").notNull(),
+    orderBoxId: uuid("order_box_id"),
     productId: uuid("product_id").notNull(),
     gtin14: text("gtin14").notNull(),
     serial: text("serial").notNull(),
@@ -336,6 +379,11 @@ export const pickupOrderItems = pgTable(
       name: "pickup_order_items_tenant_order_fk",
       columns: [t.tenantId, t.orderId],
       foreignColumns: [pickupOrders.tenantId, pickupOrders.id],
+    }),
+    foreignKey({
+      name: "pickup_order_items_tenant_order_box_fk",
+      columns: [t.tenantId, t.orderId, t.orderBoxId],
+      foreignColumns: [pickupOrderBoxes.tenantId, pickupOrderBoxes.orderId, pickupOrderBoxes.id],
     }),
     foreignKey({
       name: "pickup_order_items_tenant_product_fk",

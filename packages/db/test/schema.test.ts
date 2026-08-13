@@ -42,8 +42,19 @@ describe("platform schema", () => {
   it("gives boxes a tenant-unique sscc", () => {
     const cols = Object.keys(boxes);
     expect(cols).toEqual(
-      expect.arrayContaining(["tenantId", "id", "sscc", "shiftId", "terminalId", "closedAt"]),
+      expect.arrayContaining([
+        "tenantId",
+        "id",
+        "sscc",
+        "shiftId",
+        "terminalId",
+        "closedAt",
+        "updatedAt",
+      ]),
     );
+    if (!("updatedAt" in boxes)) return;
+    expect(boxes.updatedAt.notNull).toBe(true);
+    expect(boxes.updatedAt.hasDefault).toBe(true);
   });
 
   // Column-presence checks above would not catch a dropped unique index or a

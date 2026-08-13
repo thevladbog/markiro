@@ -575,6 +575,7 @@ export const boxes = pgTable(
      * a brand-new SSCC through the ordinary `SsccService.allocate` path.
      */
     disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("boxes_tenant_id_uq").on(t.tenantId, t.id),

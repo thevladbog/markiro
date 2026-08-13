@@ -260,6 +260,13 @@
       "when": 1786589360929,
       "tag": "0036_organization_branding",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786613924787,
+      "tag": "0037_kiosk_sscc_orders",
+      "breakpoints": true
     }
   ]
 }
