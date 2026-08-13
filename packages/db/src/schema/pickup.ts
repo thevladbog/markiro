@@ -23,6 +23,7 @@ import { tenantSubscriptions } from "./saas.js";
 
 export const employeeStatus = pgEnum("employee_status", ["active", "archived"]);
 export const kioskStatus = pgEnum("kiosk_status", ["active", "archived"]);
+export const pickupLimitMode = pgEnum("pickup_limit_mode", ["limited", "unlimited"]);
 export const pickupReason = pgEnum("pickup_reason", ["buy", "writeoff"]);
 export const pickupOrderStatus = pgEnum("pickup_order_status", [
   "pending",
@@ -47,6 +48,35 @@ export const employees = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [unique("employees_tenant_id_uq").on(t.tenantId, t.id)],
+);
+
+export const pickupTenantPolicies = pgTable("pickup_tenant_policies", {
+  tenantId: text("tenant_id")
+    .primaryKey()
+    .references(() => organization.id),
+  limitsEnabled: boolean("limits_enabled").notNull().default(true),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const employeePickupPolicies = pgTable(
+  "employee_pickup_policies",
+  {
+    tenantId: tenantId(),
+    employeeId: uuid("employee_id").notNull(),
+    limitMode: pickupLimitMode("limit_mode").notNull().default("limited"),
+    dayLimit: integer("day_limit").notNull().default(5),
+    canWriteoff: boolean("can_writeoff").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.employeeId] }),
+    check("employee_pickup_policies_day_limit_check", sql`${t.dayLimit} > 0`),
+    foreignKey({
+      name: "employee_pickup_policies_tenant_employee_fk",
+      columns: [t.tenantId, t.employeeId],
+      foreignColumns: [employees.tenantId, employees.id],
+    }).onDelete("cascade"),
+  ],
 );
 
 export const employeeBadges = pgTable(

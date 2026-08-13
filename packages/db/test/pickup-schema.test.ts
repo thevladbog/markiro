@@ -1,10 +1,24 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq, inArray } from "drizzle-orm";
+import { getTableConfig } from "drizzle-orm/pg-core";
 import { createDb, schema } from "../src/index.js";
 
 const url = process.env.DATABASE_URL;
 const { organization } = schema;
+
+describe("pickup policy schema", () => {
+  it("keeps one tenant-scoped pickup policy per employee", () => {
+    const foreignKey = getTableConfig(schema.employeePickupPolicies).foreignKeys.find(
+      (key) => key.getName() === "employee_pickup_policies_tenant_employee_fk",
+    );
+
+    expect(foreignKey, "missing employee tenant foreign key").toBeDefined();
+    const reference = foreignKey!.reference();
+    expect(reference.columns.map((column) => column.name)).toEqual(["tenant_id", "employee_id"]);
+    expect(reference.foreignColumns.map((column) => column.name)).toEqual(["tenant_id", "id"]);
+  });
+});
 
 describe.skipIf(!url)("pickup schema constraints", () => {
   const { db, pool } = createDb(url!);
@@ -55,6 +69,9 @@ describe.skipIf(!url)("pickup schema constraints", () => {
   });
 
   afterAll(async () => {
+    await db
+      .delete(schema.employeePickupPolicies)
+      .where(eq(schema.employeePickupPolicies.employeeId, empId));
     await db
       .delete(schema.pickupOrderItems)
       .where(inArray(schema.pickupOrderItems.orderId, [order1, order2]));
@@ -137,5 +154,17 @@ describe.skipIf(!url)("pickup schema constraints", () => {
       .update(schema.pickupOrders)
       .set({ exportedAt: null })
       .where(eq(schema.pickupOrders.id, order1));
+  });
+
+  it("rejects a non-positive employee day limit", async () => {
+    await expect(
+      db.insert(schema.employeePickupPolicies).values({
+        tenantId: org.id,
+        employeeId: empId,
+        limitMode: "limited",
+        dayLimit: 0,
+        canWriteoff: false,
+      }),
+    ).rejects.toMatchObject({ cause: { code: "23514" } });
   });
 });

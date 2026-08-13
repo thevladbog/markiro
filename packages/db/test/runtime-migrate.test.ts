@@ -1,4 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, test, vi } from "vitest";
@@ -54,6 +55,11 @@ const execFile = promisify(execFileCallback);
 const databaseUrlFromEnvironment = process.env.DATABASE_URL;
 const migrationsFolderOnDisk = fileURLToPath(new URL("../migrations", import.meta.url));
 const runtimeMigrateModule = fileURLToPath(new URL("../src/runtime-migrate.ts", import.meta.url));
+const pickupPolicyMigration = new URL(
+  "../migrations/0035_kiosk_pickup_policy.sql",
+  import.meta.url,
+);
+const migrationJournal = new URL("../migrations/meta/_journal.json", import.meta.url);
 
 const legacyStationMigrationFixture = String.raw`
 import { randomUUID } from "node:crypto";
@@ -198,6 +204,18 @@ afterEach(resetHarness);
 resetHarness();
 
 describe("runRuntimeMigrations", () => {
+  test("packages tenant and employee pickup policy backfills", () => {
+    const migration = readFileSync(pickupPolicyMigration, "utf8");
+    const journal = JSON.parse(readFileSync(migrationJournal, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+
+    expect(migration).toContain('CREATE TYPE "public"."pickup_limit_mode"');
+    expect(migration).toContain("INSERT INTO pickup_tenant_policies (tenant_id, limits_enabled)");
+    expect(migration).toContain("INSERT INTO employee_pickup_policies");
+    expect(journal.entries.map((entry) => entry.tag)).toContain("0035_kiosk_pickup_policy");
+  });
+
   test("holds one session advisory lock across the runtime migration", async () => {
     const logs: string[] = [];
 
