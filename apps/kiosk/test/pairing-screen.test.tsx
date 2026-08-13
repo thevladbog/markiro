@@ -697,7 +697,7 @@ describe("Pairing", () => {
     );
 
     expect(scanner.joins()).toBe(1);
-    scanner.emit(" 12345678 ");
+    scanner.emit("12345678");
 
     expect(codeDisplay().textContent).toBe("12345678");
     expect(submitButton().disabled).toBe(false);
@@ -739,7 +739,7 @@ describe("Pairing", () => {
     expect(screen.queryByText("Waiting for the scan")).toBeNull();
 
     fireEvent.click(scanButton());
-    scanner.emit(" 12345678 ");
+    scanner.emit("12345678");
     expect(codeDisplay().textContent).toBe("12345678");
     // ...and it ends when what it waited for arrives.
     expect(screen.queryByText("Waiting for the scan")).toBeNull();
@@ -760,7 +760,7 @@ describe("Pairing", () => {
     );
 
     expect(scanButton()).toBeDefined();
-    scanner.emit(" 12345678 ");
+    scanner.emit("12345678");
 
     expect(codeDisplay().textContent).toBe("12345678");
     expect(submitButton().disabled).toBe(false);
@@ -826,9 +826,17 @@ describe("Pairing", () => {
       expect(submitButton().disabled).toBe(true);
     }
 
-    // CR/LF and surrounding whitespace are the only tolerated terminal
-    // framing. Still listening: the real code lands without a reset.
-    scanner.emit("\r\n 12345678 \r\n");
+    // The listener contract is already post-transport: framing and terminators
+    // were removed by the source. Any whitespace delivered here is payload and
+    // must not be canonicalised into a credential.
+    for (const raw of [" 12345678", "12345678 ", "\t12345678", "12345678\r\n"]) {
+      scanner.emit(raw);
+      expect(codeDisplay().textContent).toBe("");
+      expect(submitButton().disabled).toBe(true);
+    }
+
+    // Still listening: the exact raw code lands without a reset.
+    scanner.emit("12345678");
     expect(codeDisplay().textContent).toBe("12345678");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(submitButton().disabled).toBe(false);

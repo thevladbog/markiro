@@ -114,7 +114,7 @@ const MILK = "Молоко 3,2%";
 const KM = `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`;
 const EMPLOYEE = { id: "e1", fullName: "Смирнов Алексей" };
 
-const IDLE_TITLE = "Возьмите продукцию для себя";
+const IDLE_TITLE = "Отсканируйте пропуск";
 const CART_TITLE = "Вы берёте";
 const SUBMIT = "Готово — передать администратору";
 const QUEUED_TITLE = "Заявка передана, номер появится после синхронизации";
@@ -124,7 +124,7 @@ const SETUP_TITLE = "Настройка сканера";
 const SETUP_DONE = "Готово";
 const KEYBOARD_TRANSPORT = "Как клавиатура (HID)";
 const SERIAL_TRANSPORT = "Web Serial (COM-порт)";
-const PAIRING_TITLE = "Подключение киоска";
+const PAIRING_TITLE = "Введите 8-значный код";
 /** The setup screen's test-scan verdicts, as an installer reads them. */
 const VERDICT_KM = "Код маркировки";
 const VERDICT_BADGE = "Бейдж";
@@ -578,7 +578,7 @@ describe("KioskShell", () => {
   it("asks an unpaired device for a pairing code, and calls no API without a token", async () => {
     render(<App />);
 
-    await settle(() => expect(screen.getByText("Подключение киоска")).toBeDefined());
+    await settle(() => expect(screen.getByText(PAIRING_TITLE)).toBeDefined());
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -1649,9 +1649,9 @@ describe("KioskShell", () => {
     scanner.scan("12345678");
 
     await settle(() => expect(screen.getByRole("status").textContent).toBe("12345678"));
-    expect((screen.getByRole("button", { name: "Подключить" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect(
+      (screen.getByRole("button", { name: "Подключить киоск" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   /**

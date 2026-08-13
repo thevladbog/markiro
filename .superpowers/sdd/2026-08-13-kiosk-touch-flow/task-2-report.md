@@ -38,3 +38,12 @@ Review confirmed that scanner input deleted arbitrary non-digits, logo refresh c
 - Only `/kiosk/branding/logo/{UUID revision}` matching the advertised revision can receive the token. MIME and declared length are checked before reading; streamed chunks are accumulated only through a 2 MiB budget and the reader is cancelled on overflow.
 - Invalid advertised path/revision CAS-removes a same-owner stale row. Valid-route network, 5xx, MIME or decode failures retain the prior valid same-owner asset. Display-time `img.onerror` immediately revokes the object URL, falls back to bundled Markiro, and CAS-invalidates the persisted asset.
 - Fix RED reproduced scanner canonicalisation and three branding boundary failures. Focused GREEN passed 56/56; full kiosk suite exited 0. Typecheck, ESLint, PWA build, Prettier and diff-check passed.
+
+## Final re-review fix: exact raw scanner input and displayed-asset invalidation
+
+- Pairing now validates the listener payload itself with exact `/^\d{8}$/`. Spaces, tabs and CR/LF delivered past a transport are payload and are rejected; the scanner sources remain responsible for removing their own terminators.
+- Every cached logo exposed to `Idle` carries its immutable `serverUrl + kioskId + credentialGeneration` owner and revision. The rendered object URL captures that same display handle, and a late image error reports it instead of asking the shell for whichever owner is current at callback time.
+- Durable invalidation reads config and the stored branding row in one `config + snapshot` transaction. It deletes only when both current owner and stored owner/revision still equal the displayed handle. An old tenant or old revision therefore cannot erase the replacement logo; a matching broken current asset is removed and falls back to bundled Markiro.
+- Object URL cleanup is target-specific: replacement/unmount/error revokes the URL associated with that render without revoking a newer displayed URL.
+- RED was 54 passed / 2 failed: whitespace was trimmed into a valid pairing code and `Idle` emitted an ownerless error callback. Final focused pairing/branding/idle GREEN is 58/58. The complete kiosk suite is 523/523; typecheck, ESLint, Vite PWA build, changed-file Prettier and diff-check passed.
+- The full app gate also exposed three stale Task 2 copy assertions (`Подключение киоска`, the former idle headline, and the former submit label); they were aligned with the already-approved current UI and `app.test.tsx` passes 47/47.

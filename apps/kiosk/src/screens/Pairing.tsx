@@ -143,21 +143,19 @@ export function Pairing({
     // nobody can see or submit.
     if (bound) return;
     return subscribe((raw) => {
-      // A wedge payload can arrive with framing characters around the digits.
-      // What survives must be EXACTLY eight, and nothing else is accepted:
+      // The transports remove their own terminal framing before fan-out.
+      // What arrives here must therefore be EXACTLY eight digits, and nothing else is accepted:
       // truncating a longer one would submit the first eight digits of a
       // marking code as though the worker had meant to, and dropping a short
       // one silently leaves the dead button the pad exists to avoid. Say what
       // was wrong and keep listening — the next scan needs no reset.
-      // Wedge/serial transports may retain terminal whitespace (notably CR/LF),
-      // but every other byte belongs to the credential. Never delete arbitrary
-      // characters: that would turn a different scanner payload into a code.
-      const framed = raw.trim();
-      if (!/^\d{8}$/.test(framed)) {
+      // Never trim or delete arbitrary characters here: that would turn a
+      // different scanner payload into a pairing credential.
+      if (!/^\d{8}$/.test(raw)) {
         setError("scan");
         return;
       }
-      setCode(framed);
+      setCode(raw);
       setError(null);
       // What the waiting state was waiting for has arrived, so the state ends.
       // A rejected scan deliberately leaves it standing: still listening, and

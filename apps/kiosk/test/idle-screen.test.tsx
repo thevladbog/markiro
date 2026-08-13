@@ -23,7 +23,12 @@ describe("Idle", () => {
   it("renders tenant identity with a bundled Markiro fallback and the approved login grid", () => {
     const { container } = render(
       <Idle
-        branding={{ organizationName: "Северная вода", logoBlob: null, revision: null }}
+        branding={{
+          organizationName: "Северная вода",
+          logoBlob: null,
+          revision: null,
+          owner: null,
+        }}
         onEmployee={vi.fn()}
         resolveBadge={vi.fn()}
         onScan={vi.fn()}
@@ -52,11 +57,21 @@ describe("Idle", () => {
   it("revokes and durably invalidates a cached logo that the browser cannot render", () => {
     const logo = new Blob(["platform-broken"], { type: "image/webp" });
     const onLogoError = vi.fn();
+    const displayed = {
+      organizationName: "Северная вода",
+      logoBlob: logo,
+      revision: REVISION,
+      owner: {
+        serverUrl: "https://kiosk.example",
+        kioskId: "kiosk-1",
+        credentialGeneration: "33333333-3333-4333-8333-333333333333",
+      },
+    };
     const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:company");
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     render(
       <Idle
-        branding={{ organizationName: "Северная вода", logoBlob: logo, revision: REVISION }}
+        branding={displayed}
         onBrandingError={onLogoError}
         onEmployee={vi.fn()}
         resolveBadge={vi.fn()}
@@ -67,7 +82,10 @@ describe("Idle", () => {
     fireEvent.error(screen.getByRole("img", { name: "Северная вода" }));
 
     expect(revoke).toHaveBeenCalledWith("blob:company");
-    expect(onLogoError).toHaveBeenCalledTimes(1);
+    expect(onLogoError).toHaveBeenCalledWith({
+      owner: displayed.owner,
+      revision: REVISION,
+    });
     expect(screen.getAllByLabelText("Маркиро").length).toBeGreaterThan(0);
     create.mockRestore();
     revoke.mockRestore();

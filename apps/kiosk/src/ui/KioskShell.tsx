@@ -157,6 +157,7 @@ export function KioskShell(): React.JSX.Element {
     organizationName: "Маркиро",
     logoBlob: null,
     revision: null,
+    owner: null,
   });
   const [online, setOnline] = useState(() => navigator.onLine);
   const [queuedCount, setQueuedCount] = useState(0);
@@ -1051,10 +1052,8 @@ export function KioskShell(): React.JSX.Element {
     screen = (
       <Idle
         branding={branding}
-        onBrandingError={() => {
-          const owner = brandingOwnerOf(configRef.current);
-          if (!owner) return;
-          void invalidateCachedBranding(owner);
+        onBrandingError={(displayed) => {
+          void invalidateCachedBranding(displayed);
         }}
         onScan={subscribe}
         resolveBadge={async (raw) => {

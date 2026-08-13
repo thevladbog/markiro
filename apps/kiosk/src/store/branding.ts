@@ -23,6 +23,12 @@ export interface CachedBranding {
   organizationName: string;
   logoBlob: Blob | null;
   revision: string | null;
+  owner: BrandingOwner | null;
+}
+
+export interface DisplayedBranding {
+  owner: BrandingOwner;
+  revision: string;
 }
 
 export interface BrandingRefreshResult {
@@ -122,6 +128,7 @@ export async function loadCachedBranding(): Promise<CachedBranding> {
     organizationName: organizationNameOf(snapshot?.bootstrap ?? null),
     logoBlob: cached?.logoBlob ?? null,
     revision: cached?.revision ?? null,
+    owner: cached?.owner ?? null,
   };
 }
 
@@ -215,8 +222,32 @@ async function commitIfCurrent(
   return applied;
 }
 
-export async function invalidateCachedBranding(owner: BrandingOwner): Promise<boolean> {
-  return commitIfCurrent(owner, (store) => store.delete(BRANDING_KEY));
+export async function invalidateCachedBranding(displayed: DisplayedBranding): Promise<boolean> {
+  let applied = false;
+  await withTransaction([STORE_CONFIG, STORE_SNAPSHOT], "readwrite", (tx) => {
+    const configRequest = tx.objectStore(STORE_CONFIG).get(CONFIG_KEY);
+    const brandingStore = tx.objectStore(STORE_SNAPSHOT);
+    const brandingRequest = brandingStore.get(BRANDING_KEY);
+    let configReady = false;
+    let brandingReady = false;
+    const invalidateIfStillDisplayed = () => {
+      if (!configReady || !brandingReady) return;
+      if (!sameBrandingOwner(ownerOf(configRequest.result), displayed.owner)) return;
+      const stored = checkedStored(brandingRequest.result, displayed.owner);
+      if (!stored || stored.revision !== displayed.revision) return;
+      brandingStore.delete(BRANDING_KEY);
+      applied = true;
+    };
+    configRequest.onsuccess = () => {
+      configReady = true;
+      invalidateIfStillDisplayed();
+    };
+    brandingRequest.onsuccess = () => {
+      brandingReady = true;
+      invalidateIfStillDisplayed();
+    };
+  });
+  return applied;
 }
 
 export async function refreshCachedBranding(input: {
@@ -240,14 +271,17 @@ export async function refreshCachedBranding(input: {
   const path = nonEmpty(input.branding.logoUrl);
   if (!revision || !path) {
     const applied = await commitIfCurrent(input.owner, (store) => store.delete(BRANDING_KEY));
-    return result({ organizationName, logoBlob: null, revision: null }, applied);
+    return result({ organizationName, logoBlob: null, revision: null, owner: null }, applied);
   }
   if (existing?.revision === revision)
-    return result({ organizationName, logoBlob: existing.logoBlob, revision }, true);
+    return result(
+      { organizationName, logoBlob: existing.logoBlob, revision, owner: input.owner },
+      true,
+    );
   const url = exactLogoUrl(input.owner.serverUrl, input.branding);
   if (!url) {
     const applied = await commitIfCurrent(input.owner, (store) => store.delete(BRANDING_KEY));
-    return result({ organizationName, logoBlob: null, revision: null }, applied);
+    return result({ organizationName, logoBlob: null, revision: null, owner: null }, applied);
   }
 
   try {
@@ -279,6 +313,7 @@ export async function refreshCachedBranding(input: {
         organizationName,
         logoBlob: applied ? blob : null,
         revision: applied ? revision : null,
+        owner: applied ? input.owner : null,
       },
       applied,
     );
@@ -298,10 +333,11 @@ export async function refreshCachedBranding(input: {
           organizationName,
           logoBlob: applied ? existing.logoBlob : null,
           revision: applied ? retained.revision : null,
+          owner: applied ? input.owner : null,
         },
         applied,
       );
     }
-    return result({ organizationName, logoBlob: null, revision: null }, false);
+    return result({ organizationName, logoBlob: null, revision: null, owner: null }, false);
   }
 }

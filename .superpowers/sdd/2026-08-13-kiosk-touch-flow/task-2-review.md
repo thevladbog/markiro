@@ -159,3 +159,12 @@ also assert a current owner's matching broken revision is deleted.
   the two residual issues above.
 - Kiosk `tsc -p tsconfig.json --noEmit` — passed.
 - No new scope was reviewed.
+
+## Final disposition
+
+Both residual Important findings are resolved in the follow-up implementation:
+
+- Pairing validates the post-transport raw value directly and rejects every whitespace/framing byte that reaches the listener.
+- The displayed logo carries its immutable owner and revision through `Idle`; IndexedDB invalidation compares current config plus the exact stored owner/revision atomically, and `KioskShell` no longer substitutes the current owner for the failed display.
+
+Regression coverage includes whitespace/CRLF rejection, old-owner and old-revision no-op invalidation, exact current-logo deletion, captured `Idle` callback identity, fallback and object-URL revocation. Focused tests pass 58/58 and the complete kiosk suite passes 523/523.

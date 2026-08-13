@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, type AlertTone } from "@markiro/ui";
 import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
-import type { CachedBranding } from "../store/branding.js";
+import type { CachedBranding, DisplayedBranding } from "../store/branding.js";
 import { BadgeScanAnimation } from "../ui/BadgeScanAnimation.js";
 import { MarkiroLogo } from "../ui/MarkiroLogo.js";
 
@@ -47,7 +47,7 @@ const NOTICE: Record<IdleNotice, { key: string; tone: AlertTone }> = {
 
 export interface IdleProps {
   branding?: CachedBranding;
-  onBrandingError?: () => void;
+  onBrandingError?: (displayed: DisplayedBranding) => void;
   /**
    * Subscribes `listener` to the device's scans, and MAY return a teardown —
    * which this screen calls on unmount. The return is optional so a caller with
@@ -78,6 +78,10 @@ export interface IdleProps {
   onOpenSettings?: () => void;
 }
 
+interface DisplayedLogo extends DisplayedBranding {
+  url: string;
+}
+
 /**
  * The unattended screen a kiosk shows between sessions: an invitation, and a
  * badge scan that starts one.
@@ -93,7 +97,7 @@ export interface IdleProps {
  * whoever is looking. `ScannerSetup`'s test scan follows the same rule.
  */
 export function Idle({
-  branding = { organizationName: "Маркиро", logoBlob: null, revision: null },
+  branding = { organizationName: "Маркиро", logoBlob: null, revision: null, owner: null },
   onBrandingError,
   onScan,
   resolveBadge,
@@ -104,26 +108,32 @@ export function Idle({
   const [notice, setNotice] = useState<IdleNotice | null>(null);
   /** Whether a press is currently being held long enough to be worth saying so. */
   const [holding, setHolding] = useState(false);
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [displayedLogo, setDisplayedLogo] = useState<DisplayedLogo | null>(null);
   const liveLogoUrl = useRef<string | null>(null);
 
-  const releaseLogoUrl = useCallback(() => {
-    if (!liveLogoUrl.current) return;
-    URL.revokeObjectURL(liveLogoUrl.current);
-    liveLogoUrl.current = null;
+  const releaseLogoUrl = useCallback((url?: string | null) => {
+    const target = url ?? liveLogoUrl.current;
+    if (!target) return;
+    URL.revokeObjectURL(target);
+    if (liveLogoUrl.current === target) liveLogoUrl.current = null;
   }, []);
 
   useEffect(() => {
     releaseLogoUrl();
-    if (!branding.logoBlob || typeof URL.createObjectURL !== "function") {
-      setLogoUrl(null);
+    if (
+      !branding.logoBlob ||
+      !branding.owner ||
+      !branding.revision ||
+      typeof URL.createObjectURL !== "function"
+    ) {
+      setDisplayedLogo(null);
       return;
     }
     const next = URL.createObjectURL(branding.logoBlob);
     liveLogoUrl.current = next;
-    setLogoUrl(next);
-    return releaseLogoUrl;
-  }, [branding.logoBlob, releaseLogoUrl]);
+    setDisplayedLogo({ url: next, owner: branding.owner, revision: branding.revision });
+    return () => releaseLogoUrl(next);
+  }, [branding.logoBlob, branding.owner, branding.revision, releaseLogoUrl]);
 
   // The callbacks, held in a ref so the listener below can read the current
   // ones without listing them as dependencies. The `useRef` initializer already
@@ -274,15 +284,17 @@ export function Idle({
   return (
     <main className="kiosk-screen kiosk-idle kiosk-login">
       <div className="kiosk-login__brand">
-        {logoUrl ? (
+        {displayedLogo ? (
           <img
+            key={displayedLogo.url}
             className="kiosk-login__company-logo"
-            src={logoUrl}
+            src={displayedLogo.url}
             alt={branding.organizationName}
             onError={() => {
-              releaseLogoUrl();
-              setLogoUrl(null);
-              onBrandingError?.();
+              const wasCurrent = liveLogoUrl.current === displayedLogo.url;
+              releaseLogoUrl(displayedLogo.url);
+              if (wasCurrent) setDisplayedLogo(null);
+              onBrandingError?.({ owner: displayedLogo.owner, revision: displayedLogo.revision });
             }}
           />
         ) : (
