@@ -119,7 +119,11 @@ export async function waitForStationProductImageMirrors(): Promise<void> {
   await Promise.all([...activeImageMirrors]);
 }
 
-export async function readStationProductImage(exec: SqlExecutor, productId: string): Promise<Blob | null> {
+export async function readStationProductImage(
+  exec: SqlExecutor,
+  productId: string,
+  descriptor?: StationProductImageDescriptor,
+): Promise<Blob | null> {
   const rows = await exec.all<{ image_pointer_checksum: string | null }>(
     "SELECT image_pointer_checksum FROM product_mirror WHERE id = ?",
     [productId],
@@ -129,7 +133,10 @@ export async function readStationProductImage(exec: SqlExecutor, productId: stri
   try {
     const cache = await openImageCache();
     const response = await cache.match(cacheKey(productId, checksum));
-    return response ? await response.blob() : null;
+    if (!response) return null;
+    const blob = await response.blob();
+    if (descriptor) await validateBlob(blob, descriptor);
+    return blob;
   } catch {
     return null;
   }
