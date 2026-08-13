@@ -69,6 +69,7 @@ Identity: plan `docs/superpowers/plans/2026-08-13-kiosk-sscc-orders.md`, spec `d
 - GREEN: unit 5/5; DB e2e 72 explicitly skipped without a migrated schema; typecheck/lint/build/Prettier/diff-check passed.
 - Full API evidence: 1173 passes, 83 failures, 19 skips; shared dev DB journal stops at 0036 and lacks both 0037 columns, so PostgreSQL e2e is NOT green and the schema-drift failures are recorded as infrastructure coverage gap.
 - Task review: APPROVED by `sscc_mutation_review`; no Critical/Important/Minor findings; reviewer unit 5/5 and typecheck passed.
+- Integrated re-review found one Important gap: a freshly inserted already-displaced losing membership was invisible to the subsequent active-only changed-row update. Fix round 1 now returns fresh insert box IDs into revision dedupe; RED 1 failed/9 passed, GREEN focused 50/50 plus typecheck/lint/build/format/diff. Targeted DB e2e remains NOT GREEN on unapplied 0037 (1 failed/72 skipped). Commit: `fix(api): version fresh losing box memberships`.
 
 ### Task 4
 

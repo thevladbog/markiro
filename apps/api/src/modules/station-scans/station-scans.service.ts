@@ -10,7 +10,7 @@ import {
   sameScan,
   type OwnerRow,
 } from "./conflict-resolution";
-import type { MembershipRow } from "./box-membership";
+import { insertFreshDisplacedMemberships, type MembershipRow } from "./box-membership";
 import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
@@ -869,18 +869,12 @@ export class StationScansService {
               ).values(),
             ];
             if (displacedRows.length > 0) {
-              await tx
-                .insert(schema.boxItems)
-                .values(
-                  displacedRows.map((row) => ({
-                    tenantId,
-                    boxId: row.boxId,
-                    codeHash: row.codeHash,
-                    addedAt: row.addedAt,
-                    displacedAt: sql`now()`,
-                  })),
-                )
-                .onConflictDoNothing();
+              const freshDisplacedBoxIds = await insertFreshDisplacedMemberships(
+                tx,
+                tenantId,
+                displacedRows,
+              );
+              for (const boxId of freshDisplacedBoxIds) membershipChangedBoxIds.add(boxId);
 
               const displacedMemberships = await tx
                 .update(schema.boxItems)

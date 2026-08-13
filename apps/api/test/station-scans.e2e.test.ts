@@ -12,6 +12,7 @@ import { loadEnv } from "../src/env";
 import { partitionName, schema, type Db } from "@markiro/db";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { SsccService } from "../src/modules/sscc/sscc.service";
+import { BoxRegistryService } from "../src/modules/kiosk/box-registry.service";
 import { createTestStationDevice } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -1186,6 +1187,14 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       return row.registryVersion;
     }
 
+    async function tenantRegistryVersion(): Promise<bigint> {
+      const [row] = await db
+        .select({ currentVersion: schema.boxRegistryVersions.currentVersion })
+        .from(schema.boxRegistryVersions)
+        .where(eq(schema.boxRegistryVersions.tenantId, tenantId));
+      return row?.currentVersion ?? 0n;
+    }
+
     async function liveItemCount(deviceBoxId: string): Promise<number> {
       const boxId = await boxIdFor(deviceBoxId);
       const rows = await db
@@ -1491,6 +1500,33 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       const displaced = items.filter((i) => i.displacedAt !== null);
       expect(displaced).toHaveLength(1);
       expect(displaced[0]!.boxId).toBe(await boxIdFor("b2"));
+    });
+
+    it("versions a fresh losing membership in a closed box and exact redelivery is a no-op", async () => {
+      await postBatchAs("t1", [scan("aa", { boxId: null, scannedAt: "10:00:00" })]);
+      await postBatchAs("t2", [scan("bb", { boxId: "b2", scannedAt: "10:00:01" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b2", shiftId, terminalId: "t2", sscc: SSCC, closedAt: ISO, operatorId: null }],
+      );
+      const boxId = await boxIdFor("b2");
+      const boxBefore = await boxRegistryVersion(boxId);
+      const tenantBefore = await tenantRegistryVersion();
+      const losing = scan("aa", { boxId: "b2", scannedAt: "10:00:05" });
+
+      await postBatchAs("t2", [losing]);
+      const boxAfter = await boxRegistryVersion(boxId);
+      const tenantAfter = await tenantRegistryVersion();
+      expect(boxAfter).toBeGreaterThan(boxBefore);
+      expect(tenantAfter).toBeGreaterThan(tenantBefore);
+      const delta = await app!
+        .get(BoxRegistryService)
+        .list(tenantId, { since: tenantBefore.toString(), limit: 250 });
+      expect(delta.items).toContainEqual(expect.objectContaining({ kind: "remove", sscc: SSCC }));
+
+      await postBatchAs("t2", [losing]);
+      expect(await boxRegistryVersion(boxId)).toBe(boxAfter);
+      expect(await tenantRegistryVersion()).toBe(tenantAfter);
     });
 
     // Beyond the brief's own idempotency case (which replays the identical
