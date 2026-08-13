@@ -13,6 +13,9 @@ const labels = {
   invalid: "Invalid code",
   wrong_gtin: "Wrong product",
   unknown: "Rejected",
+  gtin: "GTIN",
+  serial: "Serial number",
+  crypto: "Crypto tail",
 };
 
 describe("work instruments", () => {
@@ -37,13 +40,29 @@ describe("work instruments", () => {
           verdict: "ok",
           scannedAt: "2026-08-06T10:00:00.000Z",
           codeSuffix: "…5Ab1",
+          identity: {
+            gtin14: "04600000000015",
+            serial: "SERIAL-42",
+            crypto: [
+              { ai: "91", value: "KEY" },
+              { ai: "92", value: "SIGNATURE" },
+              { ai: "93", value: "TAIL" },
+            ],
+            normalized: "(01)04600000000015 (21)SERIAL-42 (91)KEY (92)SIGNATURE (93)TAIL",
+          },
         }}
         labels={labels}
       />,
     );
     const status = screen.getByRole("status");
     expect(status.textContent).toContain("Accepted");
-    expect(status.textContent).toContain("…5Ab1");
+    expect(status.textContent).toContain("GTIN");
+    expect(status.textContent).toContain("04600000000015");
+    expect(status.textContent).toContain("Serial number");
+    expect(status.textContent).toContain("SERIAL-42");
+    expect(status.textContent).toContain("Crypto tail");
+    expect(status.textContent).toContain("(91) KEY · (92) SIGNATURE · (93) TAIL");
+    expect(status.textContent).not.toContain("\u001d");
   });
 
   it("handles absent, unknown, zero, and over-capacity boxes without invalid progress", () => {
@@ -149,6 +168,12 @@ describe("work instruments", () => {
           verdict: index === 0 ? "duplicate" : "ok",
           scannedAt: index === 0 ? null : `2026-08-06T10:0${index}:00.000Z`,
           codeSuffix: `…000${index}`,
+          identity: {
+            gtin14: "04600000000015",
+            serial: `SERIAL-${index}`,
+            crypto: [],
+            normalized: `(01)04600000000015 (21)SERIAL-${index}`,
+          },
         }))}
         labels={{ title: "Recent operations", empty: "No scans yet", invalidTime: "Time unknown" }}
         statusLabels={labels}
@@ -158,7 +183,9 @@ describe("work instruments", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(6);
     expect(screen.getByText("Duplicate")).toBeDefined();
     expect(screen.getByText("Time unknown")).toBeDefined();
-    expect(screen.queryByText("…0007")).toBeNull();
+    expect(screen.getAllByText("04600000000015")).toHaveLength(6);
+    expect(screen.getByText("SERIAL-0")).toBeDefined();
+    expect(screen.queryByText("SERIAL-7")).toBeNull();
   });
 
   it("exposes fixed floor footer actions through plain callbacks", () => {

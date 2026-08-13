@@ -1,6 +1,7 @@
 import { classifyScan } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
 import { insertException } from "./box-exceptions-mirror.js";
+import { presentKm, type KmPresentation } from "./scan-presentation.js";
 
 /** One row of the local scan journal — every scan, accepted or not. */
 export interface ScanEventRow {
@@ -41,6 +42,8 @@ export interface RecentOperation {
   scannedAt: string | null;
   /** A deliberately short suffix for operator recognition, never the full code. */
   codeSuffix: string | null;
+  /** Parsed operator-safe AI values, or null when the captured payload cannot be trusted. */
+  identity: KmPresentation | null;
 }
 
 const RECENT_OPERATION_LIMIT = 6;
@@ -80,6 +83,7 @@ export async function listRecentOperations(
       verdict: row.verdict,
       scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
       codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
+      identity: scan?.kind === "km" ? presentKm(scan.km) : null,
     };
   });
 }

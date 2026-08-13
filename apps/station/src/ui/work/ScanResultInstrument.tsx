@@ -7,6 +7,9 @@ export interface ScanResultLabels {
   invalid: string;
   wrong_gtin: string;
   unknown: string;
+  gtin: string;
+  serial: string;
+  crypto: string;
 }
 
 export interface ScanResultInstrumentProps {
@@ -41,7 +44,28 @@ export function ScanResultInstrument({
         <strong>
           {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
         </strong>
-        {operation?.codeSuffix ? <span>{operation.codeSuffix}</span> : null}
+        {operation?.identity ? (
+          <dl className="work-code-identity">
+            <div>
+              <dt>{labels.gtin}</dt>
+              <dd>{operation.identity.gtin14}</dd>
+            </div>
+            <div>
+              <dt>{labels.serial}</dt>
+              <dd>{operation.identity.serial}</dd>
+            </div>
+            {operation.identity.crypto.length > 0 ? (
+              <div>
+                <dt>{labels.crypto}</dt>
+                <dd>
+                  {operation.identity.crypto.map(({ ai, value }) => `(${ai}) ${value}`).join(" · ")}
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : operation?.codeSuffix ? (
+          <span>{operation.codeSuffix}</span>
+        ) : null}
       </div>
     </section>
   );

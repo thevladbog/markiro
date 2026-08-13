@@ -65,6 +65,32 @@ function failingExecOn(exec: SqlExecutor, pattern: RegExp): SqlExecutor {
 }
 
 describe("journal", () => {
+  it("presents a captured DataMatrix as labelled AI values without GS characters", async () => {
+    const exec = makeExec();
+    const km = "010460000000001521SERIAL-42\u001d91KEY\u001d92SIGNATURE\u001d93TAIL";
+    await appendScanEvent(exec, {
+      shiftId: "s1",
+      terminalId: "t1",
+      raw: km,
+      verdict: "ok",
+      scannedAt: "2026-08-13T10:00:00.000Z",
+      operatorId: "op1",
+    });
+
+    const recent = await listRecentOperations(exec, "s1");
+    expect(recent[0]?.identity).toEqual({
+      gtin14: "04600000000015",
+      serial: "SERIAL-42",
+      crypto: [
+        { ai: "91", value: "KEY" },
+        { ai: "92", value: "SIGNATURE" },
+        { ai: "93", value: "TAIL" },
+      ],
+      normalized: "(01)04600000000015 (21)SERIAL-42 (91)KEY (92)SIGNATURE (93)TAIL",
+    });
+    expect(recent[0]?.identity?.normalized).not.toContain("\u001d");
+  });
+
   it("returns at most six display-safe shift operations in deterministic newest-first order", async () => {
     const exec = makeExec();
     const times = [
@@ -80,7 +106,7 @@ describe("journal", () => {
     for (const [index, scannedAt] of times.entries()) {
       await appendScanEvent(exec, {
         ...EVENT,
-        raw: `0104600000000015215SECRET${index}`,
+        raw: `010460000000001521SERIAL-${index}`,
         scannedAt,
         verdict: index % 2 === 0 ? "ok" : "wrong_gtin",
       });
@@ -97,14 +123,21 @@ describe("journal", () => {
     expect(recent).toHaveLength(6);
     expect(recent.map((item) => item.scannedAt)).toEqual(times.slice(2).reverse());
     expect(recent.map((item) => item.codeSuffix)).toEqual([
-      "…RET7",
-      "…RET6",
-      "…RET5",
-      "…RET4",
-      "…RET3",
-      "…RET2",
+      "…IAL7",
+      "…IAL6",
+      "…IAL5",
+      "…IAL4",
+      "…IAL3",
+      "…IAL2",
     ]);
-    expect(JSON.stringify(recent)).not.toContain("SECRET");
+    expect(recent.map((item) => item.identity?.serial)).toEqual([
+      "SERIAL-7",
+      "SERIAL-6",
+      "SERIAL-5",
+      "SERIAL-4",
+      "SERIAL-3",
+      "SERIAL-2",
+    ]);
     expect(JSON.stringify(recent)).not.toContain("FOREIGN");
   });
 
@@ -129,13 +162,29 @@ describe("journal", () => {
     });
 
     expect(await listRecentOperations(exec, "s1")).toEqual([
-      { verdict: "invalid", scannedAt: null, codeSuffix: null },
+      { verdict: "invalid", scannedAt: null, codeSuffix: null, identity: null },
       {
         verdict: "duplicate",
         scannedAt: "2026-08-06T10:00:00.000Z",
         codeSuffix: "…COND",
+        identity: {
+          gtin14: "04600000000015",
+          serial: "5SECOND",
+          crypto: [],
+          normalized: "(01)04600000000015 (21)5SECOND",
+        },
       },
-      { verdict: "ok", scannedAt: "2026-08-06T10:00:00.000Z", codeSuffix: "…IRST" },
+      {
+        verdict: "ok",
+        scannedAt: "2026-08-06T10:00:00.000Z",
+        codeSuffix: "…IRST",
+        identity: {
+          gtin14: "04600000000015",
+          serial: "5FIRST",
+          crypto: [],
+          normalized: "(01)04600000000015 (21)5FIRST",
+        },
+      },
     ]);
   });
 
@@ -147,7 +196,17 @@ describe("journal", () => {
     });
 
     expect(await listRecentOperations(exec, "s1")).toEqual([
-      { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: "…5ABC" },
+      {
+        verdict: "ok",
+        scannedAt: EVENT.scannedAt,
+        codeSuffix: "…5ABC",
+        identity: {
+          gtin14: "04600000000015",
+          serial: "5ABC",
+          crypto: [{ ai: "93", value: "TAIL" }],
+          normalized: "(01)04600000000015 (21)5ABC (93)TAIL",
+        },
+      },
     ]);
   });
 
@@ -161,7 +220,9 @@ describe("journal", () => {
     });
 
     const recent = await listRecentOperations(exec, "s1");
-    expect(recent).toEqual([{ verdict: "invalid", scannedAt: EVENT.scannedAt, codeSuffix: null }]);
+    expect(recent).toEqual([
+      { verdict: "invalid", scannedAt: EVENT.scannedAt, codeSuffix: null, identity: null },
+    ]);
     expect(JSON.stringify(recent)).not.toContain("secret");
     expect(JSON.stringify(recent)).not.toContain("5678");
   });
@@ -175,7 +236,7 @@ describe("journal", () => {
     });
 
     expect(await listRecentOperations(exec, "s1")).toEqual([
-      { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: null },
+      { verdict: "ok", scannedAt: EVENT.scannedAt, codeSuffix: null, identity: null },
     ]);
   });
 

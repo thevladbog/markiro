@@ -28,7 +28,14 @@ export function RecentOperations({
               data-tone={operation.verdict === "ok" ? "ok" : "error"}
             >
               <strong>{operationStatusLabel(operation.verdict, statusLabels)}</strong>
-              <span>{operation.codeSuffix ?? "—"}</span>
+              {operation.identity ? (
+                <span className="work-recent__identity">
+                  <span>{operation.identity.gtin14}</span>
+                  <span>{operation.identity.serial}</span>
+                </span>
+              ) : (
+                <span>{operation.codeSuffix ?? "—"}</span>
+              )}
               <time dateTime={operation.scannedAt ?? undefined}>
                 {operation.scannedAt
                   ? new Intl.DateTimeFormat(locale, { timeStyle: "medium" }).format(

@@ -351,22 +351,36 @@ export function WorkScreen({
   const signalGeneration = useRef(0);
 
   /**
-   * Visual and audio feedback share this single tone argument so the two
-   * channels cannot drift. A generation check is deliberately retained in
+   * Blocking visual and audio feedback share this single tone argument so the
+   * two channels cannot drift. Callers that already played the tone can opt
+   * out of replaying it. A generation check is deliberately retained in
    * addition to clearTimeout: it also protects a newer verdict if an older
    * callback was already queued when the replacement signal arrived.
    */
-  function showTimedSignal(tone: SignalTone, title: string, detail?: string): void {
-    const generation = ++signalGeneration.current;
-    playSignalTone(tone, signalContext.current.sound);
-    setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
-    if (flashTimer.current) clearTimeout(flashTimer.current);
-    flashTimer.current = setTimeout(() => {
-      if (signalGeneration.current !== generation) return;
-      flashTimer.current = null;
-      setSignal(null);
-    }, FLASH_MS[tone]);
-  }
+  const showTimedSignal = useCallback(
+    (tone: SignalTone, title: string, detail?: string, options?: { playSound?: boolean }): void => {
+      const generation = ++signalGeneration.current;
+      if (options?.playSound !== false) playSignalTone(tone, signalContext.current.sound);
+      setSignal({ tone, title, ...(detail === undefined ? {} : { detail }) });
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+      flashTimer.current = setTimeout(() => {
+        if (signalGeneration.current !== generation) return;
+        flashTimer.current = null;
+        setSignal(null);
+      }, FLASH_MS[tone]);
+    },
+    [],
+  );
+
+  const publishVerdict = useCallback(
+    (verdict: ScanVerdict, title: string, detail?: string): void => {
+      const tone = toneOf(verdict);
+      playSignalTone(tone, signalContext.current.sound);
+      if (tone === "ok") return;
+      showTimedSignal(tone, title, detail, { playSound: false });
+    },
+    [showTimedSignal],
+  );
 
   /**
    * Box recovery can finish inside the accepted scan's process callback.
@@ -801,7 +815,6 @@ export function WorkScreen({
         },
         onOutcome(outcome) {
           const { t: liveT, language, onScanRecorded: liveOnScanRecorded } = live.current;
-          const tone = toneOf(outcome.verdict);
           if (outcome.verdict.status === "ok") setAccepted((n) => n + 1);
           else setRejected((n) => n + 1);
 
@@ -822,7 +835,7 @@ export function WorkScreen({
                   }).format(new Date(outcome.firstSeen)),
                 });
 
-          showTimedSignal(tone, title, detail);
+          publishVerdict(outcome.verdict, title, detail);
 
           // Nudged last, strictly after the operator-visible signal is
           // rendered: `process()` above already wrote this outcome's outbox
@@ -851,7 +864,7 @@ export function WorkScreen({
           showTimedSignal("error", liveT("signal.systemError"));
         },
       }),
-    [exec, shiftId, terminalId, expectedGtin14],
+    [exec, shiftId, terminalId, expectedGtin14, publishVerdict, showTimedSignal],
   );
 
   function handleUndo(): Promise<void> {
@@ -1031,11 +1044,14 @@ export function WorkScreen({
 
   const statusLabels: ScanResultLabels = {
     waiting: t("work.waiting"),
-    ok: t("work.accepted"),
+    ok: t("signal.ok"),
     duplicate: t("signal.duplicate"),
     invalid: t("signal.wrongCode"),
     wrong_gtin: t("signal.wrongGtin"),
     unknown: t("work.rejected"),
+    gtin: t("work.gtin"),
+    serial: t("work.serial"),
+    crypto: t("work.crypto"),
   };
   const locale = i18n.language.startsWith("ru") ? "ru-RU" : "en-US";
   const blockingState: WorkBlockingState | null = noSerials ? "serial-exhaustion" : null;

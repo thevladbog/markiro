@@ -16,6 +16,7 @@ import {
   type ScanSource,
 } from "../src/lib/scan-source.js";
 import type { ScanQueue } from "../src/lib/scan-queue.js";
+import * as signalSound from "../src/lib/signal-sound.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
@@ -400,37 +401,32 @@ describe("WorkScreen", () => {
     expect(await screen.findByText("1")).toBeDefined();
   });
 
-  it("announces accepted scans with a title instead of an icon or color alone", async () => {
+  it("presents accepted scans locally while retaining their success sound", async () => {
     const source = manualSource();
+    const playSignalToneSpy = vi.spyOn(signalSound, "playSignalTone");
     renderWorkScreen({ source });
 
     act(() => source.emit(KM));
 
-    const alert = await screen.findByRole("alert");
-    expect(alert.dataset.tone).toBe("ok");
-    expect(alert.textContent).toContain("ACCEPTED");
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect((await screen.findByRole("status")).textContent).toContain("ACCEPTED");
+    expect(playSignalToneSpy).toHaveBeenCalledWith("ok", expect.anything());
   });
 
-  it.each([
-    { tone: "ok", raw: KM, duration: 350 },
-    { tone: "error", raw: "not-a-code", duration: 1200 },
-  ] as const)(
-    "keeps the $tone verdict visible for exactly $duration ms",
-    async ({ tone, raw, duration }) => {
-      vi.useFakeTimers();
-      const source = manualSource();
-      renderWorkScreen({ source });
+  it("keeps an error verdict visible for exactly 1200 ms", async () => {
+    vi.useFakeTimers();
+    const source = manualSource();
+    renderWorkScreen({ source });
 
-      act(() => source.emit(raw));
-      await act(async () => vi.advanceTimersByTimeAsync(0));
-      expect(screen.getByRole("alert").dataset.tone).toBe(tone);
+    act(() => source.emit("not-a-code"));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("error");
 
-      await act(async () => vi.advanceTimersByTimeAsync(duration - 1));
-      expect(screen.getByRole("alert").dataset.tone).toBe(tone);
-      await act(async () => vi.advanceTimersByTimeAsync(1));
-      expect(screen.queryByRole("alert")).toBeNull();
-    },
-  );
+    await act(async () => vi.advanceTimersByTimeAsync(1199));
+    expect(screen.getByRole("alert").dataset.tone).toBe("error");
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
 
   it("keeps a duplicate verdict for exactly 900 ms", async () => {
     vi.useFakeTimers();
@@ -439,7 +435,7 @@ describe("WorkScreen", () => {
 
     act(() => source.emit(KM));
     await act(async () => vi.advanceTimersByTimeAsync(0));
-    await act(async () => vi.advanceTimersByTimeAsync(350));
+    expect(screen.queryByRole("alert")).toBeNull();
     act(() => source.emit(KM));
     await act(async () => vi.advanceTimersByTimeAsync(0));
     expect(screen.getByRole("alert").dataset.tone).toBe("duplicate");
@@ -458,10 +454,12 @@ describe("WorkScreen", () => {
 
     act(() => source.emit(KM));
     await act(async () => vi.advanceTimersByTimeAsync(0));
-    expect(screen.getByRole("alert").dataset.tone).toBe("ok");
-    const staleCallback = timeoutSpy.mock.calls.find(([, delay]) => delay === 350)?.[0];
+    act(() => source.emit(KM));
+    await act(async () => vi.advanceTimersByTimeAsync(0));
+    expect(screen.getByRole("alert").dataset.tone).toBe("duplicate");
+    const staleCallback = timeoutSpy.mock.calls.find(([, delay]) => delay === 900)?.[0];
     expect(staleCallback).toBeTypeOf("function");
-    await act(async () => vi.advanceTimersByTimeAsync(349));
+    await act(async () => vi.advanceTimersByTimeAsync(899));
 
     act(() => source.emit("not-a-code"));
     await act(async () => vi.advanceTimersByTimeAsync(0));
