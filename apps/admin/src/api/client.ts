@@ -24,6 +24,7 @@ export class ApiRequestError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const isMultipart = typeof FormData !== "undefined" && init.body instanceof FormData;
   const response = await fetch(`${API_BASE}${path}`, {
     ...init,
     // The admin app is always served from the same origin the Vite proxy
@@ -31,10 +32,9 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
     // Better Auth session cookie -- credentials are set explicitly here
     // anyway so this wrapper's behavior doesn't depend on that default.
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...init.headers,
-    },
+    headers: isMultipart
+      ? init.headers
+      : { "Content-Type": "application/json", ...init.headers },
   });
 
   if (!response.ok) {

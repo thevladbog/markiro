@@ -21,7 +21,9 @@ import {
   type CreateProductInput,
   type GtinCheckResult,
   type ProductStatus,
+  type ProductImageDescriptor,
 } from "./api.js";
+import { productImageUrl } from "./api.js";
 
 /**
  * Client-side mirror of the server's zod schema
@@ -94,12 +96,15 @@ export interface ProductFormProps {
    * GUID today.
    */
   externalRef?: string | null;
+  image?: ProductImageDescriptor | null;
+  imageBusy?: boolean;
+  onDeleteImage?: () => void | Promise<void>;
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
   submissionError?: string | null;
   onDirtyChange?: (dirty: boolean) => void;
-  onSubmit: (input: CreateProductInput) => void | Promise<void>;
+  onSubmit: (input: CreateProductInput, image?: File | null) => void | Promise<void>;
   onClose: (reason: OverlayDismissReason) => void;
 }
 
@@ -186,6 +191,8 @@ export function ProductForm({
   // captured when the row's "Изменить" was clicked, per `CatalogPage`) to
   // catch up with the invalidated query on its own.
   const [linkedExternalRef, setLinkedExternalRef] = useState<string | null>(externalRef ?? null);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const {
     register,
@@ -218,6 +225,16 @@ export function ProductForm({
   useEffect(() => {
     setLinkedExternalRef(externalRef ?? null);
   }, [externalRef]);
+
+  useEffect(() => {
+    if (!selectedImage) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(selectedImage);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [selectedImage]);
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -256,7 +273,7 @@ export function ProductForm({
   }, [gtinValue]);
 
   const submit = handleSubmit(async (values) => {
-    await onSubmit(toCreateInput(values));
+    await onSubmit(toCreateInput(values), selectedImage);
   });
 
   const counterpartyOptions: SelectOption[] = [
@@ -404,6 +421,31 @@ export function ProductForm({
             {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
             {...register("egaisCode")}
           />
+        </section>
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
+          <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
+          <div className="mk-product-image-control">
+            {previewUrl || (mode === "edit" && productId && image)
+              ? <img
+                  src={previewUrl ?? productImageUrl({ id: productId!, image }) ?? undefined}
+                  alt={t("pages.catalog.form.imageAlt")}
+                  className="mk-product-image-control__preview"
+                />
+              : <div className="mk-product-image-control__empty">{t("pages.catalog.form.imageEmpty")}</div>}
+            <Input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              label={t("pages.catalog.form.imageLabel")}
+              disabled={submitting || imageBusy}
+              onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
+            />
+            {mode === "edit" && image && onDeleteImage ? (
+              <Button type="button" size="compact" variant="secondary" loading={imageBusy} disabled={submitting} onClick={() => void onDeleteImage()}>
+                {t("pages.catalog.form.imageRemove")}
+              </Button>
+            ) : null}
+            <p className="mk-product-image-control__hint">{t("pages.catalog.form.imageHint")}</p>
+          </div>
         </section>
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-defaults">
           <h3 id="product-form-defaults">{t("pages.catalog.form.sections.defaults")}</h3>

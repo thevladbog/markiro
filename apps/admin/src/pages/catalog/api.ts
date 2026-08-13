@@ -13,6 +13,14 @@ import { apiFetch } from "../../api/client.js";
 
 export type ProductStatus = "draft" | "active";
 
+export interface ProductImageDescriptor {
+  checksum: string;
+  contentType: "image/webp";
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
 /** Mirrors `apps/api/src/modules/products/dto.ts`'s `ProductDto`. */
 export interface ProductDto {
   id: string;
@@ -34,6 +42,7 @@ export interface ProductDto {
   defaultCounterpartyId: string | null;
   defaultLabelTemplateId: string | null;
   createdAt: string;
+  image?: ProductImageDescriptor | null;
 }
 
 /**
@@ -119,6 +128,20 @@ function postGtinCheck(gtin: string): Promise<GtinCheckResult> {
   });
 }
 
+function uploadProductImage(id: string, file: File): Promise<ProductDto> {
+  const body = new FormData();
+  body.append("image", file, file.name || "product-image");
+  return apiFetch<ProductDto>(`/products/${id}/image`, { method: "POST", body });
+}
+
+function deleteProductImage(id: string): Promise<void> {
+  return apiFetch<void>(`/products/${id}/image`, { method: "DELETE" });
+}
+
+export function productImageUrl(product: Pick<ProductDto, "id" | "image">): string | null {
+  return product.image ? `${API_BASE}/products/${product.id}/image/${product.image.checksum}` : null;
+}
+
 /** `GET /products` -- the active tenant's catalog, optionally filtered by search/status. */
 export function useProducts(params: ListProductsParams = {}): UseQueryResult<ProductDto[]> {
   return useQuery({
@@ -171,6 +194,30 @@ export function useDeleteProduct(): UseMutationResult<void, Error, string> {
  */
 export function useGtinCheck(): UseMutationResult<GtinCheckResult, Error, string> {
   return useMutation({ mutationFn: postGtinCheck });
+}
+
+export function useUploadProductImage(): UseMutationResult<
+  ProductDto,
+  Error,
+  { id: string; file: File }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }) => uploadProductImage(id, file),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    },
+  });
+}
+
+export function useDeleteProductImage(): UseMutationResult<void, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: deleteProductImage,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PRODUCTS_QUERY_KEY });
+    },
+  });
 }
 
 function deleteExternalLink(id: string): Promise<void> {

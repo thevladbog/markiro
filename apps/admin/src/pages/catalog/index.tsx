@@ -27,7 +27,7 @@ import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
 import { useLabelTemplates } from "../labels/api.js";
-import { useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
+import { productImageUrl, useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
 import type { CatalogPanelContext, CatalogPanelLocationState } from "./ProductPanelRoute.js";
 import "./catalog.css";
 
@@ -214,6 +214,11 @@ export function CatalogPage() {
   const columns: TableColumn<ProductDto>[] = useMemo(
     () => [
       { key: "gtin14", title: t("pages.catalog.table.gtin"), mono: true },
+      {
+        key: "image",
+        title: t("pages.catalog.table.image"),
+        render: (row) => row.image ? <img src={productImageUrl(row) ?? undefined} alt={row.name} width={48} height={48} style={{ objectFit: "cover", borderRadius: 6 }} /> : <span aria-label={t("pages.catalog.table.noImage")}>—</span>,
+      },
       { key: "name", title: t("pages.catalog.table.name") },
       {
         key: "productGroup",

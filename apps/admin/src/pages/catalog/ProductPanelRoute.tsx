@@ -11,6 +11,8 @@ import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
   useCreateProduct,
   useUpdateProduct,
+  useUploadProductImage,
+  useDeleteProductImage,
   type CreateProductInput,
   type ProductDto,
 } from "./api.js";
@@ -83,8 +85,9 @@ function PanelState({ mode }: { mode: "create" | "edit" }) {
 function CreateProductPanel() {
   const { t, context, loading, failed, close } = usePanelContext();
   const mutation = useCreateProduct();
+  const imageMutation = useUploadProductImage();
   const [error, setError] = useState<string | null>(null);
-  const guard = useRoutePanelGuard(close, mutation.isPending);
+  const guard = useRoutePanelGuard(close, mutation.isPending || imageMutation.isPending);
   if (loading || failed) return <PanelState mode="create" />;
   return (
     <>
@@ -92,14 +95,15 @@ function CreateProductPanel() {
         mode="create"
         counterparties={context.counterparties}
         labelTemplates={context.labelTemplates}
-        submitting={mutation.isPending}
+        submitting={mutation.isPending || imageMutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}
         onClose={guard.requestClose}
-        onSubmit={async (input) => {
+        onSubmit={async (input, image) => {
           try {
             setError(null);
-            await mutation.mutateAsync(input);
+            const created = await mutation.mutateAsync(input);
+            if (image) await imageMutation.mutateAsync({ id: created.id, file: image });
             toast("ok", t("pages.catalog.toasts.createSuccess"));
             guard.finish();
           } catch (cause) {
@@ -131,8 +135,13 @@ function EditProductPanel() {
   const { productId } = useParams();
   const { t, context, loading, failed, close } = usePanelContext();
   const mutation = useUpdateProduct();
+  const imageMutation = useUploadProductImage();
+  const deleteImageMutation = useDeleteProductImage();
   const [error, setError] = useState<string | null>(null);
-  const guard = useRoutePanelGuard(close, mutation.isPending);
+  const guard = useRoutePanelGuard(
+    close,
+    mutation.isPending || imageMutation.isPending || deleteImageMutation.isPending,
+  );
   const product = context.products.find((item) => item.id === productId);
   const initialValues = useMemo<ProductFormValues | undefined>(
     () =>
@@ -185,14 +194,26 @@ function EditProductPanel() {
         externalRef={product.externalRef}
         counterparties={context.counterparties}
         labelTemplates={context.labelTemplates}
-        submitting={mutation.isPending}
+        submitting={mutation.isPending || imageMutation.isPending}
+        image={product.image}
+        imageBusy={deleteImageMutation.isPending}
+        onDeleteImage={async () => {
+          try {
+            setError(null);
+            await deleteImageMutation.mutateAsync(product.id);
+            toast("ok", t("pages.catalog.form.imageRemoveSuccess"));
+          } catch (cause) {
+            setError(cause instanceof ApiRequestError ? cause.message : t("pages.catalog.form.imageError"));
+          }
+        }}
         submissionError={error}
         onDirtyChange={guard.setDirty}
         onClose={guard.requestClose}
-        onSubmit={async (input: CreateProductInput) => {
+        onSubmit={async (input: CreateProductInput, image) => {
           try {
             setError(null);
             await mutation.mutateAsync({ id: product.id, input });
+            if (image) await imageMutation.mutateAsync({ id: product.id, file: image });
             toast("ok", t("pages.catalog.toasts.updateSuccess"));
             guard.finish();
           } catch (cause) {

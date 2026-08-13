@@ -426,6 +426,8 @@
       "deleteConfirmAction": "Delete",
       "table": {
         "gtin": "GTIN",
+        "image": "Photo",
+        "noImage": "No photo",
         "name": "Name",
         "productGroup": "Group",
         "boxCapacity": "Per box",
@@ -459,8 +461,16 @@
         "sections": {
           "basic": "Basic",
           "aggregation": "Aggregation and price",
-          "defaults": "Defaults"
+          "defaults": "Defaults",
+          "image": "Product photo"
         },
+        "imageLabel": "Product photo",
+        "imageAlt": "Product photo",
+        "imageEmpty": "No photo added",
+        "imageHint": "JPEG, PNG, or WebP up to 5 MB",
+        "imageRemove": "Remove photo",
+        "imageRemoveSuccess": "Photo removed",
+        "imageError": "Could not change the photo. The current photo was preserved.",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",

@@ -426,6 +426,8 @@
       "deleteConfirmAction": "Удалить",
       "table": {
         "gtin": "ГТИН",
+        "image": "Фото",
+        "noImage": "Фото нет",
         "name": "Название",
         "productGroup": "Группа",
         "boxCapacity": "В коробе",
@@ -459,8 +461,16 @@
         "sections": {
           "basic": "Основное",
           "aggregation": "Агрегация и цена",
-          "defaults": "Значения по умолчанию"
+          "defaults": "Значения по умолчанию",
+          "image": "Фотография"
         },
+        "imageLabel": "Фотография продукта",
+        "imageAlt": "Фотография продукта",
+        "imageEmpty": "Фотография не добавлена",
+        "imageHint": "JPEG, PNG или WebP, до 5 МБ",
+        "imageRemove": "Удалить фотографию",
+        "imageRemoveSuccess": "Фотография удалена",
+        "imageError": "Не удалось изменить фотографию. Текущая фотография сохранена.",
         "draftBanner": "Черновик — заполните группу и вместимости, чтобы запускать смены",
         "gtinOwnerHint": "Владелец ГТИН — {{name}}",
         "applyCounterparty": "Подставить контрагента",
