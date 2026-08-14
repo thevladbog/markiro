@@ -86,7 +86,7 @@
 		}
 
 		@stationShift {
-			path_regexp stationShift ^/shifts/[^/]+/(open|bundle)$
+			path_regexp stationShift ^/shifts/[^/]+/(open|bundle|reference-bundle)$
 			header X-Api-Key *
 		}
 		handle @stationShift {
@@ -96,7 +96,7 @@
 		}
 
 		@stationShiftPreflight {
-			path_regexp stationShiftPreflight ^/shifts/[^/]+/(open|bundle)$
+			path_regexp stationShiftPreflight ^/shifts/[^/]+/(open|bundle|reference-bundle)$
 			method OPTIONS
 		}
 		handle @stationShiftPreflight {

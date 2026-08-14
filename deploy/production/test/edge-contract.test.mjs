@@ -404,8 +404,8 @@ function assertAuthorityContract(adapted, { alb }) {
     ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
     ["/shifts", "/products", "/products/gtin-check"],
     ["/shifts", "/products", "/products/gtin-check"],
-    ["^/shifts/[^/]+/(open|bundle)$"],
-    ["^/shifts/[^/]+/(open|bundle)$"],
+    ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
+    ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
   ];
   const adminProxies = proxyRoutes(admin);
   const adminReverseProxies = nestedObjects(admin).filter(
@@ -719,11 +719,17 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
       path: "/shifts/shift-1/bundle",
       headers: { "x-api-key": "station-test-key" },
     },
+    {
+      method: "GET",
+      path: "/shifts/shift-1/reference-bundle",
+      headers: { "x-api-key": "station-test-key" },
+    },
     { method: "OPTIONS", path: "/shifts" },
     { method: "OPTIONS", path: "/products" },
     { method: "OPTIONS", path: "/products/gtin-check" },
     { method: "OPTIONS", path: "/shifts/shift-1/open" },
     { method: "OPTIONS", path: "/shifts/shift-1/bundle" },
+    { method: "OPTIONS", path: "/shifts/shift-1/reference-bundle" },
   ]) {
     const selected = selectedAdaptedRoute(routeTable, request);
     assert.equal(

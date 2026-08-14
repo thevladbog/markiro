@@ -12,6 +12,11 @@ full via `GET /shifts/:id/bundle` into a local SQLite mirror
 sign in **offline** by PIN/badge, verified locally against `operators_mirror`
 (PBKDF2 PHC verifiers) — a PIN is never sent to the server.
 
+Interrupted-print recovery uses `GET /shifts/:id/reference-bundle` instead.
+That response refreshes the mirrored shift/product/template references with
+`sscc: null`; it never allocates server serial state and the recovery mirror
+never calls the device's local `addRange` path.
+
 ## Dev run (macOS)
 
 ```bash

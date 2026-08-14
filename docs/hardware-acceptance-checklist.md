@@ -70,8 +70,8 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
       `pnpm verify:station-production-cors` against production and record a
       PASS. The live preflight must prove the exact Windows `Origin` and Station
       capability header for every Station route at
-      `https://admin.markiro.app` (pairing, roster, shifts and their open/bundle
-      actions, product lookup, and GTIN check); CI or a browser run is not a
+      `https://admin.markiro.app` (pairing, roster, shifts and their
+      open/bundle/reference-bundle actions, product lookup, and GTIN check); CI or a browser run is not a
       substitute.
 - [ ] Only after the preceding preflight passes, run `Publish station beta` from
       `main` for the approved commit SHA. Record the workflow URL and result;
