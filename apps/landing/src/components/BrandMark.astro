@@ -11,7 +11,7 @@ const word = locale === "ru" ? "маркиро" : "MARKIRO";
 const modules = ["0-0", "0-2", "1-1", "2-0", "2-2", "3-0", "3-2", "4-1"];
 ---
 
-<span class="brand-mark" aria-label={label}>
+<span class="brand-mark" aria-label={label} translate="no">
   <span class="brand-mark__symbol" data-brand-symbol aria-hidden="true">
     {modules.map((position, index) => (
       <span

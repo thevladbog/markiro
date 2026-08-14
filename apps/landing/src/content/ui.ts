@@ -5,7 +5,7 @@ const RU = {
     breadcrumbsLabel: "Хлебные крошки",
     discussTask: "Обсудить задачу",
     footerLabel: "Ссылки в подвале",
-    homeLabel: "Markiro, на главную страницу",
+    homeLabel: "Маркиро, на главную страницу",
     menuClose: "Закрыть меню",
     menuOpen: "Открыть меню",
     nav: {

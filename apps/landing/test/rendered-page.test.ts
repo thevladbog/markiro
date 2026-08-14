@@ -78,6 +78,29 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("keeps localized brand links accessible and prevents wordmark translation", () => {
+    const ruDocument = documents.get("/");
+    const enDocument = documents.get("/en/");
+    const ruBrandLinks = [
+      ruDocument?.querySelector("header .landing-header__brand"),
+      ruDocument?.querySelector("footer .landing-footer__inner > a"),
+    ];
+    const enBrandLinks = [
+      enDocument?.querySelector("header .landing-header__brand"),
+      enDocument?.querySelector("footer .landing-footer__inner > a"),
+    ];
+
+    for (const brandLink of ruBrandLinks) {
+      expect(brandLink?.getAttribute("aria-label")).toBe("Маркиро, на главную страницу");
+      expect(brandLink?.querySelector(".brand-mark")?.getAttribute("translate")).toBe("no");
+    }
+
+    for (const brandLink of enBrandLinks) {
+      expect(brandLink?.getAttribute("aria-label")).toBe("Markiro home page");
+      expect(brandLink?.querySelector(".brand-mark")?.getAttribute("translate")).toBe("no");
+    }
+  });
+
   it("activates the shared dark design tokens", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
