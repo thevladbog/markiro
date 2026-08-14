@@ -25,6 +25,9 @@ export function WindowModeControl({
   const actionLabel = snapshot.pending
     ? t("windowMode.pending")
     : t(snapshot.mode === "locked" ? "windowMode.exit" : "windowMode.enter");
+  const actionText = snapshot.pending
+    ? t("windowMode.pendingShort")
+    : t(snapshot.mode === "locked" ? "windowMode.exitShort" : "windowMode.enterShort");
 
   useEffect(() => {
     if (disabled) setConfirmExit(false);
@@ -57,7 +60,7 @@ export function WindowModeControl({
           />
         }
       >
-        {actionLabel}
+        {actionText}
       </Button>
 
       {snapshot.error ? (

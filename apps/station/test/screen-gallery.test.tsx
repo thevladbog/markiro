@@ -12,6 +12,7 @@ import { StationScreenGallery } from "../src/dev/StationScreenGallery.js";
 import { PERSISTENT_GALLERY_STATE_IDS } from "../src/ui/persistent-station-states.js";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   vi.unstubAllGlobals();
 });
@@ -121,6 +122,41 @@ describe("development screen gallery", () => {
     expect(within(box).getByRole("button", { name: "Очистить короб" })).toBeDefined();
 
     expect(view.container.querySelectorAll(".work-recent li")).toHaveLength(6);
+  });
+
+  it("renders the work fixture with a real locally cached product image", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:gallery-product");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
+
+    const image = await screen.findByRole("img", { name: "Тестовый товар А" });
+    expect(image.getAttribute("src")).toBe("blob:gallery-product");
+    expect(image.classList.contains("work-scan-result__image")).toBe(true);
+  });
+
+  it("renders active work with the production header controls before collapse", async () => {
+    render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
+
+    const header = screen.getByRole("banner", { name: "Состояние станции" });
+    const update = within(header).getByRole("button", {
+      name: "! Доступно критическое обновление 0.1.0-beta.123",
+    });
+    const operator = within(header).getByRole("button", { name: "Сменить оператора" });
+    const windowMode = await within(header).findByRole("button", {
+      name: "Выйти из полноэкранного режима",
+    });
+    const collapse = within(header).getByRole("button", {
+      name: "Свернуть панель состояния",
+    });
+
+    for (const action of [update, operator, windowMode, collapse]) {
+      expect(action.classList.contains("mk-btn--floor")).toBe(true);
+      expect(action.classList.contains("mk-btn--secondary")).toBe(true);
+      expect(action.style.height).toBe("var(--control-floor)");
+    }
+    expect(update.textContent).toBe("!Обновления");
+    expect(windowMode.textContent).toContain("Оконный режим");
   });
 
   it.each([

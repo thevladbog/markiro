@@ -10,10 +10,15 @@ export interface WorkFooterProps {
 
 export function WorkFooter({ labels, onExceptions, onPause, onClose }: WorkFooterProps) {
   return (
-    <FloorFooter ariaLabel={`${labels.exceptions}, ${labels.pause}, ${labels.close}`}>
+    <FloorFooter
+      className="work-footer"
+      ariaLabel={`${labels.exceptions}, ${labels.pause}, ${labels.close}`}
+    >
       <Button
         size="floor"
         variant="secondary"
+        className="work-footer__action"
+        style={{ width: "220px", maxWidth: "100%" }}
         onClick={(event) => {
           onExceptions();
           event.currentTarget.blur();
@@ -23,7 +28,9 @@ export function WorkFooter({ labels, onExceptions, onPause, onClose }: WorkFoote
       </Button>
       <Button
         size="floor"
-        variant="secondary"
+        variant="warning-outline"
+        className="work-footer__action"
+        style={{ width: "220px", maxWidth: "100%" }}
         onClick={(event) => {
           onPause();
           event.currentTarget.blur();
@@ -33,7 +40,9 @@ export function WorkFooter({ labels, onExceptions, onPause, onClose }: WorkFoote
       </Button>
       <Button
         size="floor"
-        variant="secondary"
+        variant="destructive-outline"
+        className="work-footer__action"
+        style={{ width: "220px", maxWidth: "100%" }}
         onClick={(event) => {
           onClose();
           event.currentTarget.blur();

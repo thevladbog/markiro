@@ -22,6 +22,7 @@ import {
   type GalleryLocale,
   type GalleryRequest,
 } from "./gallery-fixtures.js";
+import { galleryProductImage, galleryProductImageExecutor } from "./gallery-product-image.js";
 
 export interface StationScreenGalleryProps {
   request: GalleryRequest;
@@ -46,6 +47,7 @@ const COPY = {
     longOperator: "Александрова-Романовская Екатерина Владимировна",
     longShift: "Смена производства маркированной продукции ДЕМО-01",
     update: "Доступно критическое обновление 0.1.0-beta.123",
+    updateShort: "Обновления",
     changeOperator: "Сменить оператора",
   },
   en: {
@@ -61,6 +63,7 @@ const COPY = {
     longOperator: "Alexandria Montgomery-Wellington the Third",
     longShift: "Marked goods production shift DEMO-01",
     update: "Critical update 0.1.0-beta.123 is available",
+    updateShort: "Updates",
     changeOperator: "Change operator",
   },
 } as const;
@@ -75,35 +78,36 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
-  const headerControls =
-    headerVariant === null
-      ? null
-      : {
-          update: {
-            severity: "urgent" as const,
-            glyph: "!" as const,
-            available: true,
-            label: copy.update,
-          },
-          operatorControl: (
-            <Button size="floor" variant="secondary">
-              {copy.changeOperator}
-            </Button>
-          ),
-          windowControl: (
-            <WindowModeControl
-              snapshot={{
-                mode: "locked",
-                pending: false,
-                error: headerVariant === "window-error" ? "exit" : null,
-              }}
-              activeShift
-              onEnter={() => undefined}
-              onExit={() => undefined}
-              onDismissError={() => undefined}
-            />
-          ),
-        };
+  const withActiveShiftControls = headerVariant !== null || fixture.kind === "work";
+  const headerControls = !withActiveShiftControls
+    ? null
+    : {
+        update: {
+          severity: "urgent" as const,
+          glyph: "!" as const,
+          available: true,
+          label: copy.update,
+          shortLabel: copy.updateShort,
+        },
+        operatorControl: (
+          <Button size="floor" variant="secondary">
+            {copy.changeOperator}
+          </Button>
+        ),
+        windowControl: (
+          <WindowModeControl
+            snapshot={{
+              mode: "locked",
+              pending: false,
+              error: headerVariant === "window-error" ? "exit" : null,
+            }}
+            activeShift
+            onEnter={() => undefined}
+            onExit={() => undefined}
+            onDismissError={() => undefined}
+          />
+        ),
+      };
   return (
     <div
       className="station-gallery-capture"
@@ -112,16 +116,17 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
       data-gallery-locale={request.locale}
     >
       <FloorShell
-        stationName={headerControls ? copy.longStation : copy.station}
-        lineName={headerControls ? copy.longLine : copy.line}
-        operatorName={headerControls ? copy.longOperator : copy.operator}
-        shiftLabel={headerControls ? copy.longShift : copy.shift}
+        stationName={headerVariant ? copy.longStation : copy.station}
+        lineName={headerVariant ? copy.longLine : copy.line}
+        operatorName={headerVariant ? copy.longOperator : copy.operator}
+        shiftLabel={headerVariant ? copy.longShift : copy.shift}
         serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
         syncStuck={syncVariant === "stuck"}
         conflicts={fixture.kind === "conflicts" ? 4 : 0}
+        statusBarCollapsible={fixture.kind === "work"}
         {...(headerControls
           ? {
               update: headerControls.update,
@@ -529,6 +534,9 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
         <div className="work-screen__instruments">
           <div className="work-screen__primary">
             <ScanResultInstrument
+              exec={galleryProductImageExecutor}
+              productId="gallery-product-dicky-crest"
+              image={galleryProductImage}
               productName={ru ? "Тестовый товар А" : "Sample product A"}
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
               operation={operations[0] ?? null}

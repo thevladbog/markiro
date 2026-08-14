@@ -1,5 +1,7 @@
 import {
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -74,6 +76,17 @@ export class TenantGuard implements CanActivate {
       const result = await this.auth.api.verifyApiKey({
         body: { key: apiKey, configId: "station" },
       });
+      // Better Auth reports a live key's temporary quota exhaustion as an
+      // invalid verification result with RATE_LIMITED. Do not collapse that
+      // into 401: Station treats 401 as durable credential revocation and
+      // intentionally clears the rejected key. A 429 keeps the device paired
+      // and lets its offline-first retry path recover after the window resets.
+      if (!result.valid && result.error?.code === "RATE_LIMITED") {
+        throw new HttpException(
+          "Station credential temporarily rate limited",
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
       if (result.valid && result.key) {
         req.tenantId = result.key.referenceId;
         req.authKind = "station";

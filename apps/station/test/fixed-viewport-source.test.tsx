@@ -116,6 +116,26 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
+  it("gives box progress most of the work surface at 1024px without hiding the product photo", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-screen__primary\s*\{[^}]*grid-template-rows:\s*minmax\(124px, 0\.55fr\) minmax\(0, 1\.45fr\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(150px, 0\.65fr\);[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__image\s*\{[^}]*width:\s*96px;[^}]*height:\s*96px;/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-box-fill__readout strong\s*\{[^}]*font:\s*var\(--floor-counter-sm\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__normalized\s*\{[^}]*-webkit-line-clamp:\s*3;/s,
+    );
+  });
+
   it("keeps every print-recovery action floor-sized in a bounded no-scroll dialog", () => {
     const recovery = stationSource("ui/BoxPrintRecovery.tsx");
     const css = stationSource("station.css");
@@ -130,11 +150,13 @@ describe("fixed station viewport source contract", () => {
 
   it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {
     const css = stationSource("station.css");
+    const statusBar = stationSource("ui/StatusBar.tsx");
 
-    expect(css).toMatch(
-      /\.station-update-indicator\s*\{[^}]*position:\s*static;[^}]*min-height:\s*64px;/s,
-    );
+    expect(css).toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*static;/s);
     expect(css).not.toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*absolute;/s);
+    expect(statusBar.match(/<Button/g)).toHaveLength(2);
+    expect(statusBar.match(/size="floor"/g)).toHaveLength(2);
+    expect(statusBar.match(/variant="secondary"/g)).toHaveLength(2);
     expect(css).toMatch(
       /\.station-status-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
     );
@@ -145,7 +167,7 @@ describe("fixed station viewport source contract", () => {
       /\.station-status-bar\s*\{[^}]*grid-template-columns:[^;}]*minmax\(960px, 2fr\);/s,
     );
     expect(css).toMatch(
-      /@media \(max-width: 1439px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2fr\) minmax\(0, 1\.35fr\) minmax\(0, 1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+      /@media \(max-width: 1439px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2\.6fr\) minmax\(0, 1fr\) minmax\(0, 1\.1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
     );
     expect(css).toMatch(
       /@media \(max-width: 1179px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);/s,

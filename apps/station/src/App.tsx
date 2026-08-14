@@ -1181,6 +1181,9 @@ export function App() {
     label: updater.persisted?.available
       ? t("updates.indicatorAvailable", { version: updater.persisted.available.version })
       : t("updates.indicatorCurrent"),
+    shortLabel: updater.persisted?.available
+      ? t("updates.indicatorAvailableShort")
+      : t("updates.indicatorCurrent"),
   };
   const operatorControl = (
     <OperatorSwitchControl
@@ -1299,6 +1302,7 @@ export function App() {
       actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
       onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
+      statusBarCollapsible={shift !== null}
     >
       {operatorSwitchState !== "idle" ? (
         <main className="station-centered-screen" data-testid="operator-switch-settling">

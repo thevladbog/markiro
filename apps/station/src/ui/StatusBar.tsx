@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@markiro/ui";
 import type { ServerReachability } from "../lib/api-client.js";
 
 /** What the station can honestly say about its scanner. */
@@ -10,6 +11,7 @@ export type UpdateSeverity = "none" | "info" | "warn" | "urgent";
 export interface UpdateIndicatorModel {
   severity: UpdateSeverity;
   label: string;
+  shortLabel?: string;
   glyph: "↻" | "!";
   available: boolean;
 }
@@ -45,6 +47,8 @@ export interface StatusBarProps {
   actionsDisabled?: boolean;
   operatorControl?: ReactNode;
   windowControl?: ReactNode;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }
 
 // Persistent floor status bar. Scanner/printer indicators reflect the live
@@ -66,6 +70,8 @@ export function StatusBar({
   actionsDisabled = false,
   operatorControl,
   windowControl,
+  collapsed = false,
+  onToggleCollapsed,
 }: StatusBarProps) {
   const { t } = useTranslation();
   const notConfigured = t("shell.notConfigured");
@@ -92,31 +98,50 @@ export function StatusBar({
         : t("shell.serverUnavailable");
   const updateButton =
     update && onOpenUpdates ? (
-      <button
-        type="button"
+      <Button
+        size="floor"
+        variant="secondary"
         className="station-update-indicator"
         data-update-severity={update.severity}
         aria-label={`${update.glyph} ${update.label}`}
         disabled={actionsDisabled}
         onClick={onOpenUpdates}
+        icon={<span aria-hidden="true">{update.glyph}</span>}
       >
-        <span aria-hidden="true">{update.glyph}</span>
-        <span>{update.label}</span>
-      </button>
+        {update.shortLabel ?? update.label}
+      </Button>
     ) : null;
+  const toggleButton = onToggleCollapsed ? (
+    <Button
+      size="floor"
+      variant="secondary"
+      className="station-status-toggle"
+      aria-label={t(collapsed ? "shell.expandStatusBar" : "shell.collapseStatusBar")}
+      aria-expanded={!collapsed}
+      onClick={onToggleCollapsed}
+      icon={<span aria-hidden="true">{collapsed ? "⌄" : "⌃"}</span>}
+    >
+      {t(collapsed ? "shell.expandStatusBarShort" : "shell.collapseStatusBarShort")}
+    </Button>
+  ) : null;
 
   return (
     <header
       className="station-status-bar"
       aria-label={t("shell.statusBar")}
       data-connectivity-state={connectivityState}
+      data-collapsed={collapsed ? "true" : "false"}
     >
       <dl className="station-status-group station-status-group--context">
-        <StatusValue label={t("shell.station")} value={stationName} testId="station-status" />
+        {!collapsed ? (
+          <StatusValue label={t("shell.station")} value={stationName} testId="station-status" />
+        ) : null}
         {lineName ? (
           <StatusValue label={t("shell.line")} value={lineName} testId="line-status" />
         ) : null}
-        <StatusValue label={t("shell.operator")} value={operatorName} testId="operator-status" />
+        {!collapsed ? (
+          <StatusValue label={t("shell.operator")} value={operatorName} testId="operator-status" />
+        ) : null}
         {shiftLabel ? (
           <StatusValue label={t("shell.shift")} value={shiftLabel} testId="shift-status" />
         ) : null}
@@ -135,12 +160,14 @@ export function StatusBar({
         />
         <StatusValue
           label={t("shell.sync")}
+          shortLabel={t("shell.syncShort")}
           value={syncStuck ? `${syncPending} — ${t("shell.syncStuck")}` : String(syncPending)}
           {...(syncStuck ? { tone: "warn" as const } : {})}
           testId="sync-status"
         />
         <StatusValue
           label={t("shell.conflicts")}
+          shortLabel={t("shell.conflictsShort")}
           value={String(conflicts)}
           testId="conflicts-status"
         />
@@ -158,27 +185,36 @@ export function StatusBar({
           testId="printer-status"
         />
       </dl>
-      <div className="station-status-actions" role="group" aria-label={t("shell.stationActions")}>
-        {updateButton}
-        {operatorControl}
-        {windowControl}
-      </div>
+      {collapsed ? (
+        toggleButton
+      ) : (
+        <div className="station-status-actions" role="group" aria-label={t("shell.stationActions")}>
+          {updateButton}
+          {operatorControl}
+          {windowControl}
+          {toggleButton}
+        </div>
+      )}
     </header>
   );
 }
 
 interface StatusValueProps {
   label: string;
+  shortLabel?: string;
   value: string;
   testId: string;
   tone?: "ok" | "warn";
   live?: "polite";
 }
 
-function StatusValue({ label, value, testId, tone, live }: StatusValueProps) {
+function StatusValue({ label, shortLabel, value, testId, tone, live }: StatusValueProps) {
   return (
     <div className="station-status-item" data-tone={tone}>
-      <dt>{label}</dt>
+      <dt>
+        <span className="station-status-label--long">{label}</span>
+        {shortLabel ? <span className="station-status-label--short">{shortLabel}</span> : null}
+      </dt>
       <dd data-testid={testId} {...(live ? { role: "status", "aria-live": live } : {})}>
         {value}
       </dd>

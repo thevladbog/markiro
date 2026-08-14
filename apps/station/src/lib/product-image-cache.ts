@@ -1,6 +1,21 @@
 import type { StationClient } from "./api-client.js";
 import type { SqlExecutor, StationProductImageDescriptor } from "./mirror.js";
 
+export interface StationProductImageCacheRow {
+  content_type: string;
+  byte_size: number;
+  bytes_base64: string;
+}
+
+export interface StationProductImagePointerRow {
+  image_pointer_checksum: string | null;
+  image_checksum: string | null;
+  image_content_type: string | null;
+  image_byte_size: number | null;
+  image_width: number | null;
+  image_height: number | null;
+}
+
 export const STATION_PRODUCT_IMAGE_CACHE = "markiro-station-product-images-v1";
 const CACHE_ORIGIN = "https://station.invalid/product-images/";
 
@@ -69,11 +84,7 @@ async function readSqliteImage(
   checksum: string,
   descriptor?: StationProductImageDescriptor,
 ): Promise<Blob | null> {
-  const rows = await exec.all<{
-    content_type: string;
-    byte_size: number;
-    bytes_base64: string;
-  }>(
+  const rows = await exec.all<StationProductImageCacheRow>(
     `SELECT content_type, byte_size, bytes_base64
        FROM station_product_images WHERE checksum = ?`,
     [checksum],
@@ -243,14 +254,7 @@ export async function readStationProductImage(
   productId: string,
   descriptor?: StationProductImageDescriptor,
 ): Promise<Blob | null> {
-  const rows = await exec.all<{
-    image_pointer_checksum: string | null;
-    image_checksum: string | null;
-    image_content_type: string | null;
-    image_byte_size: number | null;
-    image_width: number | null;
-    image_height: number | null;
-  }>(
+  const rows = await exec.all<StationProductImagePointerRow>(
     `SELECT image_pointer_checksum, image_checksum, image_content_type,
             image_byte_size, image_width, image_height
        FROM product_mirror WHERE id = ?`,

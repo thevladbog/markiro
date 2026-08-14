@@ -1,4 +1,4 @@
-import { ForbiddenException, UnauthorizedException } from "@nestjs/common";
+import { ForbiddenException, HttpStatus, UnauthorizedException } from "@nestjs/common";
 import type { ExecutionContext } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import type * as DrizzleOrm from "drizzle-orm";
@@ -206,6 +206,25 @@ describe("TenantGuard api-key path", () => {
     const req: FakeRequest = { headers: { "x-api-key": "mk_bad" } };
 
     await expect(guard.canActivate(contextFor(req))).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it("preserves station enrollment when api-key verification is temporarily rate limited", async () => {
+    const guard = new TenantGuard(
+      fakeAuthWithApiKey(
+        async () => null,
+        async () => ({
+          valid: false,
+          error: { message: "Rate limit exceeded.", code: "RATE_LIMITED" },
+          key: null,
+        }),
+      ),
+      fakeDb(),
+    );
+    const req: FakeRequest = { headers: { "x-api-key": "mk_still_valid" } };
+
+    await expect(guard.canActivate(contextFor(req))).rejects.toMatchObject({
+      status: HttpStatus.TOO_MANY_REQUESTS,
+    });
   });
 
   it("resolves the tenant-scoped station identity, assigned line, and only that device heartbeat", async () => {
