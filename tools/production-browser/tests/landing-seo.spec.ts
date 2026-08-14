@@ -18,7 +18,16 @@ const routes = [
   "/en/offline-production/",
   "/en/faq/",
 ];
-const MARKIRO_MODULE_POSITIONS = ["0-0", "0-2", "1-1", "2-0", "2-2", "3-0", "3-2", "4-1"];
+const MARKIRO_MODULE_LAYOUT = [
+  { position: "0-0", row: "1", column: "1", color: "rgb(250, 250, 248)" },
+  { position: "0-2", row: "1", column: "3", color: "rgb(250, 250, 248)" },
+  { position: "1-1", row: "2", column: "2", color: "rgb(250, 250, 248)" },
+  { position: "2-0", row: "3", column: "1", color: "rgb(250, 250, 248)" },
+  { position: "2-2", row: "3", column: "3", color: "rgb(250, 250, 248)" },
+  { position: "3-0", row: "4", column: "1", color: "rgb(250, 250, 248)" },
+  { position: "3-2", row: "4", column: "3", color: "rgb(250, 250, 248)" },
+  { position: "4-1", row: "5", column: "2", color: "rgb(61, 220, 122)" },
+];
 
 for (const route of routes) {
   test(`${route} renders without browser or layout errors`, async ({ page }) => {
@@ -59,18 +68,38 @@ for (const [route, wordmark] of [
   ["/", "маркиро"],
   ["/en/", "MARKIRO"],
 ] as const) {
-  test(`${route} renders the localized eight-module header brand`, async ({ page }) => {
+  test(`${route} renders the localized exact brand in its header and footer`, async ({ page }) => {
     await page.goto(route);
-    const brand = page.locator("header .brand-mark");
-    await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
-    await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
-    expect(
-      await brand
-        .locator("[data-brand-module]")
-        .evaluateAll((modules) => modules.map((module) => module.getAttribute("data-position"))),
-    ).toEqual(MARKIRO_MODULE_POSITIONS);
-    await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
-    await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("data-position", "4-1");
+    for (const brand of [page.locator("header .brand-mark"), page.locator("footer .brand-mark")]) {
+      await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
+      await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
+      expect(
+        await brand.locator("[data-brand-module]").evaluateAll((modules) =>
+          modules.map((module) => {
+            const style = getComputedStyle(module);
+            return {
+              position: module.getAttribute("data-position"),
+              row: style.gridRowStart,
+              column: style.gridColumnStart,
+              width: style.width,
+              height: style.height,
+              color: style.backgroundColor,
+            };
+          }),
+        ),
+      ).toEqual(
+        MARKIRO_MODULE_LAYOUT.map(({ position, row, column, color }) => ({
+          position,
+          row,
+          column,
+          width: "4px",
+          height: "4px",
+          color,
+        })),
+      );
+      await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
+      await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("data-position", "4-1");
+    }
   });
 }
 
