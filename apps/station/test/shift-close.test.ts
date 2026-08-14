@@ -7,7 +7,15 @@ function executor(): { exec: SqlExecutor; statements: string[] } {
   const exec: SqlExecutor = {
     async all<T>(sql: string): Promise<T[]> {
       if (sql.includes("FROM shift_mirror")) {
-        return [{ id: "shift-1", product_id: "product-1", product_name: "Widget", planned_qty: 10, status: "active" }] as T[];
+        return [
+          {
+            id: "shift-1",
+            product_id: "product-1",
+            product_name: "Widget",
+            planned_qty: 10,
+            status: "active",
+          },
+        ] as T[];
       }
       if (sql.includes("FROM codes_mirror")) return [{ actualQty: 9 }] as T[];
       if (sql.includes("openBoxCount")) return [{ openBoxCount: 0 }] as T[];
@@ -32,7 +40,12 @@ describe("closeShiftOffline", () => {
     const { exec, statements } = executor();
     const summary = await closeShiftOffline(
       exec,
-      { shiftId: "shift-1", deviceId: "device-1", operatorId: "operator-1", reasonCode: "equipment_stop" },
+      {
+        shiftId: "shift-1",
+        deviceId: "device-1",
+        operatorId: "operator-1",
+        reasonCode: "equipment_stop",
+      },
       () => new Date("2026-08-14T12:00:00.000Z"),
     );
     expect(summary.actualQty).toBe(9);

@@ -13,7 +13,9 @@ const base = {
 
 describe("station shift close payload", () => {
   it("does not require a reason when there is no plan or the plan matches", () => {
-    expect(stationShiftCloseSchema.safeParse({ ...base, plannedQtySnapshot: null }).success).toBe(true);
+    expect(stationShiftCloseSchema.safeParse({ ...base, plannedQtySnapshot: null }).success).toBe(
+      true,
+    );
     expect(stationShiftCloseSchema.safeParse(base).success).toBe(true);
   });
 
@@ -27,7 +29,8 @@ describe("station shift close payload", () => {
       }).success,
     ).toBe(true);
     expect(
-      stationShiftCloseSchema.safeParse({ ...base, actualQty: 9, reasonCode: "operator_note" }).success,
+      stationShiftCloseSchema.safeParse({ ...base, actualQty: 9, reasonCode: "operator_note" })
+        .success,
     ).toBe(false);
   });
 });

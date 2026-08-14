@@ -16,7 +16,6 @@ export function shiftCloseReasonRequired(plannedQty: number | null, actualQty: n
 
 export function isShiftCloseReasonCode(value: unknown): value is ShiftCloseReasonCode {
   return (
-    typeof value === "string" &&
-    (SHIFT_CLOSE_REASON_CODES as readonly string[]).includes(value)
+    typeof value === "string" && (SHIFT_CLOSE_REASON_CODES as readonly string[]).includes(value)
   );
 }

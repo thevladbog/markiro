@@ -51,7 +51,9 @@ function isStationRequest(req: Request): boolean {
 
   if (
     (method === "POST" &&
-      (path === "/station/pair" || path === "/station/scans" || path === "/station/shift-closures")) ||
+      (path === "/station/pair" ||
+        path === "/station/scans" ||
+        path === "/station/shift-closures")) ||
     (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/products") ||

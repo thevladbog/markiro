@@ -135,9 +135,14 @@ export function LinesPage() {
           return (
             <StatusChip
               status={online ? "ok" : "neutral"}
-              label={online
-                ? t("pages.lines.presence.online", { online: item.onlineStations, total: item.assignedStations })
-                : t("pages.lines.presence.offline")}
+              label={
+                online
+                  ? t("pages.lines.presence.online", {
+                      online: item.onlineStations,
+                      total: item.assignedStations,
+                    })
+                  : t("pages.lines.presence.offline")
+              }
             />
           );
         },

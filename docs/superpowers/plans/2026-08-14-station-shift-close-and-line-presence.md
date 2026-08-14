@@ -28,11 +28,13 @@
 ### Task 1: Shared shift-close reason contract
 
 **Files:**
+
 - Create: `packages/domain/src/shift-close.ts`
 - Modify: `packages/domain/src/index.ts`
 - Create: `packages/domain/test/shift-close.test.ts`
 
 **Interfaces:**
+
 - Produces: `SHIFT_CLOSE_REASON_CODES`, `ShiftCloseReasonCode`, `isShiftCloseReasonCode(value)`, and `shiftCloseReasonRequired(plannedQty, actualQty)`.
 - Consumed by: API DTO/service validation, Station summary UI, and Admin conflict labels.
 
@@ -102,6 +104,7 @@ git commit -m "feat(domain): define station shift close reasons"
 ### Task 2: Additive Postgres and SQLite persistence
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts`
 - Modify: `packages/db/src/schema.ts`
 - Modify: `packages/db/src/sqlite/migrations.ts`
@@ -113,6 +116,7 @@ git commit -m "feat(domain): define station shift close reasons"
 - Modify: `packages/db/test/station-sync-recovery-schema.test.ts`
 
 **Interfaces:**
+
 - Produces Postgres: `shiftDeviceParticipants`, `stationShiftCloseEvents`, and new close-authority fields on `shifts`; the event ledger is the authoritative store for accepted close snapshots.
 - Produces SQLite: `shift_close_outbox`, close-authority fields on `shift_mirror`.
 - Consumed by: Tasks 3–6.
@@ -144,10 +148,7 @@ Expected: FAIL on missing schema objects and SQLite columns/table.
 Add:
 
 ```ts
-export const stationClosePolicy = pgEnum("station_close_policy", [
-  "single_device",
-  "admin_only",
-]);
+export const stationClosePolicy = pgEnum("station_close_policy", ["single_device", "admin_only"]);
 export const stationShiftCloseOutcome = pgEnum("station_shift_close_outcome", [
   "accepted",
   "conflict",
@@ -213,6 +214,7 @@ git commit -m "feat(db): persist station shift close events"
 ### Task 3: Record station entry and publish close authority
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/dto.ts`
 - Modify: `apps/api/src/modules/shifts/shifts.controller.ts`
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts`
@@ -223,6 +225,7 @@ git commit -m "feat(db): persist station shift close events"
 - Modify: `apps/api/test/subscription-route-inventory.test.ts`
 
 **Interfaces:**
+
 - Produces: `StationCloseAccess`, additive `ShiftDto.stationCloseAccess`, and `POST /shifts/:id/enter`.
 - `enterShift(tenantId, shiftId, deviceId)` opens planned shifts, upserts participation, irreversibly promotes a second-device shift to `admin_only`, and returns the shift DTO.
 - Consumed by: Station selection/bundle in Tasks 5–6.
@@ -256,8 +259,7 @@ Add:
 
 ```ts
 export type StationCloseAccess =
-  | { kind: "single_device"; ownerDeviceId: string }
-  | { kind: "admin_only" };
+  { kind: "single_device"; ownerDeviceId: string } | { kind: "admin_only" };
 ```
 
 Use one Postgres transaction with a shift row lock. Upsert the authenticated device participant, claim an empty owner, and set `admin_only` when the owner differs. Planned becomes active in the same transaction. The service reloads the tenant-scoped joined DTO after commit.
@@ -286,6 +288,7 @@ git commit -m "feat(api): track station shift participation"
 ### Task 4: Idempotent station close endpoint and cabinet reconciliation API
 
 **Files:**
+
 - Create: `apps/api/src/modules/station-shift-close/dto.ts`
 - Create: `apps/api/src/modules/station-shift-close/station-shift-close.service.ts`
 - Create: `apps/api/src/modules/station-shift-close/station-shift-close.controller.ts`
@@ -298,6 +301,7 @@ git commit -m "feat(api): track station shift participation"
 - Modify: `apps/api/test/subscription-route-inventory.test.ts`
 
 **Interfaces:**
+
 - Produces station endpoint: `POST /station/shift-closures`.
 - Request: `{ eventId, shiftId, operatorId, plannedQtySnapshot, actualQty, closedBoxCount, reasonCode, closedAt }`. Product and tenant metadata are resolved from the locked tenant-scoped shift, never trusted from the device body.
 - Response: `{ outcome: "accepted" | "already_resolved" | "conflict"; conflictCode?: "multiple_devices" }`.
@@ -361,6 +365,7 @@ git commit -m "feat(api): reconcile offline station shift closes"
 ### Task 5: Durable Station close summary and outbox
 
 **Files:**
+
 - Create: `apps/station/src/lib/shift-close-outbox.ts`
 - Modify: `apps/station/src/lib/mirror.ts`
 - Modify: `apps/station/src/lib/shift-bundle.ts`
@@ -370,6 +375,7 @@ git commit -m "feat(api): reconcile offline station shift closes"
 - Modify: `apps/station/test/credential-recovery.test.ts`
 
 **Interfaces:**
+
 - Produces: `readShiftCloseSummary(exec, shiftId, terminalId)`, `enqueueShiftClose(exec, input)`, `readEligibleShiftCloses(exec, limit)`, `markShiftCloseConflict(...)`, `ackShiftClose(...)`, and `readLocallyClosedShiftIds(exec)`.
 - Consumed by: sync engine and UI in Tasks 6–7.
 
@@ -427,6 +433,7 @@ git commit -m "feat(station): persist offline shift closes"
 ### Task 6: Close synchronization and reliable station heartbeat
 
 **Files:**
+
 - Modify: `apps/station/src/lib/sync.ts`
 - Modify: `apps/station/src/lib/use-sync-engine.ts`
 - Create: `apps/station/src/lib/use-station-heartbeat.ts`
@@ -439,6 +446,7 @@ git commit -m "feat(station): persist offline shift closes"
 - Modify: `apps/api/test/station-auth.e2e.test.ts`
 
 **Interfaces:**
+
 - Sync consumes Task 5 close helpers and Task 4 response.
 - Heartbeat hook calls `POST /station/heartbeat` every 60,000 ms while a paired credential generation is current.
 
@@ -495,6 +503,7 @@ git commit -m "feat(station): sync shift closes and heartbeat"
 ### Task 7: Shift cards, separate pause/close, and close summary UI
 
 **Files:**
+
 - Modify: `apps/station/src/pages/ShiftSelection.tsx`
 - Modify: `apps/station/src/ui/ShiftCard.tsx`
 - Modify: `apps/station/src/pages/WorkScreen.tsx`
@@ -513,6 +522,7 @@ git commit -m "feat(station): sync shift closes and heartbeat"
 - Modify: `apps/station/test/screen-gallery.test.tsx`
 
 **Interfaces:**
+
 - `ShiftCard` gains status, mode, planned date, planned quantity, and translated labels.
 - `WorkFooter` receives separate `onPause` and `onClose` callbacks.
 - `ShiftCloseDialog` receives the durable summary and emits cancel or a valid nullable reason code.
@@ -593,6 +603,7 @@ git commit -m "feat(station): close shifts with offline summary"
 ### Task 8: Cabinet line presence and close-conflict resolution
 
 **Files:**
+
 - Modify: `apps/api/src/modules/lines/dto.ts`
 - Modify: `apps/api/src/modules/lines/lines.service.ts`
 - Create: `apps/api/test/lines.service.test.ts`
@@ -609,6 +620,7 @@ git commit -m "feat(station): close shifts with offline summary"
 - Modify: `apps/admin/test/shifts.test.tsx`
 
 **Interfaces:**
+
 - `LineDto.presence`: `{status, onlineStations, totalStations, lastSeenAt}`.
 - Admin close-conflict hooks consume Task 4 cabinet endpoints and invalidate both conflict and shift queries after close/dismiss.
 
@@ -667,6 +679,7 @@ git commit -m "feat(admin): show line presence and close conflicts"
 ### Task 9: CORS, contracts, documentation, and release gates
 
 **Files:**
+
 - Modify: `apps/api/src/cors.ts`
 - Modify: `apps/api/test/cors-station-surface.test.ts`
 - Modify: `apps/api/test/cors.e2e.test.ts`
@@ -678,6 +691,7 @@ git commit -m "feat(admin): show line presence and close conflicts"
 - Modify: `apps/station/README.md`
 
 **Interfaces:**
+
 - Adds Station preflight inventory for `POST /shifts/:id/enter`, `POST /station/shift-closures`, and `POST /station/heartbeat`.
 - Preserves the already-implemented product-image GET preflight from commit `33ffb5a1f`.
 

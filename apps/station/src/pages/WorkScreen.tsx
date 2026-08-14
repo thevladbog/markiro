@@ -1515,18 +1515,30 @@ export function WorkScreen({
               <option value="production_defect">{t("work.closeReasons.production_defect")}</option>
               <option value="material_shortage">{t("work.closeReasons.material_shortage")}</option>
               <option value="equipment_stop">{t("work.closeReasons.equipment_stop")}</option>
-              <option value="production_order_changed">{t("work.closeReasons.production_order_changed")}</option>
-              <option value="planned_quantity_error">{t("work.closeReasons.planned_quantity_error")}</option>
-              <option value="other_production_deviation">{t("work.closeReasons.other_production_deviation")}</option>
+              <option value="production_order_changed">
+                {t("work.closeReasons.production_order_changed")}
+              </option>
+              <option value="planned_quantity_error">
+                {t("work.closeReasons.planned_quantity_error")}
+              </option>
+              <option value="other_production_deviation">
+                {t("work.closeReasons.other_production_deviation")}
+              </option>
             </select>
-            <Button size="floor" onClick={() => void requestClose(closeReason)}>{t("work.closeReasonConfirm")}</Button>
-            <Button size="floor" variant="secondary" onClick={() => setCloseReasonPicker(false)}>{t("work.stay")}</Button>
+            <Button size="floor" onClick={() => void requestClose(closeReason)}>
+              {t("work.closeReasonConfirm")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setCloseReasonPicker(false)}>
+              {t("work.stay")}
+            </Button>
           </Alert>
         ) : null}
         {closeError ? (
           <Alert tone="error" title={t("work.closeFailed")}>
             <p>{closeError}</p>
-            <Button size="floor" onClick={() => setCloseError(null)}>{t("work.stay")}</Button>
+            <Button size="floor" onClick={() => setCloseError(null)}>
+              {t("work.stay")}
+            </Button>
           </Alert>
         ) : null}
         {closeSummary ? (
@@ -1534,8 +1546,15 @@ export function WorkScreen({
             <p>{closeSummary.productName}</p>
             <p>{t("work.closeSummaryPieces", { count: closeSummary.actualQty })}</p>
             <p>{t("work.closeSummaryBoxes", { count: closeSummary.closedBoxCount })}</p>
-            <p>{t("work.closeSummaryPlan", { planned: closeSummary.plannedQtySnapshot ?? t("work.noPlan"), actual: closeSummary.actualQty })}</p>
-            <Button size="floor" onClick={onExit}>{t("work.backToShifts")}</Button>
+            <p>
+              {t("work.closeSummaryPlan", {
+                planned: closeSummary.plannedQtySnapshot ?? t("work.noPlan"),
+                actual: closeSummary.actualQty,
+              })}
+            </p>
+            <Button size="floor" onClick={onExit}>
+              {t("work.backToShifts")}
+            </Button>
           </Alert>
         ) : null}
       </div>

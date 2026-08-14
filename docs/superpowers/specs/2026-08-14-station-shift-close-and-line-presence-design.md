@@ -27,14 +27,14 @@ The cabinet already stores `station_devices.last_seen_at`, but an idle station m
 
 The transport and storage contract uses stable codes; Russian and English labels remain UI translations.
 
-| Code | Russian label | English label |
-| --- | --- | --- |
-| `production_defect` | Производственный брак | Production defect |
-| `material_shortage` | Недостаток сырья | Material shortage |
-| `equipment_stop` | Остановка оборудования | Equipment stop |
-| `production_order_changed` | Изменение производственного задания | Production order changed |
-| `planned_quantity_error` | Ошибка в плановом количестве | Planned quantity error |
-| `other_production_deviation` | Другое производственное отклонение | Other production deviation |
+| Code                         | Russian label                       | English label              |
+| ---------------------------- | ----------------------------------- | -------------------------- |
+| `production_defect`          | Производственный брак               | Production defect          |
+| `material_shortage`          | Недостаток сырья                    | Material shortage          |
+| `equipment_stop`             | Остановка оборудования              | Equipment stop             |
+| `production_order_changed`   | Изменение производственного задания | Production order changed   |
+| `planned_quantity_error`     | Ошибка в плановом количестве        | Planned quantity error     |
+| `other_production_deviation` | Другое производственное отклонение  | Other production deviation |
 
 The codes belong in `@markiro/domain` so the station, API, and cabinet cannot drift. The station close DTO accepts `null` only when `plannedQtySnapshot` is null or equals `actualQty`; otherwise one of the six codes is mandatory. The API repeats that validation and never accepts arbitrary text from a device.
 
@@ -60,9 +60,7 @@ The server's final close check uses the union of explicit participant rows and d
 The list and bundle responses add a backward-compatible station closing descriptor:
 
 ```ts
-type StationCloseAccess =
-  | { kind: "single_device"; ownerDeviceId: string }
-  | { kind: "admin_only" };
+type StationCloseAccess = { kind: "single_device"; ownerDeviceId: string } | { kind: "admin_only" };
 ```
 
 The station persists it in `shift_mirror`. An omitted descriptor from an older server preserves the last published local value. An explicit `admin_only` always wins and cannot be downgraded by an older cached bundle.

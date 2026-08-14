@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  isShiftCloseReasonCode,
-  shiftCloseReasonRequired,
-} from "../src/shift-close.js";
+import { isShiftCloseReasonCode, shiftCloseReasonRequired } from "../src/shift-close.js";
 
 describe("station shift close contract", () => {
   it("does not require a reason when a plan is absent or exactly met", () => {

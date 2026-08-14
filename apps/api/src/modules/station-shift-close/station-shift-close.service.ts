@@ -37,12 +37,21 @@ export class StationShiftCloseService {
 
     const result = await this.db.transaction(async (tx) => {
       const [existing] = await tx
-        .select({ digest: schema.stationShiftCloseEvents.payloadDigest, outcome: schema.stationShiftCloseEvents.outcome })
+        .select({
+          digest: schema.stationShiftCloseEvents.payloadDigest,
+          outcome: schema.stationShiftCloseEvents.outcome,
+        })
         .from(schema.stationShiftCloseEvents)
-        .where(and(eq(schema.stationShiftCloseEvents.tenantId, tenantId), eq(schema.stationShiftCloseEvents.eventId, input.eventId)))
+        .where(
+          and(
+            eq(schema.stationShiftCloseEvents.tenantId, tenantId),
+            eq(schema.stationShiftCloseEvents.eventId, input.eventId),
+          ),
+        )
         .for("update");
       if (existing) {
-        if (existing.digest !== payloadDigest) throw new ConflictException("Close event payload changed");
+        if (existing.digest !== payloadDigest)
+          throw new ConflictException("Close event payload changed");
         return existing.outcome === "conflict"
           ? ({ outcome: "conflict", conflictCode: "multiple_devices" } as const)
           : ({ outcome: "already_resolved" } as const);
@@ -81,8 +90,15 @@ export class StationShiftCloseService {
       const participants = await tx
         .select({ deviceId: schema.shiftDeviceParticipants.deviceId })
         .from(schema.shiftDeviceParticipants)
-        .where(and(eq(schema.shiftDeviceParticipants.tenantId, tenantId), eq(schema.shiftDeviceParticipants.shiftId, input.shiftId)));
-      const multipleDevices = shift.stationClosePolicy === "admin_only" || participants.some((p) => p.deviceId !== deviceId);
+        .where(
+          and(
+            eq(schema.shiftDeviceParticipants.tenantId, tenantId),
+            eq(schema.shiftDeviceParticipants.shiftId, input.shiftId),
+          ),
+        );
+      const multipleDevices =
+        shift.stationClosePolicy === "admin_only" ||
+        participants.some((p) => p.deviceId !== deviceId);
       const outcome = multipleDevices ? "conflict" : "accepted";
       await tx.insert(schema.stationShiftCloseEvents).values({
         eventId: input.eventId,
@@ -102,8 +118,18 @@ export class StationShiftCloseService {
       if (outcome === "accepted" && shift.status === "active") {
         await tx
           .update(schema.shifts)
-          .set({ status: "closed", closedAt: input.closedAt, closeReason: input.reasonCode ?? null })
-          .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, input.shiftId), eq(schema.shifts.status, "active")));
+          .set({
+            status: "closed",
+            closedAt: input.closedAt,
+            closeReason: input.reasonCode ?? null,
+          })
+          .where(
+            and(
+              eq(schema.shifts.tenantId, tenantId),
+              eq(schema.shifts.id, input.shiftId),
+              eq(schema.shifts.status, "active"),
+            ),
+          );
       }
       return multipleDevices
         ? ({ outcome: "conflict", conflictCode: "multiple_devices" } as const)
@@ -111,7 +137,14 @@ export class StationShiftCloseService {
           ? ({ outcome: "already_resolved" } as const)
           : ({ outcome: "accepted" } as const);
     });
-    this.audit.deviceCredentialMutation({ tenantId, actorType: "unauthenticated_device", actorId: deviceId, action: "station.shift_close", resourceId: input.shiftId, outcome: "succeeded" });
+    this.audit.deviceCredentialMutation({
+      tenantId,
+      actorType: "unauthenticated_device",
+      actorId: deviceId,
+      action: "station.shift_close",
+      resourceId: input.shiftId,
+      outcome: "succeeded",
+    });
     return result;
   }
 
@@ -119,9 +152,26 @@ export class StationShiftCloseService {
     const rows = await this.db
       .select({ event: schema.stationShiftCloseEvents, productName: schema.products.name })
       .from(schema.stationShiftCloseEvents)
-      .leftJoin(schema.shifts, and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, schema.stationShiftCloseEvents.shiftId)))
-      .leftJoin(schema.products, and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, schema.shifts.productId)))
-      .where(and(eq(schema.stationShiftCloseEvents.tenantId, tenantId), eq(schema.stationShiftCloseEvents.outcome, "conflict")))
+      .leftJoin(
+        schema.shifts,
+        and(
+          eq(schema.shifts.tenantId, tenantId),
+          eq(schema.shifts.id, schema.stationShiftCloseEvents.shiftId),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.stationShiftCloseEvents.tenantId, tenantId),
+          eq(schema.stationShiftCloseEvents.outcome, "conflict"),
+        ),
+      )
       .orderBy(desc(schema.stationShiftCloseEvents.recordedAt));
     return { items: rows.map(({ event, productName }) => ({ ...event, productName })) };
   }
@@ -130,9 +180,21 @@ export class StationShiftCloseService {
     const [row] = await this.db
       .update(schema.stationShiftCloseEvents)
       .set({ outcome: "dismissed", resolvedAt: new Date(), resolvedBy: userId })
-      .where(and(eq(schema.stationShiftCloseEvents.tenantId, tenantId), eq(schema.stationShiftCloseEvents.eventId, eventId), eq(schema.stationShiftCloseEvents.outcome, "conflict")))
+      .where(
+        and(
+          eq(schema.stationShiftCloseEvents.tenantId, tenantId),
+          eq(schema.stationShiftCloseEvents.eventId, eventId),
+          eq(schema.stationShiftCloseEvents.outcome, "conflict"),
+        ),
+      )
       .returning({ eventId: schema.stationShiftCloseEvents.eventId });
     if (!row) throw new NotFoundException();
-    this.audit.credentialMutation({ tenantId, userId, action: "station.shift_close_conflict.dismiss", resourceId: eventId, outcome: "succeeded" });
+    this.audit.credentialMutation({
+      tenantId,
+      userId,
+      action: "station.shift_close_conflict.dismiss",
+      resourceId: eventId,
+      outcome: "succeeded",
+    });
   }
 }

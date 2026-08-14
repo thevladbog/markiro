@@ -377,9 +377,7 @@ export const shiftDeviceParticipants = pgTable(
     tenantId: tenantId(),
     shiftId: uuid("shift_id").notNull(),
     deviceId: uuid("device_id").notNull(),
-    firstEnteredAt: timestamp("first_entered_at", { withTimezone: true })
-      .notNull()
-      .defaultNow(),
+    firstEnteredAt: timestamp("first_entered_at", { withTimezone: true }).notNull().defaultNow(),
     lastEnteredAt: timestamp("last_entered_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -427,7 +425,10 @@ export const stationShiftCloseEvents = pgTable(
     unique("station_shift_close_events_payload_uq").on(t.tenantId, t.eventId, t.payloadDigest),
     index("station_shift_close_events_tenant_outcome_idx").on(t.tenantId, t.outcome, t.recordedAt),
     check("station_shift_close_events_digest_check", sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`),
-    check("station_shift_close_events_counts_check", sql`${t.actualQty} >= 0 AND ${t.closedBoxCount} >= 0`),
+    check(
+      "station_shift_close_events_counts_check",
+      sql`${t.actualQty} >= 0 AND ${t.closedBoxCount} >= 0`,
+    ),
     check(
       "station_shift_close_events_reason_check",
       sql`${t.reasonCode} IS NULL OR ${t.reasonCode} IN ('production_defect', 'material_shortage', 'equipment_stop', 'production_order_changed', 'planned_quantity_error', 'other_production_deviation')`,

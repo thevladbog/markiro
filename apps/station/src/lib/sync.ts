@@ -725,7 +725,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         oldestExceptionAt(deps.exec),
       ]);
       const oldest =
-        [oldestScan, oldestException, closePending[0]?.oldest ?? null, boxPendingRows[0]?.oldest ?? null]
+        [
+          oldestScan,
+          oldestException,
+          closePending[0]?.oldest ?? null,
+          boxPendingRows[0]?.oldest ?? null,
+        ]
           .filter((value): value is string => value !== null)
           .sort()[0] ?? null;
       const oldestMs = oldest === null ? NaN : Date.parse(oldest);

@@ -55,7 +55,15 @@ export class LinesService {
       )
       .where(eq(schema.lines.tenantId, tenantId));
     const now = new Date();
-    const byLine = new Map<string, { lineName: string; assignedStations: number; onlineStations: number; lastSeenAt: Date | null }>();
+    const byLine = new Map<
+      string,
+      {
+        lineName: string;
+        assignedStations: number;
+        onlineStations: number;
+        lastSeenAt: Date | null;
+      }
+    >();
     for (const row of rows) {
       const current = byLine.get(row.lineId) ?? {
         lineName: row.lineName,
@@ -66,7 +74,8 @@ export class LinesService {
       if (row.deviceId) {
         current.assignedStations += 1;
         if (stationDeviceLifecycle(row, now) === "online") current.onlineStations += 1;
-        if (row.lastSeenAt && (!current.lastSeenAt || row.lastSeenAt > current.lastSeenAt)) current.lastSeenAt = row.lastSeenAt;
+        if (row.lastSeenAt && (!current.lastSeenAt || row.lastSeenAt > current.lastSeenAt))
+          current.lastSeenAt = row.lastSeenAt;
       }
       byLine.set(row.lineId, current);
     }

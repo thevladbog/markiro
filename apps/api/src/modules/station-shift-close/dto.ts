@@ -15,11 +15,21 @@ export const stationShiftCloseSchema = z
     closedAt: z.coerce.date(),
   })
   .superRefine((value, ctx) => {
-    const required = value.plannedQtySnapshot !== null && value.plannedQtySnapshot !== value.actualQty;
+    const required =
+      value.plannedQtySnapshot !== null && value.plannedQtySnapshot !== value.actualQty;
     if (required && (!value.reasonCode || !isShiftCloseReasonCode(value.reasonCode))) {
-      ctx.addIssue({ code: "custom", path: ["reasonCode"], message: "A valid close reason is required" });
+      ctx.addIssue({
+        code: "custom",
+        path: ["reasonCode"],
+        message: "A valid close reason is required",
+      });
     }
-    if (!required && value.reasonCode !== undefined && value.reasonCode !== null && !isShiftCloseReasonCode(value.reasonCode)) {
+    if (
+      !required &&
+      value.reasonCode !== undefined &&
+      value.reasonCode !== null &&
+      !isShiftCloseReasonCode(value.reasonCode)
+    ) {
       ctx.addIssue({ code: "custom", path: ["reasonCode"], message: "Unknown close reason" });
     }
   });

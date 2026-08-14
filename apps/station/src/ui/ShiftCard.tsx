@@ -60,8 +60,11 @@ export function ShiftCard({
         ) : null}
         <div className="shift-card__product">{productName ?? "—"}</div>
         <div className="shift-card__meta">
-          {plannedDate ? `${plannedDate} · ` : ""}{modeLabel ?? mode}
-          {plannedQty !== null && plannedQty !== undefined ? ` · ${plannedLabel ?? "plan"} ${plannedQty}` : ` · ${noPlanLabel ?? "no plan"}`}
+          {plannedDate ? `${plannedDate} · ` : ""}
+          {modeLabel ?? mode}
+          {plannedQty !== null && plannedQty !== undefined
+            ? ` · ${plannedLabel ?? "plan"} ${plannedQty}`
+            : ` · ${noPlanLabel ?? "no plan"}`}
         </div>
         <div className="shift-card__status">{statusLabel ?? status}</div>
         <div className="shift-card__counterparty">

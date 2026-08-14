@@ -17,8 +17,7 @@ export type BoxTemplateResolution =
   | { ok: false; code: "BOX_LABEL_TEMPLATE_REQUIRED" };
 
 export type StationCloseAccess =
-  | { kind: "single_device"; ownerDeviceId: string }
-  | { kind: "admin_only" };
+  { kind: "single_device"; ownerDeviceId: string } | { kind: "admin_only" };
 
 /** `YYYY-MM-DD`, matches the `date` column's string mode. */
 const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");

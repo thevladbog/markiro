@@ -1,4 +1,8 @@
-import { isShiftCloseReasonCode, shiftCloseReasonRequired, type ShiftCloseReasonCode } from "@markiro/domain";
+import {
+  isShiftCloseReasonCode,
+  shiftCloseReasonRequired,
+  type ShiftCloseReasonCode,
+} from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
 
 export interface OfflineShiftCloseSummary {
@@ -15,7 +19,12 @@ export interface OfflineShiftCloseSummary {
 
 export async function closeShiftOffline(
   exec: SqlExecutor,
-  input: { shiftId: string; deviceId: string; operatorId: string | null; reasonCode?: string | null },
+  input: {
+    shiftId: string;
+    deviceId: string;
+    operatorId: string | null;
+    reasonCode?: string | null;
+  },
   now: () => Date = () => new Date(),
 ): Promise<OfflineShiftCloseSummary> {
   const [shift] = await exec.all<{
@@ -24,7 +33,9 @@ export async function closeShiftOffline(
     product_name: string | null;
     planned_qty: number | null;
     status: string;
-  }>("SELECT id, product_id, product_name, planned_qty, status FROM shift_mirror WHERE id = ?", [input.shiftId]);
+  }>("SELECT id, product_id, product_name, planned_qty, status FROM shift_mirror WHERE id = ?", [
+    input.shiftId,
+  ]);
   if (!shift) throw new Error("Shift is not available offline");
   if (shift.status === "closed") throw new Error("Shift is already closed");
 
@@ -42,7 +53,10 @@ export async function closeShiftOffline(
   );
   if (openBoxCount > 0) throw new Error("Close the open box before closing the shift");
   const reason = input.reasonCode ?? null;
-  if (shiftCloseReasonRequired(shift.planned_qty, actualQty) && (!reason || !isShiftCloseReasonCode(reason))) {
+  if (
+    shiftCloseReasonRequired(shift.planned_qty, actualQty) &&
+    (!reason || !isShiftCloseReasonCode(reason))
+  ) {
     throw new Error("A close reason is required");
   }
   if (reason !== null && !isShiftCloseReasonCode(reason)) throw new Error("Unknown close reason");
@@ -57,7 +71,19 @@ export async function closeShiftOffline(
        (event_id, shift_id, device_id, operator_id, product_id, product_name,
         planned_qty_snapshot, actual_qty, closed_box_count, reason_code, closed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [eventId, input.shiftId, input.deviceId, input.operatorId, shift.product_id, shift.product_name ?? "", shift.planned_qty, actualQty, closedBoxCount, reason, closedAt],
+      [
+        eventId,
+        input.shiftId,
+        input.deviceId,
+        input.operatorId,
+        shift.product_id,
+        shift.product_name ?? "",
+        shift.planned_qty,
+        actualQty,
+        closedBoxCount,
+        reason,
+        closedAt,
+      ],
     );
     await exec.run("COMMIT");
   } catch (error) {
@@ -101,6 +127,13 @@ export async function markShiftCloseAccepted(exec: SqlExecutor, eventId: string)
   await exec.run("DELETE FROM shift_close_outbox WHERE event_id = ?", [eventId]);
 }
 
-export async function markShiftCloseConflict(exec: SqlExecutor, eventId: string, code: string): Promise<void> {
-  await exec.run("UPDATE shift_close_outbox SET state = 'conflict', conflict_code = ?, last_checked_at = ? WHERE event_id = ?", [code, new Date().toISOString(), eventId]);
+export async function markShiftCloseConflict(
+  exec: SqlExecutor,
+  eventId: string,
+  code: string,
+): Promise<void> {
+  await exec.run(
+    "UPDATE shift_close_outbox SET state = 'conflict', conflict_code = ?, last_checked_at = ? WHERE event_id = ?",
+    [code, new Date().toISOString(), eventId],
+  );
 }

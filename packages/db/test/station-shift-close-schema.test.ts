@@ -17,8 +17,7 @@ function applyMigrations(db: DatabaseSync): void {
 
 describe("station shift close schema", () => {
   it("declares tenant-scoped participation and idempotent close event tables", () => {
-    const participants = (schema as unknown as Record<string, AnyPgTable>)
-      .shiftDeviceParticipants;
+    const participants = (schema as unknown as Record<string, AnyPgTable>).shiftDeviceParticipants;
     const events = (schema as unknown as Record<string, AnyPgTable>).stationShiftCloseEvents;
 
     expect(participants).toBeDefined();
