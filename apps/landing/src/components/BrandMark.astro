@@ -1,4 +1,26 @@
-<span class="brand-mark" aria-label="Markiro">
-  <span class="brand-mark__signal" aria-hidden="true"></span>
-  <span class="brand-mark__word">MARKIRO</span>
+---
+import type { Locale } from "../content/pages";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const label = locale === "ru" ? "Маркиро" : "Markiro";
+const word = locale === "ru" ? "маркиро" : "MARKIRO";
+const modules = ["0-0", "0-2", "1-1", "2-0", "2-2", "3-0", "3-2", "4-1"];
+---
+
+<span class="brand-mark" aria-label={label}>
+  <span class="brand-mark__symbol" data-brand-symbol aria-hidden="true">
+    {modules.map((position, index) => (
+      <span
+        class:list={["brand-mark__module", { "brand-mark__module--accent": index === 7 }]}
+        data-position={position}
+        data-brand-module
+        data-brand-accent={index === 7 ? "" : undefined}
+      />
+    ))}
+  </span>
+  <span class="brand-mark__word" lang={locale}>{word}</span>
 </span>

@@ -63,6 +63,21 @@ afterAll(() => {
 });
 
 describe("rendered landing page", () => {
+  it("renders the exact localized Markiro brand", () => {
+    const ruBrand = documents.get("/")?.querySelector("header .brand-mark");
+    const enBrand = documents.get("/en/")?.querySelector("header .brand-mark");
+
+    expect(ruBrand?.querySelector(".brand-mark__word")?.textContent).toBe("маркиро");
+    expect(ruBrand?.getAttribute("aria-label")).toBe("Маркиро");
+    expect(enBrand?.querySelector(".brand-mark__word")?.textContent).toBe("MARKIRO");
+    expect(enBrand?.getAttribute("aria-label")).toBe("Markiro");
+
+    for (const brand of [ruBrand, enBrand]) {
+      expect(brand?.querySelectorAll("[data-brand-module]")).toHaveLength(8);
+      expect(brand?.querySelectorAll("[data-brand-accent]")).toHaveLength(1);
+    }
+  });
+
   it("activates the shared dark design tokens", () => {
     expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
   });
