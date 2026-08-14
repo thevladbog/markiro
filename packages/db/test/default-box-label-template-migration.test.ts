@@ -31,10 +31,7 @@ const fixtures: readonly TenantFixture[] = [
   },
   {
     tenantId: "default-box-label-many",
-    templateIds: [
-      "00000000-0000-4000-8000-000000000301",
-      "00000000-0000-4000-8000-000000000302",
-    ],
+    templateIds: ["00000000-0000-4000-8000-000000000301", "00000000-0000-4000-8000-000000000302"],
     expectedDefaultTemplateId: null,
   },
   {
@@ -92,10 +89,12 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     }
 
     const productId = `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`;
-    await pool.query(
-      "INSERT INTO products (id, tenant_id, gtin14, name) VALUES ($1, $2, $3, $4)",
-      [productId, fixture.tenantId, `04600000000${String(index).padStart(3, "0")}`, "Migration product"],
-    );
+    await pool.query("INSERT INTO products (id, tenant_id, gtin14, name) VALUES ($1, $2, $3, $4)", [
+      productId,
+      fixture.tenantId,
+      `04600000000${String(index).padStart(3, "0")}`,
+      "Migration product",
+    ]);
 
     const shiftRows =
       fixture.tenantId === "default-box-label-sole"
@@ -111,7 +110,14 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
               fixture.templateIds[0],
             ],
           ]
-        : [[`00000000-0000-4000-8000-${String(index + 101).padStart(12, "0")}`, "aggregation", "active", null]];
+        : [
+            [
+              `00000000-0000-4000-8000-${String(index + 101).padStart(12, "0")}`,
+              "aggregation",
+              "active",
+              null,
+            ],
+          ];
 
     for (const [shiftId, mode, status, boxLabelTemplateId] of shiftRows) {
       await pool.query(
@@ -158,7 +164,9 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
-    journal.entries = journal.entries.filter((entry) => entry.tag !== "0042_default_box_label_template");
+    journal.entries = journal.entries.filter(
+      (entry) => entry.tag !== "0042_default_box_label_template",
+    );
     await writeFile(journalPath, JSON.stringify(journal));
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrationsFolder });
@@ -280,10 +288,9 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
       "UPDATE org_profiles SET default_box_label_template_id = $2 WHERE tenant_id = $1",
       ["default-box-label-many", "00000000-0000-4000-8000-000000000302"],
     );
-    const migrationStatements = (await readFile(
-      join(migrationsFolder, "0042_default_box_label_template.sql"),
-      "utf8",
-    )).split("--> statement-breakpoint");
+    const migrationStatements = (
+      await readFile(join(migrationsFolder, "0042_default_box_label_template.sql"), "utf8")
+    ).split("--> statement-breakpoint");
     const defaultsStatement = migrationStatements[2];
     const shiftsStatement = migrationStatements[3];
     if (!defaultsStatement || !shiftsStatement) {

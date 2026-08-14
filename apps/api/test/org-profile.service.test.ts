@@ -72,7 +72,11 @@ describe("OrgProfileService box label defaults", () => {
   });
 
   it.each([
-    ["writes a supplied UUID", "a0000000-0000-4000-8000-000000000001", "a0000000-0000-4000-8000-000000000001"],
+    [
+      "writes a supplied UUID",
+      "a0000000-0000-4000-8000-000000000001",
+      "a0000000-0000-4000-8000-000000000001",
+    ],
     ["clears on explicit null", null, null],
   ])("%s", async (_name, supplied, expected) => {
     const { db, onConflictDoUpdate, values } = profileUpsertDb();

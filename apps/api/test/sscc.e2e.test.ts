@@ -87,6 +87,18 @@ describe.skipIf(!ready)("sscc e2e", () => {
       .expect(201);
     productId = (product.body as { id: string }).id;
 
+    const boxLabelTemplateId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: boxLabelTemplateId,
+      tenantId,
+      name: "SSCC test box template",
+      spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+    });
+    await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: boxLabelTemplateId })
+      .expect(200);
+
     // The CreateShiftDto has no field for ssccIssuerCounterpartyId (Task 3
     // only landed the column; no route sets it yet), so it's assigned
     // directly here, same as sccc counters/blocks are inserted directly in

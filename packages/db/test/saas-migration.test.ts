@@ -20,6 +20,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
   const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   let temporaryRoot = "";
   let created = false;
+  let legacyHasDefaultBoxLabelTemplateColumn = false;
+  let upgradedHasDefaultBoxLabelTemplateColumn = false;
 
   function quoteIdentifier(identifier: string): string {
     if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) {
@@ -46,6 +48,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0039_kiosk_sscc_orders.sql"));
     await rm(join(legacyMigrations, "0040_sscc_counter_start_one.sql"));
     await rm(join(legacyMigrations, "0041_product_images.sql"));
+    await rm(join(legacyMigrations, "0042_default_box_label_template.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -58,6 +61,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "meta", "0039_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0040_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0041_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0042_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -75,11 +79,20 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0038_organization_branding" &&
         entry.tag !== "0039_kiosk_sscc_orders" &&
         entry.tag !== "0040_sscc_counter_start_one" &&
-        entry.tag !== "0041_product_images",
+        entry.tag !== "0041_product_images" &&
+        entry.tag !== "0042_default_box_label_template",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
     await migrate(drizzle(pool), { migrationsFolder: legacyMigrations });
+    const legacyDefaultColumn = await pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'org_profiles'
+         AND column_name = 'default_box_label_template_id'`,
+    );
+    legacyHasDefaultBoxLabelTemplateColumn = legacyDefaultColumn.rows[0]?.count === 1;
     await pool.query(
       "INSERT INTO organization (id, name, slug, created_at) VALUES ($1, $2, $3, $4)",
       ["existing-unmanaged", "Existing unmanaged", "existing-unmanaged", new Date()],
@@ -104,6 +117,14 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       [legacyDeviceId],
     );
     await migrate(drizzle(pool), { migrationsFolder });
+    const upgradedDefaultColumn = await pool.query<{ count: number }>(
+      `SELECT count(*)::int AS count
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'org_profiles'
+         AND column_name = 'default_box_label_template_id'`,
+    );
+    upgradedHasDefaultBoxLabelTemplateColumn = upgradedDefaultColumn.rows[0]?.count === 1;
     await pool.query(
       "INSERT INTO platform_users (id, name, email, role, status) VALUES ($1, $2, $3, 'platform_admin', 'active')",
       ["migration-test-admin", "Migration test admin", "migration-test-admin@example.invalid"],
@@ -127,6 +148,11 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       ["existing-unmanaged"],
     );
     expect(result.rows[0]?.count).toBe(0);
+  });
+
+  it("upgrades from a schema older than the default box label contract", () => {
+    expect(legacyHasDefaultBoxLabelTemplateColumn).toBe(false);
+    expect(upgradedHasDefaultBoxLabelTemplateColumn).toBe(true);
   });
 
   it("moves only untouched box counters from zero to one", async () => {

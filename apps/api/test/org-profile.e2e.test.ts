@@ -204,13 +204,19 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .expect(201);
     const templateId = template.body.id as string;
 
-    const set = await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: templateId }).expect(200);
+    const set = await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: templateId })
+      .expect(200);
     expect(set.body.defaultBoxLabelTemplateId).toBe(templateId);
 
     const omitted = await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200);
     expect(omitted.body.defaultBoxLabelTemplateId).toBe(templateId);
 
-    const cleared = await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: null }).expect(200);
+    const cleared = await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: null })
+      .expect(200);
     expect(cleared.body.defaultBoxLabelTemplateId).toBeNull();
   });
 
@@ -250,7 +256,9 @@ describe.skipIf(!ready)("org profile e2e", () => {
     expect(rejected.body.message).toBe("Unknown box label template for this organization");
     expect(JSON.stringify(rejected.body)).not.toContain(firstOrg);
     expect(JSON.stringify(rejected.body)).not.toContain(secondOrg);
-    expect(JSON.stringify(rejected.body)).not.toContain("org_profiles_box_label_template_tenant_fk");
+    expect(JSON.stringify(rejected.body)).not.toContain(
+      "org_profiles_box_label_template_tenant_fk",
+    );
 
     const profile = await first.get("/org/profile").expect(200);
     expect(profile.body.defaultBoxLabelTemplateId).toBeNull();

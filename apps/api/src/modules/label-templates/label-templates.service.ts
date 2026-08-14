@@ -128,7 +128,11 @@ export class LabelTemplatesService {
       const cause = err?.cause as { code?: string; constraint?: string } | undefined;
       const errorCode = err?.code ?? cause?.code;
       const constraint = err?.constraint ?? cause?.constraint;
-      if (errorCode === "23503" && constraint && LABEL_TEMPLATE_REFERENCE_CONSTRAINTS.has(constraint)) {
+      if (
+        errorCode === "23503" &&
+        constraint &&
+        LABEL_TEMPLATE_REFERENCE_CONSTRAINTS.has(constraint)
+      ) {
         throw new ConflictException(
           "Label template is referenced by an organization default, product, or shift",
         );

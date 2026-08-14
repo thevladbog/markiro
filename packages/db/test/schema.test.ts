@@ -30,7 +30,10 @@ describe("platform schema", () => {
     const foreignKey = getTableConfig(orgProfiles).foreignKeys.find(
       (item) => item.getName() === "org_profiles_box_label_template_tenant_fk",
     );
-    expect(foreignKey, "missing organization default box label template tenant foreign key").toBeDefined();
+    expect(
+      foreignKey,
+      "missing organization default box label template tenant foreign key",
+    ).toBeDefined();
     const reference = foreignKey!.reference();
     expect(reference.columns.map((column) => column.name)).toEqual([
       "tenant_id",

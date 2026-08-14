@@ -156,6 +156,35 @@ Keep every item unchecked until it has been exercised in the packaged Windows
 beta with the named scanner, printer, and display conditions. Automated tests
 and the browser gallery do not satisfy these checks.
 
+- [ ] In the cabinet, configure organisation default box-label template A. In
+      the packaged Station, create an aggregation shift without choosing a
+      template, close a box, and print it on the real printer. Confirm the
+      physical label uses template A and contains the 18-digit SSCC allocated
+      to that box; scan the label back and record the same SSCC.
+- [ ] With organisation default A still configured, create a planned
+      aggregation shift with explicit per-shift override B. Open it in the
+      packaged Station, close a box, and confirm the physical label uses B,
+      not A, with the SSCC allocated to that box.
+- [ ] Clear the organisation default and create a validation shift without an
+      override. Confirm the shift is created and opened without requiring or
+      mirroring a box-label template. Restore the intended default before
+      testing aggregation again.
+- [ ] With a template configured as the organisation default, try to delete it
+      from the cabinet. Confirm deletion is rejected with an actionable
+      conflict, the default remains configured, and no template or shift
+      binding is silently cleared.
+- [ ] Before upgrading, preserve the previously affected active aggregation
+      shift in persistent unresolved box-label recovery and record its box and
+      18-digit SSCC. After the database migration and API rollout, install the
+      packaged beta, run `Повторить восстановление`, and print on the same real
+      printer. Confirm backfill selects the expected template and recovery
+      retains the exact same box and SSCC without a second box close, SSCC
+      allocation, journal entry, or outbox entry.
+- [ ] For the same backfilled active-shift case, disconnect the network before
+      `Повторить восстановление`. Confirm recovery remains blocked with an
+      honest offline error and preserves the same box, SSCC, journal, outbox,
+      and print state. Restore connectivity, retry, and resolve the original
+      label without a second close or allocation.
 - [ ] Start a fresh issuer prefix and confirm the first printed box uses serial `0000001` plus a valid final check digit.
 - [ ] Scan production-like EAN-13 and KM DataMatrix; verify GTIN, serial, and AI 91/92/93 presentation.
 - [ ] Fill a 20-place box and confirm each cell, auto-close, and reset after print resolution.

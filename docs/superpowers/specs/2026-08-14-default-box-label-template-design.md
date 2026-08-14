@@ -2,7 +2,8 @@
 
 **Date:** 2026-08-14
 
-**Status:** Approved
+**Status:** Implemented — automated gates complete; packaged
+Windows/Tauri/printer/scanner acceptance pending
 
 **Scope:** Organisation-level box-label default, per-shift override, removal of
 unused item-label bindings, and recovery of aggregation shifts created by a
