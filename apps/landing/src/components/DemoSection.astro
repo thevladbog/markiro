@@ -1,12 +1,13 @@
 ---
-import type { PublicPhone } from "../lib/site-config";
+import type { PublicLegalLinks, PublicPhone } from "../lib/site-config";
 
 interface Props {
   demoEndpoint: string | null;
+  legalLinks: PublicLegalLinks | null;
   phone: PublicPhone | null;
 }
 
-const { demoEndpoint, phone } = Astro.props;
+const { demoEndpoint, legalLinks, phone } = Astro.props;
 ---
 
 <section class="section section--demo" id="demo" aria-labelledby="demo-title">
@@ -42,7 +43,14 @@ const { demoEndpoint, phone } = Astro.props;
         <span>Запросить демонстрацию</span><span aria-hidden="true">→</span>
       </button>
       <p class="form-status" data-form-status aria-live="polite"></p>
-      <p class="form-legal">Отправляя форму, вы соглашаетесь на обработку данных для ответа на запрос.</p>
+      {legalLinks ? (
+        <p class="form-legal">
+          Отправляя форму, вы принимаете <a href={legalLinks.consent}>согласие на обработку персональных данных</a>
+          и подтверждаете, что ознакомились с <a href={legalLinks.privacy}>политикой обработки данных</a>.
+        </p>
+      ) : (
+        <p class="form-legal">Онлайн-отправка будет доступна после подключения CRM и утверждения документов об обработке данных.</p>
+      )}
     </form>
   </div>
 </section>

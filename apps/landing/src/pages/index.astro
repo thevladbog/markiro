@@ -16,8 +16,10 @@ import { findSeoPage } from "../content/pages";
 import { readPublicSiteConfig } from "../lib/site-config";
 
 const siteConfig = readPublicSiteConfig({
-  PUBLIC_DEMO_ENDPOINT: import.meta.env.PUBLIC_DEMO_ENDPOINT,
+  PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+  PUBLIC_PERSONAL_DATA_CONSENT_PATH: import.meta.env.PUBLIC_PERSONAL_DATA_CONSENT_PATH,
   PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+  PUBLIC_PRIVACY_POLICY_PATH: import.meta.env.PUBLIC_PRIVACY_POLICY_PATH,
 });
 const page = findSeoPage("/");
 ---
@@ -76,7 +78,7 @@ const page = findSeoPage("/");
     <TraceLog />
     <PlatformModules />
     <ImplementationSteps />
-    <DemoSection phone={siteConfig.phone} demoEndpoint={siteConfig.demoEndpoint} />
+    <DemoSection phone={siteConfig.phone} demoEndpoint={siteConfig.demoEndpoint} legalLinks={siteConfig.legalLinks} />
   </main>
 
   <LandingFooter />

@@ -1,3 +1,5 @@
+import { canUseCategory, readConsent } from "../lib/consent";
+
 export interface RevealEntry {
   readonly isIntersecting: boolean;
   readonly target: Element;
@@ -94,6 +96,7 @@ export function browserLandingRuntime(browserWindow: Window & typeof globalThis)
       new browserWindow.IntersectionObserver((entries) => callback(entries), { threshold: 0.18 }),
     reducedMotion: browserWindow.matchMedia("(prefers-reduced-motion: reduce)").matches,
     track: (eventName, properties) => {
+      if (!canUseCategory(readConsent(browserWindow.localStorage), "analytics")) return;
       browserWindow.dispatchEvent(
         new browserWindow.CustomEvent("markiro:analytics", {
           detail: { eventName, properties },

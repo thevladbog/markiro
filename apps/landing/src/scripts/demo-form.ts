@@ -1,4 +1,5 @@
 import { type DemoLead, validateDemoLead } from "../lib/demo-form";
+import { canUseCategory, readConsent } from "../lib/consent";
 
 export interface DemoResponse {
   readonly ok: boolean;
@@ -175,6 +176,7 @@ export function browserDemoFormRuntime(browserWindow: Window & typeof globalThis
       return { ok: response.ok, status: response.status };
     },
     track: (eventName, properties) => {
+      if (!canUseCategory(readConsent(browserWindow.localStorage), "analytics")) return;
       browserWindow.dispatchEvent(
         new browserWindow.CustomEvent("markiro:analytics", {
           detail: { eventName, properties },

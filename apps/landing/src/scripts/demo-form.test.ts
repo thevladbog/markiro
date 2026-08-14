@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initDemoForm, type DemoFormRuntime, type DemoResponse } from "./demo-form";
 
-function renderForm(endpoint = "https://admin.markiro.app/public/demo-requests"): HTMLFormElement {
+function renderForm(endpoint = "/api/demo-requests"): HTMLFormElement {
   document.body.innerHTML = `
     <form data-demo-form ${endpoint.length > 0 ? `data-endpoint="${endpoint}"` : ""}>
       <label for="name">Имя</label>
@@ -69,7 +69,7 @@ describe("initDemoForm", () => {
     await submit(form);
 
     expect(currentRuntime.request).toHaveBeenCalledWith(
-      "https://admin.markiro.app/public/demo-requests",
+      "/api/demo-requests",
       {
         company: "Завод Север",
         name: "Анна",

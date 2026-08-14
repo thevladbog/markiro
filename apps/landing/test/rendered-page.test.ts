@@ -32,7 +32,7 @@ beforeAll(() => {
       env: {
         ...process.env,
         ASTRO_TELEMETRY_DISABLED: "1",
-        PUBLIC_DEMO_ENDPOINT: "",
+        PUBLIC_DEMO_SUBMISSION_ENABLED: "false",
         PUBLIC_PHONE: "",
       },
       stdio: "pipe",
