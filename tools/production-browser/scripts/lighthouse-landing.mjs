@@ -46,6 +46,12 @@ export function assertLighthouseReport(report, profile) {
   }
 }
 
+export function lighthouseScoreSummary(report, profile) {
+  return `${profile}: ${Object.keys(LIGHTHOUSE_THRESHOLDS)
+    .map((category) => `${category}=${report.categories[category].score.toFixed(2)}`)
+    .join(" ")}`;
+}
+
 async function waitForServer(url, child) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (child.exitCode !== null) throw new Error("landing preview exited before Lighthouse");
@@ -88,7 +94,9 @@ export async function runLandingLighthouse() {
       await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
         cwd: toolRoot,
       });
-      assertLighthouseReport(JSON.parse(await readFile(output, "utf8")), profile);
+      const report = JSON.parse(await readFile(output, "utf8"));
+      assertLighthouseReport(report, profile);
+      console.log(lighthouseScoreSummary(report, profile));
     }
   } finally {
     preview.kill("SIGTERM");

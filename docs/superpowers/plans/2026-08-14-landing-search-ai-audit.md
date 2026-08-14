@@ -32,20 +32,20 @@
 
 - Produces: `auditBuiltSite(root): AuditFinding[]` with codes for broken internal links, missing images, duplicate metadata, invalid canonical routes, absent headings, invalid JSON-LD and sitemap/route disagreement.
 
-- [ ] **Step 1: Write RED unit fixtures**
+- [x] **Step 1: Write RED unit fixtures**
 
   Cover one valid miniature site and explicit malformed fixtures for each finding code.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
   Run: `pnpm --filter @markiro/landing exec vitest run src/lib/audit.test.ts test/site-audit.test.ts`
   Expected: FAIL because the audit module does not exist.
 
-- [ ] **Step 3: Implement bounded filesystem audit**
+- [x] **Step 3: Implement bounded filesystem audit**
 
   Resolve only files under the supplied build root, normalize trailing-slash routes, ignore external URLs, and parse HTML with jsdom. The real-build test expects zero error findings.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
   ```bash
   git add apps/landing/src/lib/audit.ts apps/landing/src/lib/audit.test.ts apps/landing/test/site-audit.test.ts apps/landing/package.json
@@ -69,19 +69,19 @@
 
 - Produces: `test:landing:browser` and `test:landing:lighthouse` scripts; Lighthouse exits non-zero below SEO 1.00, accessibility 1.00, best-practices 0.95, or performance 0.90.
 
-- [ ] **Step 1: Write RED threshold/parser tests**
+- [x] **Step 1: Write RED threshold/parser tests**
 
   Feed synthetic Lighthouse JSON and assert boundary scores, missing categories and non-finite scores fail with precise messages.
 
-- [ ] **Step 2: Add Playwright route and crawler-parity tests**
+- [x] **Step 2: Add Playwright route and crawler-parity tests**
 
   Start the built site, visit all routes at mobile/desktop sizes, check keyboard focus, no horizontal overflow, no console/page errors, real 404s, policy endpoints and representative crawler User-Agents.
 
-- [ ] **Step 3: Pin Lighthouse and update the isolated lockfile**
+- [x] **Step 3: Pin Lighthouse and update the isolated lockfile**
 
   Use an exact version and preserve the production-browser workspace isolation. Do not broaden dependency ranges.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
   Run parser tests, landing browser suite and both Lighthouse profiles.
 
@@ -104,19 +104,19 @@
 
 - Produces: a versioned branded/non-branded query set, source/citation accuracy rubric, D0/D7/D30 cadence and exact webmaster/public-smoke checklist.
 
-- [ ] **Step 1: Write runbook RED contract**
+- [x] **Step 1: Write runbook RED contract**
 
   Assert the publication runbook includes DNS, TLS, external 404, robots/sitemap, Google, Yandex, Bing, IndexNow, structured-data validators, CRM/legal/consent gates, query-pack path and the rule that D0 is reachability only.
 
-- [ ] **Step 2: Run RED**
+- [x] **Step 2: Run RED**
 
   Run the runbook contract. Expected: FAIL because the publication runbook is absent.
 
-- [ ] **Step 3: Write the exact query pack and templates**
+- [x] **Step 3: Write the exact query pack and templates**
 
   Include branded, category, workflow, offline/recovery, SSCC, kiosk and 1C queries. Each result row records engine/model, locale/date, prompt, mention, citation URL, factual score, competing sources and follow-up action.
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
   Run runbook contract, Prettier, writing-guidelines review for the new public-facing copy, and `git diff --check`.
 
@@ -131,14 +131,14 @@
 
 - Modify: `docs/superpowers/plans/2026-08-14-landing-search-ai-audit.md`
 
-- [ ] **Step 1: Run landing gates**
+- [x] **Step 1: Run landing gates**
 
   Run landing test/typecheck/lint/build, deterministic audit, browser suite and Lighthouse mobile/desktop.
 
-- [ ] **Step 2: Run production gates**
+- [x] **Step 2: Run production gates**
 
   Run production bundle contracts, Yandex infra contracts, runbook contracts, Terraform formatting, root format check and `git diff --check`.
 
-- [ ] **Step 3: Review evidence boundaries**
+- [x] **Step 3: Review evidence boundaries**
 
   Report browser/lab results separately from CRM, legal consent, analytics, DNS/TLS, webmaster ownership, indexing, field Core Web Vitals and AI citations.

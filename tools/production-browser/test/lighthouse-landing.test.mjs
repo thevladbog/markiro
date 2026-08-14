@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertLighthouseReport, LIGHTHOUSE_THRESHOLDS } from "../scripts/lighthouse-landing.mjs";
+import {
+  assertLighthouseReport,
+  LIGHTHOUSE_THRESHOLDS,
+  lighthouseScoreSummary,
+} from "../scripts/lighthouse-landing.mjs";
 
 function report(overrides = {}) {
   return {
@@ -16,6 +20,10 @@ function report(overrides = {}) {
 
 test("accepts exact Lighthouse score thresholds", () => {
   assert.doesNotThrow(() => assertLighthouseReport(report(), "mobile"));
+  assert.equal(
+    lighthouseScoreSummary(report(), "mobile"),
+    "mobile: seo=1.00 accessibility=1.00 best-practices=0.95 performance=0.90",
+  );
 });
 
 for (const [category, score] of [
