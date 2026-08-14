@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   assertLighthouseReport,
+  lighthouseArguments,
   LIGHTHOUSE_THRESHOLDS,
   lighthouseScoreSummary,
 } from "../scripts/lighthouse-landing.mjs";
@@ -23,6 +24,27 @@ test("accepts exact Lighthouse score thresholds", () => {
   assert.equal(
     lighthouseScoreSummary(report(), "mobile"),
     "mobile: seo=1.00 accessibility=1.00 best-practices=0.95 performance=0.90",
+  );
+});
+
+test("adds Chromium sandbox compatibility flags only in CI", () => {
+  const base = {
+    chromePath: "/chromium",
+    output: "/report.json",
+    profile: "mobile",
+    url: "http://127.0.0.1:5473/",
+  };
+  assert.deepEqual(
+    lighthouseArguments({ ...base, isCI: true }).filter((argument) =>
+      argument.startsWith("--chrome-flags="),
+    ),
+    ["--chrome-flags=--no-sandbox --disable-dev-shm-usage"],
+  );
+  assert.deepEqual(
+    lighthouseArguments({ ...base, isCI: false }).filter((argument) =>
+      argument.startsWith("--chrome-flags="),
+    ),
+    [],
   );
 });
 

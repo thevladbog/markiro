@@ -52,6 +52,20 @@ export function lighthouseScoreSummary(report, profile) {
     .join(" ")}`;
 }
 
+export function lighthouseArguments({ chromePath, isCI, output, profile, url }) {
+  const arguments_ = [
+    url,
+    "--quiet",
+    "--output=json",
+    `--output-path=${output}`,
+    `--chrome-path=${chromePath}`,
+    "--only-categories=performance,accessibility,best-practices,seo",
+  ];
+  if (isCI) arguments_.push("--chrome-flags=--no-sandbox --disable-dev-shm-usage");
+  if (profile === "desktop") arguments_.push("--preset=desktop");
+  return arguments_;
+}
+
 async function waitForServer(url, child) {
   for (let attempt = 0; attempt < 60; attempt += 1) {
     if (child.exitCode !== null) throw new Error("landing preview exited before Lighthouse");
@@ -82,15 +96,13 @@ export async function runLandingLighthouse() {
     await waitForServer("http://127.0.0.1:5473/", preview);
     for (const profile of ["mobile", "desktop"]) {
       const output = path.join(outputRoot, `${profile}.json`);
-      const arguments_ = [
-        "http://127.0.0.1:5473/",
-        "--quiet",
-        "--output=json",
-        `--output-path=${output}`,
-        `--chrome-path=${chromium.executablePath()}`,
-        "--only-categories=performance,accessibility,best-practices,seo",
-      ];
-      if (profile === "desktop") arguments_.push("--preset=desktop");
+      const arguments_ = lighthouseArguments({
+        chromePath: chromium.executablePath(),
+        isCI: Boolean(process.env.CI),
+        output,
+        profile,
+        url: "http://127.0.0.1:5473/",
+      });
       await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
         cwd: toolRoot,
       });
