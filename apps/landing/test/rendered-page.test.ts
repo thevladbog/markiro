@@ -10,6 +10,18 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
 let document: Document;
+const documents = new Map<string, Document>();
+
+const EXPECTED_ROUTES = [
+  "/",
+  "/markirovka-chestny-znak/",
+  "/sscc-i-agregatsiya/",
+  "/rabochee-mesto-upakovki/",
+  "/kiosk-samovydachi/",
+  "/integratsiya-1c/",
+  "/oflayn-rabota/",
+  "/faq/",
+] as const;
 
 beforeAll(() => {
   execFileSync(
@@ -27,8 +39,15 @@ beforeAll(() => {
     },
   );
 
-  const html = readFileSync(path.join(outputDirectory, "index.html"), "utf8");
-  document = new JSDOM(html).window.document;
+  for (const route of EXPECTED_ROUTES) {
+    const outputPath =
+      route === "/"
+        ? path.join(outputDirectory, "index.html")
+        : path.join(outputDirectory, route.slice(1), "index.html");
+    const html = readFileSync(outputPath, "utf8");
+    documents.set(route, new JSDOM(html).window.document);
+  }
+  document = documents.get("/") as Document;
 }, 180_000);
 
 afterAll(() => {
@@ -94,5 +113,90 @@ describe("rendered landing page", () => {
     expect(Number(heroImage?.getAttribute("width"))).toBeGreaterThan(0);
     expect(Number(heroImage?.getAttribute("height"))).toBeGreaterThan(0);
     expect(heroImage?.getAttribute("fetchpriority")).toBe("high");
+  });
+
+  it("renders complete unique metadata for every canonical route", () => {
+    const titles = new Set<string>();
+    const descriptions = new Set<string>();
+
+    for (const [route, routeDocument] of documents) {
+      const title = routeDocument.title;
+      const description = routeDocument
+        .querySelector('meta[name="description"]')
+        ?.getAttribute("content");
+
+      expect(routeDocument.querySelectorAll("h1")).toHaveLength(1);
+      expect(routeDocument.querySelector('meta[name="robots"]')?.getAttribute("content")).toBe(
+        "index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1",
+      );
+      expect(routeDocument.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        `https://markiro.app${route}`,
+      );
+      expect(routeDocument.querySelector('meta[property="og:site_name"]')).not.toBeNull();
+      expect(routeDocument.querySelector('meta[property="og:image:alt"]')).not.toBeNull();
+      expect(routeDocument.querySelector('meta[name="twitter:title"]')).not.toBeNull();
+      expect(routeDocument.querySelector('meta[name="twitter:description"]')).not.toBeNull();
+      expect(routeDocument.querySelector('meta[name="twitter:image"]')).not.toBeNull();
+      expect(routeDocument.querySelector('meta[name="twitter:image:alt"]')).not.toBeNull();
+      expect(title).not.toBe("");
+      expect(description).toBeTruthy();
+      titles.add(title);
+      descriptions.add(description as string);
+    }
+
+    expect(titles.size).toBe(EXPECTED_ROUTES.length);
+    expect(descriptions.size).toBe(EXPECTED_ROUTES.length);
+  });
+
+  it("renders parseable structured data that matches visible navigation", () => {
+    for (const [route, routeDocument] of documents) {
+      const script = routeDocument.querySelector('script[type="application/ld+json"]');
+      expect(script).not.toBeNull();
+      const graph = JSON.parse(script?.textContent ?? "") as {
+        "@graph": Array<Record<string, unknown>>;
+      };
+
+      expect(graph["@graph"].some((entry) => entry["@type"] === "WebSite")).toBe(true);
+      expect(graph["@graph"].some((entry) => entry["@type"] === "Organization")).toBe(true);
+      expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(
+        true,
+      );
+
+      if (route !== "/") {
+        expect(routeDocument.querySelector('nav[aria-label="Хлебные крошки"]')).not.toBeNull();
+        expect(graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList")).toBe(true);
+      }
+    }
+  });
+
+  it("keeps FAQ structured answers identical to visible answers", () => {
+    const faqDocument = documents.get("/faq/") as Document;
+    const graph = JSON.parse(
+      faqDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
+    ) as {
+      "@graph": Array<Record<string, unknown>>;
+    };
+    const faq = graph["@graph"].find((entry) => entry["@type"] === "FAQPage") as {
+      mainEntity: Array<{ name: string; acceptedAnswer: { text: string } }>;
+    };
+
+    const visible = [...faqDocument.querySelectorAll("[data-faq-item]")].map((item) => ({
+      name: item.querySelector("h2")?.textContent?.trim(),
+      text: item.querySelector("p")?.textContent?.trim(),
+    }));
+    expect(visible).toEqual(
+      faq.mainEntity.map((entry) => ({
+        name: entry.name,
+        text: entry.acceptedAnswer.text,
+      })),
+    );
+  });
+
+  it("links every specialist page to at least two canonical related pages", () => {
+    for (const route of EXPECTED_ROUTES.slice(1)) {
+      const routeDocument = documents.get(route) as Document;
+      const relatedLinks = [...routeDocument.querySelectorAll('[data-related-pages] a[href^="/"]')];
+      expect(relatedLinks.length).toBeGreaterThanOrEqual(2);
+    }
   });
 });

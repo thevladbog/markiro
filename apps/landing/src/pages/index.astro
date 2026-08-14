@@ -2,9 +2,9 @@
 import { Picture } from "astro:assets";
 
 import factoryImage from "../assets/factory-line.jpg";
-import BrandMark from "../components/BrandMark.astro";
 import DemoSection from "../components/DemoSection.astro";
 import ImplementationSteps from "../components/ImplementationSteps.astro";
+import LandingFooter from "../components/LandingFooter.astro";
 import LandingHeader from "../components/LandingHeader.astro";
 import LineConsole from "../components/LineConsole.astro";
 import PlatformModules from "../components/PlatformModules.astro";
@@ -12,18 +12,17 @@ import ProductModes from "../components/ProductModes.astro";
 import ProductionCycle from "../components/ProductionCycle.astro";
 import TraceLog from "../components/TraceLog.astro";
 import BaseLayout from "../layouts/BaseLayout.astro";
+import { findSeoPage } from "../content/pages";
 import { readPublicSiteConfig } from "../lib/site-config";
 
 const siteConfig = readPublicSiteConfig({
   PUBLIC_DEMO_ENDPOINT: import.meta.env.PUBLIC_DEMO_ENDPOINT,
   PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
 });
+const page = findSeoPage("/");
 ---
 
-<BaseLayout
-  title="Markiro - маркировка и агрегация для производства"
-  description="Markiro помогает выпускать коды, печатать этикетки, собирать короба и паллеты и сохранять прослеживаемость на производственной линии."
->
+<BaseLayout page={page}>
   <LandingHeader phone={siteConfig.phone} />
 
   <main id="main">
@@ -80,15 +79,7 @@ const siteConfig = readPublicSiteConfig({
     <DemoSection phone={siteConfig.phone} demoEndpoint={siteConfig.demoEndpoint} />
   </main>
 
-  <footer class="landing-footer">
-    <div class="container landing-footer__inner">
-      <a href="#hero" aria-label="Markiro, к началу страницы"><BrandMark /></a>
-      <nav aria-label="Ссылки в подвале">
-        <a href="#cycle">Как работает</a><a href="#platform">Система</a><a href="#demo">Контакты</a>
-      </nav>
-      <span>© 2026</span>
-    </div>
-  </footer>
+  <LandingFooter />
 
   <script>
     import { browserDemoFormRuntime, initDemoForm } from "../scripts/demo-form";
