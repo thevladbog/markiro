@@ -400,7 +400,11 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost
           ? [["GET", "HEAD"]]
-          : [["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"]],
+          : [
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+            ],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);

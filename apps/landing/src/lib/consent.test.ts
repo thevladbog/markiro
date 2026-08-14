@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { canUseCategory, parseConsent, serializeConsent, type ConsentState } from "./consent";
 
 describe("consent state", () => {
-  it.each([null, "", "null", "{}", '{"version":2,"analytics":true,"marketing":true}']) (
+  it.each([null, "", "null", "{}", '{"version":2,"analytics":true,"marketing":true}'])(
     "treats absent or incompatible storage as no consent: %s",
     (stored) => {
       expect(parseConsent(stored)).toBeNull();
@@ -19,11 +19,11 @@ describe("consent state", () => {
 
   it("requires an explicit category grant", () => {
     expect(canUseCategory(null, "analytics")).toBe(false);
-    expect(
-      canUseCategory({ version: 1, analytics: false, marketing: true }, "analytics"),
-    ).toBe(false);
-    expect(
-      canUseCategory({ version: 1, analytics: true, marketing: false }, "analytics"),
-    ).toBe(true);
+    expect(canUseCategory({ version: 1, analytics: false, marketing: true }, "analytics")).toBe(
+      false,
+    );
+    expect(canUseCategory({ version: 1, analytics: true, marketing: false }, "analytics")).toBe(
+      true,
+    );
   });
 });

@@ -20,9 +20,7 @@ describe("SEO page registry", () => {
 
   it("keeps route metadata unique and useful", () => {
     expect(new Set(SEO_PAGES.map(({ title }) => title)).size).toBe(SEO_PAGES.length);
-    expect(new Set(SEO_PAGES.map(({ description }) => description)).size).toBe(
-      SEO_PAGES.length,
-    );
+    expect(new Set(SEO_PAGES.map(({ description }) => description)).size).toBe(SEO_PAGES.length);
 
     for (const page of SEO_PAGES) {
       expect(page.title.length).toBeGreaterThanOrEqual(30);

@@ -158,9 +158,7 @@ describe("rendered landing page", () => {
 
       expect(graph["@graph"].some((entry) => entry["@type"] === "WebSite")).toBe(true);
       expect(graph["@graph"].some((entry) => entry["@type"] === "Organization")).toBe(true);
-      expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(
-        true,
-      );
+      expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(true);
 
       if (route !== "/") {
         expect(routeDocument.querySelector('nav[aria-label="Хлебные крошки"]')).not.toBeNull();

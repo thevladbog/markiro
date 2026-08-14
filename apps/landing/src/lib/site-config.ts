@@ -61,10 +61,7 @@ function readSameOriginPath(value: string | undefined, variable: string): string
 
 export function readPublicSiteConfig(env: PublicEnvironment): PublicSiteConfig {
   const submissionEnabled = readEnabled(env.PUBLIC_DEMO_SUBMISSION_ENABLED);
-  const privacy = readSameOriginPath(
-    env.PUBLIC_PRIVACY_POLICY_PATH,
-    "PUBLIC_PRIVACY_POLICY_PATH",
-  );
+  const privacy = readSameOriginPath(env.PUBLIC_PRIVACY_POLICY_PATH, "PUBLIC_PRIVACY_POLICY_PATH");
   const consent = readSameOriginPath(
     env.PUBLIC_PERSONAL_DATA_CONSENT_PATH,
     "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
@@ -76,7 +73,8 @@ export function readPublicSiteConfig(env: PublicEnvironment): PublicSiteConfig {
 
   return {
     demoEndpoint: submissionEnabled ? "/api/demo-requests" : null,
-    legalLinks: submissionEnabled && privacy !== null && consent !== null ? { consent, privacy } : null,
+    legalLinks:
+      submissionEnabled && privacy !== null && consent !== null ? { consent, privacy } : null,
     phone: readPhone(env.PUBLIC_PHONE),
   };
 }

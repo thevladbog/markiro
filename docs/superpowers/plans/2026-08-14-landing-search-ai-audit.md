@@ -22,12 +22,14 @@
 ### Task 1: Add deterministic built-site SEO audit
 
 **Files:**
+
 - Create: `apps/landing/test/site-audit.test.ts`
 - Create: `apps/landing/src/lib/audit.ts`
 - Create: `apps/landing/src/lib/audit.test.ts`
 - Modify: `apps/landing/package.json`
 
 **Interfaces:**
+
 - Produces: `auditBuiltSite(root): AuditFinding[]` with codes for broken internal links, missing images, duplicate metadata, invalid canonical routes, absent headings, invalid JSON-LD and sitemap/route disagreement.
 
 - [ ] **Step 1: Write RED unit fixtures**
@@ -53,6 +55,7 @@
 ### Task 2: Add browser and Lighthouse release gates
 
 **Files:**
+
 - Create: `tools/production-browser/landing.playwright.config.ts`
 - Create: `tools/production-browser/tests/landing-seo.spec.ts`
 - Create: `tools/production-browser/scripts/lighthouse-landing.mjs`
@@ -63,6 +66,7 @@
 - Modify: `.github/workflows/ci.yml`
 
 **Interfaces:**
+
 - Produces: `test:landing:browser` and `test:landing:lighthouse` scripts; Lighthouse exits non-zero below SEO 1.00, accessibility 1.00, best-practices 0.95, or performance 0.90.
 
 - [ ] **Step 1: Write RED threshold/parser tests**
@@ -89,6 +93,7 @@
 ### Task 3: Add publication and AI-search audit artifacts
 
 **Files:**
+
 - Create: `docs/runbooks/landing-publication.md`
 - Create: `docs/seo/ai-search-query-pack.md`
 - Create: `docs/seo/ai-search-audit-template.md`
@@ -96,6 +101,7 @@
 - Modify: `deploy/production/test/runbook-contract.test.mjs`
 
 **Interfaces:**
+
 - Produces: a versioned branded/non-branded query set, source/citation accuracy rubric, D0/D7/D30 cadence and exact webmaster/public-smoke checklist.
 
 - [ ] **Step 1: Write runbook RED contract**
@@ -122,6 +128,7 @@
 ### Task 4: Final integrated verification
 
 **Files:**
+
 - Modify: `docs/superpowers/plans/2026-08-14-landing-search-ai-audit.md`
 
 - [ ] **Step 1: Run landing gates**
@@ -135,4 +142,3 @@
 - [ ] **Step 3: Review evidence boundaries**
 
   Report browser/lab results separately from CRM, legal consent, analytics, DNS/TLS, webmaster ownership, indexing, field Core Web Vitals and AI citations.
-

@@ -45,16 +45,16 @@ locale exists.
 
 The first release contains these canonical routes:
 
-| Route | Primary intent | Required substance |
-| --- | --- | --- |
-| `/` | Markiro product overview | Product promise, continuity, production cycle, modules, implementation, links into the cluster, demo CTA |
-| `/markirovka-chestny-znak/` | Production marking workflow | Code receipt/validation, printing, application, traceability, limitations and integration boundary |
-| `/sscc-i-agregatsiya/` | SSCC and aggregation | Units, boxes and pallets, parent-child hierarchy, scan verification, disaggregation/recovery where supported |
-| `/rabochee-mesto-upakovki/` | Packing station | Operator flow, scanner/printer/local operation, status visibility and recovery |
-| `/kiosk-samovydachi/` | Self-service pickup kiosk | Pairing, customer pickup flow, offline constraints, operator/admin boundary |
-| `/integratsiya-1c/` | 1C integration | Supported exchange boundary, ownership of data, safe failure/retry model; no unsupported configuration claims |
-| `/oflayn-rabota/` | Factory continuity without connectivity | Local journal/outbox, reconnect, conflicts, recovery and what still requires the server |
-| `/faq/` | Direct factual answers | Visible questions and concise answers derived from verified product behavior |
+| Route                       | Primary intent                          | Required substance                                                                                            |
+| --------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `/`                         | Markiro product overview                | Product promise, continuity, production cycle, modules, implementation, links into the cluster, demo CTA      |
+| `/markirovka-chestny-znak/` | Production marking workflow             | Code receipt/validation, printing, application, traceability, limitations and integration boundary            |
+| `/sscc-i-agregatsiya/`      | SSCC and aggregation                    | Units, boxes and pallets, parent-child hierarchy, scan verification, disaggregation/recovery where supported  |
+| `/rabochee-mesto-upakovki/` | Packing station                         | Operator flow, scanner/printer/local operation, status visibility and recovery                                |
+| `/kiosk-samovydachi/`       | Self-service pickup kiosk               | Pairing, customer pickup flow, offline constraints, operator/admin boundary                                   |
+| `/integratsiya-1c/`         | 1C integration                          | Supported exchange boundary, ownership of data, safe failure/retry model; no unsupported configuration claims |
+| `/oflayn-rabota/`           | Factory continuity without connectivity | Local journal/outbox, reconnect, conflicts, recovery and what still requires the server                       |
+| `/faq/`                     | Direct factual answers                  | Visible questions and concise answers derived from verified product behavior                                  |
 
 The routes form a topic cluster rather than isolated campaign pages. The header,
 footer, breadcrumbs, related-content links, and contextual inline links connect
@@ -308,4 +308,3 @@ truthful and useful; do not generate doorway pages solely to chase prompts.
 - Package, bundle, browser and Lighthouse gates are reported separately from
   live DNS/TLS, webmaster, indexing, field performance, CRM, consent/legal and
   AI-citation gates.
-

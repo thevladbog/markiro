@@ -42,9 +42,7 @@ describe("SEO generators", () => {
 
   it("builds truthful breadcrumb data for an inner route", () => {
     const graph = buildPageGraph(findSeoPage("/oflayn-rabota/"));
-    const breadcrumb = graph["@graph"].find(
-      (entry) => entry["@type"] === "BreadcrumbList",
-    );
+    const breadcrumb = graph["@graph"].find((entry) => entry["@type"] === "BreadcrumbList");
 
     expect(breadcrumb).toEqual({
       "@type": "BreadcrumbList",

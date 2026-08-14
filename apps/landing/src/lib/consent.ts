@@ -48,9 +48,6 @@ export function readConsent(storage: Pick<Storage, "getItem">): ConsentState | n
   }
 }
 
-export function canUseCategory(
-  state: ConsentState | null,
-  category: ConsentCategory,
-): boolean {
+export function canUseCategory(state: ConsentState | null, category: ConsentCategory): boolean {
   return state?.[category] === true;
 }

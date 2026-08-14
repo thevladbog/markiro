@@ -24,6 +24,7 @@
 ### Task 1: Add the typed page registry and policy generators
 
 **Files:**
+
 - Create: `apps/landing/src/content/pages.ts`
 - Create: `apps/landing/src/content/pages.test.ts`
 - Create: `apps/landing/src/lib/seo.ts`
@@ -35,6 +36,7 @@
 - Delete: `apps/landing/public/sitemap.xml`
 
 **Interfaces:**
+
 - Produces: `SEO_PAGES: readonly SeoPageDefinition[]`, `findSeoPage(path)`, `buildPageGraph(page)`, and deterministic text/XML endpoints.
 - Consumes: `Astro.site` fixed at `https://markiro.app`.
 
@@ -44,9 +46,14 @@
 
   ```ts
   expect(SEO_PAGES.map(({ path }) => path)).toEqual([
-    "/", "/markirovka-chestny-znak/", "/sscc-i-agregatsiya/",
-    "/rabochee-mesto-upakovki/", "/kiosk-samovydachi/",
-    "/integratsiya-1c/", "/oflayn-rabota/", "/faq/",
+    "/",
+    "/markirovka-chestny-znak/",
+    "/sscc-i-agregatsiya/",
+    "/rabochee-mesto-upakovki/",
+    "/kiosk-samovydachi/",
+    "/integratsiya-1c/",
+    "/oflayn-rabota/",
+    "/faq/",
   ]);
   expect(renderRobots()).toContain("User-agent: GPTBot\nDisallow: /");
   expect(renderRobots()).toContain("User-agent: OAI-SearchBot\nAllow: /");
@@ -77,6 +84,7 @@
 ### Task 2: Render the topic cluster and truthful structured data
 
 **Files:**
+
 - Create: `apps/landing/src/components/Breadcrumbs.astro`
 - Create: `apps/landing/src/components/RelatedPages.astro`
 - Create: `apps/landing/src/components/SeoArticle.astro`
@@ -94,6 +102,7 @@
 - Modify: `apps/landing/test/rendered-page.test.ts`
 
 **Interfaces:**
+
 - Consumes: `SEO_PAGES`, `findSeoPage`, `buildPageGraph`.
 - Produces: eight built HTML routes with one H1, visible body copy, related links, canonical metadata and matching JSON-LD.
 
@@ -128,6 +137,7 @@
 ### Task 3: Add consent-safe analytics and attribution boundaries
 
 **Files:**
+
 - Create: `apps/landing/src/lib/consent.ts`
 - Create: `apps/landing/src/lib/consent.test.ts`
 - Create: `apps/landing/src/scripts/consent.ts`
@@ -139,6 +149,7 @@
 - Modify: `apps/landing/src/styles/landing.css`
 
 **Interfaces:**
+
 - Produces: `ConsentState`, `readConsent`, `writeConsent`, `canUseCategory`, and `initConsentPanel`.
 - Consumes: no analytics vendor and creates no visitor identifier.
 
@@ -171,9 +182,11 @@
 ### Task 4: Complete package and visual gates
 
 **Files:**
+
 - Modify: `docs/superpowers/plans/2026-08-14-landing-seo-content.md`
 
 **Interfaces:**
+
 - Consumes: built topic cluster.
 - Produces: verified package evidence and recorded external blockers.
 
@@ -188,4 +201,3 @@
 - [ ] **Step 3: Record blockers without weakening behavior**
 
   Record CRM contract, legal/privacy copy, analytics vendor, public organization facts, DNS/TLS, webmaster verification and live indexing as unverified external gates.
-

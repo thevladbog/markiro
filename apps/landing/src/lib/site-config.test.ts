@@ -46,9 +46,9 @@ describe("readPublicSiteConfig", () => {
       phone: null,
     });
 
-    expect(() =>
-      readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" }),
-    ).toThrow("demo submission requires privacy and personal-data consent paths");
+    expect(() => readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toThrow(
+      "demo submission requires privacy and personal-data consent paths",
+    );
 
     expect(() =>
       readPublicSiteConfig({

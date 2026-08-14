@@ -23,12 +23,14 @@
 ### Task 1: Build and isolate the landing edge surface
 
 **Files:**
+
 - Modify: `.dockerignore`
 - Modify: `deploy/production/edge.Dockerfile`
 - Modify: `deploy/production/Caddyfile`
 - Modify: `deploy/production/test/edge-contract.test.mjs`
 
 **Interfaces:**
+
 - Produces: `/srv/landing` and Caddy snippets `landing_routes` plus HTTP/HTTPS authorities for `MARKIRO_LANDING_DOMAIN`.
 
 - [ ] **Step 1: Write edge contract RED assertions**
@@ -56,6 +58,7 @@
 ### Task 2: Carry the third domain through deployment contracts
 
 **Files:**
+
 - Modify: `deploy/production/production-domain.mjs`
 - Modify: `deploy/production/preflight.mjs`
 - Modify: `deploy/production/deploy.mjs`
@@ -70,6 +73,7 @@
 - Modify: `deploy/production/test/smoke-route-table.test.mjs`
 
 **Interfaces:**
+
 - Produces: `validateProductionDomains(domain, kioskDomain, landingDomain)` returning all three names and smoke/DNS tables containing the landing authority.
 
 - [ ] **Step 1: Add three-domain RED cases**
@@ -96,6 +100,7 @@
 ### Task 3: Extend workflow, Terraform DNS and runbooks
 
 **Files:**
+
 - Modify: `.github/workflows/release-images.yml`
 - Modify: `.github/workflows/deploy-production.yml`
 - Modify: `.github/workflows/yandex-infrastructure.yml`
@@ -111,6 +116,7 @@
 - Modify: `docs/runbooks/yandex-infrastructure-apply.md`
 
 **Interfaces:**
+
 - Produces: Terraform `landing_domain`, conditional apex A record, workflow variable forwarding and a publication checklist that preserves `public_dns_enabled=false` by default.
 
 - [ ] **Step 1: Write workflow/infra/runbook RED assertions**
@@ -137,6 +143,7 @@
 ### Task 4: Build the real edge image locally
 
 **Files:**
+
 - Modify: `docs/superpowers/plans/2026-08-14-landing-production-domain.md`
 
 - [ ] **Step 1: Run the production image contract**
@@ -150,4 +157,3 @@
 - [ ] **Step 3: Record external gates**
 
   Record that production DNS, certificate issuance, Terraform apply, SSH deploy, CRM upstream and external smoke were not exercised.
-

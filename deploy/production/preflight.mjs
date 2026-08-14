@@ -210,8 +210,7 @@ export async function runPreflight(
     kioskDomain === "kiosk.localhost" &&
     landingDomain === "landing.localhost";
   if (domain === "localhost" && !isDirectLocalSet) throw invalid("MARKIRO_DOMAIN");
-  if (kioskDomain === "kiosk.localhost" && !isDirectLocalSet)
-    throw invalid("MARKIRO_KIOSK_DOMAIN");
+  if (kioskDomain === "kiosk.localhost" && !isDirectLocalSet) throw invalid("MARKIRO_KIOSK_DOMAIN");
   if (landingDomain === "landing.localhost" && !isDirectLocalSet)
     throw invalid("MARKIRO_LANDING_DOMAIN");
   if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
