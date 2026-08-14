@@ -107,6 +107,47 @@ describe("offline kiosk branding", () => {
     });
   });
 
+  it("keeps the kiosk API prefix when the configured server URL is relative", async () => {
+    const branding = {
+      organizationName: "Северная вода",
+      logoUrl: `/kiosk/branding/logo/${REV_2}`,
+      logoRevision: REV_2,
+    };
+    await replaceSnapshot(bootstrap(branding), new Date("2026-08-13T08:00:01.000Z"));
+    const config = await writeConfig({
+      serverUrl: "/api",
+      token: "private-token",
+      kioskId: "kiosk-1",
+      kioskName: "Gate",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const owner: BrandingOwner = {
+      serverUrl: config.serverUrl,
+      kioskId: config.kioskId!,
+      credentialGeneration: config.credentialGeneration!,
+    };
+    const fetchLogo = vi.fn(
+      async () =>
+        new Response(new Blob(["valid-webp"], { type: "image/webp" }), {
+          headers: { "Content-Type": "image/webp" },
+        }),
+    );
+
+    await refreshCachedBranding({
+      owner,
+      token: "private-token",
+      branding,
+      fetch: fetchLogo as typeof fetch,
+      decode: async () => true,
+    });
+
+    expect(fetchLogo).toHaveBeenCalledWith(
+      new URL(`/api/kiosk/branding/logo/${REV_2}`, window.location.origin).toString(),
+      expect.any(Object),
+    );
+  });
+
   it("keeps the prior valid blob when a refresh fails or returns an undecodable image", async () => {
     const owner = await seedBinding({
       organizationName: "Северная вода",

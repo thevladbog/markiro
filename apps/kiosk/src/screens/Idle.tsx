@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, type AlertTone } from "@markiro/ui";
+import { Alert, Button, type AlertTone } from "@markiro/ui";
 import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
 import type { CachedBranding, DisplayedBranding } from "../store/branding.js";
@@ -67,9 +67,9 @@ export interface IdleProps {
   /** Exactly one call per session opened here, with the employee admitted. */
   onEmployee: (employeeId: string) => void;
   /**
-   * The way into scanner setup on a RUNNING kiosk, raised by a deliberate long
-   * press on the header (design brief 07 §5). Optional so a caller with nowhere
-   * to go simply leaves the gesture inert.
+   * The way into equipment settings on a RUNNING kiosk. The visible action is
+   * primary; the deliberate long press remains as a recovery gesture. Optional
+   * so a caller with nowhere to go exposes neither entry path.
    *
    * This screen only asks; it grants nothing. Everything behind it is still
    * gated on operator credentials by `ScannerSetup` — the press is an entry
@@ -239,11 +239,10 @@ export function Idle({
   /**
    * The settings gesture, as two timers on one press.
    *
-   * NOT A BUTTON, and not focusable. Two reasons, and the second is the sharp
-   * one: this screen faces the public, and the kiosk's scanner is a keyboard
-   * wedge — it "types" a badge and finishes with Enter. Any focusable control
-   * standing on the idle screen is therefore one stray focus away from being
-   * activated by the next person who scans their badge.
+   * The hidden recovery gesture remains useful if the visible control is
+   * obscured by an unusual viewport. Keyboard-wedge keystrokes are consumed by
+   * the source, including its Enter suffix, so a scan cannot activate the
+   * visible settings button by accident.
    *
    * A press is cancelled by anything that is not a completed hold — a release,
    * a finger sliding off the title, the browser taking the pointer away for a
@@ -339,6 +338,15 @@ export function Idle({
       ) : null}
       <footer className="kiosk-login__footer">
         <span>{t("idle.footer")}</span>
+        {onOpenSettings ? (
+          <Button
+            className="kiosk-control kiosk-login__settings"
+            variant="secondary"
+            onClick={onOpenSettings}
+          >
+            {t("idle.settingsAction")}
+          </Button>
+        ) : null}
         <MarkiroLogo compact />
       </footer>
     </main>
