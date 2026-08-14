@@ -112,6 +112,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
     LinesController,
     {
       listLines: readPolicy,
+      listPresence: readPolicy,
       getLine: readPolicy,
       createLine: writePolicy,
       updateLine: writePolicy,
@@ -187,6 +188,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       deleteShift: writePolicy,
       closeShift: writePolicy,
       openShift: sharedWritePolicy,
+      enterShift: sharedWritePolicy,
       getBundle: sharedReadPolicy,
       getReferenceBundle: sharedReadPolicy,
     },

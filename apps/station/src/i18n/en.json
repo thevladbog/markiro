@@ -144,6 +144,11 @@
     "boxLabelTemplateRequired": "A box label template is not configured in the admin panel. Configure it and try again.",
     "serverUnavailable": "Could not load shifts. Check server access.",
     "active": "Shift active",
+    "notStarted": "Not started",
+    "validation": "Validation",
+    "aggregation": "Aggregation",
+    "planned": "plan",
+    "noPlan": "no plan",
     "forCounterparty": "for:",
     "preparing": "Preparing the shift…"
   },
@@ -232,6 +237,8 @@
     "crypto": "Crypto tail",
     "exit": "Leave shift",
     "pauseFinish": "Pause / finish",
+    "pause": "Pause",
+    "closeShift": "Close shift",
     "exceptions": "Exceptions",
     "backToWork": "Back to work",
     "summary": "Shift summary",
@@ -254,7 +261,26 @@
     "exitPending_many": "{{count}} scans have not reached the server yet.",
     "exitPending_other": "{{count}} scans have not reached the server yet.",
     "exitAnyway": "Leave anyway",
-    "stay": "Stay"
+    "stay": "Stay",
+    "closeReasonTitle": "Select a deviation reason",
+    "closeReasonDetail": "Actual quantity differs from the plan.",
+    "closeReasonConfirm": "Close shift",
+    "closeFailed": "Could not close shift",
+    "closeOpenBox": "Close the open box first",
+    "closeSummaryTitle": "Shift closed",
+    "closeSummaryPieces": "Product: {{count}} pcs",
+    "closeSummaryBoxes": "Closed boxes: {{count}}",
+    "closeSummaryPlan": "Plan: {{planned}}, actual: {{actual}}",
+    "noPlan": "no plan",
+    "backToShifts": "Back to shifts",
+    "closeReasons": {
+      "production_defect": "Production defect",
+      "material_shortage": "Material shortage",
+      "equipment_stop": "Equipment stop",
+      "production_order_changed": "Production order changed",
+      "planned_quantity_error": "Planned quantity error",
+      "other_production_deviation": "Other production deviation"
+    }
   },
   "setup": {
     "title": "Workstation setup",

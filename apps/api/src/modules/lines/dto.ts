@@ -23,3 +23,15 @@ export interface LineDto {
 export interface ListLinesResponseDto {
   items: LineDto[];
 }
+
+export interface LinePresenceDto {
+  lineId: string;
+  lineName: string;
+  assignedStations: number;
+  onlineStations: number;
+  lastSeenAt: Date | null;
+}
+
+export interface ListLinePresenceResponseDto {
+  items: LinePresenceDto[];
+}

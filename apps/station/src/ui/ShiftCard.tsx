@@ -3,6 +3,14 @@ import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.j
 import { ProductImage } from "./ProductImage.js";
 
 export interface ShiftCardProps {
+  plannedDate?: string | null;
+  plannedQty?: number | null;
+  mode?: "validation" | "aggregation";
+  status?: "planned" | "active" | "closed";
+  modeLabel?: string;
+  statusLabel?: string;
+  noPlanLabel?: string;
+  plannedLabel?: string;
   productName: string | null;
   counterpartyName?: string | null;
   counterpartyLabel: string;
@@ -19,6 +27,14 @@ export interface ShiftCardProps {
 /** A fixed-height floor card; the parent supplies a bounded page of at most three. */
 export function ShiftCard({
   productName,
+  plannedDate,
+  plannedQty,
+  mode,
+  status,
+  modeLabel,
+  statusLabel,
+  noPlanLabel,
+  plannedLabel,
   counterpartyName,
   counterpartyLabel,
   actionLabel,
@@ -43,6 +59,14 @@ export function ShiftCard({
           />
         ) : null}
         <div className="shift-card__product">{productName ?? "—"}</div>
+        <div className="shift-card__meta">
+          {plannedDate ? `${plannedDate} · ` : ""}
+          {modeLabel ?? mode}
+          {plannedQty !== null && plannedQty !== undefined
+            ? ` · ${plannedLabel ?? "plan"} ${plannedQty}`
+            : ` · ${noPlanLabel ?? "no plan"}`}
+        </div>
+        <div className="shift-card__status">{statusLabel ?? status}</div>
         <div className="shift-card__counterparty">
           {counterpartyName ? `${counterpartyLabel} ${counterpartyName}` : null}
         </div>

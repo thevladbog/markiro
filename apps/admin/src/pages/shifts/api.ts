@@ -209,6 +209,13 @@ export interface LineDto {
   name: string;
   createdAt: string;
 }
+export interface LinePresenceDto {
+  lineId: string;
+  lineName: string;
+  assignedStations: number;
+  onlineStations: number;
+  lastSeenAt: string | null;
+}
 
 export interface CreateLineInput {
   name: string;
@@ -252,6 +259,14 @@ function removeLine(id: string): Promise<void> {
 /** `GET /lines` -- the active tenant's production lines. */
 export function useLines(): UseQueryResult<LineDto[]> {
   return useQuery({ queryKey: LINES_QUERY_KEY, queryFn: fetchLines });
+}
+
+export function useLinePresence(): UseQueryResult<LinePresenceDto[]> {
+  return useQuery({
+    queryKey: [...LINES_QUERY_KEY, "presence"],
+    queryFn: async () => (await apiFetch<{ items: LinePresenceDto[] }>("/lines/presence")).items,
+    refetchInterval: 60_000,
+  });
 }
 
 /** `POST /lines`. Invalidates the lines list on success. */

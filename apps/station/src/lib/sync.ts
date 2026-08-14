@@ -19,6 +19,12 @@ import {
   readExceptions,
   type PendingException,
 } from "./box-exceptions-mirror.js";
+import {
+  markShiftCloseAccepted,
+  markShiftCloseConflict,
+  readPendingShiftCloses,
+  type PendingShiftClose,
+} from "./shift-close.js";
 
 export { MAX_BOX_CLOSURES_PER_SYNC_BATCH };
 
@@ -57,6 +63,33 @@ export interface SyncState {
    * apart.
    */
   serialsLeft: number;
+}
+
+async function drainShiftCloseRows(
+  exec: SqlExecutor,
+  client: Pick<StationClient, "post">,
+  rows: PendingShiftClose[],
+): Promise<void> {
+  for (const row of rows) {
+    const response = await client.post<{
+      outcome: "accepted" | "already_resolved" | "conflict";
+      conflictCode?: "multiple_devices";
+    }>("/station/shift-closures", {
+      eventId: row.event_id,
+      shiftId: row.shift_id,
+      operatorId: row.operator_id,
+      plannedQtySnapshot: row.planned_qty_snapshot,
+      actualQty: row.actual_qty,
+      closedBoxCount: row.closed_box_count,
+      reasonCode: row.reason_code,
+      closedAt: row.closed_at,
+    });
+    if (response.outcome === "conflict") {
+      await markShiftCloseConflict(exec, row.event_id, response.conflictCode ?? "multiple_devices");
+    } else {
+      await markShiftCloseAccepted(exec, row.event_id);
+    }
+  }
 }
 
 export interface SyncEngineDeps {
@@ -664,16 +697,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   async function publishState(): Promise<void> {
-    const [scanPending, exceptionPending, boxPendingRows] = await Promise.all([
+    const [scanPending, exceptionPending, closePending, boxPendingRows] = await Promise.all([
       outboxDepth(deps.exec),
       exceptionDepth(deps.exec),
+      deps.exec.all<{ n: number; oldest: string | null }>(
+        "SELECT COUNT(*) AS n, MIN(closed_at) AS oldest FROM shift_close_outbox WHERE state = 'pending'",
+      ),
       deps.exec.all<{ n: number; oldest: string | null }>(
         `SELECT COUNT(*) AS n, MIN(closed_at) AS oldest
            FROM boxes_mirror WHERE closed_at IS NOT NULL AND acked_at IS NULL`,
       ),
     ]);
     const boxPending = boxPendingRows[0]?.n ?? 0;
-    const pending = scanPending + exceptionPending + boxPending;
+    const pending = scanPending + exceptionPending + (closePending[0]?.n ?? 0) + boxPending;
     // Nothing queued is never "stuck", however long the link has been down.
     let stuck = false;
     if (pending > 0) {
@@ -689,7 +725,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         oldestExceptionAt(deps.exec),
       ]);
       const oldest =
-        [oldestScan, oldestException, boxPendingRows[0]?.oldest ?? null]
+        [
+          oldestScan,
+          oldestException,
+          closePending[0]?.oldest ?? null,
+          boxPendingRows[0]?.oldest ?? null,
+        ]
           .filter((value): value is string => value !== null)
           .sort()[0] ?? null;
       const oldestMs = oldest === null ? NaN : Date.parse(oldest);
@@ -733,6 +774,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         // pinned earlier in this same process or persisted by a process
         // that pinned it and then never got to clear it — re-reads exactly
         // that range; otherwise this is a plain fresh prefix.
+        const pendingCloses = await readPendingShiftCloses(deps.exec);
+        if (pendingCloses.length > 0) {
+          await drainShiftCloseRows(deps.exec, deps.client, pendingCloses);
+          if (credentialGeneration.sealed) break;
+        }
         const ceiling = await ensurePendingCeiling();
         let batch = await readBatch(deps.exec, BATCH_SIZE, ceiling);
         // Boxes ride along independently of the outbox ceiling above (see

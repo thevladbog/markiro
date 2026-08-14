@@ -726,7 +726,13 @@
       "table": {
         "name": "Name",
         "createdAt": "Created",
+        "presence": "Line status",
         "actions": "Actions"
+      },
+      "presence": {
+        "online": "Online · {{online}} of {{total}} stations",
+        "offline": "Offline",
+        "unassigned": "No stations assigned"
       },
       "form": {
         "createTitle": "New line",

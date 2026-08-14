@@ -144,6 +144,11 @@
     "boxLabelTemplateRequired": "В админке не настроен шаблон этикетки короба. Настройте его и повторите.",
     "serverUnavailable": "Не удалось загрузить смены. Проверьте доступ к серверу.",
     "active": "Смена активна",
+    "notStarted": "Не начата",
+    "validation": "Проверка",
+    "aggregation": "Агрегация",
+    "planned": "план",
+    "noPlan": "без плана",
     "forCounterparty": "для:",
     "preparing": "Готовим смену…"
   },
@@ -232,6 +237,8 @@
     "crypto": "Криптохвост",
     "exit": "Выйти из смены",
     "pauseFinish": "Пауза / завершить",
+    "pause": "Пауза",
+    "closeShift": "Закрыть смену",
     "exceptions": "Исключения",
     "backToWork": "Вернуться к работе",
     "summary": "Итоги смены",
@@ -254,7 +261,26 @@
     "exitPending_many": "{{count}} сканов ещё не дошли до сервера.",
     "exitPending_other": "{{count}} скана ещё не дошли до сервера.",
     "exitAnyway": "Всё равно выйти",
-    "stay": "Остаться"
+    "stay": "Остаться",
+    "closeReasonTitle": "Укажите причину расхождения",
+    "closeReasonDetail": "Фактическое количество не совпадает с планом.",
+    "closeReasonConfirm": "Закрыть смену",
+    "closeFailed": "Не удалось закрыть смену",
+    "closeOpenBox": "Сначала закройте открытый короб",
+    "closeSummaryTitle": "Смена закрыта",
+    "closeSummaryPieces": "Продукция: {{count}} шт.",
+    "closeSummaryBoxes": "Закрыто коробов: {{count}}",
+    "closeSummaryPlan": "План: {{planned}}, факт: {{actual}}",
+    "noPlan": "без плана",
+    "backToShifts": "К списку смен",
+    "closeReasons": {
+      "production_defect": "Производственный брак",
+      "material_shortage": "Недостаток сырья",
+      "equipment_stop": "Остановка оборудования",
+      "production_order_changed": "Изменение производственного задания",
+      "planned_quantity_error": "Ошибка в плановом количестве",
+      "other_production_deviation": "Другое производственное отклонение"
+    }
   },
   "setup": {
     "title": "Настройка рабочего места",

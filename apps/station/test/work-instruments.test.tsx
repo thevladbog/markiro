@@ -285,20 +285,25 @@ describe("work instruments", () => {
 
   it("exposes fixed floor footer actions through plain callbacks", () => {
     const onExceptions = vi.fn();
-    const onExit = vi.fn();
+    const onPause = vi.fn();
+    const onClose = vi.fn();
     render(
       <WorkFooter
         onExceptions={onExceptions}
-        onExit={onExit}
-        labels={{ exceptions: "Exceptions", exit: "Pause / finish" }}
+        onPause={onPause}
+        onClose={onClose}
+        labels={{ exceptions: "Exceptions", pause: "Pause", close: "Close shift" }}
       />,
     );
     const exceptionButton = screen.getByRole("button", { name: "Exceptions" });
-    const exitButton = screen.getByRole("button", { name: "Pause / finish" });
+    const pauseButton = screen.getByRole("button", { name: "Pause" });
+    const closeButton = screen.getByRole("button", { name: "Close shift" });
     expect(exceptionButton.classList.contains("mk-btn--floor")).toBe(true);
     fireEvent.click(exceptionButton);
-    fireEvent.click(exitButton);
+    fireEvent.click(pauseButton);
+    fireEvent.click(closeButton);
     expect(onExceptions).toHaveBeenCalledOnce();
-    expect(onExit).toHaveBeenCalledOnce();
+    expect(onPause).toHaveBeenCalledOnce();
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });

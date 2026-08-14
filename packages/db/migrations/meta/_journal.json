@@ -302,6 +302,13 @@
       "when": 1786698556218,
       "tag": "0042_default_box_label_template",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1786720956149,
+      "tag": "0043_station_shift_close_presence",
+      "breakpoints": true
     }
   ]
 }

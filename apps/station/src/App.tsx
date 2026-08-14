@@ -65,6 +65,7 @@ import {
   type RunConfigTransition,
 } from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
+import { closeShiftOffline } from "./lib/shift-close.js";
 import { tauriStationUpdater } from "./lib/tauri-updater.js";
 import { useStationUpdater } from "./lib/use-station-updater.js";
 import { ConflictList } from "./pages/ConflictList.js";
@@ -785,6 +786,19 @@ export function App() {
     setResumeSyncAfterRecoveryCommit(false);
   }, [boxTemplateRecovery, resumeSync, resumeSyncAfterRecoveryCommit]);
 
+  // Keep the server-side station heartbeat fresh even when the line is idle
+  // and there are no scans to drain. TenantGuard records lastSeenAt on this
+  // authenticated probe, which is what the cabinet uses for line presence.
+  useEffect(() => {
+    if (!authenticatedClient) return;
+    const heartbeat = () => {
+      void authenticatedClient.whoami().catch(() => undefined);
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 60_000);
+    return () => window.clearInterval(timer);
+  }, [authenticatedClient]);
+
   // The hook is mounted unconditionally to preserve hook order, but it only
   // starts discovery after migrations have completed and readConfig has
   // published a non-null config. Discovery is non-blocking and never changes
@@ -1385,6 +1399,17 @@ export function App() {
               shiftEntryGenerationRef.current += 1;
               setShift(null);
               setFloorView("select");
+            }}
+            onCloseShift={async (reasonCode) => {
+              if (!config?.deviceId) throw new Error("Идентификатор станции недоступен");
+              const summary = await closeShiftOffline(tauriExecutor, {
+                shiftId: shift.id,
+                deviceId: config.deviceId,
+                operatorId: operator.operatorId,
+                ...(reasonCode === undefined ? {} : { reasonCode }),
+              });
+              nudgeSync();
+              return summary;
             }}
             pendingSync={syncState.pending}
             // Read off `shift_mirror` alongside `shiftContext` above (Task 13

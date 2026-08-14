@@ -159,13 +159,19 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     legacyMigrationsFolder = await mkdtemp(join(tmpdir(), "markiro-default-box-label-migration-"));
     await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
     await rm(join(legacyMigrationsFolder, "0042_default_box_label_template.sql"), { force: true });
+    await rm(join(legacyMigrationsFolder, "0043_station_shift_close_presence.sql"), {
+      force: true,
+    });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
+    await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
     };
     journal.entries = journal.entries.filter(
-      (entry) => entry.tag !== "0042_default_box_label_template",
+      (entry) =>
+        entry.tag !== "0042_default_box_label_template" &&
+        entry.tag !== "0043_station_shift_close_presence",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 

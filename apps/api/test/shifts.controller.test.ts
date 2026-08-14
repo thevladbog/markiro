@@ -33,3 +33,22 @@ describe("ShiftsController.createShift", () => {
     );
   });
 });
+
+describe("ShiftsController.enterShift", () => {
+  it("passes the authenticated station device to the entry service", async () => {
+    const enterShift = vi.fn(async () => ({
+      id: "shift-1",
+      stationCloseAccess: { kind: "single_device", ownerDeviceId: "device-1" },
+    }));
+    const controller = new ShiftsController({ enterShift } as unknown as ShiftsService);
+    const request = {
+      tenantId: "tenant-1",
+      authKind: "station",
+      deviceId: "device-1",
+    } as RequestWithTenant;
+
+    await controller.enterShift(request, "shift-1");
+
+    expect(enterShift).toHaveBeenCalledWith("tenant-1", "shift-1", "device-1");
+  });
+});

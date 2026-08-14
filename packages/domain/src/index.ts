@@ -72,6 +72,12 @@ export {
 export type { ParsedPhc } from "./crypto/phc.js";
 export { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "./sync/limits.js";
 export {
+  isShiftCloseReasonCode,
+  SHIFT_CLOSE_REASON_CODES,
+  shiftCloseReasonRequired,
+} from "./shift-close.js";
+export type { ShiftCloseReasonCode } from "./shift-close.js";
+export {
   CABINET_CAPABILITY,
   hasCabinetCapabilities,
   resolveCabinetAccess,

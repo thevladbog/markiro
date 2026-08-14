@@ -193,6 +193,24 @@ export const STATION_MIGRATIONS: string[] = [
   `ALTER TABLE product_mirror ADD COLUMN image_width INTEGER;`,
   `ALTER TABLE product_mirror ADD COLUMN image_height INTEGER;`,
   `ALTER TABLE product_mirror ADD COLUMN image_pointer_checksum TEXT;`,
+  `ALTER TABLE shift_mirror ADD COLUMN station_close_policy TEXT;`,
+  `ALTER TABLE shift_mirror ADD COLUMN station_close_owner_device_id TEXT;`,
+  `CREATE TABLE IF NOT EXISTS shift_close_outbox (
+     event_id TEXT PRIMARY KEY,
+     shift_id TEXT NOT NULL,
+     device_id TEXT NOT NULL,
+     operator_id TEXT,
+     product_id TEXT NOT NULL,
+     product_name TEXT NOT NULL,
+     planned_qty_snapshot INTEGER,
+     actual_qty INTEGER NOT NULL,
+     closed_box_count INTEGER NOT NULL,
+     reason_code TEXT,
+     closed_at TEXT NOT NULL,
+     state TEXT NOT NULL DEFAULT 'pending',
+     conflict_code TEXT,
+     last_checked_at TEXT
+   );`,
   // Station exceptions (undo/clear/reprint/disassemble): the box's own
   // retired flag. Upgrade path for devices enrolled before this slice --
   // same re-runnable idempotency as the `login` ALTER above (SQLite has no

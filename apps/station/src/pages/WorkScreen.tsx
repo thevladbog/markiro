@@ -43,6 +43,7 @@ import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
 import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import type { OfflineShiftCloseSummary } from "../lib/shift-close.js";
 import { playSignalTone, type SoundSettings } from "../lib/signal-sound.js";
 import { PrintVerification } from "../ui/PrintVerification.js";
 import { BoxPrintRecovery, type BoxPrintRecoveryErrorCode } from "../ui/BoxPrintRecovery.js";
@@ -74,6 +75,8 @@ export interface WorkScreenProps {
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   /** Return to shift selection. Does NOT close the shift — that is a cabinet action. */
   onExit: () => void;
+  /** Persists a local close and queues it for the server. */
+  onCloseShift?: (reasonCode?: string | null) => Promise<OfflineShiftCloseSummary>;
   /** Scans still queued on this device, shown before the operator walks away. */
   pendingSync: number;
   /**
@@ -141,6 +144,7 @@ export function WorkScreen({
   onScanRecorded,
   onScanQueueRegister,
   onExit,
+  onCloseShift,
   pendingSync,
   issuerPrefix,
   boxCapacity,
@@ -161,6 +165,10 @@ export function WorkScreen({
   const signalContext = useRef({ sound, t });
   signalContext.current = { sound, t };
   const [confirmExit, setConfirmExit] = useState(false);
+  const [closeReasonPicker, setCloseReasonPicker] = useState(false);
+  const [closeReason, setCloseReason] = useState<string>("production_defect");
+  const [closeError, setCloseError] = useState<string | null>(null);
+  const [closeSummary, setCloseSummary] = useState<OfflineShiftCloseSummary | null>(null);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
@@ -489,6 +497,8 @@ export function WorkScreen({
     confirmClear ||
     boxActionPending ||
     showExceptions ||
+    closeReasonPicker ||
+    closeSummary !== null ||
     noSerials,
   );
 
@@ -496,6 +506,20 @@ export function WorkScreen({
     if (ordinaryScanBlockedRef.current) return;
     if (pendingSync > 0) setConfirmExit(true);
     else onExit();
+  }
+
+  async function requestClose(reasonCode?: string | null): Promise<void> {
+    if (!onCloseShift || ordinaryScanBlockedRef.current) return;
+    setCloseError(null);
+    try {
+      const summary = await onCloseShift(reasonCode ?? null);
+      setCloseReasonPicker(false);
+      setCloseSummary(summary);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("reason")) setCloseReasonPicker(true);
+      else setCloseError(message.includes("open box") ? t("work.closeOpenBox") : message);
+    }
   }
 
   // The domain's isDuplicate(key) is synchronous, so the device's accepted keys
@@ -1457,7 +1481,8 @@ export function WorkScreen({
       <WorkFooter
         labels={workLabels.footer}
         onExceptions={() => setShowExceptions(true)}
-        onExit={requestExit}
+        onPause={requestExit}
+        onClose={() => void requestClose()}
       />
 
       <div className="work-screen__overlays">
@@ -1480,6 +1505,55 @@ export function WorkScreen({
             </Button>
             <Button size="floor" variant="secondary" onClick={() => setConfirmClear(false)}>
               {t("box.cancelClear")}
+            </Button>
+          </Alert>
+        ) : null}
+        {closeReasonPicker ? (
+          <Alert tone="warn" title={t("work.closeReasonTitle")}>
+            <p>{t("work.closeReasonDetail")}</p>
+            <select value={closeReason} onChange={(event) => setCloseReason(event.target.value)}>
+              <option value="production_defect">{t("work.closeReasons.production_defect")}</option>
+              <option value="material_shortage">{t("work.closeReasons.material_shortage")}</option>
+              <option value="equipment_stop">{t("work.closeReasons.equipment_stop")}</option>
+              <option value="production_order_changed">
+                {t("work.closeReasons.production_order_changed")}
+              </option>
+              <option value="planned_quantity_error">
+                {t("work.closeReasons.planned_quantity_error")}
+              </option>
+              <option value="other_production_deviation">
+                {t("work.closeReasons.other_production_deviation")}
+              </option>
+            </select>
+            <Button size="floor" onClick={() => void requestClose(closeReason)}>
+              {t("work.closeReasonConfirm")}
+            </Button>
+            <Button size="floor" variant="secondary" onClick={() => setCloseReasonPicker(false)}>
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {closeError ? (
+          <Alert tone="error" title={t("work.closeFailed")}>
+            <p>{closeError}</p>
+            <Button size="floor" onClick={() => setCloseError(null)}>
+              {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {closeSummary ? (
+          <Alert tone="warn" title={t("work.closeSummaryTitle")}>
+            <p>{closeSummary.productName}</p>
+            <p>{t("work.closeSummaryPieces", { count: closeSummary.actualQty })}</p>
+            <p>{t("work.closeSummaryBoxes", { count: closeSummary.closedBoxCount })}</p>
+            <p>
+              {t("work.closeSummaryPlan", {
+                planned: closeSummary.plannedQtySnapshot ?? t("work.noPlan"),
+                actual: closeSummary.actualQty,
+              })}
+            </p>
+            <Button size="floor" onClick={onExit}>
+              {t("work.backToShifts")}
             </Button>
           </Alert>
         ) : null}

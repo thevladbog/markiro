@@ -83,11 +83,14 @@ describe("LinesPage states and permissions", () => {
   });
 
   it("shows an explicit error state and retries the line list", async () => {
-    const fetchMock = vi.fn(async () =>
-      fetchMock.mock.calls.length === 1
+    let listRequests = 0;
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/lines/presence") return jsonResponse(200, { items: [] });
+      listRequests += 1;
+      return listRequests === 1
         ? jsonResponse(500, { message: "Unavailable" })
-        : jsonResponse(200, { items: [LINE] }),
-    );
+        : jsonResponse(200, { items: [LINE] });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     renderPage();
@@ -100,7 +103,7 @@ describe("LinesPage states and permissions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
 
     expect(await screen.findByText(LINE.name)).toBeDefined();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(listRequests).toBe(2);
     expect(
       screen.queryByText("Не удалось загрузить данные. Обновите страницу или войдите заново."),
     ).toBeNull();
@@ -216,8 +219,9 @@ describe("line create and rename panels", () => {
       resolveRefetch = resolve;
     });
     let listRequests = 0;
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "POST") return jsonResponse(201, LINE);
+      if (url === "/api/lines/presence") return jsonResponse(200, { items: [] });
       listRequests += 1;
       return listRequests === 1 ? jsonResponse(200, { items: [] }) : refetchResponse;
     });
@@ -265,6 +269,7 @@ describe("line create and rename panels", () => {
     let listRequests = 0;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "PATCH") return jsonResponse(200, renamed);
+      if (url === "/api/lines/presence") return jsonResponse(200, { items: [] });
       listRequests += 1;
       return listRequests === 1 ? jsonResponse(200, { items: [LINE] }) : refetchResponse;
     });
@@ -435,7 +440,8 @@ describe("line create and rename panels", () => {
     let attempts = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
+      vi.fn(async (url: string) => {
+        if (url === "/api/lines/presence") return jsonResponse(200, { items: [] });
         attempts += 1;
         return attempts === 1
           ? jsonResponse(500, { message: "Unavailable" })
@@ -460,8 +466,9 @@ describe("line deletion", () => {
       resolveRefetch = resolve;
     });
     let listRequests = 0;
-    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (init?.method === "DELETE") return jsonResponse(204, undefined);
+      if (url === "/api/lines/presence") return jsonResponse(200, { items: [] });
       listRequests += 1;
       return listRequests === 1 ? jsonResponse(200, { items: [LINE] }) : refetchResponse;
     });

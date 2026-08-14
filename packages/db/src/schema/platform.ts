@@ -28,6 +28,13 @@ export const productStatus = pgEnum("product_status", ["draft", "active"]);
 export const shiftStatus = pgEnum("shift_status", ["planned", "active", "closed"]);
 export const shiftMode = pgEnum("shift_mode", ["validation", "aggregation"]);
 export const shiftOrigin = pgEnum("shift_origin", ["admin", "station"]);
+export const stationClosePolicy = pgEnum("station_close_policy", ["single_device", "admin_only"]);
+export const stationShiftCloseOutcome = pgEnum("station_shift_close_outcome", [
+  "accepted",
+  "conflict",
+  "dismissed",
+  "resolved",
+]);
 
 const tenantId = () =>
   text("tenant_id")
@@ -152,6 +159,13 @@ export const shifts = pgTable(
     palletCapacity: integer("pallet_capacity"),
     palletsEnabled: boolean("pallets_enabled").notNull().default(false),
     createdFrom: shiftOrigin("created_from").notNull().default("admin"),
+    stationClosePolicy: stationClosePolicy("station_close_policy")
+      .notNull()
+      .default("single_device"),
+    // Deliberately no direct FK: shifts are declared before station_devices,
+    // and the service validates this nullable owner against the same tenant
+    // while atomically promoting a second participant to admin_only.
+    stationCloseOwnerDeviceId: uuid("station_close_owner_device_id"),
     plannedDate: date("planned_date"),
     openedAt: timestamp("opened_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
@@ -352,6 +366,82 @@ export const stationDevices = pgTable(
       name: "station_devices_tenant_line_fk",
       columns: [t.tenantId, t.lineId],
       foreignColumns: [lines.tenantId, lines.id],
+    }),
+  ],
+);
+
+/** Every station that explicitly entered a shift, tenant-scoped. */
+export const shiftDeviceParticipants = pgTable(
+  "shift_device_participants",
+  {
+    tenantId: tenantId(),
+    shiftId: uuid("shift_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    firstEnteredAt: timestamp("first_entered_at", { withTimezone: true }).notNull().defaultNow(),
+    lastEnteredAt: timestamp("last_entered_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique("shift_device_participants_tenant_shift_device_uq").on(
+      t.tenantId,
+      t.shiftId,
+      t.deviceId,
+    ),
+    index("shift_device_participants_tenant_shift_idx").on(t.tenantId, t.shiftId),
+    foreignKey({
+      name: "shift_device_participants_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "shift_device_participants_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
+    }),
+  ],
+);
+
+/** Idempotency ledger and reconciliation record for station close events. */
+export const stationShiftCloseEvents = pgTable(
+  "station_shift_close_events",
+  {
+    eventId: uuid("event_id").primaryKey(),
+    tenantId: tenantId(),
+    shiftId: uuid("shift_id").notNull(),
+    deviceId: uuid("device_id").notNull(),
+    operatorId: uuid("operator_id"),
+    payloadDigest: char("payload_digest", { length: 64 }).notNull(),
+    plannedQtySnapshot: integer("planned_qty_snapshot"),
+    actualQty: integer("actual_qty").notNull(),
+    closedBoxCount: integer("closed_box_count").notNull(),
+    reasonCode: text("reason_code"),
+    closedAt: timestamp("closed_at", { withTimezone: true }).notNull(),
+    outcome: stationShiftCloseOutcome("outcome").notNull().default("accepted"),
+    conflictCode: text("conflict_code"),
+    recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+    resolvedBy: text("resolved_by"),
+  },
+  (t) => [
+    unique("station_shift_close_events_payload_uq").on(t.tenantId, t.eventId, t.payloadDigest),
+    index("station_shift_close_events_tenant_outcome_idx").on(t.tenantId, t.outcome, t.recordedAt),
+    check("station_shift_close_events_digest_check", sql`${t.payloadDigest} ~ '^[0-9a-f]{64}$'`),
+    check(
+      "station_shift_close_events_counts_check",
+      sql`${t.actualQty} >= 0 AND ${t.closedBoxCount} >= 0`,
+    ),
+    check(
+      "station_shift_close_events_reason_check",
+      sql`${t.reasonCode} IS NULL OR ${t.reasonCode} IN ('production_defect', 'material_shortage', 'equipment_stop', 'production_order_changed', 'planned_quantity_error', 'other_production_deviation')`,
+    ),
+    foreignKey({
+      name: "station_shift_close_events_tenant_shift_fk",
+      columns: [t.tenantId, t.shiftId],
+      foreignColumns: [shifts.tenantId, shifts.id],
+    }),
+    foreignKey({
+      name: "station_shift_close_events_tenant_device_fk",
+      columns: [t.tenantId, t.deviceId],
+      foreignColumns: [stationDevices.tenantId, stationDevices.id],
     }),
   ],
 );

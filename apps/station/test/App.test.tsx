@@ -786,7 +786,7 @@ async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
   render(<App />);
   await signInAsOperator();
   fireEvent.click(await screen.findByRole("button", { name: "Open" }));
-  await waitFor(() => expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined());
+  await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
   if (pendingBoxPrint) {
     await screen.findByText("Printer is not configured");
   } else {
@@ -1104,7 +1104,7 @@ describe("App", () => {
       await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
 
       await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
-      expect(await screen.findByRole("button", { name: "Pause / finish" })).toBeDefined();
+      expect(await screen.findByRole("button", { name: "Pause" })).toBeDefined();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
       const counters = within(screen.getByRole("region", { name: "Accepted, Rejected" }));
@@ -1153,7 +1153,7 @@ describe("App", () => {
 
       vi.useRealTimers();
       await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
-      expect(await screen.findByRole("button", { name: "Pause / finish" })).toBeDefined();
+      expect(await screen.findByRole("button", { name: "Pause" })).toBeDefined();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
 
@@ -1532,7 +1532,8 @@ describe("App", () => {
       fireEvent.click(dismissWindowError);
       expect(lockdownMock.clearError).not.toHaveBeenCalled();
       expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
-      expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close shift" })).toBeNull();
       expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
 
       fireEvent.click(screen.getByRole("button", { name: "Retry operator change" }));
@@ -1650,21 +1651,27 @@ describe("App", () => {
         },
       ],
     });
-    const fetchMock = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("device offline"))
-      .mockResolvedValueOnce(new Response(rosterBody, { status: 200 }));
+    let rosterRequests = 0;
+    const fetchMock = vi.fn((url: string) => {
+      if (new URL(url).pathname !== "/station/operators") {
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }
+      rosterRequests += 1;
+      return rosterRequests === 1
+        ? Promise.reject(new Error("device offline"))
+        : Promise.resolve(new Response(rosterBody, { status: 200 }));
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
 
     // Initial sync (App mounts with a client already configured) fails.
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(rosterRequests).toBe(1));
 
     // The device comes back online -- this must trigger a second attempt.
     window.dispatchEvent(new Event("online"));
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(rosterRequests).toBe(2));
     // A never-before-synced device has no `operators_slot` row, so
     // `activeSlot` defaults to "a" and this first-ever publish targets its
     // opposite, slot "b". Pinned with a word boundary so this only matches
@@ -1701,24 +1708,28 @@ describe("App", () => {
       if (cmd === "plugin:sql|select") return Promise.resolve([]);
       return Promise.resolve(undefined);
     });
+    let rosterRequests = 0;
     let resolveRoster!: (response: Response) => void;
-    const fetchMock = vi.fn(
-      () =>
-        new Promise<Response>((resolve) => {
-          resolveRoster = resolve;
-        }),
-    );
+    const fetchMock = vi.fn((url: string) => {
+      if (new URL(url).pathname !== "/station/operators") {
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }
+      rosterRequests += 1;
+      return new Promise<Response>((resolve) => {
+        resolveRoster = resolve;
+      });
+    });
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(rosterRequests).toBe(1));
 
     await act(async () => {
       window.dispatchEvent(new Event("online"));
       await Promise.resolve();
     });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(rosterRequests).toBe(1);
     await act(async () => {
       resolveRoster(new Response(JSON.stringify({ items: [] }), { status: 200 }));
     });
@@ -1748,7 +1759,7 @@ describe("App", () => {
       }
       if (path === "/shifts") {
         shiftRequests += 1;
-        return shiftRequests === 1
+        return shiftRequests === 2
           ? initialShifts
           : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }
@@ -1757,13 +1768,14 @@ describe("App", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     render(<App />);
+    await waitFor(() => expect(shiftRequests).toBe(1));
     await signInAsOperator();
 
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
     act(() => window.dispatchEvent(new Event("offline")));
     expect(screen.getByTestId("server-status").textContent).toBe("No connection");
     act(() => window.dispatchEvent(new Event("online")));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(operatorRequests).toBe(2));
     expect(screen.getByTestId("server-status").textContent).toBe("No connection");
 
     act(() => window.dispatchEvent(new Event("offline")));
@@ -1826,7 +1838,7 @@ describe("App", () => {
 
     render(<App />);
     await signInAsOperator();
-    await waitFor(() => expect(shiftRequests).toBe(1));
+    await waitFor(() => expect(shiftRequests).toBe(2));
     expect(screen.getByTestId("server-status").textContent).toBe("Available");
 
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
@@ -2642,6 +2654,7 @@ describe("App", () => {
       [],
       persistedConfig,
     );
+    let shiftRequests = 0;
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
@@ -2650,8 +2663,11 @@ describe("App", () => {
           return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
         }
         if (path === "/shifts") {
+          shiftRequests += 1;
           return Promise.resolve(
-            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+            shiftRequests === 1
+              ? new Response(JSON.stringify({ items: [] }), { status: 200 })
+              : new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
           );
         }
         return Promise.resolve(new Response("{}", { status: 200 }));
@@ -2659,6 +2675,7 @@ describe("App", () => {
     );
 
     render(<App />);
+    await waitFor(() => expect(shiftRequests).toBe(1));
     await signInAsOperator();
 
     await expectEmptyQueueCredentialRecovery(persistedConfig, outbox);
@@ -3455,13 +3472,11 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
       // Reached the floor via NewShift's own path -- floorView is "new" here.
-      // WorkScreen's fixed footer reads "Pause / finish" (work.pauseFinish, en.json);
+      // WorkScreen's fixed footer exposes a dedicated Pause action;
       // waiting for it also proves shiftContext landed.
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
-      );
+      await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
 
-      fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
+      fireEvent.click(screen.getByRole("button", { name: "Pause" }));
 
       // No scans were queued for this shift, so Exit leaves immediately
       // without the pending-sync confirmation step.
@@ -3600,14 +3615,13 @@ describe("App", () => {
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
       expect(await screen.findByText("Could not restore the print state")).toBeDefined();
-      expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Close shift" })).toBeNull();
       expect(requestPaths).not.toContain("GET /shifts/s9/bundle");
 
       fireEvent.click(screen.getByRole("button", { name: "Retry recovery" }));
 
-      await waitFor(() =>
-        expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
-      );
+      await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
       await waitFor(() => expect(requestPaths).toContain("GET /shifts/s9/bundle"));
       // One failed classification read, one successful retry read, and one
       // strict recovery classifier read that confirms this validation shift
