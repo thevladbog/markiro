@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Badge, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
-import { formatCreatedAt } from "../../lib/datetime.js";
+import { formatCreatedAt, formatDate } from "../../lib/datetime.js";
 import { useEmployees } from "../employees/api.js";
 import { useShifts, type ShiftDto } from "../shifts/api.js";
 import { useBoxes, type BoxDto } from "./api.js";
@@ -54,8 +54,11 @@ export function BoxesPage() {
   // returns oldest-first, but a manager opening this page wants the shift
   // they are currently working at the top of the dropdown.
   const shiftFilterOptions: SelectOption[] = useMemo(
-    () => [...shifts].reverse().map((shift) => ({ value: shift.id, label: shiftLabel(shift) })),
-    [shifts],
+    () =>
+      [...shifts]
+        .reverse()
+        .map((shift) => ({ value: shift.id, label: shiftLabel(shift, i18n.language) })),
+    [shifts, i18n.language],
   );
 
   const columns: TableColumn<BoxDto>[] = useMemo(
@@ -67,9 +70,9 @@ export function BoxesPage() {
         render: (row) => row.sscc ?? "—",
       },
       {
-        key: "terminalId",
-        title: t("pages.boxes.table.terminal"),
-        render: (row) => row.terminalId ?? "—",
+        key: "lineName",
+        title: t("pages.boxes.table.line"),
+        render: (row) => row.lineName ?? "—",
       },
       {
         key: "operatorId",
@@ -108,12 +111,14 @@ export function BoxesPage() {
       <PageHeader title={t("pages.boxes.title")} />
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
-        <div style={{ width: 260 }}>
+        <div style={{ width: "min(100%, 440px)" }}>
           <Select
             label={t("pages.boxes.filters.shiftLabel")}
             options={shiftFilterOptions}
             value={shiftFilter}
             onValueChange={setShiftFilter}
+            searchable
+            searchLabel={t("pages.boxes.filters.searchLabel")}
           />
         </div>
       </div>
@@ -136,7 +141,8 @@ export function BoxesPage() {
 }
 
 /** Short, human-identifiable label for a shift filter option -- mirrors conflicts/index.tsx's. */
-function shiftLabel(shift: ShiftDto): string {
-  if (shift.plannedDate && shift.productName) return `${shift.plannedDate} — ${shift.productName}`;
-  return shift.productName ?? shift.plannedDate ?? shift.id;
+function shiftLabel(shift: ShiftDto, language: string): string {
+  const date = shift.plannedDate ? formatDate(shift.plannedDate, language) : null;
+  if (date && shift.productName) return `${date} — ${shift.productName}`;
+  return shift.productName ?? date ?? shift.id;
 }

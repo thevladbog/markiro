@@ -1,6 +1,6 @@
 .mk-conflicts-filters {
   display: grid;
-  grid-template-columns: minmax(0, 260px) minmax(0, 200px);
+  grid-template-columns: minmax(0, 440px) minmax(0, 200px);
   gap: 12px;
   align-items: start;
 }

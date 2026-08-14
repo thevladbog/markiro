@@ -868,11 +868,12 @@
       "selectShift": "Выберите смену, чтобы увидеть её короба",
       "contentsChangedAfterClose": "Изменилось после закрытия",
       "filters": {
-        "shiftLabel": "Смена"
+        "shiftLabel": "Смена",
+        "searchLabel": "Поиск смены"
       },
       "table": {
         "sscc": "SSCC",
-        "terminal": "Терминал",
+        "line": "Линия",
         "operator": "Оператор",
         "itemCount": "Кол-во",
         "closedAt": "Закрыт",
@@ -886,6 +887,7 @@
       "reviewed": "Рассмотрено",
       "filters": {
         "shiftLabel": "Смена",
+        "searchLabel": "Поиск смены",
         "shiftAll": "Все смены",
         "shiftHint": "Показывает конфликты, где скан этой смены был вытеснён — а не все конфликты, где эта смена участвует",
         "reviewedLabel": "Статус",

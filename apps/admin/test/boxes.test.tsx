@@ -3,7 +3,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { formatCreatedAt } from "../src/lib/datetime.js";
+import { formatCreatedAt, formatDate } from "../src/lib/datetime.js";
 import { BoxesPage } from "../src/pages/boxes/index.js";
 
 afterEach(() => {
@@ -45,6 +45,7 @@ const CLOSED_BOX = {
   id: "b2",
   sscc: "123456789012345675",
   terminalId: "t1",
+  lineName: "Линия розлива № 1",
   operatorId: "emp1",
   itemCount: 2,
   closedAt: "2026-07-28T10:00:00.000Z",
@@ -139,14 +140,14 @@ describe("BoxesPage", () => {
     });
   });
 
-  it("renders a box's sscc, terminal, resolved operator name, and item count", async () => {
+  it("renders a box's sscc, production line, resolved operator name, and item count", async () => {
     stubFetch({ shifts: [SHIFT_S1], boxes: [CLOSED_BOX], employees: [EMPLOYEE] });
 
     renderPage();
     const table = within(await screen.findByRole("table"));
 
     expect(table.getByText(CLOSED_BOX.sscc)).toBeDefined();
-    expect(table.getByText("t1")).toBeDefined();
+    expect(table.getByText("Линия розлива № 1")).toBeDefined();
     expect(table.getByText(EMPLOYEE.fullName)).toBeDefined();
     expect(table.getByText("2")).toBeDefined();
     expect(table.getByText(formatCreatedAt(CLOSED_BOX.closedAt, "ru"))).toBeDefined();
@@ -239,10 +240,23 @@ describe("BoxesPage", () => {
     });
 
     await user.click(screen.getByRole("combobox", { name: "Смена" }));
-    await user.click(await screen.findByRole("option", { name: "2026-07-28 — Cola" }));
+    await user.click(await screen.findByRole("option", { name: "28.07.2026 — Cola" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/boxes?shiftId=s1", expect.any(Object));
     });
+  });
+
+  it("formats shift dates for the active locale and narrows shifts by a date search", async () => {
+    const user = userEvent.setup();
+    stubFetch({ shifts: [SHIFT_S1, SHIFT_S2], boxes: [] });
+
+    renderPage();
+    await user.click(screen.getByRole("combobox", { name: "Смена" }));
+    await user.type(screen.getByRole("searchbox", { name: "Поиск смены" }), "29.07.2026");
+
+    expect(screen.getByRole("option", { name: "29.07.2026 — Sprite" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "28.07.2026 — Cola" })).toBeNull();
+    expect(formatDate(SHIFT_S1.plannedDate!, "ru")).toBe("28.07.2026");
   });
 });

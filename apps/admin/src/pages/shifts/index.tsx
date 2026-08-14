@@ -25,6 +25,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
+import { formatDate } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
 import { useCounterparties } from "../counterparties/api.js";
@@ -244,7 +245,7 @@ export function ShiftsPage() {
       {
         key: "plannedDate",
         title: t("pages.shifts.table.plannedDate"),
-        render: (row) => row.plannedDate ?? "—",
+        render: (row) => (row.plannedDate ? formatDate(row.plannedDate, i18n.language) : "—"),
       },
       {
         key: "productName",
@@ -312,7 +313,7 @@ export function ShiftsPage() {
           ) : null,
       },
     ],
-    [t, canWrite],
+    [t, canWrite, i18n.language],
   );
 
   return (

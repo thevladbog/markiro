@@ -71,10 +71,12 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
 });
-it("keeps kiosk settings reachable from the unified device row", async () => {
+it("keeps kiosk settings reachable as a button-styled action in the unified device row", async () => {
   renderPage();
   await screen.findByText("Entrance kiosk");
-  expect(screen.getByRole("link", { name: "Настройки киоска" }).getAttribute("href")).toBe(
+  const settings = screen.getByRole("link", { name: "Настройки киоска" });
+  expect(settings.className).toContain("mk-device-actions__kiosk-settings");
+  expect(settings.getAttribute("href")).toBe(
     "/kiosks/kiosk-1/edit",
   );
 });

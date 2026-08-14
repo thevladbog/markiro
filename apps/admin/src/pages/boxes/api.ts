@@ -14,6 +14,7 @@ export interface BoxDto {
   id: string;
   sscc: string | null;
   terminalId: string | null;
+  lineName: string | null;
   operatorId: string | null;
   itemCount: number;
   closedAt: string | null;

@@ -329,6 +329,7 @@ describe("ShiftsPage", () => {
 
     expect(await screen.findByText(PLANNED_SHIFT.productName)).toBeDefined();
     expect(screen.getByText(ACTIVE_TOLLING_SHIFT.productName)).toBeDefined();
+    expect(screen.getByText("25.07.2026")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Добавить смену" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();

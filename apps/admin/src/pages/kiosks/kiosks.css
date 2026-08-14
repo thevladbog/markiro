@@ -162,7 +162,7 @@
 
 .mk-kiosk-edit-panel__layout {
   display: grid;
-  grid-template-columns: minmax(148px, 180px) minmax(0, 1fr);
+  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr);
   gap: var(--sp-6);
   align-items: start;
 }
@@ -189,7 +189,8 @@
 .mk-kiosk-section-nav__button {
   width: 100%;
   min-height: var(--control-sm);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
@@ -234,6 +235,7 @@
 
 .mk-kiosk-section-nav__label {
   min-width: 0;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -577,6 +579,7 @@
 
   .mk-kiosk-section-nav__button {
     width: auto;
+    display: flex;
     white-space: nowrap;
   }
 
