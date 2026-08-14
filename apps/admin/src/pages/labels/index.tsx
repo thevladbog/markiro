@@ -80,7 +80,10 @@ function TemplateCard({ item }: { item: LabelTemplateSummaryDto }) {
         </span>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <Badge>
-            {t("pages.labels.sizeBadge", { width: item.widthMm, height: item.heightMm })}
+            {t("pages.labels.sizeBadge", {
+              width: item.widthMm.toFixed(1),
+              height: item.heightMm.toFixed(1),
+            })}
           </Badge>
           <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
           <Badge>{LANGUAGE_LABEL[item.language]}</Badge>

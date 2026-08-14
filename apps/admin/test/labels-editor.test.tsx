@@ -534,6 +534,22 @@ describe("Code import", () => {
     fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
     expect(screen.getByRole("dialog", { name: "Отменить несохранённые изменения?" })).toBeDefined();
   });
+
+  it("shows imported custom dimensions rounded to one decimal place in size inputs", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), {
+      target: { value: "^XA\n^PW685\n^LL472\n^XZ" },
+    });
+    await chooseOption(user, "DPI импорта", "300 DPI");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.0");
+    expect((screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement).value).toBe("40.0");
+  });
 });
 
 describe("Font coverage warnings (PreviewPane)", () => {
