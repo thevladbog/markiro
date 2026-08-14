@@ -40,8 +40,14 @@ describe("SEO generators", () => {
     const llms = renderLlmsTxt();
 
     expect(llms).toContain("# Markiro");
+    expect(llms).toContain(
+      "> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.",
+    );
     expect(llms).toContain("https://markiro.app/sscc-i-agregatsiya/");
     expect(llms).toContain("## English");
+    expect(llms).toContain(
+      "> Production serialization, aggregation, and traceability with offline-capable line stations.",
+    );
     expect(llms).toContain("https://markiro.app/en/sscc-and-aggregation/");
     expect(llms).not.toMatch(/ranking|ранжир/i);
   });

@@ -180,6 +180,11 @@ describe("rendered landing page", () => {
     }
   });
 
+  it("keeps locale-specific time punctuation in the illustrative console", () => {
+    expect(documents.get("/")?.body.textContent).toContain("52,40 сек");
+    expect(documents.get("/en/")?.body.textContent).toContain("52.40 sec");
+  });
+
   it("renders parseable structured data that matches visible navigation", () => {
     for (const [route, routeDocument] of documents) {
       const script = routeDocument.querySelector('script[type="application/ld+json"]');

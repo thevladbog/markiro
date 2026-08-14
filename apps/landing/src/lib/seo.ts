@@ -141,13 +141,15 @@ export function renderLlmsTxt(): string {
 
   return `# Markiro
 
-> Production serialization, aggregation, and traceability with offline-capable line stations.
-
 ## Русский
+
+> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.
 
 ${links("ru", "/")}
 
 ## English
+
+> Production serialization, aggregation, and traceability with offline-capable line stations.
 
 ${links("en", "/en/")}
 `;

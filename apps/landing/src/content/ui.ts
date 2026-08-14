@@ -93,6 +93,7 @@ const RU = {
       lineActive: "ЛИНИЯ АКТИВНА",
       station: "СТАНЦИЯ 03 / АГРЕГАЦИЯ",
       shiftAccepted: "ПРИНЯТО ЗА СМЕНУ",
+      timeValue: "52,40",
       timeUnit: "сек",
     },
     platform: {
@@ -254,6 +255,7 @@ const EN = {
       lineActive: "LINE ACTIVE",
       station: "STATION 03 / AGGREGATION",
       shiftAccepted: "ACCEPTED THIS SHIFT",
+      timeValue: "52.40",
       timeUnit: "sec",
     },
     platform: {

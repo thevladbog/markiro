@@ -194,7 +194,21 @@ function smokeClient(releaseSha) {
       const path = parsed.pathname;
       const kiosk = parsed.hostname.startsWith("kiosk.");
       const landing = parsed.hostname === "markiro.example";
-      if (landing && ["/", "/faq/", "/en/", "/en/faq/"].includes(path))
+      if (
+        landing &&
+        [
+          "/",
+          "/faq/",
+          "/en/",
+          "/en/chestny-znak-serialization/",
+          "/en/sscc-and-aggregation/",
+          "/en/packing-workstation/",
+          "/en/self-service-pickup-kiosk/",
+          "/en/1c-integration/",
+          "/en/offline-production/",
+          "/en/faq/",
+        ].includes(path)
+      )
         return response({
           body: landingShell(path),
           headers: {
@@ -634,6 +648,12 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/", "landing-page"],
     ["GET", "/faq/", "landing-page"],
     ["GET", "/en/", "landing-page"],
+    ["GET", "/en/chestny-znak-serialization/", "landing-page"],
+    ["GET", "/en/sscc-and-aggregation/", "landing-page"],
+    ["GET", "/en/packing-workstation/", "landing-page"],
+    ["GET", "/en/self-service-pickup-kiosk/", "landing-page"],
+    ["GET", "/en/1c-integration/", "landing-page"],
+    ["GET", "/en/offline-production/", "landing-page"],
     ["GET", "/en/faq/", "landing-page"],
     ["GET", "/robots.txt", "robots"],
     ["GET", "/sitemap.xml", "sitemap"],
