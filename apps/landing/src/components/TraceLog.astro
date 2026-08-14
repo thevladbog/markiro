@@ -1,29 +1,27 @@
 ---
-const events = [
-  ["14:21:03", "Код принят", "Марка связана с товаром", "ok"],
-  ["14:21:08", "Короб закрыт", "24 единицы в группе", "ok"],
-  ["14:21:12", "Этикетка отправлена на печать", "Принтер линии 02", "ok"],
-  ["14:21:18", "Печать не подтвердилась", "Нужно действие оператора", "problem"],
-] as const;
+import type { Locale } from "../content/pages";
+import { getUiCopy } from "../content/ui";
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.trace;
 ---
 
 <section class="section section--trace" id="traceability" aria-labelledby="trace-title">
   <div class="container trace-layout">
     <div class="trace-copy" data-reveal>
-      <p class="section-index">04 / ПРОСЛЕЖИВАЕМОСТЬ</p>
-      <h2 id="trace-title" class="display-heading display-heading--sentence">Ошибка не исчезает.<br />Она получает понятный маршрут.</h2>
-      <p class="section-lead">Каждое действие остаётся в истории. Проблемную операцию можно понять, повторить или передать ответственному.</p>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="trace-title" class="display-heading display-heading--sentence">{copy.heading[0]}<br />{copy.heading[1]}</h2>
+      <p class="section-lead">{copy.lead}</p>
       <ul class="compact-benefits">
-        <li>Точное место сбоя</li>
-        <li>История действий</li>
-        <li>Понятный следующий шаг</li>
+        {copy.benefits.map((benefit) => <li>{benefit}</li>)}
       </ul>
     </div>
 
-    <div class="trace-panel" aria-label="Пример журнала событий" data-reveal>
-      <div class="scene-toolbar"><span>ИСТОРИЯ КОРОБА 24</span><span>СТАНЦИЯ 03</span></div>
+    <div class="trace-panel" aria-label={copy.panelLabel} data-reveal>
+      <div class="scene-toolbar"><span>{copy.toolbar}</span><span>{copy.station}</span></div>
       <ol class="trace-events">
-        {events.map(([time, title, description, status]) => (
+        {copy.events.map(([time, title, description, status]) => (
           <li class:list={{ "trace-event--problem": status === "problem" }}>
             <time datetime={`2026-08-14T${time}+03:00`}>{time}</time>
             <i aria-hidden="true"></i>

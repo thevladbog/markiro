@@ -3,6 +3,7 @@ import "@markiro/ui/styles.css";
 import "../styles/landing.css";
 
 import type { SeoPageDefinition } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 import { buildPageGraph, serializeJsonLd } from "../lib/seo";
 
 interface Props {
@@ -12,11 +13,15 @@ interface Props {
 const { page } = Astro.props;
 const canonicalUrl = new URL(page.path, Astro.site);
 const socialImageUrl = new URL(page.socialImage, Astro.site);
+const alternateUrl = new URL(page.alternatePath, Astro.site);
+const ruUrl = page.locale === "ru" ? canonicalUrl : alternateUrl;
+const enUrl = page.locale === "en" ? canonicalUrl : alternateUrl;
+const copy = getUiCopy(page.locale).common;
 const jsonLd = serializeJsonLd(buildPageGraph(page));
 ---
 
 <!doctype html>
-<html lang="ru" data-theme="dark">
+<html lang={page.locale} data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -24,7 +29,8 @@ const jsonLd = serializeJsonLd(buildPageGraph(page));
     <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
     <meta name="theme-color" content="#131216" />
     <meta property="og:type" content="website" />
-    <meta property="og:locale" content="ru_RU" />
+    <meta property="og:locale" content={page.locale === "ru" ? "ru_RU" : "en_US"} />
+    <meta property="og:locale:alternate" content={page.locale === "ru" ? "en_US" : "ru_RU"} />
     <meta property="og:site_name" content="Markiro" />
     <meta property="og:title" content={page.title} />
     <meta property="og:description" content={page.description} />
@@ -39,13 +45,16 @@ const jsonLd = serializeJsonLd(buildPageGraph(page));
     <meta name="twitter:image" content={socialImageUrl} />
     <meta name="twitter:image:alt" content={page.socialImageAlt} />
     <link rel="canonical" href={canonicalUrl} />
+    <link rel="alternate" hreflang="ru" href={ruUrl} />
+    <link rel="alternate" hreflang="en" href={enUrl} />
+    <link rel="alternate" hreflang="x-default" href={ruUrl} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-    <link rel="manifest" href="/site.webmanifest" />
+    <link rel="manifest" href={page.locale === "ru" ? "/site.webmanifest" : "/site.en.webmanifest"} />
     <title>{page.title}</title>
     <script type="application/ld+json" set:html={jsonLd} is:inline />
   </head>
   <body>
-    <a class="skip-link" href="#main">Перейти к содержанию</a>
+    <a class="skip-link" href="#main">{copy.skipLink}</a>
     <slot />
   </body>
 </html>

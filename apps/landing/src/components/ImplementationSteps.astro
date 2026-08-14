@@ -1,23 +1,23 @@
 ---
-const steps = [
-  ["01", "Разбираем линию", "Фиксируем оборудование, роли и текущий маршрут кодов."],
-  ["02", "Настраиваем сценарий", "Собираем рабочий процесс под конкретный продукт и упаковку."],
-  ["03", "Проверяем на смене", "Запускаем вместе с оператором и проверяем восстановление после ошибок."],
-  ["04", "Расширяем контур", "Добавляем кабинеты, киоски и интеграции по готовности."],
-] as const;
+import type { Locale } from "../content/pages";
+import { getUiCopy } from "../content/ui";
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.implementation;
 ---
 
 <section class="section section--implementation" id="implementation" aria-labelledby="implementation-title">
   <div class="container implementation-grid">
     <div data-reveal>
-      <p class="section-index">06 / ВНЕДРЕНИЕ</p>
-      <h2 id="implementation-title" class="display-heading display-heading--sentence">Запускаем без большого проекта.</h2>
-      <p class="section-lead">Начните с одной станции и реального рабочего сценария. Масштабирование идёт после проверки процесса на линии.</p>
-      <a class="text-link" href="#demo">Обсудить первую линию <span aria-hidden="true">→</span></a>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="implementation-title" class="display-heading display-heading--sentence">{copy.heading}</h2>
+      <p class="section-lead">{copy.lead}</p>
+      <a class="text-link" href="#demo">{copy.link} <span aria-hidden="true">→</span></a>
     </div>
     <ol class="implementation-steps" data-reveal-group>
-      {steps.map(([number, title, description]) => (
-        <li data-reveal><span>{number}</span><div><h3>{title}</h3><p>{description}</p></div></li>
+      {copy.steps.map(([title, description], index) => (
+        <li data-reveal><span>{String(index + 1).padStart(2, "0")}</span><div><h3>{title}</h3><p>{description}</p></div></li>
       ))}
     </ol>
   </div>

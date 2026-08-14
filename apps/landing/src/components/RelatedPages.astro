@@ -1,6 +1,7 @@
 ---
 import type { SeoPageDefinition } from "../content/pages";
 import { findSeoPage } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 
 interface Props {
   page: SeoPageDefinition;
@@ -8,11 +9,12 @@ interface Props {
 
 const { page } = Astro.props;
 const relatedPages = page.relatedPaths.map(findSeoPage);
+const copy = getUiCopy(page.locale).common;
 ---
 
 <section class="seo-related" aria-labelledby="related-title" data-related-pages>
-  <p class="section-index">Следующий шаг</p>
-  <h2 id="related-title">Связанные производственные сценарии</h2>
+  <p class="section-index">{copy.relatedKicker}</p>
+  <h2 id="related-title">{copy.relatedHeading}</h2>
   <div class="seo-related__grid">
     {relatedPages.map((relatedPage) => (
       <a href={relatedPage.path}>

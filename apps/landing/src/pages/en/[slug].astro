@@ -1,0 +1,18 @@
+---
+import SeoArticle from "../../components/SeoArticle.astro";
+import { SEO_PAGES, type SeoPageDefinition } from "../../content/pages";
+import { readPublicSiteConfig } from "../../lib/site-config";
+
+export function getStaticPaths() {
+  return SEO_PAGES.filter((page) => page.locale === "en" && page.path !== "/en/").map((page) => ({
+    params: { slug: page.path.slice("/en/".length, -1) },
+    props: { page },
+  }));
+}
+
+interface Props { page: SeoPageDefinition }
+const { page } = Astro.props;
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<SeoArticle page={page} phone={config.phone} />

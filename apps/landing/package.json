@@ -10,7 +10,7 @@
     "preview": "astro preview --port 5473",
     "lint": "eslint \"src/**/*.ts\" astro.config.mjs",
     "typecheck": "astro check",
-    "test": "vitest run"
+    "test": "vitest run --no-file-parallelism"
   },
   "dependencies": {
     "@markiro/ui": "workspace:*",

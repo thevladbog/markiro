@@ -1,0 +1,17 @@
+{
+  "name": "Markiro",
+  "short_name": "Markiro",
+  "description": "Serialization, aggregation, and traceability for production lines.",
+  "lang": "en",
+  "start_url": "/en/",
+  "display": "browser",
+  "background_color": "#131216",
+  "theme_color": "#131216",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

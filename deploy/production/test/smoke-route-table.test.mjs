@@ -46,9 +46,9 @@ Disallow: /
 Sitemap: https://markiro.app/sitemap.xml
 `;
 const landingSitemap =
-  '<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/faq/</loc></url></urlset>';
+  '<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/faq/</loc></url><url><loc>https://markiro.app/en/</loc></url><url><loc>https://markiro.app/en/faq/</loc></url></urlset>';
 const landingLlms =
-  "# Markiro\n\n- [Главная](https://markiro.app/)\n- [Вопросы и ответы](https://markiro.app/faq/)\n";
+  "# Markiro\n\n- [Главная](https://markiro.app/)\n- [Вопросы и ответы](https://markiro.app/faq/)\n- [Home](https://markiro.app/en/)\n- [Questions](https://markiro.app/en/faq/)\n";
 const docsShell =
   '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script ><script src="/docs/bootstrap.js"></script   ></body></html>';
 const docsBootstrap = `Scalar.createApiReference("#app", {
@@ -194,7 +194,7 @@ function smokeClient(releaseSha) {
       const path = parsed.pathname;
       const kiosk = parsed.hostname.startsWith("kiosk.");
       const landing = parsed.hostname === "markiro.example";
-      if (landing && (path === "/" || path === "/faq/"))
+      if (landing && ["/", "/faq/", "/en/", "/en/faq/"].includes(path))
         return response({
           body: landingShell(path),
           headers: {
@@ -429,6 +429,32 @@ test("landing smoke permits only the public canonical URL outside the deployment
   }
 });
 
+test("landing smoke permits public hreflang metadata outside the deployment origin", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
+      return response({
+        body: landingShell().replace(
+          "</head>",
+          '<link rel="alternate" hreflang="ru" href="https://markiro.app/"><link rel="alternate" hreflang="en" href="https://markiro.app/en/"><link rel="alternate" hreflang="x-default" href="https://markiro.app/"></head>',
+        ),
+        headers: { "cache-control": "no-cache", "content-type": "text/html" },
+      });
+    return original(url, init);
+  };
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+    },
+    client,
+  );
+});
+
 test("kiosk smoke rejects shell, origin, manifest, worker, and route-boundary mutations", async (t) => {
   const releaseSha = "a".repeat(40);
   const cases = [
@@ -607,6 +633,8 @@ test("defines the complete immutable public-route smoke contract", () => {
   assert.deepEqual(LANDING_ROUTE_CHECKS, [
     ["GET", "/", "landing-page"],
     ["GET", "/faq/", "landing-page"],
+    ["GET", "/en/", "landing-page"],
+    ["GET", "/en/faq/", "landing-page"],
     ["GET", "/robots.txt", "robots"],
     ["GET", "/sitemap.xml", "sitemap"],
     ["GET", "/llms.txt", "llms"],

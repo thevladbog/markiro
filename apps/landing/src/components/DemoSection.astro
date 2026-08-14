@@ -1,55 +1,60 @@
 ---
 import type { PublicLegalLinks, PublicPhone } from "../lib/site-config";
+import type { Locale } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 
 interface Props {
   demoEndpoint: string | null;
   legalLinks: PublicLegalLinks | null;
+  locale: Locale;
   phone: PublicPhone | null;
 }
 
-const { demoEndpoint, legalLinks, phone } = Astro.props;
+const { demoEndpoint, legalLinks, locale, phone } = Astro.props;
+const rootCopy = getUiCopy(locale);
+const copy = rootCopy.home.demo;
 ---
 
 <section class="section section--demo" id="demo" aria-labelledby="demo-title">
   <div class="container demo-grid">
     <div data-reveal>
-      <p class="section-index">07 / ДЕМО НА ВАШЕЙ ЛИНИИ</p>
-      <h2 id="demo-title" class="display-heading display-heading--sentence">Покажем Markiro на вашей линии.</h2>
-      <p class="section-lead">Разберём ваш процесс и покажем рабочий сценарий без абстрактной презентации.</p>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="demo-title" class="display-heading display-heading--sentence">{copy.heading}</h2>
+      <p class="section-lead">{copy.lead}</p>
       {phone ? (
         <a class="demo-phone" href={phone.href} data-analytics="landing_phone_click" data-placement="demo">{phone.display}</a>
       ) : (
-        <p class="contact-note">Контактный телефон появится после подключения публичной линии.</p>
+        <p class="contact-note">{copy.contactNote}</p>
       )}
     </div>
 
-    <form class="demo-form" data-demo-form data-endpoint={demoEndpoint ?? undefined} novalidate data-reveal>
+    <form class="demo-form" data-demo-form data-locale={locale} data-endpoint={demoEndpoint ?? undefined} novalidate data-reveal>
       <div class="form-field">
-        <label for="name">Как к вам обращаться</label>
+        <label for="name">{copy.name}</label>
         <input id="name" name="name" type="text" autocomplete="name" maxlength="80" required />
         <span class="field-error" id="name-error"></span>
       </div>
       <div class="form-field">
-        <label for="company">Компания</label>
+        <label for="company">{copy.company}</label>
         <input id="company" name="company" type="text" autocomplete="organization" maxlength="120" required />
         <span class="field-error" id="company-error"></span>
       </div>
       <div class="form-field">
-        <label for="phone">Телефон для связи</label>
+        <label for="phone">{copy.phone}</label>
         <input id="phone" name="phone" type="tel" autocomplete="tel" inputmode="tel" maxlength="30" placeholder="+7 999 123-45-67" required />
         <span class="field-error" id="phone-error"></span>
       </div>
       <button class="button demo-form__submit" type="submit" data-analytics="landing_form_submit">
-        <span>Запросить демонстрацию</span><span aria-hidden="true">→</span>
+        <span>{rootCopy.common.requestDemo}</span><span aria-hidden="true">→</span>
       </button>
       <p class="form-status" data-form-status aria-live="polite"></p>
       {legalLinks ? (
         <p class="form-legal">
-          Отправляя форму, вы принимаете <a href={legalLinks.consent}>согласие на обработку персональных данных</a>
-          и подтверждаете, что ознакомились с <a href={legalLinks.privacy}>политикой обработки данных</a>.
+          {copy.legal.prefix} <a href={legalLinks.consent}>{copy.legal.consent}</a>
+          {copy.legal.separator} <a href={legalLinks.privacy}>{copy.legal.privacy}</a>.
         </p>
       ) : (
-        <p class="form-legal">Онлайн-отправка будет доступна после подключения CRM и утверждения документов об обработке данных.</p>
+        <p class="form-legal">{copy.unavailable}</p>
       )}
     </form>
   </div>

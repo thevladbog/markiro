@@ -1,6 +1,7 @@
 ---
 import type { PublicPhone } from "../lib/site-config";
 import type { SeoPageDefinition } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Breadcrumbs from "./Breadcrumbs.astro";
 import LandingFooter from "./LandingFooter.astro";
@@ -13,10 +14,12 @@ interface Props {
 }
 
 const { page, phone } = Astro.props;
+const copy = getUiCopy(page.locale).common;
+const homePath = page.locale === "ru" ? "/" : "/en/";
 ---
 
 <BaseLayout page={page}>
-  <LandingHeader phone={phone} />
+  <LandingHeader page={page} phone={phone} />
   <main id="main" class="seo-page">
     <header class="seo-hero">
       <div class="container seo-hero__inner">
@@ -24,8 +27,8 @@ const { page, phone } = Astro.props;
         <p class="section-index">{page.eyebrow}</p>
         <h1>{page.heading}</h1>
         <p class="seo-hero__lead">{page.introduction}</p>
-        <a class="button" href="/#demo" data-analytics="landing_demo_click" data-placement="seo-hero">
-          Обсудить задачу <span aria-hidden="true">→</span>
+        <a class="button" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="seo-hero">
+          {copy.discussTask} <span aria-hidden="true">→</span>
         </a>
       </div>
     </header>
@@ -57,14 +60,14 @@ const { page, phone } = Astro.props;
     <section class="seo-cta" aria-labelledby="seo-cta-title">
       <div class="container seo-cta__inner">
         <div>
-          <p class="section-index">Демонстрация на вашем процессе</p>
-          <h2 id="seo-cta-title">Проверим сценарий на данных вашей линии.</h2>
+          <p class="section-index">{copy.seoCtaKicker}</p>
+          <h2 id="seo-cta-title">{copy.seoCtaHeading}</h2>
         </div>
-        <a class="button" href="/#demo">Запросить демонстрацию <span aria-hidden="true">→</span></a>
+        <a class="button" href={`${homePath}#demo`}>{copy.requestDemo} <span aria-hidden="true">→</span></a>
       </div>
     </section>
   </main>
-  <LandingFooter />
+  <LandingFooter page={page} />
 
   <script>
     import { browserLandingRuntime, initLanding } from "../scripts/site";
