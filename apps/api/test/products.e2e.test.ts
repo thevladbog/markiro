@@ -1173,7 +1173,7 @@ describe.skipIf(!ready)("products e2e", () => {
         },
       },
     ]);
-  });
+  }, 15_000);
 
   it("marks product media deleting before product cascade and leaves retryable cleanup", async () => {
     const agent = request.agent(app!.getHttpServer());

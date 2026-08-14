@@ -7,6 +7,7 @@ import { PickupOrdersService } from "../src/modules/pickup-orders/pickup-orders.
 import { OrgProfileService } from "../src/modules/org-profile/org-profile.service";
 import { KioskDeviceGuard } from "../src/tenancy/kiosk-device.guard";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
+import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 
 describe("kiosk box registry OpenAPI contract", () => {
   it("documents revision paging, exact change union, and error statuses", async () => {
@@ -16,6 +17,7 @@ describe("kiosk box registry OpenAPI contract", () => {
         { provide: BoxRegistryService, useValue: {} },
         { provide: PickupOrdersService, useValue: {} },
         { provide: OrgProfileService, useValue: {} },
+        { provide: ObjectStorageService, useValue: {} },
       ],
     })
       .overrideGuard(KioskDeviceGuard)
@@ -74,6 +76,7 @@ describe("kiosk box registry OpenAPI contract", () => {
         { provide: BoxRegistryService, useValue: {} },
         { provide: PickupOrdersService, useValue: {} },
         { provide: OrgProfileService, useValue: {} },
+        { provide: ObjectStorageService, useValue: {} },
       ],
     })
       .overrideGuard(KioskDeviceGuard)

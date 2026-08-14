@@ -544,7 +544,8 @@ describe("registered subscription route inventory", () => {
         const expected =
           route.controller.name === "KioskController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
-            : route.controller.name === "StationScansController"
+            : route.controller.name === "StationScansController" ||
+                route.controller.name === "StationProductImagesController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
         expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(
