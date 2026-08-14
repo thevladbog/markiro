@@ -19,7 +19,7 @@ body {
   background: var(--surface-page);
   color: var(--fg-1);
   font-family: var(--font-ui);
-  text-rendering: optimizeLegibility;
+  text-rendering: optimizelegibility;
 }
 
 a {
@@ -842,7 +842,7 @@ input:focus-visible {
 
 .trace-events li {
   display: grid;
-  grid-template-columns: 4.5rem 0.625rem 1fr auto;
+  grid-template-columns: 4.5rem 0.625rem 1fr;
   align-items: center;
   gap: var(--sp-4);
   min-height: 4.75rem;
@@ -877,16 +877,6 @@ input:focus-visible {
 
 .trace-events .trace-event--problem i {
   background: #d74747;
-}
-
-.trace-events button {
-  min-height: 2.5rem;
-  padding-inline: var(--sp-4);
-  border: 0;
-  border-radius: var(--r-1);
-  background: #17161a;
-  color: #fafaf8;
-  font: 600 0.6875rem / 1 var(--font-ui);
 }
 
 .section--platform {
@@ -1555,12 +1545,6 @@ input:focus-visible {
     grid-template-columns: 3.5rem 0.5rem 1fr;
     gap: var(--sp-2);
     padding-block: var(--sp-3);
-  }
-
-  .trace-events button {
-    grid-column: 3;
-    width: fit-content;
-    margin-top: var(--sp-2);
   }
 
   .module-grid {

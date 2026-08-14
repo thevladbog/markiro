@@ -34,7 +34,10 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   assert.match(source, /corepack prepare pnpm@11\.10\.0 --activate/);
   assert.match(source, /pnpm install --frozen-lockfile/);
   assert.match(source, /turbo build --filter @markiro\/api\.\.\./);
-  assert.match(source, /pnpm --filter @markiro\/api deploy --legacy --prod \/out\/api/);
+  assert.match(
+    source,
+    /pnpm --config\.allow-unused-patches=true --filter @markiro\/api deploy --legacy --prod \/out\/api/,
+  );
   assert.match(source, /FROM node:24\.19\.0-bookworm-slim AS runtime/);
   assert.match(source, /apt-get install[^\n]*tini/);
   assert.match(source, /COPY --from=build(?: --chown=node:node)? \/out\/api \/app/);

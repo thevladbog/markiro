@@ -67,10 +67,11 @@ content.
 
 ## 3. Implementation boundary
 
-The architecture names `apps/landing` as an Astro 7 application, but that app
-does not currently exist in the repository. Creating the app, routing, build
-pipeline, deployment target, and form backend is a separate implementation
-step. Do not place the landing inside `apps/admin` merely to avoid this setup.
+The landing is implemented as the standalone Astro 7 application
+`apps/landing`. It owns the public route, semantic page components, progressive
+enhancement scripts, and production build. Deployment ownership and the real
+form backend remain separate production-launch requirements; do not move the
+landing into `apps/admin` to supply either of them.
 
 The landing should import shared styles from `@markiro/ui/styles.css`. Reuse the
 existing tokens and fonts. Because the target is Astro, prefer semantic Astro
@@ -517,7 +518,7 @@ decision.
 - Verify production DNS, TLS, caching, robots, sitemap, analytics, and Web Vitals
   on the deployed origin. Local build success does not establish these gates.
 
-## 16. Decisions required before implementation
+## 16. Decisions required before production launch
 
 1. Final public phone number and its hours/owner.
 2. Final privacy-policy URL, consent wording, and analytics consent behavior.
@@ -527,5 +528,5 @@ decision.
 5. Analytics provider and final event contract.
 6. Whether video, FAQ, and product-group content stay out of v1 or return through
    an additional design pass.
-7. `apps/landing` creation, Astro integration, deployment route, and production
-   ownership.
+7. Deployment route, release process, monitoring, and production ownership for
+   `apps/landing`.
