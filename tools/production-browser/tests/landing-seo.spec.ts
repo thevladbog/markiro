@@ -18,6 +18,7 @@ const routes = [
   "/en/offline-production/",
   "/en/faq/",
 ];
+const MARKIRO_MODULE_POSITIONS = ["0-0", "0-2", "1-1", "2-0", "2-2", "3-0", "3-2", "4-1"];
 
 for (const route of routes) {
   test(`${route} renders without browser or layout errors`, async ({ page }) => {
@@ -63,7 +64,13 @@ for (const [route, wordmark] of [
     const brand = page.locator("header .brand-mark");
     await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
     await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
+    expect(
+      await brand
+        .locator("[data-brand-module]")
+        .evaluateAll((modules) => modules.map((module) => module.getAttribute("data-position"))),
+    ).toEqual(MARKIRO_MODULE_POSITIONS);
     await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
+    await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("data-position", "4-1");
   });
 }
 

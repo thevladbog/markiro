@@ -50,6 +50,17 @@ const FAVICON_FILE = "favicon.svg";
 const MARKIRO_MODULE_ATTRIBUTE = "data-markiro-module";
 const MARKIRO_MODULE_FILL = "#fafaf8";
 const MARKIRO_ACCENT_FILL = "#3ddc7a";
+const MARKIRO_MODULE_GRID = [
+  { x: "18", y: "8" },
+  { x: "38", y: "8" },
+  { x: "28", y: "18" },
+  { x: "18", y: "28" },
+  { x: "38", y: "28" },
+  { x: "18", y: "38" },
+  { x: "38", y: "38" },
+  { x: "28", y: "48" },
+] as const;
+const MARKIRO_MODULE_SIZE = "8";
 
 function finding(code: AuditFindingCode, route: string, detail: string): AuditFinding {
   return { code, route, detail };
@@ -133,6 +144,19 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function matchesMarkiroModuleGrid(modules: Element[]): boolean {
+  return modules.every((module, index) => {
+    const expected = MARKIRO_MODULE_GRID[index];
+    return (
+      expected !== undefined &&
+      module.getAttribute("x") === expected.x &&
+      module.getAttribute("y") === expected.y &&
+      module.getAttribute("width") === MARKIRO_MODULE_SIZE &&
+      module.getAttribute("height") === MARKIRO_MODULE_SIZE
+    );
+  });
+}
+
 async function auditBrandAssets(root: string, files: Set<string>): Promise<AuditFinding[]> {
   const findings: AuditFinding[] = [];
 
@@ -210,6 +234,17 @@ async function auditBrandAssets(root: string, files: Set<string>): Promise<Audit
         "INVALID_FAVICON",
         faviconRoute,
         "favicon must contain exactly eight Markiro modules",
+      ),
+    );
+    return findings;
+  }
+
+  if (!matchesMarkiroModuleGrid(modules)) {
+    findings.push(
+      finding(
+        "INVALID_FAVICON",
+        faviconRoute,
+        "favicon modules must match the 3 by 5 Markiro grid",
       ),
     );
     return findings;

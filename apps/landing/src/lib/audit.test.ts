@@ -7,6 +7,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditBuiltSite, type AuditFindingCode } from "./audit";
 
 const roots: string[] = [];
+const MARKIRO_MODULE_GRID = [
+  { x: "18", y: "8" },
+  { x: "38", y: "8" },
+  { x: "28", y: "18" },
+  { x: "18", y: "28" },
+  { x: "38", y: "28" },
+  { x: "18", y: "38" },
+  { x: "38", y: "38" },
+  { x: "28", y: "48" },
+] as const;
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -52,10 +62,9 @@ function brandAssets({
   ruManifest?: Record<string, string>;
   enManifest?: Record<string, string>;
 } = {}): Record<string, string> {
-  const modules = Array.from(
-    { length: faviconModules },
-    (_, index) =>
-      `<rect data-markiro-module="" fill="${index === faviconModules - 1 ? accentFill : ordinaryFill}"/>`,
+  const modules = MARKIRO_MODULE_GRID.slice(0, faviconModules).map(
+    ({ x, y }, index) =>
+      `<rect data-markiro-module="" x="${x}" y="${y}" width="8" height="8" fill="${index === faviconModules - 1 ? accentFill : ordinaryFill}"/>`,
   );
   return {
     "favicon.svg": `<svg>${modules.join("")}</svg>`,
@@ -172,6 +181,28 @@ describe("auditBuiltSite", () => {
       code: "INVALID_FAVICON",
       route: "/favicon.svg",
       detail: "favicon modules must use seven off-white marks and one green accent",
+    });
+  });
+
+  it("rejects a favicon whose modules drift from the Markiro grid", async () => {
+    const modules = Array.from(
+      { length: 8 },
+      (_, index) =>
+        `<rect data-markiro-module="" x="19" y="8" width="8" height="8" fill="${index === 7 ? "#3ddc7a" : "#fafaf8"}"/>`,
+    );
+    const root = await fixture({
+      ...brandAssets(),
+      "favicon.svg": `<svg>${modules.join("")}</svg>`,
+      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg">' }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url></urlset>',
+    });
+
+    await expect(auditBuiltSite(root)).resolves.toContainEqual({
+      code: "INVALID_FAVICON",
+      route: "/favicon.svg",
+      detail: "favicon modules must match the 3 by 5 Markiro grid",
     });
   });
 
