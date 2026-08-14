@@ -786,6 +786,19 @@ export function App() {
     setResumeSyncAfterRecoveryCommit(false);
   }, [boxTemplateRecovery, resumeSync, resumeSyncAfterRecoveryCommit]);
 
+  // Keep the server-side station heartbeat fresh even when the line is idle
+  // and there are no scans to drain. TenantGuard records lastSeenAt on this
+  // authenticated probe, which is what the cabinet uses for line presence.
+  useEffect(() => {
+    if (!authenticatedClient) return;
+    const heartbeat = () => {
+      void authenticatedClient.whoami().catch(() => undefined);
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 60_000);
+    return () => window.clearInterval(timer);
+  }, [authenticatedClient]);
+
   // The hook is mounted unconditionally to preserve hook order, but it only
   // starts discovery after migrations have completed and readConfig has
   // published a non-null config. Discovery is non-blocking and never changes

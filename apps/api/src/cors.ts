@@ -50,7 +50,8 @@ function isStationRequest(req: Request): boolean {
   const path = (req.path.replace(/\/+$/, "") || "/").toLowerCase();
 
   if (
-    (method === "POST" && (path === "/station/pair" || path === "/station/scans")) ||
+    (method === "POST" &&
+      (path === "/station/pair" || path === "/station/scans" || path === "/station/shift-closures")) ||
     (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/products") ||
