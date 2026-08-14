@@ -1108,7 +1108,9 @@ describe.skipIf(!ready)("products e2e", () => {
     });
     const delayedFailure = agent
       .post(`/products/${productId}/image`)
-      .attach("image", await productImageFixture("#f59e0b"), "delayed-failure.jpg");
+      .attach("image", await productImageFixture("#f59e0b"), "delayed-failure.jpg")
+      .expect(503)
+      .then(() => undefined);
     await delayedUploadStarted;
 
     const concurrentSuccess = await agent
@@ -1128,7 +1130,7 @@ describe.skipIf(!ready)("products e2e", () => {
     );
     try {
       releaseDelayedUpload();
-      await delayedFailure.expect(503);
+      await delayedFailure;
     } finally {
       releaseDelayedUpload();
       await setup.pool.query(`drop trigger ${triggerName} on product_images`);
