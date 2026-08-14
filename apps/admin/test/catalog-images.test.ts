@@ -20,6 +20,23 @@ describe("catalog product images", () => {
     expect(productImageUrl(product)).toBe(`/api/products/product-1/image/${"a".repeat(64)}`);
   });
 
+  it("encodes product and checksum path segments before using the URL in an image source", () => {
+    const product = {
+      id: "product/../unsafe",
+      image: {
+        checksum: "checksum?next=<script>",
+        contentType: "image/webp",
+        byteSize: 12,
+        width: 4,
+        height: 3,
+      },
+    } as Pick<ProductDto, "id" | "image">;
+
+    expect(productImageUrl(product)).toBe(
+      "/api/products/product%2F..%2Funsafe/image/checksum%3Fnext%3D%3Cscript%3E",
+    );
+  });
+
   it("lets fetch set the multipart boundary for image uploads", async () => {
     const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       expect(init?.body).toBeInstanceOf(FormData);
