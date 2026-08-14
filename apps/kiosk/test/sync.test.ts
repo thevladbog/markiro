@@ -224,6 +224,7 @@ describe("flushQueue", () => {
     );
     const client = {
       bootstrap: vi.fn(),
+      downloadProductImage: vi.fn(),
       attestOrder: vi.fn(() => admission),
       submitOrder: vi.fn(async () => ({
         orderNo: "ORD-26-0001",
@@ -273,6 +274,7 @@ describe("flushQueue", () => {
     );
     const client = {
       bootstrap: vi.fn(),
+      downloadProductImage: vi.fn(),
       attestOrder: vi.fn(() => admission),
       submitOrder: vi.fn(async () => ({
         orderNo: "must-not-submit",

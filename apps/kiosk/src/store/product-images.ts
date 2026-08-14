@@ -5,6 +5,11 @@ interface ProductImagePointer {
   checksum: string;
 }
 
+interface StoredProductImage {
+  bytes: ArrayBuffer;
+  contentType: string;
+}
+
 async function readPointer(productId: string): Promise<ProductImagePointer | null> {
   const pointer = await withStore<ProductImagePointer>(
     STORE_PRODUCT_IMAGE_POINTERS,
@@ -15,10 +20,21 @@ async function readPointer(productId: string): Promise<ProductImagePointer | nul
 }
 
 async function readBlob(checksum: string): Promise<Blob | null> {
-  const blob = await withStore<Blob>(STORE_PRODUCT_IMAGE_BLOBS, "readonly", (store) =>
-    store.get(checksum),
+  const stored = await withStore<Blob | StoredProductImage>(
+    STORE_PRODUCT_IMAGE_BLOBS,
+    "readonly",
+    (store) => store.get(checksum),
   );
-  return blob ?? null;
+  if (stored instanceof Blob) return stored;
+  if (
+    stored &&
+    "bytes" in stored &&
+    Object.prototype.toString.call(stored.bytes) === "[object ArrayBuffer]" &&
+    typeof stored.contentType === "string"
+  ) {
+    return new Blob([new Uint8Array(stored.bytes)], { type: stored.contentType });
+  }
+  return null;
 }
 
 export async function readProductImageBlob(checksum: string): Promise<Blob | null> {
@@ -50,7 +66,11 @@ export async function publishProductImage(
   checksum: string,
   blob: Blob,
 ): Promise<void> {
-  await withStore(STORE_PRODUCT_IMAGE_BLOBS, "readwrite", (store) => store.put(blob, checksum));
+  const stored: StoredProductImage = {
+    bytes: await blob.arrayBuffer(),
+    contentType: blob.type,
+  };
+  await withStore(STORE_PRODUCT_IMAGE_BLOBS, "readwrite", (store) => store.put(stored, checksum));
   await withStore(STORE_PRODUCT_IMAGE_POINTERS, "readwrite", (store) =>
     store.put({ productId, checksum } satisfies ProductImagePointer, productId),
   );

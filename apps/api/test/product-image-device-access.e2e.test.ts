@@ -8,7 +8,12 @@ describe("device product-image delivery contracts", () => {
       getKioskImageRead: vi.fn().mockResolvedValue("tenants/t/products/p/a.webp"),
     };
     const storage = { presignRead: vi.fn().mockResolvedValue("https://private/image") };
-    const controller = new KioskController(pickupOrders as never, storage as never);
+    const controller = new KioskController(
+      pickupOrders as never,
+      {} as never,
+      {} as never,
+      storage as never,
+    );
     const response = { redirect: vi.fn() };
 
     await controller.readProductImage(

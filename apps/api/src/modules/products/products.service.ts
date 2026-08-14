@@ -13,6 +13,7 @@ import { and, eq, ilike, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DomainError, gtinMatchesPrefix, normalizeToGtin14 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import { MediaAssetsService } from "../media/media-assets.service";
 import { processProductImage } from "../media/product-image-processor";
 import { OrgProfileService } from "../org-profile/org-profile.service";
@@ -27,6 +28,10 @@ import type {
   ProductStatus,
   UpdateProductDto,
 } from "./dto";
+import {
+  invalidateProductGtinRegistry,
+  productGtinActuallyChanged,
+} from "./product-registry-invalidation";
 
 type ProductRow = typeof schema.products.$inferSelect;
 type ProductWithImageRow = ProductRow & {
@@ -144,59 +149,67 @@ export class ProductsService {
    * (post-patch) field values on every call, per the plan's draft/active rule.
    */
   async updateProduct(tenantId: string, id: string, data: UpdateProductDto): Promise<ProductDto> {
-    const current = await this.findRow(tenantId, id);
-    if (!current) {
-      throw new NotFoundException();
-    }
-
-    const gtin14 = data.gtin !== undefined ? this.normalizeOrThrow(data.gtin) : current.gtin14;
-    const name = data.name !== undefined ? data.name : current.name;
-    const productGroup = data.productGroup !== undefined ? data.productGroup : current.productGroup;
-    const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
-    const palletCapacity =
-      data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
-    const defaultCounterpartyId =
-      data.defaultCounterpartyId !== undefined
-        ? data.defaultCounterpartyId
-        : current.defaultCounterpartyId;
-    const defaultLabelTemplateId =
-      data.defaultLabelTemplateId !== undefined
-        ? data.defaultLabelTemplateId
-        : current.defaultLabelTemplateId;
-    const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
+    const normalizedGtin = data.gtin !== undefined ? this.normalizeOrThrow(data.gtin) : undefined;
 
     try {
-      const set: Partial<typeof schema.products.$inferInsert> = {
-        gtin14,
-        name,
-        productGroup,
-        boxCapacity,
-        palletCapacity,
-        defaultCounterpartyId,
-        defaultLabelTemplateId,
-        status,
-      };
+      const updatedId = await this.db.transaction(async (tx) => {
+        if (normalizedGtin !== undefined) await lockTenantBoxRegistry(tx, tenantId);
+        const [current] = await tx
+          .select()
+          .from(schema.products)
+          .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
+          .for("update");
+        if (!current) throw new NotFoundException();
 
-      if (data.unitPrice !== undefined) {
-        set.unitPrice = data.unitPrice;
-      }
-      if (data.egaisCode !== undefined) {
-        set.egaisCode = data.egaisCode;
-      }
-      if (data.externalRef !== undefined) {
-        set.externalRef = data.externalRef;
-      }
+        const gtin14 = normalizedGtin ?? current.gtin14;
+        const name = data.name !== undefined ? data.name : current.name;
+        const productGroup =
+          data.productGroup !== undefined ? data.productGroup : current.productGroup;
+        const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
+        const palletCapacity =
+          data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
+        const defaultCounterpartyId =
+          data.defaultCounterpartyId !== undefined
+            ? data.defaultCounterpartyId
+            : current.defaultCounterpartyId;
+        const defaultLabelTemplateId =
+          data.defaultLabelTemplateId !== undefined
+            ? data.defaultLabelTemplateId
+            : current.defaultLabelTemplateId;
+        const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
+        const set: Partial<typeof schema.products.$inferInsert> = {
+          gtin14,
+          name,
+          productGroup,
+          boxCapacity,
+          palletCapacity,
+          defaultCounterpartyId,
+          defaultLabelTemplateId,
+          status,
+        };
+        if (data.unitPrice !== undefined) set.unitPrice = data.unitPrice;
+        if (data.egaisCode !== undefined) set.egaisCode = data.egaisCode;
+        if (data.externalRef !== undefined) set.externalRef = data.externalRef;
 
-      const [row] = await this.db
-        .update(schema.products)
-        .set(set)
-        .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
-        .returning();
-
-      if (!row) {
-        throw new NotFoundException("Product not found or does not belong to this tenant");
-      }
-      return this.getProduct(tenantId, row.id);
+        const [row] = await tx
+          .update(schema.products)
+          .set(set)
+          .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
+          .returning();
+        if (!row) {
+          throw new NotFoundException("Product not found or does not belong to this tenant");
+        }
+        if (
+          productGtinActuallyChanged(
+            { tenantId, productId: id, gtin14: current.gtin14 },
+            { tenantId, productId: id, gtin14: row.gtin14 },
+          )
+        ) {
+          await invalidateProductGtinRegistry(tx, tenantId, id);
+        }
+        return row.id;
+      });
+      return this.getProduct(tenantId, updatedId);
     } catch (error) {
       this.handleWriteError(error);
     }

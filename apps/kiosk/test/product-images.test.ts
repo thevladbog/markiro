@@ -3,6 +3,7 @@ import type { ProductImageDescriptor } from "../src/api/types.js";
 import { syncProductImages } from "../src/sync/product-images.js";
 import {
   clearProductImages,
+  publishProductImage,
   readPublishedProductImage,
   readPublishedProductImagePointer,
 } from "../src/store/product-images.js";
@@ -103,7 +104,7 @@ describe("product image sync", () => {
     await publishProductImage(
       "p1",
       replacementImage.checksum,
-      new Blob([1, 2, 3], { type: "image/webp" }),
+      new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }),
     );
     const download = vi.fn(async () => new Blob([replacement], { type: "image/webp" }));
     await syncProductImages({ downloadProductImage: download }, [product(replacementImage)]);

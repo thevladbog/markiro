@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ProductImageDescriptor } from "../api/types.js";
 import {
   clearPublishedProductImage,
@@ -11,8 +11,9 @@ import { productMonogram } from "../screens/product-monogram.js";
 export interface ProductImageProps {
   productId: string | null;
   name: string;
-  image?: ProductImageDescriptor | null;
+  image?: ProductImageDescriptor | null | undefined;
   size?: number;
+  fallback?: ReactNode;
 }
 
 /**
@@ -26,6 +27,7 @@ export function ProductImage({
   name,
   image,
   size = 56,
+  fallback,
 }: ProductImageProps): React.JSX.Element {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -91,6 +93,7 @@ export function ProductImage({
       />
     );
   }
+  if (fallback !== undefined) return <>{fallback}</>;
   return (
     <span
       aria-hidden="true"

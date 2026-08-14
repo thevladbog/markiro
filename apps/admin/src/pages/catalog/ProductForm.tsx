@@ -197,7 +197,7 @@ export function ProductForm({
   // catch up with the invalidated query on its own.
   const [linkedExternalRef, setLinkedExternalRef] = useState<string | null>(externalRef ?? null);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   const {
@@ -233,14 +233,35 @@ export function ProductForm({
   }, [externalRef]);
 
   useEffect(() => {
-    if (!selectedImage) {
-      setPreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(selectedImage);
+    if (!selectedImage) return;
+    let cancelled = false;
     setImageLoadFailed(false);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
+    void createImageBitmap(selectedImage)
+      .then((bitmap) => {
+        if (cancelled) {
+          bitmap.close();
+          return;
+        }
+        const canvas = previewCanvasRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) {
+          bitmap.close();
+          setImageLoadFailed(true);
+          return;
+        }
+        const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+      })
+      .catch(() => {
+        if (!cancelled) setImageLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedImage]);
 
   useEffect(() => {
@@ -436,13 +457,16 @@ export function ProductForm({
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
           <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
           <div className="mk-product-image-control">
-            {(previewUrl || (mode === "edit" && productId && image)) && !imageLoadFailed ? (
+            {selectedImage && !imageLoadFailed ? (
+              <canvas
+                ref={previewCanvasRef}
+                role="img"
+                aria-label={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                className="mk-product-image-control__preview"
+              />
+            ) : mode === "edit" && productId && image && !imageLoadFailed ? (
               <img
-                src={
-                  previewUrl ??
-                  productImageUrl({ id: productId!, image: image ?? null }) ??
-                  undefined
-                }
+                src={productImageUrl({ id: productId, image }) ?? undefined}
                 alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
                 onError={() => setImageLoadFailed(true)}
                 className="mk-product-image-control__preview"

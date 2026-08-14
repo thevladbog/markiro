@@ -10,7 +10,7 @@ afterEach(async () => {
 });
 
 const image = {
-  checksum: "a".repeat(64),
+  checksum: "039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81",
   contentType: "image/webp" as const,
   byteSize: 3,
   width: 10,
@@ -28,7 +28,7 @@ describe("ProductImage", () => {
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     const view = render(<ProductImage productId="p1" name="Молоко" image={image} />);
 
-    await waitFor(() => expect(screen.getByRole("img")).toHaveAttribute("src", "blob:test"));
+    await waitFor(() => expect(screen.getByRole("img").getAttribute("src")).toBe("blob:test"));
     view.unmount();
     expect(create).toHaveBeenCalled();
     expect(revoke).toHaveBeenCalledWith("blob:test");
@@ -43,7 +43,7 @@ describe("ProductImage", () => {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:legacy");
     render(<ProductImage productId="p1" name="Молоко" />);
 
-    await waitFor(() => expect(screen.getByRole("img")).toHaveAttribute("src", "blob:legacy"));
+    await waitFor(() => expect(screen.getByRole("img").getAttribute("src")).toBe("blob:legacy"));
   });
 
   it("fails closed to a monogram when the pointer is absent or mismatched", async () => {

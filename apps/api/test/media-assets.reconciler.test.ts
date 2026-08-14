@@ -2,6 +2,7 @@ import type { Db } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 import { MediaAssetsReconciler } from "../src/modules/media/media-assets.reconciler";
 import { MediaAssetsService } from "../src/modules/media/media-assets.service";
+import type { OrgProfileService } from "../src/modules/org-profile/org-profile.service";
 import type { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 
 type AssetStatus = "staging" | "active" | "deleting";
@@ -269,12 +270,16 @@ describe("MediaAssetsReconciler", () => {
     const mediaAssets = {
       reconcile: vi.fn().mockReturnValue(cleanup),
     } as unknown as MediaAssetsService;
-    const reconciler = new MediaAssetsReconciler(mediaAssets);
+    const organizations = {
+      reconcileLogoAssets: vi.fn().mockResolvedValue(0),
+    } as unknown as OrgProfileService;
+    const reconciler = new MediaAssetsReconciler(mediaAssets, organizations);
 
     const initialization = reconciler.onModuleInit();
 
     expect(initialization).toBeUndefined();
     expect(mediaAssets.reconcile).toHaveBeenCalledOnce();
+    expect(organizations.reconcileLogoAssets).toHaveBeenCalledOnce();
 
     finishCleanup(0);
     await cleanup;
