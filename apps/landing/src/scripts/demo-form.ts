@@ -1,5 +1,6 @@
 import { type DemoLead, validateDemoLead } from "../lib/demo-form";
 import { canUseCategory, readConsent } from "../lib/consent";
+import type { Locale } from "../content/pages";
 
 export interface DemoResponse {
   readonly ok: boolean;
@@ -12,6 +13,37 @@ export interface DemoFormRuntime {
 }
 
 type FieldName = "company" | "name" | "phone";
+
+const COPY = {
+  en: {
+    checking: "Check the highlighted fields",
+    network: "The request was not sent. Check your connection and try again.",
+    rateLimited: "Too many requests. Wait a few minutes and try again.",
+    request: "Request a demonstration",
+    sending: "Sending request",
+    sendingStatus: "Sending request...",
+    server: "The request was not sent. Try again later.",
+    successHeading: "Request received",
+    successText: "We will contact you to review the line and prepare a focused demonstration.",
+    unavailable: "Online submission is not connected yet. Try again later.",
+  },
+  ru: {
+    checking: "Проверьте отмеченные поля",
+    network: "Заявка не отправлена: проверьте соединение и повторите попытку.",
+    rateLimited: "Слишком много запросов. Подождите несколько минут и повторите.",
+    request: "Запросить демонстрацию",
+    sending: "Отправляем запрос",
+    sendingStatus: "Отправляем запрос...",
+    server: "Заявка не отправлена. Попробуйте ещё раз позже.",
+    successHeading: "Запрос получили",
+    successText: "Свяжемся с вами, чтобы разобрать линию и подготовить предметную демонстрацию.",
+    unavailable: "Отправка формы пока не подключена. Попробуйте позже.",
+  },
+} as const;
+
+function formLocale(form: HTMLFormElement): Locale {
+  return form.dataset.locale === "en" ? "en" : "ru";
+}
 
 function formInput(form: HTMLFormElement, name: FieldName): HTMLInputElement {
   const element = form.elements.namedItem(name);
@@ -28,14 +60,13 @@ function setFormStatus(form: HTMLFormElement, message: string, state: "error" | 
   status.dataset.state = state;
 }
 
-function setSubmitting(form: HTMLFormElement, submitting: boolean): void {
+function setSubmitting(form: HTMLFormElement, submitting: boolean, locale: Locale): void {
   const button = form.querySelector<HTMLButtonElement>('button[type="submit"]');
   if (button === null) return;
   button.disabled = submitting;
   button.setAttribute("aria-busy", String(submitting));
   const label = button.querySelector("span");
-  if (label !== null)
-    label.textContent = submitting ? "Отправляем запрос" : "Запросить демонстрацию";
+  if (label !== null) label.textContent = submitting ? COPY[locale].sending : COPY[locale].request;
 }
 
 function clearFieldErrors(form: HTMLFormElement): void {
@@ -66,15 +97,16 @@ function showFieldErrors(form: HTMLFormElement, errors: Partial<Record<FieldName
   firstInvalid?.focus();
 }
 
-function showSuccess(form: HTMLFormElement): void {
+function showSuccess(form: HTMLFormElement, locale: Locale): void {
+  const copy = COPY[locale];
   const confirmation = document.createElement("div");
   confirmation.className = "demo-success";
   confirmation.dataset.demoSuccess = "";
   confirmation.tabIndex = -1;
   confirmation.innerHTML = `
     <span class="demo-success__mark" aria-hidden="true"></span>
-    <h3>Запрос получили</h3>
-    <p>Свяжемся с вами, чтобы разобрать линию и подготовить предметную демонстрацию.</p>
+    <h3>${copy.successHeading}</h3>
+    <p>${copy.successText}</p>
   `;
   form.replaceWith(confirmation);
   confirmation.focus();
@@ -83,6 +115,8 @@ function showSuccess(form: HTMLFormElement): void {
 export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): () => void {
   let submitting = false;
   let started = false;
+  const locale = formLocale(form);
+  const copy = COPY[locale];
 
   const onInput = (): void => {
     if (started) return;
@@ -94,15 +128,18 @@ export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): (
     event.preventDefault();
     if (submitting) return;
 
-    const validation = validateDemoLead({
-      company: formInput(form, "company").value,
-      name: formInput(form, "name").value,
-      phone: formInput(form, "phone").value,
-    });
+    const validation = validateDemoLead(
+      {
+        company: formInput(form, "company").value,
+        name: formInput(form, "name").value,
+        phone: formInput(form, "phone").value,
+      },
+      locale,
+    );
 
     if (!validation.ok) {
       showFieldErrors(form, validation.errors);
-      setFormStatus(form, "Проверьте отмеченные поля", "error");
+      setFormStatus(form, copy.checking, "error");
       runtime.track("landing_form_error", { errorClass: "validation" });
       return;
     }
@@ -110,44 +147,36 @@ export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): (
     clearFieldErrors(form);
     const endpoint = form.dataset.endpoint;
     if (endpoint === undefined || endpoint.length === 0) {
-      setFormStatus(form, "Отправка формы пока не подключена. Попробуйте позже.", "error");
+      setFormStatus(form, copy.unavailable, "error");
       runtime.track("landing_form_error", { errorClass: "unavailable" });
       return;
     }
 
     submitting = true;
-    setSubmitting(form, true);
-    setFormStatus(form, "Отправляем запрос...", "idle");
+    setSubmitting(form, true, locale);
+    setFormStatus(form, copy.sendingStatus, "idle");
 
     try {
       const response = await runtime.request(endpoint, validation.value);
       if (response.ok) {
         runtime.track("landing_form_success", {});
-        showSuccess(form);
+        showSuccess(form, locale);
         return;
       }
 
       if (response.status === 429) {
-        setFormStatus(
-          form,
-          "Слишком много запросов. Подождите несколько минут и повторите.",
-          "error",
-        );
+        setFormStatus(form, copy.rateLimited, "error");
         runtime.track("landing_form_error", { errorClass: "rate_limited" });
       } else {
-        setFormStatus(form, "Заявка не отправлена. Попробуйте ещё раз позже.", "error");
+        setFormStatus(form, copy.server, "error");
         runtime.track("landing_form_error", { errorClass: "server" });
       }
     } catch {
-      setFormStatus(
-        form,
-        "Заявка не отправлена: проверьте соединение и повторите попытку.",
-        "error",
-      );
+      setFormStatus(form, copy.network, "error");
       runtime.track("landing_form_error", { errorClass: "network" });
     } finally {
       submitting = false;
-      if (form.isConnected) setSubmitting(form, false);
+      if (form.isConnected) setSubmitting(form, false, locale);
     }
   };
 

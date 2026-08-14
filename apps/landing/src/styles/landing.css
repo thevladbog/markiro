@@ -176,6 +176,24 @@ input:focus-visible {
   font-family: var(--font-mono) !important;
 }
 
+.language-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg-3);
+  font: 600 0.6875rem / 1 var(--font-mono);
+  letter-spacing: 0.08em;
+}
+
+.language-switch a {
+  color: var(--fg-3);
+  font: inherit;
+}
+
+.language-switch a[aria-current="page"] {
+  color: var(--accent);
+}
+
 .button {
   display: inline-flex;
   align-items: center;
@@ -1325,6 +1343,18 @@ input:focus-visible {
 
   .landing-nav a:last-child {
     border-bottom: 0;
+  }
+
+  .language-switch {
+    min-height: 3.25rem;
+    padding-inline: var(--sp-4);
+  }
+
+  .language-switch a {
+    display: inline-flex;
+    min-height: 0;
+    padding: 0;
+    border: 0;
   }
 
   .menu-trigger {

@@ -1,15 +1,32 @@
 ---
+import type { SeoPageDefinition } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 import BrandMark from "./BrandMark.astro";
+
+interface Props { page: SeoPageDefinition }
+const { page } = Astro.props;
+const copy = getUiCopy(page.locale).common;
+const homePath = page.locale === "ru" ? "/" : "/en/";
+const paths = page.locale === "ru"
+  ? [
+      ["/markirovka-chestny-znak/", "Маркировка"],
+      ["/sscc-i-agregatsiya/", "SSCC"],
+      ["/integratsiya-1c/", "Интеграция с 1С"],
+      ["/faq/", "Вопросы"],
+    ]
+  : [
+      ["/en/chestny-znak-serialization/", "Serialization"],
+      ["/en/sscc-and-aggregation/", "SSCC"],
+      ["/en/1c-integration/", "1C integration"],
+      ["/en/faq/", "Questions"],
+    ];
 ---
 
 <footer class="landing-footer">
   <div class="container landing-footer__inner">
-    <a href="/" aria-label="Markiro, на главную страницу"><BrandMark /></a>
-    <nav aria-label="Ссылки в подвале">
-      <a href="/markirovka-chestny-znak/">Маркировка</a>
-      <a href="/sscc-i-agregatsiya/">SSCC</a>
-      <a href="/integratsiya-1c/">Интеграция с 1С</a>
-      <a href="/faq/">Вопросы</a>
+    <a href={homePath} aria-label={copy.homeLabel}><BrandMark /></a>
+    <nav aria-label={copy.footerLabel}>
+      {paths.map(([path, label]) => <a href={path}>{label}</a>)}
     </nav>
     <span>© 2026</span>
   </div>

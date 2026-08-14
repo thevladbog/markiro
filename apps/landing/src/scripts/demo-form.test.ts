@@ -4,9 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { initDemoForm, type DemoFormRuntime, type DemoResponse } from "./demo-form";
 
-function renderForm(endpoint = "/api/demo-requests"): HTMLFormElement {
+function renderForm(endpoint = "/api/demo-requests", locale: "ru" | "en" = "ru"): HTMLFormElement {
   document.body.innerHTML = `
-    <form data-demo-form ${endpoint.length > 0 ? `data-endpoint="${endpoint}"` : ""}>
+    <form data-demo-form data-locale="${locale}" ${endpoint.length > 0 ? `data-endpoint="${endpoint}"` : ""}>
       <label for="name">Имя</label>
       <input id="name" name="name" value="Анна" />
       <span id="name-error"></span>
@@ -59,6 +59,23 @@ describe("initDemoForm", () => {
     expect(document.querySelector("#name-error")?.textContent).toBe("Укажите имя");
     expect(document.activeElement).toBe(name);
     expect(currentRuntime.request).not.toHaveBeenCalled();
+  });
+
+  it("uses English validation and success copy for the English form", async () => {
+    const invalidForm = renderForm("/api/demo-requests", "en");
+    const name = invalidForm.elements.namedItem("name") as HTMLInputElement;
+    name.value = "";
+    initDemoForm(invalidForm, runtime());
+
+    await submit(invalidForm);
+    expect(invalidForm.querySelector("#name-error")?.textContent).toBe("Enter your name");
+
+    const validForm = renderForm("/api/demo-requests", "en");
+    initDemoForm(validForm, runtime());
+    await submit(validForm);
+    expect(document.querySelector("[data-demo-success]")?.textContent).toContain(
+      "Request received",
+    );
   });
 
   it("posts only the normalized lead and replaces the form with a focused confirmation", async () => {

@@ -11,6 +11,14 @@ const EXPECTED_PATHS = [
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
+  "/en/",
+  "/en/chestny-znak-serialization/",
+  "/en/sscc-and-aggregation/",
+  "/en/packing-workstation/",
+  "/en/self-service-pickup-kiosk/",
+  "/en/1c-integration/",
+  "/en/offline-production/",
+  "/en/faq/",
 ] as const;
 
 describe("SEO page registry", () => {
@@ -40,6 +48,18 @@ describe("SEO page registry", () => {
       expect(page.relatedPaths.length).toBeGreaterThanOrEqual(2);
       expect(page.relatedPaths).not.toContain(page.path);
       for (const relatedPath of page.relatedPaths) expect(paths.has(relatedPath)).toBe(true);
+    }
+  });
+
+  it("pairs every Russian page with one English alternate", () => {
+    const pages = new Map(SEO_PAGES.map((page) => [page.path, page]));
+
+    for (const page of SEO_PAGES) {
+      expect(page.locale === "ru" || page.locale === "en").toBe(true);
+      const alternate = pages.get(page.alternatePath);
+      expect(alternate).toBeDefined();
+      expect(alternate?.locale).not.toBe(page.locale);
+      expect(alternate?.alternatePath).toBe(page.path);
     }
   });
 

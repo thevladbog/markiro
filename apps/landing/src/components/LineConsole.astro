@@ -1,32 +1,37 @@
 ---
+import type { Locale } from "../content/pages";
+import { getUiCopy } from "../content/ui";
+
 interface Props {
   compact?: boolean;
   inverse?: boolean;
+  locale: Locale;
 }
 
-const { compact = false, inverse = false } = Astro.props;
+const { compact = false, inverse = false, locale } = Astro.props;
+const copy = getUiCopy(locale).home.lineConsole;
 ---
 
 <div class:list={["line-console", { "line-console--compact": compact, "line-console--inverse": inverse }]} aria-hidden="true">
   <div class="line-console__topline">
-    <span>СТАНЦИЯ 03 / АГРЕГАЦИЯ</span>
-    <span class="status-inline"><i></i> ЛИНИЯ АКТИВНА</span>
+    <span>{copy.station}</span>
+    <span class="status-inline"><i></i> {copy.lineActive}</span>
   </div>
   <div class="line-console__body">
     <div class="line-console__primary">
-      <span class="interface-kicker">СБОРКА</span>
-      <strong>Сборка короба</strong>
+      <span class="interface-kicker">{copy.assembly}</span>
+      <strong>{copy.caseAssembly}</strong>
       <div class="line-console__count"><b>18</b><span>/ 24</span></div>
       <div class="progress-track"><i></i></div>
     </div>
     <div class="line-console__secondary">
-      <span class="interface-kicker">ПРИНЯТО ЗА СМЕНУ</span>
+      <span class="interface-kicker">{copy.shiftAccepted}</span>
       <strong>1 248</strong>
-      <small>КОДОВ МАРКИРОВКИ</small>
+      <small>{copy.codes}</small>
     </div>
   </div>
   <div class="line-console__footer">
-    <span>Код принят</span>
-    <b>52,40 сек</b>
+    <span>{copy.accepted}</span>
+    <b>{copy.timeValue} {copy.timeUnit}</b>
   </div>
 </div>

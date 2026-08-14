@@ -119,6 +119,14 @@ export const KIOSK_ROUTE_CHECKS = Object.freeze([
 export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/", "landing-page"]),
   Object.freeze(["GET", "/faq/", "landing-page"]),
+  Object.freeze(["GET", "/en/", "landing-page"]),
+  Object.freeze(["GET", "/en/chestny-znak-serialization/", "landing-page"]),
+  Object.freeze(["GET", "/en/sscc-and-aggregation/", "landing-page"]),
+  Object.freeze(["GET", "/en/packing-workstation/", "landing-page"]),
+  Object.freeze(["GET", "/en/self-service-pickup-kiosk/", "landing-page"]),
+  Object.freeze(["GET", "/en/1c-integration/", "landing-page"]),
+  Object.freeze(["GET", "/en/offline-production/", "landing-page"]),
+  Object.freeze(["GET", "/en/faq/", "landing-page"]),
   Object.freeze(["GET", "/robots.txt", "robots"]),
   Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
   Object.freeze(["GET", "/llms.txt", "llms"]),
@@ -263,13 +271,25 @@ function kioskShellSignature(html, baseUrl) {
 function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl) {
   let runtimeHtml = html;
   if (allowedCanonicalUrl) {
+    const allowedMetadataOrigin = new URL(allowedCanonicalUrl).origin;
     runtimeHtml = runtimeHtml.replace(/<link\b([^>]*)>/gi, (tag, attributes) => {
       const rel = attributes.match(/\brel\s*=\s*["']([^"']+)["']/i)?.[1];
       const href = attributes.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
-      return rel?.split(/\s+/).some((value) => value.toLowerCase() === "canonical") &&
-        href === allowedCanonicalUrl
-        ? ""
-        : tag;
+      const relationships = rel?.split(/\s+/).map((value) => value.toLowerCase()) ?? [];
+      if (relationships.includes("canonical") && href === allowedCanonicalUrl) return "";
+      if (relationships.includes("alternate") && href) {
+        const hreflang = attributes.match(/\bhreflang\s*=\s*["']([^"']+)["']/i)?.[1];
+        try {
+          if (
+            ["ru", "en", "x-default"].includes(hreflang ?? "") &&
+            new URL(href).origin === allowedMetadataOrigin
+          )
+            return "";
+        } catch {
+          return tag;
+        }
+      }
+      return tag;
     });
   }
   const assertUrl = (value) => {
@@ -339,7 +359,9 @@ function assertLandingRoute(check, response, body, baseUrl) {
     if (
       !/(?:application|text)\/xml/i.test(contentType) ||
       !body.includes(`<loc>${new URL("/", `${LANDING_SITE_URL}/`).href}</loc>`) ||
-      !body.includes(`<loc>${new URL("/faq/", `${LANDING_SITE_URL}/`).href}</loc>`)
+      !body.includes(`<loc>${new URL("/faq/", `${LANDING_SITE_URL}/`).href}</loc>`) ||
+      !body.includes(`<loc>${new URL("/en/", `${LANDING_SITE_URL}/`).href}</loc>`) ||
+      !body.includes(`<loc>${new URL("/en/faq/", `${LANDING_SITE_URL}/`).href}</loc>`)
     )
       throw new Error("landing sitemap does not expose canonical topic routes");
     return;
@@ -348,7 +370,9 @@ function assertLandingRoute(check, response, body, baseUrl) {
     kind !== "llms" ||
     !/text\/plain/i.test(contentType) ||
     !body.includes(new URL("/", `${LANDING_SITE_URL}/`).href) ||
-    !body.includes(new URL("/faq/", `${LANDING_SITE_URL}/`).href)
+    !body.includes(new URL("/faq/", `${LANDING_SITE_URL}/`).href) ||
+    !body.includes(new URL("/en/", `${LANDING_SITE_URL}/`).href) ||
+    !body.includes(new URL("/en/faq/", `${LANDING_SITE_URL}/`).href)
   )
     throw new Error("landing llms index does not expose canonical topic routes");
 }

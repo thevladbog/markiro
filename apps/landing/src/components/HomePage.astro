@@ -1,0 +1,97 @@
+---
+import { Picture } from "astro:assets";
+
+import factoryImage from "../assets/factory-line.jpg";
+import type { SeoPageDefinition } from "../content/pages";
+import { getUiCopy } from "../content/ui";
+import { readPublicSiteConfig } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import DemoSection from "./DemoSection.astro";
+import ImplementationSteps from "./ImplementationSteps.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+import LineConsole from "./LineConsole.astro";
+import PlatformModules from "./PlatformModules.astro";
+import ProductModes from "./ProductModes.astro";
+import ProductionCycle from "./ProductionCycle.astro";
+import TraceLog from "./TraceLog.astro";
+
+interface Props { page: SeoPageDefinition }
+const { page } = Astro.props;
+const copy = getUiCopy(page.locale);
+const siteConfig = readPublicSiteConfig({
+  PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+  PUBLIC_PERSONAL_DATA_CONSENT_PATH: import.meta.env.PUBLIC_PERSONAL_DATA_CONSENT_PATH,
+  PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+  PUBLIC_PRIVACY_POLICY_PATH: import.meta.env.PUBLIC_PRIVACY_POLICY_PATH,
+});
+---
+
+<BaseLayout page={page}>
+  <LandingHeader page={page} phone={siteConfig.phone} />
+
+  <main id="main">
+    <section class="hero" id="hero" aria-labelledby="hero-title">
+      <div class="hero__media" aria-hidden="true">
+        <Picture
+          src={factoryImage}
+          alt=""
+          widths={[640, 960, 1376]}
+          formats={["avif", "webp"]}
+          sizes="(max-width: 767px) 100vw, 64vw"
+          loading="eager"
+          fetchpriority="high"
+          data-hero-image
+        />
+      </div>
+      <div class="hero__shade"></div>
+      <div class="container hero__content">
+        <p class="section-index" data-reveal>{copy.home.hero.kicker}</p>
+        <h1 id="hero-title" data-reveal>{copy.home.hero.heading[0]}<br />{copy.home.hero.heading[1]}</h1>
+        <p class="hero__lead" data-reveal>{copy.home.hero.lead}</p>
+        <div class="hero__actions" data-reveal>
+          <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="hero">{copy.common.requestDemoShort} <span aria-hidden="true">→</span></a>
+          {siteConfig.phone && <a class="hero__phone" href={siteConfig.phone.href}>{siteConfig.phone.display}</a>}
+        </div>
+        <p class="hero__note" data-reveal>{copy.home.hero.note}</p>
+      </div>
+      <div class="hero__console" data-reveal><LineConsole locale={page.locale} /></div>
+    </section>
+
+    <section class="section section--continuity" id="continuity" aria-labelledby="continuity-title">
+      <div class="container">
+        <div class="continuity-statement" data-reveal>
+          <span aria-hidden="true"></span>
+          <div>
+            <p class="section-index">{copy.home.continuity.kicker}</p>
+            <h2 id="continuity-title">{copy.home.continuity.heading[0]}<br />{copy.home.continuity.heading[1]}</h2>
+            <p>{copy.home.continuity.lead}</p>
+          </div>
+        </div>
+        <div class="continuity-points" data-reveal-group>
+          {copy.home.continuity.points.map(([title, description], index) => (
+            <article data-reveal><span>{String(index + 1).padStart(2, "0")}</span><h3>{title}</h3><p>{description}</p></article>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <ProductionCycle locale={page.locale} />
+    <ProductModes locale={page.locale} />
+    <TraceLog locale={page.locale} />
+    <PlatformModules locale={page.locale} />
+    <ImplementationSteps locale={page.locale} />
+    <DemoSection locale={page.locale} phone={siteConfig.phone} demoEndpoint={siteConfig.demoEndpoint} legalLinks={siteConfig.legalLinks} />
+  </main>
+
+  <LandingFooter page={page} />
+
+  <script>
+    import { browserDemoFormRuntime, initDemoForm } from "../scripts/demo-form";
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+
+    initLanding(document, browserLandingRuntime(window));
+    const demoForm = document.querySelector<HTMLFormElement>("[data-demo-form]");
+    if (demoForm !== null) initDemoForm(demoForm, browserDemoFormRuntime(window));
+  </script>
+</BaseLayout>

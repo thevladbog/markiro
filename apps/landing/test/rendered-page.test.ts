@@ -21,6 +21,14 @@ const EXPECTED_ROUTES = [
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
+  "/en/",
+  "/en/chestny-znak-serialization/",
+  "/en/sscc-and-aggregation/",
+  "/en/packing-workstation/",
+  "/en/self-service-pickup-kiosk/",
+  "/en/1c-integration/",
+  "/en/offline-production/",
+  "/en/faq/",
 ] as const;
 
 beforeAll(() => {
@@ -133,11 +141,26 @@ describe("rendered landing page", () => {
         `https://markiro.app${route}`,
       );
       expect(routeDocument.querySelector('meta[property="og:site_name"]')).not.toBeNull();
+      const expectedLocale = route.startsWith("/en/") ? "en" : "ru";
+      const alternateLocale = expectedLocale === "ru" ? "en" : "ru";
+      expect(routeDocument.documentElement.lang).toBe(expectedLocale);
+      expect(
+        routeDocument.querySelector('meta[property="og:locale"]')?.getAttribute("content"),
+      ).toBe(expectedLocale === "ru" ? "ru_RU" : "en_US");
+      expect(
+        routeDocument.querySelector(`link[rel="alternate"][hreflang="${alternateLocale}"]`),
+      ).not.toBeNull();
+      expect(
+        routeDocument.querySelector('link[rel="alternate"][hreflang="x-default"]'),
+      ).not.toBeNull();
       expect(routeDocument.querySelector('meta[property="og:image:alt"]')).not.toBeNull();
       expect(routeDocument.querySelector('meta[name="twitter:title"]')).not.toBeNull();
       expect(routeDocument.querySelector('meta[name="twitter:description"]')).not.toBeNull();
       expect(routeDocument.querySelector('meta[name="twitter:image"]')).not.toBeNull();
       expect(routeDocument.querySelector('meta[name="twitter:image:alt"]')).not.toBeNull();
+      expect(routeDocument.querySelector('link[rel="manifest"]')?.getAttribute("href")).toBe(
+        expectedLocale === "ru" ? "/site.webmanifest" : "/site.en.webmanifest",
+      );
       expect(title).not.toBe("");
       expect(description).toBeTruthy();
       titles.add(title);
@@ -146,6 +169,20 @@ describe("rendered landing page", () => {
 
     expect(titles.size).toBe(EXPECTED_ROUTES.length);
     expect(descriptions.size).toBe(EXPECTED_ROUTES.length);
+  });
+
+  it("renders English pages without Russian interface copy", () => {
+    for (const [route, routeDocument] of documents) {
+      if (!route.startsWith("/en/")) continue;
+      expect(routeDocument.body.textContent).not.toMatch(/[А-Яа-яЁё]/);
+      expect(routeDocument.querySelector('a[hreflang="ru"]')).not.toBeNull();
+      expect(routeDocument.querySelector('a[hreflang="en"][aria-current="page"]')).not.toBeNull();
+    }
+  });
+
+  it("keeps locale-specific time punctuation in the illustrative console", () => {
+    expect(documents.get("/")?.body.textContent).toContain("52,40 сек");
+    expect(documents.get("/en/")?.body.textContent).toContain("52.40 sec");
   });
 
   it("renders parseable structured data that matches visible navigation", () => {
@@ -157,11 +194,13 @@ describe("rendered landing page", () => {
       };
 
       expect(graph["@graph"].some((entry) => entry["@type"] === "WebSite")).toBe(true);
+      expect(graph["@graph"].some((entry) => entry["@type"] === "WebPage")).toBe(true);
       expect(graph["@graph"].some((entry) => entry["@type"] === "Organization")).toBe(true);
       expect(graph["@graph"].some((entry) => entry["@type"] === "SoftwareApplication")).toBe(true);
 
-      if (route !== "/") {
-        expect(routeDocument.querySelector('nav[aria-label="Хлебные крошки"]')).not.toBeNull();
+      if (route !== "/" && route !== "/en/") {
+        const breadcrumbsLabel = route.startsWith("/en/") ? "Breadcrumbs" : "Хлебные крошки";
+        expect(routeDocument.querySelector(`nav[aria-label="${breadcrumbsLabel}"]`)).not.toBeNull();
         expect(graph["@graph"].some((entry) => entry["@type"] === "BreadcrumbList")).toBe(true);
       }
     }
@@ -191,7 +230,7 @@ describe("rendered landing page", () => {
   });
 
   it("links every specialist page to at least two canonical related pages", () => {
-    for (const route of EXPECTED_ROUTES.slice(1)) {
+    for (const route of EXPECTED_ROUTES.filter((path) => path !== "/" && path !== "/en/")) {
       const routeDocument = documents.get(route) as Document;
       const relatedLinks = [...routeDocument.querySelectorAll('[data-related-pages] a[href^="/"]')];
       expect(relatedLinks.length).toBeGreaterThanOrEqual(2);

@@ -1,36 +1,63 @@
 ---
 import type { PublicPhone } from "../lib/site-config";
+import type { SeoPageDefinition } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 import BrandMark from "./BrandMark.astro";
 
 interface Props {
+  page: SeoPageDefinition;
   phone: PublicPhone | null;
 }
 
-const { phone } = Astro.props;
+const { page, phone } = Astro.props;
+const copy = getUiCopy(page.locale).common;
+const homePath = page.locale === "ru" ? "/" : "/en/";
+const ruPath = page.locale === "ru" ? page.path : page.alternatePath;
+const enPath = page.locale === "en" ? page.path : page.alternatePath;
+const paths = page.locale === "ru"
+  ? {
+      aggregation: "/sscc-i-agregatsiya/",
+      faq: "/faq/",
+      offline: "/oflayn-rabota/",
+      serialization: "/markirovka-chestny-znak/",
+    }
+  : {
+      aggregation: "/en/sscc-and-aggregation/",
+      faq: "/en/faq/",
+      offline: "/en/offline-production/",
+      serialization: "/en/chestny-znak-serialization/",
+    };
 ---
 
 <header class="landing-header" data-header>
-  <a class="landing-header__brand" href="/" aria-label="Markiro, на главную страницу">
+  <a class="landing-header__brand" href={homePath} aria-label={copy.homeLabel}>
     <BrandMark />
   </a>
 
-  <nav class="landing-nav" id="landing-navigation" aria-label="Основная навигация" data-menu>
-    <a href="/markirovka-chestny-znak/">Маркировка</a>
-    <a href="/sscc-i-agregatsiya/">Агрегация</a>
-    <a href="/oflayn-rabota/">Офлайн</a>
-    <a href="/faq/">Вопросы</a>
+  <nav class="landing-nav" id="landing-navigation" aria-label={copy.navigationLabel} data-menu>
+    <a href={paths.serialization}>{copy.nav.serialization}</a>
+    <a href={paths.aggregation}>{copy.nav.aggregation}</a>
+    <a href={paths.offline}>{copy.nav.offline}</a>
+    <a href={paths.faq}>{copy.nav.faq}</a>
     {phone && <a class="landing-nav__phone" href={phone.href}>{phone.display}</a>}
+    <span class="language-switch" aria-label={page.locale === "ru" ? "Язык" : "Language"}>
+      <a href={ruPath} hreflang="ru" lang="ru" aria-current={page.locale === "ru" ? "page" : undefined}>RU</a>
+      <span aria-hidden="true">/</span>
+      <a href={enPath} hreflang="en" lang="en" aria-current={page.locale === "en" ? "page" : undefined}>EN</a>
+    </span>
   </nav>
 
-  <a class="button button--compact landing-header__cta" href="/#demo" data-analytics="landing_demo_click" data-placement="header">
-    Запросить демо
+  <a class="button button--compact landing-header__cta" href={`${homePath}#demo`} data-analytics="landing_demo_click" data-placement="header">
+    {copy.requestDemoShort}
   </a>
   <button
     class="menu-trigger"
     type="button"
     aria-controls="landing-navigation"
     aria-expanded="false"
-    aria-label="Открыть меню"
+    aria-label={copy.menuOpen}
+    data-menu-open-label={copy.menuOpen}
+    data-menu-close-label={copy.menuClose}
     data-menu-trigger
   >
     <span></span><span></span>

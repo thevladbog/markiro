@@ -32,7 +32,8 @@ export function initLanding(root: Document, runtime: LandingRuntime): () => void
 
   const setMenuOpen = (open: boolean, restoreFocus = false): void => {
     trigger?.setAttribute("aria-expanded", String(open));
-    trigger?.setAttribute("aria-label", open ? "Закрыть меню" : "Открыть меню");
+    const label = open ? trigger?.dataset.menuCloseLabel : trigger?.dataset.menuOpenLabel;
+    if (label !== undefined) trigger?.setAttribute("aria-label", label);
     menu?.classList.toggle("is-open", open);
     root.body.classList.toggle("menu-is-open", open);
     if (restoreFocus) trigger?.focus();

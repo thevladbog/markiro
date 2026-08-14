@@ -9,6 +9,14 @@ const routes = [
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
+  "/en/",
+  "/en/chestny-znak-serialization/",
+  "/en/sscc-and-aggregation/",
+  "/en/packing-workstation/",
+  "/en/self-service-pickup-kiosk/",
+  "/en/1c-integration/",
+  "/en/offline-production/",
+  "/en/faq/",
 ];
 
 for (const route of routes) {
@@ -46,6 +54,16 @@ test("keyboard focus is visible on the first interactive control", async ({ page
   ).toBe(true);
 });
 
+test("language switch connects exact page counterparts", async ({ page }) => {
+  await page.goto("/en/offline-production/");
+  const menuTrigger = page.locator("[data-menu-trigger]");
+  if (await menuTrigger.isVisible()) await menuTrigger.click();
+
+  await expect(page.locator('a[hreflang="ru"]')).toHaveAttribute("href", "/oflayn-rabota/");
+  await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("href", "/en/offline-production/");
+  await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("aria-current", "page");
+});
+
 test("crawler policy endpoints expose the approved search boundary", async ({ request }) => {
   const robots = await request.get("/robots.txt");
   expect(robots.status()).toBe(200);
@@ -55,6 +73,9 @@ test("crawler policy endpoints expose the approved search boundary", async ({ re
   expect(text).toContain("Sitemap: https://markiro.app/sitemap.xml");
   await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
     "https://markiro.app/faq/",
+  );
+  await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
+    "https://markiro.app/en/faq/",
   );
   await expect((await request.get("/llms.txt")).text()).resolves.toContain("https://markiro.app/");
 });

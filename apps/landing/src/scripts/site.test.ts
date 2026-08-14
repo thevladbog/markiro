@@ -13,6 +13,13 @@ function renderShell(): void {
   `;
 }
 
+function renderEnglishShell(): void {
+  document.body.innerHTML = `
+    <button data-menu-trigger data-menu-open-label="Open menu" data-menu-close-label="Close menu" aria-label="Open menu" aria-expanded="false" aria-controls="landing-navigation">Menu</button>
+    <nav id="landing-navigation" data-menu><a href="#cycle">How it works</a></nav>
+  `;
+}
+
 function runtime(overrides: Partial<LandingRuntime> = {}): LandingRuntime {
   return {
     createObserver: vi.fn(() => ({
@@ -50,6 +57,17 @@ describe("initLanding", () => {
     expect(menu?.classList.contains("is-open")).toBe(false);
     expect(document.activeElement).toBe(trigger);
     cleanup();
+  });
+
+  it("uses the localized menu labels supplied by the page", () => {
+    renderEnglishShell();
+    const trigger = document.querySelector<HTMLButtonElement>("[data-menu-trigger]");
+    initLanding(document, runtime());
+
+    trigger?.click();
+    expect(trigger?.getAttribute("aria-label")).toBe("Close menu");
+    trigger?.click();
+    expect(trigger?.getAttribute("aria-label")).toBe("Open menu");
   });
 
   it("reveals all content immediately without creating an observer for reduced motion", () => {

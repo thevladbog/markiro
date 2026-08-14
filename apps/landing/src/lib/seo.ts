@@ -14,13 +14,15 @@ function absoluteUrl(path: string): string {
 }
 
 export function buildPageGraph(page: SeoPageDefinition): PageGraph {
+  const homePath = page.locale === "ru" ? "/" : "/en/";
+  const homePage = SEO_PAGES.find((candidate) => candidate.path === homePath);
   const graph: JsonLdObject[] = [
     {
       "@type": "WebSite",
       "@id": `${SITE_URL}/#website`,
       url: `${SITE_URL}/`,
       name: "Markiro",
-      inLanguage: "ru",
+      inLanguage: ["ru", "en"],
       publisher: { "@id": `${SITE_URL}/#organization` },
     },
     {
@@ -30,20 +32,30 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
       url: `${SITE_URL}/`,
     },
     {
+      "@type": "WebPage",
+      "@id": `${absoluteUrl(page.path)}#webpage`,
+      url: absoluteUrl(page.path),
+      name: page.title,
+      description: page.description,
+      inLanguage: page.locale,
+      isPartOf: { "@id": `${SITE_URL}/#website` },
+    },
+    {
       "@type": "SoftwareApplication",
       "@id": `${SITE_URL}/#software`,
       name: "Markiro",
       applicationCategory: "BusinessApplication",
-      description: SEO_PAGES[0]?.description,
+      description: homePage?.description,
+      inLanguage: page.locale,
       provider: { "@id": `${SITE_URL}/#organization` },
     },
   ];
 
-  if (page.path !== "/") {
+  if (page.path !== homePath) {
     graph.push({
       "@type": "BreadcrumbList",
       itemListElement: [
-        { "@type": "ListItem", position: 1, name: "Markiro", item: `${SITE_URL}/` },
+        { "@type": "ListItem", position: 1, name: "Markiro", item: absoluteUrl(homePath) },
         {
           "@type": "ListItem",
           position: 2,
@@ -107,28 +119,38 @@ export function renderSitemapXml(): string {
   const urls = SEO_PAGES.map(
     (page) => `  <url>
     <loc>${absoluteUrl(page.path)}</loc>
+    <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />
+    <xhtml:link rel="alternate" hreflang="${page.locale === "ru" ? "en" : "ru"}" href="${absoluteUrl(page.alternatePath)}" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="${absoluteUrl(page.locale === "ru" ? page.path : page.alternatePath)}" />
     <lastmod>${page.reviewedAt}</lastmod>
   </url>`,
   ).join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
 ${urls}
 </urlset>
 `;
 }
 
 export function renderLlmsTxt(): string {
-  const links = SEO_PAGES.filter(({ path }) => path !== "/")
-    .map((page) => `- [${page.navigationLabel}](${absoluteUrl(page.path)}): ${page.description}`)
-    .join("\n");
+  const links = (locale: "ru" | "en", homePath: string) =>
+    SEO_PAGES.filter((page) => page.locale === locale && page.path !== homePath)
+      .map((page) => `- [${page.navigationLabel}](${absoluteUrl(page.path)}): ${page.description}`)
+      .join("\n");
 
   return `# Markiro
 
+## Русский
+
 > Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.
 
-## Основные материалы
+${links("ru", "/")}
 
-${links}
+## English
+
+> Production serialization, aggregation, and traceability with offline-capable line stations.
+
+${links("en", "/en/")}
 `;
 }

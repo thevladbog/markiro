@@ -1,21 +1,30 @@
+---
+import type { Locale } from "../content/pages";
+import { getUiCopy } from "../content/ui";
+
+interface Props { locale: Locale }
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.product;
+---
+
 <section class="section section--product" id="product" aria-labelledby="product-title">
   <div class="container">
-    <p class="section-index">03 / ДВА РЕЖИМА</p>
-    <h2 id="product-title" class="display-heading display-heading--sentence">Не очередной кабинет.<br />Инструмент для линии.</h2>
-    <p class="section-lead">Каждый экран отвечает на один вопрос оператора и не прячет состояние за таблицами.</p>
+    <p class="section-index">{copy.kicker}</p>
+    <h2 id="product-title" class="display-heading display-heading--sentence">{copy.heading[0]}<br />{copy.heading[1]}</h2>
+    <p class="section-lead">{copy.lead}</p>
 
     <div class="product-scenes">
       <article class="product-scene" data-reveal>
         <div class="product-scene__copy">
           <span class="scene-number">01</span>
-          <h3>Код проверяется сразу после сканирования</h3>
-          <p>Оператор видит, прошёл продукт проверку или требует отдельного решения.</p>
+          <h3>{copy.firstHeading}</h3>
+          <p>{copy.firstDescription}</p>
         </div>
         <div class="product-scene__visual code-result" aria-hidden="true">
-          <div class="scene-toolbar"><span>ПРОВЕРКА КОДА</span><i></i></div>
+          <div class="scene-toolbar"><span>{copy.codeCheck}</span><i></i></div>
           <div class="code-result__body">
             <span class="scan-symbol"><i></i><i></i><i></i><i></i></span>
-            <div><span class="result-ok">КОД ПРИНЯТ</span><strong>Продукт найден</strong><small>Молоко отборное в короб</small></div>
+            <div><span class="result-ok">{copy.codeAccepted}</span><strong>{copy.productFound}</strong><small>{copy.productName}</small></div>
           </div>
         </div>
       </article>
@@ -23,16 +32,16 @@
       <article class="product-scene product-scene--reverse" data-reveal>
         <div class="product-scene__visual label-result" aria-hidden="true">
           <div class="label-sheet">
-            <span class="label-sheet__name">ПРОДУКТ 404123</span>
+            <span class="label-sheet__name">{copy.productNumber}</span>
             <span class="label-sheet__barcode"></span>
             <small>0461234000000018</small>
           </div>
-          <div class="label-status"><span class="result-ok">ПРОВЕРЕНО</span><strong>02</strong><small>ЭТИКЕТКИ<br />ГОТОВЫ</small></div>
+          <div class="label-status"><span class="result-ok">{copy.verified}</span><strong>02</strong><small>{copy.labelsReady[0]}<br />{copy.labelsReady[1]}</small></div>
         </div>
         <div class="product-scene__copy">
           <span class="scene-number">02</span>
-          <h3>Этикетка строится из проверенных данных</h3>
-          <p>Предпросмотр и печать используют один макет. Оператор не сверяет поля на глаз.</p>
+          <h3>{copy.secondHeading}</h3>
+          <p>{copy.secondDescription}</p>
         </div>
       </article>
     </div>

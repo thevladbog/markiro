@@ -1,16 +1,19 @@
 ---
 import type { SeoPageDefinition } from "../content/pages";
+import { getUiCopy } from "../content/ui";
 
 interface Props {
   page: SeoPageDefinition;
 }
 
 const { page } = Astro.props;
+const copy = getUiCopy(page.locale).common;
+const homePath = page.locale === "ru" ? "/" : "/en/";
 ---
 
-<nav class="breadcrumbs" aria-label="Хлебные крошки">
+<nav class="breadcrumbs" aria-label={copy.breadcrumbsLabel}>
   <ol>
-    <li><a href="/">Markiro</a></li>
+    <li><a href={homePath}>Markiro</a></li>
     <li aria-current="page">{page.navigationLabel}</li>
   </ol>
 </nav>
