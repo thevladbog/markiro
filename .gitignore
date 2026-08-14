@@ -25,3 +25,6 @@ backend.hcl
 backend.tf
 !.terraform.lock.hcl
 !*.example
+
+# Pencil stores a cloud-scoped file token in this local design container.
+docs/design-briefs/landing.pen

@@ -1,0 +1,26 @@
+---
+const modules = [
+  ["01", "Кабинет производства", "Задания, шаблоны этикеток, история операций и управление площадкой."],
+  ["02", "Киоск выдачи", "Самообслуживание со сканером и восстановлением после разрыва связи."],
+  ["03", "1С и API", "Обмен заданиями и статусами без ручного переноса данных."],
+] as const;
+---
+
+<section class="section section--platform" id="platform" aria-labelledby="platform-title">
+  <div class="container">
+    <p class="section-index">05 / ПЛАТФОРМА</p>
+    <h2 id="platform-title" class="display-heading display-heading--sentence">Одна линия сегодня.<br />Платформа завтра.</h2>
+    <p class="section-lead">Подключайте новые контуры по готовности, не заменяя уже работающий процесс.</p>
+
+    <div class="module-grid" data-reveal-group>
+      {modules.map(([number, title, description]) => (
+        <article class="module-card" data-reveal>
+          <span class="module-card__number">{number}</span>
+          <span class="module-icon" aria-hidden="true"></span>
+          <h3>{title}</h3>
+          <p>{description}</p>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>
