@@ -113,4 +113,40 @@ describe("MailDeliveryService", () => {
       platformUserId: "platform-user-1",
     });
   });
+
+  it("stores landing demo mail under public-request scope only", async () => {
+    const writes: Array<Record<string, unknown>> = [];
+    const tx = {
+      insert: vi.fn(() => ({
+        values: async (values: Record<string, unknown>) => {
+          writes.push(values);
+        },
+      })),
+    };
+    const service = new MailDeliveryService(
+      new MailCryptoService(Buffer.alloc(32, 6)),
+      () => "44444444-4444-4444-8444-444444444444",
+    );
+
+    await service.enqueue(tx as unknown as MailWriteTransaction, {
+      scope: { publicRequestId: "11111111-1111-4111-8111-111111111111" },
+      recipient: " Lead@Example.TEST ",
+      template: {
+        kind: "email-verification",
+        recipientName: "Ada",
+        actionUrl: "https://cabinet.example/verify/secret",
+        expiresInMinutes: 60,
+      },
+    });
+
+    expect(writes[0]).toMatchObject({
+      tenantId: null,
+      userId: null,
+      platformUserId: null,
+      publicRequestId: "11111111-1111-4111-8111-111111111111",
+      recipient: "lead@example.test",
+      kind: "email-verification",
+    });
+    expect(String(writes[0]?.encryptedPayload)).not.toContain("secret");
+  });
 });

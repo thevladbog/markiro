@@ -5,13 +5,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, schema } from "../src/index.js";
 
 describe("mail and media schema", () => {
-  it("requires every delivery to have exactly one tenant, customer user, or platform user scope", () => {
+  it("requires every delivery to have exactly one durable scope", () => {
     expect(getTableName(schema.emailDeliveries)).toBe("email_deliveries");
     expect(Object.keys(schema.emailDeliveries)).toEqual(
       expect.arrayContaining([
         "tenantId",
         "userId",
         "platformUserId",
+        "publicRequestId",
         "recipient",
         "kind",
         "status",
@@ -22,10 +23,17 @@ describe("mail and media schema", () => {
         "attemptDeadline",
       ]),
     );
-    expect(
-      getTableConfig(schema.emailDeliveries).checks.map((constraint) => constraint.name),
-    ).toContain("email_deliveries_scope_xor");
-    const platformUserForeignKey = getTableConfig(schema.emailDeliveries).foreignKeys.find(
+    const deliveryConfig = getTableConfig(schema.emailDeliveries);
+    expect(deliveryConfig.checks.map((constraint) => constraint.name)).toContain(
+      "email_deliveries_scope_xor",
+    );
+    expect(deliveryConfig.indexes.map((item) => item.config.name)).toEqual(
+      expect.arrayContaining([
+        "email_deliveries_public_request_status_idx",
+        "email_deliveries_public_request_kind_uq",
+      ]),
+    );
+    const platformUserForeignKey = deliveryConfig.foreignKeys.find(
       (foreignKey) =>
         foreignKey.getName() === "email_deliveries_platform_user_id_platform_users_id_fk",
     );

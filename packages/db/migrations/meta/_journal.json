@@ -309,6 +309,13 @@
       "when": 1786720956149,
       "tag": "0043_station_shift_close_presence",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1786743821148,
+      "tag": "0044_landing_demo_email",
+      "breakpoints": true
     }
   ]
 }

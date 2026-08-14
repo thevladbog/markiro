@@ -21,12 +21,15 @@ export class MailDeliveryService {
     const userId = "userId" in input.scope ? (input.scope.userId ?? null) : null;
     const platformUserId =
       "platformUserId" in input.scope ? (input.scope.platformUserId ?? null) : null;
+    const publicRequestId =
+      "publicRequestId" in input.scope ? (input.scope.publicRequestId ?? null) : null;
 
     await tx.insert(schema.emailDeliveries).values({
       id,
       tenantId,
       userId,
       platformUserId,
+      publicRequestId,
       recipient,
       kind: input.template.kind,
       sourceId: input.sourceId ?? null,
