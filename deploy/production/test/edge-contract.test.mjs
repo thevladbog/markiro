@@ -20,6 +20,7 @@ const commerceMlProxyTimeouts = Object.freeze({
 });
 const adminHost = "admin.example.test";
 const kioskHost = "kiosk.example.test";
+const landingHost = "markiro.example.test";
 const kioskReservedPatterns = Object.freeze([
   "/api",
   "/api/auth/*",
@@ -103,6 +104,8 @@ async function adaptCaddy(source) {
           `MARKIRO_DOMAIN=${adminHost}`,
           "-e",
           `MARKIRO_KIOSK_DOMAIN=${kioskHost}`,
+          "-e",
+          `MARKIRO_LANDING_DOMAIN=${landingHost}`,
           "-e",
           "ACME_EMAIL=ops@example.test",
           "-e",
@@ -223,7 +226,7 @@ function applicationOrderedRouteTable(route) {
     (candidate) =>
       Array.isArray(candidate.routes) &&
       candidate.routes.some((entry) =>
-        nestedObjects(entry).some((value) => value.handler === "reverse_proxy"),
+        nestedObjects(entry).some((value) => value.handler === "file_server"),
       ) &&
       candidate.routes
         .at(-1)
@@ -325,7 +328,7 @@ function normalizeAdminRoute(route) {
 }
 
 function assertAuthorityContract(adapted, { alb }) {
-  const approvedHosts = [adminHost, kioskHost];
+  const approvedHosts = [adminHost, kioskHost, landingHost];
   const applications = applicationRoutes(adapted);
   assert.equal(applications.length, approvedHosts.length);
   for (const route of applications) {
@@ -348,13 +351,15 @@ function assertAuthorityContract(adapted, { alb }) {
         .flatMap((candidate) => candidate.host),
     ),
   ].sort();
-  assert.deepEqual(hosts, [adminHost, kioskHost]);
+  assert.deepEqual(hosts, [adminHost, kioskHost, landingHost].sort());
 
   const admin = applicationRoute(adapted, adminHost);
   const kiosk = applicationRoute(adapted, kioskHost);
+  const landing = applicationRoute(adapted, landingHost);
   for (const [host, route, expectedRoot] of [
     [adminHost, admin, "/srv/admin"],
     [kioskHost, kiosk, "/srv/kiosk"],
+    [landingHost, landing, "/srv/landing"],
   ]) {
     const roots = nestedObjects(route)
       .filter((candidate) => candidate.handler === "vars" && typeof candidate.root === "string")
@@ -391,7 +396,11 @@ function assertAuthorityContract(adapted, { alb }) {
       .map((candidate) => candidate.method);
     assert.deepEqual(
       methods,
-      host === adminHost ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]] : [["GET", "HEAD"]],
+      host === adminHost
+        ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
+        : host === kioskHost
+          ? [["GET", "HEAD"]]
+          : [["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"]],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -429,6 +438,39 @@ function assertAuthorityContract(adapted, { alb }) {
   );
   assert.deepEqual(kioskProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
   assertKioskRoutingBoundary(kiosk);
+  const landingProxies = nestedObjects(landing).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  assert.equal(landingProxies.length, 0, "landing CRM boundary must stay disabled");
+  const landingRoutes = applicationOrderedRouteTable(landing);
+  for (const path of [
+    "/api",
+    "/api/demo-requests",
+    "/api/auth/session",
+    "/1c_exchange",
+    "/station/bootstrap",
+    "/kiosk/bootstrap",
+    "/health",
+    "/openapi.json",
+    "/docs",
+  ]) {
+    for (const method of ["GET", "HEAD", "POST"]) {
+      const request = { method, path };
+      assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
+    }
+  }
+  for (const path of ["/", "/faq/", "/robots.txt", "/sitemap.xml", "/llms.txt"]) {
+    const request = { method: "GET", path };
+    const selected = selectedAdaptedRoute(landingRoutes, request);
+    assert.ok(
+      nestedObjects(selected).some((candidate) => candidate.handler === "file_server"),
+      `landing GET ${path} must reach static files`,
+    );
+    assert.ok(
+      nestedObjects(selected).every((candidate) => candidate.handler !== "reverse_proxy"),
+      `landing GET ${path} must remain static-only`,
+    );
+  }
   for (const proxy of [...adminReverseProxies, ...kioskReverseProxies]) {
     const forwardedProto = proxy.headers?.request?.set?.["X-Forwarded-Proto"];
     if (alb) assert.deepEqual(forwardedProto, ["https"]);
@@ -498,15 +540,19 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   const install = dockerfile.indexOf("RUN pnpm install --frozen-lockfile");
   const adminManifest = dockerfile.indexOf("COPY apps/admin/package.json");
   const kioskManifest = dockerfile.indexOf("COPY apps/kiosk/package.json");
+  const landingManifest = dockerfile.indexOf("COPY apps/landing/package.json");
   const adminSource = dockerfile.indexOf("COPY apps/admin ./apps/admin");
   const kioskSource = dockerfile.indexOf("COPY apps/kiosk ./apps/kiosk");
+  const landingSource = dockerfile.indexOf("COPY apps/landing ./apps/landing");
   const build = dockerfile.indexOf(
-    "RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...",
+    "RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk... --filter @markiro/landing...",
   );
   assert.ok(adminManifest >= 0 && adminManifest < install);
   assert.ok(kioskManifest >= 0 && kioskManifest < install);
+  assert.ok(landingManifest >= 0 && landingManifest < install);
   assert.ok(adminSource > install && adminSource < build);
   assert.ok(kioskSource > install && kioskSource < build);
+  assert.ok(landingSource > install && landingSource < build);
   assert.ok(build > install);
 
   const runtimeInstructions = dockerfileStageInstructions(dockerfile, "runtime");
@@ -515,6 +561,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     .join("\n");
   assert.match(runtime, /COPY --from=build \/workspace\/apps\/admin\/dist \/srv\/admin/);
   assert.match(runtime, /COPY --from=build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/);
+  assert.match(runtime, /COPY --from=build \/workspace\/apps\/landing\/dist \/srv\/landing/);
   assert.match(runtime, /addgroup -S -g 10001 markiro/);
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
@@ -527,6 +574,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint",
     "--from=build /workspace/apps/admin/dist /srv/admin",
     "--from=build /workspace/apps/kiosk/dist /srv/kiosk",
+    "--from=build /workspace/apps/landing/dist /srv/landing",
   ]);
   const buildCopies = runtimeCopies
     .filter((copy) => copy.startsWith("--from=build "))
@@ -534,6 +582,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(buildCopies, [
     "/workspace/apps/admin/dist /srv/admin",
     "/workspace/apps/kiosk/dist /srv/kiosk",
+    "/workspace/apps/landing/dist /srv/landing",
   ]);
 
   for (const buildInput of [
@@ -542,6 +591,8 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "!apps/admin/**",
     "!apps/kiosk/",
     "!apps/kiosk/**",
+    "!apps/landing/",
+    "!apps/landing/**",
     "!packages/",
     "!packages/ui/",
     "!packages/ui/**",
@@ -625,7 +676,7 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
   }
 });
 
-test("direct Caddy adapter isolates the admin and kiosk authorities", async () => {
+test("direct Caddy adapter isolates the admin, kiosk and landing authorities", async () => {
   const directSource = await readFile("deploy/production/Caddyfile", "utf8");
   const direct = assertAuthorityContract(await adaptCaddy(directSource), { alb: false });
   assert.deepEqual(direct.adminTransports, [
@@ -765,9 +816,11 @@ test("production edge preserves its image and routing contract", async () => {
   assert.match(caddy, /auto_https disable_redirects/);
   assert.match(caddy, /redir https:\/\/\{\$MARKIRO_DOMAIN\}\{uri\} permanent/);
   assert.match(caddy, /redir https:\/\/\{\$MARKIRO_KIOSK_DOMAIN\}\{uri\} permanent/);
+  assert.match(caddy, /redir https:\/\/\{\$MARKIRO_LANDING_DOMAIN\}\{uri\} permanent/);
   assert.doesNotMatch(caddy, /redir https:\/\/\{\$MARKIRO_DOMAIN\}:8443/);
   assert.match(caddy, /root \* \/srv\/admin/);
   assert.match(caddy, /root \* \/srv\/kiosk/);
+  assert.match(caddy, /root \* \/srv\/landing/);
   assert.match(caddy, /try_files \{path\} \/index\.html/);
   assert.doesNotMatch(caddy, /request_body|max_size|rate_limit/);
 
@@ -787,8 +840,12 @@ test("edge image mutations cannot omit or merge frontend build outputs", async (
   const dockerignore = await readFile(".dockerignore", "utf8");
   const mutations = [
     mutate(dockerfile, " --filter @markiro/kiosk...", ""),
-    dockerfile.replaceAll("/srv/admin", "/srv").replaceAll("/srv/kiosk", "/srv"),
+    dockerfile
+      .replaceAll("/srv/admin", "/srv")
+      .replaceAll("/srv/kiosk", "/srv")
+      .replaceAll("/srv/landing", "/srv"),
     mutate(dockerfile, "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n", ""),
+    mutate(dockerfile, "COPY --from=build /workspace/apps/landing/dist /srv/landing\n", ""),
   ];
   assert.notEqual(mutations[1], dockerfile, "shared-root mutation must change the Dockerfile");
 
