@@ -49,9 +49,8 @@ const shiftFormSchema = z.object({
   plannedDate: z.string().trim().optional(),
   lineId: z.string().trim().optional(),
   counterpartyId: z.string().trim().optional(),
-  labelTemplateId: z.string().trim().optional(),
   ssccIssuerCounterpartyId: z.string().trim().optional(),
-  boxLabelTemplateId: z.string().trim().optional(),
+  boxLabelTemplateSelection: z.string(),
   boxCapacity: z
     .string()
     .trim()
@@ -67,6 +66,11 @@ const shiftFormSchema = z.object({
 
 export type ShiftFormValues = z.infer<typeof shiftFormSchema>;
 
+export interface ShiftFormContext {
+  defaultBoxLabelTemplateId: string | null;
+  labelTemplates: LabelTemplateSummaryDto[];
+}
+
 export interface ShiftFormProps {
   mode: "create" | "edit";
   initialValues?: ShiftFormValues;
@@ -74,13 +78,18 @@ export interface ShiftFormProps {
   products: ProductDto[];
   lines: LineDto[];
   counterparties: CounterpartyDto[];
-  labelTemplates: LabelTemplateSummaryDto[];
+  formContext: ShiftFormContext;
   submitting?: boolean;
   submissionError?: string | null;
   onSubmit: (input: CreateShiftInput | UpdateShiftInput) => void | Promise<void>;
   onDirtyChange: (dirty: boolean) => void;
   onClose: () => void;
 }
+
+export const BOX_TEMPLATE_SELECTION = {
+  organization: "organization",
+  none: "none",
+} as const;
 
 const EMPTY_VALUES: ShiftFormValues = {
   productId: "",
@@ -89,9 +98,8 @@ const EMPTY_VALUES: ShiftFormValues = {
   plannedDate: "",
   lineId: "",
   counterpartyId: "",
-  labelTemplateId: "",
   ssccIssuerCounterpartyId: "",
-  boxLabelTemplateId: "",
+  boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.organization,
   boxCapacity: "",
   palletCapacity: "",
   palletsEnabled: false,
@@ -110,7 +118,7 @@ export function ShiftForm({
   products,
   lines,
   counterparties,
-  labelTemplates,
+  formContext,
   submitting = false,
   submissionError,
   onSubmit,
@@ -125,15 +133,8 @@ export function ShiftForm({
   // touching the field and landing back on the same value it started with
   // reads as "not dirty"). See `toPayload`'s comment for why this matters.
   const counterpartyTouchedRef = useRef(false);
-  // Same contract as `counterpartyTouchedRef`, for the label template select.
-  const labelTemplateTouchedRef = useRef(false);
-  // Same contract again, for the sscc issuer and box label template selects.
-  // Neither has a product-level default to prefill from (unlike
-  // counterparty/label template above), but the "only send what the user
-  // actually chose" contract still applies: leaving them alone must not
-  // send an explicit null that would collide with a future prefill.
+  // Same contract as `counterpartyTouchedRef`, for the SSCC issuer select.
   const ssccIssuerTouchedRef = useRef(false);
-  const boxLabelTemplateTouchedRef = useRef(false);
 
   const {
     control,
@@ -142,6 +143,8 @@ export function ShiftForm({
     reset,
     watch,
     setValue,
+    setError,
+    clearErrors,
     formState: { errors, isDirty },
   } = useForm<ShiftFormValues>({
     resolver: zodResolver(shiftFormSchema),
@@ -152,9 +155,8 @@ export function ShiftForm({
   const shiftMode = watch("mode");
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
-  const labelTemplateId = watch("labelTemplateId");
   const ssccIssuerCounterpartyId = watch("ssccIssuerCounterpartyId");
-  const boxLabelTemplateId = watch("boxLabelTemplateId");
+  const boxLabelTemplateSelection = watch("boxLabelTemplateSelection");
   const palletsEnabled = watch("palletsEnabled");
 
   const isDirtyRef = useRef(false);
@@ -172,14 +174,12 @@ export function ShiftForm({
     reset(seeded);
     lastPrefilledProductRef.current = formMode === "create" ? null : seeded.productId || null;
     counterpartyTouchedRef.current = false;
-    labelTemplateTouchedRef.current = false;
     ssccIssuerTouchedRef.current = false;
-    boxLabelTemplateTouchedRef.current = false;
   }, [initialValues, reset, formMode]);
 
   // Product-change prefill (create mode only -- the product can't change once
   // a shift exists, and the product select is disabled while editing): applies
-  // every default and capacity from the newly-picked product.
+  // the counterparty and capacities from the newly-picked product.
   //
   // This remains a programmatic prefill: touched refs preserve whether the
   // operator had previously changed these fields for payload purposes, while
@@ -191,7 +191,6 @@ export function ShiftForm({
     const product = products.find((p) => p.id === productId);
     if (!product) return;
     setValue("counterpartyId", product.defaultCounterpartyId ?? "");
-    setValue("labelTemplateId", product.defaultLabelTemplateId ?? "");
     setValue("boxCapacity", product.boxCapacity !== null ? String(product.boxCapacity) : "");
     setValue(
       "palletCapacity",
@@ -200,11 +199,8 @@ export function ShiftForm({
   }, [formMode, productId, products, setValue]);
 
   // A Radix select needs its matching item before it can safely represent a
-  // product default. Reconcile defaults while a field is still untouched so a
-  // late option-list response cannot turn an unknown value into a false user
-  // clear. Product changes above always write the new defaults first; once an
-  // operator has touched a field, this effect deliberately leaves that latest
-  // product value intact.
+  // product default. Reconcile it while the field is still untouched so a late
+  // option-list response cannot turn an unknown value into a false user clear.
   useEffect(() => {
     if (formMode !== "create" || !productId) return;
     const product = products.find((item) => item.id === productId);
@@ -219,26 +215,31 @@ export function ShiftForm({
           : "",
       );
     }
-
-    if (!labelTemplateTouchedRef.current) {
-      const defaultLabelTemplateId = product.defaultLabelTemplateId;
-      setValue(
-        "labelTemplateId",
-        defaultLabelTemplateId && labelTemplates.some((item) => item.id === defaultLabelTemplateId)
-          ? defaultLabelTemplateId
-          : "",
-      );
-    }
-  }, [formMode, productId, products, counterparties, labelTemplates, setValue]);
+  }, [formMode, productId, products, counterparties, setValue]);
 
   const submit = handleSubmit(async (values) => {
+    const resolvedBoxLabelTemplateId = resolveBoxLabelTemplateId(
+      values.boxLabelTemplateSelection,
+      formContext.defaultBoxLabelTemplateId,
+    );
+    if (values.mode === "aggregation" && resolvedBoxLabelTemplateId === null) {
+      setError("boxLabelTemplateSelection", {
+        type: "manual",
+        message: "pages.shifts.form.errors.boxLabelTemplateRequired",
+      });
+      return;
+    }
+    clearErrors("boxLabelTemplateSelection");
     await onSubmit(
-      toPayload(values, formMode, {
-        counterparty: counterpartyTouchedRef.current,
-        labelTemplate: labelTemplateTouchedRef.current,
-        ssccIssuer: ssccIssuerTouchedRef.current,
-        boxLabelTemplate: boxLabelTemplateTouchedRef.current,
-      }),
+      toPayload(
+        values,
+        formMode,
+        {
+          counterparty: counterpartyTouchedRef.current,
+          ssccIssuer: ssccIssuerTouchedRef.current,
+        },
+        resolvedBoxLabelTemplateId,
+      ),
     );
   });
 
@@ -267,15 +268,9 @@ export function ShiftForm({
     })),
   ];
 
-  const labelTemplateOptions: SelectOption[] = [
-    { value: "", label: t("pages.shifts.form.noLabelTemplate") },
-    ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
-  ];
-
   // Default option reads "our own organization", not "none selected" -- the
   // issuer always resolves to *something* (the tenant itself when unset),
-  // unlike the counterparty/label template selects above where "none" is a
-  // genuine absence.
+  // unlike the counterparty select above where "none" is a genuine absence.
   const ssccIssuerOptions: SelectOption[] = [
     { value: "", label: t("pages.shifts.form.ssccIssuerOurOrganization") },
     ...counterparties.map((counterparty) => ({
@@ -284,9 +279,42 @@ export function ShiftForm({
     })),
   ];
 
+  const currentDefaultTemplate = formContext.labelTemplates.find(
+    (template) => template.id === formContext.defaultBoxLabelTemplateId,
+  );
+  const organizationDefaultName =
+    formContext.defaultBoxLabelTemplateId === null
+      ? t("pages.shifts.form.boxLabelTemplateNotConfigured")
+      : (currentDefaultTemplate?.name ?? t("pages.shifts.form.boxLabelTemplateUnavailable"));
   const boxLabelTemplateOptions: SelectOption[] = [
-    { value: "", label: t("pages.shifts.form.noBoxLabelTemplate") },
-    ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
+    {
+      value: BOX_TEMPLATE_SELECTION.organization,
+      label: t("pages.shifts.form.boxLabelTemplateOrganization", {
+        name: organizationDefaultName,
+      }),
+    },
+    ...(formMode === "edit"
+      ? [
+          {
+            value: BOX_TEMPLATE_SELECTION.none,
+            label: t("pages.shifts.form.noBoxLabelTemplate"),
+          },
+        ]
+      : []),
+    ...formContext.labelTemplates.map((template) => ({
+      value: template.id,
+      label: template.name,
+    })),
+    ...(boxLabelTemplateSelection !== BOX_TEMPLATE_SELECTION.organization &&
+    boxLabelTemplateSelection !== BOX_TEMPLATE_SELECTION.none &&
+    !formContext.labelTemplates.some((template) => template.id === boxLabelTemplateSelection)
+      ? [
+          {
+            value: boxLabelTemplateSelection,
+            label: t("pages.shifts.form.boxLabelTemplateUnavailable"),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -345,7 +373,10 @@ export function ShiftForm({
                     { value: "aggregation", label: t("pages.shifts.form.modeAggregation") },
                   ]}
                   value={field.value}
-                  onValueChange={field.onChange}
+                  onValueChange={(value) => {
+                    field.onChange(value);
+                    if (value === "validation") clearErrors("boxLabelTemplateSelection");
+                  }}
                 />
               )}
             />
@@ -423,21 +454,13 @@ export function ShiftForm({
           <h3>{t("pages.shifts.sections.templates")}</h3>
           <div className="mk-shift-form__grid">
             <Select
-              label={t("pages.shifts.form.labelTemplateLabel")}
-              options={labelTemplateOptions}
-              value={labelTemplateId ?? ""}
-              onValueChange={(value) => {
-                labelTemplateTouchedRef.current = true;
-                setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
-              }}
-            />
-            <Select
               label={t("pages.shifts.form.boxLabelTemplateLabel")}
               options={boxLabelTemplateOptions}
-              value={boxLabelTemplateId ?? ""}
+              value={boxLabelTemplateSelection}
+              {...errorProp(translateFieldError(t, errors.boxLabelTemplateSelection?.message))}
               onValueChange={(value) => {
-                boxLabelTemplateTouchedRef.current = true;
-                setValue("boxLabelTemplateId", value, {
+                clearErrors("boxLabelTemplateSelection");
+                setValue("boxLabelTemplateSelection", value, {
                   shouldDirty: true,
                   shouldValidate: true,
                 });
@@ -491,24 +514,24 @@ export function ShiftForm({
  * Payload semantics (plan-03 Task 13 brief, chosen + documented here since
  * the brief poses this as an open question):
  *
- * - `counterpartyId`/`labelTemplateId`/`ssccIssuerCounterpartyId`/
- *   `boxLabelTemplateId`: omitted entirely unless the user actually touched
- *   the respective select (`touched.counterparty`/`touched.labelTemplate`/
- *   `touched.ssccIssuer`/`touched.boxLabelTemplate`, each sourced from its
- *   own plain ref the select's `onChange` sets -- deliberately not
+ * - `counterpartyId`/`ssccIssuerCounterpartyId`: omitted entirely unless the
+ *   user actually touched the respective select (`touched.counterparty`/
+ *   `touched.ssccIssuer`, each sourced from its own plain ref the select's
+ *   `onChange` sets -- deliberately not
  *   react-hook-form's `dirtyFields`, which compares the *final* value to the
  *   default and would read "not dirty" if the user picks a different option
  *   and then picks the original one back). This lets the server's own
- *   create-time prefill-from-product run when `counterpartyId`/
- *   `labelTemplateId` is left alone, while an explicit user selection
- *   (including clearing it back to "None") always sends `null`/the chosen
- *   id. `ssccIssuerCounterpartyId`/`boxLabelTemplateId` have no product-level
- *   default to prefill from, but the same "don't send what wasn't touched"
- *   contract still applies -- it keeps an untouched field from ever sending
- *   an explicit `null` that could shadow a default added later. On edit,
- *   "untouched" maps onto the same `undefined`-means-"no change" contract
- *   `updateShiftSchema` already uses.
- * - `boxCapacity`/`palletCapacity`: the opposite rule -- once the aggregation
+ *   create-time prefill-from-product run when `counterpartyId` is left alone,
+ *   while an explicit user selection (including clearing it back to "None")
+ *   always sends `null`/the chosen id. On edit, "untouched" maps onto the same
+ *   `undefined`-means-"no change" contract `updateShiftSchema` already uses.
+ * - `boxLabelTemplateId` is resolved before this function: the form's
+ *   organisation-selection token becomes the current organisation UUID (or
+ *   null when unset), while a concrete template selection stays a concrete
+ *   UUID. Create omits a missing value so validation shifts may use the API's
+ *   absence semantics; edit always sends the selected snapshot, including an
+ *   explicit null snapshot.
+ * - `boxCapacity`/`palletCapacity`: once the aggregation
  *   fields are visible, whatever value is *shown* is always sent (never
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
@@ -526,18 +549,15 @@ function toPayload(
   formMode: "create" | "edit",
   touched: {
     counterparty: boolean;
-    labelTemplate: boolean;
     ssccIssuer: boolean;
-    boxLabelTemplate: boolean;
   },
+  resolvedBoxLabelTemplateId: string | null,
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
   const lineId = values.lineId?.trim();
   const counterpartyId = values.counterpartyId?.trim();
-  const labelTemplateId = values.labelTemplateId?.trim();
   const ssccIssuerCounterpartyId = values.ssccIssuerCounterpartyId?.trim();
-  const boxLabelTemplateId = values.boxLabelTemplateId?.trim();
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
 
@@ -552,16 +572,8 @@ function toPayload(
     payload.counterpartyId = counterpartyId ? counterpartyId : null;
   }
 
-  if (touched.labelTemplate) {
-    payload.labelTemplateId = labelTemplateId ? labelTemplateId : null;
-  }
-
   if (touched.ssccIssuer) {
     payload.ssccIssuerCounterpartyId = ssccIssuerCounterpartyId ? ssccIssuerCounterpartyId : null;
-  }
-
-  if (touched.boxLabelTemplate) {
-    payload.boxLabelTemplateId = boxLabelTemplateId ? boxLabelTemplateId : null;
   }
 
   if (values.mode === "aggregation") {
@@ -573,7 +585,23 @@ function toPayload(
   }
 
   if (formMode === "create") {
-    return { ...payload, productId: values.productId.trim() };
+    return {
+      ...payload,
+      productId: values.productId.trim(),
+      ...(resolvedBoxLabelTemplateId === null
+        ? {}
+        : { boxLabelTemplateId: resolvedBoxLabelTemplateId }),
+    };
   }
+  payload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
   return payload;
+}
+
+function resolveBoxLabelTemplateId(
+  selection: string,
+  defaultBoxLabelTemplateId: string | null,
+): string | null {
+  if (selection === BOX_TEMPLATE_SELECTION.organization) return defaultBoxLabelTemplateId;
+  if (selection === BOX_TEMPLATE_SELECTION.none) return null;
+  return selection;
 }

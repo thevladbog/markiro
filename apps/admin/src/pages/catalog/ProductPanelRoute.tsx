@@ -7,7 +7,6 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
-import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
   useCreateProduct,
   useUpdateProduct,
@@ -25,9 +24,6 @@ export interface CatalogPanelContext {
   counterparties: CounterpartyDto[];
   counterpartiesPending: boolean;
   counterpartiesError: boolean;
-  labelTemplates: LabelTemplateSummaryDto[];
-  labelTemplatesPending: boolean;
-  labelTemplatesError: boolean;
   retryPanelData: () => Promise<void>;
 }
 
@@ -53,10 +49,8 @@ function usePanelContext() {
   const context = useOutletContext<CatalogPanelContext>();
   const location = useLocation();
   const navigate = useNavigate();
-  const loading =
-    context.productsPending || context.counterpartiesPending || context.labelTemplatesPending;
-  const failed =
-    context.productsError || context.counterpartiesError || context.labelTemplatesError;
+  const loading = context.productsPending || context.counterpartiesPending;
+  const failed = context.productsError || context.counterpartiesError;
   const close = () => closeCatalogPanel(location, navigate);
   return { t, context, loading, failed, close };
 }
@@ -103,7 +97,6 @@ function CreateProductPanel() {
             unitPrice: createdProduct.unitPrice ?? "",
             egaisCode: createdProduct.egaisCode ?? "",
             defaultCounterpartyId: createdProduct.defaultCounterpartyId ?? "",
-            defaultLabelTemplateId: createdProduct.defaultLabelTemplateId ?? "",
           }
         : undefined,
     [createdProduct],
@@ -118,7 +111,6 @@ function CreateProductPanel() {
           ? { productId: createdProduct.id, imageAltName: createdProduct.name }
           : {})}
         counterparties={context.counterparties}
-        labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}
@@ -189,7 +181,6 @@ function EditProductPanel() {
             unitPrice: product.unitPrice ?? "",
             egaisCode: product.egaisCode ?? "",
             defaultCounterpartyId: product.defaultCounterpartyId ?? "",
-            defaultLabelTemplateId: product.defaultLabelTemplateId ?? "",
           }
         : undefined,
     // Exclude the product object itself: an external-link-only refetch must not reset dirty fields.
@@ -197,7 +188,6 @@ function EditProductPanel() {
     [
       product?.boxCapacity,
       product?.defaultCounterpartyId,
-      product?.defaultLabelTemplateId,
       product?.egaisCode,
       product?.gtin14,
       product?.name,
@@ -227,7 +217,6 @@ function EditProductPanel() {
         productId={product.id}
         externalRef={product.externalRef}
         counterparties={context.counterparties}
-        labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
         {...(product.image ? { image: product.image } : {})}
         imageAltName={product.name}

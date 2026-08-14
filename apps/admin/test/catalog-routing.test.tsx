@@ -266,7 +266,7 @@ it("keeps a failed create panel open and retries all required data", async () =>
   await screen.findByRole("dialog", { name: "Новый продукт" });
   expect(await screen.findByText("Не удалось загрузить данные формы продукта.")).toBeDefined();
   const callsBeforeRetry = fetchMock.mock.calls.length;
-  const requiredPaths = ["/api/products", "/api/counterparties", "/api/label-templates"];
+  const requiredPaths = ["/api/products", "/api/counterparties"];
   const requiredCallsBeforeRetry = requiredPaths.map(
     (path) => fetchMock.mock.calls.filter(([url]) => String(url) === path).length,
   );
@@ -329,7 +329,6 @@ it("releases a busy-only Back block after an unchanged edit request fails", asyn
     externalRef: null,
     status: "draft",
     defaultCounterpartyId: null,
-    defaultLabelTemplateId: null,
     createdAt: "2026-08-05T00:00:00.000Z",
   };
   let resolveUpdate: ((response: Response) => void) | undefined;

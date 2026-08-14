@@ -454,8 +454,6 @@
         "egaisCodeLabel": "EGAIS code",
         "defaultCounterpartyLabel": "Default counterparty",
         "noCounterparty": "None selected",
-        "defaultLabelTemplateLabel": "Default label template",
-        "noLabelTemplate": "None selected",
         "submitCreate": "Create",
         "submitUpdate": "Save",
         "sections": {
@@ -840,10 +838,11 @@
         "ssccIssuerLabel": "SSCC issuer",
         "ssccIssuerOurOrganization": "Our organization",
         "ssccIssuerHint": "Decides whose numbers appear on the boxes -- not the same question as which counterparty the goods are for.",
-        "labelTemplateLabel": "Label template",
-        "noLabelTemplate": "None selected",
         "boxLabelTemplateLabel": "Box label template",
         "noBoxLabelTemplate": "None selected",
+        "boxLabelTemplateOrganization": "Use organization setting — {{name}}",
+        "boxLabelTemplateNotConfigured": "Not configured",
+        "boxLabelTemplateUnavailable": "Template unavailable — refresh data",
         "boxCapacityLabel": "Box capacity, units",
         "palletsEnabledLabel": "Use pallets",
         "palletCapacityLabel": "Pallet capacity, units",
@@ -852,7 +851,8 @@
         "errors": {
           "productRequired": "Select a product",
           "qtyInvalid": "Enter a positive whole number",
-          "capacityInvalid": "Enter a positive whole number"
+          "capacityInvalid": "Enter a positive whole number",
+          "boxLabelTemplateRequired": "Select a box label template for aggregation"
         }
       },
       "closeModal": {

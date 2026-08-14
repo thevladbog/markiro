@@ -29,6 +29,7 @@ import { toast } from "../../lib/toast.js";
 import { useProducts } from "../catalog/api.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useLabelTemplates } from "../labels/api.js";
+import { useOrgProfile } from "../settings/api.js";
 import {
   useCloseShift,
   useDeleteShift,
@@ -241,6 +242,7 @@ export function ShiftsPage() {
   const linesQuery = useLines();
   const counterpartiesQuery = useCounterparties();
   const labelTemplatesQuery = useLabelTemplates();
+  const orgProfileQuery = useOrgProfile();
 
   const items = shiftsQuery.data ?? [];
   const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
@@ -418,18 +420,21 @@ export function ShiftsPage() {
             lines,
             counterparties,
             labelTemplates,
+            defaultBoxLabelTemplateId: orgProfileQuery.data?.defaultBoxLabelTemplateId ?? null,
             panelPending:
               shiftsQuery.isPending ||
               productsQuery.isPending ||
               linesQuery.isPending ||
               counterpartiesQuery.isPending ||
-              labelTemplatesQuery.isPending,
+              labelTemplatesQuery.isPending ||
+              orgProfileQuery.isPending,
             panelError:
               shiftsQuery.isError ||
               productsQuery.isError ||
               linesQuery.isError ||
               counterpartiesQuery.isError ||
-              labelTemplatesQuery.isError,
+              labelTemplatesQuery.isError ||
+              orgProfileQuery.isError,
             retryPanelData: async () => {
               await Promise.all([
                 shiftsQuery.refetch(),
@@ -437,6 +442,7 @@ export function ShiftsPage() {
                 linesQuery.refetch(),
                 counterpartiesQuery.refetch(),
                 labelTemplatesQuery.refetch(),
+                orgProfileQuery.refetch(),
               ]);
             },
           } satisfies ShiftsPanelContext

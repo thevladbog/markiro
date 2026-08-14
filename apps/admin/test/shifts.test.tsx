@@ -9,10 +9,15 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import type { AccessDocument } from "../src/access/api.js";
 import { AccessProvider } from "../src/access/context.js";
+import i18n from "../src/i18n/index.js";
 import type { ProductDto } from "../src/pages/catalog/api.js";
 import type * as ShiftsApiModule from "../src/pages/shifts/api.js";
 import { ShiftsPage } from "../src/pages/shifts/index.js";
-import { ShiftForm, type ShiftFormValues } from "../src/pages/shifts/ShiftForm.js";
+import {
+  BOX_TEMPLATE_SELECTION,
+  ShiftForm,
+  type ShiftFormValues,
+} from "../src/pages/shifts/ShiftForm.js";
 import { ShiftPanelRoute } from "../src/pages/shifts/ShiftPanelRoute.js";
 
 const { writeHookMountSpy } = vi.hoisted(() => ({ writeHookMountSpy: vi.fn() }));
@@ -40,11 +45,12 @@ vi.mock("../src/pages/shifts/api.js", async (importOriginal) => {
   };
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   writeHookMountSpy.mockClear();
+  await i18n.changeLanguage("ru");
 });
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -118,7 +124,6 @@ const PRODUCT_A: ProductDto = {
   externalRef: null,
   status: "active",
   defaultCounterpartyId: "cp1",
-  defaultLabelTemplateId: "lt1",
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
@@ -137,7 +142,6 @@ const PRODUCT_B = {
 const PRODUCT_B_WITH_DEFAULTS = {
   ...PRODUCT_B,
   defaultCounterpartyId: "cp2",
-  defaultLabelTemplateId: "lt1",
 };
 
 const DRAFT_PRODUCT = {
@@ -162,16 +166,6 @@ const COUNTERPARTY = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
-const LABEL_TEMPLATE = {
-  id: "lt1",
-  name: "Короб 58×40",
-  widthMm: 58,
-  heightMm: 40,
-  dpi: 203,
-  language: "zpl",
-  updatedAt: "2026-01-01T00:00:00.000Z",
-};
-
 const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
   productId: PRODUCT_A.id,
   mode: "validation",
@@ -179,9 +173,8 @@ const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
   plannedDate: "2026-08-06",
   lineId: "",
   counterpartyId: "",
-  labelTemplateId: "",
   ssccIssuerCounterpartyId: "",
-  boxLabelTemplateId: "",
+  boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.none,
   boxCapacity: "",
   palletCapacity: "",
   palletsEnabled: false,
@@ -204,7 +197,7 @@ function DirtyReseedHarness() {
         products={[PRODUCT_A]}
         lines={[]}
         counterparties={[]}
-        labelTemplates={[]}
+        formContext={{ defaultBoxLabelTemplateId: null, labelTemplates: [] }}
         onSubmit={() => undefined}
         onDirtyChange={() => undefined}
         onClose={() => undefined}
@@ -222,17 +215,36 @@ it("does not re-seed over an operator edit when initial values change in the sam
   expect((quantity as HTMLInputElement).value).toBe("501");
 });
 
-// Task 6: a second, distinct label template -- used together with
-// LABEL_TEMPLATE so the item-label-template select and the box-label-template
-// select can each be asserted against their own id, not each other's.
+// A second box template lets tests distinguish an explicit shift override
+// from the organisation default.
 const BOX_LABEL_TEMPLATE = {
-  id: "lt2",
+  id: "22222222-2222-4222-8222-222222222222",
   name: "Короб паллета 100×150",
   widthMm: 100,
   heightMm: 150,
   dpi: 203,
   language: "zpl",
   updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+const DEFAULT_BOX_LABEL_TEMPLATE = {
+  id: "11111111-1111-4111-8111-111111111111",
+  name: "Короб 100×100",
+  widthMm: 100,
+  heightMm: 100,
+  dpi: 203,
+  language: "zpl",
+  updatedAt: "2026-08-14T00:00:00.000Z",
+};
+
+const ORG_PROFILE = {
+  defaultBoxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
+  gln: null,
+  gs1Prefixes: [],
+  inn: null,
+  pickupLimitsEnabled: false,
+  logoUrl: null,
+  logoRevision: null,
 };
 
 // Task 6: two distinct counterparties -- the buyer the goods are for, and a
@@ -268,6 +280,8 @@ const PLANNED_SHIFT = {
   lineName: "Линия 1",
   counterpartyId: null,
   counterpartyName: null,
+  ssccIssuerCounterpartyId: null,
+  boxLabelTemplateId: null,
   plannedQty: 500,
   plannedDate: "2026-07-25",
   boxCapacity: null,
@@ -666,13 +680,14 @@ describe("ShiftsPage", () => {
     });
   });
 
-  it("prefills the label template select from the product's default when the product changes", async () => {
-    const user = userEvent.setup();
+  it("does not render the retired item-label template control", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
-      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -682,16 +697,10 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
     await screen.findByText("Новая смена");
 
-    await chooseOption(user, "Продукт", PRODUCT_A.name);
-
-    await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
-        LABEL_TEMPLATE.name,
-      );
-    });
+    expect(screen.queryByRole("combobox", { name: "Шаблон этикетки" })).toBeNull();
   });
 
-  it("applies product B defaults after counterparty and template were touched for product A", async () => {
+  it("applies product B's counterparty default after the field was touched for product A", async () => {
     const user = userEvent.setup();
     const created = {
       ...PLANNED_SHIFT,
@@ -709,7 +718,7 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, { items: [COUNTERPARTY, BUYER, BRAND_OWNER] });
       }
       if (path === "/api/label-templates") {
-        return jsonResponse(200, { items: [LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
       return jsonResponse(200, { items: [] });
     });
@@ -722,16 +731,12 @@ describe("ShiftsPage", () => {
 
     await chooseOption(user, "Продукт", PRODUCT_A.name);
     await chooseOption(user, "Для контрагента (толлинг)", BUYER.name);
-    await chooseOption(user, "Шаблон этикетки", BOX_LABEL_TEMPLATE.name);
     await chooseOption(user, "Продукт", PRODUCT_B_WITH_DEFAULTS.name);
 
     await waitFor(() => {
       expect(
         screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,
       ).toContain(BRAND_OWNER.name);
-      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
-        LABEL_TEMPLATE.name,
-      );
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
@@ -747,7 +752,6 @@ describe("ShiftsPage", () => {
             plannedQty: null,
             plannedDate: null,
             counterpartyId: BRAND_OWNER.id,
-            labelTemplateId: LABEL_TEMPLATE.id,
             productId: PRODUCT_B_WITH_DEFAULTS.id,
           }),
         }),
@@ -755,7 +759,7 @@ describe("ShiftsPage", () => {
     });
   }, 10_000);
 
-  it("sends labelTemplateId: null when the user clears the prefilled label template before submitting", async () => {
+  it("never sends the retired item-label field from create", async () => {
     const user = userEvent.setup();
     const created = { ...PLANNED_SHIFT, id: "new5", productId: PRODUCT_A.id };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -763,7 +767,6 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
-      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       return jsonResponse(200, { items: [] });
     });
@@ -775,30 +778,15 @@ describe("ShiftsPage", () => {
     await screen.findByText("Новая смена");
 
     await chooseOption(user, "Продукт", PRODUCT_A.name);
-    await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
-        LABEL_TEMPLATE.name,
-      );
-    });
-
-    await chooseOption(user, "Шаблон этикетки", "Не выбран");
     fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/shifts",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            mode: "validation",
-            lineId: null,
-            plannedQty: null,
-            plannedDate: null,
-            labelTemplateId: null,
-            productId: PRODUCT_A.id,
-          }),
-        }),
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts" && init?.method === "POST",
       );
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("labelTemplateId");
     });
   }, 10_000);
 
@@ -810,7 +798,9 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
-      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -838,6 +828,151 @@ describe("ShiftsPage", () => {
         }),
       );
     });
+  });
+
+  it("shows the organisation box-template default and resolves it to a UUID for aggregation", async () => {
+    const created = {
+      ...PLANNED_SHIFT,
+      id: "new-inherited-box-template",
+      mode: "aggregation",
+      productId: PRODUCT_A.id,
+      boxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+
+    const templateSelect = await screen.findByRole("combobox", {
+      name: "Шаблон этикетки короба",
+    });
+    expect(templateSelect.textContent).toContain(
+      `Использовать настройку организации — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`,
+    );
+    expect(screen.queryByRole("combobox", { name: "Шаблон этикетки" })).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(userEvent.setup(), "Продукт", PRODUCT_A.name);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts" && init?.method === "POST",
+      );
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.boxLabelTemplateId).toBe(DEFAULT_BOX_LABEL_TEMPLATE.id);
+      expect(body).not.toHaveProperty("labelTemplateId");
+      expect(Object.values(body)).not.toContain(BOX_TEMPLATE_SELECTION.organization);
+      expect(Object.values(body)).not.toContain(BOX_TEMPLATE_SELECTION.none);
+    });
+  });
+
+  it("submits an explicit box-template override instead of the organisation default", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") {
+        return jsonResponse(201, { ...PLANNED_SHIFT, id: "new-override" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await screen.findByText("Новая смена");
+    fireEvent.click(screen.getByLabelText("Агрегация"));
+    await chooseOption(userEvent.setup(), "Продукт", PRODUCT_A.name);
+    await chooseOption(userEvent.setup(), "Шаблон этикетки короба", BOX_LABEL_TEMPLATE.name);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts" && init?.method === "POST",
+      );
+      const body = JSON.parse(postCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.boxLabelTemplateId).toBe(BOX_LABEL_TEMPLATE.id);
+      expect(body).not.toHaveProperty("labelTemplateId");
+    });
+  });
+
+  it("allows validation without any box-template source", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") {
+        return jsonResponse(201, { ...PLANNED_SHIFT, id: "new-validation" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path === "/api/org/profile") {
+        return jsonResponse(200, { ...ORG_PROFILE, defaultBoxLabelTemplateId: null });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await chooseOption(userEvent.setup(), "Продукт", PRODUCT_B.name);
+    expect(screen.getByRole("combobox", { name: "Шаблон этикетки короба" }).textContent).toContain(
+      "Использовать настройку организации — Не настроен",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts" && init?.method === "POST",
+      );
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body).not.toHaveProperty("boxLabelTemplateId");
+      expect(body).not.toHaveProperty("labelTemplateId");
+    });
+  });
+
+  it("blocks aggregation inline when neither organisation nor override has a box template", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      const path = String(url);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/org/profile") {
+        return jsonResponse(200, { ...ORG_PROFILE, defaultBoxLabelTemplateId: null });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    fireEvent.click(await screen.findByLabelText("Агрегация"));
+    await chooseOption(userEvent.setup(), "Продукт", PRODUCT_A.name);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    expect(await screen.findByText("Для агрегации выберите шаблон этикетки короба")).toBeDefined();
+    expect(
+      fetchMock.mock.calls.some(([url, init]) => url === "/api/shifts" && init?.method === "POST"),
+    ).toBe(false);
   });
 
   it("shows box/pallet capacity fields only in aggregation mode, and pallet capacity only when pallets are enabled", async () => {
@@ -992,10 +1127,10 @@ describe("ShiftsPage", () => {
         // counterpartyId and productId should NOT be in PATCH payloads at all
         expect(body).not.toHaveProperty("counterpartyId");
         expect(body).not.toHaveProperty("productId");
-        // Same "untouched -> omitted" contract for the new selects (Task 6):
-        // a mutation that sent them unconditionally would show up here.
+        // The SSCC issuer still follows untouched -> omitted. The box-template
+        // snapshot is deliberately serialized on every edit, including null.
         expect(body).not.toHaveProperty("ssccIssuerCounterpartyId");
-        expect(body).not.toHaveProperty("boxLabelTemplateId");
+        expect(body.boxLabelTemplateId).toBeNull();
       },
       { timeout: 3000 },
     );
@@ -1072,8 +1207,8 @@ describe("ShiftsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
     await screen.findByText("Изменить смену");
 
-    // Same "default sends null" contract counterpartyId/labelTemplateId
-    // already have their own test for (see "sends counterpartyId: null..."
+    // Same "default sends null" contract counterpartyId already has its own
+    // test for (see "sends counterpartyId: null..."
     // above) -- touch the select away from its default, then clear it back
     // to "Наша организация" ("") before submitting. Deleting the `? : null`
     // ternary in toPayload would send a raw "" here instead of null.
@@ -1103,7 +1238,9 @@ describe("ShiftsPage", () => {
         return jsonResponse(200, updated);
       }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [PLANNED_SHIFT] });
-      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1118,7 +1255,7 @@ describe("ShiftsPage", () => {
     // away from its default, then clear it back to the no-template option
     // ("") before submitting, and confirm the payload carries an explicit
     // null rather than a raw empty string.
-    await chooseOption(user, "Шаблон этикетки короба", LABEL_TEMPLATE.name);
+    await chooseOption(user, "Шаблон этикетки короба", DEFAULT_BOX_LABEL_TEMPLATE.name);
     await chooseOption(user, "Шаблон этикетки короба", "Не выбран");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
@@ -1136,21 +1273,14 @@ describe("ShiftsPage", () => {
   });
 
   it("renders each select's own value, not its counterpart's, on load in edit mode", async () => {
-    // Two near-identical pairs of Selects sit side by side in the form:
-    // counterparty/ssccIssuer, and labelTemplate/boxLabelTemplate. A
-    // copy-paste error that crosses only the `value=` prop between a pair
-    // would still submit correctly (fireEvent.change sets the value it then
-    // asserts, so submission-based tests can't see it) but would *display*
-    // the wrong answer to "whose numbers/template is this" -- exactly the
-    // silent defect this feature exists to prevent. Assert the rendered DOM
-    // value of each select against its own distinct fixture id, before any
-    // interaction.
+    // The counterparty, SSCC issuer, and box-template selects carry different
+    // business identities. Assert each rendered value before interaction so a
+    // copy-paste error cannot silently display another field's value.
     const shiftWithDistinctFields = {
       ...PLANNED_SHIFT,
       counterpartyId: BUYER.id,
       counterpartyName: BUYER.name,
       ssccIssuerCounterpartyId: BRAND_OWNER.id,
-      labelTemplateId: LABEL_TEMPLATE.id,
       boxLabelTemplateId: BOX_LABEL_TEMPLATE.id,
     };
     const fetchMock = vi.fn(async (url: string) => {
@@ -1160,7 +1290,7 @@ describe("ShiftsPage", () => {
       }
       if (path === "/api/counterparties") return jsonResponse(200, { items: [BUYER, BRAND_OWNER] });
       if (path === "/api/label-templates") {
-        return jsonResponse(200, { items: [LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
       return jsonResponse(200, { items: [] });
     });
@@ -1178,12 +1308,121 @@ describe("ShiftsPage", () => {
     expect(screen.getByRole("combobox", { name: "Эмитент группового кода" }).textContent).toContain(
       BRAND_OWNER.name,
     );
-    expect(screen.getByRole("combobox", { name: "Шаблон этикетки" }).textContent).toContain(
-      LABEL_TEMPLATE.name,
-    );
+    expect(screen.queryByRole("combobox", { name: "Шаблон этикетки" })).toBeNull();
     expect(screen.getByRole("combobox", { name: "Шаблон этикетки короба" }).textContent).toContain(
       BOX_LABEL_TEMPLATE.name,
     );
+  });
+
+  it("keeps a planned shift's snapshotted box template when the organisation default changed", async () => {
+    const snapshottedShift = {
+      ...PLANNED_SHIFT,
+      boxLabelTemplateId: BOX_LABEL_TEMPLATE.id,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, snapshottedShift);
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText(PLANNED_SHIFT.productName);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const templateSelect = await screen.findByRole("combobox", {
+      name: "Шаблон этикетки короба",
+    });
+    expect(templateSelect.textContent).toContain(BOX_LABEL_TEMPLATE.name);
+    expect(templateSelect.textContent).not.toContain(DEFAULT_BOX_LABEL_TEMPLATE.name);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts/s1" && init?.method === "PATCH",
+      );
+      expect(patchCall).toBeDefined();
+      const body = JSON.parse(patchCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.boxLabelTemplateId).toBe(BOX_LABEL_TEMPLATE.id);
+      expect(body).not.toHaveProperty("labelTemplateId");
+    });
+  });
+
+  it("writes the current organisation default when a planned shift adopts it", async () => {
+    const snapshottedShift = {
+      ...PLANNED_SHIFT,
+      boxLabelTemplateId: BOX_LABEL_TEMPLATE.id,
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, {
+          ...snapshottedShift,
+          boxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
+        });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText(PLANNED_SHIFT.productName);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await chooseOption(
+      userEvent.setup(),
+      "Шаблон этикетки короба",
+      `Использовать настройку организации — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts/s1" && init?.method === "PATCH",
+      );
+      const body = JSON.parse(patchCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.boxLabelTemplateId).toBe(DEFAULT_BOX_LABEL_TEMPLATE.id);
+      expect(Object.values(body)).not.toContain(BOX_TEMPLATE_SELECTION.organization);
+      expect(Object.values(body)).not.toContain(BOX_TEMPLATE_SELECTION.none);
+    });
+  });
+
+  it("localizes the organisation inheritance option in English", async () => {
+    await i18n.changeLanguage("en");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+        if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+        if (path === "/api/label-templates") {
+          return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+        }
+        if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
+        return jsonResponse(200, { items: [] });
+      }),
+    );
+
+    renderPage();
+    fireEvent.click((await screen.findAllByRole("button", { name: "Plan a shift" }))[0]!);
+
+    expect(
+      (await screen.findByRole("combobox", { name: "Box label template" })).textContent,
+    ).toContain(`Use organization setting — ${DEFAULT_BOX_LABEL_TEMPLATE.name}`);
+    expect(screen.queryByRole("combobox", { name: "Label template" })).toBeNull();
   });
 
   it("sends POST with prefilled boxCapacity and mode aggregation; palletCapacity omitted while pallets disabled", async () => {
@@ -1204,6 +1443,10 @@ describe("ShiftsPage", () => {
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1264,6 +1507,10 @@ describe("ShiftsPage", () => {
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
