@@ -49,7 +49,7 @@ An additive Postgres migration introduces `shift_device_participants`:
 - `last_entered_at` records the most recent explicit entry;
 - composite tenant foreign keys bind both shift and device to the same tenant.
 
-The shift stores an irreversible `station_close_policy` with values `single_device` and `admin_only`, plus nullable `station_close_owner_device_id`. Before any station enters, the owner is null. The first station entry atomically claims the owner and leaves the policy `single_device`. Entry by a different device atomically changes the policy to `admin_only`; it never changes back when a device pauses, disconnects, or is revoked.
+The shift stores an irreversible `station_close_policy` with values `single_device` and `admin_only`, plus nullable `station_close_owner_device_id`. Before any station enters, the owner is null. The first station entry atomically claims the owner and leaves the policy `single_device`. Entry by a different device atomically changes the policy to `admin_only`; it never changes back when a device pauses, disconnects, or is revoked. The event ledger, rather than duplicated nullable columns on `shifts`, is the authoritative source for accepted close snapshots and reconciliation details.
 
 The current `POST /shifts/:id/open` remains compatible for older stations. When authenticated as a station it also records the participant. New stations use one entry operation for both planned and active shifts: it opens a planned shift when necessary, records the authenticated device, and returns the effective closing policy. Entering an active shift therefore no longer remains an unreported client-only `onSelected` transition.
 

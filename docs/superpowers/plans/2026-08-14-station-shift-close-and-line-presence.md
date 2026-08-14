@@ -113,7 +113,7 @@ git commit -m "feat(domain): define station shift close reasons"
 - Modify: `packages/db/test/station-sync-recovery-schema.test.ts`
 
 **Interfaces:**
-- Produces Postgres: `shiftDeviceParticipants`, `stationShiftCloseEvents`, new close-authority/snapshot fields on `shifts`.
+- Produces Postgres: `shiftDeviceParticipants`, `stationShiftCloseEvents`, and new close-authority fields on `shifts`; the event ledger is the authoritative store for accepted close snapshots.
 - Produces SQLite: `shift_close_outbox`, close-authority fields on `shift_mirror`.
 - Consumed by: Tasks 3–6.
 
@@ -156,7 +156,7 @@ export const stationShiftCloseOutcome = pgEnum("station_shift_close_outcome", [
 ]);
 ```
 
-Extend `shifts` with `stationClosePolicy`, `stationCloseOwnerDeviceId`, and nullable close snapshots: source, device, operator, plan, actual, closed-box count, fixed reason code, and accepted event id. Add tenant-scoped indexes needed by list/reconciliation queries.
+Extend `shifts` with `stationClosePolicy` and `stationCloseOwnerDeviceId`. Keep close source, device, operator, plan, actual, closed-box count, fixed reason code, and accepted event id in `station_shift_close_events` so the snapshot has one authoritative row and cannot drift from its idempotency ledger. Add tenant-scoped indexes needed by list/reconciliation queries.
 
 Create `shift_device_participants` with first/last entry timestamps. Create `station_shift_close_events` with the normalized payload snapshot, SHA-256 digest, outcome, nullable bounded conflict code (`multiple_devices`), recorded/resolved timestamps, and resolving cabinet user id. Keep the event row as the idempotency ledger and reconciliation source; do not add a second competing conflict table.
 
