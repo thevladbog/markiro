@@ -60,34 +60,61 @@ export async function waitForShiftBundleMirrors(): Promise<void> {
   await Promise.all([...activeMirrors]);
 }
 
+async function mirrorShiftBundleBody(
+  client: Pick<StationClient, "get"> & Partial<Pick<StationClient, "download">>,
+  exec: SqlExecutor,
+  shiftId: string,
+  generation?: CredentialGeneration,
+): Promise<void> {
+  const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
+  if (generation?.sealed) return;
+  if (bundle.sscc) {
+    await addRange(exec, bundle.sscc);
+  }
+  if (generation?.sealed) return;
+  await upsertBundle(exec, bundle);
+  if (client.download) {
+    const mediaSync = syncStationProductImage(
+      exec,
+      { download: client.download },
+      bundle.product,
+      generation ? () => generation.sealed : undefined,
+    );
+    trackStationProductImageSync(mediaSync);
+  }
+}
+
+function trackShiftBundleMirror(operation: Promise<void>): Promise<void> {
+  // Credential sealing waits for writes to settle, not for their network
+  // outcome. Keep a non-rejecting waiter in the set while returning the
+  // original promise so explicit recovery can still surface offline failure.
+  const settled = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  activeMirrors.add(settled);
+  void settled.then(() => activeMirrors.delete(settled));
+  return operation;
+}
+
+/** Recovery variant: the caller must keep its floor gate closed on failure. */
+export function refreshShiftBundleForRecovery(
+  client: Pick<StationClient, "get"> & Partial<Pick<StationClient, "download">>,
+  exec: SqlExecutor,
+  shiftId: string,
+  generation?: CredentialGeneration,
+): Promise<void> {
+  return trackShiftBundleMirror(mirrorShiftBundleBody(client, exec, shiftId, generation));
+}
+
 export function mirrorShiftBundle(
   client: Pick<StationClient, "get"> & Partial<Pick<StationClient, "download">>,
   exec: SqlExecutor,
   shiftId: string,
   generation?: CredentialGeneration,
 ): Promise<void> {
-  const operation = (async () => {
-    try {
-      const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
-      if (generation?.sealed) return;
-      if (bundle.sscc) {
-        await addRange(exec, bundle.sscc);
-      }
-      if (generation?.sealed) return;
-      await upsertBundle(exec, bundle);
-      if (client.download) {
-        const mediaSync = syncStationProductImage(
-          exec,
-          { download: client.download },
-          bundle.product,
-          generation ? () => generation.sealed : undefined,
-        );
-        trackStationProductImageSync(mediaSync);
-      }
-    } catch (err) {
-      console.error("station: shift bundle download/mirror failed", err);
-    }
-  })();
-  activeMirrors.add(operation);
-  return operation.finally(() => activeMirrors.delete(operation));
+  const operation = mirrorShiftBundleBody(client, exec, shiftId, generation).catch((err) => {
+    console.error("station: shift bundle download/mirror failed", err);
+  });
+  return trackShiftBundleMirror(operation);
 }

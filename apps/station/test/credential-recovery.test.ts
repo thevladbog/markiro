@@ -5,6 +5,7 @@ import {
   clearRejectedCredentialState,
   createFloorWorkRegistry,
   FloorWorkBarrierTimeoutError,
+  readBackfilledBoxTemplateRecovery,
   readSealedWorkSummary,
   retireFloorWork,
 } from "../src/lib/credential-recovery.js";
@@ -17,6 +18,7 @@ import {
 } from "../src/lib/mirror.js";
 import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
 import { createScanQueue } from "../src/lib/scan-queue.js";
+import { findUnresolvedBoxPrint } from "../src/lib/boxes.js";
 
 async function migratedExec(
   onRun?: (sql: string, params: unknown[]) => void,
@@ -560,5 +562,120 @@ describe("credential rejection recovery", () => {
 
     expect(await exec.all("SELECT * FROM shift_mirror")).toEqual([]);
     expect(await exec.all("SELECT * FROM product_mirror")).toEqual([]);
+  });
+
+  it("mirrors a backfilled box template without changing the unresolved production facts", async () => {
+    const exec = await migratedExec();
+    await seedRecoveryFixture(exec);
+    await exec.run(
+      `UPDATE shift_mirror
+          SET issuer_prefix = ?, box_capacity = ?, box_label_template_spec = NULL
+        WHERE id = ?`,
+      ["460123456", 10, "shift-1"],
+    );
+    await exec.run(
+      `UPDATE boxes_mirror
+          SET print_state = 'pending', print_error_code = NULL,
+              print_verified_at = NULL, print_skipped_at = NULL
+        WHERE box_id = ?`,
+      ["box-1"],
+    );
+    const factTables = [
+      ["boxes_mirror", "box_id"],
+      ["codes_mirror", "code_hash"],
+      ["scan_events_mirror", "id"],
+      ["outbox", "id"],
+    ] as const;
+    const before = Object.fromEntries(
+      await Promise.all(
+        factTables.map(async ([table, order]) => [table, await snapshot(exec, table, order)]),
+      ),
+    );
+    expect(await readBackfilledBoxTemplateRecovery(exec, "shift-1", "device-1")).toEqual({
+      boxId: "box-1",
+      sscc: "046012345678901234",
+    });
+    const unresolvedBefore = await findUnresolvedBoxPrint(exec, "shift-1", "device-1", false);
+    const boxLabelSpec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "zpl",
+      elements: [{ id: "sscc", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
+    };
+
+    await mirrorShiftBundle(
+      {
+        get: vi.fn().mockResolvedValue({
+          shift: {
+            id: "shift-1",
+            status: "active",
+            mode: "aggregation",
+            productId: "product-1",
+            productName: "Product",
+            lineId: null,
+            lineName: null,
+            counterpartyId: null,
+            counterpartyName: null,
+            labelTemplateId: null,
+            labelTemplateName: null,
+            plannedQty: null,
+            plannedDate: null,
+            boxCapacity: 10,
+            palletCapacity: null,
+            palletsEnabled: false,
+            openedAt: "2026-08-06T07:00:00.000Z",
+          },
+          product: {
+            id: "product-1",
+            gtin14: "04600000000017",
+            name: "Product",
+            productGroup: null,
+            boxCapacity: 10,
+            palletCapacity: null,
+            status: "active",
+            defaultCounterpartyId: null,
+            defaultLabelTemplateId: null,
+          },
+          labelTemplate: null,
+          boxLabelTemplate: { id: "template-box", name: "Box", spec: boxLabelSpec },
+          counterpartyGln: null,
+          operators: [],
+          sscc: {
+            issuerPrefix: "046012345",
+            extensionDigit: 0,
+            fromSerial: 100,
+            toSerial: 199,
+            consumedThroughSerial: 116,
+          },
+        }),
+      },
+      exec,
+      "shift-1",
+    );
+
+    const after = Object.fromEntries(
+      await Promise.all(
+        factTables.map(async ([table, order]) => [table, await snapshot(exec, table, order)]),
+      ),
+    );
+    expect(after).toEqual(before);
+    expect(await findUnresolvedBoxPrint(exec, "shift-1", "device-1", false)).toEqual(
+      unresolvedBefore,
+    );
+    expect(unresolvedBefore).toEqual({
+      boxId: "box-1",
+      sscc: "046012345678901234",
+      itemCount: 1,
+      state: "pending",
+      errorCode: null,
+    });
+    expect(
+      await exec.all<{ box_label_template_spec: string | null }>(
+        "SELECT box_label_template_spec FROM shift_mirror WHERE id = ?",
+        ["shift-1"],
+      ),
+    ).toEqual([{ box_label_template_spec: JSON.stringify(boxLabelSpec) }]);
+    expect(await readBackfilledBoxTemplateRecovery(exec, "shift-1", "device-1")).toBeNull();
   });
 });

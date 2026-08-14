@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { DatabaseSync } from "node:sqlite";
 import { StrictMode } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -113,7 +114,7 @@ import type { HardwareConfig } from "../src/lib/hardware-config.js";
 import type * as HardwareModule from "../src/lib/hardware.js";
 import type { ScannerStatus } from "../src/lib/hardware.js";
 import type * as LockdownModule from "../src/lib/lockdown.js";
-import { readShiftContext } from "../src/lib/mirror.js";
+import { applyMigrations, readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
@@ -398,6 +399,136 @@ async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
 }
 
+async function mockBackfilledActiveShiftRecovery(pinHash: string) {
+  const db = new DatabaseSync(":memory:");
+  const exec = {
+    async run(sql: string, values: unknown[] = []) {
+      db.prepare(sql).run(...(values as never[]));
+    },
+    async all<T>(sql: string, values: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(values as never[])) as T[];
+    },
+  };
+  await applyMigrations(exec);
+  await exec.run(
+    `INSERT INTO operators_mirror
+       (operator_id, name, login, role, pin_hash, badge_hash, active)
+     VALUES (?,?,?,?,?,?,?)`,
+    ["op1", "Ivan", OPERATOR_LOGIN, "operator", pinHash, null, 1],
+  );
+  await exec.run(
+    `INSERT INTO product_mirror
+       (id, gtin14, name, product_group, box_capacity, pallet_capacity, status,
+        default_counterparty_id, default_label_template_id)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    ["product-1", "04600000000015", "Cola", null, 10, null, "active", null, null],
+  );
+  await exec.run(
+    `INSERT INTO shift_mirror
+       (id, status, mode, product_id, product_name, box_capacity, pallets_enabled,
+        issuer_prefix, box_label_template_spec)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    ["shift-1", "active", "aggregation", "product-1", "Cola", 10, 0, "460123456", null],
+  );
+  await exec.run(
+    `INSERT INTO boxes_mirror
+       (box_id, shift_id, terminal_id, sscc, opened_at, closed_at, closed_by,
+        print_state, print_error_code)
+     VALUES (?,?,?,?,?,?,?,?,?)`,
+    [
+      "fixed-box-id",
+      "shift-1",
+      "device-1",
+      "046012345600000016",
+      "2026-08-14T08:00:00.000Z",
+      "2026-08-14T08:10:00.000Z",
+      "op1",
+      "pending",
+      null,
+    ],
+  );
+  await exec.run(
+    `INSERT INTO codes_mirror
+       (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+     VALUES (?,?,?,?,?,?)`,
+    [
+      "fixed-code-hash",
+      "shift-1",
+      "04600000000015",
+      "5Ab1",
+      "2026-08-14T08:05:00.000Z",
+      "fixed-box-id",
+    ],
+  );
+  await exec.run(
+    `INSERT INTO scan_events_mirror
+       (shift_id, terminal_id, raw, verdict, scanned_at, operator_id)
+     VALUES (?,?,?,?,?,?)`,
+    ["shift-1", "device-1", FIRST_KM, "ok", "2026-08-14T08:05:00.000Z", "op1"],
+  );
+  await exec.run(
+    `INSERT INTO outbox
+       (shift_id, terminal_id, raw, verdict, scanned_at, code_hash, gtin14, serial, box_id,
+        operator_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    [
+      "shift-1",
+      "device-1",
+      FIRST_KM,
+      "ok",
+      "2026-08-14T08:05:00.000Z",
+      "fixed-code-hash",
+      "04600000000015",
+      "5Ab1",
+      "fixed-box-id",
+      "op1",
+    ],
+  );
+  await exec.run(
+    `INSERT INTO sscc_pool
+       (issuer_prefix, extension_digit, from_serial, to_serial, next_serial)
+     VALUES (?,?,?,?,?)`,
+    ["460123456", 0, 1, 100, 2],
+  );
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+    "hardware_config",
+    JSON.stringify({
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    }),
+  ]);
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?, ?)", [
+    "install_id",
+    "test-install-id",
+  ]);
+
+  const persistedConfig = {
+    machine_id: "m1",
+    device_id: "device-1",
+    api_key: "mk_key",
+    server_url: "https://api.factory.example",
+  };
+  const executed: Array<{ query: string; values: unknown[] }> = [];
+  invokeMock.mockImplementation(async (cmd: string, payload?: unknown): Promise<unknown> => {
+    if (cmd === "read_config") return persistedConfig;
+    if (cmd === "plugin:sql|load") return "sqlite:station-mirror.db";
+    if (cmd === "plugin:sql|execute") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      executed.push({ query, values });
+      db.prepare(query).run(...(values as never[]));
+      return [0, 0];
+    }
+    if (cmd === "plugin:sql|select") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      return db.prepare(query).all(...(values as never[]));
+    }
+    return undefined;
+  });
+  return { exec, executed };
+}
+
 async function expectEmptyQueueCredentialRecovery(
   persistedConfig: Record<string, unknown>,
   outbox: OutboxSeedRow[],
@@ -569,7 +700,24 @@ async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
             label_template_spec: null,
             box_capacity: 10,
             issuer_prefix: "460123456",
-            box_label_template_spec: null,
+            box_label_template_spec: pendingBoxPrint
+              ? JSON.stringify({
+                  widthMm: 58,
+                  heightMm: 40,
+                  dpi: 203,
+                  language: "zpl",
+                  elements: [
+                    {
+                      id: "sscc",
+                      kind: "field",
+                      field: "sscc",
+                      xMm: 4,
+                      yMm: 4,
+                      fontSizePt: 10,
+                    },
+                  ],
+                })
+              : null,
           },
         ]);
       }
@@ -1092,6 +1240,170 @@ describe("App", () => {
         (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
       ).toBe(true);
     } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("refreshes a backfilled active-shift bundle offline-first and preserves the same print recovery", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const recovery = await mockBackfilledActiveShiftRecovery(pinHash);
+    const boxLabelSpec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "zpl",
+      elements: [{ id: "sscc", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
+    };
+    const bundle = {
+      shift: {
+        id: "shift-1",
+        status: "active",
+        mode: "aggregation",
+        productId: "product-1",
+        productName: "Cola",
+        lineId: null,
+        lineName: null,
+        counterpartyId: null,
+        counterpartyName: null,
+        labelTemplateId: null,
+        labelTemplateName: null,
+        plannedQty: null,
+        plannedDate: null,
+        boxCapacity: 10,
+        palletCapacity: null,
+        palletsEnabled: false,
+        openedAt: "2026-08-14T08:00:00.000Z",
+      },
+      product: {
+        id: "product-1",
+        gtin14: "04600000000015",
+        name: "Cola",
+        productGroup: null,
+        boxCapacity: 10,
+        palletCapacity: null,
+        status: "active",
+        defaultCounterpartyId: null,
+        defaultLabelTemplateId: null,
+      },
+      labelTemplate: null,
+      boxLabelTemplate: { id: "template-box", name: "Box", spec: boxLabelSpec },
+      counterpartyGln: null,
+      operators: [],
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 100,
+        consumedThroughSerial: 1,
+      },
+    };
+    let bundleAvailable = false;
+    let bundleAttempts = 0;
+    const paths: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        paths.push(`${init?.method ?? "GET"} ${path}`);
+        if (path === "/shifts" && (init?.method ?? "GET") === "GET") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "shift-1",
+                  status: "active",
+                  mode: "aggregation",
+                  productId: "product-1",
+                  productName: "Cola",
+                  plannedQty: null,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (path === "/shifts/shift-1/bundle") {
+          bundleAttempts += 1;
+          if (!bundleAvailable) throw new Error("station offline");
+          return new Response(JSON.stringify(bundle), { status: 200 });
+        }
+        if (path === "/station/operators") throw new Error("keep cached roster");
+        if ((init?.method ?? "GET") === "POST") throw new Error("keep outbox pending");
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }),
+    );
+    const factSnapshot = async () =>
+      JSON.stringify({
+        boxes: await recovery.exec.all("SELECT * FROM boxes_mirror ORDER BY box_id"),
+        codes: await recovery.exec.all("SELECT * FROM codes_mirror ORDER BY code_hash"),
+        journal: await recovery.exec.all("SELECT * FROM scan_events_mirror ORDER BY id"),
+        outbox: await recovery.exec.all("SELECT * FROM outbox ORDER BY id"),
+        pool: await recovery.exec.all("SELECT * FROM sscc_pool ORDER BY issuer_prefix"),
+      });
+    const before = await factSnapshot();
+
+    try {
+      render(<App />);
+      await signInAsOperator();
+      await act(async () => i18n.changeLanguage("ru"));
+      fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+      const retry = await screen.findByRole("button", { name: "Повторить восстановление" });
+      expect(bundleAttempts).toBe(1);
+      expect(
+        screen.getByRole("button", { name: "↻ Обновления" }) as HTMLButtonElement,
+      ).toHaveProperty("disabled", true);
+      expect(
+        screen.getByRole("button", { name: "Сохраняем текущую операцию…" }) as HTMLButtonElement,
+      ).toHaveProperty("disabled", true);
+
+      for (const key of SECOND_KM) window.dispatchEvent(new KeyboardEvent("keydown", { key }));
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", cancelable: true }));
+      fireEvent.click(retry);
+
+      expect(
+        await screen.findByText("Не удалось загрузить смены. Проверьте доступ к серверу."),
+      ).toBeDefined();
+      expect(screen.getByRole("button", { name: "Повторить восстановление" })).toBeDefined();
+      expect(bundleAttempts).toBe(2);
+      expect(await factSnapshot()).toBe(before);
+
+      bundleAvailable = true;
+      fireEvent.click(screen.getByRole("button", { name: "Повторить восстановление" }));
+
+      expect(
+        await screen.findByText("Печать была прервана. Проверьте принтер и повторите печать."),
+      ).toBeDefined();
+      expect(screen.getByText("046012345600000016")).toBeDefined();
+      expect(screen.getByRole("button", { name: "Повторить печать" })).toBeDefined();
+      expect(bundleAttempts).toBe(3);
+      expect(await factSnapshot()).toBe(before);
+      expect(paths).not.toContain("POST /shifts/shift-1/open");
+      expect(
+        recovery.executed.filter(({ query }) =>
+          /INSERT INTO boxes_mirror|UPDATE boxes_mirror\s+SET sscc|UPDATE sscc_pool\s+SET next_serial = next_serial \+ 1|INSERT INTO scan_events_mirror|INSERT INTO outbox/.test(
+            query,
+          ),
+        ),
+      ).toEqual([]);
+      expect(
+        await recovery.exec.all<{ box_id: string; sscc: string; print_state: string }>(
+          "SELECT box_id, sscc, print_state FROM boxes_mirror",
+        ),
+      ).toEqual([
+        {
+          box_id: "fixed-box-id",
+          sscc: "046012345600000016",
+          print_state: "pending",
+        },
+      ]);
+    } finally {
+      await act(async () => i18n.changeLanguage("en"));
       consoleErrorSpy.mockRestore();
     }
   });

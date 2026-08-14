@@ -9,7 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
-import { Button, Card } from "@markiro/ui";
+import { Alert, Button, Card, FullScreenDialog } from "@markiro/ui";
 import {
   clearCredential,
   isEnrolled,
@@ -29,6 +29,7 @@ import {
   createCredentialGeneration,
   createFloorWorkRegistry,
   credentialGenerationIsCurrent,
+  readBackfilledBoxTemplateRecovery,
   readSealedWorkSummary,
   type CredentialGeneration,
   type CredentialRejectedEvent,
@@ -48,7 +49,7 @@ import {
   readShiftMirror,
   type ShiftContextRow,
 } from "./lib/mirror.js";
-import { mirrorShiftBundle } from "./lib/shift-bundle.js";
+import { mirrorShiftBundle, refreshShiftBundleForRecovery } from "./lib/shift-bundle.js";
 import { createOperatorRosterRefresher } from "./lib/roster-sync.js";
 import { createKeyboardWedgeSource } from "./lib/scan-source.js";
 import { createActivityAwareScanSource, createOperatorIdleLock } from "./lib/operator-idle-lock.js";
@@ -57,6 +58,7 @@ import { loadSoundSettings, type SoundSettings } from "./lib/signal-sound.js";
 import { tauriExecutor } from "./lib/sqlite.js";
 import { resolveLegacyStationIdentity } from "./lib/legacy-identity.js";
 import { createLockdownLifecycle } from "./lib/lockdown.js";
+import { findUnresolvedBoxPrint } from "./lib/boxes.js";
 import { ConfigTransitionCoordinator } from "./lib/config-transition.js";
 import {
   resetCredentialForPairing as resetCredentialConfig,
@@ -92,6 +94,12 @@ export type CredentialRecoveryState =
   | { event: CredentialRejectedEvent; phase: "ready"; sealed: SealedWorkSummary };
 
 export type LegacyIdentityState = "resolving" | "degraded" | "rejected" | null;
+
+type BoxTemplateRecoveryState = {
+  boxId: string;
+  sscc: string;
+  phase: "blocked" | "retrying" | "unavailable";
+};
 
 export type StationView = "loading" | "pairing" | "login" | "floor";
 
@@ -208,6 +216,9 @@ export function App() {
   // and reset alongside it whenever the shift itself changes.
   const [boxCapacity, setBoxCapacity] = useState<number | null>(null);
   const [issuerPrefix, setIssuerPrefix] = useState<string | null>(null);
+  const [boxTemplateRecovery, setBoxTemplateRecovery] = useState<BoxTemplateRecoveryState | null>(
+    null,
+  );
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
@@ -442,9 +453,11 @@ export function App() {
       setShiftContext(null);
       setBoxCapacity(null);
       setIssuerPrefix(null);
+      setBoxTemplateRecovery(null);
       return;
     }
     let cancelled = false;
+    let resolving = false;
     // mirrorShiftBundle writes in the background, so poll briefly until the
     // product row lands rather than blocking shift entry on the network.
     // `readShiftMirror` is fetched alongside `readShiftContext` on every
@@ -467,14 +480,25 @@ export function App() {
         readShiftContext(tauriExecutor, shift.id),
         readShiftMirror(tauriExecutor, shift.id).catch(() => null),
       ])
-        .then(([ctx, mirror]) => {
-          if (cancelled || !ctx) return;
+        .then(async ([ctx, mirror]) => {
+          if (cancelled || !ctx || resolving) return;
+          resolving = true;
+          const recovery = mirror
+            ? await readBackfilledBoxTemplateRecovery(
+                tauriExecutor,
+                shift.id,
+                configRef.current?.deviceId ?? null,
+              )
+            : null;
+          if (cancelled) return;
           setShiftContext(ctx);
           setBoxCapacity(mirror?.boxCapacity ?? null);
           setIssuerPrefix(mirror?.issuerPrefix ?? null);
+          setBoxTemplateRecovery(recovery ? { ...recovery, phase: "blocked" } : null);
           clearInterval(tick);
         })
         .catch((err) => {
+          resolving = false;
           // A transient SQLite lock while mirrorShiftBundle's transaction is
           // in flight must not surface as an unhandled rejection on this
           // tick; the poll keeps running and the next tick self-heals.
@@ -859,8 +883,10 @@ export function App() {
     }
   }
 
+  const floorRecoveryBlocked = printRecoveryBlocked || boxTemplateRecovery !== null;
+
   async function switchOperator(): Promise<void> {
-    if (printRecoveryBlocked) return;
+    if (floorRecoveryBlocked) return;
     if (operatorSwitchAttempt.current) return operatorSwitchAttempt.current;
     const attempt = performOperatorSwitch();
     operatorSwitchAttempt.current = attempt;
@@ -877,7 +903,7 @@ export function App() {
     <WindowModeControl
       snapshot={lockdownSnapshot}
       activeShift={shift !== null}
-      disabled={operatorSwitchState !== "idle" || printRecoveryBlocked}
+      disabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
       onEnter={enterLockdown}
       onExit={exitLockdown}
       onDismissError={clearLockdownError}
@@ -1052,7 +1078,7 @@ export function App() {
   const operatorControl = (
     <OperatorSwitchControl
       activeShift={shift !== null}
-      pending={operatorSwitchState === "settling" || printRecoveryBlocked}
+      pending={operatorSwitchState === "settling" || floorRecoveryBlocked}
       error={operatorSwitchState === "failed"}
       onSwitch={switchOperator}
       onDismissError={() => {
@@ -1069,8 +1095,53 @@ export function App() {
   function handleShiftEntered(entered: ActiveShift) {
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     setShift(entered);
+    setShiftContext(null);
+    setBoxTemplateRecovery(null);
     if (floorGeneration) {
       void mirrorShiftBundle(activeClient, tauriExecutor, entered.id, floorGeneration);
+    }
+  }
+
+  async function retryBackfilledBoxTemplateRecovery(): Promise<void> {
+    if (!shift || !boxTemplateRecovery || boxTemplateRecovery.phase === "retrying") return;
+    const expected = boxTemplateRecovery;
+    setBoxTemplateRecovery({ ...expected, phase: "retrying" });
+    try {
+      await applyMigrations(tauriExecutor);
+      await refreshShiftBundleForRecovery(
+        activeClient,
+        tauriExecutor,
+        shift.id,
+        floorGeneration ?? undefined,
+      );
+      const recoveryTerminalId = configRef.current?.deviceId ?? null;
+      const [ctx, mirror, remaining, unresolved] = await Promise.all([
+        readShiftContext(tauriExecutor, shift.id),
+        readShiftMirror(tauriExecutor, shift.id),
+        readBackfilledBoxTemplateRecovery(tauriExecutor, shift.id, recoveryTerminalId),
+        findUnresolvedBoxPrint(tauriExecutor, shift.id, recoveryTerminalId, false),
+      ]);
+      if (
+        !ctx ||
+        !mirror?.boxLabelTemplateSpec ||
+        remaining !== null ||
+        unresolved?.boxId !== expected.boxId ||
+        unresolved.sscc !== expected.sscc ||
+        !floorGeneration ||
+        !credentialGenerationIsCurrent(floorGeneration)
+      ) {
+        throw new Error("backfilled box template recovery incomplete");
+      }
+      setShiftContext(ctx);
+      setBoxCapacity(mirror.boxCapacity);
+      setIssuerPrefix(mirror.issuerPrefix);
+      setBoxTemplateRecovery(null);
+    } catch {
+      setBoxTemplateRecovery((current) =>
+        current?.boxId === expected.boxId && current.sscc === expected.sscc
+          ? { ...current, phase: "unavailable" }
+          : current,
+      );
     }
   }
 
@@ -1092,7 +1163,7 @@ export function App() {
       syncStuck={syncState.stuck}
       conflicts={syncState.conflicts}
       update={updateIndicator}
-      actionsDisabled={operatorSwitchState !== "idle" || printRecoveryBlocked}
+      actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
       onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
     >
@@ -1139,49 +1210,83 @@ export function App() {
         <ConflictList exec={tauriExecutor} onBack={() => setShowConflicts(false)} />
       ) : shift ? (
         shiftContext ? (
-          <WorkScreen
-            exec={tauriExecutor}
-            shiftId={shift.id}
-            terminalId={config.deviceId ?? null}
-            operatorId={operator.operatorId}
-            expectedGtin14={shiftContext.gtin14}
-            productName={shiftContext.productName}
-            productId={shiftContext.productId}
-            productImage={shiftContext.image}
-            counterpartyName={shiftContext.counterpartyName}
-            source={scanSource}
-            sound={sound}
-            onScanRecorded={nudgeSync}
-            onScanQueueRegister={registerFloorWorkBarrier}
-            onExit={() => {
-              // Both cleared together: `floorView` is separate state that
-              // stays "new" when this shift was entered through NewShift, so
-              // clearing only `shift` would re-render NewShift instead of
-              // shift selection -- the opposite of what this exit control
-              // promises (Finding 5).
-              setShift(null);
-              setFloorView("select");
-            }}
-            pendingSync={syncState.pending}
-            // Read off `shift_mirror` alongside `shiftContext` above (Task 13
-            // review, Finding 1) -- null for a validation-mode shift, or a
-            // device the server could not resolve an issuer prefix for,
-            // which is exactly what turns WorkScreen's box UI off entirely.
-            issuerPrefix={issuerPrefix}
-            boxCapacity={boxCapacity}
-            verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
-            printing={
-              hardwareConfig.printer
-                ? {
-                    target: hardwareConfig.printer,
-                    language: hardwareConfig.printerLanguage,
-                    print: (target, bytes) => tauriHardware.print(target, bytes),
-                  }
-                : null
-            }
-            onOpenPrinterSetup={openPrintRecoverySetup}
-            onPrintRecoveryChange={handlePrintRecoveryChange}
-          />
+          boxTemplateRecovery ? (
+            <FullScreenDialog
+              open
+              title={t("box.printRecovery.restoreFailed")}
+              backLabel={t("box.printRecovery.backToShifts")}
+              backDisabled
+              onClose={() => {}}
+              initialFocus="dialog"
+              footer={
+                <Button
+                  size="floor"
+                  disabled={boxTemplateRecovery.phase === "retrying"}
+                  onClick={() => void retryBackfilledBoxTemplateRecovery()}
+                >
+                  {t(
+                    boxTemplateRecovery.phase === "retrying"
+                      ? "box.printRecovery.pending"
+                      : "box.printRecovery.retryRestore",
+                  )}
+                </Button>
+              }
+            >
+              <Alert
+                tone="error"
+                title={t(
+                  boxTemplateRecovery.phase === "unavailable"
+                    ? "shifts.serverUnavailable"
+                    : "box.printRecovery.restoreFailedDetail",
+                )}
+              />
+              <p>{boxTemplateRecovery.sscc}</p>
+            </FullScreenDialog>
+          ) : (
+            <WorkScreen
+              exec={tauriExecutor}
+              shiftId={shift.id}
+              terminalId={config.deviceId ?? null}
+              operatorId={operator.operatorId}
+              expectedGtin14={shiftContext.gtin14}
+              productName={shiftContext.productName}
+              productId={shiftContext.productId}
+              productImage={shiftContext.image}
+              counterpartyName={shiftContext.counterpartyName}
+              source={scanSource}
+              sound={sound}
+              onScanRecorded={nudgeSync}
+              onScanQueueRegister={registerFloorWorkBarrier}
+              onExit={() => {
+                // Both cleared together: `floorView` is separate state that
+                // stays "new" when this shift was entered through NewShift, so
+                // clearing only `shift` would re-render NewShift instead of
+                // shift selection -- the opposite of what this exit control
+                // promises (Finding 5).
+                setShift(null);
+                setFloorView("select");
+              }}
+              pendingSync={syncState.pending}
+              // Read off `shift_mirror` alongside `shiftContext` above (Task 13
+              // review, Finding 1) -- null for a validation-mode shift, or a
+              // device the server could not resolve an issuer prefix for,
+              // which is exactly what turns WorkScreen's box UI off entirely.
+              issuerPrefix={issuerPrefix}
+              boxCapacity={boxCapacity}
+              verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
+              printing={
+                hardwareConfig.printer
+                  ? {
+                      target: hardwareConfig.printer,
+                      language: hardwareConfig.printerLanguage,
+                      print: (target, bytes) => tauriHardware.print(target, bytes),
+                    }
+                  : null
+              }
+              onOpenPrinterSetup={openPrintRecoverySetup}
+              onPrintRecoveryChange={handlePrintRecoveryChange}
+            />
+          )
         ) : (
           <main style={{ minHeight: "100%", display: "grid", placeItems: "center" }}>
             <h1 style={{ fontSize: "2rem" }}>{t("shifts.preparing")}</h1>

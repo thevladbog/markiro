@@ -1694,6 +1694,42 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(screen.getByText(SSCC)).toBeDefined();
   });
 
+  it("keeps a backfilled active shift sealed on the same pending box and SSCC", async () => {
+    const exec = makeExec();
+    await seedPendingPrint(exec, null);
+    await exec.run("UPDATE shift_mirror SET box_label_template_spec = NULL WHERE id = ?", ["s1"]);
+    await exec.run("UPDATE shift_mirror SET box_label_template_spec = ? WHERE id = ?", [
+      JSON.stringify(LABEL_SPEC),
+      "s1",
+    ]);
+    const factsBefore = JSON.stringify({
+      boxes: await exec.all("SELECT * FROM boxes_mirror ORDER BY box_id"),
+      codes: await exec.all("SELECT * FROM codes_mirror ORDER BY code_hash"),
+      journal: await exec.all("SELECT * FROM scan_events_mirror ORDER BY id"),
+      outbox: await exec.all("SELECT * FROM outbox ORDER BY id"),
+    });
+    const source = manualSource();
+    const onScan = vi.fn();
+
+    renderWorkTracked({ exec, source, onScan });
+
+    expect(
+      await screen.findByText("Печать была прервана. Проверьте принтер и повторите печать."),
+    ).toBeDefined();
+    expect(screen.getByText(SSCC)).toBeDefined();
+    act(() => source.emit(OTHER_KM));
+    await act(async () => Promise.resolve());
+    expect(onScan).not.toHaveBeenCalled();
+    expect(
+      JSON.stringify({
+        boxes: await exec.all("SELECT * FROM boxes_mirror ORDER BY box_id"),
+        codes: await exec.all("SELECT * FROM codes_mirror ORDER BY code_hash"),
+        journal: await exec.all("SELECT * FROM scan_events_mirror ORDER BY id"),
+        outbox: await exec.all("SELECT * FROM outbox ORDER BY id"),
+      }),
+    ).toBe(factsBefore);
+  });
+
   it("shows a blocking retry when print-recovery hydration fails", async () => {
     const base = makeExec();
     await seedPendingPrint(base, "transport_failed");
