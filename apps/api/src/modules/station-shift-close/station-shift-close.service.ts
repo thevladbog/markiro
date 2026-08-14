@@ -59,6 +59,19 @@ export class StationShiftCloseService {
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, input.shiftId)))
         .for("update");
       if (!shift) throw new NotFoundException();
+      if (input.operatorId) {
+        const [operator] = await tx
+          .select({ employeeId: schema.operatorCredentials.employeeId })
+          .from(schema.operatorCredentials)
+          .where(
+            and(
+              eq(schema.operatorCredentials.tenantId, tenantId),
+              eq(schema.operatorCredentials.employeeId, input.operatorId),
+              eq(schema.operatorCredentials.active, true),
+            ),
+          );
+        if (!operator) throw new ConflictException("Operator is not active for this organization");
+      }
       if (shiftCloseReasonRequired(shift.plannedQty, input.actualQty)) {
         if (!input.reasonCode || !isShiftCloseReasonCode(input.reasonCode)) {
           throw new ConflictException("A valid close reason is required");
