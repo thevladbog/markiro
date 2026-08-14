@@ -1,7 +1,7 @@
 # Station Shift Identity, Offline Close, and Line Presence — Design Spec
 
 **Date:** 2026-08-14
-**Status:** Design approved in conversation; written review pending
+**Status:** Written design approved; implementation plan prepared
 **Related:** `docs/superpowers/specs/2026-07-28-station-sync-design.md`, `docs/superpowers/specs/2026-07-30-station-exceptions-design.md`, `docs/device-key-surface.md`, `docs/architecture.md`
 
 ## Problem
@@ -90,7 +90,8 @@ An additive runtime migration creates `shift_close_outbox` with one durable row 
 - `planned_qty_snapshot`, `actual_qty`, `closed_box_count`;
 - nullable fixed `reason_code`;
 - `closed_at` from the device;
-- state `pending` or `conflict` and nullable safe `conflict_code`.
+- state `pending` or `conflict`, nullable safe `conflict_code`, and nullable
+  `last_checked_at` for a bounded reconciliation poll.
 
 Inserting this row is the local commit point. Shift selection overlays queued/conflicted shift ids as locally closed, so a subsequent API refresh, restart, or stale active bundle cannot put the operator back into the shift. The record survives process restart and is removed only after an authoritative server acknowledgement. A conflict row remains durable until administrator reconciliation is observed.
 
@@ -113,7 +114,7 @@ On acceptance the server:
 5. closes a single-device shift and records the close snapshot, source device, operator, and event id;
 6. returns an acknowledgement that allows the station to delete the local close row.
 
-If the shift is administrator-only, the server stores a `shift_close_conflict` containing the shift, device, operator, plan, local actual, box count, reason, close time, and rejection code. The shift remains active server-side and the response tells the station to change its local row to `conflict`. Repeated delivery of the same event does not create duplicate conflicts.
+If the shift is administrator-only, the server stores a `shift_close_conflict` containing the shift, device, operator, plan, local actual, box count, reason, close time, and rejection code. The shift remains active server-side and the response tells the station to change its local row to `conflict`. Repeated delivery of the same event does not create duplicate conflicts. A conflict row is rechecked through the same idempotent endpoint no more than once every five minutes; after an administrator resolves or dismisses it, the server returns `already_resolved` and the station removes the local row. This reconciliation polling remains independent of scanner work and network availability.
 
 If an administrator already closed the shift, the device event is acknowledged as already resolved and removed locally. Late scans remain accepted under the existing `late_data_at` rule; they do not reopen the shift.
 
