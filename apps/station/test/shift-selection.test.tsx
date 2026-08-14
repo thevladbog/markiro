@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { createStationClient } from "../src/lib/api-client.js";
@@ -7,7 +7,10 @@ import { ShiftSelection } from "../src/pages/ShiftSelection.js";
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
 const client = createStationClient({
   machineId: "m1",
@@ -16,6 +19,159 @@ const client = createStationClient({
 });
 
 describe("ShiftSelection", () => {
+  it("refreshes an open empty list and shows a shift created in the cabinet", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "cabinet-shift",
+                status: "planned",
+                mode: "validation",
+                productName: "Created in cabinet",
+                plannedQty: 100,
+                productId: "product-created-in-cabinet",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await act(async () => {});
+    expect(screen.getByText("No open shifts")).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.getByRole("button", { name: "Open" })).toBeDefined();
+    vi.useRealTimers();
+  });
+
+  it("lets the operator refresh an empty shift list immediately", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "cabinet-shift",
+                status: "planned",
+                mode: "validation",
+                productName: "Available now",
+                plannedQty: 100,
+                productId: "product-available-now",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh shifts" }));
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open" })).toBeDefined());
+  });
+
+  it("keeps a loaded shift selectable after a background refresh fails", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "planned-shift",
+                status: "planned",
+                mode: "validation",
+                productName: "Still available",
+                plannedQty: 100,
+                productId: "product-still-available",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ id: "planned-shift", status: "active", mode: "validation" }),
+          {
+            status: 200,
+          },
+        ),
+      );
+    const onSelected = vi.fn();
+
+    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "Open" })).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.getByText("Could not load shifts. Check server access.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await act(async () => {});
+    expect(onSelected).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "planned-shift", status: "active" }),
+    );
+  });
+
+  it("coalesces repeated empty-list refreshes while the prior request is pending", async () => {
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    const pendingRefresh = new Promise<Response>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+      .mockReturnValueOnce(pendingRefresh);
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+
+    const refresh = screen.getByRole("button", { name: "Refresh shifts" });
+    fireEvent.click(refresh);
+    fireEvent.click(refresh);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect((refresh as HTMLButtonElement).disabled).toBe(true);
+
+    resolveRefresh?.(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    await waitFor(() => expect((refresh as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("does not start an interval refresh while the initial list request is pending", async () => {
+    vi.useFakeTimers();
+    let resolveInitial: ((response: Response) => void) | undefined;
+    const pendingInitial = new Promise<Response>((resolve) => {
+      resolveInitial = resolve;
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockReturnValue(pendingInitial);
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+
+    resolveInitial?.(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    await act(async () => {});
+  });
+
   it("renders a bounded three-card page after filtering closed shifts", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(

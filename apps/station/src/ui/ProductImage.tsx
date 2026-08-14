@@ -31,15 +31,17 @@ export function ProductImage({
   useEffect(() => {
     let cancelled = false;
     setFailed(false);
-    setObjectUrl(() => {
-      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-      objectUrlRef.current = null;
-      return null;
-    });
     // `undefined` is a legacy/unknown descriptor. The mirror may still have
     // a validated pointer from a newer response, so let the cache reader use
     // that pointer. Only an explicit null is a deletion tombstone.
-    if (!exec || image === null) return;
+    if (!exec || image === null) {
+      setObjectUrl(() => {
+        if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+        return null;
+      });
+      return;
+    }
 
     void (async () => {
       let blob: Blob | null = await readStationProductImage(exec, productId, image);
@@ -50,10 +52,12 @@ export function ProductImage({
         URL.revokeObjectURL(nextUrl);
         return;
       }
+      const previousUrl = objectUrlRef.current;
       objectUrlRef.current = nextUrl;
       setObjectUrl(nextUrl);
+      if (previousUrl) URL.revokeObjectURL(previousUrl);
     })().catch(() => {
-      if (!cancelled) setFailed(true);
+      if (!cancelled && objectUrlRef.current === null) setFailed(true);
     });
     const retry =
       retryKey < 2

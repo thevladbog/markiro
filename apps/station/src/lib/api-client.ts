@@ -184,6 +184,9 @@ export function createStationClient(
 
   return {
     get: (path) => request("GET", path),
+    // Binary media is an optional display enhancement. Its failure must not
+    // seal the line's credential generation: a CDN/proxy/media fault may hide
+    // a picture, but must not abandon queued production facts or the floor.
     download: async (path) => {
       if (credentialBoundary?.generation.sealed)
         throw new Error("station credential generation is sealed");
@@ -202,17 +205,6 @@ export function createStationClient(
           throw new StationApiError(res.status, error.message, error.code);
         }
         return await res.blob();
-      } catch (error) {
-        if (credentialBoundary && isStationCredentialRejection(error)) {
-          await rejectCredentialGeneration(
-            {
-              machineId: credentialBoundary.machineId,
-              generation: credentialBoundary.generation,
-            },
-            credentialBoundary.onCredentialRejected,
-          );
-        }
-        throw error;
       } finally {
         clearTimeout(timer);
       }
