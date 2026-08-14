@@ -243,6 +243,7 @@ describe.skipIf(!ready)("cors e2e", () => {
         ["GET", "/shifts"],
         ["POST", "/shifts"],
         ["GET", "/shifts/shift-1/bundle"],
+        ["GET", "/shifts/shift-1/reference-bundle"],
         ["POST", "/shifts/shift-1/open"],
         ["GET", "/products?search=04600000000000"],
         ["POST", "/products/gtin-check/"],

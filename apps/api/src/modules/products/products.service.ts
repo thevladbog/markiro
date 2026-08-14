@@ -34,14 +34,15 @@ import {
 } from "./product-registry-invalidation";
 
 type ProductRow = typeof schema.products.$inferSelect;
-type ProductWithImageRow = ProductRow & {
+type CurrentProductRow = Omit<ProductRow, "defaultLabelTemplateId">;
+type ProductWithImageRow = CurrentProductRow & {
   imageChecksum: string | null;
   imageByteSize: number | null;
   imageWidth: number | null;
   imageHeight: number | null;
 };
 
-const PRODUCT_WITH_IMAGE_SELECTION = {
+const CURRENT_PRODUCT_SELECTION = {
   id: schema.products.id,
   tenantId: schema.products.tenantId,
   gtin14: schema.products.gtin14,
@@ -51,11 +52,14 @@ const PRODUCT_WITH_IMAGE_SELECTION = {
   palletCapacity: schema.products.palletCapacity,
   status: schema.products.status,
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
-  defaultLabelTemplateId: schema.products.defaultLabelTemplateId,
   unitPrice: schema.products.unitPrice,
   egaisCode: schema.products.egaisCode,
   externalRef: schema.products.externalRef,
   createdAt: schema.products.createdAt,
+};
+
+const PRODUCT_WITH_IMAGE_SELECTION = {
+  ...CURRENT_PRODUCT_SELECTION,
   imageChecksum: schema.mediaAssets.checksum,
   imageByteSize: schema.mediaAssets.byteSize,
   imageWidth: schema.mediaAssets.width,
@@ -127,12 +131,11 @@ export class ProductsService {
           palletCapacity,
           status,
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
-          defaultLabelTemplateId: data.defaultLabelTemplateId ?? null,
           unitPrice: data.unitPrice ?? null,
           egaisCode: data.egaisCode ?? null,
           externalRef: data.externalRef ?? null,
         })
-        .returning();
+        .returning({ id: schema.products.id });
 
       if (!row) {
         throw new InternalServerErrorException("Failed to create product");
@@ -155,7 +158,7 @@ export class ProductsService {
       const updatedId = await this.db.transaction(async (tx) => {
         if (normalizedGtin !== undefined) await lockTenantBoxRegistry(tx, tenantId);
         const [current] = await tx
-          .select()
+          .select(CURRENT_PRODUCT_SELECTION)
           .from(schema.products)
           .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
           .for("update");
@@ -172,10 +175,6 @@ export class ProductsService {
           data.defaultCounterpartyId !== undefined
             ? data.defaultCounterpartyId
             : current.defaultCounterpartyId;
-        const defaultLabelTemplateId =
-          data.defaultLabelTemplateId !== undefined
-            ? data.defaultLabelTemplateId
-            : current.defaultLabelTemplateId;
         const status = this.computeStatus({ productGroup, boxCapacity, palletCapacity });
         const set: Partial<typeof schema.products.$inferInsert> = {
           gtin14,
@@ -184,7 +183,6 @@ export class ProductsService {
           boxCapacity,
           palletCapacity,
           defaultCounterpartyId,
-          defaultLabelTemplateId,
           status,
         };
         if (data.unitPrice !== undefined) set.unitPrice = data.unitPrice;
@@ -195,7 +193,7 @@ export class ProductsService {
           .update(schema.products)
           .set(set)
           .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, id)))
-          .returning();
+          .returning({ id: schema.products.id, gtin14: schema.products.gtin14 });
         if (!row) {
           throw new NotFoundException("Product not found or does not belong to this tenant");
         }
@@ -705,23 +703,17 @@ export class ProductsService {
   }
 
   /**
-   * Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400,
-   * naming the referenced entity per FK constraint name (products has
-   * composite FKs to counterparties/label_templates -- see platform.ts).
+   * Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400.
    */
   private handleWriteError(error: unknown): never {
-    const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
-    const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+    const err = error as Error & { code?: string; cause?: unknown };
+    const cause = err?.cause as { code?: string } | undefined;
     const errorCode = err?.code || cause?.code;
-    const constraint = err?.constraint || cause?.constraint;
 
     if (errorCode === "23505") {
       throw new ConflictException("A product with this GTIN already exists for this tenant");
     }
     if (errorCode === "23503") {
-      if (constraint === "products_tenant_default_label_template_fk") {
-        throw new BadRequestException("Unknown label template for this organization");
-      }
       throw new BadRequestException("Unknown counterparty for this organization");
     }
     throw error;
@@ -755,7 +747,6 @@ export class ProductsService {
       palletCapacity: row.palletCapacity,
       status: row.status,
       defaultCounterpartyId: row.defaultCounterpartyId,
-      defaultLabelTemplateId: row.defaultLabelTemplateId,
       unitPrice: row.unitPrice,
       egaisCode: row.egaisCode,
       externalRef: row.externalRef,

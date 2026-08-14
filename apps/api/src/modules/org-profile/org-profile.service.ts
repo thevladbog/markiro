@@ -67,6 +67,7 @@ export class OrgProfileService {
       gln: row?.gln ?? null,
       gs1Prefixes: row?.gs1Prefixes ?? [],
       inn: row?.inn ?? null,
+      defaultBoxLabelTemplateId: row?.defaultBoxLabelTemplateId ?? null,
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
       logoRevision: logo?.revision ?? null,
       logoUrl: logo?.revision ? `/org/profile/logo/${logo.revision}` : null,
@@ -88,46 +89,59 @@ export class OrgProfileService {
     if (patch.gln !== undefined) setClause.gln = patch.gln;
     if (patch.gs1Prefixes !== undefined) setClause.gs1Prefixes = patch.gs1Prefixes;
     if (patch.inn !== undefined) setClause.inn = patch.inn;
+    if (patch.defaultBoxLabelTemplateId !== undefined) {
+      setClause.defaultBoxLabelTemplateId = patch.defaultBoxLabelTemplateId;
+    }
 
-    await this.db.transaction(async (tx) => {
-      await tx
-        .insert(schema.orgProfiles)
-        .values({
-          tenantId,
-          gln: patch.gln ?? null,
-          gs1Prefixes: patch.gs1Prefixes ?? [],
-          inn: patch.inn ?? null,
-        })
-        .onConflictDoUpdate({
-          target: schema.orgProfiles.tenantId,
-          set: setClause,
-        });
-
-      if (patch.pickupLimitsEnabled !== undefined) {
-        const [policy] = await tx
-          .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
-          .from(schema.pickupTenantPolicies)
-          .where(eq(schema.pickupTenantPolicies.tenantId, tenantId))
-          .for("update");
-        if (!policy) {
-          throw new InternalServerErrorException("Tenant pickup policy is not configured");
-        }
+    try {
+      await this.db.transaction(async (tx) => {
         await tx
-          .update(schema.pickupTenantPolicies)
-          .set({ limitsEnabled: patch.pickupLimitsEnabled, updatedAt: new Date() })
-          .where(eq(schema.pickupTenantPolicies.tenantId, tenantId));
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId,
-          action: "tenant.pickup_policy.updated",
-          outcome: "success",
-          targetType: "tenant",
-          targetId: tenantId,
-          before: { limitsEnabled: policy.limitsEnabled },
-          after: { limitsEnabled: patch.pickupLimitsEnabled },
-        });
+          .insert(schema.orgProfiles)
+          .values({
+            tenantId,
+            gln: patch.gln ?? null,
+            gs1Prefixes: patch.gs1Prefixes ?? [],
+            inn: patch.inn ?? null,
+            ...(patch.defaultBoxLabelTemplateId !== undefined
+              ? { defaultBoxLabelTemplateId: patch.defaultBoxLabelTemplateId }
+              : {}),
+          })
+          .onConflictDoUpdate({
+            target: schema.orgProfiles.tenantId,
+            set: setClause,
+          });
+
+        if (patch.pickupLimitsEnabled !== undefined) {
+          const [policy] = await tx
+            .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+            .from(schema.pickupTenantPolicies)
+            .where(eq(schema.pickupTenantPolicies.tenantId, tenantId))
+            .for("update");
+          if (!policy) {
+            throw new InternalServerErrorException("Tenant pickup policy is not configured");
+          }
+          await tx
+            .update(schema.pickupTenantPolicies)
+            .set({ limitsEnabled: patch.pickupLimitsEnabled, updatedAt: new Date() })
+            .where(eq(schema.pickupTenantPolicies.tenantId, tenantId));
+          await tx.insert(schema.tenantAuditEvents).values({
+            organizationId: tenantId,
+            actorUserId,
+            action: "tenant.pickup_policy.updated",
+            outcome: "success",
+            targetType: "tenant",
+            targetId: tenantId,
+            before: { limitsEnabled: policy.limitsEnabled },
+            after: { limitsEnabled: patch.pickupLimitsEnabled },
+          });
+        }
+      });
+    } catch (error) {
+      if (isDefaultBoxLabelTemplateForeignKey(error)) {
+        throw new BadRequestException("Unknown box label template for this organization");
       }
-    });
+      throw error;
+    }
 
     return this.getProfile(tenantId);
   }
@@ -547,4 +561,15 @@ export class OrgProfileService {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "unknown error";
+}
+
+function isDefaultBoxLabelTemplateForeignKey(error: unknown): boolean {
+  const databaseError = error as {
+    code?: string;
+    constraint?: string;
+    cause?: { code?: string; constraint?: string };
+  };
+  const code = databaseError?.code ?? databaseError?.cause?.code;
+  const constraint = databaseError?.constraint ?? databaseError?.cause?.constraint;
+  return code === "23503" && constraint === "org_profiles_box_label_template_tenant_fk";
 }

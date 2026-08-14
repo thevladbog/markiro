@@ -25,7 +25,6 @@ const PRODUCT = {
   palletCapacity: 48,
   status: "active",
   defaultCounterpartyId: null,
-  defaultLabelTemplateId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
@@ -39,7 +38,6 @@ const SHIFT = {
   lineName: null,
   counterpartyId: null,
   counterpartyName: null,
-  labelTemplateId: null,
   ssccIssuerCounterpartyId: null,
   boxLabelTemplateId: null,
   plannedQty: 500,
@@ -53,6 +51,10 @@ const SHIFT = {
   lateDataAt: null,
   closeReason: null,
   createdAt: "2026-08-01T00:00:00.000Z",
+};
+
+const PLANNING_CONFIG = {
+  defaultBoxLabelTemplateId: null,
 };
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -70,6 +72,7 @@ function stubDependencies(shifts = [SHIFT], createError?: string) {
       if (path === "/api/shifts" && init?.method === "POST" && createError) {
         return jsonResponse(409, { message: createError });
       }
+      if (path === "/api/shifts/planning-config") return jsonResponse(200, PLANNING_CONFIG);
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: shifts });
       if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
       return jsonResponse(200, { items: [] });
@@ -154,6 +157,56 @@ it("keeps the create panel open and shows the server message after a conflict", 
   const alert = await within(panel).findByRole("alert");
   expect(alert.textContent).toContain("A shift already exists for this production slot");
   expect(router.state.location.pathname).toBe("/shifts/new");
+});
+
+it("keeps the panel loading until the planning configuration and templates resolve", async () => {
+  let resolvePlanningConfig: ((response: Response) => void) | undefined;
+  const planningConfigResponse = new Promise<Response>((resolve) => {
+    resolvePlanningConfig = resolve;
+  });
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/shifts/planning-config") return planningConfigResponse;
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
+      return jsonResponse(200, { items: [] });
+    }),
+  );
+  renderPanel(["/shifts/new"]);
+
+  expect(await screen.findByRole("status")).toBeDefined();
+  expect(screen.queryByText("Использовать настройку организации — Не настроен")).toBeNull();
+
+  resolvePlanningConfig?.(jsonResponse(200, PLANNING_CONFIG));
+  expect(await screen.findByLabelText("Шаблон этикетки короба")).toBeDefined();
+});
+
+it("loads shift planning for a manager without requesting the protected organisation profile", async () => {
+  const requests: string[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      const path = String(url);
+      requests.push(path);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, PLANNING_CONFIG);
+      }
+      if (path === "/api/org/profile") {
+        return jsonResponse(403, { message: "Forbidden resource" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path.startsWith("/api/products")) return jsonResponse(200, { items: [PRODUCT] });
+      return jsonResponse(200, { items: [] });
+    }),
+  );
+
+  renderPanel(["/shifts/new"]);
+
+  expect(await screen.findByLabelText("Шаблон этикетки короба")).toBeDefined();
+  expect(requests).toContain("/api/shifts/planning-config");
+  expect(requests).not.toContain("/api/org/profile");
 });
 
 it("blocks Back after a planning field changes until discard", async () => {

@@ -1,5 +1,6 @@
-import { purgeOperatorsMirror, type SqlExecutor } from "./mirror.js";
+import { purgeOperatorsMirror, readShiftMirror, type SqlExecutor } from "./mirror.js";
 import { waitForShiftBundleMirrors } from "./shift-bundle.js";
+import { findUnresolvedBoxPrint } from "./boxes.js";
 import {
   clearStationProductImages,
   waitForStationProductImageMirrors,
@@ -10,6 +11,36 @@ export interface SealedWorkSummary {
   boxes: number;
   exceptions: number;
   total: number;
+}
+
+export interface BackfilledBoxTemplateRecovery {
+  boxId: string;
+  sscc: string;
+}
+
+/**
+ * Detects the one legacy active-shift state that needs a server bundle repair.
+ * Local facts remain authoritative: this only classifies a missing mirrored
+ * template when the same device already owns a durable pending print.
+ */
+export async function readBackfilledBoxTemplateRecovery(
+  exec: SqlExecutor,
+  shiftId: string,
+  terminalId: string | null,
+): Promise<BackfilledBoxTemplateRecovery | null> {
+  const mirror = await readShiftMirror(exec, shiftId);
+  if (
+    !mirror ||
+    mirror.status !== "active" ||
+    mirror.mode !== "aggregation" ||
+    mirror.issuerPrefix === null ||
+    mirror.boxLabelTemplateSpec !== null
+  ) {
+    return null;
+  }
+  const unresolved = await findUnresolvedBoxPrint(exec, shiftId, terminalId, false);
+  if (!unresolved || unresolved.state !== "pending") return null;
+  return { boxId: unresolved.boxId, sscc: unresolved.sscc };
 }
 
 export interface CredentialRejectedEvent {

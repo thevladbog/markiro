@@ -84,6 +84,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shift-exports/:exportId/artifacts/:artifactId/download (ShiftExportsController.download)",
       "GET /shift-exports/formats (ShiftExportsController.formats)",
       "GET /shifts (ShiftsController.listShifts)",
+      "GET /shifts/planning-config (ShiftsController.getPlanningConfig)",
       "GET /shifts/:id (ShiftsController.getShift)",
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /station-devices (StationDevicesController.list)",
@@ -140,6 +141,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     contract: customerContract(CABINET_GUARDS, { mode: "recovery", kind: "shift" }),
     routes: [
       "GET /shifts/:id/bundle (ShiftsController.getBundle)",
+      "GET /shifts/:id/reference-bundle (ShiftsController.getReferenceBundle)",
       "POST /shifts/:id/close (ShiftsController.closeShift)",
     ],
   },
@@ -551,7 +553,10 @@ describe("registered subscription route inventory", () => {
         expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(
           expected,
         );
-        if (route.controller.name === "ShiftsController" && route.handlerName === "getBundle") {
+        if (
+          route.controller.name === "ShiftsController" &&
+          (route.handlerName === "getBundle" || route.handlerName === "getReferenceBundle")
+        ) {
           expect(policy).toEqual({ mode: "recovery", kind: "shift" });
         }
         continue;

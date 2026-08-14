@@ -32,6 +32,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     method: "GET",
     headers: "content-type,x-api-key,x-station-capabilities",
   },
+  {
+    path: "/shifts/cors-probe/reference-bundle",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
   { path: "/products", method: "GET", headers: "content-type,x-api-key,x-station-capabilities" },
   {
     path: "/products/gtin-check",

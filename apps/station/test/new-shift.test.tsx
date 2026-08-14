@@ -391,7 +391,7 @@ describe("NewShift", () => {
     await waitFor(() => expect(screen.getByText("Invalid GTIN")).toBeDefined());
   });
 
-  it("surfaces a server error on failed shift creation, disables Start while busy, and does not call onStarted", async () => {
+  it("shows the generic action failure for an unknown server code, disables Start while busy, and does not call onStarted", async () => {
     let resolveCreate!: (value: Response) => void;
     const createPromise = new Promise<Response>((resolve) => {
       resolveCreate = resolve;
@@ -428,10 +428,114 @@ describe("NewShift", () => {
     await waitFor(() => expect((startButton as HTMLButtonElement).disabled).toBe(true));
 
     resolveCreate(
-      new Response(JSON.stringify({ message: "Product is not active" }), { status: 422 }),
+      new Response(JSON.stringify({ message: "Product is not active", code: "UNKNOWN" }), {
+        status: 422,
+      }),
     );
 
-    await waitFor(() => expect(screen.getByText("Product is not active")).toBeDefined());
+    await waitFor(() => expect(screen.getByText("Action failed. Please try again.")).toBeDefined());
     expect(onStarted).not.toHaveBeenCalled();
+  });
+
+  it("keeps aggregation on the found product, explains missing box labels in English, and retries after configuration", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: "Aggregation shifts require a box label template",
+            code: "BOX_LABEL_TEMPLATE_REQUIRED",
+          }),
+          { status: 422 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "aggregation" }), {
+          status: 201,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "active", mode: "aggregation" }), {
+          status: 200,
+        }),
+      );
+    const onStarted = vi.fn();
+    render(
+      <NewShift client={client} source={silentSource} onStarted={onStarted} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    const startButton = screen.getByRole("button", { name: "Start" });
+    fireEvent.click(startButton);
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "A box label template is not configured in the admin panel. Configure it and try again.",
+        ),
+      ).toBeDefined(),
+    );
+    expect(screen.getByTestId("new-shift-found")).toBeDefined();
+    expect(onStarted).not.toHaveBeenCalled();
+    expectButtonDisabled(startButton, false);
+    expect(fetchMock.mock.calls).toHaveLength(3);
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3000/shifts");
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
+      JSON.stringify({ productId: "p1", mode: "aggregation", plannedDate: "2026-08-14" }),
+    );
+    expect(screen.queryByRole("combobox")).toBeNull();
+
+    fireEvent.click(startButton);
+    await waitFor(() =>
+      expect(onStarted).toHaveBeenCalledWith({ id: "s9", status: "active", mode: "aggregation" }),
+    );
+    expect(fetchMock.mock.calls[4]?.[0]).toBe("http://localhost:3000/shifts/s9/open");
+  });
+
+  it("explains missing box labels in Russian", async () => {
+    await i18n.changeLanguage("ru");
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            message: "Aggregation shifts require a box label template",
+            code: "BOX_LABEL_TEMPLATE_REQUIRED",
+          }),
+          { status: 422 },
+        ),
+      );
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    const input = screen.getByLabelText("Введите или отсканируйте GTIN");
+    fireEvent.change(input, { target: { value: "4600000000015" } });
+    fireEvent.submit(input.closest("form")!);
+    await screen.findByText("Cola");
+
+    fireEvent.click(screen.getByRole("button", { name: "Агрегация" }));
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "В админке не настроен шаблон этикетки короба. Настройте его и повторите.",
+        ),
+      ).toBeDefined(),
+    );
+    await i18n.changeLanguage("en");
   });
 });

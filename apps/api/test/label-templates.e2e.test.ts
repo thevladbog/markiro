@@ -343,6 +343,24 @@ describe.skipIf(!ready)("label-templates e2e", () => {
     });
   });
 
+  it("DELETE /label-templates/:id returns 409 if it is the organisation box default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const template = await agent
+      .post("/label-templates")
+      .send({ name: "Organisation Default", spec: VALID_SPEC })
+      .expect(201);
+    const id = template.body.id as string;
+
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: id }).expect(200);
+
+    const deleted = await agent.delete(`/label-templates/${id}`).expect(409);
+    expect(deleted.body.message).toBe(
+      "Label template is referenced by an organization default, product, or shift",
+    );
+  });
+
   it("DELETE /label-templates/:id returns 409 if referenced by a shift's labelTemplateId, then 204 once unreferenced", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);

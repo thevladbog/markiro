@@ -454,8 +454,6 @@
         "egaisCodeLabel": "Код ЕГАИС",
         "defaultCounterpartyLabel": "Контрагент по умолчанию",
         "noCounterparty": "Не выбран",
-        "defaultLabelTemplateLabel": "Шаблон этикетки по умолчанию",
-        "noLabelTemplate": "Не выбран",
         "submitCreate": "Создать",
         "submitUpdate": "Сохранить",
         "sections": {
@@ -840,10 +838,11 @@
         "ssccIssuerLabel": "Эмитент группового кода",
         "ssccIssuerOurOrganization": "Наша организация",
         "ssccIssuerHint": "Определяет, чьи номера будут на коробах — это не то же самое, что контрагент, для которого предназначен товар.",
-        "labelTemplateLabel": "Шаблон этикетки",
-        "noLabelTemplate": "Не выбран",
         "boxLabelTemplateLabel": "Шаблон этикетки короба",
         "noBoxLabelTemplate": "Не выбран",
+        "boxLabelTemplateOrganization": "Использовать настройку организации — {{name}}",
+        "boxLabelTemplateNotConfigured": "Не настроен",
+        "boxLabelTemplateUnavailable": "Шаблон недоступен — обновите данные",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletsEnabledLabel": "Использовать паллеты",
         "palletCapacityLabel": "Вместимость паллеты, шт",
@@ -852,7 +851,8 @@
         "errors": {
           "productRequired": "Выберите продукт",
           "qtyInvalid": "Введите положительное целое число",
-          "capacityInvalid": "Введите положительное целое число"
+          "capacityInvalid": "Введите положительное целое число",
+          "boxLabelTemplateRequired": "Для агрегации выберите шаблон этикетки короба"
         }
       },
       "closeModal": {
@@ -1735,6 +1735,12 @@
         "innLabel": "ИНН",
         "prefixesLabel": "Префиксы GS1",
         "prefixesHint": "Через запятую, например 4600000, 4600001",
+        "defaultBoxLabelTemplateLabel": "Шаблон этикетки короба по умолчанию",
+        "defaultBoxLabelTemplateUnset": "Не выбран",
+        "defaultBoxLabelTemplateStaleOption": "Недоступный шаблон (удалён)",
+        "defaultBoxLabelTemplateStale": "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
+        "defaultBoxLabelTemplateReload": "Обновить шаблоны",
+        "defaultBoxLabelTemplateLibraryLink": "Открыть библиотеку шаблонов",
         "save": "Сохранить",
         "errors": {
           "glnFormat": "GLN должен состоять ровно из 13 цифр",

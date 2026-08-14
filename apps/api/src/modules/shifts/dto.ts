@@ -12,21 +12,23 @@ export type ShiftStatus = (typeof SHIFT_STATUSES)[number];
 /** Server-computed only (never client-submitted); "admin" for shifts created here. */
 export type ShiftOrigin = "admin" | "station";
 
+export type BoxTemplateResolution =
+  | { ok: true; boxLabelTemplateId: string | null }
+  | { ok: false; code: "BOX_LABEL_TEMPLATE_REQUIRED" };
+
 /** `YYYY-MM-DD`, matches the `date` column's string mode. */
 const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");
 
 /**
- * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`/
- * `labelTemplateId` are server-prefilled from the product when omitted
- * (`undefined`); an explicit `null` opts out of the prefill (see
- * ShiftsService.createShift).
+ * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`
+ * are server-prefilled from the product when omitted (`undefined`); an
+ * explicit `null` opts out of the prefill (see ShiftsService.createShift).
  */
 export const createShiftSchema = z.object({
   productId: z.string().uuid(),
   mode: z.enum(SHIFT_MODES),
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
-  labelTemplateId: z.string().uuid().nullable().optional(),
   /**
    * Whose numbers this shift's boxes carry. Deliberately NOT derived from
    * `counterpartyId` -- that field answers "who is this for", this one
@@ -34,6 +36,10 @@ export const createShiftSchema = z.object({
    * Omitted/null means the tenant's own organisation.
    */
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
+  /**
+   * Omitted snapshots the organisation's current default. Explicit null
+   * opts out; aggregation-mode validation then rejects the null snapshot.
+   */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
@@ -51,8 +57,8 @@ export const updateShiftSchema = z.object({
   mode: z.enum(SHIFT_MODES).optional(),
   lineId: z.string().uuid().nullable().optional(),
   counterpartyId: z.string().uuid().nullable().optional(),
-  labelTemplateId: z.string().uuid().nullable().optional(),
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
+  /** Updates the existing snapshot only when explicitly present. */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
@@ -89,8 +95,6 @@ export interface ShiftDto {
   lineName: string | null;
   counterpartyId: string | null;
   counterpartyName: string | null;
-  labelTemplateId: string | null;
-  labelTemplateName: string | null;
   /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
   ssccIssuerCounterpartyId: string | null;
   boxLabelTemplateId: string | null;
@@ -113,22 +117,33 @@ export interface ListShiftsResponseDto {
   items: ShiftDto[];
 }
 
+/** GET /shifts/planning-config response — the operations-readable planning subset only. */
+export interface ShiftPlanningConfigDto {
+  defaultBoxLabelTemplateId: string | null;
+}
+
+/** Legacy fields retained only on station bundles during a rolling deployment. */
+export type StationBundleProductDto = ProductDto & {
+  defaultLabelTemplateId: null;
+};
+
+/** Legacy fields retained only on station bundles during a rolling deployment. */
+export type StationBundleShiftDto = ShiftDto & {
+  labelTemplateId: null;
+  labelTemplateName: null;
+};
+
 /** GET /shifts/:id/bundle response — everything the station downloads offline. */
 export interface ShiftBundleDto {
-  shift: ShiftDto;
-  product: ProductDto;
-  labelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
+  shift: StationBundleShiftDto;
+  product: StationBundleProductDto;
+  /** Retired item-label compatibility slot. Current servers always serialize null. */
+  labelTemplate: null;
   /**
    * The BOX label's own template (CodeRabbit PR33 review, Finding 3),
-   * resolved from `shift.boxLabelTemplateId` -- entirely separate from
-   * `labelTemplate` above, which is the ITEM label's template. Before this
-   * field existed, the station mirrored only `labelTemplate` and used it for
-   * every print, box included, so a shift with a distinct box template
-   * either printed the item template on every box or (when only a box
-   * template was configured) printed nothing at all. Null exactly when
-   * `shift.boxLabelTemplateId` is null or no longer resolves to a template
-   * this tenant owns -- same shape `labelTemplate` already has, no fallback
-   * to any other template.
+   * resolved from `shift.boxLabelTemplateId`. Null exactly when that snapshot
+   * is null or no longer resolves to a template this tenant owns; it never
+   * falls back to the retired item-label compatibility slot.
    */
   boxLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
   counterpartyGln: string | null;
@@ -158,3 +173,9 @@ export interface ShiftBundleDto {
     consumedThroughSerial: number | null;
   } | null;
 }
+
+/**
+ * GET /shifts/:id/reference-bundle response. It carries only mirrored
+ * reference data and can never allocate or reconcile an SSCC block.
+ */
+export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc"> & { sscc: null };

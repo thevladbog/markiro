@@ -88,15 +88,6 @@ function newQueryClient() {
   });
 }
 
-async function chooseOption(
-  user: ReturnType<typeof userEvent.setup>,
-  label: string,
-  option: string,
-) {
-  await user.click(screen.getByRole("combobox", { name: label }));
-  await user.click(await screen.findByRole("option", { name: option }));
-}
-
 function renderPage(
   access: AccessDocument = ADMIN_ACCESS,
   queryClient: QueryClient = newQueryClient(),
@@ -513,7 +504,6 @@ describe("CatalogPage", () => {
             unitPrice: null,
             egaisCode: null,
             defaultCounterpartyId: "cp1",
-            defaultLabelTemplateId: null,
           }),
         }),
       );
@@ -658,42 +648,11 @@ describe("CatalogPage", () => {
     expect(fetchMock.mock.calls.length).toBe(callsAfterMount + 1);
   });
 
-  const LABEL_TEMPLATE = {
-    id: "lt1",
-    name: "Короб 58×40",
-    widthMm: 58,
-    heightMm: 40,
-    dpi: 203,
-    language: "zpl",
-    updatedAt: "2026-01-01T00:00:00.000Z",
-  };
-
-  it("renders label templates as options in the default label template select", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (url: string) => {
-      const path = String(url);
-      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
-      return jsonResponse(200, { items: [] });
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    renderPage();
-    await screen.findByText("Каталог пуст");
-
-    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
-    await screen.findByText("Новый продукт");
-
-    await user.click(await screen.findByRole("combobox", { name: "Шаблон этикетки по умолчанию" }));
-    expect(screen.getByRole("option", { name: LABEL_TEMPLATE.name })).toBeDefined();
-  });
-
-  it("sends the chosen defaultLabelTemplateId in the create payload", async () => {
-    const user = userEvent.setup();
-    const created = { ...DRAFT_PRODUCT, id: "p4", defaultLabelTemplateId: LABEL_TEMPLATE.id };
+  it("removes the unit-template control and payload from product creation", async () => {
+    const created = { ...DRAFT_PRODUCT, id: "p4" };
     let didCreate = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
-      if (path === "/api/label-templates") return jsonResponse(200, { items: [LABEL_TEMPLATE] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === "/api/products" && init?.method === "POST") {
         didCreate = true;
@@ -709,29 +668,31 @@ describe("CatalogPage", () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
     await screen.findByText("Новый продукт");
 
+    expect(screen.queryByLabelText("Шаблон этикетки по умолчанию")).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url) === "/api/label-templates")).toBe(
+      false,
+    );
     fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Йогурт" } });
     fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
-    await chooseOption(user, "Шаблон этикетки по умолчанию", LABEL_TEMPLATE.name);
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/products",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({
-            gtin: "4006381333931",
-            name: "Йогурт",
-            productGroup: null,
-            boxCapacity: null,
-            palletCapacity: null,
-            unitPrice: null,
-            egaisCode: null,
-            defaultCounterpartyId: null,
-            defaultLabelTemplateId: LABEL_TEMPLATE.id,
-          }),
-        }),
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => String(url) === "/api/products" && init?.method === "POST",
       );
+      expect(postCall).toBeDefined();
+      const body = JSON.parse(postCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body).toEqual({
+        gtin: "4006381333931",
+        name: "Йогурт",
+        productGroup: null,
+        boxCapacity: null,
+        palletCapacity: null,
+        unitPrice: null,
+        egaisCode: null,
+        defaultCounterpartyId: null,
+      });
+      expect(body).not.toHaveProperty("defaultLabelTemplateId");
     });
   });
 
@@ -780,7 +741,6 @@ describe("CatalogPage", () => {
             unitPrice: "52.00",
             egaisCode: "ЕГАИС123",
             defaultCounterpartyId: null,
-            defaultLabelTemplateId: null,
           }),
         }),
       );
@@ -817,6 +777,7 @@ describe("CatalogPage", () => {
     // The edit form must seed from the product being edited, not render blank.
     expect((screen.getByLabelText("Цена за шт., ₽") as HTMLInputElement).value).toBe("52.00");
     expect((screen.getByLabelText("Код ЕГАИС") as HTMLInputElement).value).toBe("EG-123");
+    expect(screen.queryByLabelText("Шаблон этикетки по умолчанию")).toBeNull();
 
     // Save without touching either field -- the PATCH must round-trip the
     // original values, not overwrite them with null (data loss).
@@ -840,6 +801,7 @@ describe("CatalogPage", () => {
     >;
     expect(patchBody.unitPrice).toBe("52.00");
     expect(patchBody.egaisCode).toBe("EG-123");
+    expect(patchBody).not.toHaveProperty("defaultLabelTemplateId");
   });
 
   it("keeps an unsaved edit when the dirty state re-renders the panel route", async () => {

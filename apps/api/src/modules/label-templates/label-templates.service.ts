@@ -19,6 +19,13 @@ import type {
 
 type LabelTemplateRow = typeof schema.labelTemplates.$inferSelect;
 
+const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
+  "org_profiles_box_label_template_tenant_fk",
+  "products_tenant_default_label_template_fk",
+  "shifts_tenant_label_template_fk",
+  "shifts_tenant_box_label_template_fk",
+]);
+
 @Injectable()
 export class LabelTemplatesService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -115,12 +122,20 @@ export class LabelTemplatesService {
         .delete(schema.labelTemplates)
         .where(and(eq(schema.labelTemplates.tenantId, tenantId), eq(schema.labelTemplates.id, id)));
     } catch (error) {
-      // Catch PostgreSQL FK violation errors (code 23503); check both direct
-      // code property and nested cause.code (node-postgres wraps it either way).
-      const err = error as Error & { code?: string; cause?: unknown };
-      const errorCode = err?.code || (err?.cause as Record<string, string> | undefined)?.code;
-      if (errorCode === "23503") {
-        throw new ConflictException("Label template is referenced by products or shifts");
+      // Catch only known PostgreSQL FK references to label_templates. Drizzle
+      // may place the database fields directly on the error or under cause.
+      const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
+      const cause = err?.cause as { code?: string; constraint?: string } | undefined;
+      const errorCode = err?.code ?? cause?.code;
+      const constraint = err?.constraint ?? cause?.constraint;
+      if (
+        errorCode === "23503" &&
+        constraint &&
+        LABEL_TEMPLATE_REFERENCE_CONSTRAINTS.has(constraint)
+      ) {
+        throw new ConflictException(
+          "Label template is referenced by an organization default, product, or shift",
+        );
       }
       throw error;
     }

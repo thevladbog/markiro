@@ -18,7 +18,9 @@ export interface StationBundle {
     lineName: string | null;
     counterpartyId: string | null;
     counterpartyName: string | null;
+    /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
     labelTemplateId: string | null;
+    /** Rolling compatibility: current servers send null; older bundles may still carry a name. */
     labelTemplateName: string | null;
     plannedQty: number | null;
     plannedDate: string | null;
@@ -36,17 +38,16 @@ export interface StationBundle {
     palletCapacity: number | null;
     status: string;
     defaultCounterpartyId: string | null;
+    /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
     defaultLabelTemplateId: string | null;
     image?: StationProductImageDescriptor | null;
   };
+  /** Rolling compatibility: current servers send null; older bundles may still carry an item spec. */
   labelTemplate: { id: string; name: string; spec: unknown } | null;
   /**
-   * The BOX label's own template (CodeRabbit PR33 review, Finding 3) --
-   * entirely separate from `labelTemplate` above, which is the ITEM
-   * template. Null exactly when the shift has no `boxLabelTemplateId`, or it
-   * no longer resolves to a template this tenant owns -- see
-   * `ShiftBundleDto.boxLabelTemplate` on the server for the matching doc
-   * comment.
+   * The BOX label's own template. It is independent from the retired
+   * `labelTemplate` compatibility slot and is the only template WorkScreen
+   * may use for box printing.
    */
   boxLabelTemplate: { id: string; name: string; spec: unknown } | null;
   counterpartyGln: string | null;
@@ -86,9 +87,8 @@ export interface ShiftMirrorRow {
   counterpartyGln: string | null;
   labelTemplateSpec: string | null;
   /**
-   * The box label's OWN template spec (CodeRabbit PR33 review, Finding 3) --
-   * entirely separate from `labelTemplateSpec` above (the ITEM template).
-   * Read by `WorkScreen.tsx`'s box-printing path, never `labelTemplateSpec`.
+   * The box label's own template spec, independent from the retained legacy
+   * item-spec column. Read by WorkScreen's box-printing path exclusively.
    */
   boxLabelTemplateSpec: string | null;
   /** The shift's box capacity (Task 13 review, Finding 1) -- null disables auto-close. */
@@ -140,10 +140,27 @@ const b = (v: boolean) => (v ? 1 : 0);
  * credential rotation when it finishes later.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
-  await upsertBundleBody(exec, bundle);
+  await upsertBundleBody(exec, bundle, false);
 }
 
-async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
+/**
+ * Mirrors reference data without changing the issuer prefix that names the
+ * device's already-held local SSCC pool. Recovery bundles deliberately carry
+ * no device allocation, so a null `bundle.sscc` must not erase that durable
+ * allocation state while repairing a template.
+ */
+export async function upsertReferenceBundle(
+  exec: SqlExecutor,
+  bundle: StationBundle,
+): Promise<void> {
+  await upsertBundleBody(exec, bundle, true);
+}
+
+async function upsertBundleBody(
+  exec: SqlExecutor,
+  bundle: StationBundle,
+  preserveIssuerPrefix: boolean,
+): Promise<void> {
   const s = bundle.shift;
   await exec.run(
     `INSERT INTO shift_mirror (
@@ -163,7 +180,7 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        planned_qty=excluded.planned_qty, planned_date=excluded.planned_date,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
-       issuer_prefix=excluded.issuer_prefix,
+       issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
        box_label_template_spec=excluded.box_label_template_spec`,
     [
       s.id,

@@ -60,7 +60,7 @@ function isStationRequest(req: Request): boolean {
   }
 
   return (
-    (method === "GET" && /^\/shifts\/[^/]+\/bundle$/.test(path)) ||
+    (method === "GET" && /^\/shifts\/[^/]+\/(?:bundle|reference-bundle)$/.test(path)) ||
     (method === "POST" && /^\/shifts\/[^/]+\/open$/.test(path))
   );
 }

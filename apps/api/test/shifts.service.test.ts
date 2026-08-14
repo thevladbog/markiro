@@ -128,6 +128,60 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
   });
 });
 
+describe("ShiftsService box-template snapshot boundary", () => {
+  it("rejects a foreign organisation default through the shift composite FK and inserts no shift", async () => {
+    const tenantId = "tenant-1";
+    const productId = "10000000-0000-4000-8000-000000000001";
+    const foreignTemplateId = "20000000-0000-4000-8000-000000000002";
+    const insertedShifts: Record<string, unknown>[] = [];
+
+    const product = {
+      ...PRODUCT_ROW,
+      id: productId,
+      tenantId,
+      status: "active",
+    };
+    const db = {
+      select: () => ({
+        from: (table: unknown) => {
+          const rows =
+            table === schema.products
+              ? [product]
+              : table === schema.orgProfiles
+                ? [{ defaultBoxLabelTemplateId: foreignTemplateId }]
+                : insertedShifts;
+          return chain(rows, table, []);
+        },
+      }),
+      insert: (table: unknown) => ({
+        values: (values: Record<string, unknown>) => ({
+          returning: async () => {
+            if (table === schema.shifts && values.boxLabelTemplateId === foreignTemplateId) {
+              throw {
+                code: "23503",
+                constraint: "shifts_tenant_box_label_template_fk",
+              };
+            }
+            insertedShifts.push(values);
+            return [{ ...SHIFT_ROW, ...values }];
+          },
+        }),
+      }),
+    } as unknown as Db;
+    const entitlements = {
+      assertFeatureAccess: async () => undefined,
+    } as unknown as EntitlementsService;
+    const service = new ShiftsService(db, fakeOperatorsService(), {} as SsccService, entitlements);
+
+    await expect(
+      service.createShift(tenantId, { productId, mode: "aggregation" }),
+    ).rejects.toMatchObject({
+      response: { message: "Unknown box label template for this organization" },
+    });
+    expect(insertedShifts).toEqual([]);
+  });
+});
+
 function updateDb(current: typeof SHIFT_ROW) {
   let stored = { ...current };
   const set = vi.fn((values: Partial<typeof SHIFT_ROW>) => {

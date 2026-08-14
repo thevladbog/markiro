@@ -75,6 +75,12 @@ export interface SyncEngineDeps {
 export interface SyncEngine {
   /** Ask for a drain. Safe to call from anywhere, any number of times. */
   nudge(): void;
+  /** Freeze local sync commits; an in-flight server response becomes a retry. */
+  pause(): void;
+  /** Pause immediately, then resolve only after every in-flight network/commit phase retires. */
+  pauseAndWaitForIdle(): Promise<void>;
+  /** Lift a prior pause and immediately retry any durable pending work. */
+  resume(): void;
   stop(): void;
   /** Resolves when no drain is in flight (tests await this instead of sleeping). */
   idle(): Promise<void>;
@@ -548,6 +554,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const credentialGeneration = deps.credentialGeneration ?? createCredentialGeneration();
   let draining = false;
   let stopped = false;
+  let paused = false;
+  // A pause permanently invalidates work that was already in flight. A
+  // later resume must not make that old response committable again merely
+  // because the boolean pause has been lifted.
+  let pauseEpoch = 0;
   let credentialRejected = false;
   let requested = false;
   let lastSuccessAt: number | null = null;
@@ -711,11 +722,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   async function drain(): Promise<void> {
-    if (draining || stopped || credentialGeneration.sealed) return;
+    if (draining || stopped || paused || credentialGeneration.sealed) return;
     draining = true;
+    const drainPauseEpoch = pauseEpoch;
+    const pauseInvalidated = () => paused || pauseEpoch !== drainPauseEpoch;
     try {
-      for (;;) {
-        if (stopped || credentialGeneration.sealed) break;
+      drainLoop: for (;;) {
+        if (stopped || pauseInvalidated() || credentialGeneration.sealed) break;
         // A ceiling from a previous failed attempt on THIS batch — whether
         // pinned earlier in this same process or persisted by a process
         // that pinned it and then never got to clear it — re-reads exactly
@@ -743,7 +756,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         await ensurePendingBatchId();
         let exceptions = await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
 
-        if (credentialGeneration.sealed) break;
+        if (pauseInvalidated() || credentialGeneration.sealed) break;
 
         // Corrections and scans share one logical timeline even though they
         // live in separate SQLite tables. On a fresh attempt, send only the
@@ -869,7 +882,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           } finally {
             preparationLease.release();
           }
-          if (credentialGeneration.sealed) break;
+          if (pauseInvalidated() || credentialGeneration.sealed) break;
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId,
             items: toPayload(batch),
@@ -880,7 +893,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // Another engine sharing this key may have received the terminal
           // 401 while this request was in flight. Its response is now stale:
           // do not record conflicts/ranges, ack facts, or clear retry state.
-          if (credentialGeneration.sealed) break;
+          if (pauseInvalidated() || credentialGeneration.sealed) break;
           if (!isBatchResponse(res)) {
             // Parsed fine but isn't this endpoint's contract — could be a
             // proxy/captive portal on the plant network. Fall into the
@@ -890,6 +903,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           const commitLease = acquireCredentialCommitLease(credentialGeneration);
           if (!commitLease) break;
           try {
+            const commitIsCurrent = () => !pauseInvalidated() && !credentialGeneration.sealed;
+            if (!commitIsCurrent()) break drainLoop;
             // Filtered element-by-element, not all-or-nothing: dropping only
             // the malformed entry (Finding 2) keeps the rest of this batch's
             // conflicts intact. That matters more here than it would somewhere
@@ -941,6 +956,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 // makes when it marks a box item displaced rather than
                 // deleting it. Same try/catch as `recordConflicts` above, for
                 // the same reason: this is bookkeeping, not delivery.
+                //
+                // Once conflict persistence starts, finish this complete
+                // idempotent bookkeeping unit before observing a pause. The
+                // server's already-applied retry carries no conflicts, so
+                // stopping between rows would permanently leave the tail of
+                // this persisted set attached to an open box. The epoch check
+                // immediately after the unit still prevents any stale ack.
                 for (const c of reported) {
                   await deps.exec.run(
                     `UPDATE codes_mirror SET box_id = NULL
@@ -952,6 +974,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               } catch (err) {
                 console.error("station: recording conflicts failed", err);
               }
+              if (!commitIsCurrent()) break drainLoop;
             }
             // Applied AFTER the validated response and BEFORE the ack, in its
             // own try/catch: a pool top-up that fails must not block delivery,
@@ -960,16 +983,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // response carries another block. Losing one block costs at most
             // some burnt numbers, and SSCCs need not be contiguous.
             if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
+              if (!commitIsCurrent()) break drainLoop;
               try {
                 await addRange(deps.exec, res.ssccBlock);
               } catch (err) {
                 console.error("station: applying serial block failed", err);
               }
+              if (!commitIsCurrent()) break drainLoop;
             }
             const denied = Array.isArray(res.denied)
               ? res.denied.filter(isDeniedStationRecord)
               : [];
             if (denied.length > 0) {
+              if (!commitIsCurrent()) break drainLoop;
               try {
                 await savePersistedValue(
                   deps.exec,
@@ -984,36 +1010,48 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 // metadata table must not wedge every later production scan.
                 console.error("station: preserving recovery denials failed", err);
               }
+              if (!commitIsCurrent()) break drainLoop;
             }
             // `alreadyApplied` is a success: this exact batch is on the
             // server already, so holding on to it would wedge the queue
             // forever.
             if (maxId !== null) {
+              if (!commitIsCurrent()) break drainLoop;
               await ackThrough(deps.exec, maxId);
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (boxes.length > 0) {
               // `boxes` itself -- not just the ids -- so the ack can gate each
               // row on the outcome fields actually read into THIS payload
               // (Finding 6): see `ackBoxes`'s own doc comment.
+              if (!commitIsCurrent()) break drainLoop;
               await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (newExceptionCeiling !== null) {
+              if (!commitIsCurrent()) break drainLoop;
               await ackExceptionsThrough(deps.exec, newExceptionCeiling);
+              if (!commitIsCurrent()) break drainLoop;
             }
             // Clear the identity first, then its ceilings. A crash in between
             // leaves stale ceilings that exclude newer rows and are safely
             // discarded by the empty-prefix branch above. The reverse order
             // could expose newer rows under an already-applied batch id.
+            if (!commitIsCurrent()) break drainLoop;
             await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
+            if (!commitIsCurrent()) break drainLoop;
             pendingBatchId = null;
             if (pendingCeiling !== null) {
               await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (pendingBoxCeiling !== null) {
               await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (pendingExceptionCeiling !== null) {
               await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
             }
             pendingCeiling = null;
             pendingBoxCeiling = null;
@@ -1028,6 +1066,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             await rejectCredential();
             break;
           }
+          if (pauseInvalidated()) break;
           if (credentialGeneration.sealed) break;
           // Every non-credential failure here — network error, timeout,
           // non-401 response, bad JSON, or wrong shape — is retried
@@ -1079,7 +1118,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // scheduled retry performs a full drain of whatever is queued by the
       // time it fires, so no request is actually lost, only its timing.
       const shouldContinue =
-        requested && !stopped && !credentialGeneration.sealed && retryTimer === null;
+        requested && !stopped && !paused && !credentialGeneration.sealed && retryTimer === null;
       requested = false;
       if (shouldContinue) {
         void drain();
@@ -1090,7 +1129,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   function scheduleRetry(): void {
-    if (stopped || credentialGeneration.sealed || retryTimer !== null) return;
+    if (stopped || paused || credentialGeneration.sealed || retryTimer !== null) return;
     const delay = backoffMs;
     backoffMs = Math.min(backoffMs * 2, BACKOFF_CAP_MS);
     retryTimer = setTimeout(() => {
@@ -1099,9 +1138,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }, delay);
   }
 
+  function pause(): void {
+    pauseEpoch += 1;
+    paused = true;
+    requested = false;
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  }
+
+  function idle(): Promise<void> {
+    if (!draining) return Promise.resolve();
+    return new Promise<void>((resolve) => idleResolvers.push(resolve));
+  }
+
   return {
     nudge() {
-      if (stopped || credentialGeneration.sealed) return;
+      if (stopped || paused || credentialGeneration.sealed) return;
       if (draining) {
         requested = true;
         return;
@@ -1115,6 +1169,20 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       if (retryTimer !== null) return;
       void drain();
     },
+    pause,
+    pauseAndWaitForIdle() {
+      pause();
+      return idle();
+    },
+    resume() {
+      if (stopped || credentialGeneration.sealed || !paused) return;
+      paused = false;
+      if (draining) {
+        requested = true;
+        return;
+      }
+      void drain();
+    },
     stop() {
       stopped = true;
       if (retryTimer !== null) {
@@ -1122,9 +1190,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         retryTimer = null;
       }
     },
-    idle() {
-      if (!draining) return Promise.resolve();
-      return new Promise<void>((resolve) => idleResolvers.push(resolve));
-    },
+    idle,
   };
 }

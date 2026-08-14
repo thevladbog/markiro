@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { OrgProfilePage } from "../src/pages/settings/OrgProfilePage.js";
@@ -24,7 +25,9 @@ function renderPage() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <OrgProfilePage />
+      <MemoryRouter>
+        <OrgProfilePage />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -36,15 +39,28 @@ const PROFILE = {
   pickupLimitsEnabled: true,
   logoUrl: null as string | null,
   logoRevision: null as string | null,
+  defaultBoxLabelTemplateId: null as string | null,
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000 };
+const LABEL_TEMPLATES = [
+  {
+    id: "11111111-1111-4111-8111-111111111111",
+    name: "Короб 100 × 75",
+    widthMm: 100,
+    heightMm: 75,
+    dpi: 203 as const,
+    language: "zpl" as const,
+    updatedAt: "2026-08-14T08:00:00.000Z",
+  },
+];
 
 /** Routes the shared `fetch` mock by URL/method -- both GET/PUT `/org/profile` and its `/sscc` sibling are called on this one page. */
 function routeFetch(overrides: {
   profile?: (init?: RequestInit) => Response | Promise<Response>;
   sscc?: (init?: RequestInit) => Response | Promise<Response>;
   logo?: (init?: RequestInit) => Response | Promise<Response>;
+  labelTemplates?: (init?: RequestInit) => Response | Promise<Response>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === "/api/org/profile/logo") {
@@ -52,6 +68,11 @@ function routeFetch(overrides: {
     }
     if (url === "/api/org/profile/sscc") {
       return overrides.sscc ? overrides.sscc(init) : jsonResponse(200, COUNTER);
+    }
+    if (url === "/api/label-templates") {
+      return overrides.labelTemplates
+        ? overrides.labelTemplates(init)
+        : jsonResponse(200, { items: LABEL_TEMPLATES });
     }
     if (url === "/api/org/profile") {
       return overrides.profile ? overrides.profile(init) : jsonResponse(200, PROFILE);
@@ -69,6 +90,177 @@ async function cardOf(titleText: string): Promise<HTMLElement> {
 }
 
 describe("OrgProfilePage", () => {
+  it("shows the box-label default selector, its tenant templates, and the template library link", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = (await within(profileCard).findByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    )) as HTMLSelectElement;
+    expect(selector.value).toBe("");
+    expect(within(selector).getByRole("option", { name: "Не выбран" })).toBeDefined();
+    expect(within(selector).getByRole("option", { name: "Короб 100 × 75" })).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Открыть библиотеку шаблонов" }).getAttribute("href"),
+    ).toBe("/labels");
+  });
+
+  it("saves a selected default box-label template UUID", async () => {
+    const selectedId = LABEL_TEMPLATES[0]?.id;
+    if (!selectedId) throw new Error("Label template fixture is missing");
+    let profile = PROFILE;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = { ...profile, defaultBoxLabelTemplateId: selectedId };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    fireEvent.change(
+      await within(profileCard).findByLabelText("Шаблон этикетки короба по умолчанию"),
+      { target: { value: selectedId } },
+    );
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            defaultBoxLabelTemplateId: selectedId,
+          }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Профиль сохранён");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Profile success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("clears the saved default box-label template with an explicit null", async () => {
+    const selectedId = LABEL_TEMPLATES[0]?.id;
+    if (!selectedId) throw new Error("Label template fixture is missing");
+    let profile: typeof PROFILE = { ...PROFILE, defaultBoxLabelTemplateId: selectedId };
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = { ...profile, defaultBoxLabelTemplateId: null };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = (await within(profileCard).findByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    )) as HTMLSelectElement;
+    expect(selector.value).toBe(selectedId);
+    fireEvent.change(selector, { target: { value: "" } });
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({
+            gln: PROFILE.gln,
+            inn: PROFILE.inn,
+            gs1Prefixes: PROFILE.gs1Prefixes,
+            defaultBoxLabelTemplateId: null,
+          }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Профиль сохранён");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Profile success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("keeps a deleted saved template visible and blocks saving until a valid template is selected", async () => {
+    const staleId = "22222222-2222-4222-8222-222222222222";
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, { ...PROFILE, defaultBoxLabelTemplateId: staleId }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = (await within(profileCard).findByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    )) as HTMLSelectElement;
+    expect(selector.value).toBe(staleId);
+    expect(
+      within(selector).getByRole("option", { name: "Недоступный шаблон (удалён)" }),
+    ).toBeDefined();
+    expect(
+      within(profileCard).getByText(
+        "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
+      ),
+    ).toBeDefined();
+    const save = within(profileCard).getByRole("button", { name: "Сохранить" });
+    expect(save).toHaveProperty("disabled", true);
+    expect(within(profileCard).getByRole("button", { name: "Обновить шаблоны" })).toBeDefined();
+
+    fireEvent.change(selector, { target: { value: LABEL_TEMPLATES[0]?.id } });
+    expect(save).toHaveProperty("disabled", false);
+  });
+
+  it("keeps a deleted saved template unavailable when refreshing the template list fails", async () => {
+    const staleId = "22222222-2222-4222-8222-222222222222";
+    let labelTemplateRequests = 0;
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, { ...PROFILE, defaultBoxLabelTemplateId: staleId }),
+      labelTemplates: () => {
+        labelTemplateRequests += 1;
+        return labelTemplateRequests === 1
+          ? jsonResponse(200, { items: LABEL_TEMPLATES })
+          : jsonResponse(500, { message: "template library unavailable" });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = (await within(profileCard).findByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    )) as HTMLSelectElement;
+    const save = within(profileCard).getByRole("button", { name: "Сохранить" });
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Обновить шаблоны" }));
+
+    await waitFor(() => expect(labelTemplateRequests).toBe(2));
+    expect(selector.value).toBe(staleId);
+    expect(
+      within(selector).getByRole("option", { name: "Недоступный шаблон (удалён)" }),
+    ).toBeDefined();
+    expect(
+      within(profileCard).getByText(
+        "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
+      ),
+    ).toBeDefined();
+    expect(save).toHaveProperty("disabled", true);
+    expect(within(profileCard).getByRole("button", { name: "Обновить шаблоны" })).toBeDefined();
+  });
+
   it("saves the all-kiosk pickup-limit toggle and explains that employee values are retained", async () => {
     const fetchMock = routeFetch({
       profile: (init) =>
@@ -194,8 +386,12 @@ describe("OrgProfilePage", () => {
     const profileCard = await cardOf("Профиль организации");
     const inn = within(profileCard).getByLabelText("ИНН") as HTMLInputElement;
     const prefixes = within(profileCard).getByLabelText("Префиксы GS1") as HTMLInputElement;
+    const defaultTemplate = within(profileCard).getByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    ) as HTMLSelectElement;
     fireEvent.change(inn, { target: { value: "7707654321" } });
     fireEvent.change(prefixes, { target: { value: "4600000, 4609999" } });
+    fireEvent.change(defaultTemplate, { target: { value: LABEL_TEMPLATES[0]?.id } });
 
     const logoInput = screen.getByLabelText("Загрузить логотип");
     fireEvent.change(logoInput, {
@@ -204,11 +400,13 @@ describe("OrgProfilePage", () => {
     await screen.findByRole("img", { name: "Логотип организации" });
     expect(inn.value).toBe("7707654321");
     expect(prefixes.value).toBe("4600000, 4609999");
+    expect(defaultTemplate.value).toBe(LABEL_TEMPLATES[0]?.id);
 
     fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
     await screen.findByLabelText("Логотип Markiro по умолчанию");
     expect(inn.value).toBe("7707654321");
     expect(prefixes.value).toBe("4600000, 4609999");
+    expect(defaultTemplate.value).toBe(LABEL_TEMPLATES[0]?.id);
 
     const getsBeforePolicySave = profileGetCount;
     fireEvent.click(
@@ -220,6 +418,7 @@ describe("OrgProfilePage", () => {
     await waitFor(() => expect(profileGetCount).toBeGreaterThan(getsBeforePolicySave));
     expect(inn.value).toBe("7707654321");
     expect(prefixes.value).toBe("4600000, 4609999");
+    expect(defaultTemplate.value).toBe(LABEL_TEMPLATES[0]?.id);
   });
 
   it("adopts a clean profile refetch", async () => {
@@ -397,7 +596,12 @@ describe("OrgProfilePage", () => {
 
   it("submits a normalized PUT /org/profile payload on save and refetches", async () => {
     let didUpdate = false;
-    const updatedProfile = { gln: "6291041500213", gs1Prefixes: ["4600000", "4600001"], inn: null };
+    const updatedProfile = {
+      ...EMPTY_PROFILE,
+      gln: "6291041500213",
+      gs1Prefixes: ["4600000", "4600001"],
+      inn: null,
+    };
     const fetchMock = routeFetch({
       profile: (init) => {
         if (init?.method === "PUT") {

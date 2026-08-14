@@ -34,6 +34,8 @@ import {
   type ListShiftsResponseDto,
   type ShiftBundleDto,
   type ShiftDto,
+  type ShiftPlanningConfigDto,
+  type ShiftReferenceBundleDto,
   type UpdateShiftDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
@@ -58,8 +60,14 @@ export class ShiftsController {
     return this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
   }
 
-  // Cabinet-only: not one of the station's four routes (list, create, open,
-  // bundle) below. A device reading an arbitrary shift by id has no
+  @Get("planning-config")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async getPlanningConfig(@Req() req: RequestWithTenant): Promise<ShiftPlanningConfigDto> {
+    return this.shiftsService.getPlanningConfig(req.tenantId!);
+  }
+
+  // Cabinet-only: not one of the station's five routes (list, create, open,
+  // bundle, reference bundle) below. A device reading an arbitrary shift by id has no
   // legitimate use once it can already list/open/bundle its own.
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
@@ -133,5 +141,15 @@ export class ShiftsController {
   @AllowSubscriptionRecovery("shift")
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
     return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
+  }
+
+  @Get(":id/reference-bundle")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @AllowSubscriptionRecovery("shift")
+  async getReferenceBundle(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<ShiftReferenceBundleDto> {
+    return this.shiftsService.getReferenceBundle(req.tenantId!, id);
   }
 }

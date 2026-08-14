@@ -127,6 +127,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: null,
       gs1Prefixes: [],
       inn: null,
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -149,6 +150,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: ["4600000", "4600001"],
       inn: "7701234567",
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -173,10 +175,93 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7709876543",
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
     });
+  });
+
+  it("PUT /org/profile sets, preserves, and clears a same-tenant box label default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: orgId })
+      .expect(200);
+    const template = await agent
+      .post("/label-templates")
+      .send({
+        name: "Organisation box default",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203,
+          language: "zpl",
+          elements: [{ kind: "text", id: "default", xMm: 2, yMm: 2, text: "Box", fontSizePt: 12 }],
+        },
+      })
+      .expect(201);
+    const templateId = template.body.id as string;
+
+    const set = await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: templateId })
+      .expect(200);
+    expect(set.body.defaultBoxLabelTemplateId).toBe(templateId);
+
+    const omitted = await agent.put("/org/profile").send({ inn: "7701234567" }).expect(200);
+    expect(omitted.body.defaultBoxLabelTemplateId).toBe(templateId);
+
+    const cleared = await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: null })
+      .expect(200);
+    expect(cleared.body.defaultBoxLabelTemplateId).toBeNull();
+  });
+
+  it("PUT /org/profile rejects malformed and foreign box label defaults without leaking tenant data", async () => {
+    const first = request.agent(app!.getHttpServer());
+    const firstOrg = await signUpWithInactiveOrg(first);
+    await first
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: firstOrg })
+      .expect(200);
+
+    const second = request.agent(app!.getHttpServer());
+    const secondOrg = await signUpWithInactiveOrg(second);
+    await second
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: secondOrg })
+      .expect(200);
+    const foreignTemplate = await second
+      .post("/label-templates")
+      .send({
+        name: "Other organisation default",
+        spec: {
+          widthMm: 58,
+          heightMm: 40,
+          dpi: 203,
+          language: "zpl",
+          elements: [{ kind: "text", id: "foreign", xMm: 2, yMm: 2, text: "Box", fontSizePt: 12 }],
+        },
+      })
+      .expect(201);
+
+    await first.put("/org/profile").send({ defaultBoxLabelTemplateId: "not-a-uuid" }).expect(400);
+    const rejected = await first
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: foreignTemplate.body.id })
+      .expect(400);
+    expect(rejected.body.message).toBe("Unknown box label template for this organization");
+    expect(JSON.stringify(rejected.body)).not.toContain(firstOrg);
+    expect(JSON.stringify(rejected.body)).not.toContain(secondOrg);
+    expect(JSON.stringify(rejected.body)).not.toContain(
+      "org_profiles_box_label_template_tenant_fk",
+    );
+
+    const profile = await first.get("/org/profile").expect(200);
+    expect(profile.body.defaultBoxLabelTemplateId).toBeNull();
   });
 
   it("PUT /org/profile rejects an invalid GLN format with 400", async () => {
@@ -218,6 +303,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7701234567",
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -229,6 +315,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: "6291041500213",
       gs1Prefixes: [],
       inn: "7701234567",
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -256,6 +343,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: null,
       gs1Prefixes: [],
       inn: null,
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: true,
       logoUrl: null,
       logoRevision: null,
@@ -283,6 +371,7 @@ describe.skipIf(!ready)("org profile e2e", () => {
       gln: null,
       gs1Prefixes: [],
       inn: null,
+      defaultBoxLabelTemplateId: null,
       pickupLimitsEnabled: false,
       logoUrl: null,
       logoRevision: null,

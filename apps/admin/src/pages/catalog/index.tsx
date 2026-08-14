@@ -26,7 +26,6 @@ import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
-import { useLabelTemplates } from "../labels/api.js";
 import {
   productImageUrl,
   useDeleteProduct,
@@ -218,15 +217,8 @@ export function CatalogPage() {
     isError: counterpartiesError,
     refetch: refetchCounterparties,
   } = useCounterparties();
-  const {
-    data: labelTemplatesData,
-    isPending: labelTemplatesPending,
-    isError: labelTemplatesError,
-    refetch: refetchLabelTemplates,
-  } = useLabelTemplates();
   const items = data ?? [];
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
-  const labelTemplates = useMemo(() => labelTemplatesData ?? [], [labelTemplatesData]);
 
   const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.catalog.statusFilter.all") },
@@ -283,7 +275,7 @@ export function CatalogPage() {
   );
 
   const retryPanelData = async () => {
-    await Promise.all([refetchProducts(), refetchCounterparties(), refetchLabelTemplates()]);
+    await Promise.all([refetchProducts(), refetchCounterparties()]);
   };
 
   return (
@@ -343,9 +335,6 @@ export function CatalogPage() {
             counterparties,
             counterpartiesPending,
             counterpartiesError,
-            labelTemplates,
-            labelTemplatesPending,
-            labelTemplatesError,
             retryPanelData,
           } satisfies CatalogPanelContext
         }

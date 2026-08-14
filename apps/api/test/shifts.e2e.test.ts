@@ -10,11 +10,30 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { createTestStationDevice } from "./support/auth";
+import { createTestStationDevice, setOnlyOrganizationMemberRole } from "./support/auth";
+import { createShiftSchema, updateShiftSchema } from "../src/modules/shifts/dto";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
+
+describe("shift DTO compatibility boundary", () => {
+  it("strips the retired labelTemplateId from create and update payloads", () => {
+    const productId = randomUUID();
+    const legacyTemplateId = randomUUID();
+
+    expect(
+      createShiftSchema.parse({
+        productId,
+        mode: "validation",
+        labelTemplateId: legacyTemplateId,
+      }),
+    ).toEqual({ productId, mode: "validation" });
+    expect(updateShiftSchema.parse({ plannedQty: 10, labelTemplateId: legacyTemplateId })).toEqual({
+      plannedQty: 10,
+    });
+  });
+});
 
 describe.skipIf(!ready)("lines + shifts e2e", () => {
   let app: INestApplication | undefined;
@@ -111,6 +130,37 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     return id;
   }
 
+  async function setDefaultBoxLabelTemplate(
+    agent: ReturnType<typeof request.agent>,
+    tenantId: string,
+    name = "Default Box Template",
+  ): Promise<string> {
+    const id = await seedLabelTemplate(tenantId, name);
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: id }).expect(200);
+    return id;
+  }
+
+  async function shiftRows(tenantId: string) {
+    return db
+      .select({ id: schema.shifts.id })
+      .from(schema.shifts)
+      .where(eq(schema.shifts.tenantId, tenantId));
+  }
+
+  it("lets a manager read only the box-template default needed for shift planning", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const defaultBoxLabelTemplateId = await setDefaultBoxLabelTemplate(agent, orgId);
+    await setOnlyOrganizationMemberRole(db, orgId, "manager");
+
+    // The full settings profile remains protected from managers.
+    await agent.get("/org/profile").expect(403);
+
+    const response = await agent.get("/shifts/planning-config").expect(200);
+    expect(response.body).toEqual({ defaultBoxLabelTemplateId });
+    expect(Object.keys(response.body)).toEqual(["defaultBoxLabelTemplateId"]);
+  });
+
   // ---------------------------------------------------------------------
   // Lines CRUD
   // ---------------------------------------------------------------------
@@ -194,6 +244,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("POST /shifts prefills boxCapacity/palletCapacity/counterpartyId from an active product", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    await setDefaultBoxLabelTemplate(agent, orgId);
 
     const counterpartyId = await seedCounterparty(orgId, "Default Buyer");
     const productId = await seedProduct(orgId, {
@@ -246,7 +297,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     });
   });
 
-  it("POST /shifts prefills labelTemplateId from the product's defaultLabelTemplateId", async () => {
+  it("POST /shifts does not copy a seeded product item-label binding", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
@@ -260,70 +311,15 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     });
 
     const res = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const id = res.body.id as string;
 
-    expect(res.body).toMatchObject({ productId, labelTemplateId: templateId });
-  });
-
-  it("POST /shifts: explicit labelTemplateId null overrides the product default (no effective template)", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    const orgId = await signUpAndActivate(agent);
-
-    const templateId = await seedLabelTemplate(orgId, "Product Default Template");
-    const productId = await seedProduct(orgId, {
-      status: "active",
-      productGroup: "Beverages",
-      boxCapacity: 12,
-      palletCapacity: 48,
-      defaultLabelTemplateId: templateId,
-    });
-
-    // aggregation mode is deliberately used here to pin the plan's rule that
-    // a shift WITHOUT an effective label template is still allowed to be
-    // created -- the printing station decides the fallback later.
-    const res = await agent
-      .post("/shifts")
-      .send({ productId, mode: "aggregation", labelTemplateId: null })
-      .expect(201);
-
-    expect(res.body).toMatchObject({ productId, labelTemplateId: null });
-  });
-
-  it("POST /shifts: an explicit labelTemplateId overrides the product default with its own", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    const orgId = await signUpAndActivate(agent);
-
-    const defaultTemplateId = await seedLabelTemplate(orgId, "Product Default Template");
-    const ownTemplateId = await seedLabelTemplate(orgId, "Shift Own Template");
-    const productId = await seedProduct(orgId, {
-      status: "active",
-      productGroup: "Beverages",
-      boxCapacity: 12,
-      palletCapacity: 48,
-      defaultLabelTemplateId: defaultTemplateId,
-    });
-
-    const res = await agent
-      .post("/shifts")
-      .send({ productId, mode: "validation", labelTemplateId: ownTemplateId })
-      .expect(201);
-
-    expect(res.body).toMatchObject({ productId, labelTemplateId: ownTemplateId });
-  });
-
-  it("POST /shifts: no product default and no override -> labelTemplateId is null (allowed)", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    const orgId = await signUpAndActivate(agent);
-
-    const productId = await seedProduct(orgId, {
-      status: "active",
-      productGroup: "Beverages",
-      boxCapacity: 12,
-      palletCapacity: 48,
-    });
-
-    const res = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
-
-    expect(res.body).toMatchObject({ productId, labelTemplateId: null });
+    expect(res.body).not.toHaveProperty("labelTemplateId");
+    expect(res.body).not.toHaveProperty("labelTemplateName");
+    const [stored] = await db
+      .select({ labelTemplateId: schema.shifts.labelTemplateId })
+      .from(schema.shifts)
+      .where(and(eq(schema.shifts.tenantId, orgId), eq(schema.shifts.id, id)));
+    expect(stored?.labelTemplateId).toBeNull();
   });
 
   it("POST /shifts rejects a draft product with 422", async () => {
@@ -340,6 +336,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("POST /shifts: aggregation mode without an effective boxCapacity is rejected with 400", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    await setDefaultBoxLabelTemplate(agent, orgId);
 
     const productId = await seedProduct(orgId, {
       status: "active",
@@ -360,6 +357,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   it("POST /shifts: palletsEnabled without an effective palletCapacity is rejected with 400", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    await setDefaultBoxLabelTemplate(agent, orgId);
 
     const productId = await seedProduct(orgId, {
       status: "active",
@@ -456,26 +454,44 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
   });
 
-  it("POST /shifts rejects a cross-tenant labelTemplateId with 400", async () => {
-    const agent1 = request.agent(app!.getHttpServer());
-    const org1 = await signUpAndActivate(agent1);
-    const templateId = await seedLabelTemplate(org1, "Org1 Template");
-
-    const agent2 = request.agent(app!.getHttpServer());
-    const org2 = await signUpAndActivate(agent2);
-    const productId = await seedProduct(org2, {
+  it("GET/list/PATCH omit a seeded legacy item binding and PATCH leaves its column untouched", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const templateId = await seedLabelTemplate(orgId, "Legacy Item Template");
+    const productId = await seedProduct(orgId, {
       status: "active",
       productGroup: "Beverages",
       boxCapacity: 12,
       palletCapacity: 48,
     });
 
-    const res = await agent2
-      .post("/shifts")
-      .send({ productId, mode: "validation", labelTemplateId: templateId })
-      .expect(400);
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const id = created.body.id as string;
+    await db
+      .update(schema.shifts)
+      .set({ labelTemplateId: templateId })
+      .where(and(eq(schema.shifts.tenantId, orgId), eq(schema.shifts.id, id)));
 
-    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
+    const getRes = await agent.get(`/shifts/${id}`).expect(200);
+    const listRes = await agent.get("/shifts").expect(200);
+    const patchRes = await agent
+      .patch(`/shifts/${id}`)
+      .send({ plannedQty: 25, labelTemplateId: null })
+      .expect(200);
+
+    for (const response of [getRes.body, patchRes.body]) {
+      expect(response).not.toHaveProperty("labelTemplateId");
+      expect(response).not.toHaveProperty("labelTemplateName");
+    }
+    const listed = listRes.body.items.find((item: { id: string }) => item.id === id);
+    expect(listed).not.toHaveProperty("labelTemplateId");
+    expect(listed).not.toHaveProperty("labelTemplateName");
+
+    const [stored] = await db
+      .select({ labelTemplateId: schema.shifts.labelTemplateId })
+      .from(schema.shifts)
+      .where(and(eq(schema.shifts.tenantId, orgId), eq(schema.shifts.id, id)));
+    expect(stored?.labelTemplateId).toBe(templateId);
   });
 
   // ---------------------------------------------------------------------
@@ -555,11 +571,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("sscc issuer"));
   });
 
-  it("stores a boxLabelTemplateId distinct from the shift's own labelTemplateId", async () => {
+  it("stores an explicit boxLabelTemplateId without exposing an item-label binding", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
-    const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
     const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
@@ -573,13 +588,111 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .send({
         productId,
         mode: "validation",
-        labelTemplateId: itemTemplateId,
         boxLabelTemplateId: boxTemplateId,
       })
       .expect(201);
 
-    expect(res.body.labelTemplateId).toBe(itemTemplateId);
+    expect(res.body).not.toHaveProperty("labelTemplateId");
+    expect(res.body).not.toHaveProperty("labelTemplateName");
     expect(res.body.boxLabelTemplateId).toBe(boxTemplateId);
+  });
+
+  it("POST /shifts snapshots the organisation default box template when omitted", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const defaultTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Original Default");
+    const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Default");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation" })
+      .expect(201);
+    expect(created.body.boxLabelTemplateId).toBe(defaultTemplateId);
+
+    await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: replacementTemplateId })
+      .expect(200);
+    const fetched = await agent.get(`/shifts/${created.body.id}`).expect(200);
+    expect(fetched.body.boxLabelTemplateId).toBe(defaultTemplateId);
+    const opened = await agent.post(`/shifts/${created.body.id}/open`).expect(200);
+    expect(opened.body.boxLabelTemplateId).toBe(defaultTemplateId);
+  });
+
+  it("POST /shifts lets an explicit box template override the organisation default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    await setDefaultBoxLabelTemplate(agent, orgId, "Ignored Default");
+    const overrideTemplateId = await seedLabelTemplate(orgId, "Explicit Override");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation", boxLabelTemplateId: overrideTemplateId })
+      .expect(201);
+
+    expect(created.body.boxLabelTemplateId).toBe(overrideTemplateId);
+  });
+
+  it.each([
+    ["explicit null", { boxLabelTemplateId: null }],
+    ["an absent organisation default", {}],
+  ])(
+    "POST /shifts rejects aggregation with %s using a stable scalar code and inserts no shift",
+    async (_case, boxTemplateInput) => {
+      const agent = request.agent(app!.getHttpServer());
+      const orgId = await signUpAndActivate(agent);
+      const productId = await seedProduct(orgId, {
+        status: "active",
+        productGroup: "Beverages",
+        boxCapacity: 12,
+        palletCapacity: 48,
+      });
+      const before = await shiftRows(orgId);
+
+      const response = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation", ...boxTemplateInput })
+        .expect(422);
+
+      expect(response.body).toMatchObject({
+        code: "BOX_LABEL_TEMPLATE_REQUIRED",
+        message: "Aggregation shifts require a box label template",
+      });
+      expect(response.body.code).toBeTypeOf("string");
+      expect(JSON.stringify(response.body)).not.toContain(productId);
+      expect(await shiftRows(orgId)).toEqual(before);
+    },
+  );
+
+  it("POST /shifts accepts an explicit null box template for validation", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    await setDefaultBoxLabelTemplate(agent, orgId);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", boxLabelTemplateId: null })
+      .expect(201);
+
+    expect(created.body.boxLabelTemplateId).toBeNull();
   });
 
   it("rejects a cross-tenant boxLabelTemplateId with 400", async () => {
@@ -602,15 +715,19 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .expect(400);
 
     expect(res.body.message).toEqual(expect.stringContaining("Unknown box label template"));
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain(org1);
+    expect(serialized).not.toContain(org2);
+    expect(serialized).not.toContain(templateId);
+    expect(serialized).not.toContain("shifts_tenant_box_label_template_fk");
   });
 
-  it("PATCH /shifts/:id updates the sscc issuer and box label template independently of the counterparty and item template", async () => {
+  it("PATCH /shifts/:id updates the sscc issuer and box label template independently", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
     const buyerId = await seedCounterparty(orgId, "Buyer");
     const brandOwnerId = await seedCounterparty(orgId, "Brand Owner");
-    const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
     const boxTemplateId = await seedLabelTemplate(orgId, "Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
@@ -630,7 +747,6 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .patch(`/shifts/${id}`)
       .send({
         ssccIssuerCounterpartyId: brandOwnerId,
-        labelTemplateId: itemTemplateId,
         boxLabelTemplateId: boxTemplateId,
       })
       .expect(200);
@@ -639,8 +755,88 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     // issuer update into the counterparty column instead would flip this.
     expect(patchRes.body.counterpartyId).toBe(buyerId);
     expect(patchRes.body.ssccIssuerCounterpartyId).toBe(brandOwnerId);
-    expect(patchRes.body.labelTemplateId).toBe(itemTemplateId);
+    expect(patchRes.body).not.toHaveProperty("labelTemplateId");
+    expect(patchRes.body).not.toHaveProperty("labelTemplateName");
     expect(patchRes.body.boxLabelTemplateId).toBe(boxTemplateId);
+  });
+
+  it("PATCH validation -> aggregation uses the shift snapshot without re-resolving the organisation default", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const snapshottedTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Snapshot");
+    const currentDefaultId = await seedLabelTemplate(orgId, "Current Default");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    expect(created.body.boxLabelTemplateId).toBe(snapshottedTemplateId);
+
+    await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: currentDefaultId })
+      .expect(200);
+    const updated = await agent
+      .patch(`/shifts/${created.body.id}`)
+      .send({ mode: "aggregation" })
+      .expect(200);
+
+    expect(updated.body.mode).toBe("aggregation");
+    expect(updated.body.boxLabelTemplateId).toBe(snapshottedTemplateId);
+  });
+
+  it("PATCH validation -> aggregation rejects a null merged snapshot with the stable 422 code", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", boxLabelTemplateId: null })
+      .expect(201);
+
+    const response = await agent
+      .patch(`/shifts/${created.body.id}`)
+      .send({ mode: "aggregation" })
+      .expect(422);
+    expect(response.body).toMatchObject({
+      code: "BOX_LABEL_TEMPLATE_REQUIRED",
+      message: "Aggregation shifts require a box label template",
+    });
+    const unchanged = await agent.get(`/shifts/${created.body.id}`).expect(200);
+    expect(unchanged.body).toMatchObject({ mode: "validation", boxLabelTemplateId: null });
+  });
+
+  it("PATCH validation -> aggregation accepts an explicit box template override", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const boxTemplateId = await seedLabelTemplate(orgId, "Adopted Box Template");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", boxLabelTemplateId: null })
+      .expect(201);
+
+    const updated = await agent
+      .patch(`/shifts/${created.body.id}`)
+      .send({ mode: "aggregation", boxLabelTemplateId: boxTemplateId })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({
+      mode: "aggregation",
+      boxLabelTemplateId: boxTemplateId,
+    });
   });
 
   it("PATCH /shifts/:id updates safe metadata on an active shift and rejects operational changes", async () => {
@@ -653,6 +849,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       palletCapacity: 48,
     });
     const line = await agent.post("/lines").send({ name: "Corrected line" }).expect(201);
+    await setDefaultBoxLabelTemplate(agent, orgId, "Initial active template");
     const boxTemplateId = await seedLabelTemplate(orgId, "Active box template");
     const created = await agent
       .post("/shifts")
@@ -789,12 +986,11 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
   // Shifts: list joins + filters
   // ---------------------------------------------------------------------
 
-  it("GET /shifts joins productName/lineName/counterpartyName/labelTemplateName and supports status/date/line filters", async () => {
+  it("GET /shifts joins current names and supports status/date/line filters", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
     const counterpartyId = await seedCounterparty(orgId, "Joined Counterparty");
-    const templateId = await seedLabelTemplate(orgId, "Joined Template");
     const productId = await seedProduct(orgId, {
       name: "Joined Product",
       status: "active",
@@ -802,7 +998,6 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       boxCapacity: 12,
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
-      defaultLabelTemplateId: templateId,
     });
     const lineRes = await agent.post("/lines").send({ name: "Joined Line" }).expect(201);
     const lineId = lineRes.body.id as string;
@@ -835,9 +1030,9 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       productName: "Joined Product",
       lineName: "Joined Line",
       counterpartyName: "Joined Counterparty",
-      labelTemplateId: templateId,
-      labelTemplateName: "Joined Template",
     });
+    expect(joined).not.toHaveProperty("labelTemplateId");
+    expect(joined).not.toHaveProperty("labelTemplateName");
 
     const byStatus = await agent.get("/shifts").query({ status: "active" }).expect(200);
     expect(byStatus.body.items.map((i: { id: string }) => i.id)).toEqual([shift2.body.id]);
@@ -958,7 +1153,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
   // ---------------------------------------------------------------------
   // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
-  // the station's own four routes (list, create, open, bundle -- covered by
+  // the station's own five routes (list, create, open, bundle, reference bundle -- covered by
   // station-auth.e2e.test.ts, shifts-bundle.e2e.test.ts) stay reachable, but
   // get-by-id/patch/delete/close are cabinet-only since the station never
   // calls them (verified against apps/station/src). Routes carry no global
@@ -1010,8 +1205,9 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
-    // Session-only: not part of the station's four routes.
+    // Session-only: not part of the station's five routes.
     await request(server).get(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
+    await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(403);
     await request(server)
       .patch(`/shifts/${id}`)
       .set("x-api-key", apiKey)

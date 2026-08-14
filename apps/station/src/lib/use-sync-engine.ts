@@ -35,6 +35,12 @@ export interface UseSyncEngineResult {
    * trip `@typescript-eslint/unbound-method` — it never reads `this`.
    */
   nudge: () => void;
+  /** Synchronously prevents the current engine from committing late acks. */
+  pause: () => void;
+  /** Pauses synchronously and resolves after the current network/commit phase is idle. */
+  pauseAndWaitForIdle: () => Promise<void>;
+  /** Resumes normal device-wide draining after a fail-closed window. */
+  resume: () => void;
 }
 
 /**
@@ -75,10 +81,12 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     serialsLeft: 0,
   });
   const engineRef = useRef<SyncEngine | null>(null);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
     if (!client || !machineId) {
       engineRef.current = null;
+      pausedRef.current = false;
       return;
     }
     const engine = createSyncEngine({
@@ -90,7 +98,8 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
       ...(onCredentialRejected ? { onCredentialRejected } : {}),
     });
     engineRef.current = engine;
-    engine.nudge();
+    if (pausedRef.current) engine.pause();
+    else engine.nudge();
     const heartbeat = setInterval(() => engine.nudge(), HEARTBEAT_MS);
     return () => {
       clearInterval(heartbeat);
@@ -106,5 +115,21 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     engineRef.current?.nudge();
   }, []);
 
-  return { state, nudge };
+  const pause = useCallback(() => {
+    pausedRef.current = true;
+    engineRef.current?.pause();
+  }, []);
+
+  const pauseAndWaitForIdle = useCallback(async () => {
+    pausedRef.current = true;
+    const engine = engineRef.current;
+    if (engine) await engine.pauseAndWaitForIdle();
+  }, []);
+
+  const resume = useCallback(() => {
+    pausedRef.current = false;
+    engineRef.current?.resume();
+  }, []);
+
+  return { state, nudge, pause, pauseAndWaitForIdle, resume };
 }

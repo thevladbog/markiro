@@ -137,6 +137,60 @@ describe("createStationClient", () => {
     await expect(client.get("/shifts")).rejects.toThrow("nope");
   });
 
+  it("captures bounded documented error message and code without logging the response", async () => {
+    const response = new Response(
+      JSON.stringify({
+        message: "A box label template is required",
+        code: "BOX_LABEL_TEMPLATE_REQUIRED",
+      }),
+      { status: 422, statusText: "Unprocessable Entity" },
+    );
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(response);
+    const client = createStationClient({ apiKey: "key", serverUrl: "https://station.example" });
+
+    const error = await client.get("/shifts").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(StationApiError);
+    expect(error).toMatchObject({
+      status: 422,
+      message: "A box label template is required",
+      code: "BOX_LABEL_TEMPLATE_REQUIRED",
+    });
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(consoleLog).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["missing fields", {}, "Unprocessable Entity"],
+    [
+      "non-string fields",
+      { message: ["not a message"], code: { value: "not a code" } },
+      "Unprocessable Entity",
+    ],
+    [
+      "oversized fields",
+      { message: "m".repeat(257), code: "C".repeat(257) },
+      "Unprocessable Entity",
+    ],
+    ["malformed JSON", "{", "Unprocessable Entity"],
+  ])("falls back safely for %s error content", async (_name, body, expectedMessage) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(typeof body === "string" ? body : JSON.stringify(body), {
+        status: 422,
+        statusText: "Unprocessable Entity",
+      }),
+    );
+    const client = createStationClient({ apiKey: "key", serverUrl: "https://station.example" });
+
+    const error = await client.get("/shifts").catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(StationApiError);
+    expect(error).toMatchObject({ status: 422, message: expectedMessage });
+    expect((error as StationApiError).code).toBeUndefined();
+  });
+
   it("seals an authenticated generation before rejecting the original 401 and blocks new requests", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ message: "revoked" }), {

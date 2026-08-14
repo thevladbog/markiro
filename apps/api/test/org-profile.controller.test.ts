@@ -5,6 +5,7 @@ import { INTERCEPTORS_METADATA } from "@nestjs/common/constants";
 import { of } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
+import { putOrgProfileSchema } from "../src/modules/org-profile/dto";
 
 interface MulterInterceptor extends NestInterceptor {
   multer: { limits?: { fields?: number; files?: number; parts?: number } };
@@ -88,5 +89,30 @@ describe("OrgProfileController logo multipart boundary", () => {
     await expect(
       intercept([filePart("logo", "logo.png"), unclassifiedPart()]),
     ).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe("OrgProfileController PUT profile validation", () => {
+  it("accepts a UUID and explicit null for the box label default while preserving omission", () => {
+    const templateId = "a0000000-0000-4000-8000-000000000001";
+
+    expect(putOrgProfileSchema.safeParse({ defaultBoxLabelTemplateId: templateId })).toMatchObject({
+      success: true,
+      data: { defaultBoxLabelTemplateId: templateId },
+    });
+    expect(putOrgProfileSchema.safeParse({ defaultBoxLabelTemplateId: null })).toMatchObject({
+      success: true,
+      data: { defaultBoxLabelTemplateId: null },
+    });
+    expect(putOrgProfileSchema.safeParse({ inn: "7701234567" })).toMatchObject({
+      success: true,
+      data: { inn: "7701234567" },
+    });
+  });
+
+  it("rejects a malformed box label template identifier", () => {
+    expect(putOrgProfileSchema.safeParse({ defaultBoxLabelTemplateId: "not-a-uuid" }).success).toBe(
+      false,
+    );
   });
 });

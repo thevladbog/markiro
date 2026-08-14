@@ -12,6 +12,7 @@ import { apiErrorFromResponse, apiFetch } from "../../api/client.js";
 
 /** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `OrgProfileDto`. */
 export interface OrgProfileDto {
+  defaultBoxLabelTemplateId: string | null;
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
@@ -21,7 +22,10 @@ export interface OrgProfileDto {
 }
 
 export type PutOrgProfileInput = Partial<
-  Pick<OrgProfileDto, "gln" | "gs1Prefixes" | "inn" | "pickupLimitsEnabled">
+  Pick<
+    OrgProfileDto,
+    "defaultBoxLabelTemplateId" | "gln" | "gs1Prefixes" | "inn" | "pickupLimitsEnabled"
+  >
 >;
 
 export interface OrganizationLogoDto {

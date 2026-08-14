@@ -3,10 +3,11 @@ import type { TFunction } from "i18next";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 import { z } from "zod";
 
 import { hasValidCheckDigit } from "@markiro/domain";
-import { Alert, Button, Card, Checkbox, Input, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, Button, Card, Checkbox, Input, PageHeader, Select, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
@@ -20,6 +21,7 @@ import {
   useDeleteOrganizationLogo,
   type PutOrgProfileInput,
 } from "./api.js";
+import { useLabelTemplates } from "../labels/api.js";
 
 /**
  * Boxes take extension digit 0; 1 is reserved for pallets (06d) -- see
@@ -46,6 +48,7 @@ function derivePrefix(gln: string | null | undefined): string | null {
  * convention as `pages/counterparties/CounterpartyForm.tsx`.
  */
 const profileFormSchema = z.object({
+  defaultBoxLabelTemplateId: z.string(),
   gln: z
     .string()
     .trim()
@@ -64,7 +67,12 @@ const profileFormSchema = z.object({
 });
 type ProfileFormValues = z.infer<typeof profileFormSchema>;
 
-const EMPTY_PROFILE_VALUES: ProfileFormValues = { gln: "", inn: "", gs1Prefixes: "" };
+const EMPTY_PROFILE_VALUES: ProfileFormValues = {
+  defaultBoxLabelTemplateId: "",
+  gln: "",
+  inn: "",
+  gs1Prefixes: "",
+};
 
 /**
  * Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `ssccCounterSchema`
@@ -89,10 +97,13 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
   return message ? t(message) : undefined;
 }
 
-function toProfileInput(values: ProfileFormValues): PutOrgProfileInput {
+function toProfileInput(
+  values: ProfileFormValues,
+  defaultBoxLabelTemplateIdChanged: boolean,
+): PutOrgProfileInput {
   const gln = values.gln?.trim();
   const inn = values.inn?.trim();
-  return {
+  const input: PutOrgProfileInput = {
     gln: gln ? gln : null,
     inn: inn ? inn : null,
     gs1Prefixes: values.gs1Prefixes
@@ -102,14 +113,20 @@ function toProfileInput(values: ProfileFormValues): PutOrgProfileInput {
           .filter(Boolean)
       : [],
   };
+  if (defaultBoxLabelTemplateIdChanged) {
+    input.defaultBoxLabelTemplateId = values.defaultBoxLabelTemplateId || null;
+  }
+  return input;
 }
 
 function toProfileFormValues(profile: {
+  defaultBoxLabelTemplateId: string | null;
   gln: string | null;
   inn: string | null;
   gs1Prefixes: string[];
 }): ProfileFormValues {
   return {
+    defaultBoxLabelTemplateId: profile.defaultBoxLabelTemplateId ?? "",
     gln: profile.gln ?? "",
     inn: profile.inn ?? "",
     gs1Prefixes: profile.gs1Prefixes.join(", "),
@@ -125,13 +142,16 @@ function toProfileFormValues(profile: {
 export function OrgProfilePage() {
   const { t } = useTranslation();
   const profileQuery = useOrgProfile();
+  const labelTemplatesQuery = useLabelTemplates();
   const updateProfile = useUpdateOrgProfile();
 
   const {
     register: registerProfile,
     handleSubmit: handleProfileSubmit,
     reset: resetProfile,
-    formState: { errors: profileErrors, isDirty: isProfileDirty },
+    setValue: setProfileValue,
+    watch: watchProfile,
+    formState: { dirtyFields: profileDirtyFields, errors: profileErrors, isDirty: isProfileDirty },
   } = useForm<ProfileFormValues>({
     resolver: zodResolver(profileFormSchema),
     defaultValues: EMPTY_PROFILE_VALUES,
@@ -143,9 +163,32 @@ export function OrgProfilePage() {
     }
   }, [isProfileDirty, profileQuery.data, resetProfile]);
 
+  const defaultBoxLabelTemplateId = watchProfile("defaultBoxLabelTemplateId");
+  const labelTemplates = labelTemplatesQuery.data ?? [];
+  const savedTemplateIsUnavailable =
+    defaultBoxLabelTemplateId !== "" &&
+    labelTemplatesQuery.data !== undefined &&
+    !labelTemplates.some((template) => template.id === defaultBoxLabelTemplateId);
+  const labelTemplateOptions = [
+    { value: "", label: t("pages.settings.profile.defaultBoxLabelTemplateUnset") },
+    ...labelTemplates.map((template) => ({ value: template.id, label: template.name })),
+    ...(savedTemplateIsUnavailable
+      ? [
+          {
+            value: defaultBoxLabelTemplateId,
+            label: t("pages.settings.profile.defaultBoxLabelTemplateStaleOption"),
+            disabled: true,
+          },
+        ]
+      : []),
+  ];
+
   const submitProfile = handleProfileSubmit(async (values) => {
+    if (savedTemplateIsUnavailable) return;
     try {
-      const savedProfile = await updateProfile.mutateAsync(toProfileInput(values));
+      const savedProfile = await updateProfile.mutateAsync(
+        toProfileInput(values, profileDirtyFields.defaultBoxLabelTemplateId === true),
+      );
       resetProfile(toProfileFormValues(savedProfile));
       toast("ok", t("pages.settings.profile.toasts.updateSuccess"));
     } catch (error) {
@@ -194,8 +237,41 @@ export function OrgProfilePage() {
                 {...errorProp(translateFieldError(t, profileErrors.gs1Prefixes?.message))}
                 {...registerProfile("gs1Prefixes")}
               />
+              <Select
+                native
+                label={t("pages.settings.profile.defaultBoxLabelTemplateLabel")}
+                options={labelTemplateOptions}
+                value={defaultBoxLabelTemplateId}
+                onValueChange={(value) =>
+                  setProfileValue("defaultBoxLabelTemplateId", value, { shouldDirty: true })
+                }
+              />
+              <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                <Link to="/labels">
+                  {t("pages.settings.profile.defaultBoxLabelTemplateLibraryLink")}
+                </Link>
+                {savedTemplateIsUnavailable ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    loading={labelTemplatesQuery.isFetching}
+                    onClick={() => void labelTemplatesQuery.refetch()}
+                  >
+                    {t("pages.settings.profile.defaultBoxLabelTemplateReload")}
+                  </Button>
+                ) : null}
+              </div>
+              {savedTemplateIsUnavailable ? (
+                <Alert tone="warn">
+                  {t("pages.settings.profile.defaultBoxLabelTemplateStale")}
+                </Alert>
+              ) : null}
               <div>
-                <Button type="submit" loading={updateProfile.isPending}>
+                <Button
+                  type="submit"
+                  loading={updateProfile.isPending}
+                  disabled={savedTemplateIsUnavailable}
+                >
                   {t("pages.settings.profile.save")}
                 </Button>
               </div>

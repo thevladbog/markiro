@@ -40,7 +40,6 @@ export interface ProductDto {
   externalRef: string | null;
   status: ProductStatus;
   defaultCounterpartyId: string | null;
-  defaultLabelTemplateId: string | null;
   createdAt: string;
   image?: ProductImageDescriptor | null;
 }
@@ -59,7 +58,6 @@ export interface CreateProductInput {
   unitPrice?: string | null;
   egaisCode?: string | null;
   defaultCounterpartyId?: string | null;
-  defaultLabelTemplateId?: string | null;
 }
 
 export type UpdateProductInput = Partial<CreateProductInput>;

@@ -14,6 +14,7 @@ const expected = [
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/shifts/cors-probe/reference-bundle", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/products", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/products/gtin-check", "POST", "content-type,x-api-key,x-station-capabilities"],
 ];

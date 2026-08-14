@@ -29,8 +29,6 @@ export interface ShiftDto {
   lineName: string | null;
   counterpartyId: string | null;
   counterpartyName: string | null;
-  labelTemplateId: string | null;
-  labelTemplateName: string | null;
   /** Whose numbers this shift's boxes carry; null means the tenant's own organisation. */
   ssccIssuerCounterpartyId: string | null;
   boxLabelTemplateId: string | null;
@@ -57,7 +55,6 @@ export interface CreateShiftInput {
   mode: ShiftMode;
   lineId?: string | null;
   counterpartyId?: string | null;
-  labelTemplateId?: string | null;
   ssccIssuerCounterpartyId?: string | null;
   boxLabelTemplateId?: string | null;
   plannedQty?: number | null;
@@ -80,8 +77,13 @@ interface ListShiftsResponse {
   items: ShiftDto[];
 }
 
+export interface ShiftPlanningConfigDto {
+  defaultBoxLabelTemplateId: string | null;
+}
+
 /** Shared TanStack Query cache key prefix for the shifts list (all filter variants). */
 export const SHIFTS_QUERY_KEY = ["shifts"] as const;
+export const SHIFT_PLANNING_CONFIG_QUERY_KEY = ["shift-planning-config"] as const;
 
 function shiftsQueryKey(params: ListShiftsParams) {
   return [...SHIFTS_QUERY_KEY, params] as const;
@@ -100,6 +102,10 @@ function buildListPath(params: ListShiftsParams): string {
 async function fetchShifts(params: ListShiftsParams): Promise<ShiftDto[]> {
   const response = await apiFetch<ListShiftsResponse>(buildListPath(params));
   return response.items;
+}
+
+function fetchShiftPlanningConfig(): Promise<ShiftPlanningConfigDto> {
+  return apiFetch<ShiftPlanningConfigDto>("/shifts/planning-config");
 }
 
 function postShift(input: CreateShiftInput): Promise<ShiftDto> {
@@ -132,6 +138,14 @@ export function useShifts(params: ListShiftsParams = {}): UseQueryResult<ShiftDt
   return useQuery({
     queryKey: shiftsQueryKey(params),
     queryFn: () => fetchShifts(params),
+  });
+}
+
+/** The operations-readable organisation default needed by the shift form. */
+export function useShiftPlanningConfig(): UseQueryResult<ShiftPlanningConfigDto> {
+  return useQuery({
+    queryKey: SHIFT_PLANNING_CONFIG_QUERY_KEY,
+    queryFn: fetchShiftPlanningConfig,
   });
 }
 

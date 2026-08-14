@@ -112,6 +112,16 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     return id;
   }
 
+  async function setDefaultBoxLabelTemplate(
+    agent: ReturnType<typeof request.agent>,
+    tenantId: string,
+    name = "Default Box Template",
+  ): Promise<string> {
+    const id = await seedLabelTemplate(tenantId, name);
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: id }).expect(200);
+    return id;
+  }
+
   async function attachManagedSubscription(tenantId: string, startsAt: Date, endsAt: Date) {
     const planVersionId = await createPublishedPlan(db, {
       maxLines: null,
@@ -145,11 +155,12 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     await agent.post(`/shifts/${id}/open`).expect(409);
   });
 
-  it("GET /shifts/:id/bundle returns shift+product+labelTemplate+counterpartyGln and the operator roster", async () => {
+  it("GET /shifts/:id/bundle nulls seeded legacy item bindings while retaining the real box template", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const counterpartyId = await seedCounterparty(orgId, "Buyer");
     const templateId = await seedLabelTemplate(orgId, "Bundle Template");
+    const boxTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Bundle Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
       productGroup: "Beverages",
@@ -171,12 +182,29 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       .send({ productId, mode: "aggregation" })
       .expect(201);
     const id = created.body.id as string;
+    await db
+      .update(schema.shifts)
+      .set({ labelTemplateId: templateId })
+      .where(and(eq(schema.shifts.tenantId, orgId), eq(schema.shifts.id, id)));
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.shift).toMatchObject({ id, productId });
-    expect(bundle.body.product).toMatchObject({ id: productId, gtin14: expect.any(String) });
-    expect(bundle.body.labelTemplate).toMatchObject({ id: templateId, name: "Bundle Template" });
-    expect(bundle.body.labelTemplate.spec).toMatchObject({ language: "zpl" });
+    expect(bundle.body.shift).toMatchObject({
+      id,
+      productId,
+      labelTemplateId: null,
+      labelTemplateName: null,
+    });
+    expect(bundle.body.product).toMatchObject({
+      id: productId,
+      gtin14: expect.any(String),
+      defaultLabelTemplateId: null,
+    });
+    expect(bundle.body.labelTemplate).toBeNull();
+    expect(bundle.body.boxLabelTemplate).toMatchObject({
+      id: boxTemplateId,
+      name: "Bundle Box Template",
+      spec: { language: "zpl" },
+    });
     expect(bundle.body.counterpartyGln).toBe("6291041500213");
     expect(bundle.body.operators).toHaveLength(1);
     expect(bundle.body.operators[0]).toMatchObject({
@@ -190,15 +218,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.operators[0].pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
   });
 
-  // CodeRabbit PR33 review, Finding 3: the box template column, schema, and
-  // admin picker were all fully wired, but `getBundle` only ever resolved
-  // `labelTemplate` off `shift.labelTemplateId` -- the ITEM template -- and
-  // never touched `shift.boxLabelTemplateId` at all. The station therefore
-  // had no way to print anything but the item template on a box label. This
-  // pins the fix at the bundle level: a shift with its own distinct box
-  // template returns that template's spec under a NEW `boxLabelTemplate`
-  // field, clearly distinct from `labelTemplate`.
-  it("GET /shifts/:id/bundle resolves boxLabelTemplateId into its own boxLabelTemplate field, distinct from labelTemplate (Finding 3)", async () => {
+  it("GET /shifts/:id/bundle resolves the box snapshot without an item-template fallback", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
@@ -218,15 +238,49 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(created.body.boxLabelTemplateId).toBe(boxTemplateId);
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.labelTemplate).toMatchObject({ id: itemTemplateId, name: "Item Template" });
+    expect(bundle.body.shift).toMatchObject({
+      labelTemplateId: null,
+      labelTemplateName: null,
+    });
+    expect(bundle.body.product.defaultLabelTemplateId).toBeNull();
+    expect(bundle.body.labelTemplate).toBeNull();
     expect(bundle.body.boxLabelTemplate).toMatchObject({ id: boxTemplateId, name: "Box Template" });
     expect(bundle.body.boxLabelTemplate.spec).toMatchObject({ language: "zpl" });
-    expect(bundle.body.boxLabelTemplate.id).not.toBe(bundle.body.labelTemplate.id);
   });
 
-  // The absence case: no boxLabelTemplateId at all must resolve to null, not
-  // a fallback to the item template or any other guess.
-  it("GET /shifts/:id/bundle returns boxLabelTemplate: null when the shift has no box template set (Finding 3)", async () => {
+  it("GET /shifts/:id/bundle resolves only the snapshotted box template after the organisation default changes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const snapshottedTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Snapshot Box");
+    const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Box");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation" })
+      .expect(201);
+    expect(created.body.boxLabelTemplateId).toBe(snapshottedTemplateId);
+
+    await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: replacementTemplateId })
+      .expect(200);
+    const bundle = await agent.get(`/shifts/${created.body.id}/bundle`).expect(200);
+
+    expect(bundle.body.shift.boxLabelTemplateId).toBe(snapshottedTemplateId);
+    expect(bundle.body.boxLabelTemplate).toMatchObject({
+      id: snapshottedTemplateId,
+      name: "Snapshot Box",
+    });
+  });
+
+  // Validation shifts may intentionally snapshot no box template. The bundle
+  // must preserve that null rather than consulting current organisation state.
+  it("GET /shifts/:id/bundle returns boxLabelTemplate: null for a validation shift with a null snapshot", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const itemTemplateId = await seedLabelTemplate(orgId, "Item Only Template");
@@ -239,12 +293,17 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     });
     const created = await agent
       .post("/shifts")
-      .send({ productId, mode: "aggregation" })
+      .send({ productId, mode: "validation", boxLabelTemplateId: null })
       .expect(201);
     const id = created.body.id as string;
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.labelTemplate).toMatchObject({ id: itemTemplateId });
+    expect(bundle.body.shift).toMatchObject({
+      labelTemplateId: null,
+      labelTemplateName: null,
+    });
+    expect(bundle.body.product.defaultLabelTemplateId).toBeNull();
+    expect(bundle.body.labelTemplate).toBeNull();
     expect(bundle.body.boxLabelTemplate).toBeNull();
   });
 
@@ -308,6 +367,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     let agent: ReturnType<typeof request.agent>;
     let orgId: string;
     let stationKey: string;
+    let stationDeviceId: string;
     let shiftId: string;
     let issuerShiftId: string;
     let validationShiftId: string;
@@ -317,6 +377,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       orgId = await signUpAndActivate(agent);
 
       await agent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      await setDefaultBoxLabelTemplate(agent, orgId);
 
       const counterparty = await agent
         .post("/counterparties")
@@ -336,6 +397,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       // invented uuid (see sscc.e2e.test.ts's registerDevice).
       const device = await createTestStationDevice(app!, agent, "Box-block terminal");
       stationKey = device.apiKey;
+      stationDeviceId = device.deviceId;
 
       const plain = await agent
         .post("/shifts")
@@ -398,6 +460,94 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         );
     }
 
+    async function allocationState() {
+      const [counters, blocks] = await Promise.all([
+        db
+          .select({
+            issuerPrefix: schema.ssccCounters.issuerPrefix,
+            extensionDigit: schema.ssccCounters.extensionDigit,
+            nextSerial: schema.ssccCounters.nextSerial,
+          })
+          .from(schema.ssccCounters)
+          .where(eq(schema.ssccCounters.tenantId, orgId)),
+        db
+          .select({
+            id: schema.ssccBlocks.id,
+            issuerPrefix: schema.ssccBlocks.issuerPrefix,
+            extensionDigit: schema.ssccBlocks.extensionDigit,
+            deviceId: schema.ssccBlocks.deviceId,
+            fromSerial: schema.ssccBlocks.fromSerial,
+            toSerial: schema.ssccBlocks.toSerial,
+            consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+          })
+          .from(schema.ssccBlocks)
+          .where(eq(schema.ssccBlocks.tenantId, orgId)),
+      ]);
+      return {
+        counters: counters.toSorted((a, b) =>
+          `${a.issuerPrefix}:${a.extensionDigit}`.localeCompare(
+            `${b.issuerPrefix}:${b.extensionDigit}`,
+          ),
+        ),
+        blocks: blocks.toSorted((a, b) => a.id.localeCompare(b.id)),
+      };
+    }
+
+    it("serves an online-first reference bundle without allocating server SSCC state", async () => {
+      const onlineFirstDevice = await createTestStationDevice(
+        app!,
+        agent,
+        "Online-first recovery terminal",
+      );
+      const before = await allocationState();
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/reference-bundle`)
+        .set("x-api-key", onlineFirstDevice.apiKey)
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        shift: { id: shiftId },
+        boxLabelTemplate: { id: expect.any(String) },
+        sscc: null,
+      });
+      expect(await allocationState()).toEqual(before);
+      expect(
+        (await blocksForOrgGln()).filter((block) => block.deviceId === onlineFirstDevice.deviceId),
+      ).toEqual([]);
+    });
+
+    it("does not replace an exhausted server block during a reference bundle refresh", async () => {
+      await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+      const [held] = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, orgId),
+            eq(schema.ssccBlocks.deviceId, stationDeviceId),
+            eq(schema.ssccBlocks.issuerPrefix, orgGln.slice(0, 9)),
+          ),
+        );
+      expect(held).toBeDefined();
+      await db
+        .update(schema.ssccBlocks)
+        .set({ consumedThroughSerial: held!.toSerial })
+        .where(eq(schema.ssccBlocks.id, held!.id));
+      const before = await allocationState();
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/reference-bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+
+      expect(response.body.sscc).toBeNull();
+      expect(await allocationState()).toEqual(before);
+    });
+
     it("returns a planned aggregation bundle without allocating an SSCC block", async () => {
       const productId = await seedProduct(orgId, {
         status: "active",
@@ -425,6 +575,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const tenantAgent = request.agent(app!.getHttpServer());
       const tenantId = await signUpAndActivate(tenantAgent);
       await tenantAgent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      await setDefaultBoxLabelTemplate(tenantAgent, tenantId);
       const productId = await seedProduct(tenantId, {
         status: "active",
         productGroup: "Beverages",
@@ -462,6 +613,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const tenantAgent = request.agent(app!.getHttpServer());
       const tenantId = await signUpAndActivate(tenantAgent);
       await tenantAgent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      await setDefaultBoxLabelTemplate(tenantAgent, tenantId);
       const productId = await seedProduct(tenantId, { status: "active", boxCapacity: 12 });
       const shift = await tenantAgent
         .post("/shifts")
@@ -532,10 +684,9 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     it("still returns product/template/roster with sscc: null when the tenant has no org GLN", async () => {
       const agent = request.agent(app!.getHttpServer());
       const orgId = await signUpAndActivate(agent);
-      // Deliberately no PUT /org/profile -- this tenant never filled in a
-      // GLN (the field is nullable, and a tenant may have no profile row at
-      // all), which is exactly the fixture the review flagged: an
-      // aggregation shift whose issuer prefix can never be resolved.
+      // The profile contains only a box-template default, not a GLN, so the
+      // aggregation shift's issuer prefix still cannot be resolved.
+      await setDefaultBoxLabelTemplate(agent, orgId);
       const templateId = await seedLabelTemplate(orgId, "No-GLN Template");
       const productId = await seedProduct(orgId, {
         status: "active",
@@ -567,7 +718,12 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .expect(200);
 
       expect(res.body.product).toMatchObject({ id: productId });
-      expect(res.body.labelTemplate).toMatchObject({ id: templateId });
+      expect(res.body.shift).toMatchObject({
+        labelTemplateId: null,
+        labelTemplateName: null,
+      });
+      expect(res.body.product.defaultLabelTemplateId).toBeNull();
+      expect(res.body.labelTemplate).toBeNull();
       expect(res.body.operators).toHaveLength(1);
       expect(res.body.sscc).toBeNull();
     });
@@ -589,6 +745,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const callerAgent = request.agent(app!.getHttpServer());
       const callerOrgId = await signUpAndActivate(callerAgent);
       await callerAgent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+      await setDefaultBoxLabelTemplate(callerAgent, callerOrgId);
       const productId = await seedProduct(callerOrgId, {
         status: "active",
         productGroup: "Beverages",

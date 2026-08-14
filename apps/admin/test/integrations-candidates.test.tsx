@@ -222,10 +222,8 @@ function renderProductCard({
             unitPrice: "",
             egaisCode: "",
             defaultCounterpartyId: "",
-            defaultLabelTemplateId: "",
           }}
           counterparties={[]}
-          labelTemplates={[]}
           onSubmit={() => {}}
           onClose={() => {}}
         />

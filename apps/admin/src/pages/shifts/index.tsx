@@ -34,6 +34,7 @@ import {
   useCloseShift,
   useDeleteShift,
   useLines,
+  useShiftPlanningConfig,
   useShifts,
   type ShiftDto,
   type ShiftStatus,
@@ -256,6 +257,7 @@ export function ShiftsPage() {
   const linesQuery = useLines();
   const counterpartiesQuery = useCounterparties();
   const labelTemplatesQuery = useLabelTemplates();
+  const planningConfigQuery = useShiftPlanningConfig();
 
   const items = shiftsQuery.data ?? [];
   const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);
@@ -436,18 +438,21 @@ export function ShiftsPage() {
             lines,
             counterparties,
             labelTemplates,
+            defaultBoxLabelTemplateId: planningConfigQuery.data?.defaultBoxLabelTemplateId ?? null,
             panelPending:
               shiftsQuery.isPending ||
               productsQuery.isPending ||
               linesQuery.isPending ||
               counterpartiesQuery.isPending ||
-              labelTemplatesQuery.isPending,
+              labelTemplatesQuery.isPending ||
+              planningConfigQuery.isPending,
             panelError:
               shiftsQuery.isError ||
               productsQuery.isError ||
               linesQuery.isError ||
               counterpartiesQuery.isError ||
-              labelTemplatesQuery.isError,
+              labelTemplatesQuery.isError ||
+              planningConfigQuery.isError,
             retryPanelData: async () => {
               await Promise.all([
                 shiftsQuery.refetch(),
@@ -455,6 +460,7 @@ export function ShiftsPage() {
                 linesQuery.refetch(),
                 counterpartiesQuery.refetch(),
                 labelTemplatesQuery.refetch(),
+                planningConfigQuery.refetch(),
               ]);
             },
           } satisfies ShiftsPanelContext

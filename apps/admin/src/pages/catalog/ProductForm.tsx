@@ -14,7 +14,6 @@ import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
 import { toast } from "../../lib/toast.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
-import type { LabelTemplateSummaryDto } from "../labels/api.js";
 import {
   useGtinCheck,
   useUnlinkProduct,
@@ -71,7 +70,6 @@ const productFormSchema = z.object({
     ),
   egaisCode: z.string().trim().optional(),
   defaultCounterpartyId: z.string().trim().optional(),
-  defaultLabelTemplateId: z.string().trim().optional(),
 });
 
 export type ProductFormValues = z.infer<typeof productFormSchema>;
@@ -101,7 +99,6 @@ export interface ProductFormProps {
   imageBusy?: boolean;
   onDeleteImage?: () => void | Promise<void>;
   counterparties: CounterpartyDto[];
-  labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
   submissionError?: string | null;
   onDirtyChange?: (dirty: boolean) => void;
@@ -118,7 +115,6 @@ const EMPTY_VALUES: ProductFormValues = {
   unitPrice: "",
   egaisCode: "",
   defaultCounterpartyId: "",
-  defaultLabelTemplateId: "",
 };
 
 const FORM_ID = "product-form";
@@ -177,7 +173,6 @@ export function ProductForm({
   imageBusy = false,
   onDeleteImage,
   counterparties,
-  labelTemplates,
   submitting = false,
   submissionError,
   onDirtyChange = () => {},
@@ -215,7 +210,6 @@ export function ProductForm({
 
   const gtinValue = watch("gtin");
   const defaultCounterpartyId = watch("defaultCounterpartyId");
-  const defaultLabelTemplateId = watch("defaultLabelTemplateId");
 
   // Re-seed clean forms when their server values change. A background refetch
   // must never overwrite unsaved operator input, so dirty forms retain their
@@ -311,11 +305,6 @@ export function ProductForm({
   const counterpartyOptions: SelectOption[] = [
     { value: "", label: t("pages.catalog.form.noCounterparty") },
     ...counterparties.map((c) => ({ value: c.id, label: c.name })),
-  ];
-
-  const labelTemplateOptions: SelectOption[] = [
-    { value: "", label: t("pages.catalog.form.noLabelTemplate") },
-    ...labelTemplates.map((tpl) => ({ value: tpl.id, label: tpl.name })),
   ];
 
   const applyCounterpartyHint = () => {
@@ -508,14 +497,6 @@ export function ProductForm({
               setValue("defaultCounterpartyId", value, { shouldDirty: true, shouldValidate: true })
             }
           />
-          <Select
-            label={t("pages.catalog.form.defaultLabelTemplateLabel")}
-            options={labelTemplateOptions}
-            value={defaultLabelTemplateId ?? ""}
-            onValueChange={(value) =>
-              setValue("defaultLabelTemplateId", value, { shouldDirty: true, shouldValidate: true })
-            }
-          />
         </section>
       </form>
     </SidePanel>
@@ -530,7 +511,6 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
   const unitPrice = values.unitPrice?.trim();
   const egaisCode = values.egaisCode?.trim();
   const defaultCounterpartyId = values.defaultCounterpartyId?.trim();
-  const defaultLabelTemplateId = values.defaultLabelTemplateId?.trim();
   return {
     gtin: values.gtin.trim(),
     name: values.name.trim(),
@@ -540,6 +520,5 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
     unitPrice: unitPrice ? unitPrice.replace(",", ".") : null,
     egaisCode: egaisCode ? egaisCode : null,
     defaultCounterpartyId: defaultCounterpartyId ? defaultCounterpartyId : null,
-    defaultLabelTemplateId: defaultLabelTemplateId ? defaultLabelTemplateId : null,
   };
 }

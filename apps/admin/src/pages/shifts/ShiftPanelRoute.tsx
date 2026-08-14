@@ -17,7 +17,7 @@ import {
   type ShiftDto,
   type UpdateShiftInput,
 } from "./api.js";
-import { ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
+import { BOX_TEMPLATE_SELECTION, ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
 import { localCalendarDate } from "./date.js";
 
 export interface ShiftsPanelContext {
@@ -26,6 +26,7 @@ export interface ShiftsPanelContext {
   lines: LineDto[];
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
+  defaultBoxLabelTemplateId: string | null;
   panelPending: boolean;
   panelError: boolean;
   retryPanelData: () => Promise<void>;
@@ -117,7 +118,10 @@ function CreateShiftPanel() {
         products={context.products}
         lines={context.lines}
         counterparties={context.counterparties}
-        labelTemplates={context.labelTemplates}
+        formContext={{
+          defaultBoxLabelTemplateId: context.defaultBoxLabelTemplateId,
+          labelTemplates: context.labelTemplates,
+        }}
         submitting={mutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}
@@ -165,9 +169,8 @@ function EditShiftPanel() {
             plannedDate: shift.plannedDate ?? localCalendarDate(shift.openedAt) ?? "",
             lineId: shift.lineId ?? "",
             counterpartyId: shift.counterpartyId ?? "",
-            labelTemplateId: shift.labelTemplateId ?? "",
             ssccIssuerCounterpartyId: shift.ssccIssuerCounterpartyId ?? "",
-            boxLabelTemplateId: shift.boxLabelTemplateId ?? "",
+            boxLabelTemplateSelection: shift.boxLabelTemplateId ?? BOX_TEMPLATE_SELECTION.none,
             boxCapacity: shift.boxCapacity === null ? "" : String(shift.boxCapacity),
             palletCapacity: shift.palletCapacity === null ? "" : String(shift.palletCapacity),
             palletsEnabled: shift.palletsEnabled,
@@ -180,7 +183,6 @@ function EditShiftPanel() {
       shift?.boxCapacity,
       shift?.boxLabelTemplateId,
       shift?.counterpartyId,
-      shift?.labelTemplateId,
       shift?.lineId,
       shift?.mode,
       shift?.openedAt,
@@ -238,7 +240,10 @@ function EditShiftPanel() {
         products={context.products}
         lines={context.lines}
         counterparties={context.counterparties}
-        labelTemplates={context.labelTemplates}
+        formContext={{
+          defaultBoxLabelTemplateId: context.defaultBoxLabelTemplateId,
+          labelTemplates: context.labelTemplates,
+        }}
         submitting={mutation.isPending}
         submissionError={error}
         onDirtyChange={guard.setDirty}
