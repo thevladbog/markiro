@@ -1,5 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Markiro">
   <rect width="64" height="64" rx="8" fill="#131216"/>
-  <path fill="#3ddc7a" d="M15 15h14v14H15zm20 0h14v14H35zM15 35h14v14H15zm20 0h14v14H35z"/>
-  <path fill="#131216" d="M20 20h4v4h-4zm20 0h4v4h-4zM20 40h4v4h-4zm20 0h4v4h-4z"/>
+  <rect data-markiro-module="" x="18" y="8" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="38" y="8" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="28" y="18" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="18" y="28" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="38" y="28" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="18" y="38" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="38" y="38" width="8" height="8" fill="#fafaf8"/>
+  <rect data-markiro-module="" x="28" y="48" width="8" height="8" fill="#3ddc7a"/>
 </svg>

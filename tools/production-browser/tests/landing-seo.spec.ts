@@ -54,6 +54,19 @@ test("keyboard focus is visible on the first interactive control", async ({ page
   ).toBe(true);
 });
 
+for (const [route, wordmark] of [
+  ["/", "маркиро"],
+  ["/en/", "MARKIRO"],
+] as const) {
+  test(`${route} renders the localized eight-module header brand`, async ({ page }) => {
+    await page.goto(route);
+    const brand = page.locator("header .brand-mark");
+    await expect(brand.locator(".brand-mark__word")).toHaveText(wordmark);
+    await expect(brand.locator("[data-brand-module]")).toHaveCount(8);
+    await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
+  });
+}
+
 test("language switch connects exact page counterparts", async ({ page }) => {
   await page.goto("/en/offline-production/");
   const menuTrigger = page.locator("[data-menu-trigger]");

@@ -15,7 +15,9 @@ export type AuditFindingCode =
   | "DUPLICATE_CANONICAL"
   | "INVALID_H1"
   | "INVALID_JSON_LD"
-  | "SITEMAP_ROUTE_MISMATCH";
+  | "SITEMAP_ROUTE_MISMATCH"
+  | "INVALID_MANIFEST"
+  | "INVALID_FAVICON";
 
 export interface AuditFinding {
   code: AuditFindingCode;
@@ -32,6 +34,22 @@ interface PageRecord {
 }
 
 const SITE_ORIGIN = "https://markiro.app";
+const BRAND_MANIFESTS = [
+  {
+    file: "site.webmanifest",
+    label: "Russian",
+    expected: { lang: "ru", name: "маркиро", short_name: "маркиро" },
+  },
+  {
+    file: "site.en.webmanifest",
+    label: "English",
+    expected: { lang: "en", name: "Markiro", short_name: "Markiro" },
+  },
+] as const;
+const FAVICON_FILE = "favicon.svg";
+const MARKIRO_MODULE_ATTRIBUTE = "data-markiro-module";
+const MARKIRO_MODULE_FILL = "#fafaf8";
+const MARKIRO_ACCENT_FILL = "#3ddc7a";
 
 function finding(code: AuditFindingCode, route: string, detail: string): AuditFinding {
   return { code, route, detail };
@@ -111,6 +129,110 @@ function sitemapRoutes(xml: string): Set<string> | null {
   return routes;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+async function auditBrandAssets(root: string, files: Set<string>): Promise<AuditFinding[]> {
+  const findings: AuditFinding[] = [];
+
+  for (const { file, label, expected } of BRAND_MANIFESTS) {
+    const route = `/${file}`;
+    if (!files.has(file)) {
+      findings.push(
+        finding("INVALID_MANIFEST", route, `${label} manifest is missing or unreadable`),
+      );
+      continue;
+    }
+
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(await readFile(path.join(root, file), "utf8"));
+    } catch {
+      findings.push(finding("INVALID_MANIFEST", route, `${label} manifest must be a JSON object`));
+      continue;
+    }
+
+    if (!isRecord(manifest)) {
+      findings.push(finding("INVALID_MANIFEST", route, `${label} manifest must be a JSON object`));
+      continue;
+    }
+
+    if (manifest.lang !== expected.lang) {
+      findings.push(
+        finding(
+          "INVALID_MANIFEST",
+          route,
+          `${label} manifest must declare the ${expected.lang} locale`,
+        ),
+      );
+      continue;
+    }
+    if (manifest.name !== expected.name || manifest.short_name !== expected.short_name) {
+      findings.push(
+        finding("INVALID_MANIFEST", route, `${label} manifest must use the ${expected.name} name`),
+      );
+    }
+  }
+
+  const faviconRoute = `/${FAVICON_FILE}`;
+  if (!files.has(FAVICON_FILE)) {
+    findings.push(
+      finding(
+        "INVALID_FAVICON",
+        faviconRoute,
+        "favicon must contain exactly eight Markiro modules",
+      ),
+    );
+    return findings;
+  }
+
+  let favicon: Document;
+  try {
+    favicon = new JSDOM(await readFile(path.join(root, FAVICON_FILE), "utf8"), {
+      contentType: "image/svg+xml",
+    }).window.document;
+  } catch {
+    findings.push(
+      finding(
+        "INVALID_FAVICON",
+        faviconRoute,
+        "favicon must contain exactly eight Markiro modules",
+      ),
+    );
+    return findings;
+  }
+
+  const modules = [...favicon.querySelectorAll(`[${MARKIRO_MODULE_ATTRIBUTE}]`)];
+  if (favicon.querySelector("parsererror") || modules.length !== 8) {
+    findings.push(
+      finding(
+        "INVALID_FAVICON",
+        faviconRoute,
+        "favicon must contain exactly eight Markiro modules",
+      ),
+    );
+    return findings;
+  }
+
+  const ordinaryModules = modules.slice(0, -1);
+  const accentModule = modules.at(-1);
+  if (
+    ordinaryModules.some((module) => module.getAttribute("fill") !== MARKIRO_MODULE_FILL) ||
+    accentModule?.getAttribute("fill") !== MARKIRO_ACCENT_FILL
+  ) {
+    findings.push(
+      finding(
+        "INVALID_FAVICON",
+        faviconRoute,
+        "favicon modules must use seven off-white marks and one green accent",
+      ),
+    );
+  }
+
+  return findings;
+}
+
 export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
   const resolvedRoot = await realpath(root);
   if (!(await lstat(resolvedRoot)).isDirectory()) throw new Error("audit root must be a directory");
@@ -178,6 +300,8 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
     findings.push(
       finding("SITEMAP_ROUTE_MISMATCH", "/sitemap.xml", "sitemap and HTML routes differ"),
     );
+
+  findings.push(...(await auditBrandAssets(resolvedRoot, files)));
 
   return findings.sort((left, right) =>
     `${left.route}:${left.code}:${left.detail}`.localeCompare(
