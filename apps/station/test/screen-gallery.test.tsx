@@ -123,6 +123,33 @@ describe("development screen gallery", () => {
     expect(view.container.querySelectorAll(".work-recent li")).toHaveLength(6);
   });
 
+  it("renders the work fixture with a real locally cached product image", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:gallery-product");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
+
+    const image = await screen.findByRole("img", { name: "Тестовый товар А" });
+    expect(image.getAttribute("src")).toBe("blob:gallery-product");
+    expect(image.classList.contains("work-scan-result__image")).toBe(true);
+  });
+
+  it("renders active work with the production header controls before collapse", async () => {
+    render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
+
+    const header = screen.getByRole("banner", { name: "Состояние станции" });
+    expect(
+      within(header).getByRole("button", {
+        name: "! Доступно критическое обновление 0.1.0-beta.123",
+      }),
+    ).toBeDefined();
+    expect(within(header).getByRole("button", { name: "Сменить оператора" })).toBeDefined();
+    expect(
+      await within(header).findByRole("button", { name: "Выйти из полноэкранного режима" }),
+    ).toBeDefined();
+    expect(within(header).getByRole("button", { name: "Свернуть панель состояния" })).toBeDefined();
+  });
+
   it.each([
     {
       locale: "ru" as const,

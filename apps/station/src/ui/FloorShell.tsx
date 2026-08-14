@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@markiro/ui";
 import type { ServerReachability } from "../lib/api-client.js";
@@ -24,6 +24,7 @@ export interface FloorShellProps {
   footer?: ReactNode;
   operatorControl?: ReactNode;
   windowControl?: ReactNode;
+  statusBarCollapsible?: boolean;
   children: ReactNode;
 }
 
@@ -47,9 +48,18 @@ export function FloorShell({
   footer,
   operatorControl,
   windowControl,
+  statusBarCollapsible = false,
   children,
 }: FloorShellProps) {
   const { t } = useTranslation();
+  const [statusBarCollapsed, setStatusBarCollapsed] = useState(false);
+  const canCollapseStatusBar = statusBarCollapsible && shiftLabel !== null;
+
+  useEffect(() => {
+    if (!canCollapseStatusBar) setStatusBarCollapsed(false);
+  }, [canCollapseStatusBar]);
+
+  const collapsed = canCollapseStatusBar && statusBarCollapsed;
   return (
     <div className="station-root">
       <StatusBar
@@ -68,6 +78,10 @@ export function FloorShell({
         actionsDisabled={actionsDisabled}
         {...(operatorControl ? { operatorControl } : {})}
         {...(windowControl ? { windowControl } : {})}
+        collapsed={collapsed}
+        {...(canCollapseStatusBar
+          ? { onToggleCollapsed: () => setStatusBarCollapsed((current) => !current) }
+          : {})}
       />
       {tasks.length > 0 ? (
         <nav aria-label={t("shell.tasks")} className="station-task-nav">

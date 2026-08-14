@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { FloorFooter } from "../src/ui/FloorFooter.js";
@@ -121,6 +121,55 @@ describe("FloorShell", () => {
     expect(getComputedStyle(windowControl).position).toBe("static");
 
     stylesheet.remove();
+  });
+
+  it("collapses an active-shift header to critical production status and restores its controls", () => {
+    render(
+      <FloorShell
+        {...status}
+        statusBarCollapsible
+        operatorControl={<button>Change operator</button>}
+        windowControl={<button>Window mode</button>}
+      >
+        <CurrentFloorScreen />
+      </FloorShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse status panel" }));
+
+    const collapsedHeader = screen.getByRole("banner", { name: "Station status" });
+    expect(collapsedHeader.getAttribute("data-collapsed")).toBe("true");
+    expect(within(collapsedHeader).getByTestId("line-status").textContent).toBe("Packing A");
+    expect(within(collapsedHeader).getByTestId("shift-status").textContent).toBe("Shift 17");
+    expect(within(collapsedHeader).getByTestId("server-status").textContent).toBe("Available");
+    expect(within(collapsedHeader).getByTestId("sync-status").textContent).toBe("2");
+    expect(within(collapsedHeader).getByTestId("conflicts-status").textContent).toBe("1");
+    expect(within(collapsedHeader).getByTestId("scanner-status").textContent).toBe("Connected");
+    expect(within(collapsedHeader).getByTestId("printer-status").textContent).toBe("Configured");
+    expect(within(collapsedHeader).queryByTestId("operator-status")).toBeNull();
+    expect(within(collapsedHeader).queryByRole("button", { name: "Change operator" })).toBeNull();
+    expect(within(collapsedHeader).queryByRole("button", { name: "Window mode" })).toBeNull();
+
+    fireEvent.click(within(collapsedHeader).getByRole("button", { name: "Expand status panel" }));
+
+    const expandedHeader = screen.getByRole("banner", { name: "Station status" });
+    expect(expandedHeader.getAttribute("data-collapsed")).toBe("false");
+    expect(within(expandedHeader).getByTestId("operator-status").textContent).toBe("Alex Morgan");
+    expect(within(expandedHeader).getByRole("button", { name: "Change operator" })).toBeDefined();
+    expect(within(expandedHeader).getByRole("button", { name: "Window mode" })).toBeDefined();
+  });
+
+  it("does not offer header collapse outside an active shift", () => {
+    render(
+      <FloorShell {...status} shiftLabel={null} statusBarCollapsible>
+        <CurrentFloorScreen />
+      </FloorShell>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Collapse status panel" })).toBeNull();
+    expect(
+      screen.getByRole("banner", { name: "Station status" }).getAttribute("data-collapsed"),
+    ).toBe("false");
   });
 
   it("does not render an empty task navigation", () => {

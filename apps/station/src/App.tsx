@@ -1299,6 +1299,7 @@ export function App() {
       actionsDisabled={operatorSwitchState !== "idle" || floorRecoveryBlocked}
       onOpenUpdates={() => setShowUpdates(true)}
       footer={legacyNotice}
+      statusBarCollapsible={shift !== null}
     >
       {operatorSwitchState !== "idle" ? (
         <main className="station-centered-screen" data-testid="operator-switch-settling">

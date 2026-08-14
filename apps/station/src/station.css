@@ -2315,6 +2315,24 @@ body,
   overflow-wrap: anywhere;
 }
 
+.station-status-toggle {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 64px;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+  font: var(--floor-body-strong);
+  text-align: center;
+  white-space: nowrap;
+}
+
 .station-update-indicator {
   position: static;
   display: inline-flex;
@@ -2424,6 +2442,10 @@ body,
   white-space: nowrap;
 }
 
+.station-status-label--short {
+  display: none;
+}
+
 .station-status-item dd {
   overflow: hidden;
   margin: 0;
@@ -2443,7 +2465,19 @@ body,
 
 @media (max-width: 1439px) {
   .station-status-bar {
-    grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 2.6fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  }
+
+  .station-status-label--long:has(+ .station-status-label--short) {
+    display: none;
+  }
+
+  .station-status-label--short {
+    display: inline;
+  }
+
+  .station-status-group--sync {
+    grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.75fr));
   }
 
   .station-status-actions {
@@ -2496,6 +2530,7 @@ body,
 
   .station-status-group--sync,
   .station-status-group--hardware {
+    grid-template-columns: none;
     grid-auto-flow: row;
     grid-auto-rows: auto;
   }
@@ -2583,6 +2618,58 @@ body,
   .work-box-fill__readout strong {
     font: var(--floor-counter-sm);
   }
+}
+
+.station-status-bar[data-collapsed="true"] {
+  min-height: 72px;
+  padding-block: var(--sp-1);
+  gap: var(--sp-2);
+  grid-template-columns:
+    minmax(0, 1.45fr)
+    minmax(0, 1.1fr)
+    minmax(0, 1.1fr)
+    minmax(144px, 0.65fr);
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-group {
+  gap: var(--sp-1) var(--sp-2);
+  grid-auto-flow: column;
+  grid-auto-rows: auto;
+  grid-auto-columns: minmax(0, 1fr);
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-group--context {
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  grid-auto-flow: column;
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-group--sync {
+  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.75fr));
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-group--hardware {
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-item {
+  display: grid;
+  gap: 0;
+  align-content: center;
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-item :is(dt, dd) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.station-status-bar[data-collapsed="true"] > .station-status-toggle {
+  width: 100%;
+  min-height: 64px;
+}
+
+.station-status-actions:has(.station-status-toggle) {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .box-print-recovery {

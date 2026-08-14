@@ -8,7 +8,10 @@ import { NewShift } from "../src/pages/NewShift.js";
 beforeAll(async () => {
   await i18n.changeLanguage("en");
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 const client = createStationClient({
   machineId: "m1",
@@ -438,6 +441,8 @@ describe("NewShift", () => {
   });
 
   it("keeps aggregation on the found product, explains missing box labels in English, and retries after configuration", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
