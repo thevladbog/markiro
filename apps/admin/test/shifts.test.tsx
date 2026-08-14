@@ -524,7 +524,7 @@ describe("ShiftsPage", () => {
     renderPage();
 
     const row = (await screen.findByText("Сыр Российский")).closest("tr");
-    expect(within(row!).getByText("2026-07-23")).toBeDefined();
+    expect(within(row!).getByText("23.07.2026")).toBeDefined();
   });
 
   it("converts a legacy opening timestamp to the browser's local calendar date", async () => {
@@ -532,10 +532,10 @@ describe("ShiftsPage", () => {
     const expected = (() => {
       const date = new Date(openedAt);
       return [
-        date.getFullYear(),
-        String(date.getMonth() + 1).padStart(2, "0"),
         String(date.getDate()).padStart(2, "0"),
-      ].join("-");
+        String(date.getMonth() + 1).padStart(2, "0"),
+        date.getFullYear(),
+      ].join(".");
     })();
     const fetchMock = vi.fn(async (url: string) => {
       if (String(url).startsWith("/api/shifts")) {
