@@ -3,7 +3,6 @@ import {
   Controller,
   Get,
   Headers,
-  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
@@ -48,6 +47,7 @@ import {
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { OrgProfileService } from "../org-profile/org-profile.service";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { sendPrivateImage } from "../storage/private-image-response";
 import {
   BOX_REGISTRY_REVISION_PATTERN,
   boxRegistryQuerySchema,
@@ -98,7 +98,7 @@ export class KioskController {
       id,
       checksum,
     );
-    response.redirect(HttpStatus.FOUND, await this.storage.presignRead(objectKey, 300));
+    await sendPrivateImage(this.storage, objectKey, checksum, response);
   }
 
   @Get("box-registry")

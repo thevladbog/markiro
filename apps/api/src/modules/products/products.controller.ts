@@ -32,6 +32,7 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { sendPrivateImage } from "../storage/private-image-response";
 import {
   createProductSchema,
   gtinCheckSchema,
@@ -158,7 +159,7 @@ export class ProductsController {
     @Res() response: Response,
   ): Promise<void> {
     const objectKey = await this.productsService.getCurrentImageRead(req.tenantId!, id, checksum);
-    response.redirect(HttpStatus.FOUND, await this.storage.presignRead(objectKey, 300));
+    await sendPrivateImage(this.storage, objectKey, checksum, response);
   }
 
   @Delete(":id")
