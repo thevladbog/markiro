@@ -839,11 +839,54 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     });
   });
 
+  it("PATCH /shifts/:id updates safe metadata on an active shift and rejects operational changes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const line = await agent.post("/lines").send({ name: "Corrected line" }).expect(201);
+    await setDefaultBoxLabelTemplate(agent, orgId, "Initial active template");
+    const boxTemplateId = await seedLabelTemplate(orgId, "Active box template");
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation" })
+      .expect(201);
+    await agent.post(`/shifts/${created.body.id as string}/open`).expect(200);
+
+    const updated = await agent
+      .patch(`/shifts/${created.body.id as string}`)
+      .send({
+        lineId: line.body.id,
+        plannedDate: "2026-08-14",
+        plannedQty: 750,
+        boxLabelTemplateId: boxTemplateId,
+      })
+      .expect(200);
+
+    expect(updated.body).toMatchObject({
+      status: "active",
+      lineId: line.body.id,
+      plannedDate: "2026-08-14",
+      plannedQty: 750,
+      boxLabelTemplateId: boxTemplateId,
+      mode: "aggregation",
+    });
+    const rejected = await agent
+      .patch(`/shifts/${created.body.id as string}`)
+      .send({ mode: "validation" })
+      .expect(409);
+    expect(rejected.body.message).toContain("mode");
+  });
+
   // ---------------------------------------------------------------------
-  // Shifts: PATCH/DELETE gated by planned status
+  // Shifts: operational PATCH and DELETE remain gated by planned status
   // ---------------------------------------------------------------------
 
-  it("PATCH and DELETE /shifts/:id are rejected with 409 once the shift is no longer planned", async () => {
+  it("operational PATCH and DELETE /shifts/:id are rejected once the shift is active", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
@@ -866,8 +909,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     // Flip status via direct DB update (station activation is out of scope here).
     await db.update(schema.shifts).set({ status: "active" }).where(eq(schema.shifts.id, id));
 
-    const patchRes = await agent.patch(`/shifts/${id}`).send({ plannedQty: 200 }).expect(409);
-    expect(patchRes.body.message).toEqual(expect.stringContaining("planned"));
+    const patchRes = await agent.patch(`/shifts/${id}`).send({ mode: "aggregation" }).expect(409);
+    expect(patchRes.body.message).toEqual(expect.stringContaining("mode"));
 
     const deleteRes = await agent.delete(`/shifts/${id}`).expect(409);
     expect(deleteRes.body.message).toEqual(expect.stringContaining("planned"));
@@ -1147,7 +1190,18 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const id = created.body.id as string;
 
+    const assignedLine = await agent.post("/lines").send({ name: "Assigned line" }).expect(201);
+    const spoofedLine = await agent.post("/lines").send({ name: "Spoofed line" }).expect(201);
     const device = await createTestStationDevice(app!, agent, "Line 1 terminal");
+    await db
+      .update(schema.stationDevices)
+      .set({ lineId: assignedLine.body.id as string })
+      .where(
+        and(
+          eq(schema.stationDevices.tenantId, orgId),
+          eq(schema.stationDevices.id, device.deviceId),
+        ),
+      );
     const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
@@ -1171,8 +1225,13 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const stationCreated = await request(server)
       .post("/shifts")
       .set("x-api-key", apiKey)
-      .send({ productId, mode: "validation" })
+      .send({ productId, mode: "validation", lineId: spoofedLine.body.id })
       .expect(201);
-    expect(stationCreated.body.productId).toBe(productId);
+    expect(stationCreated.body).toMatchObject({
+      productId,
+      lineId: assignedLine.body.id,
+      createdFrom: "station",
+      plannedDate: null,
+    });
   });
 });

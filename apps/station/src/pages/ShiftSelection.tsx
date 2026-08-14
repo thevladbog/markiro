@@ -78,6 +78,11 @@ export function ShiftSelection({
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [requestedPage, setRequestedPage] = useState(1);
   const mounted = useRef(true);
+  const isCurrentRef = useRef(isCurrent);
+
+  useEffect(() => {
+    isCurrentRef.current = isCurrent;
+  }, [isCurrent]);
 
   useEffect(() => {
     mounted.current = true;
@@ -97,13 +102,15 @@ export function ShiftSelection({
         if (cancelled) return;
         setItems(response.items);
         for (const shift of response.items) {
+          const currentCheck = isCurrentRef.current;
           const prefetch = prefetchStationProductImage(
             client,
             {
               id: shift.productId,
               ...(shift.image === undefined ? {} : { image: shift.image }),
             },
-            isCurrent ? () => !isCurrent() : undefined,
+            currentCheck ? () => !currentCheck() : undefined,
+            exec,
           );
           trackStationProductImageSync(prefetch);
           void prefetch.then(() => {
@@ -121,7 +128,7 @@ export function ShiftSelection({
     return () => {
       cancelled = true;
     };
-  }, [client, loadAttempt, t]);
+  }, [client, exec, loadAttempt, t]);
 
   const openItems = useMemo(() => items.filter((shift) => shift.status !== "closed"), [items]);
   const currentPage = paginate(openItems, requestedPage, SHIFT_PAGE_SIZE);

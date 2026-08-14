@@ -861,6 +861,12 @@
         "submit": "Close shift",
         "cancel": "Cancel"
       },
+      "activeEdit": {
+        "title": "Critical active shift change",
+        "description": "These changes affect working stations. To apply them, finish work in the shift, leave it, and re-enter it on every station using it. Until then, stations will keep using the previous settings.",
+        "confirm": "Save changes",
+        "cancel": "Continue editing"
+      },
       "exports": {
         "action": "Generate report",
         "title": "Shift reports",
@@ -921,6 +927,7 @@
         "createSuccess": "Shift planned",
         "createError": "Could not plan the shift",
         "updateSuccess": "Shift updated",
+        "updateActiveSuccess": "Changes saved. Leave the shift on every station and re-enter it to apply them.",
         "updateError": "Could not update the shift",
         "deleteSuccess": "Shift deleted",
         "deleteError": "Could not delete the shift",
@@ -934,11 +941,12 @@
       "selectShift": "Select a shift to see its boxes",
       "contentsChangedAfterClose": "Changed after closing",
       "filters": {
-        "shiftLabel": "Shift"
+        "shiftLabel": "Shift",
+        "searchLabel": "Search shifts"
       },
       "table": {
         "sscc": "SSCC",
-        "terminal": "Terminal",
+        "line": "Line",
         "operator": "Operator",
         "itemCount": "Count",
         "closedAt": "Closed",
@@ -952,6 +960,7 @@
       "reviewed": "Reviewed",
       "filters": {
         "shiftLabel": "Shift",
+        "searchLabel": "Search shifts",
         "shiftAll": "All shifts",
         "shiftHint": "Shows conflicts where this shift's scan was the one displaced, not every conflict touching this shift",
         "reviewedLabel": "Status",

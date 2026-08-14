@@ -24,6 +24,14 @@ export interface NewShiftProps {
 export type NewShiftView = "input" | "found" | "notFound";
 export type NewShiftMode = "validation" | "aggregation";
 
+function currentLocalDate(now = new Date()): string {
+  return [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("-");
+}
+
 export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
   const { t } = useTranslation();
   const [raw, setRaw] = useState("");
@@ -94,7 +102,11 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
     setError(null);
     setBusy(true);
     try {
-      const created = await client.post<{ id: string }>("/shifts", { productId: product.id, mode });
+      const created = await client.post<{ id: string }>("/shifts", {
+        productId: product.id,
+        mode,
+        plannedDate: currentLocalDate(),
+      });
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${created.id}/open`,
       );

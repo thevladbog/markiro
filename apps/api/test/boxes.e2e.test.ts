@@ -278,15 +278,16 @@ describe.skipIf(!ready)("boxes e2e", () => {
   });
 
   // None of the brief's own assertions distinguish `sscc` from `terminalId`
-  // from `operatorId` from `closedAt` -- each is a DIFFERENT, distinguishable
+  // from `lineName`, `operatorId`, or `closedAt` -- each is a DIFFERENT, distinguishable
   // value here, so a `toDto`/`select` mapping bug that swapped two of these
   // columns (or read the wrong one) would fail this test even though it
   // would pass every assertion above unnoticed.
-  it("maps the box's own sscc, terminal, operator, and closing time onto the DTO", async () => {
+  it("maps the box's own sscc, terminal, line, operator, and closing time onto the DTO", async () => {
     const res = await agent.get(`/boxes?shiftId=${displacedShiftId}`).expect(200);
     const box = res.body.items[0];
     expect(box.sscc).toBe("123456789012345675");
     expect(box.terminalId).toBe(stationDeviceId);
+    expect(box.lineName).toBeNull();
     expect(box.operatorId).toBe(operatorId);
     expect(box.closedAt).toBe("2026-01-01T00:00:00.000Z");
   });

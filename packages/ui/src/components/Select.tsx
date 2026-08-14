@@ -1,5 +1,5 @@
 import * as RadixSelect from "@radix-ui/react-select";
-import { useId, useState, type CSSProperties, type FocusEvent } from "react";
+import { useId, useRef, useState, type CSSProperties, type FocusEvent } from "react";
 
 import { cn } from "../cn.js";
 import { useOverlayPortalContainer } from "./OverlayLayer.js";
@@ -26,6 +26,10 @@ export interface SelectProps<TValue extends string = string> {
   required?: boolean;
   /** Text shown when no value is selected. An empty option label takes precedence. */
   placeholder?: string;
+  /** Enables an in-menu text filter for long option lists. */
+  searchable?: boolean;
+  searchLabel?: string;
+  searchPlaceholder?: string;
   id?: string;
   className?: string;
   style?: CSSProperties;
@@ -47,6 +51,9 @@ export function Select<TValue extends string = string>({
   name,
   required,
   placeholder,
+  searchable = false,
+  searchLabel,
+  searchPlaceholder,
   hint,
   error,
   size = "md",
@@ -60,6 +67,8 @@ export function Select<TValue extends string = string>({
 }: SelectProps<TValue>) {
   const overlayPortalContainer = useOverlayPortalContainer();
   const [focus, setFocus] = useState(false);
+  const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const autoId = useId();
   const selectId = id ?? `mk-select-${autoId}`;
   const hintId = hint ? `${selectId}-hint` : undefined;
@@ -71,6 +80,11 @@ export function Select<TValue extends string = string>({
     option.value === "" ? { ...option, value: EMPTY_OPTION_VALUE } : option,
   );
   const customValue = value === "" && emptyOptionLabel !== undefined ? EMPTY_OPTION_VALUE : value;
+  const visibleItemOptions = searchable
+    ? itemOptions.filter((option) =>
+        option.label.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+      )
+    : itemOptions;
 
   if (size === "floor" || native) {
     const floor = size === "floor";
@@ -268,8 +282,47 @@ export function Select<TValue extends string = string>({
               boxShadow: "0 12px 32px color-mix(in srgb, var(--fg-1) 18%, transparent)",
             }}
           >
+            {searchable ? (
+              <div style={{ padding: 8, borderBottom: "1px solid var(--line)" }}>
+                <input
+                  ref={searchRef}
+                  type="search"
+                  aria-label={searchLabel ?? "Search"}
+                  placeholder={searchPlaceholder}
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  onKeyDown={(event) => {
+                    // Radix Select's typeahead runs before a nested input's
+                    // normal text entry. Handle printable keys here so the
+                    // filter keeps focus instead of returning to the menu.
+                    if (event.key.length === 1) {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSearch((current) => current + event.key);
+                      queueMicrotask(() => searchRef.current?.focus());
+                    } else if (event.key === "Backspace") {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      setSearch((current) => current.slice(0, -1));
+                      queueMicrotask(() => searchRef.current?.focus());
+                    }
+                  }}
+                  style={{
+                    boxSizing: "border-box",
+                    width: "100%",
+                    height: "var(--control-sm)",
+                    padding: "0 10px",
+                    border: "1px solid var(--line-strong)",
+                    borderRadius: "var(--r-1)",
+                    background: "var(--surface-card)",
+                    color: "var(--fg-1)",
+                    font: "var(--text-body-sm)",
+                  }}
+                />
+              </div>
+            ) : null}
             <RadixSelect.Viewport className="mk-select__viewport">
-              {itemOptions.map((option) => (
+              {visibleItemOptions.map((option) => (
                 <RadixSelect.Item
                   key={option.value}
                   value={option.value}

@@ -82,7 +82,17 @@ export class ShiftsController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createShiftSchema)) body: CreateShiftDto,
   ): Promise<ShiftDto> {
-    return this.shiftsService.createShift(req.tenantId!, body);
+    if (req.authKind === "station") {
+      return this.shiftsService.createShift(
+        req.tenantId!,
+        {
+          ...body,
+          lineId: req.deviceLineId ?? null,
+        },
+        "station",
+      );
+    }
+    return this.shiftsService.createShift(req.tenantId!, body, "admin");
   }
 
   @Patch(":id")

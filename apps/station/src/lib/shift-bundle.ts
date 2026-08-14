@@ -73,16 +73,17 @@ async function mirrorShiftBundleBody(
   shiftId: string,
   generation?: CredentialGeneration,
   mirrorSsccRange = true,
-): Promise<void> {
+  isEntryCurrent: () => boolean = () => true,
+): Promise<boolean> {
   const path = mirrorSsccRange
     ? `/shifts/${shiftId}/bundle`
     : `/shifts/${shiftId}/reference-bundle`;
   const bundle = await client.get<StationBundle>(path);
-  if (generation?.sealed) return;
+  if (generation?.sealed || !isEntryCurrent()) return false;
   if (mirrorSsccRange && bundle.sscc) {
     await addRange(exec, bundle.sscc);
   }
-  if (generation?.sealed) return;
+  if (generation?.sealed || !isEntryCurrent()) return false;
   if (mirrorSsccRange) {
     await upsertBundle(exec, bundle);
   } else {
@@ -93,13 +94,14 @@ async function mirrorShiftBundleBody(
       exec,
       { download: client.download },
       bundle.product,
-      generation ? () => generation.sealed : undefined,
+      () => generation?.sealed === true || !isEntryCurrent(),
     );
     trackStationProductImageSync(mediaSync);
   }
+  return true;
 }
 
-function trackShiftBundleMirror(shiftId: string, run: () => Promise<void>): Promise<void> {
+function trackShiftBundleMirror<T>(shiftId: string, run: () => Promise<T>): Promise<T> {
   // One durable mirror writer per shift. In particular, an explicit recovery
   // request must land after the unawaited shift-entry request that preceded
   // it; otherwise a delayed legacy null-template response can overwrite the
@@ -132,9 +134,9 @@ export function refreshShiftBundleForRecovery(
   // Print recovery repairs reference/template state only. The server's SSCC
   // block may have moved independently while this closed box was offline;
   // applying it here would mutate allocation state during a binding recovery.
-  return trackShiftBundleMirror(shiftId, () =>
-    mirrorShiftBundleBody(client, exec, shiftId, generation, false),
-  );
+  return trackShiftBundleMirror(shiftId, async () => {
+    await mirrorShiftBundleBody(client, exec, shiftId, generation, false);
+  });
 }
 
 export function mirrorShiftBundle(
@@ -142,10 +144,12 @@ export function mirrorShiftBundle(
   exec: SqlExecutor,
   shiftId: string,
   generation?: CredentialGeneration,
-): Promise<void> {
+  isEntryCurrent: () => boolean = () => true,
+): Promise<boolean> {
   return trackShiftBundleMirror(shiftId, () =>
-    mirrorShiftBundleBody(client, exec, shiftId, generation).catch((err) => {
+    mirrorShiftBundleBody(client, exec, shiftId, generation, true, isEntryCurrent).catch((err) => {
       console.error("station: shift bundle download/mirror failed", err);
+      return false;
     }),
   );
 }

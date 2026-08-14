@@ -243,6 +243,7 @@ const SSCC = buildSscc(0, TEST_ISSUER_PREFIX, 777);
 interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   issuerPrefix?: string | null;
   boxCapacity?: number | null;
+  bundleRevision?: number;
   /**
    * Test-only seeding: when given (together with a non-null `issuerPrefix`),
    * a box is opened and this many already-accepted codes are named into it
@@ -327,6 +328,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     pendingSync = 0,
     issuerPrefix = TEST_ISSUER_PREFIX,
     boxCapacity = null,
+    bundleRevision = 0,
     boxItemCount,
     closeCurrentBox,
     onScan,
@@ -363,7 +365,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     }
   }
 
-  return render(
+  const screenForRevision = (revision: number) => (
     <WorkScreen
       exec={exec}
       shiftId={shiftId}
@@ -380,14 +382,22 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       pendingSync={pendingSync}
       issuerPrefix={issuerPrefix}
       boxCapacity={boxCapacity}
+      bundleRevision={revision}
       {...(closeCurrentBox ? { closeCurrentBox } : {})}
       {...(onScan ? { onScan } : {})}
       verifyPrintedLabel={verifyPrintedLabel}
       {...(printing !== undefined ? { printing } : {})}
       {...(onOpenPrinterSetup ? { onOpenPrinterSetup } : {})}
       {...(onPrintRecoveryChange ? { onPrintRecoveryChange } : {})}
-    />,
+    />
   );
+  const view = render(screenForRevision(bundleRevision));
+  return {
+    ...view,
+    refreshBundle(revision: number) {
+      view.rerender(screenForRevision(revision));
+    },
+  };
 }
 
 describe("WorkScreen", () => {
@@ -1958,6 +1968,33 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(
       screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" }),
     ).toBeDefined();
+  });
+
+  it("drops the old box template when a refreshed bundle removes it without remounting work state", async () => {
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({ status: "closed", sscc: SSCC, itemCount: 1 });
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    const view = renderWorkTracked({
+      exec,
+      boxCapacity: 1,
+      boxItemCount: 0,
+      closeCurrentBox: close,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+
+    act(() => scan(KM));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+
+    await exec.run("UPDATE shift_mirror SET box_label_template_spec = NULL WHERE id = ?", ["s1"]);
+    view.refreshBundle(1);
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть короб" }));
+
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
+    expect(print).toHaveBeenCalledOnce();
+    expect(await screen.findByText("Для смены не выбран шаблон этикетки короба")).toBeDefined();
   });
 
   it("logs only a fixed category when verification reprint transport rejects", async () => {

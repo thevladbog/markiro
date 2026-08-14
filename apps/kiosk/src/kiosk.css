@@ -992,6 +992,11 @@ body,
   font: var(--text-body-sm);
 }
 
+.kiosk-login__settings {
+  min-height: 48px;
+  margin-inline: auto var(--sp-5);
+}
+
 .badge-scan-animation {
   width: clamp(180px, 26vw, 280px);
   aspect-ratio: 1;
@@ -1225,7 +1230,23 @@ body,
 
 .kiosk-setup__footer {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: var(--sp-4);
+}
+
+.kiosk-setup__refresh {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+}
+
+.kiosk-setup__refresh .mk-alert {
+  flex: 1;
 }
 
 .kiosk-setup__done {
@@ -1333,6 +1354,14 @@ body,
 }
 
 @media (orientation: portrait) and (max-width: 540px) {
+  .kiosk-login__footer > span {
+    display: none;
+  }
+
+  .kiosk-login__settings {
+    margin-inline: 0 auto;
+  }
+
   .kiosk-done {
     gap: 8px;
     padding: 12px 20px;

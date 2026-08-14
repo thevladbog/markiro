@@ -209,13 +209,13 @@ export function KioskShell(): React.JSX.Element {
   const brandingRequest = useRef(0);
 
   const refreshBranding = useCallback(
-    async (cfg: KioskConfig | null, snap: CachedSnapshot | null): Promise<void> => {
+    async (cfg: KioskConfig | null, snap: CachedSnapshot | null): Promise<boolean> => {
       const requestId = ++brandingRequest.current;
       const owner = brandingOwnerOf(cfg);
       if (!cfg?.token || !owner || !snap?.bootstrap.branding) {
         const cached = await loadCachedBranding();
         if (requestId === brandingRequest.current) setBranding(cached);
-        return;
+        return false;
       }
       try {
         const result = await refreshCachedBranding({
@@ -223,15 +223,16 @@ export function KioskShell(): React.JSX.Element {
           token: cfg.token,
           branding: snap.bootstrap.branding,
         });
-        if (
-          shouldActivateBranding(
-            result,
-            brandingOwnerOf(configRef.current),
-            requestId,
-            brandingRequest.current,
-          )
-        )
-          setBranding(result.branding);
+        const activated = shouldActivateBranding(
+          result,
+          brandingOwnerOf(configRef.current),
+          requestId,
+          brandingRequest.current,
+        );
+        if (activated) setBranding(result.branding);
+        return (
+          activated && result.branding.revision === (snap.bootstrap.branding.logoRevision ?? null)
+        );
       } catch (error) {
         console.warn("kiosk: company branding could not be refreshed", error);
         const cached = await loadCachedBranding();
@@ -240,6 +241,7 @@ export function KioskShell(): React.JSX.Element {
           sameBrandingOwner(owner, brandingOwnerOf(configRef.current))
         )
           setBranding(cached);
+        return false;
       }
     },
     [],
@@ -489,6 +491,34 @@ export function KioskShell(): React.JSX.Element {
       }
     }
     await drain();
+  }, [applySnapshot, clientFor, drain, refreshBranding, revoke]);
+
+  /** Operator-requested refresh. Unlike the background tick, this waits for
+   * both the bootstrap and the private logo download so the settings screen can
+   * report a truthful result instead of a console-only best-effort attempt. */
+  const refreshKioskData = useCallback(async (): Promise<boolean> => {
+    const client = clientFor(configRef.current);
+    if (!client) return false;
+    try {
+      await refreshSnapshot(client, now);
+      setOnline(true);
+    } catch (error) {
+      console.warn("kiosk: the manual snapshot refresh failed", error);
+      setOnline(false);
+      if (isDeviceRevoked(error)) await revoke();
+      return false;
+    }
+
+    try {
+      const refreshed = await readSnapshot();
+      applySnapshot(refreshed);
+      const brandingUpdated = await refreshBranding(configRef.current, refreshed);
+      await drain();
+      return brandingUpdated;
+    } catch (error) {
+      console.error("kiosk: the manually refreshed data could not be applied", error);
+      return false;
+    }
   }, [applySnapshot, clientFor, drain, refreshBranding, revoke]);
 
   /** Re-reads everything the device persists. Used at boot and again the moment
@@ -997,6 +1027,7 @@ export function KioskShell(): React.JSX.Element {
         // through the wedge, presses «Готово», and leaves with a saved
         // configuration that misdescribes the machine.
         activeTransport={scanPort === null ? "keyboard" : "serial"}
+        {...(paired ? { onRefreshData: refreshKioskData } : {})}
         onTransportChange={(next, port) => {
           // THE SWAP, and the whole reason that screen can certify anything.
           // The port travels up because only that screen's radio can obtain

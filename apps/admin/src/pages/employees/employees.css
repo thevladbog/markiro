@@ -131,7 +131,7 @@
 
 .mk-employee-edit-panel__layout {
   display: grid;
-  grid-template-columns: minmax(148px, 180px) minmax(0, 1fr);
+  grid-template-columns: minmax(210px, 240px) minmax(0, 1fr);
   gap: var(--sp-6);
   align-items: start;
 }
@@ -158,7 +158,8 @@
 .mk-employee-section-nav__button {
   width: 100%;
   min-height: var(--control-sm);
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-2);
@@ -194,6 +195,7 @@
 
 .mk-employee-section-nav__label {
   min-width: 0;
+  line-height: 1.2;
   overflow-wrap: anywhere;
 }
 
@@ -389,21 +391,12 @@
 
 @media (min-width: 768px) and (max-width: 1023px) {
   .mk-employee-edit-panel__layout {
-    grid-template-columns: minmax(156px, 0.48fr) minmax(0, 1fr);
+    grid-template-columns: minmax(190px, 0.48fr) minmax(0, 1fr);
     gap: var(--sp-4);
   }
 
-  .mk-employee-section-nav__button {
-    flex-direction: column;
-  }
-
-  .mk-employee-section-nav__label {
-    width: 100%;
-  }
-
   .mk-employee-section-nav__markers {
-    max-width: 100%;
-    flex-wrap: wrap;
+    max-width: none;
   }
 
   .mk-employee-profile-form {
@@ -449,6 +442,7 @@
 
   .mk-employee-section-nav__button {
     width: auto;
+    display: flex;
     white-space: nowrap;
   }
 

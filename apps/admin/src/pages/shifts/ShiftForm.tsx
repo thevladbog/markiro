@@ -21,7 +21,7 @@ import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { ProductDto } from "../catalog/api.js";
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
-import type { CreateShiftInput, LineDto, UpdateShiftInput } from "./api.js";
+import type { CreateShiftInput, LineDto, ShiftStatus, UpdateShiftInput } from "./api.js";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
 
@@ -73,6 +73,7 @@ export interface ShiftFormContext {
 
 export interface ShiftFormProps {
   mode: "create" | "edit";
+  editStatus?: ShiftStatus;
   initialValues?: ShiftFormValues;
   /** All products (both draft and active) -- draft ones render disabled with a hint. */
   products: ProductDto[];
@@ -114,6 +115,7 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
 
 export function ShiftForm({
   mode: formMode,
+  editStatus,
   initialValues,
   products,
   lines,
@@ -145,7 +147,7 @@ export function ShiftForm({
     setValue,
     setError,
     clearErrors,
-    formState: { errors, isDirty },
+    formState: { errors, isDirty, dirtyFields },
   } = useForm<ShiftFormValues>({
     resolver: zodResolver(shiftFormSchema),
     defaultValues: initialValues ?? EMPTY_VALUES,
@@ -158,6 +160,7 @@ export function ShiftForm({
   const ssccIssuerCounterpartyId = watch("ssccIssuerCounterpartyId");
   const boxLabelTemplateSelection = watch("boxLabelTemplateSelection");
   const palletsEnabled = watch("palletsEnabled");
+  const activeEdit = formMode === "edit" && editStatus === "active";
 
   const isDirtyRef = useRef(false);
 
@@ -239,6 +242,13 @@ export function ShiftForm({
           ssccIssuer: ssccIssuerTouchedRef.current,
         },
         resolvedBoxLabelTemplateId,
+        editStatus,
+        {
+          lineId: dirtyFields.lineId === true,
+          plannedQty: dirtyFields.plannedQty === true,
+          plannedDate: dirtyFields.plannedDate === true,
+          boxLabelTemplate: dirtyFields.boxLabelTemplateSelection === true,
+        },
       ),
     );
   });
@@ -373,6 +383,7 @@ export function ShiftForm({
                     { value: "aggregation", label: t("pages.shifts.form.modeAggregation") },
                   ]}
                   value={field.value}
+                  disabled={activeEdit}
                   onValueChange={(value) => {
                     field.onChange(value);
                     if (value === "validation") clearErrors("boxLabelTemplateSelection");
@@ -427,6 +438,7 @@ export function ShiftForm({
               label={t("pages.shifts.form.counterpartyLabel")}
               options={counterpartyOptions}
               value={counterpartyId ?? ""}
+              disabled={activeEdit}
               onValueChange={(value) => {
                 counterpartyTouchedRef.current = true;
                 setValue("counterpartyId", value, { shouldDirty: true, shouldValidate: true });
@@ -437,6 +449,7 @@ export function ShiftForm({
                 label={t("pages.shifts.form.ssccIssuerLabel")}
                 options={ssccIssuerOptions}
                 value={ssccIssuerCounterpartyId ?? ""}
+                disabled={activeEdit}
                 hint={t("pages.shifts.form.ssccIssuerHint")}
                 onValueChange={(value) => {
                   ssccIssuerTouchedRef.current = true;
@@ -478,6 +491,7 @@ export function ShiftForm({
                 mono
                 inputMode="numeric"
                 {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
+                disabled={activeEdit}
                 {...register("boxCapacity")}
               />
               <Controller
@@ -487,6 +501,7 @@ export function ShiftForm({
                   <Checkbox
                     label={t("pages.shifts.form.palletsEnabledLabel")}
                     checked={field.value}
+                    disabled={activeEdit}
                     onCheckedChange={field.onChange}
                   />
                 )}
@@ -497,6 +512,7 @@ export function ShiftForm({
                   mono
                   inputMode="numeric"
                   {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
+                  disabled={activeEdit}
                   {...register("palletCapacity")}
                 />
               ) : null}
@@ -536,6 +552,9 @@ export function ShiftForm({
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
  *   when hidden (`mode === "validation"`), where they're not applicable.
+ * - Active-shift edits send `lineId`, `plannedQty`, and `plannedDate` only
+ *   when their final value differs from the form default. This prevents a
+ *   stale edit panel from overwriting a concurrent correction.
  * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`,
  *   `palletsEnabled`) is always sent as shown, matching the simpler
  *   full-form-resend convention `ProductForm`/`CounterpartyForm` already use.
@@ -552,6 +571,18 @@ function toPayload(
     ssccIssuer: boolean;
   },
   resolvedBoxLabelTemplateId: string | null,
+  editStatus?: ShiftStatus,
+  changed: {
+    lineId: boolean;
+    plannedQty: boolean;
+    plannedDate: boolean;
+    boxLabelTemplate: boolean;
+  } = {
+    lineId: true,
+    plannedQty: true,
+    plannedDate: true,
+    boxLabelTemplate: true,
+  },
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
@@ -567,6 +598,17 @@ function toPayload(
     plannedQty: plannedQty ? Number(plannedQty) : null,
     plannedDate: plannedDate ? plannedDate : null,
   };
+
+  if (formMode === "edit" && editStatus === "active") {
+    const activePayload: UpdateShiftInput = {};
+    if (changed.lineId) activePayload.lineId = lineId ? lineId : null;
+    if (changed.plannedQty) activePayload.plannedQty = plannedQty ? Number(plannedQty) : null;
+    if (changed.plannedDate) activePayload.plannedDate = plannedDate ? plannedDate : null;
+    if (changed.boxLabelTemplate) {
+      activePayload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
+    }
+    return activePayload;
+  }
 
   if (touched.counterparty) {
     payload.counterpartyId = counterpartyId ? counterpartyId : null;

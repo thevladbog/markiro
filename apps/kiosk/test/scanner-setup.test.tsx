@@ -223,6 +223,34 @@ describe("ScannerSetup — transports offered", () => {
     expect(serial.getAttribute("aria-describedby")).toBe(serialHint.id);
     expect(keyboardHint.id).not.toBe(serialHint.id);
   });
+
+  it("shows whether a manual kiosk-data refresh, including branding, succeeded", async () => {
+    const onRefreshData = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        subscribe={noFanOut}
+        onRefreshData={onRefreshData}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh kiosk data" }));
+    await waitFor(() =>
+      expect(screen.getByText("Kiosk data and branding are up to date.")).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh kiosk data" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Could not refresh kiosk data or branding. Check the connection and try again.",
+        ),
+      ).toBeDefined(),
+    );
+    expect(onRefreshData).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe("ScannerSetup — the test scan", () => {

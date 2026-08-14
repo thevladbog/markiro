@@ -124,7 +124,7 @@ describe("mirrorShiftBundle", () => {
     await applyMigrations(exec);
     const get = vi.fn().mockResolvedValue(bundle);
 
-    await mirrorShiftBundle({ get }, exec, "s1");
+    await expect(mirrorShiftBundle({ get }, exec, "s1")).resolves.toBe(true);
 
     expect(get).toHaveBeenCalledWith("/shifts/s1/bundle");
     const shiftRows = await exec.all<{ id: string; product_id: string }>(
@@ -203,7 +203,7 @@ describe("mirrorShiftBundle", () => {
     const get = vi.fn().mockRejectedValue(new Error("network down"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-    await expect(mirrorShiftBundle({ get }, exec, "s1")).resolves.toBeUndefined();
+    await expect(mirrorShiftBundle({ get }, exec, "s1")).resolves.toBe(false);
 
     expect(consoleError).toHaveBeenCalled();
     const rows = await exec.all("SELECT id FROM shift_mirror");
@@ -279,6 +279,29 @@ describe("mirrorShiftBundle", () => {
     ).toEqual([{ box_label_template_spec: JSON.stringify(boxLabelSpec) }]);
   });
 
+  it("does not write a delayed response after its shift-entry token becomes stale", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    let resolveBundle!: (value: StationBundle) => void;
+    const response = new Promise<StationBundle>((resolve) => {
+      resolveBundle = resolve;
+    });
+    let current = true;
+    const mirroring = mirrorShiftBundle(
+      { get: vi.fn().mockReturnValue(response) },
+      exec,
+      "s1",
+      undefined,
+      () => current,
+    );
+
+    current = false;
+    resolveBundle(bundle);
+
+    await expect(mirroring).resolves.toBe(false);
+    expect(await exec.all("SELECT id FROM shift_mirror")).toEqual([]);
+  });
+
   // CodeRabbit PR33 review, Finding 10: `addRange` used to run AFTER
   // `upsertBundle`, whose very first statement publishes
   // `shift_mirror.issuer_prefix` -- the column `WorkScreen` polls to decide
@@ -323,7 +346,7 @@ describe("mirrorShiftBundle", () => {
       };
       const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
 
-      await expect(mirrorShiftBundle({ get }, failingExec, "s1")).resolves.toBeUndefined();
+      await expect(mirrorShiftBundle({ get }, failingExec, "s1")).resolves.toBe(false);
 
       expect(consoleError).toHaveBeenCalled();
       // The fix under test: NOT published. A concurrent reader (WorkScreen's

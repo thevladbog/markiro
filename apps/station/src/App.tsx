@@ -207,6 +207,9 @@ export function App() {
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new">("select");
   const [shift, setShift] = useState<ActiveShift | null>(null);
+  const activeShiftIdRef = useRef<string | null>(null);
+  const shiftEntryGenerationRef = useRef(0);
+  const [shiftBundleRevision, setShiftBundleRevision] = useState(0);
   const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
   const [serverReachability, setServerReachability] = useState<ServerReachability>("checking");
   const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 1 });
@@ -553,7 +556,7 @@ export function App() {
       cancelled = true;
       stopPolling();
     };
-  }, [shift]);
+  }, [shift, shiftBundleRevision]);
 
   useEffect(() => {
     let cancelled = false;
@@ -691,6 +694,8 @@ export function App() {
     // These updates gate every authenticated surface in the next render.
     // Cache deletion happens only from the post-commit effect below.
     setOperator(null);
+    activeShiftIdRef.current = null;
+    shiftEntryGenerationRef.current += 1;
     setShift(null);
     setShiftContext(null);
     setBoxCapacity(null);
@@ -914,6 +919,8 @@ export function App() {
         publishConfig,
       });
       setOperator(null);
+      activeShiftIdRef.current = null;
+      shiftEntryGenerationRef.current += 1;
       setShift(null);
       setFloorView("select");
       setShowSetup(false);
@@ -1131,7 +1138,26 @@ export function App() {
   const floorGeneration = credentialGeneration;
   startNormalShiftMirrorRef.current = (shiftId) => {
     if (floorGeneration && credentialGenerationIsCurrent(floorGeneration)) {
-      void mirrorShiftBundle(activeClient, tauriExecutor, shiftId, floorGeneration);
+      const entryGeneration = shiftEntryGenerationRef.current;
+      void mirrorShiftBundle(
+        activeClient,
+        tauriExecutor,
+        shiftId,
+        floorGeneration,
+        () =>
+          shiftEntryGenerationRef.current === entryGeneration &&
+          activeShiftIdRef.current === shiftId,
+      ).then((refreshed) => {
+        if (
+          !refreshed ||
+          shiftEntryGenerationRef.current !== entryGeneration ||
+          activeShiftIdRef.current !== shiftId ||
+          !credentialGenerationIsCurrent(floorGeneration)
+        ) {
+          return;
+        }
+        setShiftBundleRevision((revision) => revision + 1);
+      });
     }
   };
   const updateIndicator: UpdateIndicatorModel = {
@@ -1160,6 +1186,8 @@ export function App() {
   // the ordinary allocating bundle mirror through the ref above.
   function handleShiftEntered(entered: ActiveShift) {
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    shiftEntryGenerationRef.current += 1;
+    activeShiftIdRef.current = entered.id;
     shiftRecoverySyncPaused.current = true;
     pauseSync();
     setResumeSyncAfterRecoveryCommit(false);
@@ -1353,6 +1381,8 @@ export function App() {
               // clearing only `shift` would re-render NewShift instead of
               // shift selection -- the opposite of what this exit control
               // promises (Finding 5).
+              activeShiftIdRef.current = null;
+              shiftEntryGenerationRef.current += 1;
               setShift(null);
               setFloorView("select");
             }}
@@ -1363,6 +1393,7 @@ export function App() {
             // which is exactly what turns WorkScreen's box UI off entirely.
             issuerPrefix={issuerPrefix}
             boxCapacity={boxCapacity}
+            bundleRevision={shiftBundleRevision}
             verifyPrintedLabel={hardwareConfig.verifyPrintedLabel}
             printing={
               hardwareConfig.printer

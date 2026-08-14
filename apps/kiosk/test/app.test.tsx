@@ -2,7 +2,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveDigestB64, formatPhc, PHC_ITERATIONS } from "@markiro/domain";
 import { App } from "../src/App.js";
-import type { CreateOrderDto, KioskBootstrapDto } from "../src/api/types.js";
+import type { CreateOrderDto, KioskBootstrapDto, KioskBrandingDto } from "../src/api/types.js";
 import i18n from "../src/i18n/index.js";
 import type * as KeyboardModule from "../src/scanner/keyboard.js";
 import type { ScanSource } from "../src/scanner/source.js";
@@ -10,6 +10,7 @@ import type * as WebSerialModule from "../src/scanner/web-serial.js";
 import type { SerialPort } from "../src/scanner/web-serial.js";
 import { SETTINGS_HOLD_MS } from "../src/screens/Idle.js";
 import { replaceSnapshot } from "../src/store/cache.js";
+import { loadCachedBranding } from "../src/store/branding.js";
 // The namespace as well as the names, so one write can be made to fail under
 // the shell without stubbing the whole store — the shape `sync.test.ts` already
 // uses for `appendJournal`.
@@ -115,6 +116,7 @@ const GTIN_MILK = "04600682000013";
 const MILK = "Молоко 3,2%";
 const KM = `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`;
 const SSCC = "346006820000000021";
+const LOGO_REVISION = "44444444-4444-4444-8444-444444444444";
 const BOX_PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
 const EMPLOYEE = {
   id: "22222222-2222-4222-8222-222222222222",
@@ -170,7 +172,7 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
-    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    branding: server.branding,
     pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee: 5, showPrices: true },
     badgeSalt: SALT,
@@ -243,6 +245,7 @@ interface FakeServer {
    */
   takenTodayElsewhere: number;
   bootstraps: number;
+  branding: KioskBrandingDto;
   admissions: Array<Omit<CreateOrderDto, "createdAt" | "admissionProof">>;
   orders: CreateOrderDto[];
 }
@@ -281,6 +284,7 @@ beforeEach(() => {
     generatedAt: NOW.toISOString(),
     takenTodayElsewhere: 0,
     bootstraps: 0,
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
     admissions: [],
     orders: [],
   };
@@ -297,6 +301,12 @@ beforeEach(() => {
     if (url.endsWith("/kiosk/bootstrap")) {
       server.bootstraps += 1;
       return jsonResponse(bootstrapAt(server.generatedAt));
+    }
+    if (url.endsWith(`/kiosk/branding/logo/${LOGO_REVISION}`)) {
+      return new Response(new Uint8Array([0x52, 0x49, 0x46, 0x46]), {
+        status: 200,
+        headers: { "Content-Type": "image/webp", "Content-Length": "4" },
+      });
     }
     if (url.endsWith("/kiosk/order-admissions")) {
       const body = JSON.parse(String(init?.body)) as Omit<
@@ -329,6 +339,7 @@ afterEach(() => {
   setOnLine(true);
   setWebSerial(null);
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 /** jsdom's `navigator.onLine` is a prototype getter; an own property shadows
@@ -1693,6 +1704,35 @@ describe("KioskShell", () => {
     // The GATE, not the settings: this kiosk is paired, so the second access
     // tier applies and the transport radios are not in the document at all.
     expect(screen.queryByText(SETUP_TITLE)).toBeNull();
+  });
+
+  it("refreshes the bootstrap and company logo from the visible equipment settings", async () => {
+    await pair();
+    vi.stubGlobal("createImageBitmap", vi.fn().mockResolvedValue({ close: vi.fn() }));
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    const bootstrapsBefore = server.bootstraps;
+    server.branding = {
+      organizationName: "ООО Новый логотип",
+      logoUrl: `/kiosk/branding/logo/${LOGO_REVISION}`,
+      logoRevision: LOGO_REVISION,
+    };
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки оборудования" }));
+    await settle(() => expect(screen.getByText(GATE_TITLE)).toBeDefined());
+    await signInWithPin();
+    await settle(() => expect(screen.getByText(SETUP_TITLE)).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "Обновить данные киоска" }));
+
+    await settle(() =>
+      expect(screen.getByText("Данные киоска и логотип обновлены.")).toBeDefined(),
+    );
+    expect(server.bootstraps).toBeGreaterThan(bootstrapsBefore);
+    await expect(loadCachedBranding()).resolves.toMatchObject({
+      organizationName: "ООО Новый логотип",
+      revision: LOGO_REVISION,
+    });
   });
 
   // The gate is worth nothing if it only shuts once. An unattended kiosk that

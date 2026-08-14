@@ -66,6 +66,16 @@ export const STATION_MIGRATIONS: string[] = [
      image_height INTEGER,
      image_pointer_checksum TEXT
    );`,
+  // Browser Cache Storage is not a reliable persistence boundary in every
+  // Windows WebView2 runtime. Keep validated, content-addressed product
+  // images in the station's own SQLite database so offline photos survive
+  // restarts independently of browser storage support.
+  `CREATE TABLE IF NOT EXISTS station_product_images (
+     checksum TEXT PRIMARY KEY,
+     content_type TEXT NOT NULL,
+     byte_size INTEGER NOT NULL,
+     bytes_base64 TEXT NOT NULL
+   );`,
   `CREATE TABLE IF NOT EXISTS codes_mirror (
      code_hash TEXT PRIMARY KEY,
      shift_id TEXT NOT NULL,

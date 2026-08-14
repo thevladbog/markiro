@@ -424,8 +424,8 @@ describe("ConflictsPage", () => {
     const table = within(await screen.findByRole("table"));
 
     // UNREVIEWED.losingShiftId is "s1" -- SHIFT_S1's product/date, not SHIFT_S2's.
-    expect(table.getByText("2026-07-28 — Cola")).toBeDefined();
-    expect(table.queryByText("2026-07-29 — Sprite")).toBeNull();
+    expect(table.getByText("28.07.2026 — Cola")).toBeDefined();
+    expect(table.queryByText("29.07.2026 — Sprite")).toBeNull();
   });
 
   it("lists the shift filter options newest first, though GET /shifts returns oldest first", async () => {
@@ -441,7 +441,22 @@ describe("ConflictsPage", () => {
     // (newer), matching the server's real oldest-first order -- the manager
     // currently closing the newest shift should not have to scroll to find
     // it in the dropdown.
-    expect(optionLabels).toEqual(["Все смены", "2026-07-29 — Sprite", "2026-07-28 — Cola"]);
+    expect(optionLabels).toEqual(["Все смены", "29.07.2026 — Sprite", "28.07.2026 — Cola"]);
+  });
+
+  it("searches shifts by their localized planned date", async () => {
+    const user = userEvent.setup();
+    stubFetch({ conflicts: [UNREVIEWED], shifts: [SHIFT_S1, SHIFT_S2] });
+
+    renderPage();
+    await screen.findByRole("table");
+    await user.click(screen.getByRole("combobox", { name: "Смена" }));
+    const search = screen.getByRole<HTMLInputElement>("searchbox", { name: "Поиск смены" });
+    await user.type(search, "29.07.2026");
+    expect(search.value).toBe("29.07.2026");
+
+    expect(screen.getByRole("option", { name: "29.07.2026 — Sprite" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "28.07.2026 — Cola" })).toBeNull();
   });
 
   it("refetches the list scoped to the selected shift when the shift filter changes", async () => {
@@ -452,7 +467,7 @@ describe("ConflictsPage", () => {
     await screen.findByRole("table");
     expect(fetchMock).toHaveBeenCalledWith("/api/conflicts?reviewed=false", expect.any(Object));
 
-    await chooseOption(user, "Смена", "2026-07-29 — Sprite");
+    await chooseOption(user, "Смена", "29.07.2026 — Sprite");
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(

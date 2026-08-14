@@ -42,6 +42,22 @@ describe("Idle", () => {
     expect(screen.queryByText(/Зона сканирования|Scan zone/i)).toBeNull();
   });
 
+  it("offers a visible equipment-settings action after pairing", () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <Idle
+        onEmployee={vi.fn()}
+        resolveBadge={vi.fn()}
+        onScan={vi.fn()}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки оборудования" }));
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
   it("uses equal landscape columns, left-aligned copy and reduced-motion fallback", () => {
     const css = readFileSync(`${process.cwd()}/src/kiosk.css`, "utf8");
 

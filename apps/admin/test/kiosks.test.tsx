@@ -284,7 +284,7 @@ describe("KiosksPage", () => {
           ...OFFLINE_KIOSK,
           id: "offline",
           enrolled: true,
-          lastSeenAt: new Date(now - 2 * 60_000 - 1).toISOString(),
+          lastSeenAt: new Date(now - 6 * 60_000 - 1).toISOString(),
         },
       ],
       products: [],
@@ -305,7 +305,7 @@ describe("KiosksPage", () => {
         {
           ...ONLINE_KIOSK,
           id: "threshold",
-          lastSeenAt: new Date(now - 2 * 60_000).toISOString(),
+          lastSeenAt: new Date(now - 6 * 60_000).toISOString(),
         },
       ],
       products: [],
@@ -385,7 +385,7 @@ describe("KiosksPage", () => {
       kiosks: [
         {
           ...ONLINE_KIOSK,
-          lastSeenAt: new Date(now - 2 * 60_000 + 1).toISOString(),
+          lastSeenAt: new Date(now - 6 * 60_000 + 1).toISOString(),
         },
       ],
       products: [],
@@ -398,6 +398,42 @@ describe("KiosksPage", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
     expect(screen.getByText("Не в сети")).toBeDefined();
+  });
+
+  it("polls kiosk activity so a new five-minute heartbeat keeps the row online", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const now = Date.parse("2026-08-06T10:00:00.000Z");
+    vi.setSystemTime(now);
+    let kioskRequests = 0;
+    const fetchMock = stubFetch({
+      kiosks: [],
+      products: [],
+      reasons: [],
+      onPost: (path) => {
+        if (path !== "/api/kiosks") return undefined;
+        kioskRequests += 1;
+        return jsonResponse(200, {
+          items: [
+            {
+              ...ONLINE_KIOSK,
+              lastSeenAt:
+                kioskRequests === 1
+                  ? new Date(now - 5.5 * 60_000).toISOString()
+                  : new Date(Date.now()).toISOString(),
+            },
+          ],
+        });
+      },
+    });
+    renderPage();
+
+    expect(await screen.findByText("В сети")).toBeDefined();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/kiosks").length).toBeGreaterThan(1);
+    expect(screen.getByText("В сети")).toBeDefined();
   });
 
   it("keeps kiosk archive confirmation open with the server error", async () => {
