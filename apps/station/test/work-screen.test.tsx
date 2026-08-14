@@ -43,6 +43,31 @@ function makeExec(): SqlExecutor {
   };
 }
 
+/** Installed-station schema from before durable box-print recovery columns existed. */
+function makeLegacyPrintRecoveryExec(): SqlExecutor {
+  const db = new DatabaseSync(":memory:");
+  for (const stmt of STATION_MIGRATIONS) {
+    if (
+      stmt.includes("ALTER TABLE boxes_mirror ADD COLUMN print_state") ||
+      stmt.includes("ALTER TABLE boxes_mirror ADD COLUMN print_error_code")
+    ) {
+      continue;
+    }
+    try {
+      db.exec(stmt);
+    } catch (err) {
+      if (!/duplicate column name/i.test(String(err))) throw err;
+    }
+  }
+  return {
+    run: async (sql, params = []) => {
+      db.prepare(sql).run(...(params as never[]));
+    },
+    all: async <T,>(sql: string, params: unknown[] = []) =>
+      db.prepare(sql).all(...(params as never[])) as T[],
+  };
+}
+
 /**
  * Same schema, but `all` genuinely round-trips through a microtask before
  * resolving — unlike node:sqlite, which is synchronous under the hood even
@@ -1694,6 +1719,85 @@ describe("WorkScreen box progress, closing and printing", () => {
 
       expect(await screen.findByText("Принтер не принял задание")).toBeDefined();
       expect(hydrationAttempts).toBe(2);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("repairs an interrupted local migration before retrying print recovery", async () => {
+    const base = makeLegacyPrintRecoveryExec();
+    await seedLabelSpec(base, "s1");
+    let releaseMigration: (() => void) | undefined;
+    const migrationGate = new Promise<void>((resolve) => {
+      releaseMigration = resolve;
+    });
+    let migrationStarts = 0;
+    const exec: SqlExecutor = {
+      all: base.all,
+      async run(sql, params = []) {
+        if (sql.includes("CREATE TABLE IF NOT EXISTS station_meta")) {
+          migrationStarts += 1;
+          await migrationGate;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWorkTracked({ exec });
+      expect(
+        await screen.findByRole("dialog", { name: "Не удалось восстановить состояние печати" }),
+      ).toBeDefined();
+
+      const retry = screen.getByRole("button", { name: "Повторить восстановление" });
+      fireEvent.click(retry);
+      fireEvent.click(retry);
+
+      expect(
+        (await screen.findByRole("button", { name: "Выполняем…" })) as HTMLButtonElement,
+      ).toHaveProperty("disabled", true);
+      expect(migrationStarts).toBe(1);
+      releaseMigration?.();
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Не удалось восстановить состояние печати" }),
+        ).toBeNull(),
+      );
+      const columns = await base.all<{ name: string }>("PRAGMA table_info(boxes_mirror)");
+      expect(columns.map(({ name }) => name)).toEqual(
+        expect.arrayContaining(["print_state", "print_error_code"]),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("returns to the shift list without changing unresolved print work", async () => {
+    const base = makeExec();
+    await seedPendingPrint(base, "transport_failed");
+    const onExit = vi.fn();
+    const exec: SqlExecutor = {
+      run: base.run,
+      async all<T>(sql: string, params: unknown[] = []) {
+        if (sql.includes("JOIN shift_mirror s")) throw new Error("sqlite unavailable");
+        return base.all<T>(sql, params);
+      },
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      renderWorkTracked({ exec, onExit });
+      await screen.findByRole("dialog", { name: "Не удалось восстановить состояние печати" });
+
+      fireEvent.click(screen.getByRole("button", { name: "К списку смен" }));
+
+      expect(onExit).toHaveBeenCalledOnce();
+      expect(
+        await base.all<{ sscc: string; print_state: string }>(
+          "SELECT sscc, print_state FROM boxes_mirror WHERE box_id = ?",
+          [SEEDED_BOX_ID],
+        ),
+      ).toEqual([{ sscc: SSCC, print_state: "pending" }]);
     } finally {
       consoleError.mockRestore();
     }

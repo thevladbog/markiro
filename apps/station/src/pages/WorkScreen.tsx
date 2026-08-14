@@ -38,7 +38,7 @@ import {
   undoLastScan,
   type RecentOperation,
 } from "../lib/journal.js";
-import { readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
+import { applyMigrations, readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
 import { rasterizeText } from "../lib/rasterizer.js";
 import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
@@ -375,11 +375,28 @@ export function WorkScreen({
   const [printRecoveryHydrated, setPrintRecoveryHydrated] = useState(issuerPrefix === null);
   const [printRecoveryHydrationFailed, setPrintRecoveryHydrationFailed] = useState(false);
   const [printRecoveryHydrationEpoch, setPrintRecoveryHydrationEpoch] = useState(0);
+  const [printRecoveryRetrying, setPrintRecoveryRetrying] = useState(false);
+  const printRecoveryRetryingRef = useRef(false);
   const printRecoveryHydratedRef = useRef(issuerPrefix === null);
   printRecoveryHydratedRef.current = printRecoveryHydrated;
   const printRecoveryReady = useRef<Promise<boolean> | null>(null);
   const printingRef = useRef(printing);
   printingRef.current = printing;
+
+  const retryPrintRecoveryHydration = useCallback((): void => {
+    if (printRecoveryRetryingRef.current) return;
+    printRecoveryRetryingRef.current = true;
+    setPrintRecoveryRetrying(true);
+    void applyMigrations(exec)
+      .catch(() => {
+        console.error("station: print recovery migration retry failed");
+      })
+      .finally(() => {
+        setPrintRecoveryHydrationEpoch((epoch) => epoch + 1);
+        printRecoveryRetryingRef.current = false;
+        setPrintRecoveryRetrying(false);
+      });
+  }, [exec]);
   // Keep verification as a queue because exception reprints can add work
   // while an earlier printed label is still unresolved. Ordinary box intake
   // is now blocked by the first prompt, but no secondary entry may overwrite
@@ -1486,9 +1503,22 @@ export function WorkScreen({
         <FullScreenDialog
           open
           title={t("box.printRecovery.restoreFailed")}
-          backLabel={t("box.printRecovery.retryRestore")}
-          onClose={() => setPrintRecoveryHydrationEpoch((epoch) => epoch + 1)}
+          backLabel={t("box.printRecovery.backToShifts")}
+          onClose={onExit}
           initialFocus="dialog"
+          footer={
+            <Button
+              size="floor"
+              disabled={printRecoveryRetrying}
+              onClick={retryPrintRecoveryHydration}
+            >
+              {t(
+                printRecoveryRetrying
+                  ? "box.printRecovery.pending"
+                  : "box.printRecovery.retryRestore",
+              )}
+            </Button>
+          }
         >
           <Alert tone="error" title={t("box.printRecovery.restoreFailedDetail")} />
         </FullScreenDialog>
