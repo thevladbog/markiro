@@ -69,11 +69,17 @@ export class ShiftExportSourceService {
   ): Promise<ShiftExportSnapshot> {
     const snapshotResult = await tx.execute(
       sql<{
-        sourceSnapshotStartedAt: Date;
+        sourceSnapshotStartedAt: Date | string;
       }>`select transaction_timestamp() as "sourceSnapshotStartedAt"`,
     );
-    const sourceSnapshotStartedAt = snapshotResult.rows[0]?.sourceSnapshotStartedAt;
-    if (!(sourceSnapshotStartedAt instanceof Date)) {
+    const rawSnapshotStartedAt = snapshotResult.rows[0]?.sourceSnapshotStartedAt;
+    const sourceSnapshotStartedAt =
+      rawSnapshotStartedAt instanceof Date
+        ? rawSnapshotStartedAt
+        : typeof rawSnapshotStartedAt === "string"
+          ? new Date(rawSnapshotStartedAt)
+          : undefined;
+    if (!sourceSnapshotStartedAt || Number.isNaN(sourceSnapshotStartedAt.getTime())) {
       throw new Error("Shift export snapshot timestamp is unavailable");
     }
 

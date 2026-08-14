@@ -48,6 +48,7 @@ interface Fixture {
   registry?: RegistryRow[];
   codeHistory?: CodeHistoryRow[];
   memberships?: BoxMembershipRow[];
+  snapshotStartedAt?: Date | string;
 }
 
 interface JoinLog {
@@ -132,7 +133,9 @@ function fakeDb(fixture: Fixture): FakeDbResult {
 
   const tx = {
     select,
-    execute: async () => ({ rows: [{ sourceSnapshotStartedAt: SNAPSHOT_STARTED_AT }] }),
+    execute: async () => ({
+      rows: [{ sourceSnapshotStartedAt: fixture.snapshotStartedAt ?? SNAPSHOT_STARTED_AT }],
+    }),
   };
   const db = {
     transaction: async (
@@ -257,6 +260,21 @@ describe("ShiftExportSourceService", () => {
     expect(sqlText(historyJoin!.condition)).toBe(
       '("code_registry"."tenant_id" = "codes"."tenant_id" and "code_registry"."code_hash" = "codes"."code_hash" and "code_registry"."shift_id" = "codes"."shift_id" and "code_registry"."scanned_at" = "codes"."scanned_at")',
     );
+  });
+
+  it("normalizes the raw timestamp string returned by the production Drizzle query", async () => {
+    const fake = fakeDb({
+      shifts: [closedShift()],
+      registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+      codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+      snapshotStartedAt: "2026-08-14 16:45:53.789006+03",
+    });
+
+    await expect(
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+    ).resolves.toMatchObject({
+      sourceSnapshotStartedAt: new Date("2026-08-14T13:45:53.789Z"),
+    });
   });
 
   it("does not reveal a shift belonging to another tenant", async () => {
