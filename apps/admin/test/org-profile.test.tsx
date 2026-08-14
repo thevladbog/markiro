@@ -224,6 +224,43 @@ describe("OrgProfilePage", () => {
     expect(save).toHaveProperty("disabled", false);
   });
 
+  it("keeps a deleted saved template unavailable when refreshing the template list fails", async () => {
+    const staleId = "22222222-2222-4222-8222-222222222222";
+    let labelTemplateRequests = 0;
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, { ...PROFILE, defaultBoxLabelTemplateId: staleId }),
+      labelTemplates: () => {
+        labelTemplateRequests += 1;
+        return labelTemplateRequests === 1
+          ? jsonResponse(200, { items: LABEL_TEMPLATES })
+          : jsonResponse(500, { message: "template library unavailable" });
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const selector = (await within(profileCard).findByLabelText(
+      "Шаблон этикетки короба по умолчанию",
+    )) as HTMLSelectElement;
+    const save = within(profileCard).getByRole("button", { name: "Сохранить" });
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Обновить шаблоны" }));
+
+    await waitFor(() => expect(labelTemplateRequests).toBe(2));
+    expect(selector.value).toBe(staleId);
+    expect(
+      within(selector).getByRole("option", { name: "Недоступный шаблон (удалён)" }),
+    ).toBeDefined();
+    expect(
+      within(profileCard).getByText(
+        "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
+      ),
+    ).toBeDefined();
+    expect(save).toHaveProperty("disabled", true);
+    expect(within(profileCard).getByRole("button", { name: "Обновить шаблоны" })).toBeDefined();
+  });
+
   it("saves the all-kiosk pickup-limit toggle and explains that employee values are retained", async () => {
     const fetchMock = routeFetch({
       profile: (init) =>

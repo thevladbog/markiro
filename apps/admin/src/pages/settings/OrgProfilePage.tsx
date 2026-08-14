@@ -167,7 +167,7 @@ export function OrgProfilePage() {
   const labelTemplates = labelTemplatesQuery.data ?? [];
   const savedTemplateIsUnavailable =
     defaultBoxLabelTemplateId !== "" &&
-    labelTemplatesQuery.isSuccess &&
+    labelTemplatesQuery.data !== undefined &&
     !labelTemplates.some((template) => template.id === defaultBoxLabelTemplateId);
   const labelTemplateOptions = [
     { value: "", label: t("pages.settings.profile.defaultBoxLabelTemplateUnset") },
