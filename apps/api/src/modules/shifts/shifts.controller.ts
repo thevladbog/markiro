@@ -16,6 +16,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
+import { StationOnlyGuard } from "../../tenancy/station-only.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   AllowSubscriptionReadOnly,
@@ -133,7 +134,17 @@ export class ShiftsController {
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
   async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
-    return this.shiftsService.openShift(req.tenantId!, id);
+    return this.shiftsService.openShift(req.tenantId!, id, req.deviceId);
+  }
+
+  @Post(":id/enter")
+  @HttpCode(200)
+  @UseGuards(StationOnlyGuard)
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @RequireSubscriptionWrite()
+  async enterShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
+    if (!req.deviceId) throw new Error("Station device identity is missing");
+    return this.shiftsService.enterShift(req.tenantId!, id, req.deviceId);
   }
 
   @Get(":id/bundle")

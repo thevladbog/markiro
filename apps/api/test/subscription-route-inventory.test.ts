@@ -192,6 +192,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /products (ProductsController.createProduct)",
       "POST /products/:id/image (ProductsController.uploadImage)",
       "POST /shifts (ShiftsController.createShift)",
+      "POST /shifts/:id/enter (ShiftsController.enterShift)",
       "POST /shifts/:id/open (ShiftsController.openShift)",
       "POST /station-devices (StationDevicesController.create)",
       "POST /station-devices/:id/pairing-code (StationDevicesController.issuePairingCode)",

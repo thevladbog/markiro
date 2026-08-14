@@ -16,6 +16,10 @@ export type BoxTemplateResolution =
   | { ok: true; boxLabelTemplateId: string | null }
   | { ok: false; code: "BOX_LABEL_TEMPLATE_REQUIRED" };
 
+export type StationCloseAccess =
+  | { kind: "single_device"; ownerDeviceId: string }
+  | { kind: "admin_only" };
+
 /** `YYYY-MM-DD`, matches the `date` column's string mode. */
 const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");
 
@@ -110,6 +114,8 @@ export interface ShiftDto {
   /** When scans first arrived after this shift was closed; null if never. */
   lateDataAt: Date | null;
   createdAt: Date;
+  /** Station close authority, computed from station participation. */
+  stationCloseAccess?: StationCloseAccess;
 }
 
 /** GET /shifts response. */

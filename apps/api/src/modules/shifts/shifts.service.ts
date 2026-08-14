@@ -44,6 +44,8 @@ type JoinedShiftRow = Omit<ShiftDto, "image"> & {
   imageByteSize: number | null;
   imageWidth: number | null;
   imageHeight: number | null;
+  stationClosePolicy: "single_device" | "admin_only";
+  stationCloseOwnerDeviceId: string | null;
 };
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
 
@@ -439,7 +441,8 @@ export class ShiftsService {
   }
 
   /** Open a planned shift: planned -> active, stamps openedAt. 409 otherwise. */
-  async openShift(tenantId: string, id: string): Promise<ShiftDto> {
+  async openShift(tenantId: string, id: string, deviceId?: string): Promise<ShiftDto> {
+    if (deviceId) return this.enterShift(tenantId, id, deviceId);
     const current = await this.findRow(tenantId, id);
     if (!current) throw new NotFoundException();
     if (current.status !== "planned") {
@@ -461,6 +464,72 @@ export class ShiftsService {
       .returning();
     if (!row) throw new ConflictException("Shift can only be opened while planned");
     return this.getShift(tenantId, row.id);
+  }
+
+  /** Register a station's participation and atomically derive close authority. */
+  async enterShift(tenantId: string, id: string, deviceId: string): Promise<ShiftDto> {
+    await this.db.transaction(async (tx) => {
+      const [device] = await tx
+        .select({ id: schema.stationDevices.id })
+        .from(schema.stationDevices)
+        .where(
+          and(
+            eq(schema.stationDevices.tenantId, tenantId),
+            eq(schema.stationDevices.id, deviceId),
+            isNull(schema.stationDevices.revokedAt),
+          ),
+        )
+        .for("update");
+      if (!device) throw new NotFoundException("Station device not found");
+
+      const [shift] = await tx
+        .select({
+          id: schema.shifts.id,
+          status: schema.shifts.status,
+          palletsEnabled: schema.shifts.palletsEnabled,
+          stationClosePolicy: schema.shifts.stationClosePolicy,
+          stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
+        })
+        .from(schema.shifts)
+        .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)))
+        .for("update");
+      if (!shift) throw new NotFoundException();
+      if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
+      if (shift.status === "planned") {
+        if (shift.palletsEnabled) await this.entitlements.assertFeatureAccess(tenantId, "pallets");
+        await tx
+          .update(schema.shifts)
+          .set({ status: "active", openedAt: new Date() })
+          .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
+      }
+
+      const now = new Date();
+      await tx
+        .insert(schema.shiftDeviceParticipants)
+        .values({ tenantId, shiftId: id, deviceId, firstEnteredAt: now, lastEnteredAt: now })
+        .onConflictDoUpdate({
+          target: [
+            schema.shiftDeviceParticipants.tenantId,
+            schema.shiftDeviceParticipants.shiftId,
+            schema.shiftDeviceParticipants.deviceId,
+          ],
+          set: { lastEnteredAt: now },
+        });
+
+      if (shift.stationClosePolicy === "admin_only") return;
+      if (shift.stationCloseOwnerDeviceId === null) {
+        await tx
+          .update(schema.shifts)
+          .set({ stationCloseOwnerDeviceId: deviceId, stationClosePolicy: "single_device" })
+          .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
+      } else if (shift.stationCloseOwnerDeviceId !== deviceId) {
+        await tx
+          .update(schema.shifts)
+          .set({ stationCloseOwnerDeviceId: null, stationClosePolicy: "admin_only" })
+          .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
+      }
+    });
+    return this.getShift(tenantId, id);
   }
 
   /**
@@ -809,13 +878,30 @@ export class ShiftsService {
       closeReason: schema.shifts.closeReason,
       lateDataAt: schema.shifts.lateDataAt,
       createdAt: schema.shifts.createdAt,
+      stationClosePolicy: schema.shifts.stationClosePolicy,
+      stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
     };
   }
 
   private mapShiftRow(row: JoinedShiftRow): ShiftDto {
-    const { imageChecksum, imageByteSize, imageWidth, imageHeight, ...shift } = row;
+    const {
+      imageChecksum,
+      imageByteSize,
+      imageWidth,
+      imageHeight,
+      stationClosePolicy,
+      stationCloseOwnerDeviceId,
+      ...shift
+    } = row;
+    const access =
+      stationClosePolicy === "admin_only"
+        ? ({ kind: "admin_only" } as const)
+        : stationCloseOwnerDeviceId
+          ? ({ kind: "single_device", ownerDeviceId: stationCloseOwnerDeviceId } as const)
+          : undefined;
     return {
       ...shift,
+      ...(access ? { stationCloseAccess: access } : {}),
       image: imageChecksum
         ? {
             checksum: imageChecksum,
