@@ -7,10 +7,12 @@ import {
 
 export class StationApiError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly code?: string;
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = "StationApiError";
     this.status = status;
+    if (code !== undefined) this.code = code;
   }
 }
 
@@ -156,7 +158,10 @@ export function createStationClient(
       });
       receivedResponse = true;
       reportReachability("reachable");
-      if (!res.ok) throw new StationApiError(res.status, await readError(res));
+      if (!res.ok) {
+        const error = await readError(res);
+        throw new StationApiError(res.status, error.message, error.code);
+      }
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
@@ -192,7 +197,10 @@ export function createStationClient(
           },
           signal: controller.signal,
         });
-        if (!res.ok) throw new StationApiError(res.status, await readError(res));
+        if (!res.ok) {
+          const error = await readError(res);
+          throw new StationApiError(res.status, error.message, error.code);
+        }
         return await res.blob();
       } catch (error) {
         if (credentialBoundary && isStationCredentialRejection(error)) {
@@ -219,15 +227,32 @@ export function createStationClient(
   };
 }
 
-async function readError(res: Response): Promise<string> {
+const MAX_ERROR_FIELD_LENGTH = 256;
+
+interface StationErrorResponse {
+  message: string;
+  code?: string;
+}
+
+function boundedErrorField(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_ERROR_FIELD_LENGTH) {
+    return undefined;
+  }
+  return value;
+}
+
+async function readError(res: Response): Promise<StationErrorResponse> {
+  const fallback = res.statusText || `HTTP ${res.status}`;
   try {
     const body: unknown = await res.json();
-    if (body && typeof body === "object" && "message" in body) {
-      const message = (body as { message?: unknown }).message;
-      if (typeof message === "string") return message;
+    if (body && typeof body === "object") {
+      const response = body as { message?: unknown; code?: unknown };
+      const message = boundedErrorField(response.message) ?? fallback;
+      const code = boundedErrorField(response.code);
+      return code === undefined ? { message } : { message, code };
     }
   } catch {
     // non-JSON body
   }
-  return res.statusText || `HTTP ${res.status}`;
+  return { message: fallback };
 }

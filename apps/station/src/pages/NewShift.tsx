@@ -100,7 +100,11 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
       );
       onStarted(opened);
     } catch (err) {
-      setError(err instanceof StationApiError ? err.message : t("shifts.actionFailed"));
+      setError(
+        err instanceof StationApiError && err.code === "BOX_LABEL_TEMPLATE_REQUIRED"
+          ? t("shifts.boxLabelTemplateRequired")
+          : t("shifts.actionFailed"),
+      );
     } finally {
       setBusy(false);
     }

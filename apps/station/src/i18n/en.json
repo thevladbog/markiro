@@ -141,6 +141,7 @@
     "modeLabel": "Shift mode",
     "start": "Start",
     "actionFailed": "Action failed. Please try again.",
+    "boxLabelTemplateRequired": "A box label template is not configured in the admin panel. Configure it and try again.",
     "serverUnavailable": "Could not load shifts. Check server access.",
     "active": "Shift active",
     "forCounterparty": "for:",
