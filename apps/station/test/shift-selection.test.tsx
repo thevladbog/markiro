@@ -172,7 +172,7 @@ describe("ShiftSelection", () => {
     await act(async () => {});
   });
 
-  it("renders a bounded three-card page after filtering closed shifts", async () => {
+  it("renders a bounded two-card page after filtering closed shifts", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(
         JSON.stringify({
@@ -193,12 +193,13 @@ describe("ShiftSelection", () => {
     await waitFor(() => expect(screen.getByText("One")).toBeDefined());
     expect(screen.queryByText("Closed")).toBeNull();
     expect(screen.getByText("Two")).toBeDefined();
-    expect(screen.getByText("Three")).toBeDefined();
+    expect(screen.queryByText("Three")).toBeNull();
     expect(screen.queryByText("Four")).toBeNull();
     expect(screen.getByText("Page 1 of 2")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Next page" }));
     expect(screen.queryByText("One")).toBeNull();
+    expect(screen.getByText("Three")).toBeDefined();
     expect(screen.getByText("Four")).toBeDefined();
     expect(screen.getByText("Page 2 of 2")).toBeDefined();
     expect((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled).toBe(

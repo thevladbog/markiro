@@ -24,7 +24,7 @@ export interface ShiftCardProps {
   imageRefreshKey?: number;
 }
 
-/** A fixed-height floor card; the parent supplies a bounded page of at most three. */
+/** A fixed-height floor card; the parent supplies a bounded page of at most two. */
 export function ShiftCard({
   productName,
   plannedDate,
