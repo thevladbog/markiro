@@ -947,7 +947,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               // authoritative record either way.
               try {
                 await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
-                if (!commitIsCurrent()) break drainLoop;
                 // A still-open box corrects itself: the operator simply scans
                 // one more item. A CLOSED box is taped and labelled, so it
                 // stays as printed and ends one position short — the cabinet
@@ -955,15 +954,20 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 // makes when it marks a box item displaced rather than
                 // deleting it. Same try/catch as `recordConflicts` above, for
                 // the same reason: this is bookkeeping, not delivery.
+                //
+                // Once conflict persistence starts, finish this complete
+                // idempotent bookkeeping unit before observing a pause. The
+                // server's already-applied retry carries no conflicts, so
+                // stopping between rows would permanently leave the tail of
+                // this persisted set attached to an open box. The epoch check
+                // immediately after the unit still prevents any stale ack.
                 for (const c of reported) {
-                  if (!commitIsCurrent()) break drainLoop;
                   await deps.exec.run(
                     `UPDATE codes_mirror SET box_id = NULL
                          WHERE code_hash = ?
                            AND box_id IN (SELECT box_id FROM boxes_mirror WHERE closed_at IS NULL)`,
                     [c.codeHash],
                   );
-                  if (!commitIsCurrent()) break drainLoop;
                 }
               } catch (err) {
                 console.error("station: recording conflicts failed", err);

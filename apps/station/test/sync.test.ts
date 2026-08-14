@@ -181,6 +181,111 @@ describe("sync engine", () => {
     engine.stop();
   });
 
+  it("finishes every persisted open-box conflict correction before honoring a commit-phase pause", async () => {
+    const baseExec = await migratedExec();
+    await seed(baseExec, 2);
+    await openBox(baseExec, "s1", "b1", "2026-07-28T09:55:00.000Z", "t1");
+    for (const [hash, serial] of [
+      ["h1", "S1"],
+      ["h2", "S2"],
+    ] as const) {
+      await baseExec.run(
+        `INSERT INTO codes_mirror
+           (code_hash, shift_id, gtin14, serial, scanned_at, box_id)
+         VALUES (?,?,?,?,?,?)`,
+        [hash, "s1", "04600000000017", serial, "2026-07-28T10:00:00.000Z", "b1"],
+      );
+    }
+    await baseExec.run("CREATE TABLE correction_audit (code_hash TEXT NOT NULL)");
+    await baseExec.run(
+      `CREATE TRIGGER audit_open_box_conflict_correction
+         AFTER UPDATE OF box_id ON codes_mirror
+         WHEN OLD.box_id IS NOT NEW.box_id
+       BEGIN
+         INSERT INTO correction_audit (code_hash) VALUES (NEW.code_hash);
+       END`,
+    );
+
+    let firstCorrection = true;
+    let markFirstCorrectionFinished!: () => void;
+    let releaseFirstCorrection!: () => void;
+    const firstCorrectionFinished = new Promise<void>((resolve) => {
+      markFirstCorrectionFinished = resolve;
+    });
+    const firstCorrectionRelease = new Promise<void>((resolve) => {
+      releaseFirstCorrection = resolve;
+    });
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async run(sql, params) {
+        await baseExec.run(sql, params);
+        if (firstCorrection && sql.includes("UPDATE codes_mirror SET box_id = NULL")) {
+          firstCorrection = false;
+          markFirstCorrectionFinished();
+          await firstCorrectionRelease;
+        }
+      },
+    };
+    let resolveRetry!: (value: { applied: number; alreadyApplied: boolean }) => void;
+    const retryResponse = new Promise<{ applied: number; alreadyApplied: boolean }>((resolve) => {
+      resolveRetry = resolve;
+    });
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({
+        applied: 2,
+        alreadyApplied: false,
+        conflicts: [
+          {
+            codeHash: "h1",
+            winningTerminalId: "other-terminal",
+            winningScannedAt: "2026-07-28T09:59:00.000Z",
+          },
+          {
+            codeHash: "h2",
+            winningTerminalId: "other-terminal",
+            winningScannedAt: "2026-07-28T09:59:01.000Z",
+          },
+        ],
+      })
+      .mockReturnValueOnce(retryResponse);
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await firstCorrectionFinished;
+    engine.pause();
+    engine.resume();
+    releaseFirstCorrection();
+
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(await outboxDepth(baseExec)).toBe(2);
+    expect(
+      await baseExec.all("SELECT code_hash, box_id FROM codes_mirror ORDER BY code_hash"),
+    ).toEqual([
+      { code_hash: "h1", box_id: null },
+      { code_hash: "h2", box_id: null },
+    ]);
+    expect(await baseExec.all("SELECT code_hash FROM conflicts_mirror ORDER BY code_hash")).toEqual(
+      [{ code_hash: "h1" }, { code_hash: "h2" }],
+    );
+    expect(await baseExec.all("SELECT code_hash FROM correction_audit ORDER BY code_hash")).toEqual(
+      [{ code_hash: "h1" }, { code_hash: "h2" }],
+    );
+
+    resolveRetry({ applied: 2, alreadyApplied: true });
+    await engine.idle();
+    expect(await outboxDepth(baseExec)).toBe(0);
+    expect(await baseExec.all("SELECT code_hash FROM correction_audit ORDER BY code_hash")).toEqual(
+      [{ code_hash: "h1" }, { code_hash: "h2" }],
+    );
+    engine.stop();
+  });
+
   it("uses a deterministic batch id so a resend is the same key", async () => {
     const exec = await migratedExec();
     await seedInstallId(exec, "install-1");
