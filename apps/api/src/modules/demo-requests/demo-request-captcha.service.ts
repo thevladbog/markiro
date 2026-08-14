@@ -49,7 +49,7 @@ export class DemoRequestCaptchaService {
       throw captchaUnavailableError();
     }
 
-    if (!response.ok) throw captchaUnavailableError();
+    if (response.status !== 200) throw captchaUnavailableError();
 
     let payload: unknown;
     try {

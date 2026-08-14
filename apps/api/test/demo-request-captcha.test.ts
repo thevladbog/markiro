@@ -101,6 +101,21 @@ describe("DemoRequestCaptchaService", () => {
     );
   });
 
+  it("rejects a 201 response even when its payload would otherwise be valid", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ status: "ok", host: "markiro.app" }), { status: 201 }),
+      );
+
+    await expectPublicError(
+      service(fetcher).assertHuman(TOKEN, SOURCE),
+      HttpStatus.SERVICE_UNAVAILABLE,
+      "captcha_unavailable",
+      [TOKEN, SERVER_KEY, SOURCE],
+    );
+  });
+
   it("maps malformed JSON to a bounded unavailable error", async () => {
     const upstreamBody = "not-json-upstream-body";
     const fetcher = vi
