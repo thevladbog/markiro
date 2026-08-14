@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { renderEmail } from "../src/index.js";
 
+function expectTransactionalEmailOnly(output: { html: string; text: string }): void {
+  expect(output.html).not.toMatch(/<img\b|<link\b|@font-face|url\(|\b(?:src|href)=["']/i);
+  expect(output.html).not.toMatch(
+    /tracking|pixel|unsubscribe|subscription|marketing|рассыл|реклам/i,
+  );
+  expect(output.text).not.toMatch(/unsubscribe|subscription|marketing|рассыл|реклам/i);
+}
+
 describe("renderEmail", () => {
   it("renders the exact image-free Markiro shell for every template", async () => {
     const outputs = await Promise.all([
@@ -149,5 +157,94 @@ describe("renderEmail", () => {
       expiresInMinutes: minutes,
     });
     expect(output.text).toContain(expected);
+  });
+
+  it("renders an image-free internal landing notification with fixed headers and escaped text", async () => {
+    const output = await renderEmail({
+      kind: "landing-demo-notification",
+      locale: "en",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      receivedAt: new Date("2026-08-14T12:00:00Z"),
+      sourcePath: "/en/",
+      recipientName: "<Ada>",
+      company: "Factory & Co",
+      email: "ada@example.test",
+      phone: "+12025550114",
+    });
+
+    expect(output.subject).toBe("Новая заявка с markiro.app — Маркиро");
+    expect(output.replyTo).toBe("ada@example.test");
+    expect(output.html).toContain('lang="ru"');
+    expect(output.html).toContain('aria-label="Маркиро"');
+    expect(output.html.match(/data-markiro-module="true"/g)).toHaveLength(8);
+    expect(output.html).toContain("маркиро");
+    expect(output.html).toContain("&lt;Ada&gt;");
+    expect(output.html).toContain("Factory &amp; Co");
+    expect(output.html).not.toMatch(/href=["'][^"']*(?:Ada|Factory|ada%40)/i);
+    expect(output.text).toContain(
+      [
+        "ID заявки: 11111111-1111-4111-8111-111111111111",
+        "Получена: 14.08.2026, 12:00 UTC",
+        "Страница: /en/",
+      ].join("\n"),
+    );
+    expect(output.text).toContain("Язык посетителя: English (en)");
+    expect(output.text).toContain("Имя: <Ada>");
+    expect(output.text).toContain("Компания: Factory & Co");
+    expect(output.text).toContain("Email: ada@example.test");
+    expect(output.text).toContain("Телефон: +12025550114");
+    expectTransactionalEmailOnly(output);
+  });
+
+  it("renders a Russian landing confirmation and omits the absent phone row", async () => {
+    const output = await renderEmail({
+      kind: "landing-demo-confirmation",
+      locale: "ru",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      recipientName: "Анна",
+      company: "Завод & Ко",
+      email: "anna@example.test",
+      contactEmail: "hello@v-b.tech",
+    });
+
+    expect(output.subject).toBe("Мы получили вашу заявку — Маркиро");
+    expect(output.replyTo).toBe("hello@v-b.tech");
+    expect(output.html).toContain('lang="ru"');
+    expect(output.html).toContain('aria-label="Маркиро"');
+    expect(output.html.match(/data-markiro-module="true"/g)).toHaveLength(8);
+    expect(output.html).toContain("маркиро");
+    expect(output.text).toContain("Здравствуйте, Анна.");
+    expect(output.text).toContain("Мы получили вашу заявку на демонстрацию Маркиро.");
+    expect(output.text).toContain("Компания: Завод & Ко\nEmail: anna@example.test");
+    expect(output.text).not.toContain("Телефон:");
+    expect(output.text).not.toContain("11111111-1111-4111-8111-111111111111");
+    expect(output.text).not.toContain("undefined");
+    expectTransactionalEmailOnly(output);
+  });
+
+  it("renders an English landing confirmation with the localized Markiro brand", async () => {
+    const output = await renderEmail({
+      kind: "landing-demo-confirmation",
+      locale: "en",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      recipientName: "Ada",
+      company: "Factory",
+      email: "ada@example.test",
+      phone: "+12025550114",
+      contactEmail: "hello@v-b.tech",
+    });
+
+    expect(output.subject).toBe("We received your request — Markiro");
+    expect(output.replyTo).toBe("hello@v-b.tech");
+    expect(output.html).toContain('lang="en"');
+    expect(output.html).toContain('aria-label="Markiro"');
+    expect(output.html.match(/data-markiro-module="true"/g)).toHaveLength(8);
+    expect(output.html).toContain("MARKIRO");
+    expect(output.text).toContain("Hello, Ada.");
+    expect(output.text).toContain("We received your request for a Markiro demo.");
+    expect(output.text).toContain("Company: Factory\nEmail: ada@example.test\nPhone: +12025550114");
+    expect(output.text).not.toContain("11111111-1111-4111-8111-111111111111");
+    expect(output.text).not.toContain("undefined");
+    expectTransactionalEmailOnly(output);
   });
 });

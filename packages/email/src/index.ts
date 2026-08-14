@@ -14,27 +14,47 @@ import {
   PlatformUserActivationEmail,
   type PlatformUserActivationEmailProps,
 } from "./emails/platform-user-activation.js";
+import {
+  LandingDemoNotificationEmail,
+  type LandingDemoNotificationEmailProps,
+} from "./landing-demo-notification.js";
+import {
+  LandingDemoConfirmationEmail,
+  type LandingDemoConfirmationEmailProps,
+} from "./landing-demo-confirmation.js";
 
 export type EmailTemplateInput =
   | ({ kind: "organization-invitation" } & OrganizationInvitationEmailProps)
   | ({ kind: "password-reset" } & PasswordResetEmailProps)
   | ({ kind: "tenant-owner-activation" } & TenantOwnerActivationEmailProps)
   | ({ kind: "platform-user-activation" } & PlatformUserActivationEmailProps)
+  | ({ kind: "landing-demo-notification" } & LandingDemoNotificationEmailProps)
+  | ({ kind: "landing-demo-confirmation" } & LandingDemoConfirmationEmailProps)
   | ({ kind: "email-verification" } & EmailVerificationEmailProps);
 
 export interface RenderedEmail {
   subject: string;
   html: string;
   text: string;
+  replyTo?: string;
 }
 
 export async function renderEmail(input: EmailTemplateInput): Promise<RenderedEmail> {
-  const { subject, element } = resolveTemplate(input);
+  const { subject, element, replyTo } = resolveTemplate(input);
   const html = await render(element);
-  return { subject, html, text: toPlainText(html) };
+  return {
+    subject,
+    html,
+    text: toPlainText(html),
+    ...(replyTo !== undefined ? { replyTo } : {}),
+  };
 }
 
-function resolveTemplate(input: EmailTemplateInput): { subject: string; element: ReactElement } {
+function resolveTemplate(input: EmailTemplateInput): {
+  subject: string;
+  element: ReactElement;
+  replyTo?: string;
+} {
   switch (input.kind) {
     case "organization-invitation": {
       return {
@@ -89,13 +109,50 @@ function resolveTemplate(input: EmailTemplateInput): { subject: string; element:
         }),
       };
     }
+    case "landing-demo-notification": {
+      return {
+        subject: "Новая заявка с markiro.app — Маркиро",
+        replyTo: input.email,
+        element: createElement(LandingDemoNotificationEmail, {
+          locale: input.locale,
+          requestId: input.requestId,
+          receivedAt: input.receivedAt,
+          sourcePath: input.sourcePath,
+          recipientName: input.recipientName,
+          company: input.company,
+          email: input.email,
+          ...(input.phone !== undefined ? { phone: input.phone } : {}),
+        }),
+      };
+    }
+    case "landing-demo-confirmation": {
+      return {
+        subject:
+          input.locale === "ru"
+            ? "Мы получили вашу заявку — Маркиро"
+            : "We received your request — Markiro",
+        replyTo: input.contactEmail,
+        element: createElement(LandingDemoConfirmationEmail, {
+          locale: input.locale,
+          requestId: input.requestId,
+          recipientName: input.recipientName,
+          company: input.company,
+          email: input.email,
+          ...(input.phone !== undefined ? { phone: input.phone } : {}),
+          contactEmail: input.contactEmail,
+        }),
+      };
+    }
   }
 }
 
 export type {
   EmailVerificationEmailProps,
+  LandingDemoConfirmationEmailProps,
+  LandingDemoNotificationEmailProps,
   OrganizationInvitationEmailProps,
   PasswordResetEmailProps,
   PlatformUserActivationEmailProps,
   TenantOwnerActivationEmailProps,
 };
+export type { LandingLocale } from "./landing-demo-notification.js";

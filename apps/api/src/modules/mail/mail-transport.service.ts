@@ -57,15 +57,24 @@ export class MailTransportService implements MailTransport, OnModuleInit, OnModu
   }
 
   async send(rendered: RenderedEmail, recipient: string): Promise<void> {
-    await this.#transporter.sendMail({
-      from: { name: this.env.SMTP_FROM_NAME, address: this.env.SMTP_FROM_EMAIL },
-      to: recipient,
-      ...(this.env.SMTP_REPLY_TO ? { replyTo: this.env.SMTP_REPLY_TO } : {}),
-      subject: rendered.subject,
-      html: rendered.html,
-      text: rendered.text,
-    });
+    await this.#transporter.sendMail(buildMessageOptions(this.env, rendered, recipient));
   }
+}
+
+export function buildMessageOptions(
+  env: SmtpEnv,
+  rendered: RenderedEmail,
+  recipient: string,
+): nodemailer.SendMailOptions {
+  const replyTo = rendered.replyTo ?? env.SMTP_REPLY_TO;
+  return {
+    from: { name: env.SMTP_FROM_NAME, address: env.SMTP_FROM_EMAIL },
+    to: recipient,
+    ...(replyTo !== undefined ? { replyTo } : {}),
+    subject: rendered.subject,
+    html: rendered.html,
+    text: rendered.text,
+  };
 }
 
 export function buildSmtpOptions(env: SmtpEnv): SMTPTransport.Options {
