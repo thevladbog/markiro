@@ -374,7 +374,7 @@ function assertAuthorityContract(adapted, { alb }) {
       headerHandlers.some((handler) => {
         const headers = handler.response?.set ?? {};
         return (
-          handler.deferred === true &&
+          handler.response?.deferred === true &&
           headers["X-Markiro-Release-Sha"]?.[0] === "contract-sha" &&
           headers["Content-Security-Policy"]?.[0] === expectedCsp &&
           headers["Strict-Transport-Security"]?.[0] === "max-age=63072000; includeSubDomains" &&
