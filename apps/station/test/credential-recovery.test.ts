@@ -1,9 +1,12 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
 import {
+  beginFloorWorkRetirement,
   clearRejectedCredentialState,
   createFloorWorkRegistry,
+  FloorWorkBarrierTimeoutError,
   readSealedWorkSummary,
+  retireFloorWork,
 } from "../src/lib/credential-recovery.js";
 import {
   applyMigrations,
@@ -252,6 +255,78 @@ describe("credential rejection recovery", () => {
     );
   });
 
+  it("closes intake before waiting for accepted floor work", async () => {
+    const order: string[] = [];
+    const barrier = {
+      close: vi.fn(async () => {
+        order.push("close");
+      }),
+      idle: vi.fn(async () => {
+        order.push("idle");
+      }),
+    };
+
+    await retireFloorWork([barrier]);
+
+    expect(order[0]).toBe("close");
+  });
+
+  it("rejects a bounded retirement timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const pending = retireFloorWork(
+        [{ close: () => new Promise<void>(() => {}), idle: async () => {} }],
+        50,
+      );
+      const assertion = expect(pending).rejects.toBeInstanceOf(FloorWorkBarrierTimeoutError);
+
+      await vi.advanceTimersByTimeAsync(51);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reuses one close promise when a timed-out retirement is retried", async () => {
+    vi.useFakeTimers();
+    try {
+      let release: (() => void) | undefined;
+      const close = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            release = resolve;
+          }),
+      );
+      const retirement = beginFloorWorkRetirement([{ close, idle: async () => {} }]);
+
+      const firstWait = retirement.wait(50);
+      const firstAssertion = expect(firstWait).rejects.toBeInstanceOf(FloorWorkBarrierTimeoutError);
+      await vi.advanceTimersByTimeAsync(51);
+      await firstAssertion;
+
+      const retry = retirement.wait(50);
+      expect(close).toHaveBeenCalledTimes(1);
+      release?.();
+      await retry;
+      expect(close).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("normalizes a synchronous non-Error barrier failure", async () => {
+    const pending = retireFloorWork([
+      {
+        close: () => {
+          throw "close failed";
+        },
+        idle: async () => {},
+      },
+    ]);
+
+    await expect(pending).rejects.toEqual(new Error("close failed"));
+  });
+
   it("keeps a StrictMode replacement registration when the simulated cleanup settles late", () => {
     const registry = createFloorWorkRegistry();
     const barrier = { idle: async () => {} };
@@ -313,6 +388,7 @@ describe("credential rejection recovery", () => {
       { sql: "DELETE FROM station_meta WHERE key = ?", params: ["operators_slot"] },
       { sql: "DELETE FROM shift_mirror", params: [] },
       { sql: "DELETE FROM product_mirror", params: [] },
+      { sql: "DELETE FROM station_product_images", params: [] },
     ]);
 
     const retainedMeta = await exec.all<{ key: string; value: string }>(

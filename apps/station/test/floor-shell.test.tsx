@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { FloorFooter } from "../src/ui/FloorFooter.js";
@@ -32,6 +32,15 @@ describe("StationScreen", () => {
     );
     expect(screenRegion.querySelector(".station-screen__actions")?.textContent).toContain("Back");
   });
+
+  it("does not nest a second panel behind its footer actions", () => {
+    const scopedFooterRule =
+      /\.station-screen__actions > \.station-floor-footer\s*\{([^}]*)\}/.exec(stationCss)?.[1];
+
+    expect(scopedFooterRule).toContain("padding: 0");
+    expect(scopedFooterRule).toContain("border-top: 0");
+    expect(scopedFooterRule).toContain("background: transparent");
+  });
 });
 
 const status = {
@@ -39,7 +48,7 @@ const status = {
   lineName: "Packing A",
   operatorName: "Alex Morgan",
   shiftLabel: "Shift 17",
-  online: true,
+  serverReachability: "reachable" as const,
   scanner: "connected" as const,
   printerConfigured: true,
   syncPending: 2,
@@ -93,25 +102,23 @@ describe("FloorShell", () => {
     expect(activeScreen.textContent).toContain("Current work");
   });
 
-  it("reserves a normal-flow floor chrome row above status at supported viewport sizes", () => {
+  it("keeps the window control in the normal-flow status header", () => {
     const stylesheet = document.createElement("style");
     stylesheet.textContent = stationCss;
     document.head.append(stylesheet);
 
     const { container } = render(
-      <FloorShell {...status} windowChrome={<button>Window mode</button>}>
+      <FloorShell {...status} windowControl={<button>Window mode</button>}>
         <CurrentFloorScreen />
       </FloorShell>,
     );
-    const chrome = container.querySelector(".station-floor-window-chrome");
-    const statusBar = screen.getByRole("banner", { name: "Station status" });
+    const header = screen.getByRole("banner", { name: "Station status" });
+    const windowControl = within(header).getByRole("button", { name: "Window mode" });
 
-    expect(chrome).not.toBeNull();
-    expect(chrome?.nextElementSibling).toBe(statusBar);
-    expect(getComputedStyle(chrome as Element).position).toBe("static");
-    expect(getComputedStyle(chrome as Element).width).toBe("100%");
-    expect(getComputedStyle(chrome as Element).minHeight).toBe("72px");
-    expect(getComputedStyle(chrome as Element).flexShrink).toBe("0");
+    expect(windowControl).toBeDefined();
+    expect(container.querySelector(".station-floor-window-chrome")).toBeNull();
+    expect(getComputedStyle(header).display).toBe("grid");
+    expect(getComputedStyle(windowControl).position).toBe("static");
 
     stylesheet.remove();
   });

@@ -1,24 +1,31 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Modal } from "@markiro/ui";
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
 import {
   canSubmit,
+  bottleCount,
+  cartPickupPolicy,
   cartReducer,
   initialCartState,
   remainingToday,
   type CartAction,
-  type CartItem,
+  type BoxLine,
+  type KioskCartLine,
   type CartNotice,
   type CartState,
 } from "../session/cart.js";
+import { pageSizeFor } from "../session/pagination.js";
 // The money rules live beside the two screens that print money, so the cart and
 // the confirmation that summarises it cannot drift apart on a separator or a
 // rounding step.
 import { formatMoney, moneyFormat, toKopecks, totalKopecks, UNPRICED } from "./money.js";
-import { productMonogram } from "./product-monogram.js";
+import { CartLineDialog } from "../ui/CartLineDialog.js";
+import { ItemKindIcon } from "../ui/ItemKindIcon.js";
+import { PagedLines } from "../ui/PagedLines.js";
+import { ProductImage } from "../ui/ProductImage.js";
 
 export type KioskOrientation = "landscape" | "portrait";
 
@@ -38,7 +45,7 @@ export function orientationOf(width: number, height: number): KioskOrientation {
 export interface CartProps {
   /** Who the badge admitted. Shown in the header so the wrong person notices. */
   employee: { id: string; fullName: string };
-  bootstrap: KioskBootstrapDto;
+  bootstrap: KioskBootstrapSnapshotDto;
   /**
    * What this employee has already taken today, as far as the device can tell:
    * the sum of the two disjoint halves `session/day-count.ts` owns — this
@@ -51,12 +58,21 @@ export interface CartProps {
    * screen prints is a courtesy and `POST /kiosk/orders` remains the authority.
    */
   alreadyTakenToday: number;
+  /** Canonical session draft restored after navigation or a failed durable submit. */
+  initialState?: CartState;
   /**
    * Subscribes `cb` to the device's scans and MAY return a teardown, which
    * this screen calls on unmount — same contract as `Idle`, and called
    * EXACTLY ONCE at mount for the same reason (see the effect below).
    */
   onScan: (cb: ScanListener) => void | (() => void);
+  /** Local-only SSCC resolver; network access is intentionally outside this contract. */
+  resolveBox?: (
+    sscc: string,
+  ) => Promise<
+    | { kind: "resolved"; box: BoxLine }
+    | { kind: "rejected"; notice: "unknown-box" | "registry-unavailable" | "registry-blocked" }
+  >;
   /** The cart, handed over whole. The caller turns it into a `CreateOrderDto`. */
   onSubmit: (state: CartState) => void;
   /** The worker says the badge was not theirs — end the session. */
@@ -75,6 +91,11 @@ export interface CartProps {
  */
 const BANNER: Partial<Record<CartNotice["kind"], string>> = {
   duplicate: "cart.duplicate",
+  "duplicate-box": "cart.duplicateBox",
+  "duplicate-sscc": "cart.duplicateSscc",
+  "unknown-box": "cart.unknownBox",
+  "registry-unavailable": "cart.registryUnavailable",
+  "registry-blocked": "cart.registryBlocked",
   incomplete: "cart.incomplete",
   "not-a-code": "cart.notACode",
 };
@@ -117,8 +138,10 @@ function initialsOf(fullName: string): string {
  * knowledge whatsoever — it does not know that `kmKey` is `01<gtin14>21<serial>`,
  * so a change to that layout cannot reach it.
  */
-function codeTail(item: CartItem): string {
-  return `…${item.gtin14.slice(-6)}-${item.serial}`;
+function codeTail(item: KioskCartLine): string {
+  return item.kind === "km"
+    ? `…${item.gtin14.slice(-6)}-${item.serial}`
+    : `…${item.sscc.slice(-6)}`;
 }
 
 /**
@@ -144,7 +167,9 @@ export function Cart({
   employee,
   bootstrap,
   alreadyTakenToday,
+  initialState = initialCartState,
   onScan,
+  resolveBox,
   onSubmit,
   onNotMe,
 }: CartProps): React.JSX.Element {
@@ -155,15 +180,29 @@ export function Cart({
   // every scan.
   const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
 
+  const cartContext = useMemo(
+    () => ({ bootstrap, employeeId: employee.id, alreadyTakenToday }),
+    [alreadyTakenToday, bootstrap, employee.id],
+  );
+
   // The reducer is rebuilt when its context changes so a dispatch always
   // decides against the current bootstrap; React reads the reducer from the
   // render in which the action is processed, so no ref is needed here.
   const reduce = useCallback(
-    (state: CartState, action: CartAction) =>
-      cartReducer(state, action, { bootstrap, alreadyTakenToday }),
-    [bootstrap, alreadyTakenToday],
+    (state: CartState, action: CartAction) => cartReducer(state, action, cartContext),
+    [cartContext],
   );
-  const [state, dispatch] = useReducer(reduce, initialCartState);
+  const [state, dispatch] = useReducer(reduce, initialState);
+  const pickupPolicy = cartPickupPolicy(cartContext);
+
+  // A refresh may revoke writeoff while this cart is already open. Normalize
+  // the stale choice immediately; hiding the control alone would leave a
+  // forbidden reason in the state handed to the shell.
+  useEffect(() => {
+    if (!pickupPolicy.canWriteoff && state.reason === "writeoff") {
+      dispatch({ type: "reason", reason: "buy" });
+    }
+  }, [pickupPolicy.canWriteoff, state.reason]);
 
   const [orientation, setOrientation] = useState<KioskOrientation>(() =>
     orientationOf(window.innerWidth, window.innerHeight),
@@ -184,12 +223,63 @@ export function Cart({
    * scanner down and resubscribe after every scan.
    */
   const subscribe = useRef(onScan);
+  const resolveScannedBox = useRef(resolveBox);
+  const scanChain = useRef<Promise<void> | null>(null);
+  const resolverFailureLogged = useRef(false);
+  const mounted = useRef(true);
   useEffect(() => {
+    mounted.current = true;
     const stop = subscribe.current((raw) => {
-      // The screen's entire scan logic: classify, then let the reducer decide.
-      dispatch({ type: "scan", scan: classifyKioskScan(raw) });
+      const classified = classifyKioskScan(raw);
+      const apply = async () => {
+        if (!mounted.current) return;
+        if (classified.kind !== "sscc") {
+          dispatch({ type: "scan", scan: classified });
+          return;
+        }
+        let resolution:
+          | { kind: "resolved"; box: BoxLine }
+          | {
+              kind: "rejected";
+              notice: "unknown-box" | "registry-unavailable" | "registry-blocked";
+            };
+        try {
+          resolution = resolveScannedBox.current
+            ? await resolveScannedBox.current(classified.sscc)
+            : { kind: "rejected", notice: "registry-unavailable" };
+        } catch (error) {
+          // One corrupt/unreadable IndexedDB lookup must not poison the promise
+          // tail and silently disable every later scan. Log once per mounted
+          // session to avoid flooding an unattended kiosk, and convert the
+          // failure to the same actionable notice as an unavailable registry.
+          if (!resolverFailureLogged.current) {
+            resolverFailureLogged.current = true;
+            console.error("kiosk: the local box registry could not be read", error);
+          }
+          resolution = { kind: "rejected", notice: "registry-unavailable" };
+        }
+        if (!mounted.current) return;
+        dispatch(
+          resolution.kind === "resolved"
+            ? { type: "scanBox", box: resolution.box }
+            : { type: "boxRejected", kind: resolution.notice },
+        );
+      };
+      // A normal KM remains synchronous for the legacy touch surface. Once an
+      // SSCC lookup is pending, later scans queue behind it so the first scan
+      // still wins overlap regardless of IndexedDB latency.
+      if (classified.kind !== "sscc" && scanChain.current === null) {
+        void apply();
+        return;
+      }
+      const work = (scanChain.current ?? Promise.resolve()).then(apply);
+      const settled = work.finally(() => {
+        if (scanChain.current === settled) scanChain.current = null;
+      });
+      scanChain.current = settled;
     });
     return () => {
+      mounted.current = false;
       if (stop) stop();
     };
   }, []);
@@ -218,484 +308,235 @@ export function Cart({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const portrait = orientation === "portrait";
-  const limit = bootstrap.config.dayLimitPerEmployee;
+  const limit = pickupPolicy.dayLimit;
   const showPrices = bootstrap.config.showPrices;
-  const count = state.items.length;
-  const remaining = remainingToday(state, { bootstrap, alreadyTakenToday });
-  const total = totalKopecks(state.items);
+  const count = state.lines.length;
+  const remaining = remainingToday(state, cartContext);
+  const total = totalKopecks(state.lines);
   const bannerKey = notice ? BANNER[notice.kind] : undefined;
-  const submittable = canSubmit(state);
-
-  const ghostButton = {
-    borderRadius: 10,
-    border: "1px solid var(--line-strong)",
-    background: "transparent",
-    color: "var(--fg-2)",
-    font: "600 18px/1 var(--font-ui)",
-  } as const;
+  const submittable = canSubmit(state, cartContext);
+  const bottles = bottleCount(state);
+  const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<KioskCartLine | null>(null);
+  const [newLineKey, setNewLineKey] = useState<string | null>(null);
+  const [confirmNotMe, setConfirmNotMe] = useState(false);
+  const pageSize = pageSizeFor(window.innerWidth, window.innerHeight);
+  const previousLines = useRef(state.lines);
+  useEffect(() => {
+    const before = previousLines.current;
+    previousLines.current = state.lines;
+    if (state.lines.length !== before.length + 1) return;
+    const appended = state.lines[state.lines.length - 1];
+    if (!appended || before.includes(appended)) return;
+    const key = appended.kind === "km" ? appended.kmKey : appended.sscc;
+    setPage(Math.floor((state.lines.length - 1) / pageSize));
+    setNewLineKey(key);
+  }, [pageSize, state.lines]);
+  const summary = t("cart.summary", {
+    positions: t("cart.positions", { count }),
+    bottles: t("cart.bottles", { count: bottles }),
+  });
 
   return (
-    <main className="kiosk-screen kiosk-cart">
-      <header
-        style={{
-          height: 76,
-          flexShrink: 0,
-          boxSizing: "border-box",
-          background: "var(--surface-card)",
-          borderBottom: "1px solid var(--line)",
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          padding: "0 24px",
-        }}
-      >
-        {/* The wordless mark from the prototype's header; the wordmark next to
-            it says everything this signals. */}
-        <svg width="30" height="30" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-          <rect x="4" y="4" width="56" height="56" fill="var(--surface-inverse)" />
-          <g fill="var(--surface-page)">
-            <rect x="14" y="14" width="8" height="8" />
-            <rect x="14" y="26" width="8" height="8" />
-            <rect x="14" y="38" width="8" height="8" />
-            <rect x="26" y="22" width="8" height="8" />
-            <rect x="38" y="14" width="8" height="8" />
-            <rect x="38" y="26" width="8" height="8" />
-            <rect x="38" y="38" width="8" height="8" />
-            <rect x="26" y="42" width="8" height="8" fill="var(--accent-module)" />
-          </g>
-        </svg>
-        <span style={{ font: "600 17px/1 var(--font-mono)" }}>{t("cart.logo")}</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
-          <span
-            aria-hidden="true"
-            style={{
-              width: 44,
-              height: 44,
-              flexShrink: 0,
-              borderRadius: 10,
-              background: "var(--surface-inverse)",
-              color: "var(--fg-on-inverse)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              font: "600 17px/1 var(--font-ui)",
-            }}
-          >
+    <main className="kiosk-screen kiosk-cart" data-orientation={orientation}>
+      <header className="kiosk-cart__header">
+        <span className="kiosk-cart__wordmark">{t("cart.logo")}</span>
+        <span className="kiosk-cart__employee" title={employee.fullName}>
+          <span aria-hidden="true" className="kiosk-cart__initials">
             {initialsOf(employee.fullName)}
           </span>
-          <span
-            style={{
-              font: "600 20px/1 var(--font-ui)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {employee.fullName}
-          </span>
+          <span className="kiosk-cart__employee-name">{employee.fullName}</span>
         </span>
         <button
-          className="kiosk-control"
+          className="kiosk-control kiosk-cart__not-me"
           type="button"
-          onClick={onNotMe}
-          style={{ ...ghostButton, height: 56, padding: "0 22px", flexShrink: 0 }}
+          onClick={() => setConfirmNotMe(true)}
         >
           {t("cart.notMe")}
         </button>
       </header>
 
       {bannerKey ? (
-        <div
-          role="alert"
-          style={{
-            flexShrink: 0,
-            background: "var(--warn-bg)",
-            borderBottom: "1px solid var(--warn-border)",
-            color: "var(--warn-fg)",
-            padding: "14px 24px",
-            font: "600 19px/26px var(--font-ui)",
-          }}
-        >
+        <div className="kiosk-cart__banner" role="alert">
           {t(bannerKey)}
         </div>
       ) : null}
 
-      {/* Landscape puts the scan zone beside the list, portrait stacks them.
-          Flex direction only — no media queries, so the same build serves a
-          rotated kiosk without a reload. */}
-      <div
-        style={{
-          flex: 1,
-          display: "flex",
-          flexDirection: portrait ? "column" : "row",
-          minHeight: 0,
-        }}
-      >
-        <div
-          style={{
-            flex: portrait ? "0 0 auto" : "1 1 0",
-            padding: 24,
-            display: "flex",
-            flexDirection: "column",
-            gap: 16,
-            minWidth: 0,
-            minHeight: 0,
-          }}
-        >
-          {remaining === 0 ? (
-            // REPLACES the scan zone, never covers it: a scan prompt still on
-            // screen next to an exhausted limit is an invitation the kiosk will
-            // refuse, and the worker would keep waving bottles at it.
-            <div
-              role="status"
-              style={{
-                flex: portrait ? "0 0 auto" : "1 1 0",
-                border: "2px solid var(--warn-border)",
-                borderRadius: 16,
-                background: "var(--warn-bg)",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 14,
-                padding: 24,
-                textAlign: "center",
-              }}
-            >
-              <span style={{ font: "700 28px/36px var(--font-ui)", color: "var(--warn-fg)" }}>
-                {t("cart.limitTitle", { limit })}
-              </span>
-              <span style={{ font: "400 18px/26px var(--font-ui)", color: "var(--fg-2)" }}>
-                {t("cart.limitHint")}
-              </span>
-            </div>
-          ) : (
-            <div
-              style={{
-                flex: portrait ? "0 0 auto" : "1 1 0",
-                border: "2px dashed var(--line-strong)",
-                borderRadius: 16,
-                background: "var(--surface-card)",
-                display: "flex",
-                flexDirection: portrait ? "row" : "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: portrait ? 20 : 18,
-                padding: portrait ? "16px 22px" : 24,
-              }}
-            >
-              <svg
-                width={portrait ? 52 : 96}
-                height={portrait ? 52 : 96}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="var(--line-strong)"
-                strokeWidth="1.5"
-                style={{ flexShrink: 0 }}
-                aria-hidden="true"
-                focusable="false"
-              >
-                <path d="M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10" />
-              </svg>
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 8,
-                  textAlign: portrait ? "left" : "center",
-                }}
-              >
-                {/* Two elements, one sentence: the design breaks the line after
-                    «бутылку», and a dictionary entry carrying markup would push
-                    that break past every future translator. */}
-                <span
-                  style={{ font: `700 ${portrait ? "22px/28px" : "28px/36px"} var(--font-ui)` }}
-                >
-                  {t("cart.scanTitle")}
-                </span>
-                <span
-                  style={{ font: `700 ${portrait ? "22px/28px" : "28px/36px"} var(--font-ui)` }}
-                >
-                  {t("cart.scanTitleTarget")}
-                </span>
-                <span style={{ font: "400 17px/24px var(--font-ui)", color: "var(--fg-3)" }}>
-                  {t("cart.scanHint")}
-                </span>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <section
-          aria-labelledby="kiosk-cart-list-title"
-          style={{
-            width: portrait ? "auto" : 460,
-            flex: portrait ? "1 1 0" : "0 0 auto",
-            borderLeft: portrait ? "none" : "1px solid var(--line)",
-            borderTop: portrait ? "1px solid var(--line)" : "none",
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-            boxSizing: "border-box",
-            background: "var(--surface-card)",
-          }}
-        >
+      <div className="kiosk-cart__workspace">
+        <section className="kiosk-cart__scan" aria-label={t("cart.scanRegion")}>
           <div
-            style={{
-              padding: "20px 24px 14px 24px",
-              display: "flex",
-              alignItems: "baseline",
-              gap: 10,
-              borderBottom: "1px solid var(--line)",
-            }}
+            className={
+              remaining === 0 ? "kiosk-scan-card kiosk-scan-card--limit" : "kiosk-scan-card"
+            }
+            role={remaining === 0 ? "status" : undefined}
           >
-            <h1
-              id="kiosk-cart-list-title"
-              style={{ margin: 0, font: "700 24px/30px var(--font-ui)" }}
+            <svg
+              className="kiosk-scan-card__icon"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+              focusable="false"
             >
-              {t("cart.listTitle")}
-            </h1>
-            <span
-              style={{
-                font: "600 20px/1 var(--font-mono)",
-                fontVariantNumeric: "tabular-nums",
-                color: "var(--fg-3)",
-              }}
-            >
-              {count}
-            </span>
-          </div>
-
-          <div className="kiosk-cart__list" style={{ flex: 1 }}>
-            {count === 0 ? (
-              <div
-                style={{
-                  padding: "48px 24px",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: 10,
-                  textAlign: "center",
-                }}
-              >
-                <span style={{ font: "600 20px/28px var(--font-ui)", color: "var(--fg-disabled)" }}>
-                  {t("cart.emptyTitle")}
-                </span>
-                <span style={{ font: "400 16px/24px var(--font-ui)", color: "var(--fg-3)" }}>
-                  {t("cart.emptyHint")}
-                </span>
-              </div>
-            ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {state.items.map((item) => {
-                  const kopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
-                  return (
-                    <li
-                      key={item.kmKey}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 14,
-                        padding: "12px 20px 12px 24px",
-                        borderBottom: "1px solid var(--line)",
-                      }}
-                    >
-                      <span aria-hidden="true" className="kiosk-product-monogram">
-                        {productMonogram(item.name)}
-                      </span>
-                      <span
-                        style={{
-                          flex: 1,
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: 3,
-                          minWidth: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            font: "600 18px/24px var(--font-ui)",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {item.name}
-                        </span>
-                        <span
-                          style={{ font: "400 14px/18px var(--font-mono)", color: "var(--fg-3)" }}
-                        >
-                          {codeTail(item)}
-                        </span>
-                      </span>
-                      {showPrices && item.unitPrice !== null ? (
-                        <span
-                          style={{
-                            font: "600 19px/1 var(--font-mono)",
-                            fontVariantNumeric: "tabular-nums",
-                            whiteSpace: "nowrap",
-                          }}
-                        >
-                          {kopecks === null
-                            ? UNPRICED
-                            : t("cart.price", { value: formatMoney(kopecks, money) })}
-                        </span>
-                      ) : null}
-                      <button
-                        className="kiosk-control"
-                        type="button"
-                        aria-label={t("cart.remove", { name: item.name })}
-                        onClick={() => dispatch({ type: "remove", kmKey: item.kmKey })}
-                        style={{
-                          ...ghostButton,
-                          width: 56,
-                          height: 56,
-                          flexShrink: 0,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                        }}
-                      >
-                        <svg
-                          width="22"
-                          height="22"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          aria-hidden="true"
-                          focusable="false"
-                        >
-                          <path d="M6 6l12 12M18 6L6 18" />
-                        </svg>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            )}
-          </div>
-
-          <div
-            style={{
-              flexShrink: 0,
-              borderTop: "1px solid var(--line)",
-              padding: "20px 24px",
-              display: "flex",
-              flexDirection: "column",
-              gap: 12,
-            }}
-          >
-            <div
-              className="kiosk-cart__reason-scroll"
-              style={{ display: "flex", flexDirection: "column", gap: 8 }}
-            >
-              <span style={{ font: "500 14px/1 var(--font-ui)", color: "var(--fg-3)" }}>
-                {t("cart.reason")}
-              </span>
-              <div style={{ display: "flex", gap: 8 }}>
-                {(["buy", "writeoff"] as const).map((reason) => {
-                  const on = state.reason === reason;
-                  return (
-                    <button
-                      className="kiosk-control"
-                      key={reason}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => dispatch({ type: "reason", reason })}
-                      style={{
-                        flex: 1,
-                        height: 56,
-                        borderRadius: 10,
-                        border: `1px solid ${on ? "var(--surface-inverse)" : "var(--line-strong)"}`,
-                        background: on ? "var(--surface-inverse)" : "transparent",
-                        color: on ? "var(--fg-on-inverse)" : "var(--fg-2)",
-                        font: "600 18px/1 var(--font-ui)",
-                      }}
-                    >
-                      {t(reason === "buy" ? "cart.reasonBuy" : "cart.reasonWriteoff")}
-                    </button>
-                  );
-                })}
-              </div>
-              {/* The sub-reasons are the tenant's own, straight from the
-                  bootstrap — never a list hard-coded on the device. */}
-              {state.reason === "writeoff" ? (
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {bootstrap.reasons.map((sub) => {
-                    const on = state.writeoffReasonId === sub.id;
-                    return (
-                      <button
-                        className="kiosk-control"
-                        key={sub.id}
-                        type="button"
-                        aria-pressed={on}
-                        onClick={() => dispatch({ type: "writeoffReason", id: sub.id })}
-                        style={{
-                          height: 48,
-                          padding: "0 20px",
-                          borderRadius: "var(--r-round)",
-                          border: `1px solid ${on ? "var(--ok-solid)" : "var(--line-strong)"}`,
-                          background: on ? "var(--ok-bg)" : "transparent",
-                          color: on ? "var(--ok-fg)" : "var(--fg-2)",
-                          font: "600 16px/1 var(--font-ui)",
-                        }}
-                      >
-                        {sub.name}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
+              <path d="M3 7V3h4M17 3h4v4M21 17v4h-4M7 21H3v-4M7 12h10" />
+            </svg>
+            <div className="kiosk-scan-card__copy">
+              <strong>
+                {remaining === 0 ? t("cart.limitTitle", { limit }) : t("cart.scanTitle")}
+              </strong>
+              <span>{remaining === 0 ? t("cart.limitHint") : t("cart.scanTitleTarget")}</span>
+              {remaining === 0 ? null : <small>{t("cart.scanHint")}</small>}
             </div>
-
-            <div
-              style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}
-            >
-              <span style={{ font: "600 20px/26px var(--font-ui)" }}>
-                {t("cart.total", { n: count })}
-              </span>
-              {showPrices ? (
-                <span
-                  style={{
-                    font: "600 26px/1 var(--font-mono)",
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {/* «—», not a sum with the unpriced items quietly left out:
-                      this is the number the administrator charges against. */}
-                  {total === null
-                    ? UNPRICED
-                    : t("cart.price", { value: formatMoney(total, money) })}
-                </span>
-              ) : null}
-            </div>
-
-            <span style={{ font: "400 15px/20px var(--font-ui)", color: "var(--fg-3)" }}>
-              {t("cart.limitFooter", { limit, remaining })}
-            </span>
-
-            <button
-              className="kiosk-control"
-              type="button"
-              disabled={!submittable}
-              onClick={() => onSubmit(state)}
-              style={{
-                height: 84,
-                borderRadius: 12,
-                border: "none",
-                background: submittable ? "var(--accent)" : "var(--surface-panel)",
-                color: submittable ? "var(--fg-on-inverse)" : "var(--fg-disabled)",
-                font: "700 24px/1 var(--font-ui)",
-              }}
-            >
-              {t("cart.submit")}
-            </button>
           </div>
         </section>
+
+        <section className="kiosk-cart__basket" aria-labelledby="kiosk-cart-list-title">
+          <header className="kiosk-cart__basket-header">
+            <h1 id="kiosk-cart-list-title">{t("cart.listTitle")}</h1>
+            <span>{summary}</span>
+          </header>
+
+          {count === 0 ? (
+            <div className="kiosk-cart__empty">
+              <strong>{t("cart.emptyTitle")}</strong>
+              <span>{t("cart.emptyHint")}</span>
+            </div>
+          ) : (
+            <PagedLines
+              items={state.lines}
+              pageSize={pageSize}
+              page={page}
+              onPageChange={setPage}
+              renderItem={(item) => {
+                const unitKopecks = item.unitPrice === null ? null : toKopecks(item.unitPrice);
+                const kopecks = unitKopecks === null ? null : unitKopecks * item.bottleCount;
+                return (
+                  <button
+                    className="kiosk-control kiosk-line"
+                    type="button"
+                    data-new={
+                      newLineKey === (item.kind === "km" ? item.kmKey : item.sscc)
+                        ? "true"
+                        : undefined
+                    }
+                    onAnimationEnd={() => {
+                      const key = item.kind === "km" ? item.kmKey : item.sscc;
+                      setNewLineKey((current) => (current === key ? null : current));
+                    }}
+                    aria-label={t("cart.openLine", {
+                      name: item.name,
+                      quantity: t("cart.bottles", { count: item.bottleCount }),
+                    })}
+                    onClick={() => setSelected(item)}
+                  >
+                    {item.kind === "km" ? (
+                      <ProductImage
+                        productId={item.productId}
+                        name={item.name}
+                        image={item.image}
+                        fallback={<ItemKindIcon kind="km" />}
+                      />
+                    ) : (
+                      <ItemKindIcon kind={item.kind} />
+                    )}
+                    <span className="kiosk-line__copy">
+                      <span className="kiosk-line__name" title={item.name}>
+                        {item.name}
+                      </span>
+                      <span className="kiosk-line__code" title={codeTail(item)}>
+                        {codeTail(item)}
+                      </span>
+                    </span>
+                    <span className="kiosk-line__count">
+                      {t("cart.bottles", { count: item.bottleCount })}
+                    </span>
+                    {showPrices ? (
+                      <span className="kiosk-line__price">
+                        {kopecks === null
+                          ? UNPRICED
+                          : t("cart.price", { value: formatMoney(kopecks, money) })}
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              }}
+            />
+          )}
+        </section>
       </div>
+
+      <footer className="kiosk-cart__checkout">
+        <div className="kiosk-cart__totals">
+          <strong>{summary}</strong>
+          <span className="kiosk-cart__legacy-total">
+            <span>{t("cart.total", { n: count })}</span>
+            {showPrices ? (
+              <span>
+                {total === null ? UNPRICED : t("cart.price", { value: formatMoney(total, money) })}
+              </span>
+            ) : null}
+          </span>
+          <small>
+            {pickupPolicy.limited
+              ? t("cart.limitFooter", { limit, remaining })
+              : t("cart.unlimitedFooter")}
+          </small>
+        </div>
+        <button
+          className="kiosk-control kiosk-cart__continue"
+          type="button"
+          disabled={!submittable}
+          onClick={() => {
+            if (canSubmit(state, cartContext)) onSubmit(state);
+          }}
+        >
+          {t("cart.submit")}
+        </button>
+      </footer>
+
+      {newLineKey ? (
+        <span className="kiosk-visually-hidden" role="status" aria-label={t("cart.addedLine")}>
+          {t("cart.addedLine")}:{" "}
+          {state.lines.find((line) =>
+            line.kind === "km" ? line.kmKey === newLineKey : line.sscc === newLineKey,
+          )?.name ?? ""}
+        </span>
+      ) : null}
+
+      <CartLineDialog
+        line={selected}
+        onClose={() => setSelected(null)}
+        onRemove={(line) => {
+          dispatch(
+            line.kind === "km"
+              ? { type: "remove", kmKey: line.kmKey }
+              : { type: "removeBox", sscc: line.sscc },
+          );
+          setSelected(null);
+        }}
+      />
+
+      <Modal
+        open={confirmNotMe}
+        onClose={() => setConfirmNotMe(false)}
+        closeLabel={t("flow.keepWorking")}
+        width={560}
+        title={t("cart.notMeTitle")}
+        footer={
+          <div className="kiosk-flow__dialog-actions">
+            <button
+              className="kiosk-control kiosk-flow__secondary"
+              type="button"
+              onClick={() => setConfirmNotMe(false)}
+            >
+              {t("flow.keepWorking")}
+            </button>
+            <button className="kiosk-control kiosk-flow__danger" type="button" onClick={onNotMe}>
+              {t("cart.notMeConfirm")}
+            </button>
+          </div>
+        }
+      >
+        <p className="kiosk-flow__dialog-copy">{t("cart.notMeBody")}</p>
+      </Modal>
 
       {/*
         The red stop. Its copy deliberately does NOT say «not in the catalogue»,

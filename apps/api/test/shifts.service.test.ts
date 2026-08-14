@@ -18,13 +18,17 @@ import type { EntitlementsService } from "../src/subscriptions/entitlements.serv
 function chain(rows: unknown[], table: unknown, lockedTables: unknown[]) {
   const result = Promise.resolve(rows);
   const node: {
+    innerJoin: () => typeof node;
     leftJoin: () => typeof node;
     where: () => typeof node;
+    limit: () => Promise<unknown[]>;
     for: (mode: string) => Promise<unknown[]>;
     then: typeof result.then;
   } = {
+    innerJoin: () => node,
     leftJoin: () => node,
     where: () => node,
+    limit: async () => rows,
     for: async (mode) => {
       if (mode === "update") lockedTables.push(table);
       return rows;

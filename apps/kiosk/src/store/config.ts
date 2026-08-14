@@ -1,4 +1,18 @@
-import { STORE_CONFIG, withStore } from "./db.js";
+import {
+  STORE_BOX_REGISTRY_ACTIVE,
+  STORE_BOX_REGISTRY_META,
+  STORE_BOX_REGISTRY_STAGING,
+  STORE_CONFIG,
+  withStore,
+  withTransaction,
+} from "./db.js";
+import {
+  boxRegistryBindingOf,
+  boxRegistryCredentialOwnerOf,
+  credentialGenerationOf,
+  sameBoxRegistryBinding,
+  sameBoxRegistryCredentialOwner,
+} from "./installation-binding.js";
 
 const KEY = "current";
 const SCANNER_KEY = "scanner";
@@ -29,6 +43,8 @@ export interface KioskConfig {
   kioskName: string;
   place: string | null;
   nextDeviceSeq: number;
+  /** Non-secret owner generation rotated whenever the paired token changes. */
+  credentialGeneration?: string | null;
 }
 
 /**
@@ -52,11 +68,59 @@ export async function readConfig(): Promise<KioskConfig | null> {
   // Normalised HERE so every caller — and every record written back through a
   // spread of this one — carries the field in the shape the type promises,
   // whatever the build that first wrote the record put there.
-  return { ...found, kioskId: kioskIdOf(found) };
+  const normalized = { ...found, kioskId: kioskIdOf(found) };
+  if (normalized.token && !credentialGenerationOf(normalized)) return writeConfig(normalized);
+  return normalized;
 }
 
-export async function writeConfig(cfg: KioskConfig): Promise<void> {
-  await withStore(STORE_CONFIG, "readwrite", (s) => s.put(cfg, KEY));
+export async function writeConfig(cfg: KioskConfig): Promise<KioskConfig> {
+  const freshCredentialGeneration = crypto.randomUUID();
+  let stored: KioskConfig | null = null;
+  await withTransaction(
+    [STORE_CONFIG, STORE_BOX_REGISTRY_ACTIVE, STORE_BOX_REGISTRY_STAGING, STORE_BOX_REGISTRY_META],
+    "readwrite",
+    (tx) => {
+      const config = tx.objectStore(STORE_CONFIG);
+      const meta = tx.objectStore(STORE_BOX_REGISTRY_META);
+      const previousRequest = config.get(KEY);
+      const activeMetaRequest = meta.get("active");
+      let ready = 0;
+      const apply = () => {
+        ready += 1;
+        if (ready !== 2) return;
+        const previousBinding = boxRegistryBindingOf(previousRequest.result);
+        const nextBinding = boxRegistryBindingOf(cfg);
+        const previous = previousRequest.result as Partial<KioskConfig> | undefined;
+        const tokenRotated = previous?.token !== cfg.token;
+        const credentialGeneration =
+          cfg.token === null
+            ? null
+            : !tokenRotated && sameBoxRegistryBinding(previousBinding, nextBinding)
+              ? (credentialGenerationOf(previous) ?? freshCredentialGeneration)
+              : freshCredentialGeneration;
+        stored = { ...cfg, credentialGeneration };
+        const nextCredentialOwner = boxRegistryCredentialOwnerOf(stored);
+        const activeCredentialOwner = boxRegistryCredentialOwnerOf(activeMetaRequest.result);
+        const mustClear =
+          cfg.token === null ||
+          tokenRotated ||
+          nextBinding === null ||
+          !sameBoxRegistryBinding(previousBinding, nextBinding) ||
+          (activeMetaRequest.result !== undefined &&
+            !sameBoxRegistryCredentialOwner(activeCredentialOwner, nextCredentialOwner));
+        if (mustClear) {
+          tx.objectStore(STORE_BOX_REGISTRY_ACTIVE).clear();
+          tx.objectStore(STORE_BOX_REGISTRY_STAGING).clear();
+          meta.clear();
+        }
+        config.put(stored, KEY);
+      };
+      previousRequest.onsuccess = apply;
+      activeMetaRequest.onsuccess = apply;
+    },
+  );
+  if (!stored) throw new Error("kiosk config transaction did not store a value");
+  return stored;
 }
 
 /** Which transport the scanner-setup screen was told to use. */

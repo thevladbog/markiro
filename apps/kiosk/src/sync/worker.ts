@@ -1,12 +1,36 @@
-import { isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
-import type { CreateOrderAdmissionDto, CreateOrderDto } from "../api/types.js";
+import { isDeviceRevoked, isUnreachable, KioskApiError, type KioskClient } from "../api/client.js";
+import { isValidSscc } from "@markiro/domain";
+import type {
+  BoxConflict,
+  BoxConflictReason,
+  CreateOrderAdmissionDto,
+  CreateOrderDto,
+  CreateOrderResultDto,
+  OrderConflict,
+} from "../api/types.js";
 import {
   assertMeasurableGeneratedAt,
   replaceSnapshot,
   type CachedSnapshot,
 } from "../store/cache.js";
-import { readConfig } from "../store/config.js";
+import { readConfig, type KioskConfig } from "../store/config.js";
+import { syncProductImages } from "./product-images.js";
 import { appendJournal } from "../store/journal.js";
+import { putOutcome, type OutcomeOwner, type StoredRejectedLine } from "../store/outcomes.js";
+import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  discardBoxRegistryStage,
+  readBoxRegistryMeta,
+  stageBoxRegistryPage,
+  type BoxRegistryCut,
+  type BoxRegistryMeta,
+} from "../store/box-registry.js";
+import {
+  boxRegistryCredentialOwnerKey,
+  boxRegistryCredentialOwnerOf,
+  type BoxRegistryCredentialOwner,
+} from "../store/installation-binding.js";
 import {
   attestQueuedOrder,
   dequeueOrder,
@@ -152,6 +176,17 @@ export function snapshotAgeMs(snapshot: CachedSnapshot | null, now: Date): numbe
   if (!snapshot) return null;
   const ageMs = serverNow(snapshot, now).getTime() - Date.parse(snapshot.bootstrap.generatedAt);
   return Number.isFinite(ageMs) ? ageMs : null;
+}
+
+/** One freshness verdict for the registry, on the same corrected clock as bootstrap. */
+export function boxRegistryAge(
+  meta: BoxRegistryMeta | null,
+  clock: CachedSnapshot | null,
+  now: Date,
+): CacheAge {
+  if (!meta || !clock) return "blocked";
+  const ageMs = serverNow(clock, now).getTime() - Date.parse(meta.generatedAt);
+  return Number.isFinite(ageMs) ? ageVerdict(ageMs) : "blocked";
 }
 
 /** How the plaque says «N назад»: a unit and a whole number, never a suffix. */
@@ -407,7 +442,7 @@ export function flushQueue(client: KioskClient, now: () => Date): Promise<void> 
  * change that verdict, while later queue records may still be eligible because
  * they carry an earlier validated occurrence and a different device sequence.
  */
-const TERMINAL_STATUSES: ReadonlySet<number> = new Set([400, 409, 422]);
+const TERMINAL_STATUSES: ReadonlySet<number> = new Set([400, 409, 413, 422]);
 
 export function isTerminalRejection(err: unknown): boolean {
   return (
@@ -462,10 +497,18 @@ async function quarantine(
   err: KioskApiError,
   now: () => Date,
   kioskId: string | null,
+  owner: OutcomeOwner | null,
 ): Promise<boolean> {
   const at = now().toISOString();
+  const boxConflicts = safeBoxConflicts(err.details);
   try {
-    await quarantineOrder({ ...order, at, status: err.status, message: err.message });
+    await quarantineOrder({
+      ...order,
+      at,
+      status: err.status,
+      message: err.message,
+      ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
+    });
   } catch (storeErr) {
     console.error("kiosk: a refused order could not be set aside", storeErr);
     return false;
@@ -489,11 +532,39 @@ async function quarantine(
       // rule the success path applies to a refused ITEM, applied to the order.
       acceptedCount: 0,
       conflicts: [],
+      ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
     });
   } catch (journalErr) {
     // Best effort: the quarantine record is the custody, the journal is the
     // log. Losing the log line must not put the order back in the queue.
     console.warn("kiosk: a refused order could not be journalled", journalErr);
+  }
+  if (owner) {
+    try {
+      await putOutcome({
+        owner,
+        deviceSeq: order.deviceSeq,
+        employeeId: order.employeeId,
+        at,
+        viewedAt: null,
+        kind: "rejected",
+        orderNo: null,
+        acceptedCount: 0,
+        acceptedBoxes: [],
+        rejected: [
+          ...safeLooseConflicts(err.details),
+          ...boxConflicts.map((conflict) => ({
+            kind: "box" as const,
+            sscc: conflict.sscc,
+            bottleCount: conflict.bottleCount ?? 1,
+            reason: conflict.reason,
+          })),
+        ],
+      });
+    } catch (outcomeErr) {
+      console.error("kiosk: a refused outcome could not be stored", outcomeErr);
+      return false;
+    }
   }
   try {
     await dequeueOrder(order.deviceSeq);
@@ -502,6 +573,122 @@ async function quarantine(
     return false;
   }
   return true;
+}
+
+const BOX_CONFLICT_REASONS: ReadonlySet<BoxConflictReason> = new Set([
+  "unknown_box",
+  "box_not_closed",
+  "box_disassembled",
+  "box_contents_changed",
+  "mixed_product_box",
+  "duplicate",
+  "over_limit",
+]);
+const LOOSE_CONFLICT_REASONS: ReadonlySet<OrderConflict["reason"]> = new Set([
+  "not_km",
+  "incomplete",
+  "unknown_product",
+  "not_allowed",
+  "duplicate",
+  "over_limit",
+]);
+
+function safeLooseConflicts(details: unknown): StoredRejectedLine[] {
+  if (!details || typeof details !== "object") return [];
+  const raw = (details as { conflicts?: unknown }).conflicts;
+  if (!Array.isArray(raw) || raw.length > 100) return [];
+  const conflicts: StoredRejectedLine[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { rawKm?: unknown; reason?: unknown };
+    if (
+      typeof candidate.rawKm !== "string" ||
+      candidate.rawKm.length === 0 ||
+      candidate.rawKm.length > 4_096 ||
+      typeof candidate.reason !== "string" ||
+      !LOOSE_CONFLICT_REASONS.has(candidate.reason as OrderConflict["reason"])
+    )
+      return [];
+    conflicts.push({
+      kind: "loose",
+      codeTail: `…${candidate.rawKm.slice(-6)}`,
+      reason: candidate.reason as OrderConflict["reason"],
+    });
+  }
+  return conflicts;
+}
+
+function outcomeOwnerOf(config: KioskConfig): OutcomeOwner | null {
+  return config.kioskId && config.credentialGeneration
+    ? {
+        serverUrl: config.serverUrl,
+        kioskId: config.kioskId,
+        credentialGeneration: config.credentialGeneration,
+      }
+    : null;
+}
+
+function rejectedOfResult(result: CreateOrderResultDto): StoredRejectedLine[] {
+  return [
+    ...safeLooseConflicts({ conflicts: result.conflicts }),
+    ...safeBoxConflicts({ boxConflicts: result.boxConflicts ?? [] }).map((conflict) => ({
+      kind: "box" as const,
+      sscc: conflict.sscc,
+      bottleCount: conflict.bottleCount ?? 1,
+      reason: conflict.reason,
+    })),
+  ];
+}
+
+function safeAcceptedBoxes(value: unknown): Array<{ sscc: string; bottleCount: number }> {
+  if (!Array.isArray(value) || value.length > 100) return [];
+  const boxes: Array<{ sscc: string; bottleCount: number }> = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { sscc?: unknown; bottleCount?: unknown };
+    if (
+      typeof candidate.sscc !== "string" ||
+      !isValidSscc(candidate.sscc) ||
+      !Number.isInteger(candidate.bottleCount) ||
+      (candidate.bottleCount as number) <= 0 ||
+      (candidate.bottleCount as number) > 500
+    )
+      return [];
+    boxes.push({ sscc: candidate.sscc, bottleCount: candidate.bottleCount as number });
+  }
+  return boxes;
+}
+
+/** Copies only the public box verdict fields out of an untrusted error body. */
+function safeBoxConflicts(details: unknown): BoxConflict[] {
+  if (!details || typeof details !== "object") return [];
+  const raw = (details as { boxConflicts?: unknown }).boxConflicts;
+  if (!Array.isArray(raw) || raw.length > 100) return [];
+  const conflicts: BoxConflict[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as { sscc?: unknown; bottleCount?: unknown; reason?: unknown };
+    if (
+      typeof candidate.sscc !== "string" ||
+      !isValidSscc(candidate.sscc) ||
+      !(
+        candidate.bottleCount === null ||
+        (Number.isInteger(candidate.bottleCount) &&
+          (candidate.bottleCount as number) > 0 &&
+          (candidate.bottleCount as number) <= 500)
+      ) ||
+      typeof candidate.reason !== "string" ||
+      !BOX_CONFLICT_REASONS.has(candidate.reason as BoxConflictReason)
+    ) {
+      return [];
+    }
+    conflicts.push({
+      sscc: candidate.sscc,
+      bottleCount: candidate.bottleCount as number | null,
+      reason: candidate.reason as BoxConflictReason,
+    });
+  }
+  return conflicts;
 }
 
 /**
@@ -538,7 +725,9 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
      * withdrawals under "no kiosk" on a device that has one, and the day count
      * would stop seeing them.
      */
-    const kioskId = (await readConfig())?.kioskId ?? null;
+    const config = await readConfig();
+    const kioskId = config?.kioskId ?? null;
+    const outcomeOwner = config ? outcomeOwnerOf(config) : null;
     const queued = await listQueue(); // ascending deviceSeq
     for (const order of queued) {
       /** Whether THIS order's failure came from the wire or from the store
@@ -582,6 +771,28 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         answered = true;
         delivered = true;
         const at = now().toISOString();
+        const acceptedBoxes = safeAcceptedBoxes(result.acceptedBoxes ?? []);
+        const boxConflicts = safeBoxConflicts({ boxConflicts: result.boxConflicts ?? [] });
+        if (outcomeOwner) {
+          const rejected = rejectedOfResult(result);
+          await putOutcome({
+            owner: outcomeOwner,
+            deviceSeq: order.deviceSeq,
+            employeeId: order.employeeId,
+            at,
+            viewedAt: null,
+            kind:
+              result.orderNo === "" || result.itemCount === 0
+                ? "rejected"
+                : rejected.length > 0
+                  ? "partial"
+                  : "accepted",
+            orderNo: result.orderNo || null,
+            acceptedCount: result.itemCount,
+            acceptedBoxes,
+            rejected,
+          });
+        }
         await appendJournal({
           at,
           // The order's own scan time, which is what the server files it under
@@ -606,6 +817,8 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
           // worker server-side, so it must not count against them here.
           acceptedCount: result.itemCount,
           conflicts: result.conflicts,
+          ...(acceptedBoxes.length > 0 ? { acceptedBoxes } : {}),
+          ...(boxConflicts.length > 0 ? { boxConflicts } : {}),
         });
       } catch (err) {
         // A verdict the order can never come back from is not a stall: park it
@@ -615,8 +828,9 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         // order stays queued.
         if (
           isTerminalRejection(err) &&
-          (await quarantine(order, err as KioskApiError, now, kioskId))
+          (await quarantine(order, err as KioskApiError, now, kioskId, outcomeOwner))
         ) {
+          client.orderCommitted?.();
           continue;
         }
         // AN ANSWER FROM THE APPLICATION IS NOT AN OUTAGE — BUT AN ANSWER FROM
@@ -642,6 +856,7 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
         return;
       }
       await dequeueOrder(order.deviceSeq);
+      client.orderCommitted?.();
     }
   } catch {
     // The store itself failed (`listQueue`, `dequeueOrder`). Nothing is lost:
@@ -693,8 +908,141 @@ async function drainOnce(client: KioskClient, now: () => Date): Promise<void> {
  * dependency but nothing in `src/` validates responses yet; full response
  * validation is a separate concern and does not belong in this guard.
  */
-export async function refreshSnapshot(client: KioskClient, now: () => Date): Promise<void> {
+const BOX_REGISTRY_RESTARTS = 3;
+const BOX_REGISTRY_PAGE_LIMIT = 250;
+const BOX_REGISTRY_MAX_PAGES = 10_000;
+
+async function refreshBoxRegistry(
+  client: KioskClient,
+  registryOwner: BoxRegistryCredentialOwner,
+  generatedAt: string,
+  wait: (milliseconds: number) => Promise<void>,
+  maxPages: number,
+): Promise<void> {
+  let since = (await readBoxRegistryMeta(registryOwner.binding))?.version;
+  for (let attempt = 0; attempt < BOX_REGISTRY_RESTARTS; attempt += 1) {
+    let cut: BoxRegistryCut | null = null;
+    try {
+      let until: string | undefined;
+      let cursor: string | undefined;
+      const seenCursors = new Set<string>();
+      let pages = 0;
+      do {
+        pages += 1;
+        if (pages > maxPages) throw new Error("box registry page limit exceeded");
+        const page = await client.boxRegistryPage!({
+          ...(since !== undefined ? { since } : {}),
+          ...(until !== undefined ? { until } : {}),
+          ...(cursor !== undefined ? { cursor } : {}),
+          limit: BOX_REGISTRY_PAGE_LIMIT,
+        });
+        if (
+          !page ||
+          typeof page !== "object" ||
+          typeof page.until !== "string" ||
+          !/^(0|[1-9][0-9]{0,18})$/.test(page.until) ||
+          BigInt(page.until) > 9_223_372_036_854_775_807n ||
+          !Array.isArray(page.items) ||
+          !(
+            page.nextCursor === undefined ||
+            (typeof page.nextCursor === "string" &&
+              page.nextCursor.length > 0 &&
+              page.nextCursor.length <= 1_024)
+          )
+        ) {
+          throw new Error("invalid box registry page");
+        }
+        if (until === undefined) {
+          until = page.until;
+          cut = {
+            ...registryOwner,
+            owner: crypto.randomUUID(),
+            since: since ?? null,
+            until,
+          };
+          await beginBoxRegistryStage(cut);
+        } else if (page.until !== until) {
+          throw new Error("box registry page changed its until revision");
+        }
+        cursor = page.nextCursor;
+        if (cursor !== undefined) {
+          if (seenCursors.has(cursor)) throw new Error("box registry cursor cycle");
+          seenCursors.add(cursor);
+        }
+        if (cursor !== undefined) {
+          await stageBoxRegistryPage(cut!, page.items);
+        } else {
+          await activateBoxRegistryPage(cut!, page.items, generatedAt);
+        }
+      } while (cursor !== undefined);
+      return;
+    } catch (error) {
+      try {
+        if (cut) await discardBoxRegistryStage(cut);
+      } catch (storeError) {
+        // Revocation is the one verdict storage trouble must never hide: the
+        // shell has to stop admitting workers immediately.
+        if (isDeviceRevoked(error)) throw error;
+        throw storeError;
+      }
+      if (
+        error instanceof KioskApiError &&
+        error.status === 409 &&
+        error.code === "registry_snapshot_changed" &&
+        attempt + 1 < BOX_REGISTRY_RESTARTS
+      ) {
+        since = (await readBoxRegistryMeta(registryOwner.binding))?.version;
+        await wait(250 * 2 ** attempt);
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
+const registryRefreshes = new Map<string, Promise<void>>();
+
+function singleFlightRegistry(
+  registryOwner: BoxRegistryCredentialOwner,
+  run: () => Promise<void>,
+): Promise<void> {
+  const key = boxRegistryCredentialOwnerKey(registryOwner);
+  const current = registryRefreshes.get(key);
+  if (current) return current;
+  const started = run().finally(() => {
+    if (registryRefreshes.get(key) === started) registryRefreshes.delete(key);
+  });
+  registryRefreshes.set(key, started);
+  return started;
+}
+
+export async function refreshSnapshot(
+  client: KioskClient,
+  now: () => Date,
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  registryMaxPages = BOX_REGISTRY_MAX_PAGES,
+): Promise<void> {
   const bootstrap = await client.bootstrap();
   assertMeasurableGeneratedAt(bootstrap);
-  await replaceSnapshot(bootstrap, now());
+  const fetchedAt = now();
+  await replaceSnapshot(bootstrap, fetchedAt);
+  // Media is independent from the operational snapshot: a missing object must
+  // never turn a fresh roster or box registry into an outage.
+  void syncProductImages(client, bootstrap.products).catch((error) =>
+    console.warn("kiosk: product image sync failed", error),
+  );
+  // Older test doubles and old custom clients have no registry method. A real
+  // current client does; registry failure never rolls back a good bootstrap.
+  if (typeof client.boxRegistryPage !== "function") return;
+  const registryOwner = client.registryOwner ?? boxRegistryCredentialOwnerOf(await readConfig());
+  if (!registryOwner) return;
+  try {
+    await singleFlightRegistry(registryOwner, () =>
+      refreshBoxRegistry(client, registryOwner, bootstrap.generatedAt, wait, registryMaxPages),
+    );
+  } catch (error) {
+    if (isDeviceRevoked(error)) throw error;
+    console.warn("kiosk: the box registry could not be refreshed", error);
+  }
 }

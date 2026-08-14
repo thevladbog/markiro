@@ -1,10 +1,17 @@
-import { Inject, Injectable, ConflictException, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
 import { calculateOfferTotals } from "./offer-totals";
+import { normalizeOfferTerms } from "./offer-terms";
 import type { CreateOfferDto, PaymentDto } from "./dto";
 
 @Injectable()
@@ -12,6 +19,15 @@ export class PlatformOffersService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   async create(actor: PlatformPrincipal, input: CreateOfferDto) {
+    let termsMarkdown: string | null;
+    try {
+      termsMarkdown = normalizeOfferTerms(input.termsMarkdown).markdown;
+    } catch (error) {
+      if (error instanceof Error && error.message === "offer_terms_too_long") {
+        throw new BadRequestException({ code: error.message });
+      }
+      throw error;
+    }
     const total = calculateOfferTotals(
       input.lines.map((line) => ({
         quantity: line.quantity,
@@ -21,6 +37,42 @@ export class PlatformOffersService {
       })),
     );
     return this.db.transaction(async (tx) => {
+      const validatedLines: Array<{
+        line: CreateOfferDto["lines"][number];
+        catalogUnitPrice: string | null;
+        priceOverrideReason: string | null;
+      }> = [];
+      for (const line of input.lines) {
+        if (!line.catalogVersionId) {
+          if (line.kind !== "service") {
+            throw new BadRequestException({ code: "offer_catalog_version_invalid" });
+          }
+          validatedLines.push({ line, catalogUnitPrice: null, priceOverrideReason: null });
+          continue;
+        }
+        const [version] = await tx
+          .select({
+            kind: schema.catalogItemVersions.kind,
+            status: schema.catalogItemVersions.status,
+            unitPrice: schema.catalogItemVersions.unitPrice,
+          })
+          .from(schema.catalogItemVersions)
+          .where(eq(schema.catalogItemVersions.id, line.catalogVersionId))
+          .for("share");
+        if (!version || version.kind !== line.kind || version.status !== "published") {
+          throw new BadRequestException({ code: "offer_catalog_version_invalid" });
+        }
+        const priceOverrideReason = line.priceOverrideReason?.trim() || null;
+        if (line.agreedUnitPrice !== version.unitPrice && !priceOverrideReason) {
+          throw new BadRequestException({ code: "offer_price_override_reason_required" });
+        }
+        validatedLines.push({
+          line,
+          catalogUnitPrice: version.unitPrice,
+          priceOverrideReason:
+            line.agreedUnitPrice === version.unitPrice ? null : priceOverrideReason,
+        });
+      }
       const [offer] = await tx
         .insert(schema.commercialOffers)
         .values({
@@ -29,12 +81,13 @@ export class PlatformOffersService {
           status: "draft",
           total: total.total,
           expiresAt: input.expiresAt ?? null,
+          termsMarkdown,
           createdByPlatformUserId: actor.userId,
         })
         .returning();
       if (!offer) throw new Error("offer insert failed");
       await tx.insert(schema.commercialOfferLines).values(
-        input.lines.map((line, index) => ({
+        validatedLines.map(({ line, catalogUnitPrice, priceOverrideReason }, index) => ({
           tenantId: input.tenantId,
           offerId: offer.id,
           position: index + 1,
@@ -46,14 +99,14 @@ export class PlatformOffersService {
           descriptionEn: line.descriptionEn ?? null,
           quantity: line.quantity,
           unit: line.unit,
-          catalogUnitPrice: line.catalogUnitPrice ?? null,
+          catalogUnitPrice,
           agreedUnitPrice: line.agreedUnitPrice,
           vatRate:
             line.vatRateBps === null || line.vatRateBps === undefined
               ? null
               : String(line.vatRateBps / 100),
           vatIncluded: line.vatIncluded,
-          priceOverrideReason: line.priceOverrideReason ?? null,
+          priceOverrideReason,
           activationPolicy: line.kind === "plan" ? (line.activationPolicy ?? "immediately") : null,
           lineTotal: (Number(line.agreedUnitPrice) * line.quantity).toFixed(2),
         })),
@@ -82,18 +135,78 @@ export class PlatformOffersService {
   }
 
   async publish(actor: PlatformPrincipal, id: string) {
-    const [offer] = await this.db
-      .update(schema.commercialOffers)
-      .set({
-        status: "published",
-        publishedAt: new Date(),
-        publishedByPlatformUserId: actor.userId,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
-      .returning();
-    if (!offer) throw new ConflictException({ code: "offer_not_draft" });
-    return this.detail(actor, id);
+    return this.db.transaction(async (tx) => {
+      const [draft] = await tx
+        .select()
+        .from(schema.commercialOffers)
+        .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
+        .for("update");
+      if (!draft) throw new ConflictException({ code: "offer_not_draft" });
+      const [seller] = await tx
+        .select()
+        .from(schema.operatorBillingProfiles)
+        .where(eq(schema.operatorBillingProfiles.isCurrent, true))
+        .limit(1);
+      const [buyer] = await tx
+        .select()
+        .from(schema.tenantBillingProfiles)
+        .where(
+          and(
+            eq(schema.tenantBillingProfiles.tenantId, draft.tenantId),
+            eq(schema.tenantBillingProfiles.isCurrent, true),
+          ),
+        )
+        .limit(1);
+      if (!seller || !buyer) throw new ConflictException({ code: "billing_profile_required" });
+      const [latest] = await tx
+        .select({ number: schema.commercialOffers.number })
+        .from(schema.commercialOffers)
+        .where(
+          eq(
+            schema.commercialOffers.number,
+            `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`,
+          ),
+        )
+        .limit(1);
+      const number = latest
+        ? `KP-${new Date().getFullYear()}-${draft.id.slice(0, 8).toUpperCase()}`
+        : `KP-${new Date().getFullYear()}-${draft.revision.toString().padStart(6, "0")}`;
+      const [updated] = await tx
+        .update(schema.commercialOffers)
+        .set({
+          status: "published",
+          number,
+          publishedAt: new Date(),
+          publishedByPlatformUserId: actor.userId,
+          updatedAt: new Date(),
+        })
+        .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
+        .returning();
+      if (!updated) throw new ConflictException({ code: "offer_not_draft" });
+      const lines = await tx
+        .select()
+        .from(schema.commercialOfferLines)
+        .where(eq(schema.commercialOfferLines.offerId, id))
+        .orderBy(asc(schema.commercialOfferLines.position));
+      const terms = normalizeOfferTerms(updated.termsMarkdown);
+      await tx.insert(schema.commercialOfferPrintSnapshots).values({
+        tenantId: updated.tenantId,
+        offerId: updated.id,
+        revision: updated.revision,
+        number,
+        publishedAt: updated.publishedAt ?? new Date(),
+        expiresAt: updated.expiresAt,
+        sellerSnapshot: seller,
+        buyerSnapshot: buyer,
+        linesSnapshot: lines,
+        subtotal: updated.total,
+        vatTotal: "0.00",
+        total: updated.total,
+        termsMarkdown: terms.markdown,
+        termsHtml: terms.html,
+      });
+      return this.detailWith(tx, updated.tenantId, updated.id);
+    });
   }
 
   async cancel(actor: PlatformPrincipal, id: string) {

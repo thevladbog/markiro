@@ -39,8 +39,16 @@ describe("classifyKioskScan", () => {
     expect(classifyKioskScan(GTIN).kind).toBe("unknown");
   });
 
-  it("classifies an SSCC as unknown, not badge", () => {
-    expect(classifyKioskScan(SSCC).kind).toBe("unknown");
+  it.each([SSCC, `00${SSCC}`, `(00)${SSCC}`, `]C100${SSCC}`])(
+    "classifies SSCC scanner wrapper %s as one canonical box code",
+    (raw) => {
+      expect(classifyKioskScan(raw)).toEqual({ kind: "sscc", sscc: SSCC });
+    },
+  );
+
+  it("preserves a KM payload byte-for-byte while classifying SSCC separately", () => {
+    const rawKm = `01${GTIN}21KYC9X7MQ${GS}93Abcd`;
+    expect(classifyKioskScan(rawKm)).toMatchObject({ kind: "km", rawKm });
   });
 
   it("still classifies an opaque badge payload as badge", () => {

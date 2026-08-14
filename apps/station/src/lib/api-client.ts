@@ -14,17 +14,22 @@ export class StationApiError extends Error {
   }
 }
 
+export type ServerReachability = "checking" | "reachable" | "unreachable";
+
 export function isStationCredentialRejection(error: unknown): error is StationApiError {
   return error instanceof StationApiError && error.status === 401;
 }
 
 export interface StationClient {
   get<T>(path: string): Promise<T>;
+  download(path: string): Promise<Blob>;
   post<T>(path: string, body?: unknown): Promise<T>;
   whoami(signal?: AbortSignal): Promise<{ ok: true }>;
 }
 
 export interface StationClientOptions {
+  /** Reports whether a Station API response was received for a request. */
+  onReachabilityChange?: (state: Exclude<ServerReachability, "checking">) => void;
   /** Present only for the normal, durably enrolled authenticated client. */
   credentialBoundary?: {
     machineId: string;
@@ -111,6 +116,7 @@ export function createStationClient(
 ): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
   const credentialBoundary = options.credentialBoundary;
+  let latestRequestSequence = 0;
 
   async function request<T>(
     method: "GET" | "POST",
@@ -121,6 +127,10 @@ export function createStationClient(
     if (credentialBoundary?.generation.sealed) {
       throw new Error("station credential generation is sealed");
     }
+    const requestSequence = ++latestRequestSequence;
+    const reportReachability = (state: Exclude<ServerReachability, "checking">) => {
+      if (requestSequence === latestRequestSequence) options.onReachabilityChange?.(state);
+    };
     // One `AbortController` per attempt, cleared in `finally` so the timer
     // never leaks on the success path (nor on an ordinary HTTP-error path —
     // both go through the same `finally`). `controller.abort()` makes the
@@ -132,6 +142,7 @@ export function createStationClient(
     if (signal?.aborted) controller.abort();
     else signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    let receivedResponse = false;
     try {
       const res = await fetch(`${base}${path}`, {
         method,
@@ -143,10 +154,13 @@ export function createStationClient(
         signal: controller.signal,
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
+      receivedResponse = true;
+      reportReachability("reachable");
       if (!res.ok) throw new StationApiError(res.status, await readError(res));
       if (res.status === 204) return undefined as T;
       return (await res.json()) as T;
     } catch (error) {
+      if (!receivedResponse) reportReachability("unreachable");
       if (credentialBoundary && isStationCredentialRejection(error)) {
         await rejectCredentialGeneration(
           {
@@ -165,6 +179,36 @@ export function createStationClient(
 
   return {
     get: (path) => request("GET", path),
+    download: async (path) => {
+      if (credentialBoundary?.generation.sealed)
+        throw new Error("station credential generation is sealed");
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      try {
+        const res = await fetch(`${base}${path}`, {
+          headers: {
+            "x-station-capabilities": STATION_CAPABILITIES,
+            ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
+          },
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new StationApiError(res.status, await readError(res));
+        return await res.blob();
+      } catch (error) {
+        if (credentialBoundary && isStationCredentialRejection(error)) {
+          await rejectCredentialGeneration(
+            {
+              machineId: credentialBoundary.machineId,
+              generation: credentialBoundary.generation,
+            },
+            credentialBoundary.onCredentialRejected,
+          );
+        }
+        throw error;
+      } finally {
+        clearTimeout(timer);
+      }
+    },
     post: (path, body) => request("POST", path, body),
     // A cheap reachability + auth probe used by enrollment; GET /shifts is
     // TenantGuard-protected, so a 200 proves the key resolves a tenant.

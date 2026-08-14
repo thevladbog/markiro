@@ -11,9 +11,13 @@ export interface DocumentLineDraft {
   version: number;
   nameRu: string;
   nameEn: string;
+  descriptionRu?: string | null;
+  descriptionEn?: string | null;
   quantity: number;
   unit: string;
+  catalogUnitPrice?: string | null;
   agreedUnitPrice: string;
+  priceOverrideReason?: string | null;
   vatRateBps: number | null;
   vatIncluded: boolean;
   activationPolicy: ActivationPolicy | null;
@@ -23,6 +27,7 @@ export interface DocumentDraft {
   tenantId: string;
   applicationMode: "manual" | "automatic";
   date: string;
+  termsMarkdown?: string | null;
   lines: DocumentLineDraft[];
 }
 
@@ -31,6 +36,7 @@ export type DocumentDraftAction =
   | { type: "catalog.added"; version: CatalogVersionDto; separate?: boolean; id: string }
   | { type: "line.quantityChanged"; id: string; quantity: number }
   | { type: "line.priceChanged"; id: string; price: string }
+  | { type: "line.priceOverrideReasonChanged"; id: string; reason: string }
   | { type: "line.vatIncludedChanged"; id: string; included: boolean }
   | { type: "line.policyChanged"; id: string; policy: ActivationPolicy }
   | { type: "line.moved"; id: string; direction: -1 | 1 }
@@ -41,8 +47,11 @@ export interface CreateInvoiceLineInput {
   catalogVersionId: string | null;
   nameRu: string;
   nameEn: string;
+  descriptionRu?: string | null;
+  descriptionEn?: string | null;
   quantity: number;
   unit: string;
+  catalogUnitPrice?: string | null;
   agreedUnitPrice: string;
   vatRateBps: number | null;
   vatIncluded: boolean;
@@ -61,9 +70,12 @@ export interface CreateOfferLineInput {
   catalogVersionId: string | null;
   nameRu: string;
   nameEn: string;
+  descriptionRu?: string | null;
+  descriptionEn?: string | null;
   quantity: number;
   unit: string;
   agreedUnitPrice: string;
+  priceOverrideReason: string | null;
   vatRateBps: number | null;
   vatIncluded: boolean;
   activationPolicy: "immediately" | "after_current" | null;
@@ -72,5 +84,6 @@ export interface CreateOfferLineInput {
 export interface CreateOfferInput {
   tenantId: string;
   expiresAt: string | null;
+  termsMarkdown?: string | null;
   lines: CreateOfferLineInput[];
 }

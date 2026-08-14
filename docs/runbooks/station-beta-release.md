@@ -36,6 +36,13 @@ Windows.
    из `docs/hardware-acceptance-checklist.md`: иконки, production pairing,
    touch/keyboard/scanner input, viewport и fullscreen. Это отдельное
    acceptance; workflow не закрывает эти пункты.
+   Для beta с агрегацией и восстановлением печати отдельно выполните
+   весь раздел `Aggregation and box-label recovery (next Station beta)`:
+   новый issuer prefix с первым serial `0000001`, реальные EAN-13/KM,
+   короб на 20 мест, отказ принтера с перезапуском, повторную печать того же
+   SSCC, явный пропуск этикетки и scan-back GS1-128 на packaged Windows в 1280×800 и
+   1024×768. До реального прогона все эти пункты остаются
+   неотмеченными.
 
 ## Перед запуском
 
@@ -88,6 +95,17 @@ pairing выполнен настоящим кодом из `admin.markiro.app`;
 fullscreen выходит и возвращается обратно. При активной смене выход из
 fullscreen требует явного подтверждения; после отмены, выхода и повторного
 входа состояние смены и очередь не должны теряться.
+
+Для проверки обновления иконки обязательно выполните Windows upgrade smoke на
+реальных артефактах workflow `Publish station beta`. Сначала установите
+предыдущий immutable `*.exe`, созданный шагом
+`Build signed Windows NSIS updater artifacts`, и закрепите ярлык в taskbar.
+Затем обновитесь через центр обновлений до следующей beta, собранной тем же
+NSIS-шагом. После перезапуска проверьте установленную версию и отдельно иконки
+ярлыка на рабочем столе, в меню «Пуск» и в taskbar: на всех трёх поверхностях
+должен быть новый знак Markiro, а закэшированная иконка предыдущей beta должна
+исчезнуть. Запишите обе версии, Windows build, workflow URL и скриншоты в
+hardware checklist. Headless CI не заменяет эту проверку Windows Shell.
 
 ## Откат и ротация ключа
 

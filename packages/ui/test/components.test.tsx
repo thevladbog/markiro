@@ -296,6 +296,22 @@ describe("Input", () => {
 });
 
 describe("Select", () => {
+  it("contains the Radix form proxy within the field instead of the viewport", () => {
+    const { container } = render(
+      <form>
+        <Select label="Группа" options={["Пиво", "Вода"]} value="Пиво" />
+      </form>,
+    );
+
+    const field = container.querySelector(".mk-field");
+    const proxy = field?.querySelector("select[aria-hidden='true']");
+    expect(field).toBeInstanceOf(HTMLElement);
+    expect(proxy).toBeInstanceOf(HTMLSelectElement);
+    if (!(field instanceof HTMLElement) || !(proxy instanceof HTMLSelectElement)) return;
+    expect(field.contains(proxy)).toBe(true);
+    expect(field.style.position).toBe("relative");
+  });
+
   it("opens with a controlled empty option selected", async () => {
     const user = userEvent.setup();
     render(
@@ -993,6 +1009,20 @@ describe("FullScreenDialog", () => {
     dialog.focus();
     await user.tab();
     expect(document.activeElement).toBe(skip);
+  });
+
+  it("can disable both the back action and Escape while blocking work is pending", () => {
+    const onClose = vi.fn();
+    render(
+      <FullScreenDialog open title="Printing" backLabel="Retry" backDisabled onClose={onClose}>
+        Printing a box label
+      </FullScreenDialog>,
+    );
+
+    const retry = screen.getByRole("button", { name: "Retry" }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Printing" }), { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("traps focus, closes on Escape, and restores focus to its opener", async () => {

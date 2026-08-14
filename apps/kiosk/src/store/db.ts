@@ -8,12 +8,13 @@ const DB_NAME = "markiro-kiosk";
  * `countTakenToday` does with an entry from before the journal carried an
  * employee.
  */
-const DB_VERSION = 2;
+const DB_VERSION = 5;
 
 export const STORE_CONFIG = "config";
 export const STORE_SNAPSHOT = "snapshot";
 export const STORE_QUEUE = "queue";
 export const STORE_JOURNAL = "journal";
+export const STORE_OUTCOMES = "outcomes";
 /**
  * Where an order the server refused FOR GOOD goes — added in version 2, which
  * is the shape change that bumped the number above.
@@ -25,6 +26,18 @@ export const STORE_JOURNAL = "journal";
  * learning a new state.
  */
 export const STORE_QUARANTINE = "quarantine";
+export const STORE_BOX_REGISTRY_ACTIVE = "boxRegistryActive";
+export const STORE_BOX_REGISTRY_STAGING = "boxRegistryStaging";
+export const STORE_BOX_REGISTRY_META = "boxRegistryMeta";
+export const STORE_PRODUCT_IMAGE_BLOBS = "product-image-blobs";
+export const STORE_PRODUCT_IMAGE_POINTERS = "product-image-pointers";
+
+const transactionAbortReasons = new WeakMap<IDBTransaction, Error>();
+
+export function abortTransaction(tx: IDBTransaction, reason: Error): void {
+  transactionAbortReasons.set(tx, reason);
+  tx.abort();
+}
 
 // Module-private: every caller reaches the database through `withStore` or
 // `withCursor` below, which are the only two places that open a connection
@@ -46,11 +59,23 @@ function open(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_QUEUE, { keyPath: "deviceSeq" });
       if (!db.objectStoreNames.contains(STORE_JOURNAL))
         db.createObjectStore(STORE_JOURNAL, { autoIncrement: true });
+      if (!db.objectStoreNames.contains(STORE_OUTCOMES))
+        db.createObjectStore(STORE_OUTCOMES, { keyPath: "id" });
       // Keyed by `deviceSeq` like the queue it is fed from, so re-quarantining
       // the same order (a drain that parked it but crashed before the dequeue)
       // overwrites rather than duplicates.
       if (!db.objectStoreNames.contains(STORE_QUARANTINE))
         db.createObjectStore(STORE_QUARANTINE, { keyPath: "deviceSeq" });
+      if (!db.objectStoreNames.contains(STORE_BOX_REGISTRY_ACTIVE))
+        db.createObjectStore(STORE_BOX_REGISTRY_ACTIVE, { keyPath: "sscc" });
+      if (!db.objectStoreNames.contains(STORE_BOX_REGISTRY_STAGING))
+        db.createObjectStore(STORE_BOX_REGISTRY_STAGING, { keyPath: "sscc" });
+      if (!db.objectStoreNames.contains(STORE_BOX_REGISTRY_META))
+        db.createObjectStore(STORE_BOX_REGISTRY_META);
+      if (!db.objectStoreNames.contains(STORE_PRODUCT_IMAGE_BLOBS))
+        db.createObjectStore(STORE_PRODUCT_IMAGE_BLOBS);
+      if (!db.objectStoreNames.contains(STORE_PRODUCT_IMAGE_POINTERS))
+        db.createObjectStore(STORE_PRODUCT_IMAGE_POINTERS);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));
@@ -62,6 +87,52 @@ function open(): Promise<IDBDatabase> {
     // console is the difference between a diagnosable stall and a silent one.
     request.onblocked = () =>
       console.warn("kiosk: the IndexedDB upgrade is waiting for another connection to close");
+  });
+}
+
+/**
+ * Runs several object stores under one transaction. The callback must remain
+ * synchronous: awaiting inside it would let IndexedDB auto-commit before the
+ * next request is queued. Callers may queue dependent work from request event
+ * handlers, which are part of the same transaction.
+ */
+export async function withTransaction(
+  names: readonly string[],
+  mode: IDBTransactionMode,
+  run: (tx: IDBTransaction) => void,
+): Promise<void> {
+  const db = await open();
+  return new Promise<void>((resolve, reject) => {
+    const tx = db.transaction([...names], mode);
+    let settled = false;
+    const fail = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      db.close();
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+    tx.oncomplete = () => {
+      if (settled) return;
+      settled = true;
+      db.close();
+      resolve();
+    };
+    tx.onerror = () => fail(tx.error ?? new Error("IndexedDB transaction failed"));
+    tx.onabort = () =>
+      fail(
+        transactionAbortReasons.get(tx) ?? tx.error ?? new Error("IndexedDB transaction aborted"),
+      );
+    try {
+      run(tx);
+    } catch (error) {
+      try {
+        tx.abort();
+      } catch {
+        // The transaction may already have aborted because the synchronous
+        // operation threw. `fail` below still owns closing the connection.
+      }
+      fail(error);
+    }
   });
 }
 

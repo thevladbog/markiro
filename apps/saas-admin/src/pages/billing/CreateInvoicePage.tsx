@@ -8,11 +8,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { listCatalogVersions } from "../catalog/api.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
-import {
-  toInvoiceCreateInput,
-  type DocumentDraft,
-  type DocumentLineDraft,
-} from "../documents/documentDraft.js";
+import { toInvoiceCreateInput, type DocumentDraft } from "../documents/documentDraft.js";
 import {
   getTenant,
   listTenants,
@@ -22,6 +18,9 @@ import {
 } from "../tenants/api.js";
 import { createInvoice } from "./api.js";
 import { getOffer } from "../offers/api.js";
+import { sourceOfferDraft } from "./sourceOfferDraft.js";
+
+export { sourceOfferDraft } from "./sourceOfferDraft.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -31,54 +30,6 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
     createdAt: detail.tenant.createdAt,
     subscriptionStatus: detail.subscriptionStatus,
   };
-}
-
-function vatRateBps(value: string | null): number | null {
-  if (value === null) return null;
-  const match = /^(\d{1,3})\.(\d{2})$/.exec(value);
-  if (!match) throw new Error("offer_vat_rate_invalid");
-  const bps = BigInt(match[1]!) * 100n + BigInt(match[2]!);
-  if (bps > 10_000n) throw new Error("offer_vat_rate_invalid");
-  return Number(bps);
-}
-
-function copyOfferLines(
-  lines: readonly {
-    id: string;
-    kind: "plan" | "addon" | "service";
-    catalogVersionId: string | null;
-    nameRu: string;
-    nameEn: string;
-    quantity: number;
-    unit: string;
-    agreedUnitPrice: string;
-    vatRate: string | null;
-    vatIncluded: boolean;
-    activationPolicy: "immediately" | "after_current" | null;
-  }[],
-): DocumentLineDraft[] {
-  return lines.map((line) => {
-    const catalogBacked = line.catalogVersionId !== null;
-    return {
-      id: `offer-line-${line.id}`,
-      kind: catalogBacked ? line.kind : "custom",
-      catalogVersionId: line.catalogVersionId,
-      catalogItemCode: "",
-      version: 0,
-      nameRu: line.nameRu,
-      nameEn: line.nameEn,
-      quantity: line.quantity,
-      unit: line.unit,
-      agreedUnitPrice: line.agreedUnitPrice,
-      vatRateBps: vatRateBps(line.vatRate),
-      vatIncluded: line.vatIncluded,
-      activationPolicy: catalogBacked
-        ? line.activationPolicy === "immediately"
-          ? "immediate"
-          : line.activationPolicy
-        : null,
-    };
-  });
 }
 
 export function CreateInvoicePage() {
@@ -184,12 +135,9 @@ function InvoiceEditor() {
   ) {
     pickerTenants.push(toTenantListItem(prefetchedTenant.data));
   }
-  const initialDraft: DocumentDraft = {
-    tenantId: selectedTenantId ?? "",
-    applicationMode: "automatic",
-    date: "",
-    lines: sourceOffer.data ? copyOfferLines(sourceOffer.data.lines) : [],
-  };
+  const initialDraft: DocumentDraft = sourceOffer.data
+    ? sourceOfferDraft(sourceOffer.data, catalog.data?.items ?? [])
+    : { tenantId: selectedTenantId ?? "", applicationMode: "automatic", date: "", lines: [] };
 
   return (
     <DocumentComposer

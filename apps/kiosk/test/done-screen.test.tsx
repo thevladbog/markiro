@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CreateOrderResultDto, OrderConflict } from "../src/api/types.js";
+import type { BoxConflict, CreateOrderResultDto, OrderConflict } from "../src/api/types.js";
 import i18n from "../src/i18n/index.js";
 import { Blocked } from "../src/screens/Blocked.js";
 import { Done } from "../src/screens/Done.js";
+import type { CartState } from "../src/session/cart.js";
 import { StatusStrip } from "../src/ui/StatusStrip.js";
 
 afterEach(cleanup);
@@ -28,7 +29,19 @@ function resultWith(over: Partial<CreateOrderResultDto> = {}): CreateOrderResult
   return { orderNo: ORDER_NO, status: "pending", itemCount: 3, conflicts: [], ...over };
 }
 
-const conflict = (reason: OrderConflict["reason"]): OrderConflict => ({ rawKm: RAW_KM, reason });
+const conflict = (reason: OrderConflict["reason"], rawKm = RAW_KM): OrderConflict => ({
+  rawKm,
+  reason,
+});
+const SSCC = "346006820000000021";
+const boxConflict = (
+  reason: BoxConflict["reason"],
+  bottleCount: number | null = 12,
+): BoxConflict => ({
+  sscc: SSCC,
+  bottleCount,
+  reason,
+});
 
 /**
  * The cart as `Cart` handed it to `onSubmit` — the only place the reason and
@@ -41,7 +54,8 @@ const conflict = (reason: OrderConflict["reason"]): OrderConflict => ({ rawKm: R
 function cartOf(prices: (string | null)[], reason: "buy" | "writeoff" = "buy") {
   return {
     reason,
-    items: prices.map((unitPrice, index) => ({
+    lines: prices.map((unitPrice, index) => ({
+      kind: "km" as const,
       rawKm: `raw-${index}`,
       kmKey: `key-${index}`,
       gtin14: "04600682000013",
@@ -49,18 +63,39 @@ function cartOf(prices: (string | null)[], reason: "buy" | "writeoff" = "buy") {
       productId: "p-milk",
       name: "Молоко 3,2%",
       unitPrice,
+      bottleCount: 1 as const,
     })),
   };
 }
 
 const THREE_BOTTLES = ["89.90", "89.90", "89.90"];
 
+function mixedCart(): Pick<CartState, "lines" | "reason"> {
+  return {
+    reason: "buy" as const,
+    lines: [
+      cartOf(["89.90"]).lines[0]!,
+      {
+        kind: "box" as const,
+        boxId: "11111111-1111-4111-8111-111111111111",
+        sscc: SSCC,
+        productId: "p-milk",
+        name: "Молоко 3,2%",
+        bottleCount: 12,
+        unitPrice: "89.90",
+        contentKeys: ["member-secret"],
+        registryVersion: "7",
+      },
+    ],
+  };
+}
+
 function renderDone(
   result: CreateOrderResultDto | null,
-  cart = cartOf(THREE_BOTTLES),
+  cart: Pick<CartState, "lines" | "reason"> = cartOf(THREE_BOTTLES),
   showPrices = true,
+  onReset = vi.fn(),
 ) {
-  const onReset = vi.fn();
   const view = render(
     <Done result={result} cart={cart} showPrices={showPrices} onReset={onReset} />,
   );
@@ -83,6 +118,8 @@ describe("Done", () => {
   it("prints the order number the server actually gave back", () => {
     renderDone(resultWith());
 
+    expect(screen.getByRole("status").getAttribute("data-tone")).toBe("success");
+    expect(screen.getByText("Подтверждено сервером")).toBeDefined();
     expect(screen.getByText(`Заявка № ${ORDER_NO} передана`)).toBeDefined();
     expect(screen.getByText("Сообщите администратору — он оформит заявку")).toBeDefined();
     expect(screen.getByText("и выведет коды из оборота.")).toBeDefined();
@@ -96,6 +133,8 @@ describe("Done", () => {
   it("confirms the handover without a number when the order was queued offline", () => {
     renderDone(null, cartOf(["89.90", "89.90"]));
 
+    expect(screen.getByRole("status").getAttribute("data-tone")).toBe("warning");
+    expect(screen.getByText("Это ещё не подтверждённый успех")).toBeDefined();
     expect(screen.getByText("Заявка передана, номер появится после синхронизации")).toBeDefined();
     // Neither the real prefix nor the «№» that would front a placeholder.
     expect(text()).not.toContain("ORD-");
@@ -132,7 +171,19 @@ describe("Done", () => {
   it("says nothing of the sort when the server refused the order outright", () => {
     renderDone(resultWith({ orderNo: "", itemCount: 0, conflicts: [conflict("over_limit")] }));
 
+    expect(screen.getByRole("status").getAttribute("data-tone")).toBe("error");
     expect(text()).not.toContain(QUEUED_CHECK);
+  });
+
+  it("describes a rejected box without exposing its member keys", () => {
+    renderDone(
+      resultWith({ orderNo: "", itemCount: 0, boxConflicts: [boxConflict("duplicate")] }),
+      mixedCart(),
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toContain("…000021");
+    expect(alert.textContent).toContain("12 бутылок не попали в операцию");
+    expect(text()).not.toContain("member-secret");
   });
 
   it("returns the kiosk to the start on its own after ten seconds", () => {
@@ -169,6 +220,51 @@ describe("Done", () => {
     // shell moved to — a fresh session someone else has already started.
     fireEvent.click(screen.getByRole("button", { name: "Готово" }));
     act(() => vi.advanceTimersByTime(AUTO_RESET_MS * 3));
+
+    expect(onReset).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets the worker retry when durable acknowledgement fails", async () => {
+    const onReset = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("IndexedDB failed"))
+      .mockResolvedValueOnce();
+    renderDone(resultWith(), cartOf(THREE_BOTTLES), true, onReset);
+    const button = screen.getByRole("button", { name: "Готово" });
+
+    await act(async () => fireEvent.click(button));
+    await act(async () => fireEvent.click(button));
+
+    expect(onReset).toHaveBeenCalledTimes(2);
+  });
+
+  it("re-arms auto reset after acknowledgement storage fails", async () => {
+    const onReset = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(new Error("IndexedDB failed"))
+      .mockResolvedValueOnce();
+    renderDone(resultWith(), cartOf(THREE_BOTTLES), true, onReset);
+
+    await act(async () => vi.advanceTimersByTimeAsync(AUTO_RESET_MS));
+    expect(onReset).toHaveBeenCalledTimes(1);
+    await act(async () => vi.advanceTimersByTimeAsync(AUTO_RESET_MS));
+
+    expect(onReset).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not re-arm an old result after it unmounts while acknowledgement is failing", async () => {
+    let rejectAck: ((reason: Error) => void) | undefined;
+    const onReset = vi.fn(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectAck = reject;
+        }),
+    );
+    const { unmount } = renderDone(resultWith(), cartOf(THREE_BOTTLES), true, onReset);
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    unmount();
+    await act(async () => rejectAck?.(new Error("IndexedDB failed")));
+    await act(async () => vi.advanceTimersByTimeAsync(AUTO_RESET_MS * 2));
 
     expect(onReset).toHaveBeenCalledTimes(1);
   });
@@ -323,6 +419,55 @@ describe("Done", () => {
 
     expect(screen.getByText("Покупка · 2 шт · —")).toBeDefined();
     expect(text()).not.toContain("269,70");
+  });
+
+  it("renders a box-only partial as partial and prices only the accepted loose bottle", () => {
+    renderDone(
+      resultWith({
+        itemCount: 1,
+        conflicts: [],
+        boxConflicts: [boxConflict("duplicate")],
+        acceptedBoxes: [],
+      }),
+      mixedCart(),
+    );
+
+    expect(screen.getByRole("alert").textContent).toContain("короб");
+    expect(screen.getByText("Покупка · 1 шт · 89,90 ₽")).toBeDefined();
+    expect(text()).not.toContain("member-secret");
+    expect(text()).not.toContain("1 168,70");
+  });
+
+  it("prices a mixed partial from the server-accepted box set", () => {
+    renderDone(
+      resultWith({
+        itemCount: 12,
+        conflicts: [conflict("duplicate", "raw-0")],
+        boxConflicts: [],
+        acceptedBoxes: [{ sscc: SSCC, bottleCount: 12 }],
+      }),
+      mixedCart(),
+    );
+
+    expect(screen.getByText("Покупка · 12 шт · 1 078,80 ₽")).toBeDefined();
+    expect(screen.getByRole("alert")).toBeDefined();
+  });
+
+  it("prices a fully accepted box and still hides all money when configured", () => {
+    const accepted = resultWith({
+      itemCount: 12,
+      conflicts: [],
+      boxConflicts: [],
+      acceptedBoxes: [{ sscc: SSCC, bottleCount: 12 }],
+    });
+    const cart = { ...mixedCart(), lines: [mixedCart().lines[1]!] };
+    const visible = renderDone(accepted, cart);
+    expect(screen.getByText("Покупка · 12 шт · 1 078,80 ₽")).toBeDefined();
+
+    visible.unmount();
+    renderDone(accepted, cart, false);
+    expect(screen.getByText("Покупка · 12 шт")).toBeDefined();
+    expect(text()).not.toContain("₽");
   });
 
   // `showPrices = false` hides money everywhere on this device, and a summary

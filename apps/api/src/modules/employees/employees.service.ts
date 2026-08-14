@@ -1,15 +1,26 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, isNull } from "drizzle-orm";
+import {
+  ConflictException,
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from "@nestjs/common";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type {
   BadgeDto,
+  BulkEmployeePickupLimitsDto,
+  BulkEmployeePickupPolicyResponseDto,
+  BulkEmployeePickupWriteoffDto,
   CreateEmployeeDto,
   EmployeeDto,
+  EmployeePickupPolicyDto,
   IssueBadgeDto,
   ListEmployeesQueryDto,
   ListEmployeesResponseDto,
   UpdateEmployeeDto,
+  UpdateEmployeePickupPolicyDto,
 } from "./dto";
 
 @Injectable()
@@ -23,23 +34,40 @@ export class EmployeesService {
     const conds = [eq(schema.employees.tenantId, tenantId)];
     if (query.status) conds.push(eq(schema.employees.status, query.status));
     const rows = await this.db
-      .select()
+      .select({ employee: schema.employees, pickupPolicy: schema.employeePickupPolicies })
       .from(schema.employees)
+      .leftJoin(
+        schema.employeePickupPolicies,
+        and(
+          eq(schema.employeePickupPolicies.tenantId, schema.employees.tenantId),
+          eq(schema.employeePickupPolicies.employeeId, schema.employees.id),
+        ),
+      )
       .where(and(...conds))
       .orderBy(schema.employees.fullName);
     const badges = await this.badgesFor(
       tenantId,
-      rows.map((r) => r.id),
+      rows.map((r) => r.employee.id),
     );
-    return { items: rows.map((r) => this.toDto(r, badges)) };
+    return { items: rows.map((r) => this.toDto(r.employee, badges, r.pickupPolicy)) };
   }
 
   async createEmployee(tenantId: string, dto: CreateEmployeeDto): Promise<EmployeeDto> {
-    const [row] = await this.db
-      .insert(schema.employees)
-      .values({ tenantId, fullName: dto.fullName, role: dto.role ?? null })
-      .returning();
-    return this.toDto(row!, new Map());
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(schema.employees)
+        .values({ tenantId, fullName: dto.fullName, role: dto.role ?? null })
+        .returning();
+      if (!row) throw new InternalServerErrorException("Failed to create employee");
+      const [pickupPolicy] = await tx
+        .insert(schema.employeePickupPolicies)
+        .values({ tenantId, employeeId: row.id })
+        .returning();
+      if (!pickupPolicy) {
+        throw new InternalServerErrorException("Failed to create employee pickup policy");
+      }
+      return this.toDto(row, new Map(), pickupPolicy);
+    });
   }
 
   async updateEmployee(tenantId: string, id: string, dto: UpdateEmployeeDto): Promise<EmployeeDto> {
@@ -48,20 +76,83 @@ export class EmployeesService {
     if (dto.role !== undefined) set.role = dto.role;
     if (dto.status !== undefined) set.status = dto.status;
     if (Object.keys(set).length === 0) {
-      const [row] = await this.db
-        .select()
-        .from(schema.employees)
-        .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id)));
-      if (!row) throw new NotFoundException();
-      return this.toDto(row, await this.badgesFor(tenantId, [id]));
+      return this.getEmployee(tenantId, id);
     }
+    await this.getEmployee(tenantId, id);
     const [row] = await this.db
       .update(schema.employees)
       .set(set)
       .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, id)))
       .returning();
     if (!row) throw new NotFoundException();
-    return this.toDto(row, await this.badgesFor(tenantId, [id]));
+    return this.getEmployee(tenantId, id);
+  }
+
+  async updatePickupPolicy(
+    tenantId: string,
+    actorUserId: string,
+    employeeId: string,
+    dto: UpdateEmployeePickupPolicyDto,
+  ): Promise<EmployeeDto> {
+    await this.db.transaction(async (tx) => {
+      const [employee] = await tx
+        .select({ id: schema.employees.id })
+        .from(schema.employees)
+        .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, employeeId)))
+        .for("update");
+      if (!employee) throw new NotFoundException();
+
+      const [policy] = await tx
+        .select()
+        .from(schema.employeePickupPolicies)
+        .where(
+          and(
+            eq(schema.employeePickupPolicies.tenantId, tenantId),
+            eq(schema.employeePickupPolicies.employeeId, employeeId),
+          ),
+        )
+        .for("update");
+      if (!policy) {
+        throw new InternalServerErrorException("Employee pickup policy is not configured");
+      }
+      const before = this.toPickupPolicyDto(policy);
+      const after: EmployeePickupPolicyDto = dto;
+      await tx
+        .update(schema.employeePickupPolicies)
+        .set({ ...after, updatedAt: new Date() })
+        .where(
+          and(
+            eq(schema.employeePickupPolicies.tenantId, tenantId),
+            eq(schema.employeePickupPolicies.employeeId, employeeId),
+          ),
+        );
+      await this.insertPickupPolicyAudit(tx, tenantId, actorUserId, employeeId, before, after);
+    });
+    return this.getEmployee(tenantId, employeeId);
+  }
+
+  async bulkUpdatePickupLimits(
+    tenantId: string,
+    actorUserId: string,
+    dto: BulkEmployeePickupLimitsDto,
+  ): Promise<BulkEmployeePickupPolicyResponseDto> {
+    return this.bulkUpdatePickupPolicies(tenantId, actorUserId, dto.employeeIds, (before) => ({
+      limitMode: dto.limitMode,
+      dayLimit: dto.dayLimit,
+      canWriteoff: before.canWriteoff,
+    }));
+  }
+
+  async bulkUpdatePickupWriteoff(
+    tenantId: string,
+    actorUserId: string,
+    dto: BulkEmployeePickupWriteoffDto,
+  ): Promise<BulkEmployeePickupPolicyResponseDto> {
+    return this.bulkUpdatePickupPolicies(tenantId, actorUserId, dto.employeeIds, (before) => ({
+      limitMode: before.limitMode,
+      dayLimit: before.dayLimit,
+      canWriteoff: dto.canWriteoff,
+    }));
   }
 
   async archiveEmployee(tenantId: string, id: string): Promise<void> {
@@ -74,11 +165,7 @@ export class EmployeesService {
   }
 
   async issueBadge(tenantId: string, employeeId: string, dto: IssueBadgeDto): Promise<EmployeeDto> {
-    const [emp] = await this.db
-      .select()
-      .from(schema.employees)
-      .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, employeeId)));
-    if (!emp) throw new NotFoundException();
+    await this.getEmployee(tenantId, employeeId);
     try {
       await this.db
         .insert(schema.employeeBadges)
@@ -92,7 +179,7 @@ export class EmployeesService {
       }
       throw error;
     }
-    return this.toDto(emp, await this.badgesFor(tenantId, [employeeId]));
+    return this.getEmployee(tenantId, employeeId);
   }
 
   async revokeBadge(tenantId: string, employeeId: string, badgeId: string): Promise<void> {
@@ -134,15 +221,122 @@ export class EmployeesService {
     return map;
   }
 
+  private async getEmployee(tenantId: string, employeeId: string): Promise<EmployeeDto> {
+    const [row] = await this.db
+      .select({ employee: schema.employees, pickupPolicy: schema.employeePickupPolicies })
+      .from(schema.employees)
+      .leftJoin(
+        schema.employeePickupPolicies,
+        and(
+          eq(schema.employeePickupPolicies.tenantId, schema.employees.tenantId),
+          eq(schema.employeePickupPolicies.employeeId, schema.employees.id),
+        ),
+      )
+      .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, employeeId)));
+    if (!row) throw new NotFoundException();
+    return this.toDto(row.employee, await this.badgesFor(tenantId, [employeeId]), row.pickupPolicy);
+  }
+
+  private async bulkUpdatePickupPolicies(
+    tenantId: string,
+    actorUserId: string,
+    employeeIds: string[],
+    update: (before: EmployeePickupPolicyDto) => EmployeePickupPolicyDto,
+  ): Promise<BulkEmployeePickupPolicyResponseDto> {
+    return this.db.transaction(async (tx) => {
+      const employees = await tx
+        .select({ id: schema.employees.id })
+        .from(schema.employees)
+        .where(
+          and(eq(schema.employees.tenantId, tenantId), inArray(schema.employees.id, employeeIds)),
+        )
+        .orderBy(schema.employees.id)
+        .for("update");
+      if (employees.length !== employeeIds.length) throw new NotFoundException();
+
+      const policies = await tx
+        .select()
+        .from(schema.employeePickupPolicies)
+        .where(
+          and(
+            eq(schema.employeePickupPolicies.tenantId, tenantId),
+            inArray(schema.employeePickupPolicies.employeeId, employeeIds),
+          ),
+        )
+        .orderBy(schema.employeePickupPolicies.employeeId)
+        .for("update");
+      if (policies.length !== employeeIds.length) {
+        throw new InternalServerErrorException("Employee pickup policy is not configured");
+      }
+      const policiesByEmployee = new Map(policies.map((policy) => [policy.employeeId, policy]));
+      const items: BulkEmployeePickupPolicyResponseDto["items"] = [];
+      for (const employeeId of employeeIds) {
+        const policy = policiesByEmployee.get(employeeId);
+        if (!policy) {
+          throw new InternalServerErrorException("Employee pickup policy is not configured");
+        }
+        const before = this.toPickupPolicyDto(policy);
+        const after = update(before);
+        await tx
+          .update(schema.employeePickupPolicies)
+          .set({ ...after, updatedAt: new Date() })
+          .where(
+            and(
+              eq(schema.employeePickupPolicies.tenantId, tenantId),
+              eq(schema.employeePickupPolicies.employeeId, employeeId),
+            ),
+          );
+        await this.insertPickupPolicyAudit(tx, tenantId, actorUserId, employeeId, before, after);
+        items.push({ employeeId, ...after });
+      }
+      return { items };
+    });
+  }
+
+  private async insertPickupPolicyAudit(
+    tx: Parameters<Parameters<Db["transaction"]>[0]>[0],
+    tenantId: string,
+    actorUserId: string,
+    employeeId: string,
+    before: EmployeePickupPolicyDto,
+    after: EmployeePickupPolicyDto,
+  ): Promise<void> {
+    await tx.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      action: "employee.pickup_policy.updated",
+      outcome: "success",
+      targetType: "employee",
+      targetId: employeeId,
+      before,
+      after,
+    });
+  }
+
+  private toPickupPolicyDto(
+    policy: typeof schema.employeePickupPolicies.$inferSelect,
+  ): EmployeePickupPolicyDto {
+    return {
+      limitMode: policy.limitMode,
+      dayLimit: policy.dayLimit,
+      canWriteoff: policy.canWriteoff,
+    };
+  }
+
   private toDto(
     row: typeof schema.employees.$inferSelect,
     badges: Map<string, BadgeDto[]>,
+    pickupPolicy: typeof schema.employeePickupPolicies.$inferSelect | null,
   ): EmployeeDto {
+    if (!pickupPolicy) {
+      throw new InternalServerErrorException("Employee pickup policy is not configured");
+    }
     return {
       id: row.id,
       fullName: row.fullName,
       role: row.role,
       status: row.status,
+      pickupPolicy: this.toPickupPolicyDto(pickupPolicy),
       badges: badges.get(row.id) ?? [],
       createdAt: row.createdAt,
     };

@@ -1,4 +1,4 @@
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import { kioskIdOf } from "../store/config.js";
 import type { JournalEntry } from "../store/journal.js";
 import type { QueuedOrder } from "../store/queue.js";
@@ -186,7 +186,7 @@ export function countTakenToday({
  * product instead of printing «осталось NaN».
  */
 export function takenTodayElsewhere(
-  bootstrap: KioskBootstrapDto | null,
+  bootstrap: KioskBootstrapSnapshotDto | null,
   employeeId: string,
 ): number {
   const employee = bootstrap?.employees?.find((one) => one.id === employeeId);
@@ -196,6 +196,77 @@ export function takenTodayElsewhere(
   // which could only ever cancel out withdrawals this device really made.
   if (!Number.isInteger(taken) || (taken as number) < 0) return 0;
   return taken as number;
+}
+
+export interface EffectivePickupPolicy {
+  limited: boolean;
+  dayLimit: number;
+  canWriteoff: boolean;
+}
+
+interface CompleteCurrentPickupPolicy {
+  limitsEnabled: boolean;
+  limitMode: "limited" | "unlimited";
+  dayLimit: number;
+  canWriteoff: boolean;
+}
+
+function isCompleteCurrentPickupPolicy(
+  value: Record<keyof CompleteCurrentPickupPolicy, unknown>,
+): value is CompleteCurrentPickupPolicy {
+  return (
+    typeof value.limitsEnabled === "boolean" &&
+    (value.limitMode === "limited" || value.limitMode === "unlimited") &&
+    Number.isInteger(value.dayLimit) &&
+    (value.dayLimit as number) > 0 &&
+    typeof value.canWriteoff === "boolean"
+  );
+}
+
+/**
+ * Resolves today's tenant + employee policy from an untrusted bootstrap.
+ * Only one complete, type-valid current tuple can grant tenant-off,
+ * employee-unlimited, or writeoff privileges. Missing/malformed fields mean
+ * an older cached snapshot, so the whole tuple falls back atomically: limited,
+ * the positive legacy kiosk limit (or deny-all zero), and no writeoff.
+ */
+export function effectivePickupPolicy(
+  bootstrap: KioskBootstrapSnapshotDto,
+  employeeId: string,
+): EffectivePickupPolicy | null {
+  const employee = bootstrap.employees?.find((one) => one.id === employeeId);
+  if (!employee) return null;
+
+  const rawEmployee = employee as Partial<(typeof bootstrap.employees)[number]>;
+  const rawBootstrap = bootstrap as Partial<KioskBootstrapSnapshotDto>;
+  const rawTenantPolicy = rawBootstrap.pickupPolicy as
+    { limitsEnabled?: unknown } | null | undefined;
+  const currentPolicy = {
+    limitsEnabled: rawTenantPolicy?.limitsEnabled,
+    limitMode: rawEmployee.limitMode,
+    dayLimit: rawEmployee.dayLimit,
+    canWriteoff: rawEmployee.canWriteoff,
+  };
+  if (isCompleteCurrentPickupPolicy(currentPolicy)) {
+    return {
+      limited: currentPolicy.limitsEnabled && currentPolicy.limitMode === "limited",
+      dayLimit: currentPolicy.dayLimit,
+      canWriteoff: currentPolicy.canWriteoff,
+    };
+  }
+
+  const rawLegacyLimit = (rawBootstrap.config as { dayLimitPerEmployee?: unknown } | undefined)
+    ?.dayLimitPerEmployee;
+  const dayLimit =
+    Number.isInteger(rawLegacyLimit) && (rawLegacyLimit as number) > 0
+      ? (rawLegacyLimit as number)
+      : 0;
+
+  return {
+    limited: true,
+    dayLimit,
+    canWriteoff: false,
+  };
 }
 
 /** One withdrawal, reduced to the three things the count needs. */
@@ -237,11 +308,16 @@ function attributedOrder(order: QueuedOrder): Withdrawal | null {
   const body = record.body;
   if (!body || !Array.isArray(body.items)) return null;
   if (typeof body.createdAt !== "string") return null;
+  const estimate = record.estimatedBottleCount;
+  const items =
+    Number.isInteger(estimate) && (estimate as number) >= 0 && (estimate as number) <= 1_500
+      ? (estimate as number)
+      : body.items.length;
   return {
     deviceSeq: record.deviceSeq,
     employeeId: record.employeeId,
     takenAt: body.createdAt,
-    items: body.items.length,
+    items,
   };
 }
 

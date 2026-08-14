@@ -10,6 +10,45 @@ import {
 } from "../src/store/queue.js";
 import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import type { KioskBootstrapDto } from "../src/api/types.js";
+import { IDBFactory } from "fake-indexeddb";
+import { appendJournal, readJournal } from "../src/store/journal.js";
+import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  lookupBox,
+  readBoxRegistryMeta,
+  type BoxRegistryCut,
+} from "../src/store/box-registry.js";
+
+const REGISTRY_SSCC = "346006820000000021";
+const binding = (serverUrl: string, kioskId: string) => ({ serverUrl, kioskId });
+
+async function seedRegistry(serverUrl: string, kioskId: string, version = "7"): Promise<void> {
+  const config = await readConfig();
+  const target = {
+    binding: binding(serverUrl, kioskId),
+    credentialGeneration: config?.credentialGeneration ?? "missing",
+    owner: "seed",
+    since: null,
+    until: version,
+  };
+  await beginBoxRegistryStage(target);
+  await activateBoxRegistryPage(
+    target,
+    [
+      {
+        kind: "upsert",
+        boxId: "00000000-0000-4000-8000-000000000001",
+        sscc: REGISTRY_SSCC,
+        productId: "00000000-0000-4000-8000-000000000002",
+        bottleCount: 1,
+        contentKeys: ["member"],
+        updatedAt: "2026-08-13T12:00:00Z",
+      },
+    ],
+    "2026-08-13T12:00:00Z",
+  );
+}
 
 const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto => ({
   generatedAt: "2026-07-28T06:00:00.000Z",
@@ -19,6 +58,8 @@ const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto 
     startsAt: "2026-07-01T00:00:00.000Z",
     endsAt: "2026-08-31T00:00:00.000Z",
   },
+  branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+  pickupPolicy: { limitsEnabled: true },
   config: { dayLimitPerEmployee: 5, showPrices: true },
   badgeSalt: "c2FsdA==",
   reasons: [],
@@ -28,6 +69,52 @@ const snapshot = (employees: KioskBootstrapDto["employees"]): KioskBootstrapDto 
 });
 
 describe("cache", () => {
+  it("upgrades a version-two database without losing its snapshot or queue and adds outcomes", async () => {
+    globalThis.indexedDB = new IDBFactory();
+    await new Promise<void>((resolve, reject) => {
+      const request = indexedDB.open("markiro-kiosk", 2);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        db.createObjectStore("snapshot");
+        db.createObjectStore("queue", { keyPath: "deviceSeq" });
+      };
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => {
+        const db = request.result;
+        const tx = db.transaction(["snapshot", "queue"], "readwrite");
+        tx.objectStore("snapshot").put({ bootstrap: snapshot([]), fetchedAt: "legacy" }, "current");
+        tx.objectStore("queue").put({
+          deviceSeq: 4,
+          employeeId: "e1",
+          body: { deviceSeq: 4, badgeCode: "legacy", reason: "buy", items: [] },
+        });
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+
+    expect(await readSnapshot()).toMatchObject({ fetchedAt: "legacy" });
+    expect(await listQueue()).toEqual([
+      {
+        deviceSeq: 4,
+        employeeId: "e1",
+        body: { deviceSeq: 4, badgeCode: "legacy", reason: "buy", items: [] },
+      },
+    ]);
+    const opened = indexedDB.open("markiro-kiosk");
+    const stores = await new Promise<string[]>((resolve, reject) => {
+      opened.onerror = () => reject(opened.error);
+      opened.onsuccess = () => {
+        const db = opened.result;
+        resolve(Array.from(db.objectStoreNames));
+        db.close();
+      };
+    });
+    expect(stores).toContain("outcomes");
+  });
   it("returns null before anything is stored", async () => {
     await expect(readSnapshot()).resolves.toBeNull();
   });
@@ -35,13 +122,42 @@ describe("cache", () => {
   it("replaces the snapshot wholesale — an employee removed on the server disappears locally", async () => {
     await replaceSnapshot(
       snapshot([
-        { id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 },
-        { id: "e2", fullName: "B", role: null, badgeHash: null, takenTodayElsewhere: 0 },
+        {
+          id: "e1",
+          fullName: "A",
+          role: null,
+          badgeHash: null,
+          limitMode: "limited",
+          dayLimit: 5,
+          canWriteoff: true,
+          takenTodayElsewhere: 0,
+        },
+        {
+          id: "e2",
+          fullName: "B",
+          role: null,
+          badgeHash: null,
+          limitMode: "limited",
+          dayLimit: 5,
+          canWriteoff: true,
+          takenTodayElsewhere: 0,
+        },
       ]),
       new Date("2026-07-28T06:00:00.000Z"),
     );
     await replaceSnapshot(
-      snapshot([{ id: "e1", fullName: "A", role: null, badgeHash: null, takenTodayElsewhere: 0 }]),
+      snapshot([
+        {
+          id: "e1",
+          fullName: "A",
+          role: null,
+          badgeHash: null,
+          limitMode: "limited",
+          dayLimit: 5,
+          canWriteoff: true,
+          takenTodayElsewhere: 0,
+        },
+      ]),
       new Date("2026-07-28T06:05:00.000Z"),
     );
 
@@ -75,6 +191,28 @@ describe("queue", () => {
     await enqueueOrder({ deviceSeq: 2, badgeDigest: "B", reason: "buy", items: [] }, "e1");
     await dequeueOrder(1);
     expect((await listQueue()).map((q) => q.deviceSeq)).toEqual([2]);
+  });
+
+  it("persists boxes verbatim beside a bottle estimate outside the wire body", async () => {
+    const body = {
+      deviceSeq: 3,
+      badgeDigest: "B",
+      reason: "buy" as const,
+      items: [{ rawKm: "loose" }],
+      boxes: [{ sscc: "346006820000000021" }],
+    };
+
+    await enqueueOrder(body, "e1", "pending_attestation", 13);
+
+    expect(await listQueue()).toEqual([
+      {
+        deviceSeq: 3,
+        employeeId: "e1",
+        body,
+        admissionState: "pending_attestation",
+        estimatedBottleCount: 13,
+      },
+    ]);
   });
 });
 
@@ -175,5 +313,140 @@ describe("config", () => {
       nextDeviceSeq: 1,
     });
     expect((await readConfig())?.kioskId).toBeNull();
+  });
+
+  it("preserves registry when the same installation is re-paired with a normalized URL", async () => {
+    await writeConfig({
+      serverUrl: "https://one.example/api",
+      token: "old",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    await seedRegistry("https://one.example/api", "k-1");
+
+    await writeConfig({
+      serverUrl: "https://one.example/api/",
+      token: "old",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 2,
+    });
+
+    expect(
+      await lookupBox(binding("https://one.example/api/", "k-1"), REGISTRY_SSCC),
+    ).not.toBeNull();
+  });
+
+  it("rejects an old credential cut after same-binding token rotation and accepts the new owner", async () => {
+    const installation = binding("https://one.example/api", "k-1");
+    const oldConfig = await writeConfig({
+      ...installation,
+      token: "old-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    const oldCut = {
+      binding: installation,
+      credentialGeneration: oldConfig.credentialGeneration!,
+      owner: "old-refresh",
+      since: null,
+      until: "1",
+    } as BoxRegistryCut;
+    await beginBoxRegistryStage(oldCut);
+
+    const newConfig = await writeConfig({
+      ...installation,
+      token: "new-token",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    });
+    expect(newConfig.credentialGeneration).not.toBe(oldConfig.credentialGeneration);
+
+    await expect(activateBoxRegistryPage(oldCut, [], "2026-08-13T12:00:00Z")).rejects.toThrow(
+      /credential|ownership|lost/i,
+    );
+
+    const newCut = {
+      binding: installation,
+      credentialGeneration: newConfig.credentialGeneration!,
+      owner: "new-refresh",
+      since: null,
+      until: "2",
+    } as BoxRegistryCut;
+    await beginBoxRegistryStage(newCut);
+    await activateBoxRegistryPage(newCut, [], "2026-08-13T12:01:00Z");
+    expect(await readBoxRegistryMeta(installation)).toMatchObject({ version: "2" });
+  });
+
+  it.each([
+    ["another server", "https://two.example/api", "k-1"],
+    ["another kiosk", "https://one.example/api", "k-2"],
+  ])(
+    "atomically clears registry for %s but keeps queue and journal",
+    async (_label, serverUrl, kioskId) => {
+      await writeConfig({
+        serverUrl: "https://one.example/api",
+        token: "old",
+        kioskId: "k-1",
+        kioskName: "A",
+        place: null,
+        nextDeviceSeq: 1,
+      });
+      await seedRegistry("https://one.example/api", "k-1", "99");
+      await enqueueOrder(
+        { deviceSeq: 1, badgeDigest: "digest", reason: "buy", items: [{ rawKm: "wire" }] },
+        "e1",
+      );
+      await appendJournal({
+        at: "2026-08-13T12:00:00Z",
+        createdAt: "2026-08-13T12:00:00Z",
+        kioskId: "k-1",
+        deviceSeq: 0,
+        orderNo: "old",
+        employeeId: "e1",
+        acceptedCount: 1,
+        conflicts: [],
+      });
+
+      await writeConfig({
+        serverUrl,
+        token: "new",
+        kioskId,
+        kioskName: "B",
+        place: null,
+        nextDeviceSeq: 0,
+      });
+
+      expect(await readBoxRegistryMeta(binding(serverUrl, kioskId))).toBeNull();
+      expect(await listQueue()).toHaveLength(1);
+      expect(await readJournal(10)).toHaveLength(1);
+    },
+  );
+
+  it("clears registry on revocation without deleting queue or journal", async () => {
+    const config = {
+      serverUrl: "https://one.example/api",
+      token: "old",
+      kioskId: "k-1",
+      kioskName: "A",
+      place: null,
+      nextDeviceSeq: 1,
+    };
+    await writeConfig(config);
+    await seedRegistry(config.serverUrl, config.kioskId);
+    await enqueueOrder(
+      { deviceSeq: 1, badgeDigest: "digest", reason: "buy", items: [{ rawKm: "wire" }] },
+      "e1",
+    );
+
+    await writeConfig({ ...config, token: null });
+
+    expect(await readBoxRegistryMeta(binding(config.serverUrl, config.kioskId))).toBeNull();
+    expect(await listQueue()).toHaveLength(1);
   });
 });

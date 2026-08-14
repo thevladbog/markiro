@@ -58,7 +58,23 @@ export const STATION_MIGRATIONS: string[] = [
      pallet_capacity INTEGER,
      status TEXT NOT NULL,
      default_counterparty_id TEXT,
-     default_label_template_id TEXT
+     default_label_template_id TEXT,
+     image_checksum TEXT,
+     image_content_type TEXT,
+     image_byte_size INTEGER,
+     image_width INTEGER,
+     image_height INTEGER,
+     image_pointer_checksum TEXT
+   );`,
+  // Browser Cache Storage is not a reliable persistence boundary in every
+  // Windows WebView2 runtime. Keep validated, content-addressed product
+  // images in the station's own SQLite database so offline photos survive
+  // restarts independently of browser storage support.
+  `CREATE TABLE IF NOT EXISTS station_product_images (
+     checksum TEXT PRIMARY KEY,
+     content_type TEXT NOT NULL,
+     byte_size INTEGER NOT NULL,
+     bytes_base64 TEXT NOT NULL
    );`,
   `CREATE TABLE IF NOT EXISTS codes_mirror (
      code_hash TEXT PRIMARY KEY,
@@ -171,6 +187,12 @@ export const STATION_MIGRATIONS: string[] = [
   // alongside the other shift_mirror columns; read back by `readShiftMirror`
   // the same way. Same re-runnable idempotency as the `login` ALTER above.
   `ALTER TABLE shift_mirror ADD COLUMN box_label_template_spec TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_checksum TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_content_type TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_byte_size INTEGER;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_width INTEGER;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_height INTEGER;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_pointer_checksum TEXT;`,
   // Station exceptions (undo/clear/reprint/disassemble): the box's own
   // retired flag. Upgrade path for devices enrolled before this slice --
   // same re-runnable idempotency as the `login` ALTER above (SQLite has no
@@ -227,4 +249,9 @@ export const STATION_MIGRATIONS: string[] = [
        DELETE FROM codes_mirror WHERE box_id = NEW.box_id;
        UPDATE boxes_mirror SET disassembled_at = NEW.at WHERE box_id = NEW.box_id;
      END;`,
+  // Durable box-label recovery. These must remain trailing ALTERs rather
+  // than changing CREATE TABLE: installed stations already have boxes_mirror,
+  // and their historical rows must migrate to `legacy`, never `pending`.
+  `ALTER TABLE boxes_mirror ADD COLUMN print_state TEXT NOT NULL DEFAULT 'legacy';`,
+  `ALTER TABLE boxes_mirror ADD COLUMN print_error_code TEXT;`,
 ];

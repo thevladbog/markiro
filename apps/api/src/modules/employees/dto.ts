@@ -18,6 +18,37 @@ export const listEmployeesQuerySchema = z.object({
 });
 export type ListEmployeesQueryDto = z.infer<typeof listEmployeesQuerySchema>;
 
+export const employeePickupPolicySchema = z.object({
+  limitMode: z.enum(["limited", "unlimited"]),
+  dayLimit: z.number().int().min(1),
+  canWriteoff: z.boolean(),
+});
+export type UpdateEmployeePickupPolicyDto = z.infer<typeof employeePickupPolicySchema>;
+
+const bulkEmployeeIdsSchema = z
+  .array(
+    z
+      .string()
+      .uuid()
+      .transform((employeeId) => employeeId.toLowerCase()),
+  )
+  .min(1)
+  .max(500)
+  .refine((ids) => new Set(ids).size === ids.length, "employeeIds must be unique");
+
+export const bulkEmployeePickupLimitsSchema = z.object({
+  employeeIds: bulkEmployeeIdsSchema,
+  limitMode: z.enum(["limited", "unlimited"]),
+  dayLimit: z.number().int().min(1),
+});
+export type BulkEmployeePickupLimitsDto = z.infer<typeof bulkEmployeePickupLimitsSchema>;
+
+export const bulkEmployeePickupWriteoffSchema = z.object({
+  employeeIds: bulkEmployeeIdsSchema,
+  canWriteoff: z.boolean(),
+});
+export type BulkEmployeePickupWriteoffDto = z.infer<typeof bulkEmployeePickupWriteoffSchema>;
+
 export const issueBadgeSchema = z.object({
   badgeCode: z.string().trim().min(1).max(256),
   label: z.string().trim().min(1).max(64).nullable().optional(),
@@ -31,11 +62,23 @@ export interface BadgeDto {
   issuedAt: Date;
   revokedAt: Date | null;
 }
+export interface EmployeePickupPolicyDto {
+  limitMode: "limited" | "unlimited";
+  dayLimit: number;
+  canWriteoff: boolean;
+}
+export interface BulkEmployeePickupPolicyItemDto extends EmployeePickupPolicyDto {
+  employeeId: string;
+}
+export interface BulkEmployeePickupPolicyResponseDto {
+  items: BulkEmployeePickupPolicyItemDto[];
+}
 export interface EmployeeDto {
   id: string;
   fullName: string;
   role: string | null;
   status: "active" | "archived";
+  pickupPolicy: EmployeePickupPolicyDto;
   badges: BadgeDto[];
   createdAt: Date;
 }

@@ -426,6 +426,8 @@
       "deleteConfirmAction": "Delete",
       "table": {
         "gtin": "GTIN",
+        "image": "Photo",
+        "noImage": "No photo",
         "name": "Name",
         "productGroup": "Group",
         "boxCapacity": "Per box",
@@ -459,8 +461,16 @@
         "sections": {
           "basic": "Basic",
           "aggregation": "Aggregation and price",
-          "defaults": "Defaults"
+          "defaults": "Defaults",
+          "image": "Product photo"
         },
+        "imageLabel": "Product photo",
+        "imageAlt": "Product photo",
+        "imageEmpty": "No photo added",
+        "imageHint": "JPEG, PNG, or WebP up to 5 MB",
+        "imageRemove": "Remove photo",
+        "imageRemoveSuccess": "Photo removed",
+        "imageError": "Could not change the photo. The current photo was preserved.",
         "draftBanner": "Draft — fill in the group and capacities to run shifts",
         "gtinOwnerHint": "GTIN owner — {{name}}",
         "applyCounterparty": "Apply counterparty",
@@ -547,7 +557,7 @@
         },
         "sscc": {
           "cardTitle": "Box SSCC counter",
-          "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+          "description": "The box starting serial must be from 1 to 9,999,999 within the prefix below. Set it when migrating numbers already issued by another system under this GLN.",
           "prefixLabel": "Derived prefix",
           "nextSerialLabel": "Starting serial",
           "save": "Save SSCC",
@@ -555,7 +565,7 @@
           "retry": "Retry",
           "prefixUnavailable": "Saving is unavailable because a prefix could not be derived from the GLN.",
           "errors": {
-            "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+            "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999"
           },
           "toasts": {
             "updateSuccess": "Counter saved",
@@ -857,6 +867,62 @@
         "confirm": "Save changes",
         "cancel": "Continue editing"
       },
+      "exports": {
+        "action": "Generate report",
+        "title": "Shift reports",
+        "formatLabel": "Report format",
+        "splitLabel": "Split report into parts",
+        "lineLimitLabel": "Maximum lines per part",
+        "create": "Generate report",
+        "historyLabel": "Report history",
+        "historyTitle": "Generated reports",
+        "historyEmpty": "No reports have been generated for this shift yet.",
+        "stale": "Shift data changed — generate a new report",
+        "retry": "Retry",
+        "download": "Download",
+        "part": "Part {{number}}",
+        "status": {
+          "queued": "Queued",
+          "processing": "Processing",
+          "ready": "Ready",
+          "failed": "Failed"
+        },
+        "parameters": {
+          "single": "Not split",
+          "split": "up to {{count}} lines per part"
+        },
+        "details": {
+          "actor": "Created by",
+          "unknownActor": "Unknown user",
+          "created": "Time",
+          "format": "Format",
+          "parameters": "Parameters",
+          "codes": "Codes",
+          "boxes": "Boxes"
+        },
+        "counts": {
+          "lines": "{{count}} lines",
+          "codes": "{{count}} codes",
+          "boxes": "{{count}} boxes",
+          "bytes": "{{count}} B"
+        },
+        "validation": {
+          "lineLimit": "Enter a whole number from 2 to 1,000,000"
+        },
+        "errors": {
+          "SHIFT_NOT_CLOSED": "The shift must be closed before generating a report.",
+          "SHIFT_HAS_NO_CODES": "The shift has no codes to include in a report.",
+          "SHIFT_DATE_MISSING": "The shift has no date.",
+          "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
+          "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
+          "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
+          "BOX_EXCEEDS_LINE_LIMIT": "A box does not fit within the lines-per-part limit.",
+          "GENERATION_FAILED": "Could not generate the report. Try again.",
+          "STORAGE_FAILED": "Could not save the report. Try again.",
+          "QUEUE_FAILED": "Could not queue the report. Try again.",
+          "infrastructure": "Could not complete the operation. Try again later."
+        }
+      },
       "toasts": {
         "createSuccess": "Shift planned",
         "createError": "Could not plan the shift",
@@ -1030,7 +1096,14 @@
           "duplicate": "duplicate — code already in another order",
           "over_limit": "daily limit exceeded",
           "unknown_badge": "badge not recognised",
-          "unknown_reason": "write-off reason unavailable"
+          "unknown_reason": "write-off reason unavailable",
+          "writeoff_reason_required": "write-off reason not provided",
+          "writeoff_forbidden": "employee may not create write-offs",
+          "unknown_box": "box not found",
+          "box_not_closed": "box is not closed",
+          "box_disassembled": "box was disassembled",
+          "box_contents_changed": "box contents changed",
+          "mixed_product_box": "box contains multiple products"
         }
       },
       "rejections": {
@@ -1066,6 +1139,8 @@
         },
         "unknownBadge": "Badge not recognised",
         "badgeCodeLabel": "Badge: {{code}}",
+        "boxLabel": "Box {{sscc}}",
+        "boxCountLabel": "Box {{sscc}} · {{count}} pcs",
         "noOrder": "no order",
         "state": {
           "open": "Open",
@@ -1157,6 +1232,40 @@
         "navigationLabel": "Employee sections",
         "profile": "Profile",
         "error": "Error"
+      },
+      "pickupPolicy": {
+        "title": "Pickup policy",
+        "limitModeLabel": "Pickup limit",
+        "limited": "Daily limit",
+        "unlimited": "Unlimited",
+        "dayLimitLabel": "Items per day",
+        "retainedLimitHint": "This value is retained and applies again when the limit is enabled.",
+        "dayLimitError": "Enter a positive whole number",
+        "canWriteoffLabel": "Allow writeoff",
+        "canWriteoffHint": "Writeoff permission changes independently from the limit.",
+        "save": "Save pickup policy",
+        "toasts": { "success": "Pickup policy saved", "error": "Could not save the pickup policy" }
+      },
+      "bulk": {
+        "title": "Bulk pickup policy update",
+        "openAction": "Bulk edit policies",
+        "cancel": "Finish bulk editing",
+        "selectEmployee": "Select {{name}}",
+        "selectedCount": "Selected: {{count}}",
+        "selectFirst": "Select first 500",
+        "maxSelection": "You can select no more than 500 employees",
+        "limitModeLabel": "Limit to assign",
+        "limitAction": "Assign limit",
+        "canWriteoffLabel": "Allow writeoff",
+        "writeoffAction": "Change writeoff permission",
+        "limitConfirmTitle": "Assign limit to employees?",
+        "limitConfirmBody": "The limit will change for the selected employees ({{count}}). Writeoff permission stays unchanged.",
+        "limitConfirmAction": "Assign",
+        "writeoffConfirmTitle": "Change writeoff permission?",
+        "writeoffConfirmBody": "Writeoff permission will change for the selected employees ({{count}}). Their limit stays unchanged.",
+        "writeoffConfirmAction": "Change",
+        "success": "Selected employee policies updated",
+        "error": "Could not update selected employee policies"
       },
       "badges": {
         "title": "Badges",
@@ -1367,7 +1476,6 @@
         "editTitle": "Edit kiosk",
         "nameLabel": "Name",
         "locationLabel": "Location",
-        "dayLimitLabel": "Daily item limit per employee",
         "showPricesLabel": "Show prices",
         "productsLabel": "Allowed products",
         "saveProductsAction": "Save list",
@@ -1390,8 +1498,7 @@
         "discardAction": "Discard",
         "errors": {
           "nameRequired": "Enter a name",
-          "nameTooLong": "200 characters or fewer",
-          "dayLimitInvalid": "Enter a positive whole number"
+          "nameTooLong": "200 characters or fewer"
         }
       },
       "sections": {
@@ -1630,15 +1737,35 @@
           "updateError": "Could not save the profile"
         }
       },
+      "pickupPolicy": {
+        "cardTitle": "Pickup policy",
+        "enabledLabel": "Apply limits across all kiosks in total",
+        "enabledHint": "When enforcement is disabled, saved employee values are retained and apply again after it is enabled.",
+        "save": "Save",
+        "toasts": {
+          "success": "Pickup policy saved",
+          "error": "Could not save the pickup policy"
+        }
+      },
+      "logo": {
+        "cardTitle": "Organisation logo",
+        "previewAlt": "Organisation logo",
+        "fallbackLabel": "Default Markiro logo",
+        "uploadLabel": "Upload logo",
+        "removeAction": "Remove logo",
+        "invalidType": "Choose one JPEG, PNG, or WebP file.",
+        "uploadError": "Could not upload the logo",
+        "removeError": "Could not remove the logo"
+      },
       "sscc": {
         "cardTitle": "Box SSCC counter",
-        "description": "The starting serial counts within the prefix below. Set it when migrating box numbers already issued by another system under this GLN.",
+        "description": "The box starting serial must be from 1 to 9,999,999 within the prefix below. Set it when migrating numbers already issued by another system under this GLN.",
         "prefixLabel": "Derived prefix",
         "prefixUnavailable": "Set the GLN above to see the derived prefix",
         "nextSerialLabel": "Starting serial",
         "save": "Save",
         "errors": {
-          "nextSerialInvalid": "Enter a whole number from 0 to 9,999,999"
+          "nextSerialInvalid": "Enter a whole number from 1 to 9,999,999"
         },
         "toasts": {
           "updateSuccess": "Counter saved",

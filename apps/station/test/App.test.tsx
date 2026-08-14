@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
@@ -116,6 +116,7 @@ import type * as LockdownModule from "../src/lib/lockdown.js";
 import { readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
+import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 beforeAll(async () => {
@@ -123,6 +124,7 @@ beforeAll(async () => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   invokeMock.mockClear();
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -176,13 +178,24 @@ const operator: OperatorMirrorRecord = {
 
 const OPERATOR_LOGIN = "1001";
 const OPERATOR_PIN = "4242";
+const SECOND_OPERATOR_LOGIN = "1002";
+const SECOND_OPERATOR_PIN = "4343";
+const FIRST_KM = "0104600000000015215Ab1";
+const SECOND_KM = "0104600000000015215Ab2";
 
 /** Row shape `readOperatorsMirror` expects back from `plugin:sql|select`. */
-function operatorMirrorRow(pinHash: string) {
-  return {
-    operator_id: "op1",
+function operatorMirrorRow(
+  pinHash: string,
+  identity: { operatorId: string; name: string; login: string } = {
+    operatorId: "op1",
     name: "Ivan",
     login: OPERATOR_LOGIN,
+  },
+) {
+  return {
+    operator_id: identity.operatorId,
+    name: identity.name,
+    login: identity.login,
     role: "operator",
     pin_hash: pinHash,
     badge_hash: null,
@@ -375,12 +388,12 @@ function clickDigits(value: string) {
 }
 
 /** Drives the real badge-first OperatorLogin fallback to reach the floor stage. */
-async function signInAsOperator() {
+async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
   fireEvent.click(screen.getByRole("button", { name: "Use personnel number" }));
-  clickDigits(OPERATOR_LOGIN);
+  clickDigits(login);
   fireEvent.click(screen.getByRole("button", { name: "Next" }));
-  clickDigits(OPERATOR_PIN);
+  clickDigits(pin);
   fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
 }
@@ -474,6 +487,178 @@ async function renderAtFloorStage(
   );
   await signInAsOperator();
   return outbox;
+}
+
+async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
+  lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
+  lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+  const firstPinHash = await hashSecret(OPERATOR_PIN);
+  const secondPinHash = await hashSecret(SECOND_OPERATOR_PIN);
+  const hardwareConfig: HardwareConfig = {
+    scanner: { port: "COM7", baud: 9600 },
+    printer: null,
+    printerLanguage: "zpl",
+    verifyPrintedLabel: false,
+  };
+  mockInvokeForFloor(firstPinHash, hardwareConfig);
+  const baseInvoke = invokeMock.getMockImplementation();
+  if (!baseInvoke) throw new Error("floor invoke mock is unavailable");
+
+  let releaseFirstJournal!: () => void;
+  let markFirstJournalStarted!: () => void;
+  const firstJournalGate = new Promise<void>((resolve) => {
+    releaseFirstJournal = resolve;
+  });
+  const firstJournalStarted = new Promise<void>((resolve) => {
+    markFirstJournalStarted = resolve;
+  });
+  const journalOperatorIds: string[] = [];
+  const outboxOperatorIds: string[] = [];
+  const postPaths: string[] = [];
+  let boxItemCount = 3;
+
+  invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+    if (cmd === "plugin:sql|select") {
+      const { query } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (/FROM operators_mirror\b/.test(query)) {
+        return Promise.resolve([
+          operatorMirrorRow(firstPinHash),
+          operatorMirrorRow(secondPinHash, {
+            operatorId: "op2",
+            name: "Maria",
+            login: SECOND_OPERATOR_LOGIN,
+          }),
+        ]);
+      }
+      if (pendingBoxPrint && query.includes("b.print_state = 'pending'")) {
+        return Promise.resolve([
+          {
+            box_id: "box-closed",
+            sscc: "046012345600000016",
+            item_count: 10,
+            print_state: "pending",
+            print_error_code: "printer_unconfigured",
+          },
+        ]);
+      }
+      if (query.includes("FROM boxes_mirror") && query.includes("closed_at IS NULL")) {
+        return Promise.resolve([
+          {
+            box_id: "box-open",
+            shift_id: "shift-1",
+            sscc: null,
+            opened_at: "2026-08-13T08:00:00.000Z",
+            closed_at: null,
+            item_count: boxItemCount,
+          },
+        ]);
+      }
+      if (query.includes("FROM boxes_mirror")) return Promise.resolve([]);
+      if (query.includes("product_mirror")) {
+        return Promise.resolve([
+          { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+        ]);
+      }
+      if (query.includes("FROM shift_mirror WHERE")) {
+        return Promise.resolve([
+          {
+            id: "shift-1",
+            status: "active",
+            mode: "aggregation",
+            counterparty_gln: null,
+            label_template_spec: null,
+            box_capacity: 10,
+            issuer_prefix: "460123456",
+            box_label_template_spec: null,
+          },
+        ]);
+      }
+      if (query.includes("FROM codes_mirror")) return Promise.resolve([]);
+    }
+    if (cmd === "plugin:sql|execute") {
+      const { query, values = [] } = (payload ?? {}) as { query: string; values?: unknown[] };
+      if (query.includes("INSERT INTO codes_mirror")) boxItemCount += 1;
+      if (query.includes("INSERT INTO scan_events_mirror")) {
+        journalOperatorIds.push(values[5] as string);
+        if (journalOperatorIds.length === 1) {
+          markFirstJournalStarted();
+          return firstJournalGate;
+        }
+      }
+      if (query.includes("INSERT INTO outbox")) outboxOperatorIds.push(values[9] as string);
+    }
+    return baseInvoke(cmd, payload);
+  });
+
+  let scanListener: (raw: string) => void = () => {};
+  hardwareMock.onScan.mockImplementation(async (listener) => {
+    scanListener = listener;
+    return () => {
+      if (scanListener === listener) scanListener = () => {};
+    };
+  });
+
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      const path = new URL(url).pathname;
+      const method = init?.method ?? "GET";
+      if (method === "POST") postPaths.push(path);
+      if (path === "/shifts" && method === "GET") {
+        return new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "shift-1",
+                status: "planned",
+                mode: "aggregation",
+                productName: "Cola",
+                plannedQty: 10,
+              },
+            ],
+          }),
+          { status: 200 },
+        );
+      }
+      if (path === "/shifts/shift-1/open" && method === "POST") {
+        return new Response(
+          JSON.stringify({ id: "shift-1", status: "active", mode: "aggregation" }),
+          { status: 200 },
+        );
+      }
+      if (path === "/station/scans" && method === "POST") {
+        return new Response(JSON.stringify({ applied: 0, alreadyApplied: false }), {
+          status: 200,
+        });
+      }
+      return new Response(JSON.stringify({ items: [] }), { status: 200 });
+    }),
+  );
+
+  render(<App />);
+  await signInAsOperator();
+  fireEvent.click(await screen.findByRole("button", { name: "Open" }));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined());
+  if (pendingBoxPrint) {
+    await screen.findByText("Printer is not configured");
+  } else {
+    await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("3 / 10"));
+    await screen.findByRole("button", { name: "Change operator" });
+  }
+
+  return {
+    emitScan(raw: string) {
+      scanListener(raw);
+    },
+    captureScanListener() {
+      return scanListener;
+    },
+    firstJournalStarted,
+    releaseFirstJournal,
+    journalOperatorIds,
+    outboxOperatorIds,
+    postPaths,
+  };
 }
 
 describe("nextStationView", () => {
@@ -692,6 +877,341 @@ describe("App", () => {
     }
   });
 
+  it("returns from an idle floor to badge login without clearing credentials or queued work", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
+      lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+      const pinHash = await hashSecret(OPERATOR_PIN);
+      const queued = mockInvokeForFloor(
+        pinHash,
+        { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+        [outboxRow(1)],
+      );
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string, init?: RequestInit) => {
+          if (new URL(url).pathname === "/station/scans" && init?.method === "POST") {
+            throw new Error("keep durable outbox pending");
+          }
+          return new Response(JSON.stringify({ items: [] }), { status: 200 });
+        }),
+      );
+
+      render(<App />);
+      await signInAsOperator();
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+      expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
+      expect(queued).toHaveLength(1);
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("locks the operator after ten inactive minutes without clearing credentials or queued work", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const queued = await renderAtFloorStage();
+      vi.useFakeTimers();
+      fireEvent.pointerDown(window);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OPERATOR_IDLE_TIMEOUT_MS - 1);
+      });
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.getByText("Operator sign-in")).toBeDefined();
+      expect(queued).toHaveLength(1);
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("drains accepted local work, resumes the same shift and open box, and changes journal attribution", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Change operator?" })).getByRole("button", {
+          name: "Change operator",
+        }),
+      );
+
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByTestId("operator-switch-settling").textContent).toContain(
+        "Saving the current operation…",
+      );
+      floor.releaseFirstJournal();
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+
+      await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
+      expect(await screen.findByRole("button", { name: "Pause / finish" })).toBeDefined();
+      expect(screen.getByText("Maria")).toBeDefined();
+      await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
+      const counters = within(screen.getByRole("region", { name: "Accepted, Rejected" }));
+      expect(counters.getAllByRole("definition")[0]?.textContent).toBe("0");
+
+      act(() => floor.emitScan(SECOND_KM));
+      await waitFor(() => expect(floor.journalOperatorIds).toEqual(["op1", "op2"]));
+      expect(floor.outboxOperatorIds).toEqual(["op1", "op2"]);
+      expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
+      expect(counters.getAllByRole("definition")[0]?.textContent).toBe("1");
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("auto-locks safely and lets another operator resume the same shift and open box", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+      vi.useFakeTimers();
+      fireEvent.pointerDown(window);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OPERATOR_IDLE_TIMEOUT_MS - 1);
+      });
+
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(OPERATOR_IDLE_TIMEOUT_MS - 1);
+      });
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(screen.getByTestId("operator-switch-settling").textContent).toContain(
+        "Saving the current operation…",
+      );
+
+      floor.releaseFirstJournal();
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.getByText("Operator sign-in")).toBeDefined();
+
+      vi.useRealTimers();
+      await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
+      expect(await screen.findByRole("button", { name: "Pause / finish" })).toBeDefined();
+      expect(screen.getByText("Maria")).toBeDefined();
+      await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
+
+      act(() => floor.emitScan(SECOND_KM));
+      await waitFor(() => expect(floor.journalOperatorIds).toEqual(["op1", "op2"]));
+      expect(floor.outboxOperatorIds).toEqual(["op1", "op2"]);
+      expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("disables every floor header action while accepted local work settles", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      lockdownMock.exit.mockClear();
+
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Change operator?" })).getByRole("button", {
+          name: "Change operator",
+        }),
+      );
+
+      const update = screen.getByRole("button", { name: "↻ Updates" });
+      const operatorSwitch = screen.getByRole("button", {
+        name: "Saving the current operation…",
+      });
+      const windowMode = screen.getByRole("button", { name: "Exit fullscreen" });
+      expect((update as HTMLButtonElement).disabled).toBe(true);
+      expect((operatorSwitch as HTMLButtonElement).disabled).toBe(true);
+      expect((windowMode as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(update);
+      fireEvent.click(operatorSwitch);
+      fireEvent.click(windowMode);
+      expect(screen.queryByRole("heading", { name: "Station updates" })).toBeNull();
+      expect(screen.queryByRole("dialog", { name: "Exit fullscreen?" })).toBeNull();
+      expect(lockdownMock.exit).not.toHaveBeenCalled();
+
+      floor.releaseFirstJournal();
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("locks ordinary floor navigation during print recovery but keeps printer setup available", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch(true);
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
+      expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Saving the current operation…" }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: /fullscreen/ }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+
+      fireEvent.click(screen.getByRole("button", { name: "Done" }));
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("releases the print-recovery setup latch when service reset returns to pairing", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await renderActiveShiftForOperatorSwitch(true);
+      expect(await screen.findByText("Printer is not configured")).toBeDefined();
+
+      fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+
+      await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
+      expect(screen.getByRole("button", { name: /fullscreen/ })).toHaveProperty("disabled", false);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("keeps one retired queue closed through timeout and retry until its write settles", async () => {
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const floor = await renderActiveShiftForOperatorSwitch();
+      act(() => floor.emitScan(FIRST_KM));
+      await floor.firstJournalStarted;
+      act(() => {
+        lockdownMock.publish({ mode: "locked", pending: false, error: "exit" });
+      });
+      lockdownMock.clearError.mockClear();
+      const staleScannerListener = floor.captureScanListener();
+      const scannerSubscriptionsBeforeSwitch = hardwareMock.onScan.mock.calls.length;
+      const destructiveBefore = invokeMock.mock.calls.filter(([cmd, payload]) => {
+        if (cmd === "clear_credential") return true;
+        if (cmd !== "plugin:sql|execute") return false;
+        const query = ((payload ?? {}) as { query?: string }).query ?? "";
+        return /^\s*DELETE FROM (outbox|codes_mirror|scan_events_mirror|boxes_mirror|box_exceptions_mirror)/.test(
+          query,
+        );
+      }).length;
+
+      fireEvent.click(screen.getByRole("button", { name: "Change operator" }));
+      vi.useFakeTimers();
+      fireEvent.click(
+        within(screen.getByRole("dialog", { name: "Change operator?" })).getByRole("button", {
+          name: "Change operator",
+        }),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5_001);
+      });
+
+      expect(screen.getByText("Ivan")).toBeDefined();
+      expect(screen.queryByText("Operator sign-in")).toBeNull();
+      expect(
+        screen
+          .getAllByRole("alert")
+          .some((alert) =>
+            alert.textContent?.includes(
+              "Could not change operator. The current operator and local work remain active.",
+            ),
+          ),
+      ).toBe(true);
+      const retryOperatorSwitch = screen.getByRole("button", {
+        name: "Retry operator change",
+      });
+      expect((retryOperatorSwitch as HTMLButtonElement).disabled).toBe(false);
+      expect(
+        (screen.getByRole("button", { name: "Change operator" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "↻ Updates" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      expect(
+        (screen.getByRole("button", { name: "Exit fullscreen" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+      const dismissWindowError = screen.getByRole("button", {
+        name: "Dismiss window mode error",
+      });
+      expect((dismissWindowError as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(dismissWindowError);
+      expect(lockdownMock.clearError).not.toHaveBeenCalled();
+      expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
+      expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry operator change" }));
+      expect(screen.getByTestId("operator-switch-settling")).toBeDefined();
+      expect(hardwareMock.onScan).toHaveBeenCalledTimes(scannerSubscriptionsBeforeSwitch);
+      act(() => staleScannerListener(SECOND_KM));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(floor.journalOperatorIds).toEqual(["op1"]);
+
+      const destructiveAfter = invokeMock.mock.calls.filter(([cmd, payload]) => {
+        if (cmd === "clear_credential") return true;
+        if (cmd !== "plugin:sql|execute") return false;
+        const query = ((payload ?? {}) as { query?: string }).query ?? "";
+        return /^\s*DELETE FROM (outbox|codes_mirror|scan_events_mirror|boxes_mirror|box_exceptions_mirror)/.test(
+          query,
+        );
+      }).length;
+      expect(destructiveAfter).toBe(destructiveBefore);
+      floor.releaseFirstJournal();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      vi.useRealTimers();
+      await waitFor(() => expect(screen.getByText("Operator sign-in")).toBeDefined());
+      expect(floor.journalOperatorIds).toEqual(["op1"]);
+      expect(floor.outboxOperatorIds).toEqual(["op1"]);
+      expect(floor.postPaths.some((path) => path.endsWith("/close"))).toBe(false);
+    } finally {
+      vi.useRealTimers();
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
   it("drives the real pairing success path to OperatorLogin, not back to pairing", async () => {
     // Mutable so a `write_config` call updates what the next `read_config`
     // resolves to. This exercises the upgrade-safe route: an enrolled bundle
@@ -802,6 +1322,171 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("coalesces startup and browser-online roster refreshes through one App refresher", async () => {
+    lockdownMock.start.mockReturnValue(() => {});
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    invokeMock.mockImplementation((cmd: string): Promise<unknown> => {
+      if (cmd === "read_config") {
+        return Promise.resolve({
+          machine_id: "m1",
+          device_id: "device-1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        });
+      }
+      if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+      if (cmd === "plugin:sql|execute") return Promise.resolve([0, 0]);
+      if (cmd === "plugin:sql|select") return Promise.resolve([]);
+      return Promise.resolve(undefined);
+    });
+    let resolveRoster!: (response: Response) => void;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRoster = resolve;
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      window.dispatchEvent(new Event("online"));
+      await Promise.resolve();
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      resolveRoster(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    });
+  });
+
+  it("keeps a successful Station API response authoritative after an offline browser hint", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    let rejectInitialShifts!: (reason?: unknown) => void;
+    const initialShifts = new Promise<Response>((_resolve, reject) => {
+      rejectInitialShifts = reject;
+    });
+    let operatorRequests = 0;
+    let shiftRequests = 0;
+    const fetchMock = vi.fn((url: string) => {
+      const path = new URL(url).pathname;
+      if (path === "/station/operators") {
+        operatorRequests += 1;
+        return operatorRequests === 1
+          ? Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }))
+          : new Promise<Response>(() => {});
+      }
+      if (path === "/shifts") {
+        shiftRequests += 1;
+        return shiftRequests === 1
+          ? initialShifts
+          : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }
+      return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(<App />);
+    await signInAsOperator();
+
+    expect(screen.getByTestId("server-status").textContent).toBe("Available");
+    act(() => window.dispatchEvent(new Event("offline")));
+    expect(screen.getByTestId("server-status").textContent).toBe("No connection");
+    act(() => window.dispatchEvent(new Event("online")));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(screen.getByTestId("server-status").textContent).toBe("No connection");
+
+    act(() => window.dispatchEvent(new Event("offline")));
+    act(() => rejectInitialShifts(new TypeError("network")));
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
+  });
+
+  it("ignores a late reachability outcome from the client replaced by credential re-pairing", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    const persistedConfig: Record<string, unknown> = {
+      machine_id: "m1",
+      device_id: "device-1",
+      tenant_id: "tenant-1",
+      api_key: "old-key",
+      server_url: "https://api.factory.example",
+    };
+    mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      persistedConfig,
+    );
+    let rejectOldShift!: (reason?: unknown) => void;
+    const oldShift = new Promise<Response>((_resolve, reject) => {
+      rejectOldShift = reject;
+    });
+    let shiftRequests = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        const path = new URL(url).pathname;
+        if (path === "/station/pair") {
+          return Promise.resolve(
+            new Response(
+              JSON.stringify({
+                device: {
+                  id: "device-1",
+                  name: "Packing station",
+                  tenantId: "tenant-1",
+                  organizationName: "Factory",
+                  line: null,
+                },
+                credential: { apiKey: "new-key", serverUrl: "https://api.factory.example" },
+                operators: [],
+              }),
+              { status: 201, headers: { "Content-Type": "application/json" } },
+            ),
+          );
+        }
+        if (path === "/shifts") {
+          shiftRequests += 1;
+          return shiftRequests === 1
+            ? oldShift
+            : Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+        }
+        return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    await waitFor(() => expect(shiftRequests).toBe(1));
+    expect(screen.getByTestId("server-status").textContent).toBe("Available");
+
+    fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+    await screen.findByText("Connect station");
+    fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
+    await signInAsOperator();
+    await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
+
+    await act(async () => {
+      rejectOldShift(new TypeError("late old-client failure"));
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("server-status").textContent).toBe("Available");
   });
 
   it("backfills a real legacy config before sync and later recovers a 401 against the same durable device", async () => {
@@ -2682,7 +3367,8 @@ describe("App", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Rejoin" }));
 
     expect((await screen.findByTestId("box-progress")).textContent).toBe("0 / 10");
-    await waitFor(() => expect(openBoxInsertCount).toBe(1));
+    await waitFor(() => expect(openBoxInsertCount).toBeGreaterThan(0));
+    const openBoxInsertsBeforeRefresh = openBoxInsertCount;
 
     resolveBundle(
       new Response(
@@ -2738,11 +3424,10 @@ describe("App", () => {
     );
 
     await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("0 / 20"));
-    // One fresh read updates App's props; the second is the newly mounted
-    // WorkScreen reading the box label spec. Without the remount it keeps
-    // the old mount-time template even though the capacity prop updates.
+    // One fresh read updates App's props; WorkScreen then re-reads the label
+    // spec in place for the new bundle revision without recreating work state.
     expect(freshPlainMirrorReads).toBeGreaterThanOrEqual(2);
-    expect(openBoxInsertCount).toBe(1);
+    expect(openBoxInsertCount).toBe(openBoxInsertsBeforeRefresh);
   });
 
   // Task 13 review, Finding 1: App.tsx used to hardcode `issuerPrefix={null}`

@@ -14,7 +14,7 @@ const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
 );
 
-describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
+describe.skipIf(!ready)("aggregate media asset reconciliation e2e", () => {
   let app: INestApplication | undefined;
   let db: Db;
   const deleteObject = vi.fn().mockResolvedValue(undefined);
@@ -22,6 +22,11 @@ describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
   const activeId = randomUUID();
   const stagingId = randomUUID();
   const deletingId = randomUUID();
+  const tenantId = randomUUID();
+  const productId = randomUUID();
+  const activeProductId = randomUUID();
+  const tenantStagingId = randomUUID();
+  const tenantDeletingId = randomUUID();
 
   beforeAll(async () => {
     const env = loadEnv();
@@ -34,6 +39,18 @@ describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
       emailVerified: true,
       createdAt: new Date(),
       updatedAt: new Date(),
+    });
+    await db.insert(schema.organization).values({
+      id: tenantId,
+      name: "Reconciliation tenant",
+      slug: `reconciliation-${tenantId}`,
+      createdAt: new Date(),
+    });
+    await db.insert(schema.products).values({
+      id: productId,
+      tenantId,
+      gtin14: "04006381333931",
+      name: "Referenced product image",
     });
     const stale = new Date(Date.now() - 60 * 60 * 1_000);
     await db.insert(schema.mediaAssets).values([
@@ -74,6 +91,43 @@ describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
         createdAt: stale,
         updatedAt: stale,
       },
+      {
+        id: activeProductId,
+        ownerTenantId: tenantId,
+        objectKey: `tenants/${tenantId}/products/${activeProductId}.webp`,
+        contentType: "image/webp",
+        byteSize: 100,
+        checksum: "active-product-checksum",
+        width: 1200,
+        height: 600,
+        status: "active",
+      },
+      {
+        id: tenantStagingId,
+        ownerTenantId: tenantId,
+        objectKey: `tenants/${tenantId}/products/${tenantStagingId}.webp`,
+        contentType: "image/webp",
+        byteSize: 100,
+        checksum: "tenant-staging-checksum",
+        width: 1200,
+        height: 600,
+        status: "staging",
+        createdAt: stale,
+        updatedAt: stale,
+      },
+      {
+        id: tenantDeletingId,
+        ownerTenantId: tenantId,
+        objectKey: `tenants/${tenantId}/products/${tenantDeletingId}.webp`,
+        contentType: "image/webp",
+        byteSize: 100,
+        checksum: "tenant-deleting-checksum",
+        width: 1200,
+        height: 600,
+        status: "deleting",
+        createdAt: stale,
+        updatedAt: stale,
+      },
     ]);
     await db.insert(schema.userProfiles).values({
       userId,
@@ -81,6 +135,11 @@ describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
       lastName: "Петров",
       avatarAssetOwnerUserId: userId,
       avatarAssetId: activeId,
+    });
+    await db.insert(schema.productImages).values({
+      tenantId,
+      productId,
+      assetId: activeProductId,
     });
 
     const storage = {
@@ -104,29 +163,70 @@ describe.skipIf(!ready)("profile asset reconciliation e2e", () => {
 
   afterAll(async () => {
     await db.delete(schema.userProfiles).where(eq(schema.userProfiles.userId, userId));
+    await db.delete(schema.productImages).where(eq(schema.productImages.productId, productId));
     await db
       .delete(schema.mediaAssets)
-      .where(inArray(schema.mediaAssets.id, [activeId, stagingId, deletingId]));
+      .where(
+        inArray(schema.mediaAssets.id, [
+          activeId,
+          stagingId,
+          deletingId,
+          activeProductId,
+          tenantStagingId,
+          tenantDeletingId,
+        ]),
+      );
+    await db.delete(schema.products).where(eq(schema.products.id, productId));
+    await db.delete(schema.organization).where(eq(schema.organization.id, tenantId));
     await db.delete(schema.user).where(eq(schema.user.id, userId));
     await app?.close();
   });
 
-  it("removes stale cleanup intents while retaining the referenced active avatar", async () => {
+  it("removes stale cleanup intents while retaining referenced avatar and product assets", async () => {
     await vi.waitFor(async () => {
       const rows = await db
         .select({ id: schema.mediaAssets.id, status: schema.mediaAssets.status })
         .from(schema.mediaAssets)
-        .where(inArray(schema.mediaAssets.id, [activeId, stagingId, deletingId]));
-      expect(rows).toEqual([{ id: activeId, status: "active" }]);
+        .where(
+          inArray(schema.mediaAssets.id, [
+            activeId,
+            stagingId,
+            deletingId,
+            activeProductId,
+            tenantStagingId,
+            tenantDeletingId,
+          ]),
+        );
+      expect(rows.sort((left, right) => left.id.localeCompare(right.id))).toEqual(
+        [
+          { id: activeId, status: "active" as const },
+          { id: activeProductId, status: "active" as const },
+        ].sort((left, right) => left.id.localeCompare(right.id)),
+      );
     });
-    expect(deleteObject).toHaveBeenCalledTimes(2);
+    expect(deleteObject).toHaveBeenCalledTimes(4);
     expect(deleteObject).toHaveBeenCalledWith(`users/${userId}/avatars/${stagingId}.webp`);
     expect(deleteObject).toHaveBeenCalledWith(`users/${userId}/avatars/${deletingId}.webp`);
+    expect(deleteObject).toHaveBeenCalledWith(
+      `tenants/${tenantId}/products/${tenantStagingId}.webp`,
+    );
+    expect(deleteObject).toHaveBeenCalledWith(
+      `tenants/${tenantId}/products/${tenantDeletingId}.webp`,
+    );
+    expect(deleteObject).not.toHaveBeenCalledWith(
+      `tenants/${tenantId}/products/${activeProductId}.webp`,
+    );
 
     const [profile] = await db
       .select({ avatarAssetId: schema.userProfiles.avatarAssetId })
       .from(schema.userProfiles)
       .where(eq(schema.userProfiles.userId, userId));
     expect(profile?.avatarAssetId).toBe(activeId);
+
+    const [productImage] = await db
+      .select({ assetId: schema.productImages.assetId })
+      .from(schema.productImages)
+      .where(eq(schema.productImages.productId, productId));
+    expect(productImage?.assetId).toBe(activeProductId);
   });
 });

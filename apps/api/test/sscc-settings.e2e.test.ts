@@ -112,6 +112,10 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .expect(400);
   });
 
+  it("rejects serial zero for the tenant's own box counter", async () => {
+    await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 0 }).expect(400);
+  });
+
   it("rejects an extension digit outside 0..9 for a counterparty's counter", async () => {
     await agent
       .put(`/counterparties/${counterpartyId}/sscc`)
@@ -123,6 +127,13 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     await agent
       .put(`/counterparties/${counterpartyId}/sscc`)
       .send({ extensionDigit: 0, nextSerial: 10_000_000 })
+      .expect(400);
+  });
+
+  it("rejects serial zero for a counterparty's box counter", async () => {
+    await agent
+      .put(`/counterparties/${counterpartyId}/sscc`)
+      .send({ extensionDigit: 0, nextSerial: 0 })
       .expect(400);
   });
 
@@ -170,10 +181,10 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     await signUpAndActivate(agent2);
     await agent2.put("/org/profile").send({ gln: "4607777777003" }).expect(200);
 
-    // Org B's own counter starts fresh at 0 -- NOT org A's 555. A missing
+    // Org B's own counter starts fresh at 1 -- NOT org A's 555. A missing
     // tenant filter in getSscc's WHERE clause would leak org A's row here.
     const res = await agent2.get("/org/profile/sscc").expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 0 });
+    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
 
     const stillOwn = await agent.get("/org/profile/sscc").expect(200);
     expect(stillOwn.body.nextSerial).toBe(555);
@@ -203,11 +214,11 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     await agentB.put("/org/profile").send({ gln: SHARED_PREFIX_GLN_B }).expect(200);
 
     // Org B shares org A's 9-digit prefix but is a DIFFERENT tenant -- it
-    // must start fresh at 0, not inherit A's 700. A WHERE clause missing the
+    // must start fresh at 1, not inherit A's 700. A WHERE clause missing the
     // tenantId filter (matching on issuerPrefix + extensionDigit alone)
     // would return SOME row here instead of none.
     const resB = await agentB.get("/org/profile/sscc").expect(200);
-    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 0 });
+    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
 
     const resA = await agentA.get("/org/profile/sscc").expect(200);
     expect(resA.body.nextSerial).toBe(700);
@@ -236,7 +247,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
 
     // Same prefix as counterparty A, different tenant -- must read as fresh.
     const resB = await agentB.get(`/counterparties/${cpBId}/sscc`).expect(200);
-    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 0 });
+    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
   });
 
   describe("putSscc floor (final review, finding 2)", () => {
@@ -271,9 +282,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       // Cuts a real sscc_blocks row under this prefix, the same one-statement
       // path a shift bundle uses -- no HTTP route exposes raw allocation, so
       // SsccService is called directly, same as sscc.e2e.test.ts does.
-      // `allocate` itself already advances `sscc_counters` to `size` (50) as
+      // `allocate` itself already advances `sscc_counters` to `1 + size` (51) as
       // part of granting the block, so the floor -- one past the block's
-      // toSerial -- equals that same baseline here (fromSerial 0, size 50).
+      // toSerial -- equals that same baseline here (fromSerial 1, size 50).
       const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
       const floor = block.toSerial + 1;
       expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
@@ -368,9 +379,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
 
       // The race: a device's bundle fetch allocates a REAL block under this
       // SAME prefix, in between the admin's floor read above and their
-      // write below -- advancing the counter to 50 and moving the floor to 50.
+      // write below -- advancing the counter to 51 and moving the floor to 51.
       const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
-      expect(block.toSerial).toBe(49);
+      expect(block.toSerial).toBe(50);
 
       // The admin's write now lands, still carrying the STALE value that
       // was valid a moment ago. The atomic guard must refuse it.
@@ -380,7 +391,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       // The counter must be untouched by the rejected write -- still
       // exactly where the concurrent allocation left it, never silently
       // regressed to the stale value.
-      expect(await readCounter(prefix)).toBe(50);
+      expect(await readCounter(prefix)).toBe(51);
     });
 
     it("still applies cleanly when nothing has changed since the floor was read", async () => {

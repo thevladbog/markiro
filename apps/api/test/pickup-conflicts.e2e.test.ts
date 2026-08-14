@@ -10,6 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
+import { createTestEmployee } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
 /**
@@ -67,9 +68,12 @@ describe.skipIf(!ready)("pickup order sync conflicts e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await createTestEmployee(db, {
+      id: employeeId,
+      tenantId,
+      fullName: "Иван Иванов",
+      role: "оператор",
+    });
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();

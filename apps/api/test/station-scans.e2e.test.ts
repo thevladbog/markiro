@@ -12,6 +12,7 @@ import { loadEnv } from "../src/env";
 import { partitionName, schema, type Db } from "@markiro/db";
 import type { ScanItemDto } from "../src/modules/station-scans/dto";
 import { SsccService } from "../src/modules/sscc/sscc.service";
+import { BoxRegistryService } from "../src/modules/kiosk/box-registry.service";
 import { createTestStationDevice } from "./support/auth";
 import { listenOnLoopback } from "./support/listen-loopback";
 
@@ -1168,6 +1169,32 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         );
     }
 
+    async function boxUpdatedAt(boxId: string): Promise<Date> {
+      const [row] = await db
+        .select({ updatedAt: schema.boxes.updatedAt })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
+      if (!row) throw new Error(`no box row for id ${boxId}`);
+      return row.updatedAt;
+    }
+
+    async function boxRegistryVersion(boxId: string): Promise<bigint> {
+      const [row] = await db
+        .select({ registryVersion: schema.boxes.registryVersion })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
+      if (!row) throw new Error(`no box row for id ${boxId}`);
+      return row.registryVersion;
+    }
+
+    async function tenantRegistryVersion(): Promise<bigint> {
+      const [row] = await db
+        .select({ currentVersion: schema.boxRegistryVersions.currentVersion })
+        .from(schema.boxRegistryVersions)
+        .where(eq(schema.boxRegistryVersions.tenantId, tenantId));
+      return row?.currentVersion ?? 0n;
+    }
+
     async function liveItemCount(deviceBoxId: string): Promise<number> {
       const boxId = await boxIdFor(deviceBoxId);
       const rows = await db
@@ -1202,6 +1229,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
 
     it("fills in the serial, closedAt, and operator when the closure arrives", async () => {
       await postBatch([scan("aa", { boxId: "b1" })]);
+      const boxId = await boxIdFor("b1");
+      const before = await boxUpdatedAt(boxId);
+      const beforeRegistryVersion = await boxRegistryVersion(boxId);
       await postBatchWithBoxes(
         [],
         [
@@ -1225,6 +1255,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // asserted by nothing in this suite -- every closure test sent
       // `operatorId: null` (another cheap gap named in the review).
       expect(box!.operatorId).toBe(OPERATOR_ID);
+      expect(box!.updatedAt.getTime()).toBeGreaterThan(before.getTime());
+      expect(box!.registryVersion).toBeGreaterThan(beforeRegistryVersion);
     });
 
     // Task 13 review, Finding 6: the closure DTO now carries the device's own
@@ -1282,6 +1314,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       );
       let [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.tenantId, tenantId));
       expect(box!.printVerifiedAt).toBeNull();
+      const registryVersion = box!.registryVersion;
+      const registryUpdatedAt = box!.updatedAt;
 
       // Resent under a fresh batchId (a real device would not resend the
       // very same batchId once it has moved on) with the SAME sscc, now
@@ -1305,6 +1339,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       // The original closure fields are untouched by this second delivery.
       expect(box!.closedAt?.toISOString()).toBe(ISO);
       expect(box!.sscc).toBe(SSCC);
+      expect(box!.registryVersion).toBe(registryVersion);
+      expect(box!.updatedAt.getTime()).toBe(registryUpdatedAt.getTime());
     });
 
     it("records the operator on the scan event", async () => {
@@ -1340,6 +1376,26 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       expect(items.every((i) => i.displacedAt === null)).toBe(true);
     });
 
+    it("advances only the existing box whose active membership changes", async () => {
+      await postBatch([
+        scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
+        scan("bb", { boxId: "b2", scannedAt: "10:00:01" }),
+      ]);
+      const b1Id = await boxIdFor("b1");
+      const b2Id = await boxIdFor("b2");
+      const b1Before = await boxUpdatedAt(b1Id);
+      const b2Before = await boxUpdatedAt(b2Id);
+      const b1VersionBefore = await boxRegistryVersion(b1Id);
+      const b2VersionBefore = await boxRegistryVersion(b2Id);
+
+      await postBatch([scan("cc", { boxId: "b1", scannedAt: "10:00:02" })]);
+
+      expect((await boxUpdatedAt(b1Id)).getTime()).toBeGreaterThan(b1Before.getTime());
+      expect((await boxUpdatedAt(b2Id)).getTime()).toBe(b2Before.getTime());
+      expect(await boxRegistryVersion(b1Id)).toBeGreaterThan(b1VersionBefore);
+      expect(await boxRegistryVersion(b2Id)).toBe(b2VersionBefore);
+    });
+
     it("marks only the losing membership when one batch puts the same hash in two boxes", async () => {
       await postBatch([
         scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
@@ -1355,14 +1411,50 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       );
     });
 
-    it("keeps exactly one membership for identical claims naming two boxes", async () => {
+    it("advances only the membership displaced by duplicate reconciliation", async () => {
       await postBatch([
         scan("aa", { boxId: "b1", scannedAt: "10:00:00" }),
-        scan("aa", { boxId: "b2", scannedAt: "10:00:00" }),
+        scan("bb", { boxId: "b2", scannedAt: "10:00:00" }),
       ]);
+      const b1Id = await boxIdFor("b1");
+      const b2Id = await boxIdFor("b2");
+
+      // Simulate legacy/concurrent data that predates the set-based duplicate
+      // reconciliation below: both boxes claim the same ownership identity.
+      await db.insert(schema.boxItems).values({
+        tenantId,
+        boxId: b2Id,
+        codeHash: boxedCodeHash("aa"),
+        addedAt: new Date("2026-07-29T10:00:00.000Z"),
+      });
+      const before = new Map([
+        [b1Id, { updatedAt: await boxUpdatedAt(b1Id), version: await boxRegistryVersion(b1Id) }],
+        [b2Id, { updatedAt: await boxUpdatedAt(b2Id), version: await boxRegistryVersion(b2Id) }],
+      ]);
+      const versionBefore = (boxId: string): { updatedAt: Date; version: bigint } => {
+        const version = before.get(boxId);
+        if (!version) throw new Error(`no baseline registry version for box ${boxId}`);
+        return version;
+      };
+
+      // Exact replay changes neither the registry owner nor b1's membership,
+      // but it does reconcile the duplicate active membership seeded above.
+      await postBatch([scan("aa", { boxId: "b1", scannedAt: "10:00:00" })]);
 
       const items = await boxItemRows(tenantId, "aa");
       expect(items.filter((item) => item.displacedAt === null)).toHaveLength(1);
+      const active = items.find((item) => item.displacedAt === null)!;
+      const displaced = items.find((item) => item.displacedAt !== null)!;
+      expect((await boxUpdatedAt(displaced.boxId)).getTime()).toBeGreaterThan(
+        versionBefore(displaced.boxId).updatedAt.getTime(),
+      );
+      expect((await boxUpdatedAt(active.boxId)).getTime()).toBe(
+        versionBefore(active.boxId).updatedAt.getTime(),
+      );
+      expect(await boxRegistryVersion(displaced.boxId)).toBeGreaterThan(
+        versionBefore(displaced.boxId).version,
+      );
+      expect(await boxRegistryVersion(active.boxId)).toBe(versionBefore(active.boxId).version);
       expect((await registryOwner(tenantId, boxedCodeHash("aa")))?.scannedAt.toISOString()).toBe(
         "2026-07-29T10:00:00.000Z",
       );
@@ -1410,6 +1502,33 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       expect(displaced[0]!.boxId).toBe(await boxIdFor("b2"));
     });
 
+    it("versions a fresh losing membership in a closed box and exact redelivery is a no-op", async () => {
+      await postBatchAs("t1", [scan("aa", { boxId: null, scannedAt: "10:00:00" })]);
+      await postBatchAs("t2", [scan("bb", { boxId: "b2", scannedAt: "10:00:01" })]);
+      await postBatchWithBoxes(
+        [],
+        [{ boxId: "b2", shiftId, terminalId: "t2", sscc: SSCC, closedAt: ISO, operatorId: null }],
+      );
+      const boxId = await boxIdFor("b2");
+      const boxBefore = await boxRegistryVersion(boxId);
+      const tenantBefore = await tenantRegistryVersion();
+      const losing = scan("aa", { boxId: "b2", scannedAt: "10:00:05" });
+
+      await postBatchAs("t2", [losing]);
+      const boxAfter = await boxRegistryVersion(boxId);
+      const tenantAfter = await tenantRegistryVersion();
+      expect(boxAfter).toBeGreaterThan(boxBefore);
+      expect(tenantAfter).toBeGreaterThan(tenantBefore);
+      const delta = await app!
+        .get(BoxRegistryService)
+        .list(tenantId, { since: tenantBefore.toString(), limit: 250 });
+      expect(delta.items).toContainEqual(expect.objectContaining({ kind: "remove", sscc: SSCC }));
+
+      await postBatchAs("t2", [losing]);
+      expect(await boxRegistryVersion(boxId)).toBe(boxAfter);
+      expect(await tenantRegistryVersion()).toBe(tenantAfter);
+    });
+
     // Beyond the brief's own idempotency case (which replays the identical
     // batchId and so never re-executes the transaction body at all): a
     // device that lost its own record of what it already sent can resend
@@ -1421,9 +1540,14 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     it("keeps one box_items row when the same scan is redelivered under a fresh batchId", async () => {
       const item = scan("aa", { boxId: "b1" });
       await postRaw(batchBody([item]));
+      const boxId = await boxIdFor("b1");
+      const before = await boxUpdatedAt(boxId);
+      const beforeRegistryVersion = await boxRegistryVersion(boxId);
       await postRaw(batchBody([item]));
       expect(await boxCount(tenantId)).toBe(1);
       expect((await boxItemRows(tenantId, "aa")).length).toBe(1);
+      expect((await boxUpdatedAt(boxId)).getTime()).toBe(before.getTime());
+      expect(await boxRegistryVersion(boxId)).toBe(beforeRegistryVersion);
     });
 
     // Beyond the brief's own cases: proves SsccService.recordConsumedSerial
@@ -1507,13 +1631,15 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         "unboxed (Finding 2)",
       async () => {
         await postBatchAs("t2", [scan("aa", { boxId: "b2", scannedAt: "10:00:05" })]);
+        const b2Id = await boxIdFor("b2");
+        const before = await boxUpdatedAt(b2Id);
+        const beforeRegistryVersion = await boxRegistryVersion(b2Id);
         await postBatchAs("t1", [scan("aa", { boxId: null, scannedAt: "10:00:00" })]);
 
         // t1's earlier, unboxed scan now owns "aa" -- b2 (t2's box) must no
         // longer count it.
         expect(await liveItemCount("b2")).toBe(0);
         const items = await boxItemRows(tenantId, "aa");
-        const b2Id = await boxIdFor("b2");
         const b2Item = items.find((i) => i.boxId === b2Id);
         // Assert the row EXISTS before asserting anything about its
         // `displacedAt`: optional chaining on a missing row yields
@@ -1524,6 +1650,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         // fix (cheap gap named in the review).
         expect(b2Item).toBeDefined();
         expect(b2Item!.displacedAt).not.toBeNull();
+        expect((await boxUpdatedAt(b2Id)).getTime()).toBeGreaterThan(before.getTime());
+        expect(await boxRegistryVersion(b2Id)).toBeGreaterThan(beforeRegistryVersion);
       },
     );
 
@@ -1938,6 +2066,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       it("undo releases the code from the registry and marks the box item removed", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
+        const before = await boxUpdatedAt(boxId);
+        const beforeRegistryVersion = await boxRegistryVersion(boxId);
         const codeHash = boxedCodeHash("aa");
 
         const undoRes = await postRaw({
@@ -1992,6 +2122,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             ),
           );
         expect(itemRow?.removedAt).not.toBeNull();
+        expect((await boxUpdatedAt(boxId)).getTime()).toBeGreaterThan(before.getTime());
+        expect(await boxRegistryVersion(boxId)).toBeGreaterThan(beforeRegistryVersion);
 
         const [auditRow] = await db
           .select()
@@ -2028,6 +2160,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             },
           ],
         });
+        const boxId = await boxIdFor("b1");
+        const beforeRescan = await boxUpdatedAt(boxId);
+        const beforeRescanRegistryVersion = await boxRegistryVersion(boxId);
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
 
         expect((await registryOwner(tenantId, codeHash))?.terminalId).toBe(deviceId);
@@ -2039,6 +2174,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           );
         expect(membership?.removedAt).toBeNull();
         expect(membership?.addedAt.toISOString()).toBe("2026-07-29T10:00:02.000Z");
+        expect((await boxUpdatedAt(boxId)).getTime()).toBeGreaterThan(beforeRescan.getTime());
+        expect(await boxRegistryVersion(boxId)).toBeGreaterThan(beforeRescanRegistryVersion);
       });
 
       it("a stale undo cannot release or remove a newer rescan", async () => {
@@ -2062,6 +2199,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           exceptions: [staleUndo],
         });
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
+        const boxId = await boxIdFor("b1");
+        const beforeStaleUndo = await boxUpdatedAt(boxId);
+        const beforeStaleUndoRegistryVersion = await boxRegistryVersion(boxId);
         await postRaw({
           batchId: `undo-stale-${randomUUID()}`,
           items: [],
@@ -2080,6 +2220,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           );
         expect(membership?.addedAt.toISOString()).toBe("2026-07-29T10:00:02.000Z");
         expect(membership?.removedAt).toBeNull();
+        expect((await boxUpdatedAt(boxId)).getTime()).toBe(beforeStaleUndo.getTime());
+        expect(await boxRegistryVersion(boxId)).toBe(beforeStaleUndoRegistryVersion);
       });
 
       // t1 claims "aa" first (a LATER scannedAt); t2's own later-arriving but
@@ -2218,6 +2360,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       it("clear removes every active item from a still-open box, closes none of it", async () => {
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1" }), scan("bb", { boxId: "b1" })]);
         const boxId = await boxIdFor("b1");
+        const before = await boxUpdatedAt(boxId);
+        const beforeRegistryVersion = await boxRegistryVersion(boxId);
         const codeHash1 = boxedCodeHash("aa");
         const codeHash2 = boxedCodeHash("bb");
 
@@ -2264,6 +2408,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
         expect(box?.closedAt).toBeNull();
         expect(box?.disassembledAt).toBeNull();
+        expect(box!.updatedAt.getTime()).toBeGreaterThan(before.getTime());
+        expect(box!.registryVersion).toBeGreaterThan(beforeRegistryVersion);
 
         const [auditRow] = await db
           .select()
@@ -2296,6 +2442,9 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           exceptions: [staleClear],
         });
         await postBatchAs(deviceId, [scan("aa", { boxId: "b1", scannedAt: "10:00:02" })]);
+        const boxId = await boxIdFor("b1");
+        const beforeStaleClear = await boxUpdatedAt(boxId);
+        const beforeStaleClearRegistryVersion = await boxRegistryVersion(boxId);
         await postRaw({
           batchId: `clear-stale-${randomUUID()}`,
           items: [],
@@ -2307,6 +2456,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           "2026-07-29T10:00:02.000Z",
         );
         expect(await liveItemCount("b1")).toBe(1);
+        expect((await boxUpdatedAt(boxId)).getTime()).toBe(beforeStaleClear.getTime());
+        expect(await boxRegistryVersion(boxId)).toBe(beforeStaleClearRegistryVersion);
       });
 
       it("applies a pre-close clear when its later closure arrives in the same batch", async () => {
@@ -2405,6 +2556,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           ],
         );
         const boxId = await boxIdFor("b1");
+        const before = await boxUpdatedAt(boxId);
+        const beforeRegistryVersion = await boxRegistryVersion(boxId);
 
         await postRaw({
           batchId: `clear-test-${randomUUID()}`,
@@ -2444,6 +2597,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         const [box] = await db.select().from(schema.boxes).where(eq(schema.boxes.id, boxId));
         expect(box?.closedAt?.toISOString()).toBe(ISO);
         expect(box?.disassembledAt).toBeNull();
+        expect(box!.updatedAt.getTime()).toBe(before.getTime());
+        expect(box!.registryVersion).toBe(beforeRegistryVersion);
 
         // Still a recorded attempt (same pattern as every other kind/no-op
         // combination in this describe block) even though nothing else
@@ -2484,6 +2639,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           ],
         );
         const boxId = await boxIdFor("b1");
+        const before = await boxUpdatedAt(boxId);
+        const beforeRegistryVersion = await boxRegistryVersion(boxId);
 
         const res = await postRaw({
           batchId: `disassemble-test-${randomUUID()}`,
@@ -2512,6 +2669,8 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         // The sscc string itself is kept -- historical record; only
         // disassembledAt marks retirement.
         expect(box?.sscc).toBe(SSCC);
+        expect(box!.updatedAt.getTime()).toBeGreaterThan(before.getTime());
+        expect(box!.registryVersion).toBeGreaterThan(beforeRegistryVersion);
 
         const items = await db
           .select()
@@ -2545,6 +2704,7 @@ describe.skipIf(!ready)("station-scans e2e", () => {
         // reactivate membership in a disassembled box.
         await postBatchAs(deviceId, [scan("cc", { boxId: "b1", scannedAt: "08:30:00" })]);
         expect(await boxItemRows(tenantId, "cc")).toHaveLength(0);
+        expect((await boxUpdatedAt(boxId)).getTime()).toBe(box!.updatedAt.getTime());
       });
 
       it("disassemble on a still-open box is a no-op (guarded by closedAt IS NOT NULL)", async () => {
@@ -2777,7 +2937,11 @@ describe.skipIf(!ready)("station-scans e2e", () => {
             exceptions: [disassembleException],
           });
           const [firstPass] = await db
-            .select({ disassembledAt: schema.boxes.disassembledAt })
+            .select({
+              disassembledAt: schema.boxes.disassembledAt,
+              updatedAt: schema.boxes.updatedAt,
+              registryVersion: schema.boxes.registryVersion,
+            })
             .from(schema.boxes)
             .where(eq(schema.boxes.id, boxId));
           const firstTimestamp = firstPass!.disassembledAt;
@@ -2795,12 +2959,18 @@ describe.skipIf(!ready)("station-scans e2e", () => {
           });
 
           const [secondPass] = await db
-            .select({ disassembledAt: schema.boxes.disassembledAt })
+            .select({
+              disassembledAt: schema.boxes.disassembledAt,
+              updatedAt: schema.boxes.updatedAt,
+              registryVersion: schema.boxes.registryVersion,
+            })
             .from(schema.boxes)
             .where(eq(schema.boxes.id, boxId));
           // The FIRST disassembly's own timestamp survives untouched -- a
           // missing guard would re-stamp `now()` a second time here.
           expect(secondPass!.disassembledAt?.getTime()).toBe(firstTimestamp!.getTime());
+          expect(secondPass!.updatedAt.getTime()).toBe(firstPass!.updatedAt.getTime());
+          expect(secondPass!.registryVersion).toBe(firstPass!.registryVersion);
 
           const auditRows = await db
             .select()

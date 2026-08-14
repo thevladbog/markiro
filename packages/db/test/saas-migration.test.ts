@@ -39,11 +39,25 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0032_cute_frank_castle.sql"));
     await rm(join(legacyMigrations, "0033_common_magdalene.sql"));
     await rm(join(legacyMigrations, "0034_overconfident_harrier.sql"));
+    await rm(join(legacyMigrations, "0035_stormy_ser_duncan.sql"));
+    await rm(join(legacyMigrations, "0036_neat_quasar.sql"));
+    await rm(join(legacyMigrations, "0037_kiosk_pickup_policy.sql"));
+    await rm(join(legacyMigrations, "0038_organization_branding.sql"));
+    await rm(join(legacyMigrations, "0039_kiosk_sscc_orders.sql"));
+    await rm(join(legacyMigrations, "0040_sscc_counter_start_one.sql"));
+    await rm(join(legacyMigrations, "0041_product_images.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0033_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0034_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0035_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0036_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0037_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0038_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0039_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0040_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0041_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -54,7 +68,14 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0031_platform_auth_runtime_fields" &&
         entry.tag !== "0032_cute_frank_castle" &&
         entry.tag !== "0033_common_magdalene" &&
-        entry.tag !== "0034_overconfident_harrier",
+        entry.tag !== "0034_overconfident_harrier" &&
+        entry.tag !== "0035_stormy_ser_duncan" &&
+        entry.tag !== "0036_neat_quasar" &&
+        entry.tag !== "0037_kiosk_pickup_policy" &&
+        entry.tag !== "0038_organization_branding" &&
+        entry.tag !== "0039_kiosk_sscc_orders" &&
+        entry.tag !== "0040_sscc_counter_start_one" &&
+        entry.tag !== "0041_product_images",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
@@ -62,6 +83,25 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await pool.query(
       "INSERT INTO organization (id, name, slug, created_at) VALUES ($1, $2, $3, $4)",
       ["existing-unmanaged", "Existing unmanaged", "existing-unmanaged", new Date()],
+    );
+    const legacyDeviceId = "00000000-0000-4000-8000-000000000036";
+    await pool.query("INSERT INTO station_devices (id, tenant_id, name) VALUES ($1, $2, $3)", [
+      legacyDeviceId,
+      "existing-unmanaged",
+      "Legacy SSCC device",
+    ]);
+    await pool.query(
+      `INSERT INTO sscc_counters (tenant_id, issuer_prefix, extension_digit, next_serial)
+       VALUES
+         ('existing-unmanaged', '460000001', 0, 0),
+         ('existing-unmanaged', '460000001', 1, 0),
+         ('existing-unmanaged', '460000002', 0, 0),
+         ('existing-unmanaged', '460000003', 0, 7)`,
+    );
+    await pool.query(
+      `INSERT INTO sscc_blocks (tenant_id, issuer_prefix, extension_digit, device_id, from_serial, to_serial)
+       VALUES ('existing-unmanaged', '460000002', 0, $1, 0, 9)`,
+      [legacyDeviceId],
     );
     await migrate(drizzle(pool), { migrationsFolder });
     await pool.query(
@@ -87,6 +127,22 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       ["existing-unmanaged"],
     );
     expect(result.rows[0]?.count).toBe(0);
+  });
+
+  it("moves only untouched box counters from zero to one", async () => {
+    const result = await pool.query(
+      `SELECT issuer_prefix, extension_digit, next_serial::int
+       FROM sscc_counters
+       WHERE tenant_id = 'existing-unmanaged'
+       ORDER BY issuer_prefix, extension_digit`,
+    );
+
+    expect(result.rows).toEqual([
+      { issuer_prefix: "460000001", extension_digit: 0, next_serial: 1 },
+      { issuer_prefix: "460000001", extension_digit: 1, next_serial: 0 },
+      { issuer_prefix: "460000002", extension_digit: 0, next_serial: 0 },
+      { issuer_prefix: "460000003", extension_digit: 0, next_serial: 7 },
+    ]);
   });
 
   it("applies Better Auth two-factor defaults required by the platform plugin", async () => {

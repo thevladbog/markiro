@@ -29,16 +29,27 @@ function renderPage() {
   );
 }
 
-const PROFILE = { gln: "4601112222005", gs1Prefixes: ["4600000"], inn: "7701234567" };
-const EMPTY_PROFILE = { gln: null, gs1Prefixes: [], inn: null };
+const PROFILE = {
+  gln: "4601112222005",
+  gs1Prefixes: ["4600000"],
+  inn: "7701234567",
+  pickupLimitsEnabled: true,
+  logoUrl: null as string | null,
+  logoRevision: null as string | null,
+};
+const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
 const COUNTER = { extensionDigit: 0, nextSerial: 45_000 };
 
 /** Routes the shared `fetch` mock by URL/method -- both GET/PUT `/org/profile` and its `/sscc` sibling are called on this one page. */
 function routeFetch(overrides: {
   profile?: (init?: RequestInit) => Response | Promise<Response>;
   sscc?: (init?: RequestInit) => Response | Promise<Response>;
+  logo?: (init?: RequestInit) => Response | Promise<Response>;
 }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/org/profile/logo") {
+      return overrides.logo ? overrides.logo(init) : jsonResponse(204, undefined);
+    }
     if (url === "/api/org/profile/sscc") {
       return overrides.sscc ? overrides.sscc(init) : jsonResponse(200, COUNTER);
     }
@@ -58,6 +69,246 @@ async function cardOf(titleText: string): Promise<HTMLElement> {
 }
 
 describe("OrgProfilePage", () => {
+  it("saves the all-kiosk pickup-limit toggle and explains that employee values are retained", async () => {
+    const fetchMock = routeFetch({
+      profile: (init) =>
+        init?.method === "PUT"
+          ? jsonResponse(200, { ...PROFILE, pickupLimitsEnabled: false })
+          : jsonResponse(200, PROFILE),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const toggle = await screen.findByRole("checkbox", {
+      name: "Применять лимиты суммарно во всех киосках",
+    });
+    expect(toggle.getAttribute("aria-describedby")).not.toBeNull();
+    expect(screen.getByText(/значения сотрудников останутся/i)).toBeDefined();
+    fireEvent.click(toggle);
+    fireEvent.click(
+      within(await cardOf("Политика выдачи")).getByRole("button", { name: "Сохранить" }),
+    );
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile",
+        expect.objectContaining({
+          method: "PUT",
+          body: JSON.stringify({ pickupLimitsEnabled: false }),
+        }),
+      ),
+    );
+    const successToast = await screen.findByText("Политика выдачи сохранена");
+    const toastStatus = successToast.closest("[role=status]");
+    if (!toastStatus) throw new Error("Pickup policy success toast not found");
+    fireEvent.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
+  });
+
+  it("uses Markiro fallback, rejects unsupported logo input, then previews and removes the normalized logo", async () => {
+    let profile = PROFILE;
+    const revision = "11111111-1111-4111-8111-111111111111";
+    const fetchMock = routeFetch({
+      profile: () => jsonResponse(200, profile),
+      logo: (init) => {
+        if (init?.method === "POST") {
+          profile = {
+            ...profile,
+            logoRevision: revision,
+            logoUrl: `/org/profile/logo/${revision}`,
+          };
+          return jsonResponse(201, { logoRevision: revision, logoUrl: profile.logoUrl });
+        }
+        profile = { ...profile, logoRevision: null, logoUrl: null };
+        return jsonResponse(204, undefined);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    expect(await screen.findByLabelText("Логотип Markiro по умолчанию")).toBeDefined();
+    const input = screen.getByLabelText("Загрузить логотип");
+    fireEvent.change(input, {
+      target: { files: [new File(["svg"], "logo.svg", { type: "image/svg+xml" })] },
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain("JPEG, PNG или WebP");
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+
+    fireEvent.change(input, {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+    const preview = await screen.findByRole("img", { name: "Логотип организации" });
+    expect(preview.getAttribute("src")).toBe(`/api/org/profile/logo/${revision}`);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/org/profile/logo",
+      expect.objectContaining({ method: "POST", body: expect.any(FormData) }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/org/profile/logo",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    expect(await screen.findByLabelText("Логотип Markiro по умолчанию")).toBeDefined();
+  });
+
+  it("preserves dirty INN and prefix drafts across logo, policy and profile-cache updates", async () => {
+    let profile = PROFILE;
+    const revision = "22222222-2222-4222-8222-222222222222";
+    let profileGetCount = 0;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          const input = JSON.parse(String(init.body)) as { pickupLimitsEnabled?: boolean };
+          profile = {
+            ...profile,
+            ...(input.pickupLimitsEnabled === undefined
+              ? {}
+              : { pickupLimitsEnabled: input.pickupLimitsEnabled }),
+          };
+          return jsonResponse(200, profile);
+        }
+        profileGetCount += 1;
+        return jsonResponse(200, profile);
+      },
+      logo: (init) => {
+        if (init?.method === "POST") {
+          profile = {
+            ...profile,
+            logoRevision: revision,
+            logoUrl: `/org/profile/logo/${revision}`,
+          };
+          return jsonResponse(201, {
+            logoRevision: revision,
+            logoUrl: profile.logoUrl,
+          });
+        }
+        profile = { ...profile, logoRevision: null, logoUrl: null };
+        return jsonResponse(204, undefined);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const inn = within(profileCard).getByLabelText("ИНН") as HTMLInputElement;
+    const prefixes = within(profileCard).getByLabelText("Префиксы GS1") as HTMLInputElement;
+    fireEvent.change(inn, { target: { value: "7707654321" } });
+    fireEvent.change(prefixes, { target: { value: "4600000, 4609999" } });
+
+    const logoInput = screen.getByLabelText("Загрузить логотип");
+    fireEvent.change(logoInput, {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+    await screen.findByRole("img", { name: "Логотип организации" });
+    expect(inn.value).toBe("7707654321");
+    expect(prefixes.value).toBe("4600000, 4609999");
+
+    fireEvent.click(screen.getByRole("button", { name: "Удалить логотип" }));
+    await screen.findByLabelText("Логотип Markiro по умолчанию");
+    expect(inn.value).toBe("7707654321");
+    expect(prefixes.value).toBe("4600000, 4609999");
+
+    const getsBeforePolicySave = profileGetCount;
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Применять лимиты суммарно во всех киосках" }),
+    );
+    fireEvent.click(
+      within(await cardOf("Политика выдачи")).getByRole("button", { name: "Сохранить" }),
+    );
+    await waitFor(() => expect(profileGetCount).toBeGreaterThan(getsBeforePolicySave));
+    expect(inn.value).toBe("7707654321");
+    expect(prefixes.value).toBe("4600000, 4609999");
+  });
+
+  it("adopts a clean profile refetch", async () => {
+    let profile = PROFILE;
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          profile = {
+            ...profile,
+            inn: "7709999999",
+            gs1Prefixes: ["4609999"],
+            pickupLimitsEnabled: false,
+          };
+        }
+        return jsonResponse(200, profile);
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    fireEvent.click(
+      screen.getByRole("checkbox", { name: "Применять лимиты суммарно во всех киосках" }),
+    );
+    fireEvent.click(
+      within(await cardOf("Политика выдачи")).getByRole("button", { name: "Сохранить" }),
+    );
+
+    expect(await within(profileCard).findByDisplayValue("7709999999")).toBeDefined();
+    expect(within(profileCard).getByDisplayValue("4609999")).toBeDefined();
+  });
+
+  it("adopts a successful profile save before a cross-card cache update", async () => {
+    const savedProfile = {
+      ...PROFILE,
+      inn: "7708888888",
+      gs1Prefixes: ["4608888"],
+    };
+    const refetchedProfile = {
+      ...savedProfile,
+      inn: "7707777777",
+      gs1Prefixes: ["4607777"],
+      logoRevision: "33333333-3333-4333-8333-333333333333",
+      logoUrl: "/org/profile/logo/33333333-3333-4333-8333-333333333333",
+    };
+    let saved = false;
+    let resolveRefetch: ((response: Response) => void) | undefined;
+    const refetch = new Promise<Response>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    const fetchMock = routeFetch({
+      profile: (init) => {
+        if (init?.method === "PUT") {
+          saved = true;
+          return jsonResponse(200, savedProfile);
+        }
+        return saved ? refetch : jsonResponse(200, PROFILE);
+      },
+      logo: () =>
+        jsonResponse(201, {
+          logoRevision: refetchedProfile.logoRevision,
+          logoUrl: refetchedProfile.logoUrl,
+        }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderPage();
+
+    const profileCard = await cardOf("Профиль организации");
+    const inn = within(profileCard).getByLabelText("ИНН") as HTMLInputElement;
+    const prefixes = within(profileCard).getByLabelText("Префиксы GS1") as HTMLInputElement;
+    fireEvent.change(inn, { target: { value: savedProfile.inn } });
+    fireEvent.change(prefixes, { target: { value: savedProfile.gs1Prefixes.join(", ") } });
+    fireEvent.click(within(profileCard).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Профиль сохранён");
+
+    fireEvent.change(screen.getByLabelText("Загрузить логотип"), {
+      target: { files: [new File(["png"], "logo.png", { type: "image/png" })] },
+    });
+    await screen.findByRole("img", { name: "Логотип организации" });
+    expect(inn.value).toBe(savedProfile.inn);
+    expect(prefixes.value).toBe(savedProfile.gs1Prefixes.join(", "));
+
+    resolveRefetch?.(jsonResponse(200, refetchedProfile));
+    expect(await within(profileCard).findByDisplayValue(refetchedProfile.inn)).toBeDefined();
+    expect(
+      within(profileCard).getByDisplayValue(refetchedProfile.gs1Prefixes.join(", ")),
+    ).toBeDefined();
+  });
+
   it("renders the profile fields and the derived prefix from the mocked GET responses", async () => {
     vi.stubGlobal("fetch", routeFetch({}));
 
@@ -127,7 +378,7 @@ describe("OrgProfilePage", () => {
 
     renderPage();
 
-    expect(await screen.findByRole("status")).toBeDefined();
+    expect((await screen.findByText("Загрузка…")).closest('[role="status"]')).not.toBeNull();
     expect(screen.queryByText("Профиль организации")).toBeNull();
   });
 
@@ -289,7 +540,33 @@ describe("OrgProfilePage", () => {
     ).length;
     fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
 
-    expect(await screen.findByText("Введите целое число от 0 до 9 999 999")).toBeDefined();
+    expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
+    const putCallsAfter = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
+    ).length;
+    expect(putCallsAfter).toBe(putCallsBefore);
+  });
+
+  it("normalizes a historical zero counter to one and refuses a new zero value", async () => {
+    const fetchMock = routeFetch({
+      sscc: () => jsonResponse(200, { extensionDigit: 0, nextSerial: 0 }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    const ssccCard = await cardOf("Счётчик SSCC для коробов");
+    const nextSerialInput = (await within(ssccCard).findByLabelText(
+      "Начальный серийный номер",
+    )) as HTMLInputElement;
+    expect(nextSerialInput.value).toBe("1");
+
+    fireEvent.change(nextSerialInput, { target: { value: "0" } });
+    const putCallsBefore = fetchMock.mock.calls.filter(
+      (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
+    ).length;
+    fireEvent.click(within(ssccCard).getByRole("button", { name: "Сохранить" }));
+
+    expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
     const putCallsAfter = fetchMock.mock.calls.filter(
       (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
     ).length;

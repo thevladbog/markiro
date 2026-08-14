@@ -319,7 +319,7 @@ describe("ShiftsPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         if (String(url).startsWith("/api/shifts")) {
-          return jsonResponse(200, { items: [PLANNED_SHIFT, ACTIVE_TOLLING_SHIFT] });
+          return jsonResponse(200, { items: [PLANNED_SHIFT, ACTIVE_TOLLING_SHIFT, CLOSED_SHIFT] });
         }
         return jsonResponse(200, { items: [] });
       }),
@@ -327,12 +327,13 @@ describe("ShiftsPage", () => {
 
     renderPage(OPERATIONS_READ_ONLY);
 
-    expect(await screen.findByText(PLANNED_SHIFT.productName)).toBeDefined();
+    expect((await screen.findAllByText(PLANNED_SHIFT.productName)).length).toBe(2);
     expect(screen.getByText(ACTIVE_TOLLING_SHIFT.productName)).toBeDefined();
     expect(screen.queryByRole("button", { name: "Добавить смену" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Изменить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Закрыть смену" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Сформировать отчет" })).toBeDefined();
     expect(writeHookMountSpy).not.toHaveBeenCalled();
   });
 

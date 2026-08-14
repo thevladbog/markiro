@@ -14,6 +14,7 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductDto } from "../products/dto";
+import type { ProductImageDescriptor } from "../products/dto";
 import {
   BOX_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
@@ -35,6 +36,12 @@ import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
+type JoinedShiftRow = Omit<ShiftDto, "image"> & {
+  imageChecksum: string | null;
+  imageByteSize: number | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+};
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
 
 /**
@@ -76,13 +83,28 @@ export class ShiftsService {
       .select(this.joinedSelection())
       .from(schema.shifts)
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(...conditions))
       .orderBy(schema.shifts.createdAt);
 
-    return { items: rows };
+    return { items: rows.map((row) => this.mapShiftRow(row)) };
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
@@ -91,6 +113,21 @@ export class ShiftsService {
       .select(this.joinedSelection())
       .from(schema.shifts)
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
@@ -99,7 +136,7 @@ export class ShiftsService {
     if (!row) {
       throw new NotFoundException();
     }
-    return row;
+    return this.mapShiftRow(row);
   }
 
   /**
@@ -403,6 +440,7 @@ export class ShiftsService {
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
     if (!productRow) throw new NotFoundException("Shift product missing");
+    const image = await this.findProductImage(tenantId, shift.productId);
     const product: ProductDto = {
       id: productRow.id,
       gtin14: productRow.gtin14,
@@ -417,6 +455,7 @@ export class ShiftsService {
       egaisCode: productRow.egaisCode,
       externalRef: productRow.externalRef,
       createdAt: productRow.createdAt,
+      image,
     };
 
     const labelTemplate = await this.findLabelTemplate(tenantId, shift.labelTemplateId);
@@ -586,6 +625,44 @@ export class ShiftsService {
     return row;
   }
 
+  private async findProductImage(
+    tenantId: string,
+    productId: string,
+  ): Promise<ProductImageDescriptor | null> {
+    const [row] = await this.db
+      .select({
+        checksum: schema.mediaAssets.checksum,
+        byteSize: schema.mediaAssets.byteSize,
+        width: schema.mediaAssets.width,
+        height: schema.mediaAssets.height,
+      })
+      .from(schema.productImages)
+      .innerJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.productImages.tenantId, tenantId),
+          eq(schema.productImages.productId, productId),
+        ),
+      )
+      .limit(1);
+    return row
+      ? {
+          checksum: row.checksum,
+          contentType: "image/webp",
+          byteSize: row.byteSize ?? 0,
+          width: row.width ?? 0,
+          height: row.height ?? 0,
+        }
+      : null;
+  }
+
   /**
    * aggregation mode needs an effective box capacity; a pallets-enabled
    * aggregation shift additionally needs an effective pallet capacity.
@@ -611,6 +688,10 @@ export class ShiftsService {
       mode: schema.shifts.mode,
       productId: schema.shifts.productId,
       productName: schema.products.name,
+      imageChecksum: schema.mediaAssets.checksum,
+      imageByteSize: schema.mediaAssets.byteSize,
+      imageWidth: schema.mediaAssets.width,
+      imageHeight: schema.mediaAssets.height,
       lineId: schema.shifts.lineId,
       lineName: schema.lines.name,
       counterpartyId: schema.shifts.counterpartyId,
@@ -630,6 +711,22 @@ export class ShiftsService {
       closeReason: schema.shifts.closeReason,
       lateDataAt: schema.shifts.lateDataAt,
       createdAt: schema.shifts.createdAt,
+    };
+  }
+
+  private mapShiftRow(row: JoinedShiftRow): ShiftDto {
+    const { imageChecksum, imageByteSize, imageWidth, imageHeight, ...shift } = row;
+    return {
+      ...shift,
+      image: imageChecksum
+        ? {
+            checksum: imageChecksum,
+            contentType: "image/webp",
+            byteSize: imageByteSize ?? 0,
+            width: imageWidth ?? 0,
+            height: imageHeight ?? 0,
+          }
+        : null,
     };
   }
 

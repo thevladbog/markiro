@@ -4,17 +4,30 @@ import type {
   CreateOrderDto,
   CreateOrderResultDto,
   KioskBootstrapDto,
+  KioskBoxRegistryPage,
+  KioskBoxRegistryQuery,
   PairKioskResultDto,
 } from "./types.js";
+import {
+  boxRegistryCredentialOwnerOf,
+  type BoxRegistryCredentialOwner,
+} from "../store/installation-binding.js";
 
 export class KioskApiError extends Error {
   readonly status: number;
   readonly code: string | null;
-  constructor(status: number, message: string, code: string | null = null) {
+  readonly details: unknown;
+  constructor(
+    status: number,
+    message: string,
+    code: string | null = null,
+    details: unknown = null,
+  ) {
     super(message);
     this.name = "KioskApiError";
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -146,6 +159,7 @@ export function isUnreachable(err: unknown): boolean {
 interface KioskErrorResponse {
   message: string;
   code: string | null;
+  details: unknown;
 }
 
 async function readError(res: Response): Promise<KioskErrorResponse> {
@@ -159,12 +173,13 @@ async function readError(res: Response): Promise<KioskErrorResponse> {
             ? response.message
             : res.statusText || `HTTP ${res.status}`,
         code: typeof response.code === "string" ? response.code : null,
+        details: body,
       };
     }
   } catch {
     // non-JSON body
   }
-  return { message: res.statusText || `HTTP ${res.status}`, code: null };
+  return { message: res.statusText || `HTTP ${res.status}`, code: null, details: null };
 }
 
 function baseOf(serverUrl: string): string {
@@ -215,7 +230,7 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
     const res = await fetch(url, { ...init, signal: controller.signal });
     if (!res.ok) {
       const error = await readError(res);
-      throw new KioskApiError(res.status, error.message, error.code);
+      throw new KioskApiError(res.status, error.message, error.code, error.details);
     }
     return (await res.json()) as T;
   })();
@@ -241,6 +256,36 @@ async function fetchJson<T>(url: string, init: RequestInit, timeoutMs: number): 
   }
 }
 
+async function fetchBlob(url: string, init: RequestInit, timeoutMs: number): Promise<Blob> {
+  const controller = new AbortController();
+  let expire!: () => void;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    expire = () => {
+      controller.abort();
+      reject(new KioskTimeoutError(timeoutMs));
+    };
+  });
+  const timer = setTimeout(() => expire(), timeoutMs);
+  const attempt = (async () => {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    if (!res.ok) {
+      const error = await readError(res);
+      throw new KioskApiError(res.status, error.message, error.code, error.details);
+    }
+    return await res.blob();
+  })();
+  try {
+    return await Promise.race([attempt, deadline]);
+  } catch (err) {
+    if (err instanceof KioskApiError) throw err;
+    if (controller.signal.aborted) throw new KioskTimeoutError(timeoutMs);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    void attempt.catch(() => {});
+  }
+}
+
 /**
  * Redeems a pairing code. Deliberately NOT a method on the token-bearing
  * client: the device has no token until this succeeds, mirroring the server,
@@ -262,13 +307,25 @@ export async function pairKiosk(serverUrl: string, code: string): Promise<PairKi
 }
 
 export interface KioskClient {
+  readonly registryOwner?: BoxRegistryCredentialOwner;
   bootstrap(): Promise<KioskBootstrapDto>;
+  downloadProductImage(productId: string, checksum: string): Promise<Blob>;
+  boxRegistryPage?(query: KioskBoxRegistryQuery): Promise<KioskBoxRegistryPage>;
   attestOrder(body: CreateOrderAdmissionDto): Promise<CreateOrderAdmissionResultDto>;
   submitOrder(body: CreateOrderDto): Promise<CreateOrderResultDto>;
+  /** Optional UI signal after the server result, local outcome/journal and
+   * queue removal have all committed. Network clients do not need it. */
+  orderCommitted?(): void;
 }
 
-export function createKioskClient(cfg: { token: string; serverUrl: string }): KioskClient {
+export function createKioskClient(cfg: {
+  token: string;
+  serverUrl: string;
+  kioskId?: string | null;
+  credentialGeneration?: string | null;
+}): KioskClient {
   const base = baseOf(cfg.serverUrl);
+  const registryOwner = boxRegistryCredentialOwnerOf(cfg);
 
   async function request<T>(
     method: "GET" | "POST",
@@ -295,9 +352,35 @@ export function createKioskClient(cfg: { token: string; serverUrl: string }): Ki
   }
 
   return {
+    ...(registryOwner ? { registryOwner } : {}),
     // Every authenticated call bumps `kiosks.last_seen_at` server-side, so a
     // periodic bootstrap doubles as the heartbeat — there is no separate one.
     bootstrap: () => request<KioskBootstrapDto>("GET", "/kiosk/bootstrap", BOOTSTRAP_TIMEOUT_MS),
+    downloadProductImage: (productId, checksum) =>
+      fetchBlob(
+        `${base}/kiosk/products/${encodeURIComponent(productId)}/image/${encodeURIComponent(checksum)}`,
+        {
+          method: "GET",
+          headers: {
+            "x-kiosk-token": cfg.token,
+            "x-kiosk-capabilities": "subscription-recovery-v1",
+          },
+        },
+        BOOTSTRAP_TIMEOUT_MS,
+      ),
+    boxRegistryPage: (query) => {
+      const params = new URLSearchParams();
+      if (query.since !== undefined) params.set("since", query.since);
+      if (query.until !== undefined) params.set("until", query.until);
+      if (query.cursor !== undefined) params.set("cursor", query.cursor);
+      if (query.limit !== undefined) params.set("limit", String(query.limit));
+      const suffix = params.size === 0 ? "" : `?${params.toString()}`;
+      return request<KioskBoxRegistryPage>(
+        "GET",
+        `/kiosk/box-registry${suffix}`,
+        BOOTSTRAP_TIMEOUT_MS,
+      );
+    },
     attestOrder: (body) =>
       request<CreateOrderAdmissionResultDto>(
         "POST",

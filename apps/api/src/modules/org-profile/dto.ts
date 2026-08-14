@@ -14,6 +14,7 @@ export const putOrgProfileSchema = z.object({
   gln: glnSchema.nullable().optional(),
   gs1Prefixes: z.array(gs1PrefixSchema).optional(),
   inn: z.string().nullable().optional(),
+  pickupLimitsEnabled: z.boolean().optional(),
 });
 export type PutOrgProfileDto = z.infer<typeof putOrgProfileSchema>;
 
@@ -21,19 +22,45 @@ export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
+  pickupLimitsEnabled: boolean;
+  logoUrl: string | null;
+  logoRevision: string | null;
+}
+
+export interface OrganizationLogoDto {
+  logoRevision: string;
+  logoUrl: string;
+}
+
+export interface KioskBrandingDto {
+  organizationName: string;
+  logoUrl: string | null;
+  logoRevision: string | null;
 }
 
 /**
- * A 9-digit issuer prefix leaves a 7-digit serial, so the space is
- * 0..9_999_999 per extension digit. Seeding beyond it cannot produce a valid
- * SSCC, so it is refused at the boundary rather than at the first close.
+ * A 9-digit issuer prefix leaves a 7-digit serial, so the GS1-valid space is
+ * 0..9_999_999 per extension digit. Fresh box allocation starts at 1, while
+ * serial zero remains valid historical SSCC input. Seeding beyond the space
+ * cannot produce a valid SSCC, so it is refused at the boundary rather than
+ * at the first close.
  *
  * Shared by both the org-profile and counterparties controllers (Task 5) --
  * one tenant's own counter and each counterparty's counter carry the exact
  * same shape, so the schema is defined once here and imported by the other.
  */
-export const ssccCounterSchema = z.object({
-  extensionDigit: z.number().int().min(0).max(9),
-  nextSerial: z.number().int().min(0).max(9_999_999),
-});
+export const ssccCounterSchema = z
+  .object({
+    extensionDigit: z.number().int().min(0).max(9),
+    nextSerial: z.number().int().min(0).max(9_999_999),
+  })
+  .superRefine(({ extensionDigit, nextSerial }, ctx) => {
+    if (extensionDigit === 0 && nextSerial < 1) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["nextSerial"],
+        message: "box nextSerial must be at least 1",
+      });
+    }
+  });
 export type SsccCounterDto = z.infer<typeof ssccCounterSchema>;

@@ -1,6 +1,9 @@
 import { Module } from "@nestjs/common";
 import { DevicePairingModule } from "../device-pairing/device-pairing.module";
+import { OrgProfileModule } from "../org-profile/org-profile.module";
 import { PickupOrdersModule } from "../pickup-orders/pickup-orders.module";
+import { StorageModule } from "../storage/storage.module";
+import { BoxRegistryService } from "./box-registry.service";
 import { KioskController } from "./kiosk.controller";
 import { KioskPairController } from "./kiosk-pair.controller";
 import { PairingService } from "./pairing.service";
@@ -12,9 +15,9 @@ import { PairingService } from "./pairing.service";
  * the class, which would silently give each controller its own instance.
  */
 @Module({
-  imports: [DevicePairingModule, PickupOrdersModule],
+  imports: [DevicePairingModule, PickupOrdersModule, OrgProfileModule, StorageModule],
   controllers: [KioskController, KioskPairController],
-  providers: [PairingService],
-  exports: [PairingService],
+  providers: [PairingService, BoxRegistryService],
+  exports: [PairingService, BoxRegistryService],
 })
 export class KioskModule {}

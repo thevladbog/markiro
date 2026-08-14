@@ -1,4 +1,4 @@
-import type { CartItem } from "../session/cart.js";
+import type { KioskCartLine } from "../session/cart.js";
 
 /**
  * What a kiosk screen may say about money, in one place.
@@ -49,13 +49,13 @@ export function toKopecks(value: string): number | null {
  * nothing, and «—» sitting in the footer before the first scan reads as a
  * broken screen.
  */
-export function totalKopecks(items: CartItem[]): number | null {
+export function totalKopecks(items: readonly KioskCartLine[]): number | null {
   let sum = 0;
   for (const item of items) {
     if (item.unitPrice === null) return null;
     const kopecks = toKopecks(item.unitPrice);
     if (kopecks === null) return null;
-    sum += kopecks;
+    sum += kopecks * item.bottleCount;
   }
   return sum;
 }

@@ -1,8 +1,17 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    alias: [
+      {
+        find: /^js-yaml$/,
+        replacement: fileURLToPath(new URL("./src/lib/js-yaml-default.ts", import.meta.url)),
+      },
+    ],
+  },
   server: {
     proxy: {
       "/api/platform-auth": {

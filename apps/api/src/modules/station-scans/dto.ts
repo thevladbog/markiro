@@ -87,6 +87,29 @@ const scanItemSchema = z
     }
   });
 
+const boxClosureSchema = z
+  .object({
+    // Scoped with shift/terminal because a device-local box id is not globally unique.
+    boxId: z.string().min(1).max(64),
+    shiftId: z.string().uuid().toLowerCase(),
+    terminalId: z.string().nullable(),
+    sscc: z.string().length(18),
+    closedAt: z.string().datetime(),
+    operatorId: z.string().uuid().toLowerCase().nullable(),
+    // Defaults preserve compatibility with older stations that omit outcomes.
+    printVerifiedAt: z.string().datetime().nullable().default(null),
+    printSkippedAt: z.string().datetime().nullable().default(null),
+  })
+  .superRefine((closure, ctx) => {
+    if (closure.printVerifiedAt !== null && closure.printSkippedAt !== null) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["printSkippedAt"],
+        message: "print verification outcomes are mutually exclusive",
+      });
+    }
+  });
+
 export const syncBatchSchema = z.object({
   // Device-generated: "<machineId>:<per-installation id>:<highest outbox id
   // in the batch>" (see apps/station/src/lib/sync.ts and install-id.ts).
@@ -108,32 +131,7 @@ export const syncBatchSchema = z.object({
   // (created by an earlier item's arrival, see boxes' schema comment)
   // already exists by the time its closure gets here.
   boxes: z
-    .array(
-      z.object({
-        boxId: z.string().min(1).max(64),
-        // `boxes_device_box_uq` scopes a device's box id to (shift,
-        // terminal): a bare deviceBoxId string is NOT unique on its own --
-        // two terminals in one tenant can both call a box "b1", and one
-        // device can reuse a box id after a shift change. Carrying these
-        // (Finding 3 on this task) is what lets the closure UPDATE identify
-        // exactly one box instead of matching every row sharing that string;
-        // the device already knows both, the same way it does for a scan
-        // item above.
-        shiftId: z.string().uuid().toLowerCase(),
-        terminalId: z.string().nullable(),
-        sscc: z.string().length(18),
-        closedAt: z.string().datetime(),
-        operatorId: z.string().uuid().toLowerCase().nullable(),
-        // Whether the closed box's printed label was verified or explicitly
-        // skipped, as recorded on the device's own `boxes_mirror` row (Task
-        // 13 review, Finding 6). `.default(null)`, not `.optional()`: an
-        // older station build mid-rollout that has not yet learned to send
-        // these two fields must still be accepted -- their absence means
-        // exactly the same thing an explicit null does, "not yet resolved".
-        printVerifiedAt: z.string().datetime().nullable().default(null),
-        printSkippedAt: z.string().datetime().nullable().default(null),
-      }),
-    )
+    .array(boxClosureSchema)
     // Shared with the station's own drain loop (`MAX_BOX_CLOSURES_PER_SYNC_
     // BATCH` in `apps/station/src/lib/sync.ts`, sourced from
     // `@markiro/domain`): the two sides MUST agree, or a device that reads

@@ -1,5 +1,5 @@
 import { deriveDigestB64, parsePhc, PHC_ITERATIONS } from "@markiro/domain";
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 
 /**
  * digestB64 -> employeeId. Every badge verifier in a tenant shares
@@ -16,7 +16,7 @@ import type { KioskBootstrapDto } from "../api/types.js";
  * Thus last-write-wins here is unreachable rather than tolerated — if this
  * constraint is ever relaxed server-side, this map would need a duplicate guard.
  */
-export function buildBadgeIndex(bootstrap: KioskBootstrapDto): Map<string, string> {
+export function buildBadgeIndex(bootstrap: KioskBootstrapSnapshotDto): Map<string, string> {
   const index = new Map<string, string>();
   for (const employee of bootstrap.employees) {
     if (!employee.badgeHash) continue;
@@ -53,7 +53,7 @@ export interface ResolvedBadge {
  */
 export async function resolveBadge(
   raw: string,
-  bootstrap: KioskBootstrapDto,
+  bootstrap: KioskBootstrapSnapshotDto,
   index: Map<string, string>,
 ): Promise<ResolvedBadge | null> {
   if (!raw) return null;

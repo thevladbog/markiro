@@ -96,7 +96,8 @@
     "pay": "Record payment",
     "empty": "No offers yet",
     "loadError": "Could not load offers",
-    "catalogLink": "Catalog"
+    "catalogLink": "Catalog",
+    "terms": { "label": "Terms of cooperation" }
   },
   "billing": {
     "title": "Invoices and payments",
@@ -143,6 +144,7 @@
     },
     "quantityFor": "Quantity for {{name}}",
     "priceFor": "Price for {{name}}",
+    "priceOverrideReasonFor": "Price change reason for {{name}}",
     "vatFor": "VAT for {{name}}",
     "vatIncluded": "Included",
     "vatExcluded": "Added",

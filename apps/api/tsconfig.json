@@ -1,6 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "module": "commonjs",
     "moduleResolution": "node10",
     "target": "ES2023",

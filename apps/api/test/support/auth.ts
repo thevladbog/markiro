@@ -63,6 +63,31 @@ export async function setOnlyOrganizationMemberRole(
 }
 
 /**
+ * Test-only equivalent of EmployeesService.createEmployee for fixtures that
+ * need to control the employee id or seed adjacent rows directly.
+ */
+export async function createTestEmployee(
+  db: Db,
+  employee: typeof schema.employees.$inferInsert & { id: string },
+  pickupPolicy: Partial<{
+    limitMode: "limited" | "unlimited";
+    dayLimit: number;
+    canWriteoff: boolean;
+  }> = {},
+): Promise<string> {
+  if (process.env.NODE_ENV !== "test") {
+    throw new Error("createTestEmployee is restricted to tests");
+  }
+  await db.transaction(async (tx) => {
+    await tx.insert(schema.employees).values(employee);
+    await tx
+      .insert(schema.employeePickupPolicies)
+      .values({ tenantId: employee.tenantId, employeeId: employee.id, ...pickupPolicy });
+  });
+  return employee.id;
+}
+
+/**
  * Test-only station fixture. Production pairing is deliberately the only
  * production credential path; tests needing an already-paired station seed a
  * durable record through the normal create route, then link a Better Auth key

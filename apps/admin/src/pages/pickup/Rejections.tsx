@@ -237,8 +237,19 @@ export function RejectionsPage() {
               >
                 <ul style={{ margin: 0, paddingInlineStart: "var(--sp-5)" }}>
                   {row.codes.map((code, index) => (
-                    <li key={`${code.rawKm}:${index}`} style={{ font: "var(--text-code)" }}>
-                      {code.rawKm} — {t(`pages.pickup.conflicts.reason.${code.reason}`)}
+                    <li
+                      key={`${"source" in code ? code.sscc : code.rawKm}:${index}`}
+                      style={{ font: "var(--text-code)" }}
+                    >
+                      {"source" in code
+                        ? t(
+                            code.bottleCount === null
+                              ? "pages.pickup.rejections.boxLabel"
+                              : "pages.pickup.rejections.boxCountLabel",
+                            { sscc: code.sscc, count: code.bottleCount ?? 0 },
+                          )
+                        : code.rawKm}{" "}
+                      — {t(`pages.pickup.conflicts.reason.${code.reason}`)}
                     </li>
                   ))}
                 </ul>

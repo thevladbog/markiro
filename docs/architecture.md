@@ -75,6 +75,11 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 - Shift downloads to the station in full: product, label template,
   capacities, counterparty GLN, **pre-allocated SSCC serial ranges per
   terminal** — boxes/pallets print offline with no collisions.
+- Product snapshots carry an optional private image descriptor. Device mirrors
+  treat an absent `image` field as a legacy/unknown value and retain any
+  already-published local pointer; only explicit `image: null` clears it. This
+  keeps older API payloads safe during rolling deployment while kiosk and station
+  clients publish only validated WebP bytes offline.
 - Scans append to a local journal; background sync pushes idempotent batches
   (terminal-sequenced). Online cross-terminal duplicates are caught by the
   server instantly; offline ones — at sync, surfaced as conflicts for the

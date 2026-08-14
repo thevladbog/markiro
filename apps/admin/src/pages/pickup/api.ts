@@ -50,6 +50,19 @@ export interface SyncConflict {
   reason: "not_km" | "incomplete" | "unknown_product" | "not_allowed" | "duplicate" | "over_limit";
 }
 
+export interface BoxConflict {
+  sscc: string;
+  bottleCount: number | null;
+  reason:
+    | "unknown_box"
+    | "box_not_closed"
+    | "box_disassembled"
+    | "box_contents_changed"
+    | "mixed_product_box"
+    | "duplicate"
+    | "over_limit";
+}
+
 /** Mirrors `apps/api/src/modules/pickup-orders/dto.ts`'s `PickupOrderItemDto`. */
 export interface PickupOrderItemDto {
   id: string;
@@ -67,6 +80,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   receiptNo: string | null;
   actNo: string | null;
   syncConflicts: SyncConflict[];
+  boxConflicts: BoxConflict[];
   exportHeldProductNames: string[];
 }
 

@@ -1,12 +1,13 @@
 import { Module } from "@nestjs/common";
+import { MediaModule } from "../media/media.module";
 import { ProfileController } from "./profile.controller";
 import { ProfileService } from "./profile.service";
 import { ProfileSessionGuard } from "./profile-session.guard";
-import { ProfileAssetsReconciler } from "./profile-assets.reconciler";
 
 @Module({
+  imports: [MediaModule],
   controllers: [ProfileController],
-  providers: [ProfileService, ProfileSessionGuard, ProfileAssetsReconciler],
+  providers: [ProfileService, ProfileSessionGuard],
   exports: [ProfileService],
 })
 export class ProfileModule {}

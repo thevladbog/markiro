@@ -23,7 +23,9 @@ import {
 } from "../src/store/config.js";
 import { appendJournal, type JournalEntry } from "../src/store/journal.js";
 import { enqueueOrder, listQuarantine, listQueue } from "../src/store/queue.js";
+import { activateBoxRegistryPage, beginBoxRegistryStage } from "../src/store/box-registry.js";
 import { REFRESH_INTERVAL_MS, RETRY_MAX_MS, STALE_BLOCK_MS } from "../src/sync/worker.js";
+import { putOutcome } from "../src/store/outcomes.js";
 
 afterEach(cleanup);
 
@@ -112,11 +114,17 @@ const GS = String.fromCharCode(0x1d);
 const GTIN_MILK = "04600682000013";
 const MILK = "Молоко 3,2%";
 const KM = `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`;
-const EMPLOYEE = { id: "e1", fullName: "Смирнов Алексей" };
+const SSCC = "346006820000000021";
+const BOX_PRODUCT_ID = "22222222-2222-4222-8222-222222222222";
+const EMPLOYEE = {
+  id: "22222222-2222-4222-8222-222222222222",
+  fullName: "Смирнов Алексей",
+};
 
-const IDLE_TITLE = "Возьмите продукцию для себя";
+const IDLE_TITLE = "Отсканируйте пропуск";
 const CART_TITLE = "Вы берёте";
-const SUBMIT = "Готово — передать администратору";
+const SUBMIT = "Продолжить";
+const CONFIRM_ONE = "Подтвердить 1 бутылку";
 const QUEUED_TITLE = "Заявка передана, номер появится после синхронизации";
 const OFFLINE = "Нет связи — киоск работает офлайн";
 const GATE_TITLE = "Вход в настройки";
@@ -124,7 +132,7 @@ const SETUP_TITLE = "Настройка сканера";
 const SETUP_DONE = "Готово";
 const KEYBOARD_TRANSPORT = "Как клавиатура (HID)";
 const SERIAL_TRANSPORT = "Web Serial (COM-порт)";
-const PAIRING_TITLE = "Подключение киоска";
+const PAIRING_TITLE = "Введите 8-значный код";
 /** The setup screen's test-scan verdicts, as an installer reads them. */
 const VERDICT_KM = "Код маркировки";
 const VERDICT_BADGE = "Бейдж";
@@ -162,11 +170,14 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee: 5, showPrices: true },
     badgeSalt: SALT,
     reasons: [{ id: "r-defect", name: "Брак" }],
     products: [
       { id: "p-milk", gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
+      { id: BOX_PRODUCT_ID, gtin14: GTIN_MILK, name: MILK, unitPrice: "89.90", egaisCode: null },
     ],
     employees: [
       {
@@ -174,6 +185,9 @@ function bootstrapAt(generatedAt: string): KioskBootstrapDto {
         fullName: EMPLOYEE.fullName,
         role: null,
         badgeHash,
+        limitMode: "limited",
+        dayLimit: 5,
+        canWriteoff: true,
         // What this worker took at the OTHER kiosks today, which is the one
         // part of their day count this device cannot see for itself.
         takenTodayElsewhere: server.takenTodayElsewhere,
@@ -325,7 +339,7 @@ function setOnLine(value: boolean): void {
 
 /** The gate this device is bound to, as pairing records it — and what the
  * journal's entries have to name to be counted as this gate's. */
-const KIOSK_ID = "k-1";
+const KIOSK_ID = "11111111-1111-4111-8111-111111111111";
 
 const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
   serverUrl: "/api",
@@ -349,7 +363,34 @@ const config = (over: Partial<KioskConfig> = {}): KioskConfig => ({
  */
 async function pair(generatedAt = NOW.toISOString(), over: Partial<KioskConfig> = {}) {
   await replaceSnapshot(bootstrapAt(generatedAt), new Date(generatedAt));
-  await writeConfig(config(over));
+  return writeConfig(config(over));
+}
+
+async function seedBoxRegistry(): Promise<void> {
+  const stored = await pair();
+  const cut = {
+    binding: { serverUrl: stored.serverUrl, kioskId: stored.kioskId! },
+    credentialGeneration: stored.credentialGeneration!,
+    owner: "app-test",
+    since: null,
+    until: "1",
+  };
+  await beginBoxRegistryStage(cut);
+  await activateBoxRegistryPage(
+    cut,
+    [
+      {
+        kind: "upsert",
+        boxId: "11111111-1111-4111-8111-111111111111",
+        sscc: SSCC,
+        productId: BOX_PRODUCT_ID,
+        bottleCount: 2,
+        contentKeys: ["box-member-a", "box-member-b"],
+        updatedAt: NOW.toISOString(),
+      },
+    ],
+    NOW.toISOString(),
+  );
 }
 
 const queuedOrder = (deviceSeq: number): CreateOrderDto => ({
@@ -559,21 +600,68 @@ function setWebSerialWithoutGrant(port: SerialPort): void {
 }
 
 /** Badge in, one bottle scanned, submit pressed — the whole worker's flow. */
+async function proceedToBuyConfirmation(bottles = 1): Promise<void> {
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+  });
+  await settle(() => expect(screen.getByRole("button", { name: /Через кассу/ })).toBeDefined());
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: /Через кассу/ }));
+  });
+  await settle(() =>
+    expect(
+      screen.getByRole("button", { name: new RegExp(`Подтвердить ${bottles} бутыл`) }),
+    ).toBeDefined(),
+  );
+}
+
 async function takeOneBottle(): Promise<void> {
   scan(BADGE);
   await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
   scan(KM);
   await settle(() => expect(screen.getByText(MILK)).toBeDefined());
+  await proceedToBuyConfirmation();
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+    fireEvent.click(screen.getByRole("button", { name: CONFIRM_ONE }));
   });
 }
 
 describe("KioskShell", () => {
+  it("shows the same employee an unviewed server result after restart and acknowledges it on Done", async () => {
+    await pair();
+    const config = await readConfig();
+    if (!config?.kioskId || !config.credentialGeneration) throw new Error("paired owner missing");
+    await putOutcome({
+      owner: {
+        serverUrl: config.serverUrl,
+        kioskId: config.kioskId,
+        credentialGeneration: config.credentialGeneration,
+      },
+      deviceSeq: 4,
+      employeeId: EMPLOYEE.id,
+      at: "2026-08-13T11:00:00.000Z",
+      viewedAt: null,
+      kind: "accepted",
+      orderNo: "ORD-RESTART",
+      acceptedCount: 12,
+      acceptedBoxes: [{ sscc: SSCC, bottleCount: 12 }],
+      rejected: [],
+    });
+
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(/ORD-RESTART/)).toBeDefined());
+    expect(screen.queryByText(CART_TITLE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+  });
   it("asks an unpaired device for a pairing code, and calls no API without a token", async () => {
     render(<App />);
 
-    await settle(() => expect(screen.getByText("Подключение киоска")).toBeDefined());
+    await settle(() => expect(screen.getByText(PAIRING_TITLE)).toBeDefined());
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -695,8 +783,34 @@ describe("KioskShell", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Не я" }));
     });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Выйти и очистить" }));
+    });
 
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+  });
+
+  it("skips operation choice and confirms a purchase for an employee without writeoff permission", async () => {
+    const bootstrap = bootstrapAt(NOW.toISOString());
+    bootstrap.employees[0]!.canWriteoff = false;
+    await replaceSnapshot(bootstrap, NOW);
+    await writeConfig(config());
+    server.reachable = false;
+    setOnLine(false);
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    scan(KM);
+    await settle(() => expect(screen.getByText(MILK)).toBeDefined());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+    });
+
+    await settle(() => expect(screen.getByRole("button", { name: CONFIRM_ONE })).toBeDefined());
+    expect(screen.queryByRole("button", { name: /Списание/ })).toBeNull();
+    expect(screen.getAllByText("Через кассу")).toHaveLength(1);
   });
 
   /**
@@ -1268,8 +1382,9 @@ describe("KioskShell", () => {
     scan(KM);
     await settle(() => expect(screen.getByText(MILK)).toBeDefined());
 
+    await proceedToBuyConfirmation();
     await act(async () => {
-      const button = screen.getByRole("button", { name: SUBMIT });
+      const button = screen.getByRole("button", { name: CONFIRM_ONE });
       fireEvent.click(button);
       fireEvent.click(button);
     });
@@ -1290,7 +1405,7 @@ describe("KioskShell", () => {
    * with `Cart` — and its live button — still on screen. A second tap now would
    * file a genuine second order for one worker's bottles.
    */
-  it("ignores a second tap that lands while the first order is still in flight", async () => {
+  it("keeps confirmation authoritative while the first order is still in flight", async () => {
     await pair();
     render(<App />);
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
@@ -1306,10 +1421,30 @@ describe("KioskShell", () => {
 
     await takeOneBottle();
     await settle(async () => expect((await readConfig())?.nextDeviceSeq).toBe(6));
+    const postedOrders = () =>
+      (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.filter(
+        ([input]) => String(input).endsWith("/kiosk/orders"),
+      );
+    await settle(() => expect(postedOrders()).toHaveLength(1));
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: SUBMIT }));
+      const primary = document.querySelector(".kiosk-flow__primary");
+      const back = document.querySelector(".kiosk-flow__back");
+      const cancel = document.querySelector(".kiosk-flow__cancel");
+      if (!(primary instanceof HTMLButtonElement)) throw new Error("confirmation CTA missing");
+      if (!(back instanceof HTMLButtonElement)) throw new Error("confirmation back missing");
+      if (!(cancel instanceof HTMLButtonElement)) throw new Error("confirmation cancel missing");
+      expect(primary.disabled).toBe(true);
+      expect(back.disabled).toBe(true);
+      expect(cancel.disabled).toBe(true);
+      fireEvent.click(back);
+      fireEvent.click(cancel);
+      fireEvent.click(primary);
+      fireEvent.click(primary);
     });
-    deliver();
+    expect(screen.getByRole("heading", { name: "Подтверждение" })).toBeDefined();
+    expect(await listQueue()).toHaveLength(1);
+    expect(postedOrders()).toHaveLength(1);
+    await act(async () => deliver());
 
     await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
     expect(server.orders.map((order) => order.deviceSeq)).toEqual([5]);
@@ -1329,8 +1464,8 @@ describe("KioskShell", () => {
    * numbers to be monotonic, not dense. That asymmetry is the entire reason the
    * counter is written before the order, and it is what this test pins.
    */
-  it("never files two orders under one device sequence when the counter write fails", async () => {
-    await pair();
+  it("keeps the exact cart visible and retryable when the counter write fails", async () => {
+    await seedBoxRegistry();
     render(<App />);
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 
@@ -1339,28 +1474,36 @@ describe("KioskShell", () => {
     const refused = vi
       .spyOn(configStore, "writeConfig")
       .mockRejectedValueOnce(new Error("the config store refused the write"));
-    await takeOneBottle();
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    scan(SSCC);
+    scan(KM);
+    await settle(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
+    await proceedToBuyConfirmation(3);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Подтвердить 3 бутылки" }));
+    });
     await settle(() => expect(refused).toHaveBeenCalled());
     await act(async () => {});
-    // Nothing was promised: no number, no confirmation, still their own cart.
+    // Nothing was promised: no number, no confirmation, still their own cart —
+    // including the exact line they can retry without rescanning.
     expect(screen.getByText(CART_TITLE)).toBeDefined();
+    expect(screen.getAllByText(MILK)).toHaveLength(2);
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    await proceedToBuyConfirmation(3);
     await act(async () => {
-      fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+      fireEvent.click(screen.getByRole("button", { name: "Подтвердить 3 бутылки" }));
     });
-    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+    await settle(() => expect(screen.getByText("Заявка № ORD-26-0005 передана")).toBeDefined());
 
-    // Whatever DID become durable leaves on the ordinary interval, unattended.
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(REFRESH_INTERVAL_MS);
+    expect(server.orders).toHaveLength(1);
+    expect(server.orders[0]).toMatchObject({
+      deviceSeq: 5,
+      badgeDigest,
+      reason: "buy",
+      items: [{ rawKm: KM }],
+      boxes: [{ sscc: SSCC }],
     });
-
-    // And now the next worker takes their own bottle.
-    await takeOneBottle();
-    await settle(() => expect(said()).toContain("ORD-"));
-
-    const seqs = server.orders.map((order) => order.deviceSeq);
-    expect(seqs.length).toBeGreaterThan(0);
-    expect(new Set(seqs).size).toBe(seqs.length);
   });
 
   /**
@@ -1605,6 +1748,9 @@ describe("KioskShell", () => {
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Не я" }));
     });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Выйти и очистить" }));
+    });
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 
     await holdIdleHeader(SETTINGS_HOLD_MS);
@@ -1644,9 +1790,9 @@ describe("KioskShell", () => {
     scanner.scan("12345678");
 
     await settle(() => expect(screen.getByRole("status").textContent).toBe("12345678"));
-    expect((screen.getByRole("button", { name: "Подключить" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect(
+      (screen.getByRole("button", { name: "Подключить киоск" }) as HTMLButtonElement).disabled,
+    ).toBe(false);
   });
 
   /**
@@ -1807,6 +1953,9 @@ describe("KioskShell", () => {
     await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Не я" }));
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Выйти и очистить" }));
     });
     await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
 

@@ -69,6 +69,8 @@ async function bootstrapWith(seeds: OperatorSeed[]): Promise<KioskBootstrapDto> 
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee: 5, showPrices: true },
     badgeSalt: SALT,
     reasons: [],

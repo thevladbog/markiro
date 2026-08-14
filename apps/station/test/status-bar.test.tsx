@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
@@ -15,11 +15,49 @@ describe("StatusBar", () => {
     shiftLabel: "Shift 17",
   };
 
+  it.each([
+    ["checking", "Checking"],
+    ["reachable", "Available"],
+    ["unreachable", "No connection"],
+  ] as const)("shows %s server reachability as %s", (serverReachability, expected) => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability={serverReachability}
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+
+    expect(screen.getByTestId("server-status").textContent).toBe(expected);
+  });
+
+  it("announces server reachability changes politely", () => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability="unreachable"
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+
+    const serverStatus = screen.getByTestId("server-status");
+    expect(serverStatus.getAttribute("role")).toBe("status");
+    expect(serverStatus.getAttribute("aria-live")).toBe("polite");
+  });
+
   it("shows each live context and operational status exactly once", () => {
     render(
       <StatusBar
         {...context}
-        online={false}
+        serverReachability="unreachable"
         scanner="connected"
         printerConfigured
         syncPending={5}
@@ -32,7 +70,7 @@ describe("StatusBar", () => {
     expect(screen.getAllByText("Packing A")).toHaveLength(1);
     expect(screen.getAllByText("Alex Morgan")).toHaveLength(1);
     expect(screen.getAllByText("Shift 17")).toHaveLength(1);
-    expect(screen.getAllByText("Offline")).toHaveLength(1);
+    expect(screen.getAllByText("No connection")).toHaveLength(1);
     expect(screen.getAllByText("Connected")).toHaveLength(1);
     expect(screen.getAllByText("Configured")).toHaveLength(1);
     expect(screen.getAllByText("5")).toHaveLength(1);
@@ -43,7 +81,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -60,11 +98,37 @@ describe("StatusBar", () => {
     ).toBe("warn");
   });
 
+  it("owns update, operator, and window controls inside one labelled action rail", () => {
+    render(
+      <StatusBar
+        {...context}
+        serverReachability="reachable"
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+        update={{ severity: "info", glyph: "↻", label: "Current version", available: false }}
+        onOpenUpdates={() => {}}
+        operatorControl={<button type="button">Change operator</button>}
+        windowControl={<button type="button">Window mode</button>}
+      />,
+    );
+
+    const header = screen.getByRole("banner", { name: "Station status" });
+    const actions = within(header).getByRole("group", { name: "Station actions" });
+    expect(
+      within(actions)
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["↻Current version", "Change operator", "Window mode"]);
+  });
+
   it("does not invent agent or teammate status without a live source", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -81,7 +145,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -96,7 +160,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="connected"
         printerConfigured
         syncPending={0}
@@ -111,7 +175,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="disconnected"
         printerConfigured
         syncPending={0}
@@ -126,7 +190,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -141,7 +205,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured
         syncPending={0}
@@ -156,7 +220,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={42}
@@ -171,7 +235,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -186,7 +250,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={7}
@@ -201,7 +265,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}
@@ -216,7 +280,7 @@ describe("StatusBar", () => {
     render(
       <StatusBar
         {...context}
-        online
+        serverReachability="reachable"
         scanner="keyboard"
         printerConfigured={false}
         syncPending={0}

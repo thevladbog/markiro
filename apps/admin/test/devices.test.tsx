@@ -9,6 +9,10 @@ import { AccessProvider } from "../src/access/context.js";
 import i18n from "../src/i18n/index.js";
 import { DevicesPage } from "../src/pages/devices/index.js";
 
+vi.mock("../src/layout/useActiveOrg.js", () => ({
+  useActiveOrg: () => ({ orgId: "org-1", orgName: "Factory" }),
+}));
+
 function response(body: unknown): Response {
   return { ok: true, status: 200, json: async () => body } as Response;
 }
@@ -77,6 +81,28 @@ it("keeps kiosk settings reachable from the unified device row", async () => {
   expect(screen.getByRole("link", { name: "Настройки киоска" }).getAttribute("href")).toBe(
     "/kiosks/kiosk-1/edit",
   );
+});
+
+it("does not leave auth cleanup tied to the jsdom window", async () => {
+  vi.useFakeTimers();
+  const windowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window");
+
+  try {
+    renderPage();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => response({})),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    cleanup();
+
+    Reflect.deleteProperty(globalThis, "window");
+    expect(() => vi.advanceTimersByTime(1_000)).not.toThrow();
+  } finally {
+    if (windowDescriptor) Object.defineProperty(globalThis, "window", windowDescriptor);
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
 });
 
 it("sends filter and pager state to the bounded devices endpoint", async () => {

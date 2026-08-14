@@ -1,7 +1,9 @@
 import { BadRequestException } from "@nestjs/common";
+import { SQL } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import type * as MarkiroDb from "@markiro/db";
-import type { Db } from "@markiro/db";
+import { schema, type Db } from "@markiro/db";
 
 // Hoisted so the `vi.mock` factory below (itself hoisted above this file's
 // other imports) can close over it -- same discipline `App.test.tsx` uses
@@ -40,6 +42,138 @@ const ssccServiceStub = { recordConsumedSerial: vi.fn() } as unknown as SsccServ
 const entitlementsServiceStub = {
   resolveRecovery: async () => ({ access: "managed" }),
 } as unknown as EntitlementsService;
+
+describe("StationScansService box registry versioning", () => {
+  it("advances a closed box with the monotonic registry cursor expression in the batch transaction", async () => {
+    const boxUpdates: Array<Record<string, unknown>> = [];
+    const insertedTables: unknown[] = [];
+    const lockQueries: Array<{ sql: string; params: unknown[] }> = [];
+    const shiftId = "11111111-1111-1111-1111-111111111111";
+    const terminalId = "22222222-2222-2222-2222-222222222222";
+    const dbStub = {
+      transaction: async (run: (tx: unknown) => Promise<unknown>) => {
+        const tx = {
+          insert: (table: unknown) => {
+            insertedTables.push(table);
+            return {
+              values: () => ({
+                onConflictDoNothing: () => ({
+                  returning: () => Promise.resolve([{ batchId: "box-close-1" }]),
+                }),
+                onConflictDoUpdate: () => ({
+                  returning: () => Promise.resolve([{ currentVersion: 1n }]),
+                }),
+              }),
+            };
+          },
+          select: () => ({
+            from: () => ({
+              where: () => ({
+                orderBy: () => ({
+                  for: () => Promise.resolve([{ id: shiftId, openedAt: new Date() }]),
+                }),
+              }),
+            }),
+          }),
+          execute: (query: SQL) => {
+            const rendered = new PgDialect().sqlToQuery(query);
+            lockQueries.push({ sql: rendered.sql, params: rendered.params });
+            return Promise.resolve();
+          },
+          update: (table: unknown) => ({
+            set: (values: Record<string, unknown>) => {
+              if (table === schema.boxes) boxUpdates.push(values);
+              return {
+                where: () => {
+                  const result = Promise.resolve({ rowCount: 1 });
+                  return Object.assign(result, {
+                    returning: () => Promise.resolve([{ id: "box-1" }]),
+                  });
+                },
+              };
+            },
+          }),
+        };
+        return run(tx);
+      },
+    } as unknown as Db;
+    const ssccService = {
+      recordConsumedSerial: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SsccService;
+    const service = new StationScansService(dbStub, ssccService, entitlementsServiceStub);
+
+    await service.applyBatch(
+      "tenant-1",
+      {
+        batchId: "box-close-1",
+        items: [],
+        boxes: [
+          {
+            boxId: "device-box-1",
+            shiftId,
+            terminalId,
+            sscc: "123456789012345675",
+            closedAt: "2026-07-29T11:00:00.000Z",
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+        ],
+        exceptions: [],
+      },
+      terminalId,
+    );
+
+    expect(insertedTables).toContain(schema.boxRegistryVersions);
+    expect(lockQueries[0]?.params).toContain("box-registry:tenant-1");
+    expect(
+      lockQueries.filter((query) => query.params.includes("box-registry:tenant-1")).length,
+    ).toBe(1);
+    expect(boxUpdates).toHaveLength(2);
+    expect(boxUpdates[0]).not.toHaveProperty("registryVersion");
+    expect(boxUpdates[1]?.registryVersion).toBe(1n);
+    const updatedAt = boxUpdates[1]?.updatedAt;
+    expect(updatedAt).toBeInstanceOf(SQL);
+    const query = new PgDialect().sqlToQuery(updatedAt as SQL).sql;
+    expect(query).toMatch(
+      /^GREATEST\(clock_timestamp\(\), .*updated_at.* \+ interval '1 millisecond'\)$/i,
+    );
+  });
+
+  it("does not acquire the tenant registry lock for an exact replay", async () => {
+    const execute = vi.fn();
+    const replayRows = [{ terminalId: null, payloadDigest: null, result: null }];
+    const tx = {
+      execute,
+      insert: () => ({
+        values: () => ({
+          onConflictDoNothing: () => ({ returning: () => Promise.resolve([]) }),
+        }),
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            for: () => Promise.resolve(replayRows),
+          }),
+        }),
+      }),
+    };
+    // Match the actual digest by returning it through a thenable shim after
+    // the service has built the query; the mismatch path is irrelevant to
+    // the lock assertion, so use the legacy replay row which returns early.
+    const service = new StationScansService(
+      { transaction: (run: (executor: typeof tx) => unknown) => run(tx) } as never,
+      ssccServiceStub,
+      entitlementsServiceStub,
+    );
+    await service.applyBatch(
+      "tenant-1",
+      { batchId: "replay-1", items: [], boxes: [], exceptions: [] },
+      "terminal-1",
+    );
+    expect(execute).not.toHaveBeenCalled();
+  });
+});
 
 /**
  * `monthsAgo` months before "now" (real wall clock), on the 15th at
@@ -203,6 +337,7 @@ describe("StationScansService.applyBatch shift-ownership guard ordering (Finding
       transaction: async (fn: (tx: unknown) => Promise<unknown>) => {
         openedTransaction = true;
         const tx = {
+          execute: () => Promise.resolve(),
           insert: () => ({
             values: () => ({
               onConflictDoNothing: () => ({

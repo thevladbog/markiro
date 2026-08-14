@@ -246,6 +246,55 @@
       "when": 1786481010105,
       "tag": "0034_overconfident_harrier",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1786565510430,
+      "tag": "0035_stormy_ser_duncan",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1786648204178,
+      "tag": "0036_neat_quasar",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1786648204179,
+      "tag": "0037_kiosk_pickup_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1786648204180,
+      "tag": "0038_organization_branding",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1786648204181,
+      "tag": "0039_kiosk_sscc_orders",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1786657686545,
+      "tag": "0040_sscc_counter_start_one",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786657686546,
+      "tag": "0041_product_images",
+      "breakpoints": true
     }
   ]
 }

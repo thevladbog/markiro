@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 import { OperatorsModule } from "../operators/operators.module";
 import { PickupOrdersController } from "./pickup-orders.controller";
 import { PickupOrdersService } from "./pickup-orders.service";
+import { OrgProfileModule } from "../org-profile/org-profile.module";
 
 /**
  * Shared module for `PickupOrdersService`: `KioskModule` (device-facing,
@@ -16,7 +17,7 @@ import { PickupOrdersService } from "./pickup-orders.service";
  * duplicating them.
  */
 @Module({
-  imports: [OperatorsModule],
+  imports: [OperatorsModule, OrgProfileModule],
   controllers: [PickupOrdersController],
   providers: [PickupOrdersService],
   exports: [PickupOrdersService],
