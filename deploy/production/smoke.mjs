@@ -197,10 +197,13 @@ function requestClient() {
   return { request: (url, init) => fetch(url, init) };
 }
 
-function assertHeaders(response, requiresHsts) {
+function assertHeaders(response, requiresHsts, routeLabel) {
   const headers = response.headers;
-  if (headers.get("content-security-policy") !== CSP)
-    throw new Error("CSP is not the production policy");
+  const csp = headers.get("content-security-policy");
+  if (csp !== CSP)
+    throw new Error(
+      `CSP is ${csp === null ? "missing" : "not the production policy"} on ${routeLabel}`,
+    );
   if (
     requiresHsts &&
     headers.get("strict-transport-security") !== "max-age=63072000; includeSubDomains"
@@ -465,7 +468,7 @@ async function assertDocumentation(client, html, baseUrl) {
   for (const url of documentationScripts(html, baseUrl)) {
     const response = await publicRequest(client, url, { method: "GET" });
     const body = await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `admin ${url.pathname}`);
     if (
       response.status !== 200 ||
       !/(?:application|text)\/javascript/i.test(response.headers.get("content-type") || "")
@@ -853,7 +856,7 @@ async function runAdminSmoke(options, client) {
   )
     throw new Error("live release identity does not match the expected release");
   const rootHtml = await getText(root);
-  assertHeaders(root, new URL(baseUrl).protocol === "https:");
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "admin /");
   const signature = shellSignature(rootHtml);
   if (root.status !== 200 || !signature)
     throw new Error("root did not return the built admin shell");
@@ -875,7 +878,7 @@ async function runAdminSmoke(options, client) {
     const response =
       check.path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), init);
     const body = check.path === "/" ? rootHtml : await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `admin ${path}`);
     assertRoute(check, response, body, signature);
     if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
   }
@@ -894,7 +897,7 @@ async function runKioskSmoke(options, client, admin) {
   )
     throw new Error("live release identity does not match the expected release");
   const rootHtml = await getText(root);
-  assertHeaders(root, new URL(baseUrl).protocol === "https:");
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "kiosk /");
   const signature = kioskShellSignature(rootHtml, baseUrl);
   if (root.status !== 200 || !signature)
     throw new Error("kiosk root did not return the built kiosk shell");
@@ -913,7 +916,11 @@ async function runKioskSmoke(options, client, admin) {
     { method: "GET" },
   );
   const registration = await getText(registrationResponse);
-  assertHeaders(registrationResponse, new URL(baseUrl).protocol === "https:");
+  assertHeaders(
+    registrationResponse,
+    new URL(baseUrl).protocol === "https:",
+    `kiosk ${signature.registrationPath}`,
+  );
   if (
     registrationResponse.status !== 200 ||
     !/(?:application|text)\/javascript/i.test(
@@ -936,7 +943,7 @@ async function runKioskSmoke(options, client, admin) {
     const response =
       contractPath === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
     const body = contractPath === "/" ? rootHtml : await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `kiosk ${path}`);
     if (kind === "manifest") manifest = parseManifest(body, baseUrl);
     assertKioskRoute(check, response, body, signature, manifest, baseUrl);
   }
@@ -952,14 +959,14 @@ async function runLandingSmoke(options, client) {
   )
     throw new Error("live release identity does not match the expected release");
   const rootBody = await getText(root);
-  assertHeaders(root, new URL(baseUrl).protocol === "https:");
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "landing /");
 
   for (const check of LANDING_ROUTE_CHECKS) {
     const [method, path] = check;
     const response =
       path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
     const body = path === "/" ? rootBody : await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`);
     assertLandingRoute(check, response, body, baseUrl);
   }
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
