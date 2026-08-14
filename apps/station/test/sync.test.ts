@@ -121,6 +121,66 @@ describe("sync engine", () => {
     engine.stop();
   });
 
+  it("revalidates a pause after awaited commit bookkeeping before acknowledging the outbox", async () => {
+    const baseExec = await migratedExec();
+    await seed(baseExec, 1);
+    let markCommitStarted!: () => void;
+    let releaseCommit!: () => void;
+    const commitStarted = new Promise<void>((resolve) => {
+      markCommitStarted = resolve;
+    });
+    const commitRelease = new Promise<void>((resolve) => {
+      releaseCommit = resolve;
+    });
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async run(sql, params) {
+        if (sql.includes("INSERT INTO conflicts_mirror")) {
+          markCommitStarted();
+          await commitRelease;
+        }
+        await baseExec.run(sql, params);
+      },
+    };
+    let resolveRetry!: (value: { applied: number; alreadyApplied: boolean }) => void;
+    const retryResponse = new Promise<{ applied: number; alreadyApplied: boolean }>((resolve) => {
+      resolveRetry = resolve;
+    });
+    const post = vi
+      .fn()
+      .mockResolvedValueOnce({
+        applied: 1,
+        alreadyApplied: false,
+        conflicts: [
+          {
+            codeHash: "h1",
+            winningTerminalId: "other-terminal",
+            winningScannedAt: "2026-07-28T09:59:00.000Z",
+          },
+        ],
+      })
+      .mockReturnValueOnce(retryResponse);
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await commitStarted;
+    engine.pause();
+    engine.resume();
+    releaseCommit();
+
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(await outboxDepth(baseExec)).toBe(1);
+    resolveRetry({ applied: 1, alreadyApplied: true });
+    await engine.idle();
+    expect(await outboxDepth(baseExec)).toBe(0);
+    engine.stop();
+  });
+
   it("uses a deterministic batch id so a resend is the same key", async () => {
     const exec = await migratedExec();
     await seedInstallId(exec, "install-1");

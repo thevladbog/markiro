@@ -3459,21 +3459,16 @@ describe("App", () => {
     }
   });
 
-  // Task 13 review, Finding 2: `readShiftMirror` used to share the SAME
-  // `.catch` as `readShiftContext` inside one `Promise.all`, so a mirror-read
-  // failure -- including `applyMigrations` rethrowing a genuine (non-
-  // duplicate-column) migration error, plausible if a lock or transient error
-  // hits the `issuer_prefix` column or any ALTER before it -- rejected the
-  // WHOLE `Promise.all`. `setShiftContext` was then never called, stranding
-  // the operator on "Preparing the shift…" indefinitely. Before this task, a
-  // mirror-read failure only degraded the box feature to absent; it must not
-  // now be able to block shift entry entirely. This proves a rejected
-  // `readShiftMirror` alone still lets `shiftContext` land and the work
-  // screen render.
-  it("still reaches the work screen when readShiftMirror throws (Task 13 review, Finding 2)", async () => {
+  it("keeps sync and the floor sealed until a transient shift-mirror read is retried", async () => {
     const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
+      lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+      lockdownMock.subscribe.mockImplementation((listener) => {
+        lockdownMock.listeners.add(listener);
+        return () => lockdownMock.listeners.delete(listener);
+      });
       const pinHash = await hashSecret(OPERATOR_PIN);
+      let shiftMirrorReads = 0;
       invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
         if (cmd === "read_config") {
           return Promise.resolve({
@@ -3494,19 +3489,30 @@ describe("App", () => {
           if (/FROM operators_mirror\b/.test(query)) {
             return Promise.resolve([operatorMirrorRow(pinHash)]);
           }
-          // `readShiftContext`'s join (product_mirror) -- kept healthy, so
-          // `ctx` resolves non-null and the work screen appearing is
-          // genuinely down to `readShiftMirror`'s own rejection being
-          // tolerated, not to the poll never reaching `ctx` at all.
+          // `readShiftContext` stays healthy while the independent local
+          // recovery classification read fails once.
           if (query.includes("product_mirror")) {
             return Promise.resolve([
               { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
             ]);
           }
-          // `readShiftMirror`'s own plain select -- rejected outright, the
-          // exact failure this fix must tolerate.
           if (query.includes("shift_mirror")) {
-            return Promise.reject(new Error("simulated shift_mirror read failure"));
+            shiftMirrorReads += 1;
+            if (shiftMirrorReads === 1) {
+              return Promise.reject(new Error("simulated transient shift_mirror read failure"));
+            }
+            return Promise.resolve([
+              {
+                id: "s9",
+                status: "active",
+                mode: "validation",
+                counterparty_gln: null,
+                label_template_spec: null,
+                box_capacity: null,
+                issuer_prefix: null,
+                box_label_template_spec: null,
+              },
+            ]);
           }
           if (query.includes("station_meta")) {
             if (values?.[0] === "hardware_config") {
@@ -3578,12 +3584,18 @@ describe("App", () => {
       await waitFor(() => expect(screen.getByText("Cola")).toBeDefined());
       fireEvent.click(screen.getByRole("button", { name: "Start" }));
 
-      // Reaches the work screen despite `readShiftMirror`'s rejection --
-      // stuck on "Preparing the shift…" is exactly the bug this fix removes.
+      expect(await screen.findByText("Could not restore the print state")).toBeDefined();
+      expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
+
+      fireEvent.click(screen.getByRole("button", { name: "Retry recovery" }));
+
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
       );
-      expect(screen.queryByText("Preparing the shift…")).toBeNull();
+      // One failed classification read, one successful retry read, and one
+      // strict recovery classifier read that confirms this validation shift
+      // has no pending box recovery.
+      expect(shiftMirrorReads).toBe(3);
     } finally {
       consoleErrorSpy.mockRestore();
     }

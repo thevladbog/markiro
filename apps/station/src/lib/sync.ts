@@ -725,7 +725,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     const drainPauseEpoch = pauseEpoch;
     const pauseInvalidated = () => paused || pauseEpoch !== drainPauseEpoch;
     try {
-      for (;;) {
+      drainLoop: for (;;) {
         if (stopped || pauseInvalidated() || credentialGeneration.sealed) break;
         // A ceiling from a previous failed attempt on THIS batch — whether
         // pinned earlier in this same process or persisted by a process
@@ -901,6 +901,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           const commitLease = acquireCredentialCommitLease(credentialGeneration);
           if (!commitLease) break;
           try {
+            const commitIsCurrent = () => !pauseInvalidated() && !credentialGeneration.sealed;
+            if (!commitIsCurrent()) break drainLoop;
             // Filtered element-by-element, not all-or-nothing: dropping only
             // the malformed entry (Finding 2) keeps the rest of this batch's
             // conflicts intact. That matters more here than it would somewhere
@@ -945,6 +947,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               // authoritative record either way.
               try {
                 await recordConflicts(deps.exec, reported, new Date(now()).toISOString());
+                if (!commitIsCurrent()) break drainLoop;
                 // A still-open box corrects itself: the operator simply scans
                 // one more item. A CLOSED box is taped and labelled, so it
                 // stays as printed and ends one position short — the cabinet
@@ -953,16 +956,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 // deleting it. Same try/catch as `recordConflicts` above, for
                 // the same reason: this is bookkeeping, not delivery.
                 for (const c of reported) {
+                  if (!commitIsCurrent()) break drainLoop;
                   await deps.exec.run(
                     `UPDATE codes_mirror SET box_id = NULL
                          WHERE code_hash = ?
                            AND box_id IN (SELECT box_id FROM boxes_mirror WHERE closed_at IS NULL)`,
                     [c.codeHash],
                   );
+                  if (!commitIsCurrent()) break drainLoop;
                 }
               } catch (err) {
                 console.error("station: recording conflicts failed", err);
               }
+              if (!commitIsCurrent()) break drainLoop;
             }
             // Applied AFTER the validated response and BEFORE the ack, in its
             // own try/catch: a pool top-up that fails must not block delivery,
@@ -971,16 +977,19 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             // response carries another block. Losing one block costs at most
             // some burnt numbers, and SSCCs need not be contiguous.
             if (res.ssccBlock && isBatchSsccBlock(res.ssccBlock)) {
+              if (!commitIsCurrent()) break drainLoop;
               try {
                 await addRange(deps.exec, res.ssccBlock);
               } catch (err) {
                 console.error("station: applying serial block failed", err);
               }
+              if (!commitIsCurrent()) break drainLoop;
             }
             const denied = Array.isArray(res.denied)
               ? res.denied.filter(isDeniedStationRecord)
               : [];
             if (denied.length > 0) {
+              if (!commitIsCurrent()) break drainLoop;
               try {
                 await savePersistedValue(
                   deps.exec,
@@ -995,36 +1004,48 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                 // metadata table must not wedge every later production scan.
                 console.error("station: preserving recovery denials failed", err);
               }
+              if (!commitIsCurrent()) break drainLoop;
             }
             // `alreadyApplied` is a success: this exact batch is on the
             // server already, so holding on to it would wedge the queue
             // forever.
             if (maxId !== null) {
+              if (!commitIsCurrent()) break drainLoop;
               await ackThrough(deps.exec, maxId);
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (boxes.length > 0) {
               // `boxes` itself -- not just the ids -- so the ack can gate each
               // row on the outcome fields actually read into THIS payload
               // (Finding 6): see `ackBoxes`'s own doc comment.
+              if (!commitIsCurrent()) break drainLoop;
               await ackBoxes(deps.exec, boxes, new Date(now()).toISOString());
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (newExceptionCeiling !== null) {
+              if (!commitIsCurrent()) break drainLoop;
               await ackExceptionsThrough(deps.exec, newExceptionCeiling);
+              if (!commitIsCurrent()) break drainLoop;
             }
             // Clear the identity first, then its ceilings. A crash in between
             // leaves stale ceilings that exclude newer rows and are safely
             // discarded by the empty-prefix branch above. The reverse order
             // could expose newer rows under an already-applied batch id.
+            if (!commitIsCurrent()) break drainLoop;
             await clearPersistedCeiling(deps.exec, BATCH_ID_META_KEY);
+            if (!commitIsCurrent()) break drainLoop;
             pendingBatchId = null;
             if (pendingCeiling !== null) {
               await clearPersistedCeiling(deps.exec, CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (pendingBoxCeiling !== null) {
               await clearPersistedCeiling(deps.exec, BOX_CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
             }
             if (pendingExceptionCeiling !== null) {
               await clearPersistedCeiling(deps.exec, EXCEPTION_CEILING_META_KEY);
+              if (!commitIsCurrent()) break drainLoop;
             }
             pendingCeiling = null;
             pendingBoxCeiling = null;
