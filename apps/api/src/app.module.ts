@@ -48,6 +48,7 @@ import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
 import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
+import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 
 @Module({})
 export class AppModule {
@@ -88,6 +89,7 @@ export class AppModule {
         AuthorizationModule,
         SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
         JobsModule.forRoot(setup.databaseUrl, env),
+        DemoRequestsModule.forRoot(env),
         OrgProfileModule,
         CounterpartiesModule,
         ProductsModule,

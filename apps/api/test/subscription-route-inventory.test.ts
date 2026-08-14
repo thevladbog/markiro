@@ -322,6 +322,10 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
     reason:
       "CommerceML transport upload and export-success acknowledgement preserve recovery continuity",
   },
+  "DemoRequestsController.submit": {
+    reason:
+      "public landing submission is intentionally unauthenticated and enforces strict input, bounded rate limits, consent, captcha, and fixed recipients",
+  },
   "InvitationsController.accept": {
     reason: "public invitation token/session lifecycle is an authentication and security flow",
   },
