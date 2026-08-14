@@ -81,7 +81,9 @@ export function Select<TValue extends string = string>({
   );
   const customValue = value === "" && emptyOptionLabel !== undefined ? EMPTY_OPTION_VALUE : value;
   const visibleItemOptions = searchable
-    ? itemOptions.filter((option) => option.label.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+    ? itemOptions.filter((option) =>
+        option.label.toLocaleLowerCase().includes(search.toLocaleLowerCase()),
+      )
     : itemOptions;
 
   if (size === "floor" || native) {

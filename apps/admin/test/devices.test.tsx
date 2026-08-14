@@ -80,9 +80,7 @@ it("keeps kiosk settings reachable as a button-styled action in the unified devi
   await screen.findByText("Entrance kiosk");
   const settings = screen.getByRole("link", { name: "Настройки киоска" });
   expect(settings.className).toContain("mk-device-actions__kiosk-settings");
-  expect(settings.getAttribute("href")).toBe(
-    "/kiosks/kiosk-1/edit",
-  );
+  expect(settings.getAttribute("href")).toBe("/kiosks/kiosk-1/edit");
 });
 
 it("does not leave auth cleanup tied to the jsdom window", async () => {
