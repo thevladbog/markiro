@@ -408,6 +408,7 @@ function assertAuthorityContract(adapted, { alb }) {
               ["GET", "HEAD"],
               ["GET", "HEAD"],
               ["GET", "HEAD"],
+              ["GET", "HEAD"],
             ],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );

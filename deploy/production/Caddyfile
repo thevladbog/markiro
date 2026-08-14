@@ -182,11 +182,19 @@
 			file_server
 		}
 
-		@landingDocument method GET HEAD
+		@landingDocument {
+			file {path} {path}/index.html
+			method GET HEAD
+		}
 		handle @landingDocument {
 			header Cache-Control "no-cache"
 			try_files {path} {path}/index.html
 			file_server
+		}
+
+		@landingMissing method GET HEAD
+		handle @landingMissing {
+			respond 404
 		}
 
 		respond 404
