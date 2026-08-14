@@ -2,12 +2,17 @@
 import "@markiro/ui/styles.css";
 import "../styles/landing.css";
 
+import type { SeoPageDefinition } from "../content/pages";
+import { buildPageGraph, serializeJsonLd } from "../lib/seo";
+
 interface Props {
-  description: string;
-  title: string;
+  page: SeoPageDefinition;
 }
 
-const { description, title } = Astro.props;
+const { page } = Astro.props;
+const canonicalUrl = new URL(page.path, Astro.site);
+const socialImageUrl = new URL(page.socialImage, Astro.site);
+const jsonLd = serializeJsonLd(buildPageGraph(page));
 ---
 
 <!doctype html>
@@ -15,21 +20,29 @@ const { description, title } = Astro.props;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content={description} />
+    <meta name="description" content={page.description} />
+    <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1" />
     <meta name="theme-color" content="#131216" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="ru_RU" />
-    <meta property="og:title" content={title} />
-    <meta property="og:description" content={description} />
-    <meta property="og:url" content={new URL(Astro.url.pathname, Astro.site)} />
-    <meta property="og:image" content={new URL("/og-markiro.jpg", Astro.site)} />
+    <meta property="og:site_name" content="Markiro" />
+    <meta property="og:title" content={page.title} />
+    <meta property="og:description" content={page.description} />
+    <meta property="og:url" content={canonicalUrl} />
+    <meta property="og:image" content={socialImageUrl} />
     <meta property="og:image:width" content="1376" />
     <meta property="og:image:height" content="768" />
+    <meta property="og:image:alt" content={page.socialImageAlt} />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+    <meta name="twitter:title" content={page.title} />
+    <meta name="twitter:description" content={page.description} />
+    <meta name="twitter:image" content={socialImageUrl} />
+    <meta name="twitter:image:alt" content={page.socialImageAlt} />
+    <link rel="canonical" href={canonicalUrl} />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="manifest" href="/site.webmanifest" />
-    <title>{title}</title>
+    <title>{page.title}</title>
+    <script type="application/ld+json" set:html={jsonLd} is:inline />
   </head>
   <body>
     <a class="skip-link" href="#main">Перейти к содержанию</a>

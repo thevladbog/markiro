@@ -46,3 +46,28 @@ test("production runbooks contain no legacy deployment ceremony", async () => {
     /deployment_phase=|rollback_rehearsal=|rehearsal_run_id=|production-controller|production-cleanup/,
   );
 });
+
+test("landing publication runbook separates reachability from indexed search evidence", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  for (const required of [
+    "DNS",
+    "TLS",
+    "404",
+    "robots.txt",
+    "sitemap.xml",
+    "Google Search Console",
+    "Яндекс Вебмастер",
+    "Bing Webmaster",
+    "IndexNow",
+    "Rich Results Test",
+    "Валидатор микроразметки",
+    "CRM",
+    "consent",
+    "docs/seo/ai-search-query-pack.md",
+  ])
+    assert.match(runbook, new RegExp(required.replaceAll(".", "\\."), "i"));
+  assert.match(runbook, /D0[^\n]*только[^\n]*(?:доступност|reachability)/i);
+  assert.match(runbook, /D7/);
+  assert.match(runbook, /D30/);
+  assert.match(runbook, /field Core Web Vitals[^\n]*не[^\n]*Lighthouse/i);
+});

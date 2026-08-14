@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   KIOSK_ROUTE_CHECKS,
+  LANDING_ROUTE_CHECKS,
   productionBaseUrls,
   ROUTE_CHECKS,
   runPublicSmoke,
@@ -28,6 +29,26 @@ const kioskRegistration =
   "if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js', { scope: '/' });";
 const kioskServiceWorker =
   'precacheAndRoute([{url:"index.html",revision:"1"}],{});cleanupOutdatedCaches();registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]}));';
+const landingShell = (path = "/") =>
+  `<!doctype html><html lang="ru"><head><title>Маркировка Честный знак — Markiro</title><link rel="canonical" href="https://markiro.app${path}"></head><body><main><h1>Маркировка без остановки производства</h1></main></body></html>`;
+const landingRobots = `User-agent: *
+Allow: /
+User-agent: OAI-SearchBot
+Allow: /
+User-agent: Claude-SearchBot
+Allow: /
+User-agent: PerplexityBot
+Allow: /
+User-agent: GPTBot
+Disallow: /
+User-agent: ClaudeBot
+Disallow: /
+Sitemap: https://markiro.app/sitemap.xml
+`;
+const landingSitemap =
+  '<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/faq/</loc></url></urlset>';
+const landingLlms =
+  "# Markiro\n\n- [Главная](https://markiro.app/)\n- [Вопросы и ответы](https://markiro.app/faq/)\n";
 const docsShell =
   '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script ><script src="/docs/bootstrap.js"></script   ></body></html>';
 const docsBootstrap = `Scalar.createApiReference("#app", {
@@ -46,21 +67,25 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
     productionBaseUrls({
       MARKIRO_DOMAIN: "localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+      MARKIRO_LANDING_DOMAIN: "landing.localhost",
       MARKIRO_HTTPS_PORT: "18443",
     }),
     {
       admin: "https://localhost:18443",
       kiosk: "https://kiosk.localhost:18443",
+      landing: "https://landing.localhost:18443",
     },
   );
   assert.deepEqual(
     productionBaseUrls({
-      MARKIRO_DOMAIN: "markiro.example",
+      MARKIRO_DOMAIN: "admin.markiro.example",
       MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+      MARKIRO_LANDING_DOMAIN: "markiro.example",
     }),
     {
-      admin: "https://markiro.example",
+      admin: "https://admin.markiro.example",
       kiosk: "https://kiosk.markiro.example",
+      landing: "https://markiro.example",
     },
   );
 });
@@ -71,6 +96,7 @@ test("rejects malformed and equal smoke authorities without disclosing their val
       {
         MARKIRO_DOMAIN: "markiro.example@evil.example",
         MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+        MARKIRO_LANDING_DOMAIN: "landing.markiro.example",
       },
       "MARKIRO_DOMAIN is invalid",
       "evil.example",
@@ -79,24 +105,55 @@ test("rejects malformed and equal smoke authorities without disclosing their val
       {
         MARKIRO_DOMAIN: "markiro.example",
         MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example/private",
+        MARKIRO_LANDING_DOMAIN: "landing.markiro.example",
       },
       "MARKIRO_KIOSK_DOMAIN is invalid",
       "private",
     ],
     [
-      { MARKIRO_DOMAIN: "markiro.example", MARKIRO_KIOSK_DOMAIN: "markiro.example" },
+      {
+        MARKIRO_DOMAIN: "markiro.example",
+        MARKIRO_KIOSK_DOMAIN: "markiro.example",
+        MARKIRO_LANDING_DOMAIN: "landing.markiro.example",
+      },
       "production domains must be distinct",
       "markiro.example",
     ],
     [
-      { MARKIRO_DOMAIN: "localhost", MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example" },
+      {
+        MARKIRO_DOMAIN: "localhost",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+        MARKIRO_LANDING_DOMAIN: "landing.markiro.example",
+      },
       "MARKIRO_DOMAIN is invalid",
       "kiosk.markiro.example",
     ],
     [
-      { MARKIRO_DOMAIN: "markiro.example", MARKIRO_KIOSK_DOMAIN: "kiosk.localhost" },
+      {
+        MARKIRO_DOMAIN: "markiro.example",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+        MARKIRO_LANDING_DOMAIN: "landing.markiro.example",
+      },
       "MARKIRO_KIOSK_DOMAIN is invalid",
       "markiro.example",
+    ],
+    [
+      {
+        MARKIRO_DOMAIN: "admin.markiro.example",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+        MARKIRO_LANDING_DOMAIN: "https://markiro.example",
+      },
+      "MARKIRO_LANDING_DOMAIN is invalid",
+      "https://markiro.example",
+    ],
+    [
+      {
+        MARKIRO_DOMAIN: "admin.markiro.example",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+        MARKIRO_LANDING_DOMAIN: "admin.markiro.example",
+      },
+      "production domains must be distinct",
+      "admin.markiro.example",
     ],
   ];
 
@@ -136,6 +193,46 @@ function smokeClient(releaseSha) {
       const parsed = new URL(url);
       const path = parsed.pathname;
       const kiosk = parsed.hostname.startsWith("kiosk.");
+      const landing = parsed.hostname === "markiro.example";
+      if (landing && (path === "/" || path === "/faq/"))
+        return response({
+          body: landingShell(path),
+          headers: {
+            "cache-control": "no-cache",
+            "content-type": "text/html; charset=utf-8",
+            ...(releaseSha ? { "x-markiro-release-sha": releaseSha } : {}),
+          },
+        });
+      if (landing && path === "/robots.txt")
+        return response({
+          body: landingRobots,
+          headers: {
+            "cache-control": "public, max-age=300",
+            "content-type": "text/plain; charset=utf-8",
+          },
+        });
+      if (landing && path === "/sitemap.xml")
+        return response({
+          body: landingSitemap,
+          headers: {
+            "cache-control": "public, max-age=300",
+            "content-type": "application/xml; charset=utf-8",
+          },
+        });
+      if (landing && path === "/llms.txt")
+        return response({
+          body: landingLlms,
+          headers: {
+            "cache-control": "public, max-age=300",
+            "content-type": "text/plain; charset=utf-8",
+          },
+        });
+      if (landing)
+        return response({
+          status: 404,
+          body: "not found",
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
       if (kiosk && path === "/")
         return response({
           body: kioskShell,
@@ -231,8 +328,9 @@ test("runner public smoke exercises the external route contract without local Do
 
   await runPublicSmoke(
     {
-      adminBaseUrl: "https://markiro.example",
+      adminBaseUrl: "https://app.markiro.example",
       kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
     },
     client,
   );
@@ -253,8 +351,9 @@ test("public smoke rejects a different live release identity before exercising r
   await assert.rejects(
     runPublicSmoke(
       {
-        adminBaseUrl: "https://markiro.example",
+        adminBaseUrl: "https://app.markiro.example",
         kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
         expectedReleaseSha: "a".repeat(40),
       },
       client,
@@ -271,14 +370,63 @@ test("public smoke accepts the exact live release identity", async () => {
 
   await runPublicSmoke(
     {
-      adminBaseUrl: "https://markiro.example",
+      adminBaseUrl: "https://app.markiro.example",
       kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
       expectedReleaseSha: releaseSha,
     },
     client,
   );
 
   assert.ok(client.requests.length > 1);
+});
+
+test("landing smoke permits only the public canonical URL outside the deployment origin", async (t) => {
+  for (const [name, mutate, expected] of [
+    [
+      "external runtime asset",
+      (body) =>
+        body.replace("</head>", '<script src="https://cdn.example/app.js"></script></head>'),
+      /external origin/,
+    ],
+    [
+      "deployment-alias canonical",
+      (body) => body.replace("https://markiro.app/", "https://markiro.example/"),
+      /invalid title, canonical, or H1/,
+    ],
+    [
+      "duplicate canonical",
+      (body) =>
+        body.replace("</head>", '<link rel="canonical" href="https://markiro.app/"></head>'),
+      /invalid title, canonical, or H1/,
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const client = smokeClient();
+      const original = client.request;
+      client.request = async (url, init) => {
+        const parsed = new URL(url);
+        if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
+          return response({
+            body: mutate(landingShell()),
+            headers: { "cache-control": "no-cache", "content-type": "text/html" },
+          });
+        return original(url, init);
+      };
+
+      await assert.rejects(
+        runPublicSmoke(
+          {
+            adminBaseUrl: "https://app.markiro.example",
+            kioskBaseUrl: "https://kiosk.markiro.example",
+            landingBaseUrl: "https://markiro.example",
+          },
+          client,
+        ),
+        expected,
+      );
+    });
+  }
 });
 
 test("kiosk smoke rejects shell, origin, manifest, worker, and route-boundary mutations", async (t) => {
@@ -380,8 +528,9 @@ test("kiosk smoke rejects shell, origin, manifest, worker, and route-boundary mu
       await assert.rejects(
         runPublicSmoke(
           {
-            adminBaseUrl: "https://markiro.example",
+            adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             expectedReleaseSha: releaseSha,
           },
           client,
@@ -453,6 +602,19 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["POST", "/unknown", "not-found"],
   ]);
   for (const check of KIOSK_ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
+
+  assert.ok(Object.isFrozen(LANDING_ROUTE_CHECKS));
+  assert.deepEqual(LANDING_ROUTE_CHECKS, [
+    ["GET", "/", "landing-page"],
+    ["GET", "/faq/", "landing-page"],
+    ["GET", "/robots.txt", "robots"],
+    ["GET", "/sitemap.xml", "sitemap"],
+    ["GET", "/llms.txt", "llms"],
+    ["GET", "/api/demo-requests", "not-found"],
+    ["POST", "/api/demo-requests", "not-found"],
+    ["GET", "/missing/", "not-found"],
+  ]);
+  for (const check of LANDING_ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
 });
 
 test("smokes public routing, headers, and unprivileged runtime without accepting a proxied SPA", async () => {
@@ -472,6 +634,7 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
     {
       adminBaseUrl: "https://app.markiro.example",
       kioskBaseUrl: "https://kiosk.app.markiro.example",
+      landingBaseUrl: "https://markiro.example",
       assetName: "main.js",
       environment: {},
     },
@@ -479,7 +642,10 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
     docker,
   );
 
-  assert.equal(client.requests.length, ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + 3);
+  assert.equal(
+    client.requests.length,
+    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 3,
+  );
   assert.deepEqual(
     client.requests
       .map(({ url }) => new URL(url).pathname)
@@ -519,6 +685,7 @@ test("rejects an API container with an actual host port binding", async () => {
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: {},
         },
@@ -550,6 +717,7 @@ test("accepts only exact no-binding PortBindings shapes", async (t) => {
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: {},
         },
@@ -584,6 +752,7 @@ test("rejects every non-null PortBindings value, including empty arrays", async 
           {
             adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.app.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             assetName: "main.js",
             environment: {},
           },
@@ -620,6 +789,7 @@ test("rejects missing or invalid API host-port inspection output", async () => {
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: {},
         },
@@ -644,6 +814,7 @@ test("requires the pruned API runtime to exclude Playwright and OpenTelemetry", 
   const options = {
     adminBaseUrl: "https://app.markiro.example",
     kioskBaseUrl: "https://kiosk.app.markiro.example",
+    landingBaseUrl: "https://markiro.example",
     assetName: "main.js",
     environment: { SMOKE_ASSERT_DEPENDENCY_ISOLATION: "1" },
   };
@@ -707,6 +878,7 @@ test("rejects every unavailable API container ID before inspect", async (t) => {
           {
             adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.app.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             assetName: "main.js",
             environment: {},
           },
@@ -744,6 +916,7 @@ test("rejects an admin shell on an API response", async () => {
       {
         adminBaseUrl: "https://app.markiro.example",
         kioskBaseUrl: "https://kiosk.app.markiro.example",
+        landingBaseUrl: "https://markiro.example",
         assetName: "main.js",
         environment: {},
       },
@@ -776,6 +949,7 @@ test("rejects an external origin in the built root", async () => {
       {
         adminBaseUrl: "https://app.markiro.example",
         kioskBaseUrl: "https://kiosk.app.markiro.example",
+        landingBaseUrl: "https://markiro.example",
         assetName: "main.js",
         environment: {},
       },
@@ -812,6 +986,7 @@ test("accepts the exact Nest 11 JSON 404 for the absent station bootstrap endpoi
     {
       adminBaseUrl: "https://app.markiro.example",
       kioskBaseUrl: "https://kiosk.app.markiro.example",
+      landingBaseUrl: "https://markiro.example",
       assetName: "main.js",
       environment: {},
     },
@@ -849,6 +1024,7 @@ test("preserves valid JSON 200, 401, and 403 station responses", async (t) => {
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: {},
         },
@@ -897,6 +1073,7 @@ test("rejects arbitrary JSON 404 bodies for station bootstrap", async (t) => {
           {
             adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.app.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             assetName: "main.js",
             environment: {},
           },
@@ -947,6 +1124,7 @@ test("rejects an edge 404 for station bootstrap and proxy 404s elsewhere", async
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: {},
         },
@@ -983,6 +1161,7 @@ test(
           {
             adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.app.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             assetName: "main.js",
             environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
             commandTimeoutMs: 5,
@@ -1017,6 +1196,7 @@ test(
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
           commandTimeoutMs: 5,
@@ -1049,6 +1229,7 @@ test("restores the API through the fixed CI image override when requested", asyn
     {
       adminBaseUrl: "https://app.markiro.example",
       kioskBaseUrl: "https://kiosk.app.markiro.example",
+      landingBaseUrl: "https://markiro.example",
       assetName: "main.js",
       environment: {
         MARKIRO_ENV_FILE: "/private/ci.env",
@@ -1097,6 +1278,7 @@ test("reports a restore failure after attempting shutdown", async () => {
       {
         adminBaseUrl: "https://app.markiro.example",
         kioskBaseUrl: "https://kiosk.app.markiro.example",
+        landingBaseUrl: "https://markiro.example",
         assetName: "main.js",
         environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
         commandTimeoutMs: 5,
@@ -1127,6 +1309,7 @@ test("surfaces both sanitized shutdown and restoration failures", async () => {
       {
         adminBaseUrl: "https://app.markiro.example",
         kioskBaseUrl: "https://kiosk.app.markiro.example",
+        landingBaseUrl: "https://markiro.example",
         assetName: "main.js",
         environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
       },
@@ -1166,6 +1349,7 @@ test("rejects unclean stopped container states and always restores the API", asy
         {
           adminBaseUrl: "https://app.markiro.example",
           kioskBaseUrl: "https://kiosk.app.markiro.example",
+          landingBaseUrl: "https://markiro.example",
           assetName: "main.js",
           environment: { SMOKE_ASSERT_SHUTDOWN: "1" },
         },
@@ -1205,6 +1389,7 @@ test("rejects an unknown route with an HTML content type and structurally distin
       {
         adminBaseUrl: "https://app.markiro.example",
         kioskBaseUrl: "https://kiosk.app.markiro.example",
+        landingBaseUrl: "https://markiro.example",
         assetName: "main.js",
         environment: {},
       },
@@ -1227,6 +1412,7 @@ test("rejects an unknown route with an HTML content type and structurally distin
     {
       adminBaseUrl: "https://app.markiro.example",
       kioskBaseUrl: "https://kiosk.app.markiro.example",
+      landingBaseUrl: "https://markiro.example",
       assetName: "main.js",
       environment: {},
     },
@@ -1271,6 +1457,7 @@ test("rejects documentation that cannot execute under the production CSP", async
           {
             adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.app.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             assetName: "main.js",
             environment: {},
           },
@@ -1355,6 +1542,7 @@ test("rejects unavailable documentation scripts and a bootstrap with the wrong d
           {
             adminBaseUrl: "https://app.markiro.example",
             kioskBaseUrl: "https://kiosk.app.markiro.example",
+            landingBaseUrl: "https://markiro.example",
             assetName: "main.js",
             environment: {},
           },

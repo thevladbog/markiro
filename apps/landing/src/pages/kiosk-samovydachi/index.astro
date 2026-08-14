@@ -1,0 +1,9 @@
+---
+import SeoArticle from "../../components/SeoArticle.astro";
+import { findSeoPage } from "../../content/pages";
+import { readPublicSiteConfig } from "../../lib/site-config";
+
+const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<SeoArticle page={findSeoPage("/kiosk-samovydachi/")} phone={config.phone} />

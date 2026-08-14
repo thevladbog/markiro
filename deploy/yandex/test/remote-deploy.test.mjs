@@ -169,6 +169,7 @@ function environment(overrides = {}) {
     GHCR_TOKEN: "masked-job-token",
     MARKIRO_DOMAIN: "admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+    MARKIRO_LANDING_DOMAIN: "markiro.example",
     ACME_EMAIL: "ops@example.test",
     ...overrides,
   };
@@ -221,6 +222,7 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   assert.match(prepare.input, /GHCR_USERNAME/);
   assert.match(prepare.input, /GHCR_TOKEN/);
   assert.ok(prepare.args.includes("MARKIRO_EDGE_MODE=direct"));
+  assert.ok(prepare.args.includes("MARKIRO_LANDING_DOMAIN=markiro.example"));
   assert.ok(prepare.args.includes("ACME_EMAIL=ops@example.test"));
   assert.ok(prepare.args.includes(`--working-directory=/opt/markiro/releases/${COMMIT}`));
   assert.deepEqual(prepare.args.slice(-6), [

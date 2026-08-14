@@ -6,6 +6,7 @@ describe("readPublicSiteConfig", () => {
   it("keeps optional contact channels absent instead of inventing placeholders", () => {
     expect(readPublicSiteConfig({})).toEqual({
       demoEndpoint: null,
+      legalLinks: null,
       phone: null,
     });
   });
@@ -29,25 +30,47 @@ describe("readPublicSiteConfig", () => {
     },
   );
 
-  it("accepts only a credential-free HTTPS lead endpoint", () => {
+  it("uses only the fixed same-origin lead route when legal links are configured", () => {
+    expect(
+      readPublicSiteConfig({
+        PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
+        PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
+      }),
+    ).toEqual({
+      demoEndpoint: "/api/demo-requests",
+      legalLinks: {
+        consent: "/personal-data-consent/",
+        privacy: "/privacy/",
+      },
+      phone: null,
+    });
+
+    expect(() => readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toThrow(
+      "demo submission requires privacy and personal-data consent paths",
+    );
+
+    expect(() =>
+      readPublicSiteConfig({
+        PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
+        PUBLIC_PRIVACY_POLICY_PATH: "https://other.example/privacy",
+      }),
+    ).toThrow("PUBLIC_PRIVACY_POLICY_PATH must be a same-origin absolute path");
+  });
+
+  it("does not accept a public cross-origin lead endpoint", () => {
     expect(
       readPublicSiteConfig({
         PUBLIC_DEMO_ENDPOINT: "https://admin.markiro.app/public/demo-requests",
-      }).demoEndpoint,
-    ).toBe("https://admin.markiro.app/public/demo-requests");
-
-    expect(() =>
-      readPublicSiteConfig({ PUBLIC_DEMO_ENDPOINT: "http://markiro.app/leads" }),
-    ).toThrow("PUBLIC_DEMO_ENDPOINT must use HTTPS");
-
-    expect(() =>
-      readPublicSiteConfig({ PUBLIC_DEMO_ENDPOINT: "https://token@markiro.app/leads" }),
-    ).toThrow("PUBLIC_DEMO_ENDPOINT must not contain credentials");
+      }),
+    ).toEqual({ demoEndpoint: null, legalLinks: null, phone: null });
   });
 
   it("treats whitespace-only values as absent", () => {
-    expect(readPublicSiteConfig({ PUBLIC_DEMO_ENDPOINT: "  ", PUBLIC_PHONE: "  " })).toEqual({
+    expect(readPublicSiteConfig({ PUBLIC_PHONE: "  " })).toEqual({
       demoEndpoint: null,
+      legalLinks: null,
       phone: null,
     });
   });

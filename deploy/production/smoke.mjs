@@ -8,6 +8,7 @@ import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs"
 
 const CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const LANDING_SITE_URL = "https://markiro.app";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 function timeoutError(command, timeoutMs) {
@@ -115,24 +116,42 @@ export const KIOSK_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["POST", "/unknown", "not-found"]),
 ]);
 
+export const LANDING_ROUTE_CHECKS = Object.freeze([
+  Object.freeze(["GET", "/", "landing-page"]),
+  Object.freeze(["GET", "/faq/", "landing-page"]),
+  Object.freeze(["GET", "/robots.txt", "robots"]),
+  Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
+  Object.freeze(["GET", "/llms.txt", "llms"]),
+  Object.freeze(["GET", "/api/demo-requests", "not-found"]),
+  Object.freeze(["POST", "/api/demo-requests", "not-found"]),
+  Object.freeze(["GET", "/missing/", "not-found"]),
+]);
+
 function productionBaseUrl(domain, port) {
   const authority = port && port !== "443" ? `${domain}:${port}` : domain;
   return `https://${authority}`;
 }
 
 export function productionBaseUrls(environment) {
-  const { domain, kioskDomain } = validateProductionDomains(
+  const { domain, kioskDomain, landingDomain } = validateProductionDomains(
     environment.MARKIRO_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
+    environment.MARKIRO_LANDING_DOMAIN,
   );
-  const isLocalPair = domain === "localhost" && kioskDomain === "kiosk.localhost";
-  if (domain === "localhost" && !isLocalPair) throw new Error("MARKIRO_DOMAIN is invalid");
-  if (kioskDomain === "kiosk.localhost" && !isLocalPair)
+  const isLocalSet =
+    domain === "localhost" &&
+    kioskDomain === "kiosk.localhost" &&
+    landingDomain === "landing.localhost";
+  if (domain === "localhost" && !isLocalSet) throw new Error("MARKIRO_DOMAIN is invalid");
+  if (kioskDomain === "kiosk.localhost" && !isLocalSet)
     throw new Error("MARKIRO_KIOSK_DOMAIN is invalid");
+  if (landingDomain === "landing.localhost" && !isLocalSet)
+    throw new Error("MARKIRO_LANDING_DOMAIN is invalid");
   const port = environment.MARKIRO_HTTPS_PORT;
   return {
     admin: productionBaseUrl(domain, port),
     kiosk: productionBaseUrl(kioskDomain, port),
+    landing: productionBaseUrl(landingDomain, port),
   };
 }
 
@@ -178,10 +197,13 @@ function requestClient() {
   return { request: (url, init) => fetch(url, init) };
 }
 
-function assertHeaders(response, requiresHsts) {
+function assertHeaders(response, requiresHsts, routeLabel) {
   const headers = response.headers;
-  if (headers.get("content-security-policy") !== CSP)
-    throw new Error("CSP is not the production policy");
+  const csp = headers.get("content-security-policy");
+  if (csp !== CSP)
+    throw new Error(
+      `CSP is ${csp === null ? "missing" : "not the production policy"} on ${routeLabel}`,
+    );
   if (
     requiresHsts &&
     headers.get("strict-transport-security") !== "max-age=63072000; includeSubDomains"
@@ -238,20 +260,97 @@ function kioskShellSignature(html, baseUrl) {
   };
 }
 
-function assertNoExternalOrigins(html, baseUrl) {
+function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl) {
+  let runtimeHtml = html;
+  if (allowedCanonicalUrl) {
+    runtimeHtml = runtimeHtml.replace(/<link\b([^>]*)>/gi, (tag, attributes) => {
+      const rel = attributes.match(/\brel\s*=\s*["']([^"']+)["']/i)?.[1];
+      const href = attributes.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+      return rel?.split(/\s+/).some((value) => value.toLowerCase() === "canonical") &&
+        href === allowedCanonicalUrl
+        ? ""
+        : tag;
+    });
+  }
   const assertUrl = (value) => {
     if (value.startsWith("//")) throw new Error("built index contains an external origin");
     if (/^https?:\/\//i.test(value) && new URL(value).origin !== new URL(baseUrl).origin)
       throw new Error("built index contains an external origin");
   };
-  for (const match of html.matchAll(
+  for (const match of runtimeHtml.matchAll(
     /\b(?:src|href|action|poster|formaction)\s*=\s*["']([^"']+)["']/gi,
   )) {
     assertUrl(match[1]);
   }
-  for (const match of html.matchAll(/\bsrcset\s*=\s*["']([^"']+)["']/gi)) {
+  for (const match of runtimeHtml.matchAll(/\bsrcset\s*=\s*["']([^"']+)["']/gi)) {
     for (const source of match[1].split(",")) assertUrl(source.trim().split(/\s+/, 1)[0]);
   }
+}
+
+function landingPageSignature(html, expectedUrl) {
+  const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
+  const canonicals = [...html.matchAll(/<link\b([^>]*)>/gi)]
+    .map((match) => match[1])
+    .filter((attributes) => /\brel\s*=\s*["'][^"']*\bcanonical\b[^"']*["']/i.test(attributes));
+  const canonical = canonicals[0]?.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+  const headings = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
+  if (!title || canonicals.length !== 1 || canonical !== expectedUrl || headings.length !== 1)
+    return null;
+  return { title, canonical };
+}
+
+function assertLandingRoute(check, response, body, baseUrl) {
+  const [, path, kind] = check;
+  const contentType = response.headers.get("content-type") || "";
+  if (kind === "not-found") {
+    if (response.status !== 404 || /text\/html/i.test(contentType))
+      throw new Error(`landing ${path} did not return a non-HTML 404`);
+    return;
+  }
+  if (response.status !== 200) throw new Error(`landing ${path} is unavailable`);
+
+  if (kind === "landing-page") {
+    if (!/text\/html/i.test(contentType)) throw new Error(`landing ${path} is not HTML`);
+    const expectedUrl = new URL(path, `${LANDING_SITE_URL}/`).href;
+    if (!landingPageSignature(body, expectedUrl))
+      throw new Error(`landing ${path} has an invalid title, canonical, or H1`);
+    if (response.headers.get("cache-control") !== "no-cache")
+      throw new Error(`landing ${path} is not revalidation-only`);
+    assertNoExternalOrigins(body, baseUrl, expectedUrl);
+    return;
+  }
+
+  if (response.headers.get("cache-control") !== "public, max-age=300")
+    throw new Error(`landing ${path} has an invalid cache policy`);
+  if (kind === "robots") {
+    if (
+      !/text\/plain/i.test(contentType) ||
+      !/User-agent:\s*OAI-SearchBot[\s\S]*?Allow:\s*\//i.test(body) ||
+      !/User-agent:\s*Claude-SearchBot[\s\S]*?Allow:\s*\//i.test(body) ||
+      !/User-agent:\s*PerplexityBot[\s\S]*?Allow:\s*\//i.test(body) ||
+      !/User-agent:\s*GPTBot[\s\S]*?Disallow:\s*\//i.test(body) ||
+      !/User-agent:\s*ClaudeBot[\s\S]*?Disallow:\s*\//i.test(body) ||
+      !body.includes(`Sitemap: ${new URL("/sitemap.xml", `${LANDING_SITE_URL}/`).href}`)
+    )
+      throw new Error("landing robots policy does not preserve search and training boundaries");
+    return;
+  }
+  if (kind === "sitemap") {
+    if (
+      !/(?:application|text)\/xml/i.test(contentType) ||
+      !body.includes(`<loc>${new URL("/", `${LANDING_SITE_URL}/`).href}</loc>`) ||
+      !body.includes(`<loc>${new URL("/faq/", `${LANDING_SITE_URL}/`).href}</loc>`)
+    )
+      throw new Error("landing sitemap does not expose canonical topic routes");
+    return;
+  }
+  if (
+    kind !== "llms" ||
+    !/text\/plain/i.test(contentType) ||
+    !body.includes(new URL("/", `${LANDING_SITE_URL}/`).href) ||
+    !body.includes(new URL("/faq/", `${LANDING_SITE_URL}/`).href)
+  )
+    throw new Error("landing llms index does not expose canonical topic routes");
 }
 
 function parseManifest(body, baseUrl) {
@@ -369,7 +468,7 @@ async function assertDocumentation(client, html, baseUrl) {
   for (const url of documentationScripts(html, baseUrl)) {
     const response = await publicRequest(client, url, { method: "GET" });
     const body = await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `admin ${url.pathname}`);
     if (
       response.status !== 200 ||
       !/(?:application|text)\/javascript/i.test(response.headers.get("content-type") || "")
@@ -757,7 +856,7 @@ async function runAdminSmoke(options, client) {
   )
     throw new Error("live release identity does not match the expected release");
   const rootHtml = await getText(root);
-  assertHeaders(root, new URL(baseUrl).protocol === "https:");
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "admin /");
   const signature = shellSignature(rootHtml);
   if (root.status !== 200 || !signature)
     throw new Error("root did not return the built admin shell");
@@ -779,7 +878,7 @@ async function runAdminSmoke(options, client) {
     const response =
       check.path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), init);
     const body = check.path === "/" ? rootHtml : await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `admin ${path}`);
     assertRoute(check, response, body, signature);
     if (check.kind === "docs") await assertDocumentation(client, body, baseUrl);
   }
@@ -798,7 +897,7 @@ async function runKioskSmoke(options, client, admin) {
   )
     throw new Error("live release identity does not match the expected release");
   const rootHtml = await getText(root);
-  assertHeaders(root, new URL(baseUrl).protocol === "https:");
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "kiosk /");
   const signature = kioskShellSignature(rootHtml, baseUrl);
   if (root.status !== 200 || !signature)
     throw new Error("kiosk root did not return the built kiosk shell");
@@ -817,7 +916,11 @@ async function runKioskSmoke(options, client, admin) {
     { method: "GET" },
   );
   const registration = await getText(registrationResponse);
-  assertHeaders(registrationResponse, new URL(baseUrl).protocol === "https:");
+  assertHeaders(
+    registrationResponse,
+    new URL(baseUrl).protocol === "https:",
+    `kiosk ${signature.registrationPath}`,
+  );
   if (
     registrationResponse.status !== 200 ||
     !/(?:application|text)\/javascript/i.test(
@@ -840,9 +943,31 @@ async function runKioskSmoke(options, client, admin) {
     const response =
       contractPath === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
     const body = contractPath === "/" ? rootHtml : await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:");
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `kiosk ${path}`);
     if (kind === "manifest") manifest = parseManifest(body, baseUrl);
     assertKioskRoute(check, response, body, signature, manifest, baseUrl);
+  }
+  return { releaseSha: root.headers.get("x-markiro-release-sha") };
+}
+
+async function runLandingSmoke(options, client) {
+  const baseUrl = options.landingBaseUrl.replace(/\/$/, "");
+  const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
+  if (
+    options.expectedReleaseSha &&
+    root.headers.get("x-markiro-release-sha") !== options.expectedReleaseSha
+  )
+    throw new Error("live release identity does not match the expected release");
+  const rootBody = await getText(root);
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "landing /");
+
+  for (const check of LANDING_ROUTE_CHECKS) {
+    const [method, path] = check;
+    const response =
+      path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
+    const body = path === "/" ? rootBody : await getText(response);
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`);
+    assertLandingRoute(check, response, body, baseUrl);
   }
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
 }
@@ -850,14 +975,19 @@ async function runKioskSmoke(options, client, admin) {
 export async function runPublicSmoke(options, client = requestClient()) {
   const admin = await runAdminSmoke(options, client);
   const kiosk = await runKioskSmoke(options, client, admin);
-  if (!options.expectedReleaseSha && (admin.releaseSha || kiosk.releaseSha)) {
-    if (!admin.releaseSha || admin.releaseSha !== kiosk.releaseSha)
+  const landing = await runLandingSmoke(options, client);
+  if (!options.expectedReleaseSha && (admin.releaseSha || kiosk.releaseSha || landing.releaseSha)) {
+    if (
+      !admin.releaseSha ||
+      admin.releaseSha !== kiosk.releaseSha ||
+      admin.releaseSha !== landing.releaseSha
+    )
       throw new Error("live authorities do not serve the same release");
   }
 }
 
 /**
- * @param {{adminBaseUrl: string, kioskBaseUrl: string, assetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
+ * @param {{adminBaseUrl: string, kioskBaseUrl: string, landingBaseUrl: string, assetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
  * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
  * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
  */
@@ -879,10 +1009,11 @@ export async function runSmoke(options, client = requestClient(), docker) {
 
 if (isMainModule(import.meta.url)) {
   try {
-    const { admin, kiosk } = productionBaseUrls(process.env);
+    const { admin, kiosk, landing } = productionBaseUrls(process.env);
     await runSmoke({
       adminBaseUrl: admin,
       kioskBaseUrl: kiosk,
+      landingBaseUrl: landing,
       expectedReleaseSha: process.env.MARKIRO_IMAGE_TAG,
       environment: process.env,
     });

@@ -140,6 +140,17 @@ variable "kiosk_domain" {
   }
 }
 
+variable "landing_domain" {
+  description = "Exact public landing authority served directly by Caddy."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.landing_domain)) && var.landing_domain != var.domain && var.landing_domain != var.kiosk_domain
+    error_message = "landing_domain must be a lowercase fully-qualified domain name distinct from admin and kiosk."
+  }
+}
+
 variable "dns_zone_id" {
   description = "Existing public Cloud DNS zone ID."
   type        = string
@@ -147,7 +158,7 @@ variable "dns_zone_id" {
 }
 
 variable "public_dns_enabled" {
-  description = "Whether both direct-VM A records are published."
+  description = "Whether all direct-VM A records are published."
   type        = bool
   default     = false
   nullable    = false

@@ -1,0 +1,74 @@
+---
+import type { PublicPhone } from "../lib/site-config";
+import type { SeoPageDefinition } from "../content/pages";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Breadcrumbs from "./Breadcrumbs.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+import RelatedPages from "./RelatedPages.astro";
+
+interface Props {
+  page: SeoPageDefinition;
+  phone: PublicPhone | null;
+}
+
+const { page, phone } = Astro.props;
+---
+
+<BaseLayout page={page}>
+  <LandingHeader phone={phone} />
+  <main id="main" class="seo-page">
+    <header class="seo-hero">
+      <div class="container seo-hero__inner">
+        <Breadcrumbs page={page} />
+        <p class="section-index">{page.eyebrow}</p>
+        <h1>{page.heading}</h1>
+        <p class="seo-hero__lead">{page.introduction}</p>
+        <a class="button" href="/#demo" data-analytics="landing_demo_click" data-placement="seo-hero">
+          Обсудить задачу <span aria-hidden="true">→</span>
+        </a>
+      </div>
+    </header>
+
+    <article class="container seo-article">
+      {page.sections.map((section, index) => (
+        <section aria-labelledby={`section-${index}`}>
+          <p class="section-index">{String(index + 1).padStart(2, "0")}</p>
+          <h2 id={`section-${index}`}>{section.heading}</h2>
+          {section.paragraphs.map((paragraph) => <p>{paragraph}</p>)}
+          {section.bullets && <ul>{section.bullets.map((bullet) => <li>{bullet}</li>)}</ul>}
+        </section>
+      ))}
+
+      {page.faq && (
+        <div class="faq-list">
+          {page.faq.map((entry) => (
+            <section data-faq-item>
+              <h2>{entry.question}</h2>
+              <p>{entry.answer}</p>
+            </section>
+          ))}
+        </div>
+      )}
+
+      <RelatedPages page={page} />
+    </article>
+
+    <section class="seo-cta" aria-labelledby="seo-cta-title">
+      <div class="container seo-cta__inner">
+        <div>
+          <p class="section-index">Демонстрация на вашем процессе</p>
+          <h2 id="seo-cta-title">Проверим сценарий на данных вашей линии.</h2>
+        </div>
+        <a class="button" href="/#demo">Запросить демонстрацию <span aria-hidden="true">→</span></a>
+      </div>
+    </section>
+  </main>
+  <LandingFooter />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>
