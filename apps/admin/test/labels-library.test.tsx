@@ -144,11 +144,25 @@ describe("LabelTemplatesPage", () => {
 
     expect(await screen.findByText("Короб 100×100 v3")).toBeDefined();
     expect(screen.getByText("Единица 58×40")).toBeDefined();
-    expect(screen.getByText("100×100 мм")).toBeDefined();
-    expect(screen.getByText("58×40 мм")).toBeDefined();
+    expect(screen.getByText("100.0×100.0 мм")).toBeDefined();
+    expect(screen.getByText("58.0×40.0 мм")).toBeDefined();
     expect(screen.getAllByText("203 dpi")).toHaveLength(2);
     expect(screen.getByText("ZPL")).toBeDefined();
     expect(screen.getByText("TSPL")).toBeDefined();
+  });
+
+  it("rounds imported label dimensions to one decimal place in the card badge", async () => {
+    stubFetch([
+      {
+        ...UNIT_SUMMARY,
+        widthMm: 57.99666666666667,
+        heightMm: 39.962666666666664,
+      },
+    ]);
+
+    renderPage();
+
+    expect(await screen.findByText("58.0×40.0 мм")).toBeDefined();
   });
 
   it("renders a thumbnail <canvas> per card without crashing under jsdom's ctx-less canvas", async () => {

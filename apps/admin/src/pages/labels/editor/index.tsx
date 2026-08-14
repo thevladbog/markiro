@@ -324,7 +324,7 @@ function LabelEditorContent({
               aria-label={t("pages.labels.editor.widthLabel")}
               type="number"
               mono
-              value={spec.widthMm}
+              value={spec.widthMm.toFixed(1)}
               onChange={(event) =>
                 handleLabelResize(Number(event.target.value) || 0, spec.heightMm)
               }
@@ -334,7 +334,7 @@ function LabelEditorContent({
               aria-label={t("pages.labels.editor.heightLabel")}
               type="number"
               mono
-              value={spec.heightMm}
+              value={spec.heightMm.toFixed(1)}
               onChange={(event) => handleLabelResize(spec.widthMm, Number(event.target.value) || 0)}
               style={{ width: 90 }}
             />
