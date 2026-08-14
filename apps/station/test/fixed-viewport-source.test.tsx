@@ -116,6 +116,26 @@ describe("fixed station viewport source contract", () => {
     );
   });
 
+  it("gives box progress most of the work surface at 1024px without hiding the product photo", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-screen__primary\s*\{[^}]*grid-template-rows:\s*minmax\(124px, 0\.55fr\) minmax\(0, 1\.45fr\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(150px, 0\.65fr\);[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__image\s*\{[^}]*width:\s*96px;[^}]*height:\s*96px;/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-box-fill__readout strong\s*\{[^}]*font:\s*var\(--floor-counter-sm\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result__normalized\s*\{[^}]*-webkit-line-clamp:\s*3;/s,
+    );
+  });
+
   it("keeps every print-recovery action floor-sized in a bounded no-scroll dialog", () => {
     const recovery = stationSource("ui/BoxPrintRecovery.tsx");
     const css = stationSource("station.css");
