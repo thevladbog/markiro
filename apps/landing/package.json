@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "astro dev --port 5473",
     "build": "astro build",
+    "audit": "node --experimental-strip-types src/lib/audit.ts dist",
     "preview": "astro preview --port 5473",
     "lint": "eslint \"src/**/*.ts\" astro.config.mjs",
     "typecheck": "astro check",
