@@ -1137,6 +1137,53 @@ input:focus-visible {
   font: 400 0.75rem / 1.2 var(--font-ui);
 }
 
+.demo-form__honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.demo-form__consent {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: start;
+}
+
+.demo-form__consent input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.125rem;
+  accent-color: var(--accent);
+}
+
+.demo-form__consent label {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.demo-form__consent .field-error {
+  grid-column: 2;
+}
+
+.demo-form__consent a,
+.form-legal a {
+  color: var(--fg-1);
+  text-underline-offset: 0.18em;
+}
+
+.demo-form__captcha {
+  display: grid;
+}
+
+.smart-captcha {
+  min-height: 6.25rem;
+  overflow: hidden;
+}
+
 .demo-form__submit {
   width: 100%;
   margin-top: var(--sp-2);

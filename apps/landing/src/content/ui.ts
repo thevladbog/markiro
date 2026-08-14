@@ -50,17 +50,18 @@ const RU = {
     demo: {
       company: "Компания",
       contactNote: "Контактный телефон появится после подключения публичной линии.",
+      email: "Email",
       heading: "Покажем Markiro на вашей линии.",
       kicker: "07 / ДЕМО НА ВАШЕЙ ЛИНИИ",
       lead: "Разберём ваш процесс и покажем рабочий сценарий без абстрактной презентации.",
       legal: {
         consent: "согласие на обработку персональных данных",
-        prefix: "Отправляя форму, вы принимаете",
+        prefix: "Я принимаю",
         privacy: "политикой обработки данных",
-        separator: "и подтверждаете, что ознакомились с",
+        separator: "и подтверждаю, что ознакомился с",
       },
       name: "Как к вам обращаться",
-      phone: "Телефон для связи",
+      phone: "Телефон для связи (необязательно)",
       unavailable:
         "Онлайн-отправка будет доступна после подключения CRM и утверждения документов об обработке данных.",
     },
@@ -206,17 +207,18 @@ const EN = {
     demo: {
       company: "Company",
       contactNote: "A contact number will appear when the public phone line is connected.",
+      email: "Email",
       heading: "See Markiro on your production line.",
       kicker: "07 / DEMO ON YOUR LINE",
       lead: "We will examine your process and demonstrate a working scenario instead of an abstract presentation.",
       legal: {
         consent: "personal-data processing consent",
-        prefix: "By submitting this form, you accept the",
+        prefix: "I accept the",
         privacy: "data processing policy",
-        separator: "and confirm that you have read the",
+        separator: "and confirm that I have read the",
       },
       name: "Your name",
-      phone: "Contact phone",
+      phone: "Contact phone (optional)",
       unavailable:
         "Online submission will be available after the CRM connection and data-processing documents are approved.",
     },

@@ -1,5 +1,15 @@
 import { expect, test } from "@playwright/test";
 
+test.beforeEach(async ({ page }) => {
+  await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
+    await route.fulfill({
+      body: "window.smartCaptcha = { reset() {} };",
+      contentType: "application/javascript",
+      status: 200,
+    });
+  });
+});
+
 const routes = [
   "/",
   "/markirovka-chestny-znak/",
@@ -28,6 +38,89 @@ const MARKIRO_MODULE_LAYOUT = [
   { position: "3-2", row: "4", column: "3", color: "rgb(250, 250, 248)" },
   { position: "4-1", row: "5", column: "2", color: "rgb(61, 220, 122)" },
 ];
+
+const demoCases = [
+  {
+    company: "Завод Север",
+    emailInput: " ANNA@EXAMPLE.TEST ",
+    expectedPayload: {
+      captchaToken: "ru-captcha-token",
+      company: "Завод Север",
+      consentVersion: "2026-08-14",
+      email: "anna@example.test",
+      locale: "ru",
+      name: "Анна",
+      phone: "+79991234567",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      sourcePath: "/",
+      website: "",
+    },
+    name: "Анна",
+    path: "/",
+    phone: "8 (999) 123-45-67",
+    success: "Запрос получили",
+    token: "ru-captcha-token",
+  },
+  {
+    company: "Factory",
+    emailInput: " ADA@EXAMPLE.TEST ",
+    expectedPayload: {
+      captchaToken: "en-captcha-token",
+      company: "Factory",
+      consentVersion: "2026-08-14",
+      email: "ada@example.test",
+      locale: "en",
+      name: "Ada",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      sourcePath: "/en/",
+      website: "",
+    },
+    name: "Ada",
+    path: "/en/",
+    phone: "",
+    success: "Request received",
+    token: "en-captcha-token",
+  },
+] as const;
+
+for (const demoCase of demoCases) {
+  test(`${demoCase.path} submits the exact localized demo request`, async ({ page }) => {
+    await page.addInitScript((requestId) => {
+      Object.defineProperty(window.crypto, "randomUUID", { value: () => requestId });
+    }, demoCase.expectedPayload.requestId);
+
+    let requestPayload: unknown;
+    await page.route("**/api/demo-requests", async (route) => {
+      requestPayload = route.request().postDataJSON();
+      await route.fulfill({
+        body: JSON.stringify({ accepted: true, requestId: demoCase.expectedPayload.requestId }),
+        contentType: "application/json",
+        status: 202,
+      });
+    });
+
+    await page.goto(demoCase.path);
+    const form = page.locator("form[data-demo-form]");
+    await form.locator('input[name="name"]').fill(demoCase.name);
+    await form.locator('input[name="company"]').fill(demoCase.company);
+    await form.locator('input[name="email"]').fill(demoCase.emailInput);
+    if (demoCase.phone.length > 0) {
+      await form.locator('input[name="phone"]').fill(demoCase.phone);
+    }
+    await form.locator('input[name="consent"]').check();
+    await form.evaluate((element, token) => {
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "smart-token";
+      input.value = token;
+      element.append(input);
+    }, demoCase.token);
+    await form.locator('button[type="submit"]').click();
+
+    await expect(page.locator("[data-demo-success]")).toContainText(demoCase.success);
+    expect(requestPayload).toEqual(demoCase.expectedPayload);
+  });
+}
 
 for (const route of routes) {
   test(`${route} renders without browser or layout errors`, async ({ page }) => {

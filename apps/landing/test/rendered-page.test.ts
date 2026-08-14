@@ -9,8 +9,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const appRoot = fileURLToPath(new URL("../", import.meta.url));
 const outputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-render-"));
+const enabledOutputDirectory = mkdtempSync(path.join(tmpdir(), "markiro-landing-enabled-render-"));
 let document: Document;
 const documents = new Map<string, Document>();
+const enabledDocuments = new Map<string, Document>();
 
 const EXPECTED_ROUTES = [
   "/",
@@ -40,8 +42,31 @@ beforeAll(() => {
       env: {
         ...process.env,
         ASTRO_TELEMETRY_DISABLED: "1",
+        PUBLIC_DEMO_CONSENT_VERSION: "stray-consent-version",
         PUBLIC_DEMO_SUBMISSION_ENABLED: "false",
+        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/stray-consent/",
         PUBLIC_PHONE: "",
+        PUBLIC_PRIVACY_POLICY_PATH: "/stray-privacy/",
+        PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_stray-client-key",
+      },
+      stdio: "pipe",
+    },
+  );
+
+  execFileSync(
+    path.join(appRoot, "node_modules/.bin/astro"),
+    ["build", "--outDir", enabledOutputDirectory],
+    {
+      cwd: appRoot,
+      env: {
+        ...process.env,
+        ASTRO_TELEMETRY_DISABLED: "1",
+        PUBLIC_DEMO_CONSENT_VERSION: "2026-08-14",
+        PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
+        PUBLIC_PHONE: "",
+        PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
+        PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_render-test-key",
       },
       stdio: "pipe",
     },
@@ -54,12 +79,20 @@ beforeAll(() => {
         : path.join(outputDirectory, route.slice(1), "index.html");
     const html = readFileSync(outputPath, "utf8");
     documents.set(route, new JSDOM(html).window.document);
+
+    const enabledOutputPath =
+      route === "/"
+        ? path.join(enabledOutputDirectory, "index.html")
+        : path.join(enabledOutputDirectory, route.slice(1), "index.html");
+    const enabledHtml = readFileSync(enabledOutputPath, "utf8");
+    enabledDocuments.set(route, new JSDOM(enabledHtml).window.document);
   }
   document = documents.get("/") as Document;
 }, 180_000);
 
 afterAll(() => {
   rmSync(outputDirectory, { force: true, recursive: true });
+  rmSync(enabledOutputDirectory, { force: true, recursive: true });
 });
 
 describe("rendered landing page", () => {
@@ -130,13 +163,69 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("renders a labelled three-field demo form", () => {
+  it("renders the four visible fields in the accessible order with optional phone copy", () => {
     const form = document.querySelector("form[data-demo-form]");
     expect(form).not.toBeNull();
 
-    for (const fieldId of ["name", "company", "phone"]) {
+    for (const fieldId of ["name", "company", "email", "phone"]) {
       expect(form?.querySelector(`label[for=${fieldId}]`)).not.toBeNull();
       expect(form?.querySelector(`#${fieldId}[name=${fieldId}]`)).not.toBeNull();
+    }
+    expect(
+      [...(form?.querySelectorAll(".form-field > input") ?? [])].map((input) => input.id),
+    ).toEqual(["name", "company", "email", "phone"]);
+    expect(form?.querySelector('input[name="email"]')?.getAttribute("autocomplete")).toBe("email");
+    expect(form?.querySelector('input[name="phone"]')?.getAttribute("autocomplete")).toBe("tel");
+    expect(form?.querySelector('label[for="phone"]')?.textContent).toContain("необязательно");
+  });
+
+  it("keeps captcha, consent, and public submission data out of disabled builds", () => {
+    const form = document.querySelector("form[data-demo-form]");
+    expect(form?.hasAttribute("data-endpoint")).toBe(false);
+    expect(form?.hasAttribute("data-consent-version")).toBe(false);
+    expect(form?.querySelector('input[name="consent"]')).toBeNull();
+    expect(form?.querySelector(".smart-captcha")).toBeNull();
+    expect(
+      document.querySelector('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
+    ).toBeNull();
+    expect(document.documentElement.outerHTML).not.toContain("stray-consent-version");
+    expect(document.documentElement.outerHTML).not.toContain("ysc1_stray-client-key");
+    expect(document.documentElement.outerHTML).not.toContain("/stray-consent/");
+    expect(document.documentElement.outerHTML).not.toContain("/stray-privacy/");
+  });
+
+  it("renders enabled consent, honeypot, captcha, and localized source contracts", () => {
+    for (const [route, expectedLocale] of [
+      ["/", "ru"],
+      ["/en/", "en"],
+    ] as const) {
+      const enabledDocument = enabledDocuments.get(route) as Document;
+      const form = enabledDocument.querySelector<HTMLFormElement>("form[data-demo-form]");
+      expect(form?.dataset.endpoint).toBe("/api/demo-requests");
+      expect(form?.dataset.consentVersion).toBe("2026-08-14");
+      expect(form?.dataset.locale).toBe(expectedLocale);
+      expect(form?.dataset.sourcePath).toBe(route);
+
+      const honeypot = form?.querySelector<HTMLElement>(".demo-form__honeypot");
+      expect(honeypot?.getAttribute("aria-hidden")).toBe("true");
+      expect(honeypot?.querySelector('input[name="website"]')?.getAttribute("tabindex")).toBe("-1");
+
+      const consent = form?.querySelector<HTMLInputElement>('input[name="consent"]');
+      expect(consent?.checked).toBe(false);
+      expect(consent?.required).toBe(true);
+      expect(form?.querySelector("[data-consent-error]")).not.toBeNull();
+      expect(form?.querySelector('a[href="/personal-data-consent/"]')).not.toBeNull();
+      expect(form?.querySelector('a[href="/privacy/"]')).not.toBeNull();
+
+      expect(form?.querySelector(".smart-captcha")?.getAttribute("data-sitekey")).toBe(
+        "ysc1_render-test-key",
+      );
+      expect(form?.querySelector("[data-captcha-error]")).not.toBeNull();
+      expect(
+        enabledDocument.querySelector(
+          'script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]',
+        ),
+      ).not.toBeNull();
     }
   });
 
