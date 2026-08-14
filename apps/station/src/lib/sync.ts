@@ -75,6 +75,10 @@ export interface SyncEngineDeps {
 export interface SyncEngine {
   /** Ask for a drain. Safe to call from anywhere, any number of times. */
   nudge(): void;
+  /** Freeze local sync commits; an in-flight server response becomes a retry. */
+  pause(): void;
+  /** Lift a prior pause and immediately retry any durable pending work. */
+  resume(): void;
   stop(): void;
   /** Resolves when no drain is in flight (tests await this instead of sleeping). */
   idle(): Promise<void>;
@@ -548,6 +552,11 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   const credentialGeneration = deps.credentialGeneration ?? createCredentialGeneration();
   let draining = false;
   let stopped = false;
+  let paused = false;
+  // A pause permanently invalidates work that was already in flight. A
+  // later resume must not make that old response committable again merely
+  // because the boolean pause has been lifted.
+  let pauseEpoch = 0;
   let credentialRejected = false;
   let requested = false;
   let lastSuccessAt: number | null = null;
@@ -711,11 +720,13 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   async function drain(): Promise<void> {
-    if (draining || stopped || credentialGeneration.sealed) return;
+    if (draining || stopped || paused || credentialGeneration.sealed) return;
     draining = true;
+    const drainPauseEpoch = pauseEpoch;
+    const pauseInvalidated = () => paused || pauseEpoch !== drainPauseEpoch;
     try {
       for (;;) {
-        if (stopped || credentialGeneration.sealed) break;
+        if (stopped || pauseInvalidated() || credentialGeneration.sealed) break;
         // A ceiling from a previous failed attempt on THIS batch — whether
         // pinned earlier in this same process or persisted by a process
         // that pinned it and then never got to clear it — re-reads exactly
@@ -743,7 +754,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         await ensurePendingBatchId();
         let exceptions = await readExceptions(deps.exec, BATCH_SIZE, exceptionCeiling);
 
-        if (credentialGeneration.sealed) break;
+        if (pauseInvalidated() || credentialGeneration.sealed) break;
 
         // Corrections and scans share one logical timeline even though they
         // live in separate SQLite tables. On a fresh attempt, send only the
@@ -869,7 +880,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           } finally {
             preparationLease.release();
           }
-          if (credentialGeneration.sealed) break;
+          if (pauseInvalidated() || credentialGeneration.sealed) break;
           const res = await deps.client.post<BatchResponse>("/station/scans", {
             batchId,
             items: toPayload(batch),
@@ -880,7 +891,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           // Another engine sharing this key may have received the terminal
           // 401 while this request was in flight. Its response is now stale:
           // do not record conflicts/ranges, ack facts, or clear retry state.
-          if (credentialGeneration.sealed) break;
+          if (pauseInvalidated() || credentialGeneration.sealed) break;
           if (!isBatchResponse(res)) {
             // Parsed fine but isn't this endpoint's contract — could be a
             // proxy/captive portal on the plant network. Fall into the
@@ -1028,6 +1039,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             await rejectCredential();
             break;
           }
+          if (pauseInvalidated()) break;
           if (credentialGeneration.sealed) break;
           // Every non-credential failure here — network error, timeout,
           // non-401 response, bad JSON, or wrong shape — is retried
@@ -1079,7 +1091,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // scheduled retry performs a full drain of whatever is queued by the
       // time it fires, so no request is actually lost, only its timing.
       const shouldContinue =
-        requested && !stopped && !credentialGeneration.sealed && retryTimer === null;
+        requested && !stopped && !paused && !credentialGeneration.sealed && retryTimer === null;
       requested = false;
       if (shouldContinue) {
         void drain();
@@ -1090,7 +1102,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
   }
 
   function scheduleRetry(): void {
-    if (stopped || credentialGeneration.sealed || retryTimer !== null) return;
+    if (stopped || paused || credentialGeneration.sealed || retryTimer !== null) return;
     const delay = backoffMs;
     backoffMs = Math.min(backoffMs * 2, BACKOFF_CAP_MS);
     retryTimer = setTimeout(() => {
@@ -1101,7 +1113,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
 
   return {
     nudge() {
-      if (stopped || credentialGeneration.sealed) return;
+      if (stopped || paused || credentialGeneration.sealed) return;
       if (draining) {
         requested = true;
         return;
@@ -1113,6 +1125,24 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       // nothing queued now is lost — only sent later than this particular
       // nudge asked for.
       if (retryTimer !== null) return;
+      void drain();
+    },
+    pause() {
+      pauseEpoch += 1;
+      paused = true;
+      requested = false;
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    },
+    resume() {
+      if (stopped || credentialGeneration.sealed || !paused) return;
+      paused = false;
+      if (draining) {
+        requested = true;
+        return;
+      }
       void drain();
     },
     stop() {

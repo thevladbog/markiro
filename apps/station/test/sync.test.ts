@@ -91,6 +91,36 @@ describe("sync engine", () => {
     engine.stop();
   });
 
+  it("keeps an in-flight acknowledgement stale across pause and resume, then retries it", async () => {
+    const exec = await migratedExec();
+    await seed(exec, 1);
+    let resolveFirst!: (value: { applied: number; alreadyApplied: boolean }) => void;
+    const firstResponse = new Promise<{ applied: number; alreadyApplied: boolean }>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const post = vi
+      .fn()
+      .mockReturnValueOnce(firstResponse)
+      .mockResolvedValue({ applied: 1, alreadyApplied: true });
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+    engine.pause();
+    engine.resume();
+    resolveFirst({ applied: 1, alreadyApplied: false });
+    await engine.idle();
+
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(await outboxDepth(exec)).toBe(0);
+    engine.stop();
+  });
+
   it("uses a deterministic batch id so a resend is the same key", async () => {
     const exec = await migratedExec();
     await seedInstallId(exec, "install-1");

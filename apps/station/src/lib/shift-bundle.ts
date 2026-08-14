@@ -12,13 +12,14 @@ import { syncStationProductImage, trackStationProductImageSync } from "./product
  * pairing and `/station/operators` are the authoritative roster sources, and
  * an unversioned bundle response may complete after a newer live roster sync.
  *
- * `bundle.sscc` (aggregation shifts only; null in validation mode, and null
+ * A normal mirror adds `bundle.sscc` (aggregation shifts only; null in validation mode, and null
  * when the server could not resolve this device an issuer prefix) is
  * likewise added to the local serial pool when present -- `addRange` is
  * idempotent (its primary key upserts a block already held, advancing its
  * cursor rather than regressing or duplicating it -- see its own doc
  * comment), so a replayed bundle download can never double the pool or
- * reissue a serial.
+ * reissue a serial. The explicit print-recovery variant intentionally skips
+ * this allocation state and refreshes only the reference bundle/template.
  *
  * CodeRabbit PR33 review, Finding 10: `addRange` runs BEFORE `upsertBundle`,
  * not after. `upsertBundle`'s very first statement publishes
@@ -54,6 +55,7 @@ import { syncStationProductImage, trackStationProductImageSync } from "./product
  * `node:sqlite` executor, without rendering React or faking Tauri IPC.
  */
 const activeMirrors = new Set<Promise<void>>();
+const shiftMirrorTails = new Map<string, Promise<void>>();
 
 /** Waits for bundle downloads/writes that started before credential sealing. */
 export async function waitForShiftBundleMirrors(): Promise<void> {
@@ -65,10 +67,11 @@ async function mirrorShiftBundleBody(
   exec: SqlExecutor,
   shiftId: string,
   generation?: CredentialGeneration,
+  mirrorSsccRange = true,
 ): Promise<void> {
   const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
   if (generation?.sealed) return;
-  if (bundle.sscc) {
+  if (mirrorSsccRange && bundle.sscc) {
     await addRange(exec, bundle.sscc);
   }
   if (generation?.sealed) return;
@@ -84,7 +87,13 @@ async function mirrorShiftBundleBody(
   }
 }
 
-function trackShiftBundleMirror(operation: Promise<void>): Promise<void> {
+function trackShiftBundleMirror(shiftId: string, run: () => Promise<void>): Promise<void> {
+  // One durable mirror writer per shift. In particular, an explicit recovery
+  // request must land after the unawaited shift-entry request that preceded
+  // it; otherwise a delayed legacy null-template response can overwrite the
+  // freshly backfilled template after the floor gate has opened.
+  const predecessor = shiftMirrorTails.get(shiftId) ?? Promise.resolve();
+  const operation = predecessor.then(run, run);
   // Credential sealing waits for writes to settle, not for their network
   // outcome. Keep a non-rejecting waiter in the set while returning the
   // original promise so explicit recovery can still surface offline failure.
@@ -92,8 +101,12 @@ function trackShiftBundleMirror(operation: Promise<void>): Promise<void> {
     () => undefined,
     () => undefined,
   );
+  shiftMirrorTails.set(shiftId, settled);
   activeMirrors.add(settled);
-  void settled.then(() => activeMirrors.delete(settled));
+  void settled.then(() => {
+    activeMirrors.delete(settled);
+    if (shiftMirrorTails.get(shiftId) === settled) shiftMirrorTails.delete(shiftId);
+  });
   return operation;
 }
 
@@ -104,7 +117,12 @@ export function refreshShiftBundleForRecovery(
   shiftId: string,
   generation?: CredentialGeneration,
 ): Promise<void> {
-  return trackShiftBundleMirror(mirrorShiftBundleBody(client, exec, shiftId, generation));
+  // Print recovery repairs reference/template state only. The server's SSCC
+  // block may have moved independently while this closed box was offline;
+  // applying it here would mutate allocation state during a binding recovery.
+  return trackShiftBundleMirror(shiftId, () =>
+    mirrorShiftBundleBody(client, exec, shiftId, generation, false),
+  );
 }
 
 export function mirrorShiftBundle(
@@ -113,8 +131,9 @@ export function mirrorShiftBundle(
   shiftId: string,
   generation?: CredentialGeneration,
 ): Promise<void> {
-  const operation = mirrorShiftBundleBody(client, exec, shiftId, generation).catch((err) => {
-    console.error("station: shift bundle download/mirror failed", err);
-  });
-  return trackShiftBundleMirror(operation);
+  return trackShiftBundleMirror(shiftId, () =>
+    mirrorShiftBundleBody(client, exec, shiftId, generation).catch((err) => {
+      console.error("station: shift bundle download/mirror failed", err);
+    }),
+  );
 }

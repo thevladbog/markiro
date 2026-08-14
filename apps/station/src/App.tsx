@@ -219,6 +219,10 @@ export function App() {
   const [boxTemplateRecovery, setBoxTemplateRecovery] = useState<BoxTemplateRecoveryState | null>(
     null,
   );
+  const shiftRecoverySyncPaused = useRef(false);
+  const pauseSyncRef = useRef<() => void>(() => {});
+  const resumeSyncRef = useRef<() => void>(() => {});
+  const [resumeSyncAfterRecoveryCommit, setResumeSyncAfterRecoveryCommit] = useState(false);
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
   const [showSetup, setShowSetup] = useState(false);
@@ -454,6 +458,7 @@ export function App() {
       setBoxCapacity(null);
       setIssuerPrefix(null);
       setBoxTemplateRecovery(null);
+      if (shiftRecoverySyncPaused.current) setResumeSyncAfterRecoveryCommit(true);
       return;
     }
     let cancelled = false;
@@ -461,10 +466,10 @@ export function App() {
     // mirrorShiftBundle writes in the background, so poll briefly until the
     // product row lands rather than blocking shift entry on the network.
     // `readShiftMirror` is fetched alongside `readShiftContext` on every
-    // tick: the shift row it reads is written before the product row
-    // `readShiftContext`'s join depends on (see `upsertBundleBody`), so by
-    // the time `ctx` resolves non-null the mirror row is already there too --
-    // gating this poll on `ctx` (rather than adding a second one) is enough.
+    // tick. Recovery classification does not wait for the joined product row:
+    // a shift with no durable mirror cannot own the closed-box recovery this
+    // gate protects, so its brief sync pause can lift while context hydration
+    // keeps polling in the background.
     // `readShiftMirror` carries its OWN `.catch(() => null)` (Task 13 review,
     // Finding 2), separate from the `.catch` below that guards the whole
     // `Promise.all`: without it, a mirror-read failure -- including
@@ -481,7 +486,7 @@ export function App() {
         readShiftMirror(tauriExecutor, shift.id).catch(() => null),
       ])
         .then(async ([ctx, mirror]) => {
-          if (cancelled || !ctx || resolving) return;
+          if (cancelled || resolving) return;
           resolving = true;
           const recovery = mirror
             ? await readBackfilledBoxTemplateRecovery(
@@ -491,6 +496,14 @@ export function App() {
               )
             : null;
           if (cancelled) return;
+          if (!recovery && shiftRecoverySyncPaused.current) {
+            shiftRecoverySyncPaused.current = false;
+            resumeSyncRef.current();
+          }
+          if (!ctx) {
+            resolving = false;
+            return;
+          }
           setShiftContext(ctx);
           setBoxCapacity(mirror?.boxCapacity ?? null);
           setIssuerPrefix(mirror?.issuerPrefix ?? null);
@@ -710,13 +723,31 @@ export function App() {
   // and teardown are paired inside one effect there (a StrictMode hazard) and
   // for why `nudge` below is safe to call from anywhere without needing the
   // engine's identity as a dependency.
-  const { state: syncState, nudge: nudgeSync } = useSyncEngine({
+  const {
+    state: syncState,
+    nudge: nudgeSync,
+    pause: pauseSync,
+    resume: resumeSync,
+  } = useSyncEngine({
     exec: tauriExecutor,
     client: authenticatedClient,
     machineId: config?.machineId,
     ...(credentialGeneration ? { credentialGeneration } : {}),
     onCredentialRejected,
   });
+  pauseSyncRef.current = pauseSync;
+  resumeSyncRef.current = resumeSync;
+
+  // Successful recovery first commits the unblocked floor render; only the
+  // following effect may let the device-wide outbox resume. This prevents a
+  // fast sync acknowledgement from deleting the preserved row in the gap
+  // between validation and the recovery UI actually becoming actionable.
+  useEffect(() => {
+    if (!resumeSyncAfterRecoveryCommit || boxTemplateRecovery !== null) return;
+    shiftRecoverySyncPaused.current = false;
+    resumeSync();
+    setResumeSyncAfterRecoveryCommit(false);
+  }, [boxTemplateRecovery, resumeSync, resumeSyncAfterRecoveryCommit]);
 
   // The hook is mounted unconditionally to preserve hook order, but it only
   // starts discovery after migrations have completed and readConfig has
@@ -1094,6 +1125,9 @@ export function App() {
   // resilience contract (a download failure must not block entry).
   function handleShiftEntered(entered: ActiveShift) {
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
+    shiftRecoverySyncPaused.current = true;
+    pauseSync();
+    setResumeSyncAfterRecoveryCommit(false);
     setShift(entered);
     setShiftContext(null);
     setBoxTemplateRecovery(null);
@@ -1136,6 +1170,7 @@ export function App() {
       setBoxCapacity(mirror.boxCapacity);
       setIssuerPrefix(mirror.issuerPrefix);
       setBoxTemplateRecovery(null);
+      setResumeSyncAfterRecoveryCommit(true);
     } catch {
       setBoxTemplateRecovery((current) =>
         current?.boxId === expected.boxId && current.sscc === expected.sscc

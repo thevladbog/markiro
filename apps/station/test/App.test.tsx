@@ -1305,6 +1305,15 @@ describe("App", () => {
     };
     let bundleAvailable = false;
     let bundleAttempts = 0;
+    let syncAttempts = 0;
+    let resolveRecoveryWindowSync!: (response: Response) => void;
+    let resolveResumedSync!: (response: Response) => void;
+    const recoveryWindowSync = new Promise<Response>((resolve) => {
+      resolveRecoveryWindowSync = resolve;
+    });
+    const resumedSync = new Promise<Response>((resolve) => {
+      resolveResumedSync = resolve;
+    });
     const paths: string[] = [];
     vi.stubGlobal(
       "fetch",
@@ -1334,6 +1343,10 @@ describe("App", () => {
           return new Response(JSON.stringify(bundle), { status: 200 });
         }
         if (path === "/station/operators") throw new Error("keep cached roster");
+        if (path === "/station/scans" && init?.method === "POST") {
+          syncAttempts += 1;
+          return syncAttempts === 1 ? recoveryWindowSync : resumedSync;
+        }
         if ((init?.method ?? "GET") === "POST") throw new Error("keep outbox pending");
         return new Response(JSON.stringify({ items: [] }), { status: 200 });
       }),
@@ -1350,6 +1363,7 @@ describe("App", () => {
 
     try {
       render(<App />);
+      await waitFor(() => expect(syncAttempts).toBe(1));
       await signInAsOperator();
       await act(async () => i18n.changeLanguage("ru"));
       fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
@@ -1374,7 +1388,14 @@ describe("App", () => {
       expect(await factSnapshot()).toBe(before);
 
       bundleAvailable = true;
-      fireEvent.click(screen.getByRole("button", { name: "Повторить восстановление" }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Повторить восстановление" }));
+        // Connectivity returns for the bundle refresh and an already in-flight
+        // outbox request at the same time. Recovery must ignore this late ack.
+        resolveRecoveryWindowSync(
+          new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), { status: 200 }),
+        );
+      });
 
       expect(
         await screen.findByText("Печать была прервана. Проверьте принтер и повторите печать."),
@@ -1382,6 +1403,9 @@ describe("App", () => {
       expect(screen.getByText("046012345600000016")).toBeDefined();
       expect(screen.getByRole("button", { name: "Повторить печать" })).toBeDefined();
       expect(bundleAttempts).toBe(3);
+      await waitFor(() => expect(syncAttempts).toBe(2));
+      // The resumed request is deliberately still pending, proving the first
+      // response could not acknowledge anything during the recovery window.
       expect(await factSnapshot()).toBe(before);
       expect(paths).not.toContain("POST /shifts/shift-1/open");
       expect(
@@ -1402,6 +1426,13 @@ describe("App", () => {
           print_state: "pending",
         },
       ]);
+
+      resolveResumedSync(
+        new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), { status: 200 }),
+      );
+      await waitFor(async () => {
+        expect(await recovery.exec.all("SELECT * FROM outbox")).toEqual([]);
+      });
     } finally {
       await act(async () => i18n.changeLanguage("en"));
       consoleErrorSpy.mockRestore();

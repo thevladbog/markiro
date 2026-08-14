@@ -16,7 +16,7 @@ import {
   type SqlExecutor,
   type StationBundle,
 } from "../src/lib/mirror.js";
-import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
+import { mirrorShiftBundle, refreshShiftBundleForRecovery } from "../src/lib/shift-bundle.js";
 import { createScanQueue } from "../src/lib/scan-queue.js";
 import { findUnresolvedBoxPrint } from "../src/lib/boxes.js";
 
@@ -585,6 +585,7 @@ describe("credential rejection recovery", () => {
       ["codes_mirror", "code_hash"],
       ["scan_events_mirror", "id"],
       ["outbox", "id"],
+      ["sscc_pool", "issuer_prefix, extension_digit, from_serial"],
     ] as const;
     const before = Object.fromEntries(
       await Promise.all(
@@ -604,7 +605,7 @@ describe("credential rejection recovery", () => {
       elements: [{ id: "sscc", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
     };
 
-    await mirrorShiftBundle(
+    await refreshShiftBundleForRecovery(
       {
         get: vi.fn().mockResolvedValue({
           shift: {
@@ -646,7 +647,10 @@ describe("credential rejection recovery", () => {
             extensionDigit: 0,
             fromSerial: 100,
             toSerial: 199,
-            consumedThroughSerial: 116,
+            // Deliberately ahead of the durable local cursor (117). A normal
+            // bundle mirror is allowed to advance this to 151, but print
+            // recovery is reference-only and must preserve the pool exactly.
+            consumedThroughSerial: 150,
           },
         }),
       },

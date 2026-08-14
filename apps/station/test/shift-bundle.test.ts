@@ -7,7 +7,7 @@ import {
   type StationBundle,
 } from "../src/lib/mirror.js";
 import { syncOperatorRoster } from "../src/lib/roster-sync.js";
-import { mirrorShiftBundle } from "../src/lib/shift-bundle.js";
+import { mirrorShiftBundle, refreshShiftBundleForRecovery } from "../src/lib/shift-bundle.js";
 import { remaining } from "../src/lib/sscc-pool.js";
 import {
   createCredentialGeneration,
@@ -232,6 +232,47 @@ describe("mirrorShiftBundle", () => {
 
     expect(await exec.all("SELECT id FROM shift_mirror")).toEqual([]);
     expect(await exec.all("SELECT id FROM product_mirror")).toEqual([]);
+  });
+
+  it("serializes recovery behind an older mirror so a delayed stale template cannot overwrite it", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    let resolveStale!: (value: StationBundle) => void;
+    let resolveRecovery!: (value: StationBundle) => void;
+    const staleResponse = new Promise<StationBundle>((resolve) => {
+      resolveStale = resolve;
+    });
+    const recoveryResponse = new Promise<StationBundle>((resolve) => {
+      resolveRecovery = resolve;
+    });
+    const boxLabelSpec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "zpl",
+      elements: [{ id: "sscc", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
+    };
+    const get = vi.fn().mockReturnValueOnce(staleResponse).mockReturnValueOnce(recoveryResponse);
+
+    const initial = mirrorShiftBundle({ get }, exec, "s1");
+    const recovery = refreshShiftBundleForRecovery({ get }, exec, "s1");
+
+    // Resolve the newer request first. Without per-shift exclusion it lands,
+    // then the older null-template response lands last and regresses SQLite.
+    resolveRecovery({
+      ...bundle,
+      boxLabelTemplate: { id: "box-template", name: "Box", spec: boxLabelSpec },
+    });
+    resolveStale(bundle);
+    await Promise.all([initial, recovery]);
+
+    expect(get).toHaveBeenCalledTimes(2);
+    expect(
+      await exec.all<{ box_label_template_spec: string | null }>(
+        "SELECT box_label_template_spec FROM shift_mirror WHERE id = ?",
+        ["s1"],
+      ),
+    ).toEqual([{ box_label_template_spec: JSON.stringify(boxLabelSpec) }]);
   });
 
   // CodeRabbit PR33 review, Finding 10: `addRange` used to run AFTER
