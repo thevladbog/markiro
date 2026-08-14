@@ -43,7 +43,7 @@ export function ProductImage({
 
     void (async () => {
       let blob: Blob | null = await readStationProductImage(exec, productId, image);
-      if (!blob && image) blob = await readCachedStationProductImage(productId, image);
+      if (!blob && image) blob = await readCachedStationProductImage(productId, image, exec);
       if (cancelled || !blob || typeof URL.createObjectURL !== "function") return;
       const nextUrl = URL.createObjectURL(blob);
       if (cancelled) {

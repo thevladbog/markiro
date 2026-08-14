@@ -99,6 +99,14 @@ export const productMirror = sqliteTable("product_mirror", {
   imagePointerChecksum: text("image_pointer_checksum"),
 });
 
+/** Validated, content-addressed WebP bytes for offline station rendering. */
+export const stationProductImages = sqliteTable("station_product_images", {
+  checksum: text("checksum").primaryKey(),
+  contentType: text("content_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  bytesBase64: text("bytes_base64").notNull(),
+});
+
 /**
  * Local journal mirror of server `codes` (05b writes here; 05a only defines
  * the schema). Columns mirror packages/db/src/schema/codes.ts.
