@@ -13,7 +13,7 @@ function cacheKey(productId: string, checksum: string): string {
 
 async function openImageCache(): Promise<CacheLike> {
   if (typeof caches === "undefined") throw new Error("Cache Storage unavailable");
-  return (await caches.open(STATION_PRODUCT_IMAGE_CACHE)) as CacheLike;
+  return caches.open(STATION_PRODUCT_IMAGE_CACHE);
 }
 
 async function digest(buffer: ArrayBuffer): Promise<string> {
