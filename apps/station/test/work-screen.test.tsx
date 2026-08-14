@@ -613,7 +613,8 @@ describe("WorkScreen", () => {
     expect(view.container.querySelector(".work-screen__instruments")).not.toBeNull();
     expect(screen.getByRole("heading", { name: "Recent operations" })).toBeDefined();
     expect(screen.getByRole("button", { name: "Exceptions" })).toBeDefined();
-    expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Pause" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Close shift" })).toBeDefined();
   });
 
   it("coalesces a scan burst into one active and one trailing recent read without delaying commits", async () => {
@@ -870,7 +871,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 0 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(onExit).toHaveBeenCalledTimes(1);
   });
 
@@ -878,7 +879,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(onExit).not.toHaveBeenCalled();
     expect(screen.getByText("12 scans have not reached the server yet.")).toBeDefined();
 
@@ -890,7 +891,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     fireEvent.click(screen.getByRole("button", { name: "Stay" }));
     expect(onExit).not.toHaveBeenCalled();
   });
@@ -905,7 +906,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 12 });
 
-    const exitButton = screen.getByRole("button", { name: "Pause / finish" });
+    const exitButton = screen.getByRole("button", { name: "Pause" });
     exitButton.focus();
     expect(document.activeElement).toBe(exitButton);
 
@@ -918,7 +919,7 @@ describe("WorkScreen", () => {
     const onExit = vi.fn();
     renderWorkScreen({ onExit, pendingSync: 1 });
 
-    fireEvent.click(screen.getByRole("button", { name: "Pause / finish" }));
+    fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     expect(screen.getByText("1 scan has not reached the server yet.")).toBeDefined();
   });
 });

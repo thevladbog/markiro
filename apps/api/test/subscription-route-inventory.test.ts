@@ -38,6 +38,7 @@ type CustomerRouteContract = {
 const CABINET_GUARDS = ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"] as const;
 const KIOSK_GUARDS = ["KioskDeviceGuard", "SubscriptionAccessGuard"] as const;
 const STATION_GUARDS = ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"] as const;
+const CABINET_STATION_GUARDS = [...CABINET_GUARDS, "StationOnlyGuard"] as const;
 
 const customerContract = (
   guards: readonly string[],
@@ -194,10 +195,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /products (ProductsController.createProduct)",
       "POST /products/:id/image (ProductsController.uploadImage)",
       "POST /shifts (ShiftsController.createShift)",
-      "POST /shifts/:id/enter (ShiftsController.enterShift)",
       "POST /shifts/:id/open (ShiftsController.openShift)",
       "POST /shift-close-conflicts/:eventId/dismiss (StationShiftCloseController.dismiss)",
-      "POST /station/shift-closures (StationShiftCloseController.close)",
       "POST /station-devices (StationDevicesController.create)",
       "POST /station-devices/:id/pairing-code (StationDevicesController.issuePairingCode)",
       "POST /team/invitations (TeamController.createInvitation)",
@@ -208,6 +207,13 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "PUT /org/profile (OrgProfileController.putProfile)",
       "PUT /org/profile/sscc (OrgProfileController.putSscc)",
       "PUT /team/members/:id/employee (TeamController.linkEmployee)",
+    ],
+  },
+  {
+    contract: customerContract(CABINET_STATION_GUARDS, { mode: "write" }),
+    routes: [
+      "POST /shifts/:id/enter (ShiftsController.enterShift)",
+      "POST /station/shift-closures (StationShiftCloseController.close)",
     ],
   },
   {
@@ -548,13 +554,24 @@ describe("registered subscription route inventory", () => {
           // exceptions; this branch only prevents silent inheritance.
         }
         const names = guards.map((guard) => guard.name);
+        const stationOnlyCabinetRoute =
+          (route.controller.name === "ShiftsController" && route.handlerName === "enterShift") ||
+          (route.controller.name === "StationShiftCloseController" &&
+            route.handlerName === "close");
         const expected =
           route.controller.name === "KioskController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
             : route.controller.name === "StationScansController" ||
                 route.controller.name === "StationProductImagesController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
-              : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
+              : stationOnlyCabinetRoute
+                ? [
+                    "TenantGuard",
+                    "AuthorizationGuard",
+                    "SubscriptionAccessGuard",
+                    "StationOnlyGuard",
+                  ]
+                : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
         expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(
           expected,
         );

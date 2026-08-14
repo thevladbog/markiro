@@ -65,6 +65,8 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   palletCapacity: schema.shifts.palletCapacity,
   palletsEnabled: schema.shifts.palletsEnabled,
   createdFrom: schema.shifts.createdFrom,
+  stationClosePolicy: schema.shifts.stationClosePolicy,
+  stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
   openedAt: schema.shifts.openedAt,
   closedAt: schema.shifts.closedAt,
   closeReason: schema.shifts.closeReason,
