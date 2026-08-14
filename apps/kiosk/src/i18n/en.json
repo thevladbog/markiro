@@ -42,6 +42,7 @@
     "hint": "The QR code is on the back of your badge. Hold it up to the scanner below the screen, then scan the marking codes on the bottles.",
     "badgeUnknown": "Badge not recognised. Scan it again, or ask an administrator.",
     "notABadge": "Scan your badge first — you can scan the bottles right after that.",
+    "settingsAction": "Equipment settings",
     "settingsHold": "Keep holding — the settings sign-in will open",
     "footer": "Self-service kiosk"
   },
@@ -222,6 +223,9 @@
     "testTitle": "Test scan",
     "testPrompt": "Scan any code — the kiosk will show what it recognised.",
     "testWaiting": "Waiting for a scan…",
+    "refreshData": "Refresh kiosk data",
+    "refreshSuccess": "Kiosk data and branding are up to date.",
+    "refreshError": "Could not refresh kiosk data or branding. Check the connection and try again.",
     "resultKm": "Marking code",
     "resultBadge": "Badge",
     "resultIncomplete": "A marking code without the GS separator — the scanner dropped it. Switch to Web Serial.",

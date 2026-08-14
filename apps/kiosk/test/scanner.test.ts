@@ -16,6 +16,9 @@ class FakeTarget {
   press(key: string) {
     this.handlers.forEach((h) => h({ key } as unknown as Event));
   }
+  key(event: Pick<KeyboardEvent, "key" | "code"> & Partial<KeyboardEvent>) {
+    this.handlers.forEach((handler) => handler(event as unknown as Event));
+  }
   get listenerCount() {
     return this.handlers.length;
   }
@@ -32,6 +35,19 @@ describe("keyboard wedge", () => {
     target.type("0104600682000013");
     target.press("Enter");
     expect(seen).toEqual(["0104600682000013"]);
+  });
+
+  it("consumes scanner keystrokes so the suffix Enter cannot activate a focused control", () => {
+    const target = new FakeTarget();
+    createKeyboardWedgeSource({ target }).start(vi.fn());
+    const preventCharacter = vi.fn();
+    const preventEnter = vi.fn();
+
+    target.key({ code: "Digit1", key: "1", preventDefault: preventCharacter });
+    target.key({ code: "Enter", key: "Enter", preventDefault: preventEnter });
+
+    expect(preventCharacter).toHaveBeenCalledOnce();
+    expect(preventEnter).toHaveBeenCalledOnce();
   });
 
   it("flushes on a silence timeout too — a scanner configured without a suffix would otherwise never deliver", () => {
@@ -123,6 +139,54 @@ describe("keyboard wedge", () => {
     target.press("Enter");
 
     expect(seen).toEqual([code]);
+  });
+
+  it("reads HID letters from their physical US keys regardless of the active OS layout", () => {
+    const target = new FakeTarget();
+    const seen: string[] = [];
+    createKeyboardWedgeSource({ target }).start((raw) => seen.push(raw));
+
+    for (const [code, key] of [
+      ["KeyB", "и"],
+      ["KeyA", "ф"],
+      ["KeyD", "в"],
+      ["KeyG", "п"],
+      ["KeyE", "у"],
+      ["Minus", "-"],
+      ["Digit1", "1"],
+    ] as const) {
+      target.key({ code, key });
+    }
+    target.key({ code: "Enter", key: "Enter" });
+
+    expect(seen).toEqual(["badge-1"]);
+  });
+
+  it("reconstructs the GS separator emitted by a HID scanner as Ctrl+RightBracket", () => {
+    const target = new FakeTarget();
+    const seen: string[] = [];
+    createKeyboardWedgeSource({ target }).start((raw) => seen.push(raw));
+
+    target.type("010460068200001321ABC");
+    target.key({ code: "BracketRight", key: "ъ", ctrlKey: true });
+    target.type("91EE06");
+    target.key({ code: "BracketRight", key: "ъ", ctrlKey: true });
+    target.type("92F8C3");
+    target.key({ code: "Enter", key: "Enter" });
+
+    expect(seen).toEqual([`010460068200001321ABC${GS}91EE06${GS}92F8C3`]);
+  });
+
+  it("preserves an 18-digit SSCC exactly while normalising keyboard events", () => {
+    const target = new FakeTarget();
+    const seen: string[] = [];
+    createKeyboardWedgeSource({ target }).start((raw) => seen.push(raw));
+    const sscc = "046012345678901234";
+
+    for (const digit of sscc) target.key({ code: `Digit${digit}`, key: digit });
+    target.key({ code: "Enter", key: "Enter" });
+
+    expect(seen).toEqual([sscc]);
   });
 
   it("stops listening when the returned function is called", () => {

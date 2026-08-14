@@ -163,7 +163,10 @@ function exactLogoUrl(serverUrl: string, branding: KioskBrandingDto): string | n
   const expectedPath = `/kiosk/branding/logo/${encodeURIComponent(revision)}`;
   if (advertised !== expectedPath) return null;
   try {
-    return new URL(expectedPath, `${serverUrl.replace(/\/+$/, "")}/`).toString();
+    const origin = typeof location === "undefined" ? "http://localhost" : location.origin;
+    const resolved = new URL(`${serverUrl.replace(/\/+$/, "")}${expectedPath}`, origin);
+    if (resolved.protocol !== "http:" && resolved.protocol !== "https:") return null;
+    return resolved.toString();
   } catch {
     return null;
   }
