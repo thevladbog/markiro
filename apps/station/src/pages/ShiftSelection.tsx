@@ -133,8 +133,10 @@ export function ShiftSelection({
       .catch((err: unknown) => {
         if (!mounted.current || listRequest.current?.id !== id) return;
         setError(err instanceof StationApiError ? err.message : t("shifts.serverUnavailable"));
-        setLoadFailed(true);
-        setLoading(false);
+        if (initialForClient) {
+          setLoadFailed(true);
+          setLoading(false);
+        }
       })
       .finally(() => {
         if (!mounted.current || listRequest.current?.id !== id) return;

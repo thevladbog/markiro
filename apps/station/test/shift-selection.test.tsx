@@ -33,6 +33,7 @@ describe("ShiftSelection", () => {
                 mode: "validation",
                 productName: "Created in cabinet",
                 plannedQty: 100,
+                productId: "product-created-in-cabinet",
               },
             ],
           }),
@@ -48,7 +49,7 @@ describe("ShiftSelection", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
 
-    expect(screen.getByText("Created in cabinet")).toBeDefined();
+    expect(screen.getByRole("button", { name: "Open" })).toBeDefined();
     vi.useRealTimers();
   });
 
@@ -65,6 +66,7 @@ describe("ShiftSelection", () => {
                 mode: "validation",
                 productName: "Available now",
                 plannedQty: 100,
+                productId: "product-available-now",
               },
             ],
           }),
@@ -77,7 +79,54 @@ describe("ShiftSelection", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Refresh shifts" }));
 
-    await waitFor(() => expect(screen.getByText("Available now")).toBeDefined());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open" })).toBeDefined());
+  });
+
+  it("keeps a loaded shift selectable after a background refresh fails", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            items: [
+              {
+                id: "planned-shift",
+                status: "planned",
+                mode: "validation",
+                productName: "Still available",
+                plannedQty: 100,
+                productId: "product-still-available",
+              },
+            ],
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ id: "planned-shift", status: "active", mode: "validation" }),
+          {
+            status: 200,
+          },
+        ),
+      );
+    const onSelected = vi.fn();
+
+    render(<ShiftSelection client={client} onSelected={onSelected} onNew={() => {}} />);
+    await act(async () => {});
+    expect(screen.getByRole("button", { name: "Open" })).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect(screen.getByText("Could not load shifts. Check server access.")).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await act(async () => {});
+    expect(onSelected).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "planned-shift", status: "active" }),
+    );
   });
 
   it("coalesces repeated empty-list refreshes while the prior request is pending", async () => {
