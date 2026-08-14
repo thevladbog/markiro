@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db";
-import type { ProductDto } from "../products/dto";
+import type { ProductDto, ProductImageDescriptor } from "../products/dto";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
 export type ShiftMode = (typeof SHIFT_MODES)[number];
@@ -81,6 +81,7 @@ export interface ShiftDto {
   mode: ShiftMode;
   productId: string;
   productName: string | null;
+  image?: ProductImageDescriptor | null;
   lineId: string | null;
   lineName: string | null;
   counterpartyId: string | null;

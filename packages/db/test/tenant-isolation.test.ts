@@ -3,9 +3,11 @@ import { inArray } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "../src/client.js";
 import { organization } from "../src/schema/auth.js";
+import { mediaAssets } from "../src/schema/media.js";
 import {
   counterparties,
   lines,
+  productImages,
   products,
   shifts,
   stationDevices,
@@ -35,6 +37,8 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
   };
 
   const productIds: string[] = [];
+  const mediaAssetIds: string[] = [];
+  const productImageProductIds: string[] = [];
   const shiftIds: string[] = [];
   const counterpartyIds: string[] = [];
   const lineIds: string[] = [];
@@ -45,7 +49,7 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
   });
 
   afterAll(async () => {
-    // Clean up in FK order: pairing codes -> devices -> lines/shifts -> products/counterparties -> organization.
+    // Clean up in FK order: pairing codes -> devices -> product images -> lines/shifts -> products/counterparties -> organization.
     if (stationDeviceIds.length) {
       await db
         .delete(stationPairingCodes)
@@ -53,8 +57,15 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
       await db.delete(stationDevices).where(inArray(stationDevices.id, stationDeviceIds));
     }
     if (shiftIds.length) await db.delete(shifts).where(inArray(shifts.id, shiftIds));
+    if (productImageProductIds.length) {
+      await db
+        .delete(productImages)
+        .where(inArray(productImages.productId, productImageProductIds));
+    }
     if (lineIds.length) await db.delete(lines).where(inArray(lines.id, lineIds));
     if (productIds.length) await db.delete(products).where(inArray(products.id, productIds));
+    if (mediaAssetIds.length)
+      await db.delete(mediaAssets).where(inArray(mediaAssets.id, mediaAssetIds));
     if (counterpartyIds.length) {
       await db.delete(counterparties).where(inArray(counterparties.id, counterpartyIds));
     }
@@ -141,6 +152,153 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
 
     expect(productA!.gtin14).toBe(productB!.gtin14);
     expect(productA!.tenantId).not.toBe(productB!.tenantId);
+  });
+
+  it("rejects a product image that joins a tenant's product to another tenant's asset", async () => {
+    const [productA] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: "04012345678906", name: "Image product A" })
+      .returning();
+    productIds.push(productA!.id);
+    productImageProductIds.push(productA!.id);
+
+    const [assetB] = await db
+      .insert(mediaAssets)
+      .values({
+        ownerTenantId: orgB.id,
+        objectKey: `products/${randomUUID()}.png`,
+        contentType: "image/png",
+        byteSize: 1,
+        checksum: "a".repeat(64),
+      })
+      .returning();
+    mediaAssetIds.push(assetB!.id);
+
+    await expect(
+      db.insert(productImages).values({
+        tenantId: orgA.id,
+        productId: productA!.id,
+        assetId: assetB!.id,
+      }),
+    ).rejects.toMatchObject({ cause: { code: FOREIGN_KEY_VIOLATION } });
+  });
+
+  it("allows a product image backed by an asset from the same tenant", async () => {
+    const [productA] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: "04012345678907", name: "Image product A2" })
+      .returning();
+    productIds.push(productA!.id);
+    productImageProductIds.push(productA!.id);
+
+    const [assetA] = await db
+      .insert(mediaAssets)
+      .values({
+        ownerTenantId: orgA.id,
+        objectKey: `products/${randomUUID()}.png`,
+        contentType: "image/png",
+        byteSize: 1,
+        checksum: "b".repeat(64),
+      })
+      .returning();
+    mediaAssetIds.push(assetA!.id);
+
+    const [image] = await db
+      .insert(productImages)
+      .values({ tenantId: orgA.id, productId: productA!.id, assetId: assetA!.id })
+      .returning();
+
+    expect(image).toMatchObject({
+      tenantId: orgA.id,
+      productId: productA!.id,
+      assetId: assetA!.id,
+    });
+  });
+
+  it("rejects a second asset binding for the same tenant product", async () => {
+    const [productA] = await db
+      .insert(products)
+      .values({ tenantId: orgA.id, gtin14: "04012345678908", name: "Cardinality product" })
+      .returning();
+    productIds.push(productA!.id);
+    productImageProductIds.push(productA!.id);
+
+    const [firstAsset, secondAsset] = await db
+      .insert(mediaAssets)
+      .values([
+        {
+          ownerTenantId: orgA.id,
+          objectKey: `products/${randomUUID()}.png`,
+          contentType: "image/png",
+          byteSize: 1,
+          checksum: "c".repeat(64),
+        },
+        {
+          ownerTenantId: orgA.id,
+          objectKey: `products/${randomUUID()}.png`,
+          contentType: "image/png",
+          byteSize: 1,
+          checksum: "d".repeat(64),
+        },
+      ])
+      .returning();
+    mediaAssetIds.push(firstAsset!.id, secondAsset!.id);
+
+    await db.insert(productImages).values({
+      tenantId: orgA.id,
+      productId: productA!.id,
+      assetId: firstAsset!.id,
+    });
+
+    await expect(
+      db.insert(productImages).values({
+        tenantId: orgA.id,
+        productId: productA!.id,
+        assetId: secondAsset!.id,
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: UNIQUE_VIOLATION, constraint: "product_images_tenant_id_product_id_pk" },
+    });
+  });
+
+  it("rejects binding the same asset to a second product", async () => {
+    const [firstProduct, secondProduct] = await db
+      .insert(products)
+      .values([
+        { tenantId: orgA.id, gtin14: "04012345678909", name: "First asset product" },
+        { tenantId: orgA.id, gtin14: "04012345678910", name: "Second asset product" },
+      ])
+      .returning();
+    productIds.push(firstProduct!.id, secondProduct!.id);
+    productImageProductIds.push(firstProduct!.id, secondProduct!.id);
+
+    const [asset] = await db
+      .insert(mediaAssets)
+      .values({
+        ownerTenantId: orgA.id,
+        objectKey: `products/${randomUUID()}.png`,
+        contentType: "image/png",
+        byteSize: 1,
+        checksum: "e".repeat(64),
+      })
+      .returning();
+    mediaAssetIds.push(asset!.id);
+
+    await db.insert(productImages).values({
+      tenantId: orgA.id,
+      productId: firstProduct!.id,
+      assetId: asset!.id,
+    });
+
+    await expect(
+      db.insert(productImages).values({
+        tenantId: orgA.id,
+        productId: secondProduct!.id,
+        assetId: asset!.id,
+      }),
+    ).rejects.toMatchObject({
+      cause: { code: UNIQUE_VIOLATION, constraint: "product_images_asset_id_uq" },
+    });
   });
 
   it("allows a station without an API key to reference a line in its own tenant", async () => {

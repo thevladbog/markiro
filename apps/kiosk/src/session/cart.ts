@@ -1,4 +1,4 @@
-import type { KioskBootstrapSnapshotDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto, ProductImageDescriptor } from "../api/types.js";
 import type { KioskScan } from "../domain-guard/classify.js";
 import { effectivePickupPolicy, type EffectivePickupPolicy } from "./day-count.js";
 
@@ -11,6 +11,7 @@ export interface LooseKmLine {
   productId: string;
   name: string;
   unitPrice: string | null;
+  image?: ProductImageDescriptor | null | undefined;
   bottleCount: 1;
 }
 
@@ -168,6 +169,7 @@ function applyScan(state: CartState, scan: KioskScan, ctx: CartContext): CartSta
     productId: product.id,
     name: product.name,
     unitPrice: product.unitPrice,
+    image: product.image,
     bottleCount: 1,
   };
   return { ...state, lines: [...state.lines, line], notice: null };

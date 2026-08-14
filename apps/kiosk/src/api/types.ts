@@ -122,6 +122,14 @@ export interface SubscriptionAccessSnapshotDto {
   endsAt: string | null;
 }
 
+export interface ProductImageDescriptor {
+  checksum: string;
+  contentType: "image/webp";
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
 export interface KioskBrandingDto {
   organizationName: string;
   logoUrl: string | null;
@@ -191,6 +199,8 @@ export interface KioskBootstrapDto {
     name: string;
     unitPrice: string | null;
     egaisCode: string | null;
+    /** Undefined is a legacy server payload; null is an explicit deletion. */
+    image?: ProductImageDescriptor | null;
   }[];
   employees: KioskBootstrapEmployeeDto[];
   operators: {

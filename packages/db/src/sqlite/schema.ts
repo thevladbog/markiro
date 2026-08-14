@@ -91,6 +91,12 @@ export const productMirror = sqliteTable("product_mirror", {
   status: text("status").notNull(),
   defaultCounterpartyId: text("default_counterparty_id"),
   defaultLabelTemplateId: text("default_label_template_id"),
+  imageChecksum: text("image_checksum"),
+  imageContentType: text("image_content_type"),
+  imageByteSize: integer("image_byte_size"),
+  imageWidth: integer("image_width"),
+  imageHeight: integer("image_height"),
+  imagePointerChecksum: text("image_pointer_checksum"),
 });
 
 /**

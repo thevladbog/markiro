@@ -17,7 +17,9 @@ describe("processAvatar", () => {
         contentType: "image/webp",
         width: 512,
         height: 512,
+        byteSize: result.buffer.byteLength,
       });
+      expect(result.checksum).toMatch(/^[a-f0-9]{64}$/);
       expect(metadata).toMatchObject({ format: "webp", width: 512, height: 512 });
       expect(metadata.exif).toBeUndefined();
     },

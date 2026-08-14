@@ -3,11 +3,13 @@ import {
   Controller,
   Get,
   Headers,
+  HttpStatus,
   Param,
   ParseUUIDPipe,
   Post,
   Query,
   Req,
+  Res,
   StreamableFile,
   UnprocessableEntityException,
   UseGuards,
@@ -33,6 +35,7 @@ import {
 } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
+import type { Response } from "express";
 import {
   createOrderAdmissionSchema,
   createOrderSchema,
@@ -44,6 +47,7 @@ import {
 } from "../pickup-orders/dto";
 import { PickupOrdersService } from "../pickup-orders/pickup-orders.service";
 import { OrgProfileService } from "../org-profile/org-profile.service";
+import { ObjectStorageService } from "../storage/object-storage.service";
 import {
   BOX_REGISTRY_REVISION_PATTERN,
   boxRegistryQuerySchema,
@@ -73,11 +77,28 @@ export class KioskController {
     private readonly pickupOrdersService: PickupOrdersService,
     private readonly orgProfileService: OrgProfileService,
     private readonly boxRegistryService: BoxRegistryService,
+    private readonly storage: ObjectStorageService,
   ) {}
 
   @Get("bootstrap")
   async bootstrap(@Req() req: RequestWithKiosk): Promise<KioskBootstrapDto> {
     return this.pickupOrdersService.bootstrap(req.tenantId!, req.kioskId!);
+  }
+
+  @Get("products/:id/image/:checksum")
+  async readProductImage(
+    @Req() req: RequestWithKiosk,
+    @Param("id") id: string,
+    @Param("checksum") checksum: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const objectKey = await this.pickupOrdersService.getKioskImageRead(
+      req.tenantId!,
+      req.kioskId!,
+      id,
+      checksum,
+    );
+    response.redirect(HttpStatus.FOUND, await this.storage.presignRead(objectKey, 300));
   }
 
   @Get("box-registry")

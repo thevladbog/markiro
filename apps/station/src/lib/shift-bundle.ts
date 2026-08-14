@@ -2,6 +2,7 @@ import type { StationClient } from "./api-client.js";
 import type { CredentialGeneration } from "./credential-recovery.js";
 import { upsertBundle, type SqlExecutor, type StationBundle } from "./mirror.js";
 import { addRange } from "./sscc-pool.js";
+import { syncStationProductImage, trackStationProductImageSync } from "./product-image-cache.js";
 
 /**
  * Downloads the full shift bundle (`GET /shifts/:id/bundle`) and mirrors it
@@ -60,7 +61,7 @@ export async function waitForShiftBundleMirrors(): Promise<void> {
 }
 
 export function mirrorShiftBundle(
-  client: Pick<StationClient, "get">,
+  client: Pick<StationClient, "get"> & Partial<Pick<StationClient, "download">>,
   exec: SqlExecutor,
   shiftId: string,
   generation?: CredentialGeneration,
@@ -74,6 +75,15 @@ export function mirrorShiftBundle(
       }
       if (generation?.sealed) return;
       await upsertBundle(exec, bundle);
+      if (client.download) {
+        const mediaSync = syncStationProductImage(
+          exec,
+          { download: client.download },
+          bundle.product,
+          generation ? () => generation.sealed : undefined,
+        );
+        trackStationProductImageSync(mediaSync);
+      }
     } catch (err) {
       console.error("station: shift bundle download/mirror failed", err);
     }

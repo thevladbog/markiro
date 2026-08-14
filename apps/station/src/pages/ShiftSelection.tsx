@@ -5,7 +5,12 @@ import { StationApiError, type StationClient } from "../lib/api-client.js";
 import { paginate } from "../lib/pagination.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
+import type { SqlExecutor } from "../lib/mirror.js";
 import { StationScreen } from "../ui/StationScreen.js";
+import {
+  prefetchStationProductImage,
+  trackStationProductImageSync,
+} from "../lib/product-image-cache.js";
 
 const SHIFT_PAGE_SIZE = 3;
 
@@ -16,10 +21,19 @@ interface ShiftListItem {
   productName: string | null;
   plannedQty: number | null;
   counterpartyName?: string | null;
+  productId: string;
+  image?: {
+    checksum: string;
+    contentType: "image/webp";
+    byteSize: number;
+    width: number;
+    height: number;
+  } | null;
 }
 
 export interface ShiftSelectionProps {
   client: StationClient;
+  exec?: SqlExecutor;
   onSelected: (shift: { id: string; status: string; mode: string }) => void;
   onNew: () => void;
   /** Opens the workstation setup screen; omitted where there is no way in. */
@@ -47,6 +61,7 @@ export function shiftSelectionPersistentState(input: {
 
 export function ShiftSelection({
   client,
+  exec,
   onSelected,
   onNew,
   onSetup,
@@ -60,6 +75,7 @@ export function ShiftSelection({
   const [loading, setLoading] = useState(true);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [busy, setBusy] = useState(false);
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [requestedPage, setRequestedPage] = useState(1);
   const mounted = useRef(true);
 
@@ -80,6 +96,20 @@ export function ShiftSelection({
       .then((response) => {
         if (cancelled) return;
         setItems(response.items);
+        for (const shift of response.items) {
+          const prefetch = prefetchStationProductImage(
+            client,
+            {
+              id: shift.productId,
+              ...(shift.image === undefined ? {} : { image: shift.image }),
+            },
+            isCurrent ? () => !isCurrent() : undefined,
+          );
+          trackStationProductImageSync(prefetch);
+          void prefetch.then(() => {
+            if (mounted.current) setImageRefreshKey((key) => key + 1);
+          });
+        }
         setLoading(false);
       })
       .catch((err: unknown) => {
@@ -181,6 +211,10 @@ export function ShiftSelection({
                   active={shift.status === "active"}
                   disabled={busy}
                   onSelect={() => (shift.status === "active" ? rejoin(shift) : void open(shift))}
+                  exec={exec}
+                  productId={shift.productId}
+                  image={shift.image}
+                  imageRefreshKey={imageRefreshKey}
                 />
               ))}
             </div>

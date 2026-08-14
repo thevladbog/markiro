@@ -1,11 +1,12 @@
 import { Module } from "@nestjs/common";
 import { DevicePairingModule } from "../device-pairing/device-pairing.module";
+import { OrgProfileModule } from "../org-profile/org-profile.module";
 import { PickupOrdersModule } from "../pickup-orders/pickup-orders.module";
+import { StorageModule } from "../storage/storage.module";
+import { BoxRegistryService } from "./box-registry.service";
 import { KioskController } from "./kiosk.controller";
 import { KioskPairController } from "./kiosk-pair.controller";
 import { PairingService } from "./pairing.service";
-import { OrgProfileModule } from "../org-profile/org-profile.module";
-import { BoxRegistryService } from "./box-registry.service";
 
 /**
  * `PairingService` lives here (its file is under this module) and is
@@ -14,7 +15,7 @@ import { BoxRegistryService } from "./box-registry.service";
  * the class, which would silently give each controller its own instance.
  */
 @Module({
-  imports: [DevicePairingModule, PickupOrdersModule, OrgProfileModule],
+  imports: [DevicePairingModule, PickupOrdersModule, OrgProfileModule, StorageModule],
   controllers: [KioskController, KioskPairController],
   providers: [PairingService, BoxRegistryService],
   exports: [PairingService, BoxRegistryService],

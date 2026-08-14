@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Input, PinPad, Spinner } from "@markiro/ui";
-import { KioskApiError, pairKiosk } from "../api/client.js";
+import { createKioskClient, KioskApiError, pairKiosk } from "../api/client.js";
 import type { ScanListener } from "../scanner/source.js";
 import {
   assertMeasurableGeneratedAt,
@@ -9,6 +9,8 @@ import {
   UnusableBootstrapError,
 } from "../store/cache.js";
 import { kioskIdOf, writeConfig } from "../store/config.js";
+import { clearProductImages } from "../store/product-images.js";
+import { syncProductImages } from "../sync/product-images.js";
 import { MarkiroLogo } from "../ui/MarkiroLogo.js";
 
 /** `POST /kiosk/pair` accepts `/^\d{8}$/` — the admin panel issues nothing else. */
@@ -226,6 +228,9 @@ export function Pairing({
       // failure for what it is (`bundle`, below) instead of discovering it
       // halfway through a write sequence. `replaceSnapshot` refuses it too.
       assertMeasurableGeneratedAt(result.bootstrap);
+      // A re-pair is a tenant boundary. Finish the old-tenant media scrub
+      // before either the new snapshot or token can become durable.
+      await clearProductImages();
       // THE ORDER OF THESE TWO WRITES IS LOAD-BEARING — do not tidy it.
       // `config.token` is the state-machine trigger: `nextKioskView` reads
       // `paired` from it, and once it is set this screen is unreachable. So the
@@ -256,6 +261,10 @@ export function Pairing({
         // device cannot collide with the idempotency keys of its own past orders.
         nextDeviceSeq: result.nextDeviceSeq,
       });
+      const imageClient = createKioskClient({ token: result.token, serverUrl });
+      void syncProductImages(imageClient, result.bootstrap.products).catch((error) =>
+        console.warn("kiosk: product image sync after pairing failed", error),
+      );
       // AFTER both writes, and instead of handing over immediately: the device
       // is bound, and §5.2 wants the installer told WHICH kiosk it is bound to
       // before the working mode replaces this screen. Read off the response

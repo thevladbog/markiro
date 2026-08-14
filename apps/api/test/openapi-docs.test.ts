@@ -14,6 +14,9 @@ import { StationDevicesController } from "../src/modules/station-devices/station
 import { StationDevicesService } from "../src/modules/station-devices/station-devices.service";
 import { StationPairController } from "../src/modules/station-pairing/station-pair.controller";
 import { StationPairingService } from "../src/modules/station-pairing/station-pairing.service";
+import { ProductsController } from "../src/modules/products/products.controller";
+import { ProductsService } from "../src/modules/products/products.service";
+import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
@@ -116,6 +119,48 @@ describe("self-hosted OpenAPI documentation", () => {
     expect(scriptSources('<script src="/docs/scalar.js"></script   >')).toEqual([
       "/docs/scalar.js",
     ]);
+  });
+
+  it("documents the cabinet product image upload, delete, and immutable read routes", async () => {
+    const moduleRef = await Test.createTestingModule({
+      controllers: [ProductsController],
+      providers: [
+        { provide: ProductsService, useValue: {} },
+        { provide: ObjectStorageService, useValue: {} },
+      ],
+    })
+      .overrideGuard(TenantGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(AuthorizationGuard)
+      .useValue({ canActivate: () => true })
+      .overrideGuard(SubscriptionAccessGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
+    const app = moduleRef.createNestApplication();
+    await app.init();
+
+    try {
+      const document = SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
+      );
+      const imagePath = document.paths["/products/{id}/image"];
+      expect(imagePath?.post?.requestBody).toMatchObject({
+        content: {
+          "multipart/form-data": {
+            schema: {
+              type: "object",
+              required: ["image"],
+              properties: { image: { type: "string", format: "binary" } },
+            },
+          },
+        },
+      });
+      expect(imagePath?.delete).toBeDefined();
+      expect(document.paths["/products/{id}/image/{checksum}"]?.get).toBeDefined();
+    } finally {
+      await app.close();
+    }
   });
 
   it("documents the authenticated station identity backfill response exactly", async () => {

@@ -2,6 +2,7 @@ import { isCanonicalDigestB64, isValidSscc } from "@markiro/domain";
 import { z } from "zod";
 import type { SubscriptionAccessSnapshot } from "../../subscriptions/entitlements.types";
 import type { KioskBrandingDto } from "../org-profile/dto";
+import type { ProductImageDescriptor } from "../products/dto";
 
 /** POST /kiosk/pair body — the 8-digit code shown on the kiosk cabinet. */
 export const pairKioskSchema = z.object({ code: z.string().regex(/^\d{8}$/) });
@@ -198,6 +199,8 @@ export interface KioskBootstrapDto {
     name: string;
     unitPrice: string | null;
     egaisCode: string | null;
+    /** Optional for rolling compatibility with older kiosk snapshots. */
+    image?: ProductImageDescriptor | null;
   }[];
   employees: {
     id: string;

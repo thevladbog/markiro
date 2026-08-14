@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,10 +11,17 @@ import {
   Post,
   Query,
   Req,
+  Res,
+  UploadedFile,
   UseGuards,
+  UseFilters,
+  UseInterceptors,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
+import { ApiBody, ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
+import type { Response } from "express";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
 import {
@@ -23,6 +31,7 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
+import { ObjectStorageService } from "../storage/object-storage.service";
 import {
   createProductSchema,
   gtinCheckSchema,
@@ -37,13 +46,17 @@ import {
   type UpdateProductDto,
 } from "./dto";
 import { ProductsService } from "./products.service";
+import { ProductImageUploadFilter } from "./product-image-upload.filter";
 
 @ApiTags("products")
 @Controller("products")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
 export class ProductsController {
-  constructor(private readonly productsService: ProductsService) {}
+  constructor(
+    private readonly productsService: ProductsService,
+    private readonly storage: ObjectStorageService,
+  ) {}
 
   @Get()
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
@@ -93,6 +106,59 @@ export class ProductsController {
     @Body(new ZodValidationPipe(updateProductSchema)) body: UpdateProductDto,
   ): Promise<ProductDto> {
     return this.productsService.updateProduct(req.tenantId!, id, body);
+  }
+
+  @Post(":id/image")
+  @ApiConsumes("multipart/form-data")
+  @ApiBody({
+    schema: {
+      type: "object",
+      required: ["image"],
+      properties: { image: { type: "string", format: "binary" } },
+    },
+  })
+  @UseInterceptors(
+    FileInterceptor("image", {
+      storage: memoryStorage(),
+      limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+    }),
+  )
+  @UseFilters(ProductImageUploadFilter)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  async uploadImage(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ): Promise<ProductDto> {
+    if (!file) {
+      return this.productsService
+        .recordImageUploadFailure(req.tenantId!, req.userId!, id, "missing_image")
+        .then(() => {
+          throw new BadRequestException("Product image file is required");
+        });
+    }
+    return this.productsService.uploadImage(req.tenantId!, req.userId!, id, file.buffer);
+  }
+
+  @Delete(":id/image")
+  @HttpCode(204)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  async deleteImage(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
+    return this.productsService.deleteImage(req.tenantId!, req.userId!, id);
+  }
+
+  @Get(":id/image/:checksum")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async readImage(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+    @Param("checksum") checksum: string,
+    @Res() response: Response,
+  ): Promise<void> {
+    const objectKey = await this.productsService.getCurrentImageRead(req.tenantId!, id, checksum);
+    response.redirect(HttpStatus.FOUND, await this.storage.presignRead(objectKey, 300));
   }
 
   @Delete(":id")

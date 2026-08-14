@@ -1,16 +1,16 @@
 import { Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from "@nestjs/common";
 import { OrgProfileService } from "../org-profile/org-profile.service";
-import { ProfileService } from "./profile.service";
+import { MediaAssetsService } from "./media-assets.service";
 
 const RECONCILE_INTERVAL_MS = 5 * 60 * 1_000;
 
 @Injectable()
-export class ProfileAssetsReconciler implements OnModuleInit, OnModuleDestroy {
-  readonly #logger = new Logger(ProfileAssetsReconciler.name);
+export class MediaAssetsReconciler implements OnModuleInit, OnModuleDestroy {
+  readonly #logger = new Logger(MediaAssetsReconciler.name);
   #timer?: NodeJS.Timeout;
 
   constructor(
-    private readonly profiles: ProfileService,
+    private readonly mediaAssets: MediaAssetsService,
     private readonly organizations: OrgProfileService,
   ) {}
 
@@ -26,15 +26,15 @@ export class ProfileAssetsReconciler implements OnModuleInit, OnModuleDestroy {
 
   private async runOnce(): Promise<void> {
     try {
-      const [profileCount, organizationCount] = await Promise.all([
-        this.profiles.reconcileAssets(),
+      const [mediaCount, organizationCount] = await Promise.all([
+        this.mediaAssets.reconcile(),
         this.organizations.reconcileLogoAssets(),
       ]);
-      const count = profileCount + organizationCount;
-      if (count > 0) this.#logger.log(`Reconciled ${count} stale stored asset(s)`);
+      const count = mediaCount + organizationCount;
+      if (count > 0) this.#logger.log(`Reconciled ${count} stale media asset(s)`);
     } catch (error) {
       this.#logger.error(
-        `Could not reconcile stale stored assets: ${
+        `Could not reconcile stale media assets: ${
           error instanceof Error ? error.message : "unknown error"
         }`,
       );

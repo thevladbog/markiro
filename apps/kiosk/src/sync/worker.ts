@@ -14,6 +14,7 @@ import {
   type CachedSnapshot,
 } from "../store/cache.js";
 import { readConfig, type KioskConfig } from "../store/config.js";
+import { syncProductImages } from "./product-images.js";
 import { appendJournal } from "../store/journal.js";
 import { putOutcome, type OutcomeOwner, type StoredRejectedLine } from "../store/outcomes.js";
 import {
@@ -1026,6 +1027,11 @@ export async function refreshSnapshot(
   assertMeasurableGeneratedAt(bootstrap);
   const fetchedAt = now();
   await replaceSnapshot(bootstrap, fetchedAt);
+  // Media is independent from the operational snapshot: a missing object must
+  // never turn a fresh roster or box registry into an outage.
+  void syncProductImages(client, bootstrap.products).catch((error) =>
+    console.warn("kiosk: product image sync failed", error),
+  );
   // Older test doubles and old custom clients have no registry method. A real
   // current client does; registry failure never rolls back a good bootstrap.
   if (typeof client.boxRegistryPage !== "function") return;

@@ -77,6 +77,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /pickup-rejections (PickupRejectionsController.list)",
       "GET /products (ProductsController.listProducts)",
       "GET /products/:id (ProductsController.getProduct)",
+      "GET /products/:id/image/:checksum (ProductsController.readImage)",
       "GET /billing/invoices (TenantBillingController.list)",
       "GET /billing/invoices/:id (TenantBillingController.detail)",
       "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.download)",
@@ -151,6 +152,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "DELETE /org/profile/logo (OrgProfileController.deleteLogo)",
       "DELETE /pickup-reasons/:id (PickupReasonsController.archiveReason)",
       "DELETE /products/:id (ProductsController.deleteProduct)",
+      "DELETE /products/:id/image (ProductsController.deleteImage)",
       "DELETE /products/:id/external-link (ProductExternalLinkController.unlink)",
       "DELETE /shifts/:id (ShiftsController.deleteShift)",
       "DELETE /team/members/:id/employee (TeamController.unlinkEmployee)",
@@ -186,6 +188,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /pickup-reasons (PickupReasonsController.createReason)",
       "POST /pickup-rejections/:id/acknowledge (PickupRejectionsController.acknowledge)",
       "POST /products (ProductsController.createProduct)",
+      "POST /products/:id/image (ProductsController.uploadImage)",
       "POST /shifts (ShiftsController.createShift)",
       "POST /shifts/:id/open (ShiftsController.openShift)",
       "POST /station-devices (StationDevicesController.create)",
@@ -206,6 +209,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /kiosk/bootstrap (KioskController.bootstrap)",
       "GET /kiosk/branding/logo/:revision (KioskController.logo)",
       "GET /kiosk/box-registry (KioskController.boxRegistry)",
+      "GET /kiosk/products/:id/image/:checksum (KioskController.readProductImage)",
     ],
   },
   {
@@ -219,6 +223,12 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: ["POST /station/scans (StationScansController.ingest)"],
+  },
+  {
+    contract: customerContract(STATION_GUARDS, { mode: "read_only_allowed", reason: "read" }),
+    routes: [
+      "GET /station/products/:id/image/:checksum (StationProductImagesController.readProductImage)",
+    ],
   },
 ] as const;
 
@@ -534,7 +544,8 @@ describe("registered subscription route inventory", () => {
         const expected =
           route.controller.name === "KioskController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
-            : route.controller.name === "StationScansController"
+            : route.controller.name === "StationScansController" ||
+                route.controller.name === "StationProductImagesController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
         expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(

@@ -102,6 +102,9 @@ const legacyGatedClient: StationClient = {
   post<T>() {
     return Promise.reject<T>(new Error("legacy station identity is not yet available"));
   },
+  download() {
+    return Promise.reject<Blob>(new Error("legacy station identity is not yet available"));
+  },
   whoami() {
     return Promise.reject(new Error("legacy station identity is not yet available"));
   },
@@ -1143,6 +1146,8 @@ export function App() {
             operatorId={operator.operatorId}
             expectedGtin14={shiftContext.gtin14}
             productName={shiftContext.productName}
+            productId={shiftContext.productId}
+            productImage={shiftContext.image}
             counterpartyName={shiftContext.counterpartyName}
             source={scanSource}
             sound={sound}
@@ -1185,6 +1190,7 @@ export function App() {
       ) : floorView === "select" ? (
         <ShiftSelection
           client={activeClient}
+          exec={tauriExecutor}
           onSelected={handleShiftEntered}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false

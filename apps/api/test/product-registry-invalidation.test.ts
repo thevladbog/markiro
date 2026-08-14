@@ -120,8 +120,28 @@ describe("ProductsService update registry boundary", () => {
     });
     const tx = { select, update, execute, insert };
     const transaction = vi.fn(async (callback: (executor: typeof tx) => unknown) => callback(tx));
+    const limit = vi.fn().mockResolvedValue([
+      {
+        ...baseRow,
+        gtin14: returnedGtin,
+        imageChecksum: null,
+        imageByteSize: null,
+        imageWidth: null,
+        imageHeight: null,
+      },
+    ]);
+    const whereProduct = vi.fn(() => ({ limit }));
+    const joinAsset = vi.fn(() => ({ where: whereProduct }));
+    const joinImage = vi.fn(() => ({ leftJoin: joinAsset }));
+    const fromProduct = vi.fn(() => ({ leftJoin: joinImage }));
+    const selectProduct = vi.fn(() => ({ from: fromProduct }));
     return {
-      service: new ProductsService({ transaction } as never, {} as never),
+      service: new ProductsService(
+        { transaction, select: selectProduct } as never,
+        {} as never,
+        {} as never,
+        {} as never,
+      ),
       execute,
       insert,
       forUpdate,

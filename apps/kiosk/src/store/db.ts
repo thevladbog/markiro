@@ -8,7 +8,7 @@ const DB_NAME = "markiro-kiosk";
  * `countTakenToday` does with an entry from before the journal carried an
  * employee.
  */
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 export const STORE_CONFIG = "config";
 export const STORE_SNAPSHOT = "snapshot";
@@ -29,6 +29,8 @@ export const STORE_QUARANTINE = "quarantine";
 export const STORE_BOX_REGISTRY_ACTIVE = "boxRegistryActive";
 export const STORE_BOX_REGISTRY_STAGING = "boxRegistryStaging";
 export const STORE_BOX_REGISTRY_META = "boxRegistryMeta";
+export const STORE_PRODUCT_IMAGE_BLOBS = "product-image-blobs";
+export const STORE_PRODUCT_IMAGE_POINTERS = "product-image-pointers";
 
 const transactionAbortReasons = new WeakMap<IDBTransaction, Error>();
 
@@ -70,6 +72,10 @@ function open(): Promise<IDBDatabase> {
         db.createObjectStore(STORE_BOX_REGISTRY_STAGING, { keyPath: "sscc" });
       if (!db.objectStoreNames.contains(STORE_BOX_REGISTRY_META))
         db.createObjectStore(STORE_BOX_REGISTRY_META);
+      if (!db.objectStoreNames.contains(STORE_PRODUCT_IMAGE_BLOBS))
+        db.createObjectStore(STORE_PRODUCT_IMAGE_BLOBS);
+      if (!db.objectStoreNames.contains(STORE_PRODUCT_IMAGE_POINTERS))
+        db.createObjectStore(STORE_PRODUCT_IMAGE_POINTERS);
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("IndexedDB open failed"));

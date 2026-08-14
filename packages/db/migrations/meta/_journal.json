@@ -288,6 +288,13 @@
       "when": 1786657686545,
       "tag": "0040_sscc_counter_start_one",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1786657686546,
+      "tag": "0041_product_images",
+      "breakpoints": true
     }
   ]
 }

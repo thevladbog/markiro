@@ -27,7 +27,13 @@ import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
 import { useLabelTemplates } from "../labels/api.js";
-import { useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
+import {
+  productImageUrl,
+  useDeleteProduct,
+  useProducts,
+  type ProductDto,
+  type ProductStatus,
+} from "./api.js";
 import type { CatalogPanelContext, CatalogPanelLocationState } from "./ProductPanelRoute.js";
 import "./catalog.css";
 
@@ -43,6 +49,23 @@ import "./catalog.css";
 const CANDIDATES_CHANNEL_TYPE = "commerceml";
 
 type StatusFilter = "all" | ProductStatus;
+
+function ProductThumbnail({ product }: { product: ProductDto }) {
+  const [failed, setFailed] = useState(false);
+  if (!product.image || failed) {
+    return <span aria-label={failed ? "" : undefined}>—</span>;
+  }
+  return (
+    <img
+      src={productImageUrl(product) ?? undefined}
+      alt={product.name}
+      width={48}
+      height={48}
+      onError={() => setFailed(true)}
+      style={{ objectFit: "cover", borderRadius: 6 }}
+    />
+  );
+}
 
 /** Debounce delay (ms) between the last keystroke in the search box and the refetch. */
 const SEARCH_DEBOUNCE_MS = 300;
@@ -214,6 +237,11 @@ export function CatalogPage() {
   const columns: TableColumn<ProductDto>[] = useMemo(
     () => [
       { key: "gtin14", title: t("pages.catalog.table.gtin"), mono: true },
+      {
+        key: "image",
+        title: t("pages.catalog.table.image"),
+        render: (row) => <ProductThumbnail product={row} />,
+      },
       { key: "name", title: t("pages.catalog.table.name") },
       {
         key: "productGroup",

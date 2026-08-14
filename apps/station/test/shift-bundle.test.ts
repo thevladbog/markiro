@@ -143,6 +143,44 @@ describe("mirrorShiftBundle", () => {
     expect(productRows).toHaveLength(1);
   });
 
+  it("keeps an image pointer when an older bundle omits the optional image field", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const image = {
+      checksum: "a".repeat(64),
+      contentType: "image/webp" as const,
+      byteSize: 12,
+      width: 120,
+      height: 80,
+    };
+
+    await mirrorShiftBundle(
+      {
+        get: vi.fn().mockResolvedValue({
+          ...bundle,
+          product: { ...bundle.product, image },
+        }),
+      },
+      exec,
+      "s1",
+    );
+    await exec.run("UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ?", [
+      image.checksum,
+      "p1",
+    ]);
+
+    // Literal pre-image server payload: the optional field is absent.
+    await mirrorShiftBundle({ get: vi.fn().mockResolvedValue(bundle) }, exec, "s1");
+
+    const rows = await exec.all<{
+      image_checksum: string | null;
+      image_pointer_checksum: string | null;
+    }>("SELECT image_checksum, image_pointer_checksum FROM product_mirror WHERE id = ?", ["p1"]);
+    expect(rows).toEqual([
+      { image_checksum: image.checksum, image_pointer_checksum: image.checksum },
+    ]);
+  });
+
   it("adds the bundle's box serial block to the local pool when present (Task 11)", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);

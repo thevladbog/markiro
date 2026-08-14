@@ -64,6 +64,7 @@ import {
   type OutcomeOwner,
 } from "../store/outcomes.js";
 import { scrubStoredBadgeCodes } from "../store/scrub.js";
+import { clearProductImages } from "../store/product-images.js";
 import {
   cancelFlushRetry,
   flushQueue,
@@ -186,6 +187,7 @@ export function KioskShell(): React.JSX.Element {
    * would restart the interval every time the counter advances.
    */
   const configRef = useRef<KioskConfig | null>(null);
+  const loadedConfigRef = useRef(false);
   const applyConfig = useCallback((next: KioskConfig | null) => {
     configRef.current = next;
     setConfig(next);
@@ -288,6 +290,7 @@ export function KioskShell(): React.JSX.Element {
       // Called rather than passed along: `KioskClient` declares these as
       // methods, so handing the reference over would detach it from its object.
       bootstrap: () => base.bootstrap(),
+      downloadProductImage: (productId, checksum) => base.downloadProductImage(productId, checksum),
       boxRegistryPage: (query) => base.boxRegistryPage!(query),
       attestOrder: async (body) => {
         try {
@@ -423,6 +426,11 @@ export function KioskShell(): React.JSX.Element {
     // could be filed, and `Pairing` is about to replace the screen anyway.
     dispatchFlow({ type: "unpaired" });
     try {
+      await clearProductImages();
+    } catch (err) {
+      console.error("kiosk: product images could not be scrubbed after revocation", err);
+    }
+    try {
       await quarantineQueue(now(), "device token revoked by the server");
     } catch (err) {
       console.error("kiosk: the undeliverable queue could not be set aside", err);
@@ -489,6 +497,11 @@ export function KioskShell(): React.JSX.Element {
     try {
       const cfg = await readConfig();
       const snap = await readSnapshot();
+      const previous = configRef.current;
+      const tenantChanged =
+        loadedConfigRef.current &&
+        (previous?.token !== cfg?.token || previous?.kioskId !== cfg?.kioskId);
+      if (tenantChanged) await clearProductImages();
       // BEFORE the config is applied, and therefore before anything can drain:
       // the sync interval is keyed on `config.token`, so until `applyConfig`
       // runs there is no client and no drain. The scrub is safe against a
@@ -500,6 +513,7 @@ export function KioskShell(): React.JSX.Element {
       if (snap) await scrubStoredBadgeCodes(snap.bootstrap.badgeSalt);
       applyConfig(cfg);
       applySnapshot(snap);
+      loadedConfigRef.current = true;
       setBranding(await loadCachedBranding());
       // Logo delivery is best-effort and must not hold the post-pair handoff or
       // turn a usable bootstrap into a failed pairing. The cached/fallback

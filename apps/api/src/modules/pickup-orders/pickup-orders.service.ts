@@ -35,6 +35,7 @@ import { OperatorsService } from "../operators/operators.service";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 import { OrgProfileService } from "../org-profile/org-profile.service";
+import type { ProductImageDescriptor } from "../products/dto";
 import {
   applyOrderLineLimit,
   classifyResolvedBoxConflicts,
@@ -594,6 +595,10 @@ export class PickupOrdersService {
         name: schema.products.name,
         unitPrice: schema.products.unitPrice,
         egaisCode: schema.products.egaisCode,
+        imageChecksum: schema.mediaAssets.checksum,
+        imageByteSize: schema.mediaAssets.byteSize,
+        imageWidth: schema.mediaAssets.width,
+        imageHeight: schema.mediaAssets.height,
       })
       .from(schema.kioskProducts)
       .innerJoin(
@@ -601,6 +606,21 @@ export class PickupOrdersService {
         and(
           eq(schema.products.tenantId, schema.kioskProducts.tenantId),
           eq(schema.products.id, schema.kioskProducts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.kioskProducts.tenantId),
+          eq(schema.productImages.productId, schema.kioskProducts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
         ),
       )
       .where(
@@ -649,7 +669,26 @@ export class PickupOrdersService {
       },
       badgeSalt,
       reasons,
-      products,
+      products: products.map((product) => ({
+        id: product.id,
+        gtin14: product.gtin14,
+        name: product.name,
+        unitPrice: product.unitPrice,
+        egaisCode: product.egaisCode,
+        image:
+          product.imageChecksum &&
+          product.imageByteSize !== null &&
+          product.imageWidth !== null &&
+          product.imageHeight !== null
+            ? ({
+                checksum: product.imageChecksum,
+                contentType: "image/webp",
+                byteSize: product.imageByteSize,
+                width: product.imageWidth,
+                height: product.imageHeight,
+              } satisfies ProductImageDescriptor)
+            : null,
+      })),
       employees: employeeRows.map(({ employee, pickupPolicy: employeePolicy }) => {
         if (!employeePolicy) {
           throw new InternalServerErrorException("Employee pickup policy is not configured");
@@ -682,6 +721,51 @@ export class PickupOrdersService {
         active: o.active,
       })),
     };
+  }
+
+  /** Allowlist- and checksum-protected private image read for a paired kiosk. */
+  async getKioskImageRead(
+    tenantId: string,
+    kioskId: string,
+    productId: string,
+    checksum: string,
+  ): Promise<string> {
+    const [asset] = await this.db
+      .select({ objectKey: schema.mediaAssets.objectKey })
+      .from(schema.kioskProducts)
+      .innerJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.kioskProducts.tenantId),
+          eq(schema.products.id, schema.kioskProducts.productId),
+        ),
+      )
+      .innerJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.products.tenantId),
+          eq(schema.productImages.productId, schema.products.id),
+        ),
+      )
+      .innerJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, schema.products.tenantId),
+          eq(schema.mediaAssets.status, "active"),
+          eq(schema.mediaAssets.checksum, checksum),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.kioskProducts.tenantId, tenantId),
+          eq(schema.kioskProducts.kioskId, kioskId),
+          eq(schema.kioskProducts.productId, productId),
+        ),
+      )
+      .limit(1);
+    if (!asset) throw new NotFoundException();
+    return asset.objectKey;
   }
 
   /** Admin list, joined with employee/kiosk/writeoff-reason names, newest first. */

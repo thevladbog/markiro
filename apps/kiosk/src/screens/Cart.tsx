@@ -25,6 +25,7 @@ import { formatMoney, moneyFormat, toKopecks, totalKopecks, UNPRICED } from "./m
 import { CartLineDialog } from "../ui/CartLineDialog.js";
 import { ItemKindIcon } from "../ui/ItemKindIcon.js";
 import { PagedLines } from "../ui/PagedLines.js";
+import { ProductImage } from "../ui/ProductImage.js";
 
 export type KioskOrientation = "landscape" | "portrait";
 
@@ -426,7 +427,16 @@ export function Cart({
                     })}
                     onClick={() => setSelected(item)}
                   >
-                    <ItemKindIcon kind={item.kind} />
+                    {item.kind === "km" ? (
+                      <ProductImage
+                        productId={item.productId}
+                        name={item.name}
+                        image={item.image}
+                        fallback={<ItemKindIcon kind="km" />}
+                      />
+                    ) : (
+                      <ItemKindIcon kind={item.kind} />
+                    )}
                     <span className="kiosk-line__copy">
                       <span className="kiosk-line__name" title={item.name}>
                         {item.name}

@@ -7,7 +7,7 @@ import {
   Logger,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { and, eq, inArray, isNull, lt, lte, notExists, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
@@ -248,74 +248,6 @@ export class ProfileService {
       .limit(1);
     if (!asset) return { url: null };
     return { url: await this.storage.presignRead(asset.objectKey, 300) };
-  }
-
-  async reconcileAssets(now = new Date(), limit = 50): Promise<number> {
-    const staleBefore = new Date(now.getTime() - 15 * 60 * 1_000);
-    const candidates = await this.db
-      .select({
-        id: schema.mediaAssets.id,
-        ownerUserId: schema.mediaAssets.ownerUserId,
-        objectKey: schema.mediaAssets.objectKey,
-        status: schema.mediaAssets.status,
-      })
-      .from(schema.mediaAssets)
-      .leftJoin(schema.userProfiles, eq(schema.userProfiles.avatarAssetId, schema.mediaAssets.id))
-      .where(
-        and(
-          inArray(schema.mediaAssets.status, ["staging", "deleting"]),
-          lt(schema.mediaAssets.updatedAt, staleBefore),
-          isNull(schema.userProfiles.userId),
-        ),
-      )
-      .limit(limit);
-
-    let reconciled = 0;
-    for (const candidate of candidates) {
-      const claimed = await this.db
-        .update(schema.mediaAssets)
-        .set({ status: "deleting", updatedAt: now })
-        .where(
-          and(
-            eq(schema.mediaAssets.id, candidate.id),
-            eq(schema.mediaAssets.ownerUserId, candidate.ownerUserId),
-            eq(schema.mediaAssets.status, candidate.status),
-            lte(schema.mediaAssets.updatedAt, staleBefore),
-          ),
-        )
-        .returning({ id: schema.mediaAssets.id });
-      if (claimed.length !== 1) continue;
-
-      const [reference] = await this.db
-        .select({ userId: schema.userProfiles.userId })
-        .from(schema.userProfiles)
-        .where(eq(schema.userProfiles.avatarAssetId, candidate.id))
-        .limit(1);
-      if (reference) continue;
-
-      try {
-        await this.storage.delete(candidate.objectKey);
-      } catch {
-        continue;
-      }
-      const result = await this.db
-        .delete(schema.mediaAssets)
-        .where(
-          and(
-            eq(schema.mediaAssets.id, candidate.id),
-            eq(schema.mediaAssets.ownerUserId, candidate.ownerUserId),
-            eq(schema.mediaAssets.status, "deleting"),
-            notExists(
-              this.db
-                .select({ userId: schema.userProfiles.userId })
-                .from(schema.userProfiles)
-                .where(eq(schema.userProfiles.avatarAssetId, candidate.id)),
-            ),
-          ),
-        );
-      reconciled += result.rowCount ?? 0;
-    }
-    return reconciled;
   }
 
   private async getRequiredProfile(userId: string, message: string): Promise<UserProfileDto> {

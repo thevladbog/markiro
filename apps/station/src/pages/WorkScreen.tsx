@@ -49,6 +49,7 @@ import { BoxPrintRecovery, type BoxPrintRecoveryErrorCode } from "../ui/BoxPrint
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../ui/work/RecentOperations.js";
 import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
+import type { StationProductImageDescriptor } from "../lib/mirror.js";
 import { WorkCounters } from "../ui/work/WorkCounters.js";
 import { WorkFooter } from "../ui/work/WorkFooter.js";
 import { buildWorkLabels } from "../ui/work/work-labels.js";
@@ -61,6 +62,8 @@ export interface WorkScreenProps {
   operatorId: string;
   expectedGtin14: string;
   productName: string;
+  productId?: string;
+  productImage?: StationProductImageDescriptor | null | undefined;
   counterpartyName?: string | null;
   source: ScanSource;
   sound: SoundSettings;
@@ -128,6 +131,8 @@ export function WorkScreen({
   operatorId,
   expectedGtin14,
   productName,
+  productId,
+  productImage,
   counterpartyName,
   source,
   sound,
@@ -155,6 +160,15 @@ export function WorkScreen({
   const [confirmExit, setConfirmExit] = useState(false);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
+  const [imageRefreshKey, setImageRefreshKey] = useState(0);
+  useEffect(() => {
+    const first = window.setTimeout(() => setImageRefreshKey((key) => key + 1), 300);
+    const second = window.setTimeout(() => setImageRefreshKey((key) => key + 1), 1_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearTimeout(second);
+    };
+  }, [shiftId]);
   const [latestAcceptedOperation, setLatestAcceptedOperation] = useState<RecentOperation | null>(
     null,
   );
@@ -1375,6 +1389,10 @@ export function WorkScreen({
                 counterpartyName={counterpartyName ?? null}
                 operation={latestAcceptedOperation}
                 labels={workLabels.status}
+                exec={exec}
+                productId={productId}
+                image={productImage}
+                refreshKey={imageRefreshKey}
               />
               {issuerPrefix !== null ? (
                 <BoxFillInstrument

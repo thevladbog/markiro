@@ -58,7 +58,13 @@ export const STATION_MIGRATIONS: string[] = [
      pallet_capacity INTEGER,
      status TEXT NOT NULL,
      default_counterparty_id TEXT,
-     default_label_template_id TEXT
+     default_label_template_id TEXT,
+     image_checksum TEXT,
+     image_content_type TEXT,
+     image_byte_size INTEGER,
+     image_width INTEGER,
+     image_height INTEGER,
+     image_pointer_checksum TEXT
    );`,
   `CREATE TABLE IF NOT EXISTS codes_mirror (
      code_hash TEXT PRIMARY KEY,
@@ -171,6 +177,12 @@ export const STATION_MIGRATIONS: string[] = [
   // alongside the other shift_mirror columns; read back by `readShiftMirror`
   // the same way. Same re-runnable idempotency as the `login` ALTER above.
   `ALTER TABLE shift_mirror ADD COLUMN box_label_template_spec TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_checksum TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_content_type TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_byte_size INTEGER;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_width INTEGER;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_height INTEGER;`,
+  `ALTER TABLE product_mirror ADD COLUMN image_pointer_checksum TEXT;`,
   // Station exceptions (undo/clear/reprint/disassemble): the box's own
   // retired flag. Upgrade path for devices enrolled before this slice --
   // same re-runnable idempotency as the `login` ALTER above (SQLite has no
