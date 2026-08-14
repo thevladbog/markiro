@@ -25,6 +25,7 @@
 	encode zstd gzip
 
 	header {
+		defer
 		-Server
 		X-Markiro-Release-Sha "{$MARKIRO_RELEASE_SHA}"
 		Strict-Transport-Security "max-age=63072000; includeSubDomains"

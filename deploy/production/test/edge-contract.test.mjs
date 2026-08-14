@@ -366,20 +366,24 @@ function assertAuthorityContract(adapted, { alb }) {
       .map((candidate) => candidate.root);
     assert.deepEqual(roots, [expectedRoot], `${host} must use only ${expectedRoot}`);
 
-    const headerSets = nestedObjects(route)
-      .filter((candidate) => candidate.handler === "headers")
-      .map((candidate) => candidate.response?.set ?? {});
+    const headerHandlers = nestedObjects(route).filter(
+      (candidate) => candidate.handler === "headers",
+    );
+    const headerSets = headerHandlers.map((candidate) => candidate.response?.set ?? {});
     assert.ok(
-      headerSets.some(
-        (headers) =>
+      headerHandlers.some((handler) => {
+        const headers = handler.response?.set ?? {};
+        return (
+          handler.deferred === true &&
           headers["X-Markiro-Release-Sha"]?.[0] === "contract-sha" &&
           headers["Content-Security-Policy"]?.[0] === expectedCsp &&
           headers["Strict-Transport-Security"]?.[0] === "max-age=63072000; includeSubDomains" &&
           headers["X-Content-Type-Options"]?.[0] === "nosniff" &&
           headers["X-Frame-Options"]?.[0] === "SAMEORIGIN" &&
-          headers["Referrer-Policy"]?.[0] === "strict-origin-when-cross-origin",
-      ),
-      `${host} must emit the common security and release headers`,
+          headers["Referrer-Policy"]?.[0] === "strict-origin-when-cross-origin"
+        );
+      }),
+      `${host} must defer the common security and release headers through error responses`,
     );
     assert.ok(
       headerSets.some(
