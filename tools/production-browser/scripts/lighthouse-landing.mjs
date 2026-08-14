@@ -61,7 +61,7 @@ export function lighthouseArguments({ chromePath, isCI, output, profile, url }) 
     `--chrome-path=${chromePath}`,
     "--only-categories=performance,accessibility,best-practices,seo",
   ];
-  if (isCI) arguments_.push("--chrome-flags=--no-sandbox --disable-dev-shm-usage");
+  if (isCI) arguments_.push("--chrome-flags=--headless=new --no-sandbox --disable-dev-shm-usage");
   if (profile === "desktop") arguments_.push("--preset=desktop");
   return arguments_;
 }

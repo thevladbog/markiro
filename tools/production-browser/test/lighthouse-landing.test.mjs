@@ -38,7 +38,7 @@ test("adds Chromium sandbox compatibility flags only in CI", () => {
     lighthouseArguments({ ...base, isCI: true }).filter((argument) =>
       argument.startsWith("--chrome-flags="),
     ),
-    ["--chrome-flags=--no-sandbox --disable-dev-shm-usage"],
+    ["--chrome-flags=--headless=new --no-sandbox --disable-dev-shm-usage"],
   );
   assert.deepEqual(
     lighthouseArguments({ ...base, isCI: false }).filter((argument) =>
