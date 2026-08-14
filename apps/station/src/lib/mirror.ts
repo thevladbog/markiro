@@ -140,10 +140,27 @@ const b = (v: boolean) => (v ? 1 : 0);
  * credential rotation when it finishes later.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
-  await upsertBundleBody(exec, bundle);
+  await upsertBundleBody(exec, bundle, false);
 }
 
-async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
+/**
+ * Mirrors reference data without changing the issuer prefix that names the
+ * device's already-held local SSCC pool. Recovery bundles deliberately carry
+ * no device allocation, so a null `bundle.sscc` must not erase that durable
+ * allocation state while repairing a template.
+ */
+export async function upsertReferenceBundle(
+  exec: SqlExecutor,
+  bundle: StationBundle,
+): Promise<void> {
+  await upsertBundleBody(exec, bundle, true);
+}
+
+async function upsertBundleBody(
+  exec: SqlExecutor,
+  bundle: StationBundle,
+  preserveIssuerPrefix: boolean,
+): Promise<void> {
   const s = bundle.shift;
   await exec.run(
     `INSERT INTO shift_mirror (
@@ -163,7 +180,7 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
        planned_qty=excluded.planned_qty, planned_date=excluded.planned_date,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
-       issuer_prefix=excluded.issuer_prefix,
+       issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
        box_label_template_spec=excluded.box_label_template_spec`,
     [
       s.id,

@@ -28,6 +28,8 @@ import type {
   ShiftBundleDto,
   ShiftDto,
   ShiftMode,
+  ShiftPlanningConfigDto,
+  ShiftReferenceBundleDto,
   UpdateShiftDto,
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -143,6 +145,11 @@ export class ShiftsService {
       .orderBy(schema.shifts.createdAt);
 
     return { items: rows.map((row) => this.mapShiftRow(row)) };
+  }
+
+  /** The one organisation setting needed by operations shift planning. */
+  async getPlanningConfig(tenantId: string): Promise<ShiftPlanningConfigDto> {
+    return { defaultBoxLabelTemplateId: await this.findDefaultBoxLabelTemplateId(tenantId) };
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
@@ -411,6 +418,20 @@ export class ShiftsService {
    * carries a NOT NULL FK, so a block can only ever be cut for a real device.
    */
   async getBundle(tenantId: string, id: string, deviceId: string | null): Promise<ShiftBundleDto> {
+    const referenceBundle = await this.getReferenceBundle(tenantId, id);
+    const sscc: ShiftBundleDto["sscc"] =
+      referenceBundle.shift.mode === "aggregation" && deviceId
+        ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
+        : null;
+    return { ...referenceBundle, sscc };
+  }
+
+  /**
+   * Reference-only bundle for recovery. This method intentionally accepts no
+   * device id and never enters `bundleSscc`, so it cannot allocate, replace,
+   * or reconcile server-side SSCC state.
+   */
+  async getReferenceBundle(tenantId: string, id: string): Promise<ShiftReferenceBundleDto> {
     const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
@@ -483,15 +504,6 @@ export class ShiftsService {
     // refresh can never drift.
     const operators = await this.operatorsService.buildRoster(tenantId);
 
-    // Aggregation shifts, and only for an actual station device. A
-    // validation shift closes no boxes, so allocating for it would burn
-    // serials nothing will ever print; a session caller has no device row to
-    // attribute a block to (sscc_blocks.device_id is NOT NULL).
-    const sscc: ShiftBundleDto["sscc"] =
-      shift.mode === "aggregation" && deviceId
-        ? await this.bundleSscc(tenantId, shift.id, deviceId)
-        : null;
-
     return {
       shift: bundleShift,
       product,
@@ -499,7 +511,7 @@ export class ShiftsService {
       boxLabelTemplate,
       counterpartyGln,
       operators,
-      sscc,
+      sscc: null,
     };
   }
 

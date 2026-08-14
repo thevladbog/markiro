@@ -37,6 +37,8 @@ export interface UseSyncEngineResult {
   nudge: () => void;
   /** Synchronously prevents the current engine from committing late acks. */
   pause: () => void;
+  /** Pauses synchronously and resolves after the current network/commit phase is idle. */
+  pauseAndWaitForIdle: () => Promise<void>;
   /** Resumes normal device-wide draining after a fail-closed window. */
   resume: () => void;
 }
@@ -118,10 +120,16 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
     engineRef.current?.pause();
   }, []);
 
+  const pauseAndWaitForIdle = useCallback(async () => {
+    pausedRef.current = true;
+    const engine = engineRef.current;
+    if (engine) await engine.pauseAndWaitForIdle();
+  }, []);
+
   const resume = useCallback(() => {
     pausedRef.current = false;
     engineRef.current?.resume();
   }, []);
 
-  return { state, nudge, pause, resume };
+  return { state, nudge, pause, pauseAndWaitForIdle, resume };
 }

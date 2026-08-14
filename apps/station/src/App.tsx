@@ -223,8 +223,8 @@ export function App() {
     null,
   );
   const shiftRecoverySyncPaused = useRef(false);
-  const pauseSyncRef = useRef<() => void>(() => {});
-  const resumeSyncRef = useRef<() => void>(() => {});
+  const pauseSyncAndWaitForIdleRef = useRef<() => Promise<void>>(async () => {});
+  const startNormalShiftMirrorRef = useRef<(shiftId: string) => void>(() => {});
   const [resumeSyncAfterRecoveryCommit, setResumeSyncAfterRecoveryCommit] = useState(false);
   const [hardwareConfig, setHardwareConfig] = useState<HardwareConfig>(DEFAULT_HARDWARE_CONFIG);
   const [scannerStatus, setScannerStatus] = useState<ScannerStatus | null>(null);
@@ -466,15 +466,20 @@ export function App() {
     }
     let cancelled = false;
     let resolving = false;
-    // mirrorShiftBundle writes in the background, so poll briefly until the
-    // product row lands rather than blocking shift entry on the network.
-    // `readShiftMirror` is fetched alongside `readShiftContext` on every
-    // tick. A missing mirror is a valid, classifiable state, but a failed read
-    // is not proof that recovery is unnecessary. Keep the outbox and floor
-    // sealed on that error and let the operator explicitly retry the local
-    // classification. This avoids turning a transient SQLite fault into an
-    // irreversible acknowledgement of the very box that may need recovery.
-    const tick = setInterval(() => {
+    let normalMirrorStarted = false;
+    let tick: ReturnType<typeof setInterval> | null = null;
+    const stopPolling = () => {
+      if (tick !== null) clearInterval(tick);
+      tick = null;
+    };
+    // Recovery classification owns the first local read after shift entry.
+    // The awaited pause barrier retires both an in-flight request and every
+    // device-side commit it already entered before any recovery fact is read.
+    // Only a confirmed "no recovery" result may schedule the normal bundle,
+    // whose endpoint is allowed to allocate an SSCC range.
+    const poll = () => {
+      if (resolving) return;
+      resolving = true;
       void Promise.all([
         readShiftContext(tauriExecutor, shift.id),
         readShiftMirror(tauriExecutor, shift.id).then(
@@ -483,14 +488,13 @@ export function App() {
         ),
       ])
         .then(async ([ctx, mirrorRead]) => {
-          if (cancelled || resolving) return;
-          resolving = true;
+          if (cancelled) return;
           if (!mirrorRead.ok) {
             if (ctx) setShiftContext(ctx);
             setBoxCapacity(null);
             setIssuerPrefix(null);
             setBoxTemplateRecovery({ kind: "local-read", phase: "local-error" });
-            clearInterval(tick);
+            stopPolling();
             console.error(
               "station: readShiftMirror recovery classification failed",
               mirrorRead.error,
@@ -506,9 +510,9 @@ export function App() {
               )
             : null;
           if (cancelled) return;
-          if (!recovery && shiftRecoverySyncPaused.current) {
-            shiftRecoverySyncPaused.current = false;
-            resumeSyncRef.current();
+          if (!recovery && !normalMirrorStarted) {
+            normalMirrorStarted = true;
+            startNormalShiftMirrorRef.current(shift.id);
           }
           if (!ctx) {
             resolving = false;
@@ -518,7 +522,10 @@ export function App() {
           setBoxCapacity(mirror?.boxCapacity ?? null);
           setIssuerPrefix(mirror?.issuerPrefix ?? null);
           setBoxTemplateRecovery(recovery ? { kind: "box", ...recovery, phase: "blocked" } : null);
-          clearInterval(tick);
+          if (!recovery && shiftRecoverySyncPaused.current) {
+            setResumeSyncAfterRecoveryCommit(true);
+          }
+          stopPolling();
         })
         .catch((err) => {
           resolving = false;
@@ -527,10 +534,24 @@ export function App() {
           // tick; the poll keeps running and the next tick self-heals.
           console.error("station: readShiftContext poll failed", err);
         });
-    }, 250);
+    };
+    void pauseSyncAndWaitForIdleRef
+      .current()
+      .then(() => {
+        if (cancelled) return;
+        poll();
+        tick = setInterval(poll, 250);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setBoxCapacity(null);
+        setIssuerPrefix(null);
+        setBoxTemplateRecovery({ kind: "local-read", phase: "local-error" });
+        console.error("station: sync recovery barrier failed", error);
+      });
     return () => {
       cancelled = true;
-      clearInterval(tick);
+      stopPolling();
     };
   }, [shift]);
 
@@ -737,6 +758,7 @@ export function App() {
     state: syncState,
     nudge: nudgeSync,
     pause: pauseSync,
+    pauseAndWaitForIdle: pauseSyncAndWaitForIdle,
     resume: resumeSync,
   } = useSyncEngine({
     exec: tauriExecutor,
@@ -745,8 +767,7 @@ export function App() {
     ...(credentialGeneration ? { credentialGeneration } : {}),
     onCredentialRejected,
   });
-  pauseSyncRef.current = pauseSync;
-  resumeSyncRef.current = resumeSync;
+  pauseSyncAndWaitForIdleRef.current = pauseSyncAndWaitForIdle;
 
   // Successful recovery first commits the unblocked floor render; only the
   // following effect may let the device-wide outbox resume. This prevents a
@@ -1108,6 +1129,11 @@ export function App() {
   // from, so it is guaranteed non-null in this branch.
   const activeClient = authenticatedClient ?? legacyGatedClient;
   const floorGeneration = credentialGeneration;
+  startNormalShiftMirrorRef.current = (shiftId) => {
+    if (floorGeneration && credentialGenerationIsCurrent(floorGeneration)) {
+      void mirrorShiftBundle(activeClient, tauriExecutor, shiftId, floorGeneration);
+    }
+  };
   const updateIndicator: UpdateIndicatorModel = {
     severity: updater.severity,
     glyph: updater.persisted?.available ? "!" : "↻",
@@ -1129,10 +1155,9 @@ export function App() {
   );
 
   // Shared by ShiftSelection's `onSelected` and NewShift's `onStarted`: the
-  // shift is entered immediately (never blocked on the network), and the
-  // bundle download + SQLite mirror happens in the background so it's
-  // available offline afterward. See `mirrorShiftBundle` for the
-  // resilience contract (a download failure must not block entry).
+  // shift is entered immediately (never blocked on the network). Recovery
+  // classification runs first; only its confirmed no-recovery branch starts
+  // the ordinary allocating bundle mirror through the ref above.
   function handleShiftEntered(entered: ActiveShift) {
     if (floorGeneration && !credentialGenerationIsCurrent(floorGeneration)) return;
     shiftRecoverySyncPaused.current = true;
@@ -1141,9 +1166,6 @@ export function App() {
     setShift(entered);
     setShiftContext(null);
     setBoxTemplateRecovery(null);
-    if (floorGeneration) {
-      void mirrorShiftBundle(activeClient, tauriExecutor, entered.id, floorGeneration);
-    }
   }
 
   async function retryBackfilledBoxTemplateRecovery(): Promise<void> {
@@ -1152,6 +1174,7 @@ export function App() {
     let expected = origin.kind === "box" ? { boxId: origin.boxId, sscc: origin.sscc } : null;
     setBoxTemplateRecovery({ ...origin, phase: "retrying" });
     try {
+      await pauseSyncAndWaitForIdle();
       await applyMigrations(tauriExecutor);
       if (!expected) {
         const recoveryTerminalId = configRef.current?.deviceId ?? null;
@@ -1166,6 +1189,7 @@ export function App() {
           recoveryTerminalId,
         );
         if (!expected) {
+          startNormalShiftMirrorRef.current(shift.id);
           setShiftContext(ctx);
           setBoxCapacity(mirror.boxCapacity);
           setIssuerPrefix(mirror.issuerPrefix);

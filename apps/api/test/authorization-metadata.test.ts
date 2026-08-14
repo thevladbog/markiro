@@ -180,6 +180,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
     ShiftsController,
     {
       listShifts: sharedReadPolicy,
+      getPlanningConfig: readPolicy,
       getShift: readPolicy,
       createShift: sharedWritePolicy,
       updateShift: writePolicy,
@@ -187,6 +188,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       closeShift: writePolicy,
       openShift: sharedWritePolicy,
       getBundle: sharedReadPolicy,
+      getReferenceBundle: sharedReadPolicy,
     },
   ],
 ];

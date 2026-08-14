@@ -114,6 +114,11 @@ export interface ListShiftsResponseDto {
   items: ShiftDto[];
 }
 
+/** GET /shifts/planning-config response — the operations-readable planning subset only. */
+export interface ShiftPlanningConfigDto {
+  defaultBoxLabelTemplateId: string | null;
+}
+
 /** Legacy fields retained only on station bundles during a rolling deployment. */
 export type StationBundleProductDto = ProductDto & {
   defaultLabelTemplateId: null;
@@ -165,3 +170,9 @@ export interface ShiftBundleDto {
     consumedThroughSerial: number | null;
   } | null;
 }
+
+/**
+ * GET /shifts/:id/reference-bundle response. It carries only mirrored
+ * reference data and can never allocate or reconcile an SSCC block.
+ */
+export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc"> & { sscc: null };

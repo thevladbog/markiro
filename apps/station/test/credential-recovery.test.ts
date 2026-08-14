@@ -605,58 +605,47 @@ describe("credential rejection recovery", () => {
       elements: [{ id: "sscc", kind: "field", field: "sscc", xMm: 4, yMm: 4, fontSizePt: 10 }],
     };
 
-    await refreshShiftBundleForRecovery(
-      {
-        get: vi.fn().mockResolvedValue({
-          shift: {
-            id: "shift-1",
-            status: "active",
-            mode: "aggregation",
-            productId: "product-1",
-            productName: "Product",
-            lineId: null,
-            lineName: null,
-            counterpartyId: null,
-            counterpartyName: null,
-            labelTemplateId: null,
-            labelTemplateName: null,
-            plannedQty: null,
-            plannedDate: null,
-            boxCapacity: 10,
-            palletCapacity: null,
-            palletsEnabled: false,
-            openedAt: "2026-08-06T07:00:00.000Z",
-          },
-          product: {
-            id: "product-1",
-            gtin14: "04600000000017",
-            name: "Product",
-            productGroup: null,
-            boxCapacity: 10,
-            palletCapacity: null,
-            status: "active",
-            defaultCounterpartyId: null,
-            defaultLabelTemplateId: null,
-          },
-          labelTemplate: null,
-          boxLabelTemplate: { id: "template-box", name: "Box", spec: boxLabelSpec },
-          counterpartyGln: null,
-          operators: [],
-          sscc: {
-            issuerPrefix: "046012345",
-            extensionDigit: 0,
-            fromSerial: 100,
-            toSerial: 199,
-            // Deliberately ahead of the durable local cursor (117). A normal
-            // bundle mirror is allowed to advance this to 151, but print
-            // recovery is reference-only and must preserve the pool exactly.
-            consumedThroughSerial: 150,
-          },
-        }),
+    const get = vi.fn().mockResolvedValue({
+      shift: {
+        id: "shift-1",
+        status: "active",
+        mode: "aggregation",
+        productId: "product-1",
+        productName: "Product",
+        lineId: null,
+        lineName: null,
+        counterpartyId: null,
+        counterpartyName: null,
+        labelTemplateId: null,
+        labelTemplateName: null,
+        plannedQty: null,
+        plannedDate: null,
+        boxCapacity: 10,
+        palletCapacity: null,
+        palletsEnabled: false,
+        openedAt: "2026-08-06T07:00:00.000Z",
       },
-      exec,
-      "shift-1",
-    );
+      product: {
+        id: "product-1",
+        gtin14: "04600000000017",
+        name: "Product",
+        productGroup: null,
+        boxCapacity: 10,
+        palletCapacity: null,
+        status: "active",
+        defaultCounterpartyId: null,
+        defaultLabelTemplateId: null,
+      },
+      labelTemplate: null,
+      boxLabelTemplate: { id: "template-box", name: "Box", spec: boxLabelSpec },
+      counterpartyGln: null,
+      operators: [],
+      // The reference endpoint never allocates or returns a device block.
+      sscc: null,
+    });
+    await refreshShiftBundleForRecovery({ get }, exec, "shift-1");
+
+    expect(get).toHaveBeenCalledWith("/shifts/shift-1/reference-bundle");
 
     const after = Object.fromEntries(
       await Promise.all(
@@ -664,6 +653,12 @@ describe("credential rejection recovery", () => {
       ),
     );
     expect(after).toEqual(before);
+    expect(
+      await exec.all<{ issuer_prefix: string | null }>(
+        "SELECT issuer_prefix FROM shift_mirror WHERE id = ?",
+        ["shift-1"],
+      ),
+    ).toEqual([{ issuer_prefix: "460123456" }]);
     expect(await findUnresolvedBoxPrint(exec, "shift-1", "device-1", false)).toEqual(
       unresolvedBefore,
     );

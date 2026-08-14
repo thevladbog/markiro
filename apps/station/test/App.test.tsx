@@ -1295,16 +1295,11 @@ describe("App", () => {
       boxLabelTemplate: { id: "template-box", name: "Box", spec: boxLabelSpec },
       counterpartyGln: null,
       operators: [],
-      sscc: {
-        issuerPrefix: "460123456",
-        extensionDigit: 0,
-        fromSerial: 1,
-        toSerial: 100,
-        consumedThroughSerial: 1,
-      },
+      sscc: null,
     };
     let bundleAvailable = false;
-    let bundleAttempts = 0;
+    let referenceBundleAttempts = 0;
+    let normalBundleAttempts = 0;
     let syncAttempts = 0;
     let resolveRecoveryWindowSync!: (response: Response) => void;
     let resolveResumedSync!: (response: Response) => void;
@@ -1337,10 +1332,14 @@ describe("App", () => {
             { status: 200 },
           );
         }
-        if (path === "/shifts/shift-1/bundle") {
-          bundleAttempts += 1;
+        if (path === "/shifts/shift-1/reference-bundle") {
+          referenceBundleAttempts += 1;
           if (!bundleAvailable) throw new Error("station offline");
           return new Response(JSON.stringify(bundle), { status: 200 });
+        }
+        if (path === "/shifts/shift-1/bundle") {
+          normalBundleAttempts += 1;
+          throw new Error("normal allocation bundle must not start before recovery classification");
         }
         if (path === "/station/operators") throw new Error("keep cached roster");
         if (path === "/station/scans" && init?.method === "POST") {
@@ -1367,8 +1366,25 @@ describe("App", () => {
       await signInAsOperator();
       await act(async () => i18n.changeLanguage("ru"));
       fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+
+      // The normal sync request is held in the network phase. Recovery may
+      // neither inspect the mirror nor start either bundle path until the
+      // awaited pause-and-idle barrier has retired that request.
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(screen.queryByRole("button", { name: "Повторить восстановление" })).toBeNull();
+      expect(referenceBundleAttempts).toBe(0);
+      expect(normalBundleAttempts).toBe(0);
+
+      await act(async () => {
+        resolveRecoveryWindowSync(
+          new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), { status: 200 }),
+        );
+      });
       const retry = await screen.findByRole("button", { name: "Повторить восстановление" });
-      expect(bundleAttempts).toBe(1);
+      expect(referenceBundleAttempts).toBe(0);
+      expect(normalBundleAttempts).toBe(0);
       expect(
         screen.getByRole("button", { name: "↻ Обновления" }) as HTMLButtonElement,
       ).toHaveProperty("disabled", true);
@@ -1384,17 +1400,13 @@ describe("App", () => {
         await screen.findByText("Не удалось загрузить смены. Проверьте доступ к серверу."),
       ).toBeDefined();
       expect(screen.getByRole("button", { name: "Повторить восстановление" })).toBeDefined();
-      expect(bundleAttempts).toBe(2);
+      expect(referenceBundleAttempts).toBe(1);
+      expect(normalBundleAttempts).toBe(0);
       expect(await factSnapshot()).toBe(before);
 
       bundleAvailable = true;
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: "Повторить восстановление" }));
-        // Connectivity returns for the bundle refresh and an already in-flight
-        // outbox request at the same time. Recovery must ignore this late ack.
-        resolveRecoveryWindowSync(
-          new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), { status: 200 }),
-        );
       });
 
       expect(
@@ -1402,7 +1414,8 @@ describe("App", () => {
       ).toBeDefined();
       expect(screen.getByText("046012345600000016")).toBeDefined();
       expect(screen.getByRole("button", { name: "Повторить печать" })).toBeDefined();
-      expect(bundleAttempts).toBe(3);
+      expect(referenceBundleAttempts).toBe(2);
+      expect(normalBundleAttempts).toBe(0);
       await waitFor(() => expect(syncAttempts).toBe(2));
       // The resumed request is deliberately still pending, proving the first
       // response could not acknowledge anything during the recovery window.
@@ -3537,11 +3550,13 @@ describe("App", () => {
         return Promise.resolve(undefined);
       });
 
+      const requestPaths: string[] = [];
       vi.stubGlobal(
         "fetch",
         vi.fn(async (url: string, init?: RequestInit) => {
           const path = new URL(url).pathname;
           const method = init?.method ?? "GET";
+          requestPaths.push(`${method} ${path}`);
           if (path === "/products/gtin-check" && method === "POST") {
             return new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
               status: 200,
@@ -3586,12 +3601,14 @@ describe("App", () => {
 
       expect(await screen.findByText("Could not restore the print state")).toBeDefined();
       expect(screen.queryByRole("button", { name: "Pause / finish" })).toBeNull();
+      expect(requestPaths).not.toContain("GET /shifts/s9/bundle");
 
       fireEvent.click(screen.getByRole("button", { name: "Retry recovery" }));
 
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Pause / finish" })).toBeDefined(),
       );
+      await waitFor(() => expect(requestPaths).toContain("GET /shifts/s9/bundle"));
       // One failed classification read, one successful retry read, and one
       // strict recovery classifier read that confirms this validation shift
       // has no pending box recovery.

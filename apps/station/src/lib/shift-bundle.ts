@@ -1,6 +1,11 @@
 import type { StationClient } from "./api-client.js";
 import type { CredentialGeneration } from "./credential-recovery.js";
-import { upsertBundle, type SqlExecutor, type StationBundle } from "./mirror.js";
+import {
+  upsertBundle,
+  upsertReferenceBundle,
+  type SqlExecutor,
+  type StationBundle,
+} from "./mirror.js";
 import { addRange } from "./sscc-pool.js";
 import { syncStationProductImage, trackStationProductImageSync } from "./product-image-cache.js";
 
@@ -69,13 +74,20 @@ async function mirrorShiftBundleBody(
   generation?: CredentialGeneration,
   mirrorSsccRange = true,
 ): Promise<void> {
-  const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
+  const path = mirrorSsccRange
+    ? `/shifts/${shiftId}/bundle`
+    : `/shifts/${shiftId}/reference-bundle`;
+  const bundle = await client.get<StationBundle>(path);
   if (generation?.sealed) return;
   if (mirrorSsccRange && bundle.sscc) {
     await addRange(exec, bundle.sscc);
   }
   if (generation?.sealed) return;
-  await upsertBundle(exec, bundle);
+  if (mirrorSsccRange) {
+    await upsertBundle(exec, bundle);
+  } else {
+    await upsertReferenceBundle(exec, bundle);
+  }
   if (client.download) {
     const mediaSync = syncStationProductImage(
       exec,

@@ -267,6 +267,10 @@ describe("mirrorShiftBundle", () => {
     await Promise.all([initial, recovery]);
 
     expect(get).toHaveBeenCalledTimes(2);
+    expect(get.mock.calls.map(([path]) => path)).toEqual([
+      "/shifts/s1/bundle",
+      "/shifts/s1/reference-bundle",
+    ]);
     expect(
       await exec.all<{ box_label_template_spec: string | null }>(
         "SELECT box_label_template_spec FROM shift_mirror WHERE id = ?",

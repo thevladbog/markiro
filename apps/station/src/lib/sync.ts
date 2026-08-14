@@ -77,6 +77,8 @@ export interface SyncEngine {
   nudge(): void;
   /** Freeze local sync commits; an in-flight server response becomes a retry. */
   pause(): void;
+  /** Pause immediately, then resolve only after every in-flight network/commit phase retires. */
+  pauseAndWaitForIdle(): Promise<void>;
   /** Lift a prior pause and immediately retry any durable pending work. */
   resume(): void;
   stop(): void;
@@ -1136,6 +1138,21 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     }, delay);
   }
 
+  function pause(): void {
+    pauseEpoch += 1;
+    paused = true;
+    requested = false;
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  }
+
+  function idle(): Promise<void> {
+    if (!draining) return Promise.resolve();
+    return new Promise<void>((resolve) => idleResolvers.push(resolve));
+  }
+
   return {
     nudge() {
       if (stopped || paused || credentialGeneration.sealed) return;
@@ -1152,14 +1169,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       if (retryTimer !== null) return;
       void drain();
     },
-    pause() {
-      pauseEpoch += 1;
-      paused = true;
-      requested = false;
-      if (retryTimer !== null) {
-        clearTimeout(retryTimer);
-        retryTimer = null;
-      }
+    pause,
+    pauseAndWaitForIdle() {
+      pause();
+      return idle();
     },
     resume() {
       if (stopped || credentialGeneration.sealed || !paused) return;
@@ -1177,9 +1190,6 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         retryTimer = null;
       }
     },
-    idle() {
-      if (!draining) return Promise.resolve();
-      return new Promise<void>((resolve) => idleResolvers.push(resolve));
-    },
+    idle,
   };
 }

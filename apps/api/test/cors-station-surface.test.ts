@@ -28,6 +28,7 @@ const documentedStationSurface = [
   ["GET", "/shifts"],
   ["POST", "/shifts"],
   ["GET", "/shifts/shift-1/bundle"],
+  ["GET", "/shifts/shift-1/reference-bundle"],
   ["POST", "/shifts/shift-1/open"],
   ["GET", "/products"],
   ["POST", "/products/gtin-check"],
@@ -79,6 +80,7 @@ describe("station CORS surface", () => {
     ["POST", "/shifts/shift-1/close"],
     ["GET", "/shifts/shift-1/open"],
     ["POST", "/shifts/shift-1/bundle"],
+    ["POST", "/shifts/shift-1/reference-bundle"],
     ["POST", "/products"],
     ["GET", "/products/gtin-check"],
     ["GET", "/products/product-1"],
@@ -88,6 +90,7 @@ describe("station CORS surface", () => {
     ["GET", "/unknown"],
     ["GET", "/products-extra"],
     ["GET", "/shifts/shift-1/bundle/extra"],
+    ["GET", "/shifts/shift-1/reference-bundle/extra"],
   ] as const)("does not leak STATION_ORIGIN onto adjacent %s %s", (method, path) => {
     expect(selectedOrigins(delegate, method, path)).not.toContain(STATION_ORIGIN);
     expect(selectedOrigins(delegate, "OPTIONS", path, method)).not.toContain(STATION_ORIGIN);

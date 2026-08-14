@@ -237,14 +237,8 @@ const DEFAULT_BOX_LABEL_TEMPLATE = {
   updatedAt: "2026-08-14T00:00:00.000Z",
 };
 
-const ORG_PROFILE = {
+const SHIFT_PLANNING_CONFIG = {
   defaultBoxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
-  gln: null,
-  gs1Prefixes: [],
-  inn: null,
-  pickupLimitsEnabled: false,
-  logoUrl: null,
-  logoRevision: null,
 };
 
 // Task 6: two distinct counterparties -- the buyer the goods are for, and a
@@ -603,6 +597,9 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, { defaultBoxLabelTemplateId: null });
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [COUNTERPARTY] });
@@ -790,12 +787,15 @@ describe("ShiftsPage", () => {
     });
   }, 10_000);
 
-  it("omits labelTemplateId from the create payload when left untouched", async () => {
+  it("omits both retired item-template and untouched box-template fields from create", async () => {
     const user = userEvent.setup();
     const created = { ...PLANNED_SHIFT, id: "new6", productId: PRODUCT_B.id };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, { defaultBoxLabelTemplateId: null });
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
       if (path === "/api/label-templates") {
@@ -841,12 +841,14 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
-      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -886,12 +888,14 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") {
         return jsonResponse(201, { ...PLANNED_SHIFT, id: "new-override" });
       }
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
-      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -921,11 +925,11 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts" && init?.method === "POST") {
         return jsonResponse(201, { ...PLANNED_SHIFT, id: "new-validation" });
       }
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, defaultBoxLabelTemplateId: null });
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
-      if (path === "/api/org/profile") {
-        return jsonResponse(200, { ...ORG_PROFILE, defaultBoxLabelTemplateId: null });
-      }
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -953,11 +957,11 @@ describe("ShiftsPage", () => {
   it("blocks aggregation inline when neither organisation nor override has a box template", async () => {
     const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
       const path = String(url);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, { ...SHIFT_PLANNING_CONFIG, defaultBoxLabelTemplateId: null });
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
-      if (path === "/api/org/profile") {
-        return jsonResponse(200, { ...ORG_PROFILE, defaultBoxLabelTemplateId: null });
-      }
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1229,7 +1233,7 @@ describe("ShiftsPage", () => {
     );
   });
 
-  it("sends boxLabelTemplateId: null when the user selects then clears it back to the default", async () => {
+  it("sends boxLabelTemplateId: null when the user explicitly selects no template", async () => {
     const user = userEvent.setup();
     const updated = { ...PLANNED_SHIFT, boxLabelTemplateId: null };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
@@ -1324,12 +1328,14 @@ describe("ShiftsPage", () => {
       if (path === "/api/shifts/s1" && init?.method === "PATCH") {
         return jsonResponse(200, snapshottedShift);
       }
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
-      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1369,12 +1375,14 @@ describe("ShiftsPage", () => {
           boxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
         });
       }
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [snapshottedShift] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
       }
-      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1406,12 +1414,14 @@ describe("ShiftsPage", () => {
       "fetch",
       vi.fn(async (url: string) => {
         const path = String(url);
+        if (path === "/api/shifts/planning-config") {
+          return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+        }
         if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
         if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
         if (path === "/api/label-templates") {
           return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
         }
-        if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
         return jsonResponse(200, { items: [] });
       }),
     );
@@ -1440,13 +1450,15 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
       }
-      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -1504,13 +1516,15 @@ describe("ShiftsPage", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
       if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path === "/api/shifts/planning-config") {
+        return jsonResponse(200, SHIFT_PLANNING_CONFIG);
+      }
       if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
       if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
       if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
       if (path === "/api/label-templates") {
         return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
       }
-      if (path === "/api/org/profile") return jsonResponse(200, ORG_PROFILE);
       return jsonResponse(200, { items: [] });
     });
     vi.stubGlobal("fetch", fetchMock);

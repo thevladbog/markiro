@@ -121,6 +121,151 @@ describe("sync engine", () => {
     engine.stop();
   });
 
+  it("waits for an in-flight serial-range commit before the pause barrier becomes idle", async () => {
+    const baseExec = await migratedExec();
+    await seed(baseExec, 1);
+    let markRangeCommitStarted!: () => void;
+    let releaseRangeCommit!: () => void;
+    const rangeCommitStarted = new Promise<void>((resolve) => {
+      markRangeCommitStarted = resolve;
+    });
+    const rangeCommitRelease = new Promise<void>((resolve) => {
+      releaseRangeCommit = resolve;
+    });
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async run(sql, params) {
+        if (sql.includes("INSERT INTO sscc_pool")) {
+          markRangeCommitStarted();
+          await rangeCommitRelease;
+        }
+        await baseExec.run(sql, params);
+      },
+    };
+    const post = vi.fn().mockResolvedValue({
+      applied: 1,
+      alreadyApplied: false,
+      ssccBlock: {
+        issuerPrefix: "046012345",
+        extensionDigit: 0,
+        fromSerial: 1,
+        toSerial: 100,
+      },
+    });
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await rangeCommitStarted;
+    let barrierSettled = false;
+    const barrier = engine.pauseAndWaitForIdle().then(() => {
+      barrierSettled = true;
+    });
+    await Promise.resolve();
+    expect(barrierSettled).toBe(false);
+
+    releaseRangeCommit();
+    await barrier;
+    expect(await remaining(baseExec, "046012345", 0)).toBe(100);
+    expect(await outboxDepth(baseExec)).toBe(1);
+    engine.stop();
+  });
+
+  it("waits for an in-flight outbox acknowledgement before the pause barrier becomes idle", async () => {
+    const baseExec = await migratedExec();
+    await seed(baseExec, 1);
+    let markAckStarted!: () => void;
+    let releaseAck!: () => void;
+    const ackStarted = new Promise<void>((resolve) => {
+      markAckStarted = resolve;
+    });
+    const ackRelease = new Promise<void>((resolve) => {
+      releaseAck = resolve;
+    });
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async run(sql, params) {
+        if (sql.includes("DELETE FROM outbox WHERE id <=")) {
+          markAckStarted();
+          await ackRelease;
+        }
+        await baseExec.run(sql, params);
+      },
+    };
+    const engine = createSyncEngine({
+      exec,
+      client: { post: vi.fn().mockResolvedValue({ applied: 1, alreadyApplied: false }) },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await ackStarted;
+    let barrierSettled = false;
+    const barrier = engine.pauseAndWaitForIdle().then(() => {
+      barrierSettled = true;
+    });
+    await Promise.resolve();
+    expect(barrierSettled).toBe(false);
+
+    releaseAck();
+    await barrier;
+    expect(await outboxDepth(baseExec)).toBe(0);
+    engine.stop();
+  });
+
+  it("waits for an in-flight box acknowledgement before the pause barrier becomes idle", async () => {
+    const baseExec = await migratedExec();
+    await openBox(baseExec, "s1", "b1", "2026-07-28T09:55:00.000Z", "t1");
+    await closeBox(baseExec, "b1", "004601234560000017", "2026-07-28T10:00:00.000Z", null);
+    let markBoxAckStarted!: () => void;
+    let releaseBoxAck!: () => void;
+    const boxAckStarted = new Promise<void>((resolve) => {
+      markBoxAckStarted = resolve;
+    });
+    const boxAckRelease = new Promise<void>((resolve) => {
+      releaseBoxAck = resolve;
+    });
+    const exec: SqlExecutor = {
+      ...baseExec,
+      async run(sql, params) {
+        if (sql.includes("UPDATE boxes_mirror SET acked_at")) {
+          markBoxAckStarted();
+          await boxAckRelease;
+        }
+        await baseExec.run(sql, params);
+      },
+    };
+    const engine = createSyncEngine({
+      exec,
+      client: { post: vi.fn().mockResolvedValue({ applied: 0, alreadyApplied: false }) },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await boxAckStarted;
+    let barrierSettled = false;
+    const barrier = engine.pauseAndWaitForIdle().then(() => {
+      barrierSettled = true;
+    });
+    await Promise.resolve();
+    expect(barrierSettled).toBe(false);
+
+    releaseBoxAck();
+    await barrier;
+    const [box] = await baseExec.all<{ acked_at: string | null }>(
+      "SELECT acked_at FROM boxes_mirror WHERE box_id = ?",
+      ["b1"],
+    );
+    expect(box?.acked_at).not.toBeNull();
+    engine.stop();
+  });
+
   it("revalidates a pause after awaited commit bookkeeping before acknowledging the outbox", async () => {
     const baseExec = await migratedExec();
     await seed(baseExec, 1);

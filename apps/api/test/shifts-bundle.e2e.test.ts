@@ -367,6 +367,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     let agent: ReturnType<typeof request.agent>;
     let orgId: string;
     let stationKey: string;
+    let stationDeviceId: string;
     let shiftId: string;
     let issuerShiftId: string;
     let validationShiftId: string;
@@ -396,6 +397,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       // invented uuid (see sscc.e2e.test.ts's registerDevice).
       const device = await createTestStationDevice(app!, agent, "Box-block terminal");
       stationKey = device.apiKey;
+      stationDeviceId = device.deviceId;
 
       const plain = await agent
         .post("/shifts")
@@ -457,6 +459,94 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
           ),
         );
     }
+
+    async function allocationState() {
+      const [counters, blocks] = await Promise.all([
+        db
+          .select({
+            issuerPrefix: schema.ssccCounters.issuerPrefix,
+            extensionDigit: schema.ssccCounters.extensionDigit,
+            nextSerial: schema.ssccCounters.nextSerial,
+          })
+          .from(schema.ssccCounters)
+          .where(eq(schema.ssccCounters.tenantId, orgId)),
+        db
+          .select({
+            id: schema.ssccBlocks.id,
+            issuerPrefix: schema.ssccBlocks.issuerPrefix,
+            extensionDigit: schema.ssccBlocks.extensionDigit,
+            deviceId: schema.ssccBlocks.deviceId,
+            fromSerial: schema.ssccBlocks.fromSerial,
+            toSerial: schema.ssccBlocks.toSerial,
+            consumedThroughSerial: schema.ssccBlocks.consumedThroughSerial,
+          })
+          .from(schema.ssccBlocks)
+          .where(eq(schema.ssccBlocks.tenantId, orgId)),
+      ]);
+      return {
+        counters: counters.toSorted((a, b) =>
+          `${a.issuerPrefix}:${a.extensionDigit}`.localeCompare(
+            `${b.issuerPrefix}:${b.extensionDigit}`,
+          ),
+        ),
+        blocks: blocks.toSorted((a, b) => a.id.localeCompare(b.id)),
+      };
+    }
+
+    it("serves an online-first reference bundle without allocating server SSCC state", async () => {
+      const onlineFirstDevice = await createTestStationDevice(
+        app!,
+        agent,
+        "Online-first recovery terminal",
+      );
+      const before = await allocationState();
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/reference-bundle`)
+        .set("x-api-key", onlineFirstDevice.apiKey)
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        shift: { id: shiftId },
+        boxLabelTemplate: { id: expect.any(String) },
+        sscc: null,
+      });
+      expect(await allocationState()).toEqual(before);
+      expect(
+        (await blocksForOrgGln()).filter((block) => block.deviceId === onlineFirstDevice.deviceId),
+      ).toEqual([]);
+    });
+
+    it("does not replace an exhausted server block during a reference bundle refresh", async () => {
+      await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+      const [held] = await db
+        .select()
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, orgId),
+            eq(schema.ssccBlocks.deviceId, stationDeviceId),
+            eq(schema.ssccBlocks.issuerPrefix, orgGln.slice(0, 9)),
+          ),
+        );
+      expect(held).toBeDefined();
+      await db
+        .update(schema.ssccBlocks)
+        .set({ consumedThroughSerial: held!.toSerial })
+        .where(eq(schema.ssccBlocks.id, held!.id));
+      const before = await allocationState();
+
+      const response = await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/reference-bundle`)
+        .set("x-api-key", stationKey)
+        .expect(200);
+
+      expect(response.body.sscc).toBeNull();
+      expect(await allocationState()).toEqual(before);
+    });
 
     it("returns a planned aggregation bundle without allocating an SSCC block", async () => {
       const productId = await seedProduct(orgId, {

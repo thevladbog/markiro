@@ -10,7 +10,7 @@ import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { createTestStationDevice } from "./support/auth";
+import { createTestStationDevice, setOnlyOrganizationMemberRole } from "./support/auth";
 import { createShiftSchema, updateShiftSchema } from "../src/modules/shifts/dto";
 
 const ready = Boolean(
@@ -146,6 +146,20 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .from(schema.shifts)
       .where(eq(schema.shifts.tenantId, tenantId));
   }
+
+  it("lets a manager read only the box-template default needed for shift planning", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const defaultBoxLabelTemplateId = await setDefaultBoxLabelTemplate(agent, orgId);
+    await setOnlyOrganizationMemberRole(db, orgId, "manager");
+
+    // The full settings profile remains protected from managers.
+    await agent.get("/org/profile").expect(403);
+
+    const response = await agent.get("/shifts/planning-config").expect(200);
+    expect(response.body).toEqual({ defaultBoxLabelTemplateId });
+    expect(Object.keys(response.body)).toEqual(["defaultBoxLabelTemplateId"]);
+  });
 
   // ---------------------------------------------------------------------
   // Lines CRUD
@@ -701,6 +715,11 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .expect(400);
 
     expect(res.body.message).toEqual(expect.stringContaining("Unknown box label template"));
+    const serialized = JSON.stringify(res.body);
+    expect(serialized).not.toContain(org1);
+    expect(serialized).not.toContain(org2);
+    expect(serialized).not.toContain(templateId);
+    expect(serialized).not.toContain("shifts_tenant_box_label_template_fk");
   });
 
   it("PATCH /shifts/:id updates the sscc issuer and box label template independently", async () => {
@@ -1091,7 +1110,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
   // ---------------------------------------------------------------------
   // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
-  // the station's own four routes (list, create, open, bundle -- covered by
+  // the station's own five routes (list, create, open, bundle, reference bundle -- covered by
   // station-auth.e2e.test.ts, shifts-bundle.e2e.test.ts) stay reachable, but
   // get-by-id/patch/delete/close are cabinet-only since the station never
   // calls them (verified against apps/station/src). Routes carry no global
@@ -1132,8 +1151,9 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
-    // Session-only: not part of the station's four routes.
+    // Session-only: not part of the station's five routes.
     await request(server).get(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
+    await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(403);
     await request(server)
       .patch(`/shifts/${id}`)
       .set("x-api-key", apiKey)
