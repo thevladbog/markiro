@@ -93,6 +93,10 @@ describe.skipIf(!ready)("products e2e", () => {
     delete: vi.fn(async (key: string) => {
       storedObjects.delete(key);
     }),
+    get: vi.fn(async (key: string) => ({
+      body: storedObjects.get(key) ?? Buffer.alloc(0),
+      contentType: "image/webp",
+    })),
     presignRead: vi.fn(async (key: string) => `https://signed.invalid/${encodeURIComponent(key)}`),
   };
 
@@ -130,6 +134,10 @@ describe.skipIf(!ready)("products e2e", () => {
     storage.delete.mockImplementation(async (key: string) => {
       storedObjects.delete(key);
     });
+    storage.get.mockImplementation(async (key: string) => ({
+      body: storedObjects.get(key) ?? Buffer.alloc(0),
+      contentType: "image/webp",
+    }));
     storage.presignRead.mockImplementation(
       async (key: string) => `https://signed.invalid/${encodeURIComponent(key)}`,
     );
@@ -713,12 +721,13 @@ describe.skipIf(!ready)("products e2e", () => {
 
     const read = await agent
       .get(`/products/${productId}/image/${first.body.image.checksum}`)
-      .redirects(0)
-      .expect(302);
-    expect(read.headers.location).toBe(
-      `https://signed.invalid/${encodeURIComponent(firstAsset!.objectKey)}`,
-    );
-    expect(storage.presignRead).toHaveBeenCalledWith(firstAsset!.objectKey, 300);
+      .expect(200)
+      .expect("Content-Type", "image/webp")
+      .expect("Content-Length", String(first.body.image.byteSize))
+      .expect("ETag", `"${first.body.image.checksum}"`)
+      .expect("Cache-Control", "private, max-age=300, immutable");
+    expect(read.body).toEqual(storedObjects.get(firstAsset!.objectKey));
+    expect(storage.get).toHaveBeenCalledWith(firstAsset!.objectKey);
 
     const second = await agent
       .post(`/products/${productId}/image`)

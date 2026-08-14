@@ -1,9 +1,10 @@
-import { Controller, Get, HttpStatus, Param, Req, Res, UseGuards } from "@nestjs/common";
+import { Controller, Get, Param, Req, Res, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import type { Response } from "express";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ObjectStorageService } from "../storage/object-storage.service";
+import { sendPrivateImage } from "../storage/private-image-response";
 import { ProductsService } from "../products/products.service";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { AllowSubscriptionReadOnly } from "../../subscriptions/subscription-access-policy";
@@ -26,6 +27,6 @@ export class StationProductImagesController {
     @Res() response: Response,
   ): Promise<void> {
     const objectKey = await this.productsService.getCurrentImageRead(req.tenantId!, id, checksum);
-    response.redirect(HttpStatus.FOUND, await this.storage.presignRead(objectKey, 300));
+    await sendPrivateImage(this.storage, objectKey, checksum, response);
   }
 }
