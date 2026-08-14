@@ -152,6 +152,10 @@ jobs:
         run: pnpm test:yandex-runtime
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
+      - name: Verify landing browser and Lighthouse release gates
+        run: |
+          pnpm test:landing:browser
+          pnpm test:landing:lighthouse
       - name: Generate masked test-only environment
         run: |
           set -euo pipefail

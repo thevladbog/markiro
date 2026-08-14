@@ -371,7 +371,7 @@ input:focus-visible {
 
 .interface-kicker {
   margin-bottom: var(--sp-3);
-  color: #77736b;
+  color: #625f58;
   font: 500 0.625rem / 1 var(--font-mono);
 }
 
@@ -419,7 +419,7 @@ input:focus-visible {
 
 .line-console__secondary small {
   margin-top: var(--sp-3);
-  color: #77736b;
+  color: #625f58;
   font: 500 0.625rem / 1.4 var(--font-mono);
 }
 
@@ -1613,9 +1613,7 @@ input:focus-visible {
 .seo-hero {
   padding: 10rem 0 6rem;
   border-bottom: 1px solid var(--line);
-  background:
-    linear-gradient(120deg, rgb(25 69 45 / 22%), transparent 58%),
-    var(--bg-0);
+  background: linear-gradient(120deg, rgb(25 69 45 / 22%), transparent 58%), var(--bg-0);
 }
 
 .seo-hero__inner {

@@ -10,11 +10,15 @@
   "scripts": {
     "test": "playwright test --config playwright.config.ts",
     "test:kiosk": "playwright test --config kiosk.playwright.config.ts",
+    "test:landing": "playwright test --config landing.playwright.config.ts",
+    "test:landing:lighthouse": "node scripts/lighthouse-landing.mjs",
+    "test:lighthouse-parser": "node --test test/lighthouse-landing.test.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@playwright/test": "1.62.0",
     "@types/node": "26.1.1",
+    "lighthouse": "13.4.0",
     "typescript": "6.0.3"
   }
 }
