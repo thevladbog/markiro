@@ -28,6 +28,7 @@ import type {
   ShiftBundleDto,
   ShiftDto,
   ShiftMode,
+  ShiftOrigin,
   UpdateShiftDto,
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -148,7 +149,11 @@ export class ShiftsService {
    * with no effective label template (neither the shift nor its product has
    * one) -- allowed by design; the printing station decides the fallback.
    */
-  async createShift(tenantId: string, data: CreateShiftDto): Promise<ShiftDto> {
+  async createShift(
+    tenantId: string,
+    data: CreateShiftDto,
+    createdFrom: ShiftOrigin = "admin",
+  ): Promise<ShiftDto> {
     if (data.palletsEnabled === true) {
       await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
@@ -191,6 +196,7 @@ export class ShiftsService {
           boxCapacity: boxCapacity ?? null,
           palletCapacity: palletCapacity ?? null,
           palletsEnabled,
+          createdFrom,
         })
         .returning();
 
@@ -204,20 +210,24 @@ export class ShiftsService {
   }
 
   /**
-   * Partial update, allowed only while `status === "planned"` (409
-   * otherwise). Capacity/mode rules are re-checked against the merged
-   * (post-patch) values, mirroring the create-time validation.
+   * Planned shifts accept the full planning patch. Active shifts accept only
+   * administrative metadata plus the box-label template; changing mode,
+   * product-derived rules, or other print semantics after stations have
+   * mirrored a bundle would split the line across incompatible local state.
    */
   async updateShift(tenantId: string, id: string, data: UpdateShiftDto): Promise<ShiftDto> {
-    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
-      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
-    }
     const current = await this.findRow(tenantId, id);
     if (!current) {
       throw new NotFoundException();
     }
-    if (current.status !== "planned") {
-      throw new ConflictException("Shift can only be edited while planned");
+    if (current.status === "closed") {
+      throw new ConflictException("Closed shifts cannot be edited");
+    }
+    if (current.status === "active") {
+      return this.updateActiveShift(tenantId, id, data);
+    }
+    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
 
     const mode = data.mode !== undefined ? data.mode : current.mode;
@@ -270,6 +280,54 @@ export class ShiftsService {
       if (!row) {
         throw new ConflictException("Shift can only be edited while planned");
       }
+      return this.getShift(tenantId, row.id);
+    } catch (error) {
+      this.handleWriteError(error);
+    }
+  }
+
+  private async updateActiveShift(
+    tenantId: string,
+    id: string,
+    data: UpdateShiftDto,
+  ): Promise<ShiftDto> {
+    const allowedFields = new Set<keyof UpdateShiftDto>([
+      "lineId",
+      "plannedQty",
+      "plannedDate",
+      "boxLabelTemplateId",
+    ]);
+    const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
+      (field) => !allowedFields.has(field),
+    );
+    if (forbiddenField) {
+      throw new ConflictException(`Active shift field cannot be edited: ${String(forbiddenField)}`);
+    }
+
+    const changes: Partial<
+      Pick<ShiftRow, "lineId" | "plannedQty" | "plannedDate" | "boxLabelTemplateId">
+    > = {};
+    if (data.lineId !== undefined) changes.lineId = data.lineId;
+    if (data.plannedQty !== undefined) changes.plannedQty = data.plannedQty;
+    if (data.plannedDate !== undefined) changes.plannedDate = data.plannedDate;
+    if (data.boxLabelTemplateId !== undefined) {
+      changes.boxLabelTemplateId = data.boxLabelTemplateId;
+    }
+    if (Object.keys(changes).length === 0) return this.getShift(tenantId, id);
+
+    try {
+      const [row] = await this.db
+        .update(schema.shifts)
+        .set(changes)
+        .where(
+          and(
+            eq(schema.shifts.tenantId, tenantId),
+            eq(schema.shifts.id, id),
+            eq(schema.shifts.status, "active"),
+          ),
+        )
+        .returning();
+      if (!row) throw new ConflictException("Shift is no longer active");
       return this.getShift(tenantId, row.id);
     } catch (error) {
       this.handleWriteError(error);

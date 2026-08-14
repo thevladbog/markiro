@@ -425,7 +425,7 @@ describe("ShiftsPage", () => {
     expect(screen.queryByText("Смены не запланированы")).toBeNull();
   });
 
-  it("shows edit/delete actions only for planned rows, and the close action only for active rows", async () => {
+  it("shows edit for planned and active rows, delete only for planned, and close only for active", async () => {
     const fetchMock = vi.fn(async (url: string) => {
       const path = String(url);
       if (path.startsWith("/api/shifts")) {
@@ -438,9 +438,118 @@ describe("ShiftsPage", () => {
     renderPage();
     const table = within(await screen.findByRole("table"));
 
-    expect(table.getAllByRole("button", { name: "Изменить" })).toHaveLength(1);
+    expect(table.getAllByRole("button", { name: "Изменить" })).toHaveLength(2);
     expect(table.getAllByRole("button", { name: "Удалить" })).toHaveLength(1);
     expect(table.getAllByRole("button", { name: "Закрыть смену" })).toHaveLength(1);
+  });
+
+  it("requires a critical confirmation before saving active-shift metadata", async () => {
+    const user = userEvent.setup();
+    const activeShift = {
+      ...ACTIVE_TOLLING_SHIFT,
+      labelTemplateId: "lt1",
+      labelTemplateName: LABEL_TEMPLATE.name,
+      boxLabelTemplateId: "lt1",
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s2" && init?.method === "PATCH") {
+        return jsonResponse(200, { ...activeShift, plannedQty: 1200, boxLabelTemplateId: "lt2" });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [activeShift] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [LABEL_TEMPLATE, BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    const row = (await screen.findByText("Сыр Российский")).closest("tr");
+    expect(row).not.toBeNull();
+    await user.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену");
+
+    expect((screen.getByRole("radio", { name: "Валидация" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect(screen.queryByRole("combobox", { name: "Шаблон этикетки" })).toBeNull();
+    expect((screen.getByLabelText("Вместимость короба, шт") as HTMLInputElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(screen.getByLabelText("Плановое количество, шт"), {
+      target: { value: "1200" },
+    });
+    await chooseOption(user, "Шаблон этикетки короба", BOX_LABEL_TEMPLATE.name);
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Критическое изменение активной смены",
+    });
+    expect(dialog.textContent).toContain(
+      "выйдите из неё и войдите повторно на всех работающих с ней станциях",
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => call[0] === "/api/shifts/s2" && call[1]?.method === "PATCH",
+      ),
+    ).toBe(false);
+
+    await user.click(within(dialog).getByRole("button", { name: "Сохранить изменения" }));
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        (call) => call[0] === "/api/shifts/s2" && call[1]?.method === "PATCH",
+      );
+      expect(JSON.parse(patchCall?.[1]?.body as string)).toEqual({
+        plannedQty: 1200,
+        boxLabelTemplateId: "lt2",
+      });
+    });
+    expect(await screen.findByText(/Изменения сохранены.*войдите в смену повторно/)).toBeDefined();
+  });
+
+  it("shows the opening date when an existing shift has no planned date", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/shifts")) {
+        return jsonResponse(200, {
+          items: [{ ...ACTIVE_TOLLING_SHIFT, plannedDate: null }],
+        });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const row = (await screen.findByText("Сыр Российский")).closest("tr");
+    expect(within(row!).getByText("2026-07-23")).toBeDefined();
+  });
+
+  it("converts a legacy opening timestamp to the browser's local calendar date", async () => {
+    const openedAt = "2026-07-23T23:30:00-11:00";
+    const expected = (() => {
+      const date = new Date(openedAt);
+      return [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, "0"),
+        String(date.getDate()).padStart(2, "0"),
+      ].join("-");
+    })();
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).startsWith("/api/shifts")) {
+        return jsonResponse(200, {
+          items: [{ ...ACTIVE_TOLLING_SHIFT, plannedDate: null, openedAt }],
+        });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+
+    const row = (await screen.findByText("Сыр Российский")).closest("tr");
+    expect(within(row!).getByText(expected)).toBeDefined();
   });
 
   it("opens the close-reason modal and POSTs the exact {reason} body on confirm", async () => {

@@ -37,6 +37,7 @@ import {
   type ShiftDto,
   type ShiftStatus,
 } from "./api.js";
+import { localCalendarDate } from "./date.js";
 import { ShiftExportsDialog } from "./ShiftExportsDialog.js";
 import type { ShiftsPanelContext, ShiftsPanelLocationState } from "./ShiftPanelRoute.js";
 import "./shifts.css";
@@ -142,6 +143,7 @@ function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
 
 function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const closeMutation = useCloseShift();
   const [open, setOpen] = useState(false);
   const [closeReason, setCloseReason] = useState("");
@@ -164,6 +166,18 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
   return (
     <>
       <RowActions>
+        <Button
+          type="button"
+          size="compact"
+          variant="secondary"
+          onClick={() =>
+            void navigate(`${shift.id}/edit`, {
+              state: { shiftsBackground: true } satisfies ShiftsPanelLocationState,
+            })
+          }
+        >
+          {t("pages.shifts.edit")}
+        </Button>
         <Button
           type="button"
           size="compact"
@@ -261,7 +275,7 @@ export function ShiftsPage() {
       {
         key: "plannedDate",
         title: t("pages.shifts.table.plannedDate"),
-        render: (row) => row.plannedDate ?? "—",
+        render: (row) => row.plannedDate ?? localCalendarDate(row.openedAt) ?? "—",
       },
       {
         key: "productName",

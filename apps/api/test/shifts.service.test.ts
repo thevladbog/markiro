@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { ConflictException } from "@nestjs/common";
+import { describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
 import { ShiftsService } from "../src/modules/shifts/shifts.service";
 import type { OperatorsService } from "../src/modules/operators/operators.service";
@@ -124,5 +125,71 @@ describe("ShiftsService.getBundle's bundleSscc degrade path (Task 7 correction)"
 
     await expect(service.getBundle("tenant-1", "shift-1", "device-1")).rejects.toBe(boom);
     expect(lockedTables).toEqual([schema.shifts]);
+  });
+});
+
+function updateDb(current: typeof SHIFT_ROW) {
+  let stored = { ...current };
+  const set = vi.fn((values: Partial<typeof SHIFT_ROW>) => {
+    stored = { ...stored, ...values };
+    return {
+      where: () => ({
+        returning: async () => [stored],
+      }),
+    };
+  });
+  const db = {
+    select: () => ({
+      from: () => chain([stored], schema.shifts, []),
+    }),
+    update: () => ({ set }),
+  } as unknown as Db;
+  return { db, set };
+}
+
+function serviceForUpdate(db: Db) {
+  return new ShiftsService(
+    db,
+    fakeOperatorsService(),
+    {} as SsccService,
+    {} as EntitlementsService,
+  );
+}
+
+describe("ShiftsService.updateShift active-shift safety", () => {
+  it("updates only active-shift administrative metadata and the box label template", async () => {
+    const { db, set } = updateDb(SHIFT_ROW);
+    const service = serviceForUpdate(db);
+
+    const updated = await service.updateShift("tenant-1", "shift-1", {
+      lineId: "line-2",
+      plannedDate: "2026-08-14",
+      plannedQty: 750,
+      boxLabelTemplateId: "box-template-2",
+    });
+
+    expect(set).toHaveBeenCalledWith({
+      lineId: "line-2",
+      plannedDate: "2026-08-14",
+      plannedQty: 750,
+      boxLabelTemplateId: "box-template-2",
+    });
+    expect(updated).toMatchObject({
+      status: "active",
+      lineId: "line-2",
+      plannedDate: "2026-08-14",
+      plannedQty: 750,
+      boxLabelTemplateId: "box-template-2",
+    });
+  });
+
+  it("rejects operational changes while a shift is active", async () => {
+    const { db, set } = updateDb(SHIFT_ROW);
+    const service = serviceForUpdate(db);
+
+    await expect(
+      service.updateShift("tenant-1", "shift-1", { mode: "validation" }),
+    ).rejects.toThrow(ConflictException);
+    expect(set).not.toHaveBeenCalled();
   });
 });
