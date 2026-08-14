@@ -120,7 +120,9 @@ export class LabelTemplatesService {
       const err = error as Error & { code?: string; cause?: unknown };
       const errorCode = err?.code || (err?.cause as Record<string, string> | undefined)?.code;
       if (errorCode === "23503") {
-        throw new ConflictException("Label template is referenced by products or shifts");
+        throw new ConflictException(
+          "Label template is referenced by an organization default, product, or shift",
+        );
       }
       throw error;
     }

@@ -14,6 +14,7 @@ export const putOrgProfileSchema = z.object({
   gln: glnSchema.nullable().optional(),
   gs1Prefixes: z.array(gs1PrefixSchema).optional(),
   inn: z.string().nullable().optional(),
+  defaultBoxLabelTemplateId: z.string().uuid().nullable().optional(),
   pickupLimitsEnabled: z.boolean().optional(),
 });
 export type PutOrgProfileDto = z.infer<typeof putOrgProfileSchema>;
@@ -22,6 +23,7 @@ export interface OrgProfileDto {
   gln: string | null;
   gs1Prefixes: string[];
   inn: string | null;
+  defaultBoxLabelTemplateId: string | null;
   pickupLimitsEnabled: boolean;
   logoUrl: string | null;
   logoRevision: string | null;
