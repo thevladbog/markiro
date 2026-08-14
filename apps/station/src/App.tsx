@@ -65,6 +65,7 @@ import {
   type RunConfigTransition,
 } from "./lib/credential-reset.js";
 import { useSyncEngine } from "./lib/use-sync-engine.js";
+import { closeShiftOffline } from "./lib/shift-close.js";
 import { tauriStationUpdater } from "./lib/tauri-updater.js";
 import { useStationUpdater } from "./lib/use-station-updater.js";
 import { ConflictList } from "./pages/ConflictList.js";
@@ -1385,6 +1386,17 @@ export function App() {
               shiftEntryGenerationRef.current += 1;
               setShift(null);
               setFloorView("select");
+            }}
+            onCloseShift={async (reasonCode) => {
+              if (!config?.deviceId) throw new Error("Идентификатор станции недоступен");
+              const summary = await closeShiftOffline(tauriExecutor, {
+                shiftId: shift.id,
+                deviceId: config.deviceId,
+                operatorId: operator.operatorId,
+                ...(reasonCode === undefined ? {} : { reasonCode }),
+              });
+              nudgeSync();
+              return summary;
             }}
             pendingSync={syncState.pending}
             // Read off `shift_mirror` alongside `shiftContext` above (Task 13

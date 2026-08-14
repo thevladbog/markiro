@@ -568,7 +568,8 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
       <WorkFooter
         labels={workLabels.footer}
         onExceptions={() => undefined}
-        onExit={() => undefined}
+        onPause={() => undefined}
+        onClose={() => undefined}
       />
     </main>
   );

@@ -20,6 +20,7 @@ interface ShiftListItem {
   mode: "validation" | "aggregation";
   productName: string | null;
   plannedQty: number | null;
+  plannedDate: string | null;
   counterpartyName?: string | null;
   productId: string;
   image?: {
@@ -212,6 +213,14 @@ export function ShiftSelection({
                 <ShiftCard
                   key={shift.id}
                   productName={shift.productName}
+                  plannedDate={shift.plannedDate}
+                  plannedQty={shift.plannedQty}
+                  mode={shift.mode}
+                  status={shift.status}
+                  modeLabel={shift.mode === "aggregation" ? t("shifts.aggregation") : t("shifts.validation")}
+                  statusLabel={shift.status === "active" ? t("shifts.active") : t("shifts.notStarted")}
+                  plannedLabel={t("shifts.planned")}
+                  noPlanLabel={t("shifts.noPlan")}
                   counterpartyName={shift.counterpartyName ?? null}
                   counterpartyLabel={t("shifts.forCounterparty")}
                   actionLabel={shift.status === "active" ? t("shifts.rejoin") : t("shifts.open")}

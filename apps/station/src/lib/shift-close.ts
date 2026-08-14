@@ -36,6 +36,11 @@ export async function closeShiftOffline(
     "SELECT COUNT(*) AS closedBoxCount FROM boxes_mirror WHERE shift_id = ? AND closed_at IS NOT NULL",
     [input.shiftId],
   );
+  const [{ openBoxCount = 0 } = {}] = await exec.all<{ openBoxCount: number }>(
+    "SELECT COUNT(*) AS openBoxCount FROM boxes_mirror WHERE shift_id = ? AND closed_at IS NULL",
+    [input.shiftId],
+  );
+  if (openBoxCount > 0) throw new Error("Close the open box before closing the shift");
   const reason = input.reasonCode ?? null;
   if (shiftCloseReasonRequired(shift.planned_qty, actualQty) && (!reason || !isShiftCloseReasonCode(reason))) {
     throw new Error("A close reason is required");
@@ -67,7 +72,7 @@ export async function closeShiftOffline(
     plannedQtySnapshot: shift.planned_qty,
     actualQty,
     closedBoxCount,
-    reasonCode: reason as ShiftCloseReasonCode | null,
+    reasonCode: reason,
     closedAt,
   };
 }

@@ -2,14 +2,15 @@ import { Button } from "@markiro/ui";
 import { FloorFooter } from "../FloorFooter.js";
 
 export interface WorkFooterProps {
-  labels: { exceptions: string; exit: string };
+  labels: { exceptions: string; pause: string; close: string };
   onExceptions: () => void;
-  onExit: () => void;
+  onPause: () => void;
+  onClose: () => void;
 }
 
-export function WorkFooter({ labels, onExceptions, onExit }: WorkFooterProps) {
+export function WorkFooter({ labels, onExceptions, onPause, onClose }: WorkFooterProps) {
   return (
-    <FloorFooter ariaLabel={`${labels.exceptions}, ${labels.exit}`}>
+    <FloorFooter ariaLabel={`${labels.exceptions}, ${labels.pause}, ${labels.close}`}>
       <Button
         size="floor"
         variant="secondary"
@@ -24,11 +25,21 @@ export function WorkFooter({ labels, onExceptions, onExit }: WorkFooterProps) {
         size="floor"
         variant="secondary"
         onClick={(event) => {
-          onExit();
+          onPause();
           event.currentTarget.blur();
         }}
       >
-        {labels.exit}
+        {labels.pause}
+      </Button>
+      <Button
+        size="floor"
+        variant="secondary"
+        onClick={(event) => {
+          onClose();
+          event.currentTarget.blur();
+        }}
+      >
+        {labels.close}
       </Button>
     </FloorFooter>
   );

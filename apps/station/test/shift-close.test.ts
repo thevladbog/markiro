@@ -10,6 +10,7 @@ function executor(): { exec: SqlExecutor; statements: string[] } {
         return [{ id: "shift-1", product_id: "product-1", product_name: "Widget", planned_qty: 10, status: "active" }] as T[];
       }
       if (sql.includes("FROM codes_mirror")) return [{ actualQty: 9 }] as T[];
+      if (sql.includes("openBoxCount")) return [{ openBoxCount: 0 }] as T[];
       return [{ closedBoxCount: 1 }] as T[];
     },
     async run(sql: string): Promise<void> {
