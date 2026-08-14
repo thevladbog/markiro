@@ -1726,6 +1726,12 @@
         "innLabel": "ИНН",
         "prefixesLabel": "Префиксы GS1",
         "prefixesHint": "Через запятую, например 4600000, 4600001",
+        "defaultBoxLabelTemplateLabel": "Шаблон этикетки короба по умолчанию",
+        "defaultBoxLabelTemplateUnset": "Не выбран",
+        "defaultBoxLabelTemplateStaleOption": "Недоступный шаблон (удалён)",
+        "defaultBoxLabelTemplateStale": "Выбранный шаблон больше недоступен. Обновите список или выберите другой шаблон.",
+        "defaultBoxLabelTemplateReload": "Обновить шаблоны",
+        "defaultBoxLabelTemplateLibraryLink": "Открыть библиотеку шаблонов",
         "save": "Сохранить",
         "errors": {
           "glnFormat": "GLN должен состоять ровно из 13 цифр",

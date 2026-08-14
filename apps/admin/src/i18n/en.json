@@ -1719,6 +1719,12 @@
         "innLabel": "Tax ID",
         "prefixesLabel": "GS1 prefixes",
         "prefixesHint": "Comma-separated, e.g. 4600000, 4600001",
+        "defaultBoxLabelTemplateLabel": "Default box label template",
+        "defaultBoxLabelTemplateUnset": "Not selected",
+        "defaultBoxLabelTemplateStaleOption": "Unavailable template (deleted)",
+        "defaultBoxLabelTemplateStale": "The selected template is no longer available. Refresh the list or choose another template.",
+        "defaultBoxLabelTemplateReload": "Refresh templates",
+        "defaultBoxLabelTemplateLibraryLink": "Open template library",
         "save": "Save",
         "errors": {
           "glnFormat": "GLN must be exactly 13 digits",
