@@ -412,7 +412,8 @@
       "pending": "Working…",
       "restoreFailed": "Could not restore the print state",
       "restoreFailedDetail": "Scanning is paused. Retry restoring the local box state.",
-      "retryRestore": "Retry recovery"
+      "retryRestore": "Retry recovery",
+      "backToShifts": "Back to shifts"
     },
     "invalidSerial": "Could not build a box number. Try closing the box again."
   }
