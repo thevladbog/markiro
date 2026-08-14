@@ -25,6 +25,7 @@
 	encode zstd gzip
 
 	header {
+		defer
 		-Server
 		X-Markiro-Release-Sha "{$MARKIRO_RELEASE_SHA}"
 		Strict-Transport-Security "max-age=63072000; includeSubDomains"
@@ -155,12 +156,61 @@
 	}
 }
 
+(landing_routes) {
+	root * /srv/landing
+	route {
+		@landingReserved path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /health* /openapi.json /docs*
+		handle @landingReserved {
+			respond 404
+		}
+
+		@landingAssets {
+			path /assets/*
+			method GET HEAD
+		}
+		handle @landingAssets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		@landingPolicy {
+			path /robots.txt /sitemap.xml /llms.txt
+			method GET HEAD
+		}
+		handle @landingPolicy {
+			header Cache-Control "public, max-age=300"
+			file_server
+		}
+
+		@landingDocument {
+			file {path} {path}/index.html
+			method GET HEAD
+		}
+		handle @landingDocument {
+			header Cache-Control "no-cache"
+			try_files {path} {path}/index.html
+			file_server
+		}
+
+		@landingMissing method GET HEAD
+		handle @landingMissing {
+			respond 404
+		}
+
+		respond 404
+	}
+}
+
 http://{$MARKIRO_DOMAIN}:8080 {
 	redir https://{$MARKIRO_DOMAIN}{uri} permanent
 }
 
 http://{$MARKIRO_KIOSK_DOMAIN}:8080 {
 	redir https://{$MARKIRO_KIOSK_DOMAIN}{uri} permanent
+}
+
+http://{$MARKIRO_LANDING_DOMAIN}:8080 {
+	redir https://{$MARKIRO_LANDING_DOMAIN}{uri} permanent
 }
 
 https://{$MARKIRO_DOMAIN}:8443 {
@@ -171,4 +221,9 @@ https://{$MARKIRO_DOMAIN}:8443 {
 https://{$MARKIRO_KIOSK_DOMAIN}:8443 {
 	import common_headers
 	import kiosk_routes
+}
+
+https://{$MARKIRO_LANDING_DOMAIN}:8443 {
+	import common_headers
+	import landing_routes
 }

@@ -803,6 +803,7 @@ export async function deployRelease(options, supplied = {}) {
         environment,
         adminBaseUrl: baseUrls.admin,
         kioskBaseUrl: baseUrls.kiosk,
+        landingBaseUrl: baseUrls.landing,
         expectedReleaseSha: tag,
       });
     } catch {

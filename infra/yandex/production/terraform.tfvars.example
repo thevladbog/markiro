@@ -16,5 +16,6 @@ media_bucket_name           = "replace-with-media-bucket-name"
 audit_bucket_name           = "replace-with-temporarily-retained-audit-bucket-name"
 domain                      = "admin.markiro.app"
 kiosk_domain                = "kiosk.markiro.app"
+landing_domain              = "markiro.app"
 dns_zone_id                 = "replace-with-cloud-dns-zone-id"
 public_dns_enabled          = false

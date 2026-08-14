@@ -13,6 +13,8 @@
 !apps/admin/**
 !apps/kiosk/
 !apps/kiosk/**
+!apps/landing/
+!apps/landing/**
 !packages/
 !packages/db/
 !packages/db/**

@@ -5,6 +5,7 @@ import { dnsOptionsFromEnvironment, verifyDnsConvergence, verifyDnsOnce } from "
 
 const domain = "app.markiro.example";
 const kioskDomain = "kiosk.markiro.example";
+const landingDomain = "markiro.example";
 
 function digOutput({
   domainName = domain,
@@ -690,6 +691,17 @@ test("retries the complete verification within a bounded convergence budget", as
       answers: [{ type: "A", value: "203.0.113.10" }],
     }),
     digOutput({ domainName: kioskDomain, flags: ["qr", "rd", "ra"], authority: [soa] }),
+    digOutput({
+      domainName: landingDomain,
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ domainName: landingDomain, authority: [soa] }),
+    digOutput({
+      domainName: landingDomain,
+      flags: ["qr", "rd", "ra"],
+      answers: [{ type: "A", value: "203.0.113.10" }],
+    }),
+    digOutput({ domainName: landingDomain, flags: ["qr", "rd", "ra"], authority: [soa] }),
   ];
   const sleeps = [];
 
@@ -697,6 +709,7 @@ test("retries the complete verification within a bounded convergence budget", as
     {
       adminDomain: domain,
       kioskDomain,
+      landingDomain,
       authoritativeServer: "ns1.example.test",
       publicResolvers: ["resolver.example.test"],
       approvedA: ["203.0.113.10"],
@@ -715,6 +728,7 @@ test("retries the complete verification within a bounded convergence budget", as
     answers: {
       [domain]: ["203.0.113.10"],
       [kioskDomain]: ["203.0.113.10"],
+      [landingDomain]: ["203.0.113.10"],
     },
     attempt: 2,
   });
@@ -725,6 +739,7 @@ test("parses explicit A, AAAA, authoritative, and public-resolver operator input
     dnsOptionsFromEnvironment({
       MARKIRO_DOMAIN: domain,
       MARKIRO_KIOSK_DOMAIN: kioskDomain,
+      MARKIRO_LANDING_DOMAIN: landingDomain,
       MARKIRO_AUTHORITATIVE_DNS_SERVER: "ns1.example.test",
       MARKIRO_PUBLIC_DNS_RESOLVERS: "resolver-one.example.test,resolver-two.example.test",
       MARKIRO_APPROVED_DNS_A: "203.0.113.10,203.0.113.11",
@@ -733,6 +748,7 @@ test("parses explicit A, AAAA, authoritative, and public-resolver operator input
     {
       adminDomain: domain,
       kioskDomain,
+      landingDomain,
       authoritativeServer: "ns1.example.test",
       publicResolvers: ["resolver-one.example.test", "resolver-two.example.test"],
       approvedA: ["203.0.113.10", "203.0.113.11"],
@@ -745,6 +761,7 @@ test("fails closed on missing resolvers, empty address sets, and unsafe server t
   const baseline = {
     MARKIRO_DOMAIN: domain,
     MARKIRO_KIOSK_DOMAIN: kioskDomain,
+    MARKIRO_LANDING_DOMAIN: landingDomain,
     MARKIRO_AUTHORITATIVE_DNS_SERVER: "ns1.example.test",
     MARKIRO_PUBLIC_DNS_RESOLVERS: "resolver.example.test",
     MARKIRO_APPROVED_DNS_A: "203.0.113.10",
@@ -788,6 +805,14 @@ test("fails closed on missing resolvers, empty address sets, and unsafe server t
     () => dnsOptionsFromEnvironment({ ...baseline, MARKIRO_KIOSK_DOMAIN: domain }),
     /production domains must be distinct/,
   );
+  assert.throws(
+    () =>
+      dnsOptionsFromEnvironment({
+        ...baseline,
+        MARKIRO_LANDING_DOMAIN: "https://markiro.example",
+      }),
+    /MARKIRO_LANDING_DOMAIN is invalid/,
+  );
 });
 
 test("reports the sanitized last cause when the bounded convergence budget is exhausted", async () => {
@@ -803,6 +828,7 @@ test("reports the sanitized last cause when the bounded convergence budget is ex
       {
         adminDomain: domain,
         kioskDomain,
+        landingDomain,
         authoritativeServer: "ns1.example.test",
         publicResolvers: ["resolver.example.test"],
         approvedA: ["203.0.113.10"],

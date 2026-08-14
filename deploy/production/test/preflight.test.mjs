@@ -11,6 +11,7 @@ const release = {
   MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
   MARKIRO_DOMAIN: "app.markiro.example",
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+  MARKIRO_LANDING_DOMAIN: "markiro.example",
   ACME_EMAIL: "ops@example.test",
 };
 
@@ -23,6 +24,7 @@ test("documents every digest selector input and output in the preflight interfac
     "MARKIRO_EDGE_IMAGE_DIGEST",
     "MARKIRO_DOMAIN",
     "MARKIRO_KIOSK_DOMAIN",
+    "MARKIRO_LANDING_DOMAIN",
     "MARKIRO_EDGE_MODE",
     "ACME_EMAIL",
     "MARKIRO_ENV_FILE",
@@ -31,7 +33,14 @@ test("documents every digest selector input and output in the preflight interfac
   ])
     assert.match(source, new RegExp(`@property \\{string \\| undefined\\} ${input}`));
 
-  for (const output of ["apiImageDigest", "edgeImageDigest", "domain", "kioskDomain", "envFile"])
+  for (const output of [
+    "apiImageDigest",
+    "edgeImageDigest",
+    "domain",
+    "kioskDomain",
+    "landingDomain",
+    "envFile",
+  ])
     assert.match(source, new RegExp(`@property \\{string\\} ${output}`));
   assert.match(source, /@property \{string \| undefined\} imageTag/);
   assert.match(source, /@property \{string \| undefined\} acmeEmail/);
@@ -75,6 +84,7 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
     edgeImageDigest: release.MARKIRO_EDGE_IMAGE_DIGEST,
     domain: release.MARKIRO_DOMAIN,
     kioskDomain: release.MARKIRO_KIOSK_DOMAIN,
+    landingDomain: release.MARKIRO_LANDING_DOMAIN,
     acmeEmail: release.ACME_EMAIL,
     envFile: ".env.production",
     edgeMode: "direct",
@@ -130,7 +140,7 @@ test("does not inject absent optional host ports into Compose validation", async
   assert.equal(Object.hasOwn(validatedEnvironment, "MARKIRO_HTTPS_PORT"), false);
 });
 
-test("passes the kiosk domain to Compose validation", async () => {
+test("passes the kiosk and landing domains to Compose validation", async () => {
   let validatedEnvironment;
 
   await runPreflight(release, {
@@ -141,6 +151,7 @@ test("passes the kiosk domain to Compose validation", async () => {
   });
 
   assert.equal(validatedEnvironment.MARKIRO_KIOSK_DOMAIN, release.MARKIRO_KIOSK_DOMAIN);
+  assert.equal(validatedEnvironment.MARKIRO_LANDING_DOMAIN, release.MARKIRO_LANDING_DOMAIN);
 });
 
 for (const [variable, value] of [
@@ -191,20 +202,52 @@ for (const [name, domain] of [
     ));
 }
 
+for (const [name, domain] of [
+  ["missing value", undefined],
+  ["scheme", "https://markiro.example"],
+  ["path", "markiro.example/landing"],
+  ["port", "markiro.example:443"],
+  ["uppercase label", "Markiro.example"],
+  ["single-label production name", "landing"],
+]) {
+  test(`rejects a landing domain with a ${name} without disclosing it`, () =>
+    assertRejected(
+      { ...release, MARKIRO_LANDING_DOMAIN: domain },
+      "MARKIRO_LANDING_DOMAIN is invalid",
+    ));
+}
+
 test("rejects equal production domains without disclosing them", () =>
   assertRejected(
     { ...release, MARKIRO_KIOSK_DOMAIN: release.MARKIRO_DOMAIN },
     "production domains must be distinct",
   ));
 
-test("accepts only the explicit local direct-mode domain pair", async () => {
+test("rejects a landing domain equal to another authority", async () => {
+  await assertRejected(
+    { ...release, MARKIRO_LANDING_DOMAIN: release.MARKIRO_DOMAIN },
+    "production domains must be distinct",
+  );
+  await assertRejected(
+    { ...release, MARKIRO_LANDING_DOMAIN: release.MARKIRO_KIOSK_DOMAIN },
+    "production domains must be distinct",
+  );
+});
+
+test("accepts only the explicit local direct-mode domain set", async () => {
   const result = await runPreflight(
-    { ...release, MARKIRO_DOMAIN: "localhost", MARKIRO_KIOSK_DOMAIN: "kiosk.localhost" },
+    {
+      ...release,
+      MARKIRO_DOMAIN: "localhost",
+      MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+      MARKIRO_LANDING_DOMAIN: "landing.localhost",
+    },
     dependencies({ envText: "KIOSK_ORIGIN=https://kiosk.localhost\n" }),
   );
 
   assert.equal(result.domain, "localhost");
   assert.equal(result.kioskDomain, "kiosk.localhost");
+  assert.equal(result.landingDomain, "landing.localhost");
   await assertRejected({ ...release, MARKIRO_DOMAIN: "localhost" }, "MARKIRO_DOMAIN is invalid");
   await assertRejected(
     { ...release, MARKIRO_KIOSK_DOMAIN: "kiosk.localhost" },
@@ -219,6 +262,7 @@ test("accepts only the explicit local direct-mode domain pair", async () => {
       ...release,
       MARKIRO_DOMAIN: "localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+      MARKIRO_LANDING_DOMAIN: "landing.localhost",
       MARKIRO_EDGE_MODE: "behind-alb",
     },
     "MARKIRO_EDGE_MODE is invalid",
@@ -256,12 +300,14 @@ test("accepts the direct-mode HTTPS port in the kiosk origin", async () => {
       ...release,
       MARKIRO_DOMAIN: "localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+      MARKIRO_LANDING_DOMAIN: "landing.localhost",
       MARKIRO_HTTPS_PORT: "18443",
     },
     dependencies({ envText: "KIOSK_ORIGIN=https://kiosk.localhost:18443\n" }),
   );
 
   assert.equal(result.kioskDomain, "kiosk.localhost");
+  assert.equal(result.landingDomain, "landing.localhost");
 });
 
 test("rejects an invalid ACME email without disclosing it", () =>
@@ -332,6 +378,7 @@ test("passes optional host port overrides to the Compose child without other env
   assert.equal(childEnvironment.MARKIRO_HTTP_PORT, "18080");
   assert.equal(childEnvironment.MARKIRO_HTTPS_PORT, "18443");
   assert.equal(childEnvironment.MARKIRO_KIOSK_DOMAIN, release.MARKIRO_KIOSK_DOMAIN);
+  assert.equal(childEnvironment.MARKIRO_LANDING_DOMAIN, release.MARKIRO_LANDING_DOMAIN);
 });
 
 test("does not add undefined host port keys to the Compose child environment", async () => {

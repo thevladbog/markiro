@@ -2,7 +2,8 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { initLanding, type LandingRuntime, type RevealEntry } from "./site";
+import { browserLandingRuntime, initLanding, type LandingRuntime, type RevealEntry } from "./site";
+import { serializeConsent } from "../lib/consent";
 
 function renderShell(): void {
   document.body.innerHTML = `
@@ -28,6 +29,7 @@ function runtime(overrides: Partial<LandingRuntime> = {}): LandingRuntime {
 afterEach(() => {
   document.documentElement.className = "";
   document.body.innerHTML = "";
+  window.localStorage.clear();
 });
 
 describe("initLanding", () => {
@@ -82,5 +84,29 @@ describe("initLanding", () => {
     expect(observer.unobserve).toHaveBeenCalledWith(firstTarget);
     cleanup();
     expect(observer.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it("does not dispatch optional analytics without explicit analytics consent", () => {
+    const events: Event[] = [];
+    const listener = (event: Event): void => {
+      events.push(event);
+    };
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: () => ({ matches: false }),
+    });
+    window.addEventListener("markiro:analytics", listener);
+    const currentRuntime = browserLandingRuntime(window);
+
+    currentRuntime.track("landing_demo_click", { placement: "hero" });
+    expect(events).toHaveLength(0);
+
+    window.localStorage.setItem(
+      "markiro-consent",
+      serializeConsent({ version: 1, analytics: true, marketing: false }),
+    );
+    currentRuntime.track("landing_demo_click", { placement: "hero" });
+    expect(events).toHaveLength(1);
+    window.removeEventListener("markiro:analytics", listener);
   });
 });

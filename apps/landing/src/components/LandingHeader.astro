@@ -10,18 +10,19 @@ const { phone } = Astro.props;
 ---
 
 <header class="landing-header" data-header>
-  <a class="landing-header__brand" href="#hero" aria-label="Markiro, к началу страницы">
+  <a class="landing-header__brand" href="/" aria-label="Markiro, на главную страницу">
     <BrandMark />
   </a>
 
   <nav class="landing-nav" id="landing-navigation" aria-label="Основная навигация" data-menu>
-    <a href="#continuity">Возможности</a>
-    <a href="#cycle">Как работает</a>
-    <a href="#platform">Система</a>
+    <a href="/markirovka-chestny-znak/">Маркировка</a>
+    <a href="/sscc-i-agregatsiya/">Агрегация</a>
+    <a href="/oflayn-rabota/">Офлайн</a>
+    <a href="/faq/">Вопросы</a>
     {phone && <a class="landing-nav__phone" href={phone.href}>{phone.display}</a>}
   </nav>
 
-  <a class="button button--compact landing-header__cta" href="#demo" data-analytics="landing_demo_click" data-placement="header">
+  <a class="button button--compact landing-header__cta" href="/#demo" data-analytics="landing_demo_click" data-placement="header">
     Запросить демо
   </a>
   <button
