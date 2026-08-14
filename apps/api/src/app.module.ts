@@ -47,6 +47,7 @@ import { BillingPaymentsModule } from "./modules/billing-payments/billing-paymen
 import type { PlatformAuth } from "@markiro/db";
 import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
+import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
 
 @Module({})
 export class AppModule {
@@ -93,6 +94,7 @@ export class AppModule {
         LinesModule,
         ShiftsModule,
         ShiftExportsModule,
+        StationShiftCloseModule,
         LabelTemplatesModule,
         StationDevicesModule,
         DevicesModule,
