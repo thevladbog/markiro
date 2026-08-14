@@ -121,6 +121,7 @@
     "loading": "Loading shifts…",
     "empty": "No open shifts",
     "retry": "Retry",
+    "refresh": "Refresh shifts",
     "pagination": "Shift pages",
     "previousPage": "Previous page",
     "nextPage": "Next page",

@@ -226,6 +226,28 @@ describe("createStationClient", () => {
     expect(onCredentialRejected).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps the station enrolled when an optional product image download returns 401", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ message: "image unavailable" }), {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "still-valid", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    await expect(client.download("/station/products/p1/image/checksum")).rejects.toEqual(
+      new StationApiError(401, "image unavailable"),
+    );
+
+    expect(generation.phase).toBe("active");
+    expect(onCredentialRejected).not.toHaveBeenCalled();
+  });
+
   it("publishes one rejection when concurrent authenticated requests receive 401", async () => {
     let resolveFirst!: (value: Response) => void;
     let resolveSecond!: (value: Response) => void;

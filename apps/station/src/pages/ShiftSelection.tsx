@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Pager } from "@markiro/ui";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
@@ -13,6 +13,7 @@ import {
 } from "../lib/product-image-cache.js";
 
 const SHIFT_PAGE_SIZE = 3;
+const SHIFT_REFRESH_MS = 30_000;
 
 interface ShiftListItem {
   id: string;
@@ -74,12 +75,15 @@ export function ShiftSelection({
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [refreshing, setRefreshing] = useState(true);
   const [busy, setBusy] = useState(false);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [requestedPage, setRequestedPage] = useState(1);
   const mounted = useRef(true);
   const isCurrentRef = useRef(isCurrent);
+  const listRequest = useRef<{ client: StationClient; id: number } | null>(null);
+  const listRequestId = useRef(0);
+  const loadedClient = useRef<StationClient | null>(null);
 
   useEffect(() => {
     isCurrentRef.current = isCurrent;
@@ -92,16 +96,22 @@ export function ShiftSelection({
     };
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+  const refreshShifts = useCallback(() => {
+    if (listRequest.current?.client === client) return;
+
+    const id = ++listRequestId.current;
+    listRequest.current = { client, id };
+    const initialForClient = loadedClient.current !== client;
+    if (initialForClient) setLoading(true);
+    setRefreshing(true);
     setLoadFailed(false);
     setError(null);
-    client
+    void client
       .get<{ items: ShiftListItem[] }>("/shifts")
       .then((response) => {
-        if (cancelled) return;
+        if (!mounted.current || listRequest.current?.id !== id) return;
         setItems(response.items);
+        loadedClient.current = client;
         for (const shift of response.items) {
           const currentCheck = isCurrentRef.current;
           const prefetch = prefetchStationProductImage(
@@ -121,15 +131,28 @@ export function ShiftSelection({
         setLoading(false);
       })
       .catch((err: unknown) => {
-        if (cancelled) return;
+        if (!mounted.current || listRequest.current?.id !== id) return;
         setError(err instanceof StationApiError ? err.message : t("shifts.serverUnavailable"));
         setLoadFailed(true);
         setLoading(false);
+      })
+      .finally(() => {
+        if (!mounted.current || listRequest.current?.id !== id) return;
+        listRequest.current = null;
+        setRefreshing(false);
       });
-    return () => {
-      cancelled = true;
-    };
-  }, [client, exec, loadAttempt, t]);
+  }, [client, exec, t]);
+
+  useEffect(() => {
+    refreshShifts();
+  }, [refreshShifts]);
+
+  useEffect(() => {
+    const refresh = window.setInterval(() => {
+      refreshShifts();
+    }, SHIFT_REFRESH_MS);
+    return () => window.clearInterval(refresh);
+  }, [refreshShifts]);
 
   const openItems = useMemo(() => items.filter((shift) => shift.status !== "closed"), [items]);
   const currentPage = paginate(openItems, requestedPage, SHIFT_PAGE_SIZE);
@@ -201,12 +224,27 @@ export function ShiftSelection({
             </p>
           ) : persistentState === "read-error" ? (
             <div className="shift-selection__state">
-              <Button size="floor" variant="secondary" onClick={() => setLoadAttempt((n) => n + 1)}>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={refreshing}
+                onClick={refreshShifts}
+              >
                 {t("shifts.retry")}
               </Button>
             </div>
           ) : persistentState === "empty" ? (
-            <p className="shift-selection__state">{t("shifts.empty")}</p>
+            <div className="shift-selection__state">
+              <p>{t("shifts.empty")}</p>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={refreshing}
+                onClick={refreshShifts}
+              >
+                {t("shifts.refresh")}
+              </Button>
+            </div>
           ) : (
             <div className="shift-selection__grid">
               {currentPage.items.map((shift) => (

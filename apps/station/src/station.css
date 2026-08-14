@@ -849,9 +849,16 @@ body,
   width: 100%;
   height: 100%;
   margin: 0;
+  gap: var(--sp-3);
+  align-content: center;
   color: var(--fg-2);
   font: var(--floor-lg);
   place-items: center;
+  text-align: center;
+}
+
+.shift-selection__state p {
+  margin: 0;
 }
 
 .shift-card {
