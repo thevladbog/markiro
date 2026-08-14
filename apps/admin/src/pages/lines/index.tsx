@@ -12,6 +12,7 @@ import {
   PageHeader,
   RowActions,
   Spinner,
+  StatusChip,
   Table,
 } from "@markiro/ui";
 import type { TableColumn } from "@markiro/ui";
@@ -21,7 +22,7 @@ import { ApiRequestError } from "../../api/client.js";
 import i18n from "../../i18n/index.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
-import { useDeleteLine, useLines, type LineDto } from "../shifts/api.js";
+import { useDeleteLine, useLinePresence, useLines, type LineDto } from "../shifts/api.js";
 import type { LinesPanelContext, LinesPanelLocationState } from "./LinePanelRoute.js";
 import "./lines.css";
 
@@ -113,10 +114,34 @@ export function LinesPage() {
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
   const query = useLines();
   const items = query.data ?? [];
+  const presence = useLinePresence();
+  const presenceByLine = useMemo(
+    () => new Map((presence.data ?? []).map((item) => [item.lineId, item])),
+    [presence.data],
+  );
 
   const columns: TableColumn<LineDto>[] = useMemo(() => {
     const referenceColumns: TableColumn<LineDto>[] = [
       { key: "name", title: t("pages.lines.table.name") },
+      {
+        key: "presence",
+        title: t("pages.lines.table.presence"),
+        render: (line) => {
+          const item = presenceByLine.get(line.id);
+          if (!item || item.assignedStations === 0) {
+            return <StatusChip status="neutral" label={t("pages.lines.presence.unassigned")} />;
+          }
+          const online = item.onlineStations > 0;
+          return (
+            <StatusChip
+              status={online ? "ok" : "neutral"}
+              label={online
+                ? t("pages.lines.presence.online", { online: item.onlineStations, total: item.assignedStations })
+                : t("pages.lines.presence.offline")}
+            />
+          );
+        },
+      },
       {
         key: "createdAt",
         title: t("pages.lines.table.createdAt"),
@@ -137,7 +162,7 @@ export function LinesPage() {
           },
         ]
       : referenceColumns;
-  }, [canWrite, t]);
+  }, [canWrite, presenceByLine, t]);
 
   return (
     <AdminPage className="mk-lines-page" data-testid="lines-page">

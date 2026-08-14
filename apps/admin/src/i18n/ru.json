@@ -726,7 +726,13 @@
       "table": {
         "name": "Название",
         "createdAt": "Создана",
+        "presence": "Состояние линии",
         "actions": "Действия"
+      },
+      "presence": {
+        "online": "Онлайн · {{online}} из {{total}} станций",
+        "offline": "Офлайн",
+        "unassigned": "Станции не назначены"
       },
       "form": {
         "createTitle": "Новая линия",

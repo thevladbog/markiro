@@ -27,6 +27,7 @@ import {
   type CreateLineDto,
   type LineDto,
   type ListLinesResponseDto,
+  type ListLinePresenceResponseDto,
   type UpdateLineDto,
 } from "./dto";
 import { LinesService } from "./lines.service";
@@ -44,6 +45,12 @@ export class LinesController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async listLines(@Req() req: RequestWithTenant): Promise<ListLinesResponseDto> {
     return this.linesService.listLines(req.tenantId!);
+  }
+
+  @Get("presence")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async listPresence(@Req() req: RequestWithTenant): Promise<ListLinePresenceResponseDto> {
+    return this.linesService.listPresence(req.tenantId!);
   }
 
   @Get(":id")
