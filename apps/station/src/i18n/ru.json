@@ -201,6 +201,7 @@
     "current": "На станции установлена актуальная версия.",
     "manualOnly": "Скачивание и установка выполняются вручную.",
     "indicatorCurrent": "Обновления",
+    "indicatorAvailableShort": "Обновить",
     "indicatorAvailable": "Обновить до {{version}}",
     "progress": "Прогресс скачивания обновления",
     "activeShift": "Завершите активную смену перед установкой",

@@ -201,6 +201,7 @@
     "current": "This station is up to date.",
     "manualOnly": "Downloads and installation are manual.",
     "indicatorCurrent": "Updates",
+    "indicatorAvailableShort": "Update",
     "indicatorAvailable": "Update {{version}}",
     "progress": "Update download progress",
     "activeShift": "Leave the active shift before installing",

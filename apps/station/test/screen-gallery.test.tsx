@@ -12,6 +12,7 @@ import { StationScreenGallery } from "../src/dev/StationScreenGallery.js";
 import { PERSISTENT_GALLERY_STATE_IDS } from "../src/ui/persistent-station-states.js";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   cleanup();
   vi.unstubAllGlobals();
 });
