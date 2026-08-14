@@ -21,6 +21,7 @@ import {
   SsccService,
 } from "../sscc/sscc.service";
 import type {
+  BoxTemplateResolution,
   CloseShiftDto,
   CreateShiftDto,
   ListShiftsQueryDto,
@@ -167,9 +168,14 @@ export class ShiftsService {
       data.counterpartyId !== undefined ? data.counterpartyId : product.defaultCounterpartyId;
     const labelTemplateId =
       data.labelTemplateId !== undefined ? data.labelTemplateId : product.defaultLabelTemplateId;
+    const boxLabelTemplateId =
+      data.boxLabelTemplateId !== undefined
+        ? data.boxLabelTemplateId
+        : await this.findDefaultBoxLabelTemplateId(tenantId);
     const palletsEnabled = data.palletsEnabled ?? false;
 
     this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletCapacity);
+    this.assertBoxTemplateRule(data.mode, boxLabelTemplateId);
 
     try {
       const [row] = await this.db
@@ -180,11 +186,11 @@ export class ShiftsService {
           lineId: data.lineId ?? null,
           counterpartyId: counterpartyId ?? null,
           labelTemplateId: labelTemplateId ?? null,
-          // No product-level default exists for either field (unlike
-          // counterpartyId/labelTemplateId above) -- the issuer is always
-          // explicit, so an omitted value is simply null ("our organisation").
+          // The issuer is always explicit (unlike the org-defaulted box
+          // template resolved above), so an omitted value is null ("our
+          // organisation").
           ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
-          boxLabelTemplateId: data.boxLabelTemplateId ?? null,
+          boxLabelTemplateId,
           mode: data.mode,
           plannedQty: data.plannedQty ?? null,
           plannedDate: data.plannedDate ?? null,
@@ -241,6 +247,7 @@ export class ShiftsService {
       data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
 
     this.assertCapacityRules(mode, boxCapacity, palletsEnabled, palletCapacity);
+    this.assertBoxTemplateRule(mode, boxLabelTemplateId);
 
     try {
       const [row] = await this.db
@@ -567,6 +574,14 @@ export class ShiftsService {
     return row;
   }
 
+  private async findDefaultBoxLabelTemplateId(tenantId: string): Promise<string | null> {
+    const [row] = await this.db
+      .select({ defaultBoxLabelTemplateId: schema.orgProfiles.defaultBoxLabelTemplateId })
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, tenantId));
+    return row?.defaultBoxLabelTemplateId ?? null;
+  }
+
   private async findProductImage(
     tenantId: string,
     productId: string,
@@ -620,6 +635,26 @@ export class ShiftsService {
     }
     if (palletsEnabled && mode === "aggregation" && !palletCapacity) {
       throw new BadRequestException("Pallet-enabled aggregation shifts require a pallet capacity");
+    }
+  }
+
+  private resolveBoxTemplate(
+    mode: ShiftMode,
+    boxLabelTemplateId: string | null,
+  ): BoxTemplateResolution {
+    if (mode === "aggregation" && boxLabelTemplateId === null) {
+      return { ok: false, code: "BOX_LABEL_TEMPLATE_REQUIRED" };
+    }
+    return { ok: true, boxLabelTemplateId };
+  }
+
+  private assertBoxTemplateRule(mode: ShiftMode, boxLabelTemplateId: string | null): void {
+    const resolution = this.resolveBoxTemplate(mode, boxLabelTemplateId);
+    if (!resolution.ok) {
+      throw new UnprocessableEntityException({
+        code: resolution.code,
+        message: "Aggregation shifts require a box label template",
+      });
     }
   }
 

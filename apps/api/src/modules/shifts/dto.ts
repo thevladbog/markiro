@@ -12,6 +12,10 @@ export type ShiftStatus = (typeof SHIFT_STATUSES)[number];
 /** Server-computed only (never client-submitted); "admin" for shifts created here. */
 export type ShiftOrigin = "admin" | "station";
 
+export type BoxTemplateResolution =
+  | { ok: true; boxLabelTemplateId: string | null }
+  | { ok: false; code: "BOX_LABEL_TEMPLATE_REQUIRED" };
+
 /** `YYYY-MM-DD`, matches the `date` column's string mode. */
 const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");
 
@@ -34,6 +38,10 @@ export const createShiftSchema = z.object({
    * Omitted/null means the tenant's own organisation.
    */
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
+  /**
+   * Omitted snapshots the organisation's current default. Explicit null
+   * opts out; aggregation-mode validation then rejects the null snapshot.
+   */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
@@ -50,6 +58,7 @@ export const updateShiftSchema = z.object({
   counterpartyId: z.string().uuid().nullable().optional(),
   labelTemplateId: z.string().uuid().nullable().optional(),
   ssccIssuerCounterpartyId: z.string().uuid().nullable().optional(),
+  /** Updates the existing snapshot only when explicitly present. */
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),

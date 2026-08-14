@@ -112,6 +112,16 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     return id;
   }
 
+  async function setDefaultBoxLabelTemplate(
+    agent: ReturnType<typeof request.agent>,
+    tenantId: string,
+    name = "Default Box Template",
+  ): Promise<string> {
+    const id = await seedLabelTemplate(tenantId, name);
+    await agent.put("/org/profile").send({ defaultBoxLabelTemplateId: id }).expect(200);
+    return id;
+  }
+
   async function attachManagedSubscription(tenantId: string, startsAt: Date, endsAt: Date) {
     const planVersionId = await createPublishedPlan(db, {
       maxLines: null,
@@ -150,6 +160,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const orgId = await signUpAndActivate(agent);
     const counterpartyId = await seedCounterparty(orgId, "Buyer");
     const templateId = await seedLabelTemplate(orgId, "Bundle Template");
+    await setDefaultBoxLabelTemplate(agent, orgId);
     const productId = await seedProduct(orgId, {
       status: "active",
       productGroup: "Beverages",
@@ -224,9 +235,39 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.boxLabelTemplate.id).not.toBe(bundle.body.labelTemplate.id);
   });
 
-  // The absence case: no boxLabelTemplateId at all must resolve to null, not
-  // a fallback to the item template or any other guess.
-  it("GET /shifts/:id/bundle returns boxLabelTemplate: null when the shift has no box template set (Finding 3)", async () => {
+  it("GET /shifts/:id/bundle resolves only the snapshotted box template after the organisation default changes", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const snapshottedTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Snapshot Box");
+    const replacementTemplateId = await seedLabelTemplate(orgId, "Replacement Box");
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "aggregation" })
+      .expect(201);
+    expect(created.body.boxLabelTemplateId).toBe(snapshottedTemplateId);
+
+    await agent
+      .put("/org/profile")
+      .send({ defaultBoxLabelTemplateId: replacementTemplateId })
+      .expect(200);
+    const bundle = await agent.get(`/shifts/${created.body.id}/bundle`).expect(200);
+
+    expect(bundle.body.shift.boxLabelTemplateId).toBe(snapshottedTemplateId);
+    expect(bundle.body.boxLabelTemplate).toMatchObject({
+      id: snapshottedTemplateId,
+      name: "Snapshot Box",
+    });
+  });
+
+  // Validation shifts may intentionally snapshot no box template. The bundle
+  // must preserve that null rather than consulting current organisation state.
+  it("GET /shifts/:id/bundle returns boxLabelTemplate: null for a validation shift with a null snapshot", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const itemTemplateId = await seedLabelTemplate(orgId, "Item Only Template");
@@ -239,7 +280,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     });
     const created = await agent
       .post("/shifts")
-      .send({ productId, mode: "aggregation" })
+      .send({ productId, mode: "validation", boxLabelTemplateId: null })
       .expect(201);
     const id = created.body.id as string;
 
@@ -317,6 +358,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       orgId = await signUpAndActivate(agent);
 
       await agent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      await setDefaultBoxLabelTemplate(agent, orgId);
 
       const counterparty = await agent
         .post("/counterparties")
@@ -425,6 +467,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const tenantAgent = request.agent(app!.getHttpServer());
       const tenantId = await signUpAndActivate(tenantAgent);
       await tenantAgent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      await setDefaultBoxLabelTemplate(tenantAgent, tenantId);
       const productId = await seedProduct(tenantId, {
         status: "active",
         productGroup: "Beverages",
@@ -462,6 +505,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const tenantAgent = request.agent(app!.getHttpServer());
       const tenantId = await signUpAndActivate(tenantAgent);
       await tenantAgent.put("/org/profile").send({ gln: orgGln }).expect(200);
+      await setDefaultBoxLabelTemplate(tenantAgent, tenantId);
       const productId = await seedProduct(tenantId, { status: "active", boxCapacity: 12 });
       const shift = await tenantAgent
         .post("/shifts")
@@ -532,10 +576,9 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     it("still returns product/template/roster with sscc: null when the tenant has no org GLN", async () => {
       const agent = request.agent(app!.getHttpServer());
       const orgId = await signUpAndActivate(agent);
-      // Deliberately no PUT /org/profile -- this tenant never filled in a
-      // GLN (the field is nullable, and a tenant may have no profile row at
-      // all), which is exactly the fixture the review flagged: an
-      // aggregation shift whose issuer prefix can never be resolved.
+      // The profile contains only a box-template default, not a GLN, so the
+      // aggregation shift's issuer prefix still cannot be resolved.
+      await setDefaultBoxLabelTemplate(agent, orgId);
       const templateId = await seedLabelTemplate(orgId, "No-GLN Template");
       const productId = await seedProduct(orgId, {
         status: "active",
@@ -589,6 +632,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       const callerAgent = request.agent(app!.getHttpServer());
       const callerOrgId = await signUpAndActivate(callerAgent);
       await callerAgent.put("/org/profile").send({ gln: "4601112222005" }).expect(200);
+      await setDefaultBoxLabelTemplate(callerAgent, callerOrgId);
       const productId = await seedProduct(callerOrgId, {
         status: "active",
         productGroup: "Beverages",
