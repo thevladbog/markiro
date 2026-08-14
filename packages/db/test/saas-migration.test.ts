@@ -49,6 +49,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0040_sscc_counter_start_one.sql"));
     await rm(join(legacyMigrations, "0041_product_images.sql"));
     await rm(join(legacyMigrations, "0042_default_box_label_template.sql"));
+    await rm(join(legacyMigrations, "0043_station_shift_close_presence.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -62,6 +63,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "meta", "0040_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0041_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0042_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0043_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -80,7 +82,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0039_kiosk_sscc_orders" &&
         entry.tag !== "0040_sscc_counter_start_one" &&
         entry.tag !== "0041_product_images" &&
-        entry.tag !== "0042_default_box_label_template",
+        entry.tag !== "0042_default_box_label_template" &&
+        entry.tag !== "0043_station_shift_close_presence",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
