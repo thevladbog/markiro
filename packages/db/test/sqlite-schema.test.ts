@@ -29,7 +29,7 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
-  it("creates all eleven mirror tables", () => {
+  it("creates the durable product image cache table", () => {
     const db = migratedDb();
     const rows = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -46,6 +46,7 @@ describe("STATION_MIGRATIONS", () => {
     expect(names).toContain("conflicts_mirror");
     expect(names).toContain("sscc_pool");
     expect(names).toContain("boxes_mirror");
+    expect(names).toContain("station_product_images");
   });
 
   it("keeps operators_mirror and operators_mirror_b column-for-column identical", () => {
