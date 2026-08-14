@@ -547,12 +547,8 @@ describe("Code import", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
 
-    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe(
-      "58.0",
-    );
-    expect((screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement).value).toBe(
-      "40.0",
-    );
+    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.0");
+    expect((screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement).value).toBe("40.0");
   });
 });
 
