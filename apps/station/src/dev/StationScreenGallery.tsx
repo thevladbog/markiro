@@ -47,6 +47,7 @@ const COPY = {
     longOperator: "Александрова-Романовская Екатерина Владимировна",
     longShift: "Смена производства маркированной продукции ДЕМО-01",
     update: "Доступно критическое обновление 0.1.0-beta.123",
+    updateShort: "Обновления",
     changeOperator: "Сменить оператора",
   },
   en: {
@@ -62,6 +63,7 @@ const COPY = {
     longOperator: "Alexandria Montgomery-Wellington the Third",
     longShift: "Marked goods production shift DEMO-01",
     update: "Critical update 0.1.0-beta.123 is available",
+    updateShort: "Updates",
     changeOperator: "Change operator",
   },
 } as const;
@@ -85,6 +87,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
           glyph: "!" as const,
           available: true,
           label: copy.update,
+          shortLabel: copy.updateShort,
         },
         operatorControl: (
           <Button size="floor" variant="secondary">

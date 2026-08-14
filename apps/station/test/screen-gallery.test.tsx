@@ -138,16 +138,24 @@ describe("development screen gallery", () => {
     render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
 
     const header = screen.getByRole("banner", { name: "Состояние станции" });
-    expect(
-      within(header).getByRole("button", {
-        name: "! Доступно критическое обновление 0.1.0-beta.123",
-      }),
-    ).toBeDefined();
-    expect(within(header).getByRole("button", { name: "Сменить оператора" })).toBeDefined();
-    expect(
-      await within(header).findByRole("button", { name: "Выйти из полноэкранного режима" }),
-    ).toBeDefined();
-    expect(within(header).getByRole("button", { name: "Свернуть панель состояния" })).toBeDefined();
+    const update = within(header).getByRole("button", {
+      name: "! Доступно критическое обновление 0.1.0-beta.123",
+    });
+    const operator = within(header).getByRole("button", { name: "Сменить оператора" });
+    const windowMode = await within(header).findByRole("button", {
+      name: "Выйти из полноэкранного режима",
+    });
+    const collapse = within(header).getByRole("button", {
+      name: "Свернуть панель состояния",
+    });
+
+    for (const action of [update, operator, windowMode, collapse]) {
+      expect(action.classList.contains("mk-btn--floor")).toBe(true);
+      expect(action.classList.contains("mk-btn--secondary")).toBe(true);
+      expect(action.style.height).toBe("var(--control-floor)");
+    }
+    expect(update.textContent).toBe("!Обновления");
+    expect(windowMode.textContent).toContain("Оконный режим");
   });
 
   it.each([

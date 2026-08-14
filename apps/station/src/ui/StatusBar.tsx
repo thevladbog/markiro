@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@markiro/ui";
 import type { ServerReachability } from "../lib/api-client.js";
 
 /** What the station can honestly say about its scanner. */
@@ -10,6 +11,7 @@ export type UpdateSeverity = "none" | "info" | "warn" | "urgent";
 export interface UpdateIndicatorModel {
   severity: UpdateSeverity;
   label: string;
+  shortLabel?: string;
   glyph: "↻" | "!";
   available: boolean;
 }
@@ -96,29 +98,31 @@ export function StatusBar({
         : t("shell.serverUnavailable");
   const updateButton =
     update && onOpenUpdates ? (
-      <button
-        type="button"
+      <Button
+        size="floor"
+        variant="secondary"
         className="station-update-indicator"
         data-update-severity={update.severity}
         aria-label={`${update.glyph} ${update.label}`}
         disabled={actionsDisabled}
         onClick={onOpenUpdates}
+        icon={<span aria-hidden="true">{update.glyph}</span>}
       >
-        <span aria-hidden="true">{update.glyph}</span>
-        <span>{update.label}</span>
-      </button>
+        {update.shortLabel ?? update.label}
+      </Button>
     ) : null;
   const toggleButton = onToggleCollapsed ? (
-    <button
-      type="button"
+    <Button
+      size="floor"
+      variant="secondary"
       className="station-status-toggle"
       aria-label={t(collapsed ? "shell.expandStatusBar" : "shell.collapseStatusBar")}
       aria-expanded={!collapsed}
       onClick={onToggleCollapsed}
+      icon={<span aria-hidden="true">{collapsed ? "⌄" : "⌃"}</span>}
     >
-      <span aria-hidden="true">{collapsed ? "⌄" : "⌃"}</span>
-      <span>{t(collapsed ? "shell.expandStatusBarShort" : "shell.collapseStatusBarShort")}</span>
-    </button>
+      {t(collapsed ? "shell.expandStatusBarShort" : "shell.collapseStatusBarShort")}
+    </Button>
   ) : null;
 
   return (

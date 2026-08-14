@@ -1181,6 +1181,7 @@ export function App() {
     label: updater.persisted?.available
       ? t("updates.indicatorAvailable", { version: updater.persisted.available.version })
       : t("updates.indicatorCurrent"),
+    shortLabel: t("updates.indicatorCurrent"),
   };
   const operatorControl = (
     <OperatorSwitchControl

@@ -299,6 +299,13 @@ describe("work instruments", () => {
     const pauseButton = screen.getByRole("button", { name: "Pause" });
     const closeButton = screen.getByRole("button", { name: "Close shift" });
     expect(exceptionButton.classList.contains("mk-btn--floor")).toBe(true);
+    expect(exceptionButton.classList.contains("mk-btn--secondary")).toBe(true);
+    expect(pauseButton.classList.contains("mk-btn--warning-outline")).toBe(true);
+    expect(closeButton.classList.contains("mk-btn--destructive-outline")).toBe(true);
+    for (const button of [exceptionButton, pauseButton, closeButton]) {
+      expect(button.style.width).toBe("220px");
+      expect(button.style.maxWidth).toBe("100%");
+    }
     fireEvent.click(exceptionButton);
     fireEvent.click(pauseButton);
     fireEvent.click(closeButton);

@@ -3,7 +3,8 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react";
 import { cn } from "../cn.js";
 
 /** Порт `design-system/components/forms/Button.jsx` с офисными и цеховым размерами. */
-export type ButtonVariant = "primary" | "secondary" | "destructive";
+export type ButtonVariant =
+  "primary" | "secondary" | "destructive" | "warning-outline" | "destructive-outline";
 export type ButtonSize = "md" | "compact" | "floor";
 
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
@@ -40,6 +41,16 @@ const VARIANT_STYLE: Record<ButtonVariant, CSSProperties> = {
     background: "var(--err-solid)",
     color: "#FFFFFF",
     border: "1px solid var(--err-solid)",
+  },
+  "warning-outline": {
+    background: "transparent",
+    color: "var(--warn-fg)",
+    border: "1px solid var(--warn-border)",
+  },
+  "destructive-outline": {
+    background: "transparent",
+    color: "var(--err-fg)",
+    border: "1px solid var(--err-border)",
   },
 };
 

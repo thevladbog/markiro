@@ -10,6 +10,16 @@
   white-space: nowrap;
 }
 
+.mk-btn--warning-outline:hover:not(:disabled),
+.mk-btn--warning-outline:active:not(:disabled) {
+  background: var(--warn-bg) !important;
+}
+
+.mk-btn--destructive-outline:hover:not(:disabled),
+.mk-btn--destructive-outline:active:not(:disabled) {
+  background: var(--err-bg) !important;
+}
+
 .mk-visually-hidden {
   position: absolute;
   width: 1px;

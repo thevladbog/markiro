@@ -7,8 +7,11 @@
   },
   "windowMode": {
     "exit": "Exit fullscreen",
+    "exitShort": "Window mode",
     "enter": "Return to fullscreen",
+    "enterShort": "Fullscreen",
     "pending": "Changing window mode…",
+    "pendingShort": "Changing mode…",
     "confirmTitle": "Exit fullscreen?",
     "confirmDetail": "Production continues and only the window mode changes. The operator, active shift, and queued work stay in place.",
     "confirmAction": "Confirm exit fullscreen",

@@ -150,11 +150,13 @@ describe("fixed station viewport source contract", () => {
 
   it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {
     const css = stationSource("station.css");
+    const statusBar = stationSource("ui/StatusBar.tsx");
 
-    expect(css).toMatch(
-      /\.station-update-indicator\s*\{[^}]*position:\s*static;[^}]*min-height:\s*64px;/s,
-    );
+    expect(css).toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*static;/s);
     expect(css).not.toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*absolute;/s);
+    expect(statusBar.match(/<Button/g)).toHaveLength(2);
+    expect(statusBar.match(/size="floor"/g)).toHaveLength(2);
+    expect(statusBar.match(/variant="secondary"/g)).toHaveLength(2);
     expect(css).toMatch(
       /\.station-status-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
     );
