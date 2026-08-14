@@ -8,6 +8,7 @@ import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs"
 
 const CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const LANDING_SITE_URL = "https://markiro.app";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 function timeoutError(command, timeoutMs) {
@@ -256,30 +257,42 @@ function kioskShellSignature(html, baseUrl) {
   };
 }
 
-function assertNoExternalOrigins(html, baseUrl) {
+function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl) {
+  let runtimeHtml = html;
+  if (allowedCanonicalUrl) {
+    runtimeHtml = runtimeHtml.replace(/<link\b([^>]*)>/gi, (tag, attributes) => {
+      const rel = attributes.match(/\brel\s*=\s*["']([^"']+)["']/i)?.[1];
+      const href = attributes.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+      return rel?.split(/\s+/).some((value) => value.toLowerCase() === "canonical") &&
+        href === allowedCanonicalUrl
+        ? ""
+        : tag;
+    });
+  }
   const assertUrl = (value) => {
     if (value.startsWith("//")) throw new Error("built index contains an external origin");
     if (/^https?:\/\//i.test(value) && new URL(value).origin !== new URL(baseUrl).origin)
       throw new Error("built index contains an external origin");
   };
-  for (const match of html.matchAll(
+  for (const match of runtimeHtml.matchAll(
     /\b(?:src|href|action|poster|formaction)\s*=\s*["']([^"']+)["']/gi,
   )) {
     assertUrl(match[1]);
   }
-  for (const match of html.matchAll(/\bsrcset\s*=\s*["']([^"']+)["']/gi)) {
+  for (const match of runtimeHtml.matchAll(/\bsrcset\s*=\s*["']([^"']+)["']/gi)) {
     for (const source of match[1].split(",")) assertUrl(source.trim().split(/\s+/, 1)[0]);
   }
 }
 
 function landingPageSignature(html, expectedUrl) {
   const title = html.match(/<title[^>]*>([^<]+)<\/title>/i)?.[1]?.trim();
-  const canonical = [...html.matchAll(/<link\b([^>]*)>/gi)]
+  const canonicals = [...html.matchAll(/<link\b([^>]*)>/gi)]
     .map((match) => match[1])
-    .find((attributes) => /\brel\s*=\s*["'][^"']*\bcanonical\b[^"']*["']/i.test(attributes))
-    ?.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+    .filter((attributes) => /\brel\s*=\s*["'][^"']*\bcanonical\b[^"']*["']/i.test(attributes));
+  const canonical = canonicals[0]?.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
   const headings = [...html.matchAll(/<h1\b[^>]*>([\s\S]*?)<\/h1>/gi)];
-  if (!title || canonical !== expectedUrl || headings.length !== 1) return null;
+  if (!title || canonicals.length !== 1 || canonical !== expectedUrl || headings.length !== 1)
+    return null;
   return { title, canonical };
 }
 
@@ -295,12 +308,12 @@ function assertLandingRoute(check, response, body, baseUrl) {
 
   if (kind === "landing-page") {
     if (!/text\/html/i.test(contentType)) throw new Error(`landing ${path} is not HTML`);
-    const expectedUrl = new URL(path, `${baseUrl}/`).href;
+    const expectedUrl = new URL(path, `${LANDING_SITE_URL}/`).href;
     if (!landingPageSignature(body, expectedUrl))
       throw new Error(`landing ${path} has an invalid title, canonical, or H1`);
     if (response.headers.get("cache-control") !== "no-cache")
       throw new Error(`landing ${path} is not revalidation-only`);
-    assertNoExternalOrigins(body, baseUrl);
+    assertNoExternalOrigins(body, baseUrl, expectedUrl);
     return;
   }
 
@@ -314,7 +327,7 @@ function assertLandingRoute(check, response, body, baseUrl) {
       !/User-agent:\s*PerplexityBot[\s\S]*?Allow:\s*\//i.test(body) ||
       !/User-agent:\s*GPTBot[\s\S]*?Disallow:\s*\//i.test(body) ||
       !/User-agent:\s*ClaudeBot[\s\S]*?Disallow:\s*\//i.test(body) ||
-      !body.includes(`Sitemap: ${new URL("/sitemap.xml", `${baseUrl}/`).href}`)
+      !body.includes(`Sitemap: ${new URL("/sitemap.xml", `${LANDING_SITE_URL}/`).href}`)
     )
       throw new Error("landing robots policy does not preserve search and training boundaries");
     return;
@@ -322,8 +335,8 @@ function assertLandingRoute(check, response, body, baseUrl) {
   if (kind === "sitemap") {
     if (
       !/(?:application|text)\/xml/i.test(contentType) ||
-      !body.includes(`<loc>${new URL("/", `${baseUrl}/`).href}</loc>`) ||
-      !body.includes(`<loc>${new URL("/faq/", `${baseUrl}/`).href}</loc>`)
+      !body.includes(`<loc>${new URL("/", `${LANDING_SITE_URL}/`).href}</loc>`) ||
+      !body.includes(`<loc>${new URL("/faq/", `${LANDING_SITE_URL}/`).href}</loc>`)
     )
       throw new Error("landing sitemap does not expose canonical topic routes");
     return;
@@ -331,8 +344,8 @@ function assertLandingRoute(check, response, body, baseUrl) {
   if (
     kind !== "llms" ||
     !/text\/plain/i.test(contentType) ||
-    !body.includes(new URL("/", `${baseUrl}/`).href) ||
-    !body.includes(new URL("/faq/", `${baseUrl}/`).href)
+    !body.includes(new URL("/", `${LANDING_SITE_URL}/`).href) ||
+    !body.includes(new URL("/faq/", `${LANDING_SITE_URL}/`).href)
   )
     throw new Error("landing llms index does not expose canonical topic routes");
 }

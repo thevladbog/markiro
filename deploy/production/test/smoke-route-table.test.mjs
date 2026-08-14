@@ -30,7 +30,7 @@ const kioskRegistration =
 const kioskServiceWorker =
   'precacheAndRoute([{url:"index.html",revision:"1"}],{});cleanupOutdatedCaches();registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]}));';
 const landingShell = (path = "/") =>
-  `<!doctype html><html lang="ru"><head><title>Маркировка Честный знак — Markiro</title><link rel="canonical" href="https://markiro.example${path}"></head><body><main><h1>Маркировка без остановки производства</h1></main></body></html>`;
+  `<!doctype html><html lang="ru"><head><title>Маркировка Честный знак — Markiro</title><link rel="canonical" href="https://markiro.app${path}"></head><body><main><h1>Маркировка без остановки производства</h1></main></body></html>`;
 const landingRobots = `User-agent: *
 Allow: /
 User-agent: OAI-SearchBot
@@ -43,12 +43,12 @@ User-agent: GPTBot
 Disallow: /
 User-agent: ClaudeBot
 Disallow: /
-Sitemap: https://markiro.example/sitemap.xml
+Sitemap: https://markiro.app/sitemap.xml
 `;
 const landingSitemap =
-  '<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://markiro.example/</loc></url><url><loc>https://markiro.example/faq/</loc></url></urlset>';
+  '<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/faq/</loc></url></urlset>';
 const landingLlms =
-  "# Markiro\n\n- [Главная](https://markiro.example/)\n- [Вопросы и ответы](https://markiro.example/faq/)\n";
+  "# Markiro\n\n- [Главная](https://markiro.app/)\n- [Вопросы и ответы](https://markiro.app/faq/)\n";
 const docsShell =
   '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script ><script src="/docs/bootstrap.js"></script   ></body></html>';
 const docsBootstrap = `Scalar.createApiReference("#app", {
@@ -379,6 +379,54 @@ test("public smoke accepts the exact live release identity", async () => {
   );
 
   assert.ok(client.requests.length > 1);
+});
+
+test("landing smoke permits only the public canonical URL outside the deployment origin", async (t) => {
+  for (const [name, mutate, expected] of [
+    [
+      "external runtime asset",
+      (body) =>
+        body.replace("</head>", '<script src="https://cdn.example/app.js"></script></head>'),
+      /external origin/,
+    ],
+    [
+      "deployment-alias canonical",
+      (body) => body.replace("https://markiro.app/", "https://markiro.example/"),
+      /invalid title, canonical, or H1/,
+    ],
+    [
+      "duplicate canonical",
+      (body) =>
+        body.replace("</head>", '<link rel="canonical" href="https://markiro.app/"></head>'),
+      /invalid title, canonical, or H1/,
+    ],
+  ]) {
+    await t.test(name, async () => {
+      const client = smokeClient();
+      const original = client.request;
+      client.request = async (url, init) => {
+        const parsed = new URL(url);
+        if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
+          return response({
+            body: mutate(landingShell()),
+            headers: { "cache-control": "no-cache", "content-type": "text/html" },
+          });
+        return original(url, init);
+      };
+
+      await assert.rejects(
+        runPublicSmoke(
+          {
+            adminBaseUrl: "https://app.markiro.example",
+            kioskBaseUrl: "https://kiosk.markiro.example",
+            landingBaseUrl: "https://markiro.example",
+          },
+          client,
+        ),
+        expected,
+      );
+    });
+  }
 });
 
 test("kiosk smoke rejects shell, origin, manifest, worker, and route-boundary mutations", async (t) => {
