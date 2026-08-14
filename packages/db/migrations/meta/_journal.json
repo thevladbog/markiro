@@ -295,6 +295,13 @@
       "when": 1786657686546,
       "tag": "0041_product_images",
       "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1786698556218,
+      "tag": "0042_default_box_label_template",
+      "breakpoints": true
     }
   ]
 }

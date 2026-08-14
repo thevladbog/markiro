@@ -20,8 +20,25 @@ import {
   stationPairingCodes,
 } from "../src/schema/platform.js";
 import { codes } from "../src/schema/codes.js";
+import { orgProfiles } from "../src/schema/org-profile.js";
 
 describe("platform schema", () => {
+  it("gives organization profiles a nullable tenant-scoped default box label template", () => {
+    expect(orgProfiles.defaultBoxLabelTemplateId).toBeDefined();
+    expect(orgProfiles.defaultBoxLabelTemplateId.notNull).toBe(false);
+
+    const foreignKey = getTableConfig(orgProfiles).foreignKeys.find(
+      (item) => item.getName() === "org_profiles_box_label_template_tenant_fk",
+    );
+    expect(foreignKey, "missing organization default box label template tenant foreign key").toBeDefined();
+    const reference = foreignKey!.reference();
+    expect(reference.columns.map((column) => column.name)).toEqual([
+      "tenant_id",
+      "default_box_label_template_id",
+    ]);
+    expect(reference.foreignColumns.map((column) => column.name)).toEqual(["tenant_id", "id"]);
+  });
+
   it("exports the four tables", () => {
     expect(getTableName(counterparties)).toBe("counterparties");
     expect(getTableName(products)).toBe("products");
