@@ -40,6 +40,13 @@ test("station beta publication is protected, serialized, main-only and channel-l
   const signingStep = workflow.jobs.release.steps.find(
     (step) => step.name === "Build signed Windows NSIS updater artifacts",
   );
+  const verifyStep = workflow.jobs.release.steps.find(
+    (step) => step.name === "Build and verify station",
+  );
+  assert.match(
+    verifyStep.run,
+    /pnpm --filter @markiro\/station exec vitest run --maxWorkers=2 --testTimeout=30000/,
+  );
   const corsStep = workflow.jobs.release.steps.find(
     (step) => step.name === "Verify production station pairing CORS",
   );
