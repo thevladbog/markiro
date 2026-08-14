@@ -941,11 +941,12 @@
       "selectShift": "Select a shift to see its boxes",
       "contentsChangedAfterClose": "Changed after closing",
       "filters": {
-        "shiftLabel": "Shift"
+        "shiftLabel": "Shift",
+        "searchLabel": "Search shifts"
       },
       "table": {
         "sscc": "SSCC",
-        "terminal": "Terminal",
+        "line": "Line",
         "operator": "Operator",
         "itemCount": "Count",
         "closedAt": "Closed",
@@ -959,6 +960,7 @@
       "reviewed": "Reviewed",
       "filters": {
         "shiftLabel": "Shift",
+        "searchLabel": "Search shifts",
         "shiftAll": "All shifts",
         "shiftHint": "Shows conflicts where this shift's scan was the one displaced, not every conflict touching this shift",
         "reviewedLabel": "Status",

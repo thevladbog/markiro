@@ -34,6 +34,8 @@ export interface BoxDto {
   id: string;
   sscc: string | null;
   terminalId: string | null;
+  /** Assigned production line of the station that reported this box. */
+  lineName: string | null;
   operatorId: string | null;
   itemCount: number;
   closedAt: Date | null;

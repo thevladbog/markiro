@@ -13,6 +13,19 @@ export function resolveDateTimeLocale(language: string): string {
   return language.startsWith("ru") ? "ru-RU" : "en-US";
 }
 
+/** Formats an API `YYYY-MM-DD` date without shifting it through the viewer's timezone. */
+export function formatDate(date: string, language: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  if (!year || !month || !day) return date;
+
+  return new Intl.DateTimeFormat(resolveDateTimeLocale(language), {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
 export function formatCreatedAt(iso: string, language: string): string {
   const locale = resolveDateTimeLocale(language);
   return new Intl.DateTimeFormat(locale, { dateStyle: "short", timeStyle: "short" }).format(

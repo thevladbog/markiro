@@ -8,7 +8,7 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
-import { formatCreatedAt, formatScanTime } from "../../lib/datetime.js";
+import { formatCreatedAt, formatDate, formatScanTime } from "../../lib/datetime.js";
 import { toast } from "../../lib/toast.js";
 import { useShifts, type ShiftDto } from "../shifts/api.js";
 import { useConflicts, useReviewConflict, type ConflictDto } from "./api.js";
@@ -61,9 +61,11 @@ export function ConflictsPage() {
   const shiftFilterOptions: SelectOption[] = useMemo(
     () => [
       { value: "all", label: t("pages.conflicts.filters.shiftAll") },
-      ...[...shifts].reverse().map((shift) => ({ value: shift.id, label: shiftLabel(shift) })),
+      ...[...shifts]
+        .reverse()
+        .map((shift) => ({ value: shift.id, label: shiftLabel(shift, i18n.language) })),
     ],
-    [t, shifts],
+    [t, shifts, i18n.language],
   );
 
   const reviewedFilterOptions: SelectOption<ReviewedFilter>[] = useMemo(
@@ -89,7 +91,9 @@ export function ConflictsPage() {
         render: (row) => {
           const shift = shiftsById.get(row.losingShiftId);
           return (
-            <span title={row.losingShiftId}>{shift ? shiftLabel(shift) : row.losingShiftId}</span>
+            <span title={row.losingShiftId}>
+              {shift ? shiftLabel(shift, i18n.language) : row.losingShiftId}
+            </span>
           );
         },
       },
@@ -138,6 +142,8 @@ export function ConflictsPage() {
             value={shiftFilter}
             aria-describedby={shiftHintId}
             onValueChange={setShiftFilter}
+            searchable
+            searchLabel={t("pages.conflicts.filters.searchLabel")}
           />
           <p id={shiftHintId} className="mk-conflicts-filters__hint">
             {t("pages.conflicts.filters.shiftHint")}
@@ -237,9 +243,10 @@ function AuthorizedConflictsTable({
 }
 
 /** Short, human-identifiable label for a shift filter option / shift column cell. */
-function shiftLabel(shift: ShiftDto): string {
-  if (shift.plannedDate && shift.productName) return `${shift.plannedDate} — ${shift.productName}`;
-  return shift.productName ?? shift.plannedDate ?? shift.id;
+function shiftLabel(shift: ShiftDto, language: string): string {
+  const date = shift.plannedDate ? formatDate(shift.plannedDate, language) : null;
+  if (date && shift.productName) return `${date} — ${shift.productName}`;
+  return shift.productName ?? date ?? shift.id;
 }
 
 /**

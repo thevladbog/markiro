@@ -53,7 +53,23 @@ export function DeviceActions({
         }}
       >
         {device.type === "kiosk" ? (
-          <Link to={`/kiosks/${device.id}/edit`} aria-label={t("pages.devices.kioskSettings")}>
+          <Link
+            to={`/kiosks/${device.id}/edit`}
+            className="mk-device-actions__kiosk-settings"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              minHeight: "var(--control-sm)",
+              padding: "0 16px",
+              border: "1px solid var(--line-strong)",
+              borderRadius: "var(--r-2)",
+              background: "var(--surface-card)",
+              color: "var(--fg-1)",
+              font: "600 13px/1 var(--font-ui)",
+              textDecoration: "none",
+            }}
+          >
             {t("pages.devices.kioskSettings")}
           </Link>
         ) : null}

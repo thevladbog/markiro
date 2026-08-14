@@ -8,6 +8,7 @@ interface BoxRow {
   id: string;
   sscc: string | null;
   terminalId: string | null;
+  lineName: string | null;
   operatorId: string | null;
   closedAt: Date | null;
   itemCount: number;
@@ -71,6 +72,7 @@ export class BoxesService {
         id: schema.boxes.id,
         sscc: schema.boxes.sscc,
         terminalId: schema.boxes.terminalId,
+        lineName: schema.lines.name,
         operatorId: schema.boxes.operatorId,
         closedAt: schema.boxes.closedAt,
         disassembledAt: schema.boxes.disassembledAt,
@@ -91,8 +93,22 @@ export class BoxesService {
           eq(schema.boxItems.boxId, schema.boxes.id),
         ),
       )
+      .leftJoin(
+        schema.stationDevices,
+        and(
+          eq(schema.stationDevices.tenantId, schema.boxes.tenantId),
+          sql`${schema.stationDevices.id}::text = ${schema.boxes.terminalId}`,
+        ),
+      )
+      .leftJoin(
+        schema.lines,
+        and(
+          eq(schema.lines.tenantId, schema.stationDevices.tenantId),
+          eq(schema.lines.id, schema.stationDevices.lineId),
+        ),
+      )
       .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.shiftId, query.shiftId)))
-      .groupBy(schema.boxes.id)
+      .groupBy(schema.boxes.id, schema.stationDevices.id, schema.lines.id)
       .orderBy(sql`${schema.boxes.closedAt} desc nulls first`);
 
     return { items: rows.map((row) => this.toDto(row)) };
@@ -103,6 +119,7 @@ export class BoxesService {
       id: row.id,
       sscc: row.sscc,
       terminalId: row.terminalId,
+      lineName: row.lineName,
       operatorId: row.operatorId,
       itemCount: row.itemCount,
       closedAt: row.closedAt,
