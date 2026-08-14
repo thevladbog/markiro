@@ -489,7 +489,7 @@ describe("NewShift", () => {
     expect(fetchMock.mock.calls).toHaveLength(3);
     expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3000/shifts");
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
-      JSON.stringify({ productId: "p1", mode: "aggregation" }),
+      JSON.stringify({ productId: "p1", mode: "aggregation", plannedDate: "2026-08-14" }),
     );
     expect(screen.queryByRole("combobox")).toBeNull();
 
