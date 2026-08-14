@@ -12,7 +12,8 @@ import {
   trackStationProductImageSync,
 } from "../lib/product-image-cache.js";
 
-const SHIFT_PAGE_SIZE = 3;
+/** Two large choices stay legible on the 1280×800 line-terminal baseline. */
+const SHIFT_PAGE_SIZE = 2;
 const SHIFT_REFRESH_MS = 30_000;
 
 interface ShiftListItem {
