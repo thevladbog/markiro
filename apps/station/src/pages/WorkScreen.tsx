@@ -73,6 +73,8 @@ export interface WorkScreenProps {
   issuerPrefix: string | null;
   /** Items per box before it closes automatically (the shift's `boxCapacity`). */
   boxCapacity: number | null;
+  /** Bumps after a freshly downloaded bundle replaces the offline mirror. */
+  bundleRevision?: number;
   /**
    * Injectable for tests; defaults to the real `closeCurrentBox` (Task 12)
    * bound to this device's `issuerPrefix`.
@@ -124,6 +126,7 @@ export function WorkScreen({
   pendingSync,
   issuerPrefix,
   boxCapacity,
+  bundleRevision = 0,
   closeCurrentBox: closeCurrentBoxProp,
   onScan,
   verifyPrintedLabel,
@@ -451,6 +454,9 @@ export function WorkScreen({
   // no-op) for the same reason `boxReady` is -- a stray future await must
   // never hang forever.
   useEffect(() => {
+    // A refreshed bundle may remove the template. Clear first so a failed,
+    // absent, or unparsable replacement never leaves the previous spec live.
+    labelSpecRef.current = null;
     if (issuerPrefix === null) {
       labelSpecReady.current = Promise.resolve();
       return;
@@ -482,7 +488,7 @@ export function WorkScreen({
     return () => {
       cancelled = true;
     };
-  }, [exec, shiftId, issuerPrefix]);
+  }, [exec, shiftId, issuerPrefix, bundleRevision]);
 
   /**
    * Renders and (if a printer is configured) sends the just-closed box's

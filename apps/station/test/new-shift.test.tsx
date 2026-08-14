@@ -57,7 +57,8 @@ describe("NewShift", () => {
   });
 
   it("resolves a known GTIN, creates + opens a validation shift", async () => {
-    vi.spyOn(globalThis, "fetch")
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
       // POST /products/gtin-check
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
@@ -99,6 +100,20 @@ describe("NewShift", () => {
         expect.objectContaining({ id: "s9", status: "active" }),
       ),
     );
+
+    const now = new Date();
+    const expectedLocalDate = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, "0"),
+      String(now.getDate()).padStart(2, "0"),
+    ].join("-");
+    const createRequest = fetchSpy.mock.calls[2];
+    expect(createRequest?.[0]).toBe("http://localhost:3000/shifts");
+    expect(JSON.parse(createRequest?.[1]?.body as string)).toEqual({
+      productId: "p1",
+      mode: "validation",
+      plannedDate: expectedLocalDate,
+    });
   });
 
   it("shows the blocking not-in-catalog screen for an unknown GTIN", async () => {

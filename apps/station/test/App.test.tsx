@@ -2561,6 +2561,190 @@ describe("App", () => {
     }
   });
 
+  it("re-reads a delayed fresh bundle and remounts the work screen after entering from a stale mirror", async () => {
+    lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
+    lockdownMock.subscribe.mockImplementation((listener) => {
+      lockdownMock.listeners.add(listener);
+      return () => lockdownMock.listeners.delete(listener);
+    });
+    lockdownMock.start.mockReturnValue(() => {});
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    let fresh = false;
+    let freshPlainMirrorReads = 0;
+    let openBoxInsertCount = 0;
+    let resolveBundle!: (response: Response) => void;
+    const delayedBundle = new Promise<Response>((resolve) => {
+      resolveBundle = resolve;
+    });
+
+    invokeMock.mockImplementation((cmd: string, payload?: unknown): Promise<unknown> => {
+      if (cmd === "read_config") {
+        return Promise.resolve({
+          machine_id: "m1",
+          device_id: "device-1",
+          api_key: "mk_key",
+          server_url: "http://localhost:3000",
+        });
+      }
+      if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
+      if (cmd === "plugin:sql|execute") {
+        const { query } = (payload ?? {}) as { query: string };
+        if (query.includes("INSERT INTO shift_mirror")) fresh = true;
+        if (query.includes("INSERT INTO boxes_mirror")) openBoxInsertCount += 1;
+        return Promise.resolve([0, 0]);
+      }
+      if (cmd === "plugin:sql|select") {
+        const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
+        if (query.includes("FROM outbox")) {
+          if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
+          return Promise.resolve([]);
+        }
+        if (/FROM operators_mirror\b/.test(query)) {
+          return Promise.resolve([operatorMirrorRow(pinHash)]);
+        }
+        if (query.includes("boxes_mirror")) return Promise.resolve([]);
+        if (query.includes("product_mirror")) {
+          return Promise.resolve([
+            { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+          ]);
+        }
+        if (query.includes("shift_mirror")) {
+          if (fresh) freshPlainMirrorReads += 1;
+          return Promise.resolve([
+            {
+              id: "s9",
+              status: "active",
+              mode: "aggregation",
+              counterparty_gln: null,
+              label_template_spec: null,
+              box_capacity: fresh ? 20 : 10,
+              issuer_prefix: "460123456",
+              box_label_template_spec: JSON.stringify({
+                widthMm: fresh ? 80 : 58,
+                heightMm: 40,
+                dpi: 203,
+                language: "zpl",
+                elements: [],
+              }),
+            },
+          ]);
+        }
+        if (query.includes("station_meta")) {
+          if (values?.[0] === "hardware_config") {
+            return Promise.resolve([
+              {
+                value: JSON.stringify({
+                  scanner: null,
+                  printer: null,
+                  printerLanguage: "zpl",
+                  verifyPrintedLabel: false,
+                }),
+              },
+            ]);
+          }
+          if (values?.[0] === "install_id") {
+            return Promise.resolve([{ value: "test-install-id" }]);
+          }
+        }
+        return Promise.resolve([]);
+      }
+      return Promise.resolve(undefined);
+    });
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = new URL(url).pathname;
+        const method = init?.method ?? "GET";
+        if (path === "/shifts" && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              items: [
+                {
+                  id: "s9",
+                  status: "active",
+                  mode: "aggregation",
+                  productName: "Cola",
+                  plannedQty: 100,
+                },
+              ],
+            }),
+            { status: 200 },
+          );
+        }
+        if (path === "/shifts/s9/bundle") return delayedBundle;
+        return new Response(JSON.stringify({ items: [] }), { status: 200 });
+      }),
+    );
+
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(await screen.findByRole("button", { name: "Rejoin" }));
+
+    expect((await screen.findByTestId("box-progress")).textContent).toBe("0 / 10");
+    await waitFor(() => expect(openBoxInsertCount).toBe(1));
+
+    resolveBundle(
+      new Response(
+        JSON.stringify({
+          shift: {
+            id: "s9",
+            status: "active",
+            mode: "aggregation",
+            productId: "p1",
+            productName: "Cola",
+            lineId: "line-1",
+            lineName: "Line 1",
+            counterpartyId: null,
+            counterpartyName: null,
+            labelTemplateId: null,
+            labelTemplateName: null,
+            plannedQty: 100,
+            plannedDate: "2026-08-14",
+            boxCapacity: 20,
+            palletCapacity: null,
+            palletsEnabled: false,
+            openedAt: "2026-08-14T10:00:00Z",
+          },
+          product: {
+            id: "p1",
+            gtin14: "04600000000015",
+            name: "Cola",
+            productGroup: "Beverages",
+            boxCapacity: 20,
+            palletCapacity: null,
+            status: "active",
+            defaultCounterpartyId: null,
+            defaultLabelTemplateId: null,
+          },
+          labelTemplate: null,
+          boxLabelTemplate: {
+            id: "box-new",
+            name: "New box label",
+            spec: { widthMm: 80, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+          },
+          counterpartyGln: null,
+          operators: [],
+          sscc: {
+            issuerPrefix: "460123456",
+            extensionDigit: 0,
+            fromSerial: 1,
+            toSerial: 100,
+            consumedThroughSerial: null,
+          },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("0 / 20"));
+    // One fresh read updates App's props; the second is the newly mounted
+    // WorkScreen reading the box label spec. Without the remount it keeps
+    // the old mount-time template even though the capacity prop updates.
+    expect(freshPlainMirrorReads).toBeGreaterThanOrEqual(2);
+    expect(openBoxInsertCount).toBe(1);
+  });
+
   // Task 13 review, Finding 1: App.tsx used to hardcode `issuerPrefix={null}`
   // and `boxCapacity={null}` into WorkScreen unconditionally, so the box UI
   // (progress, close, printing, verification) was unreachable from a real
