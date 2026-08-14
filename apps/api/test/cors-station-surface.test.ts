@@ -24,6 +24,10 @@ const documentedStationSurface = [
   ["POST", "/station/pair"],
   ["GET", "/station/identity"],
   ["GET", "/station/operators"],
+  [
+    "GET",
+    "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  ],
   ["POST", "/station/scans"],
   ["GET", "/shifts"],
   ["POST", "/shifts"],
@@ -74,6 +78,14 @@ describe("station CORS surface", () => {
     ["GET", "/station/pair"],
     ["POST", "/station/identity"],
     ["POST", "/station/operators"],
+    [
+      "POST",
+      "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    ],
+    [
+      "GET",
+      "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/extra",
+    ],
     ["GET", "/station/scans"],
     ["PATCH", "/shifts"],
     ["GET", "/shifts/shift-1"],

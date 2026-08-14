@@ -9,6 +9,11 @@ const expected = [
   ["/station/pair", "POST", "content-type,x-station-capabilities"],
   ["/station/identity", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/station/operators", "GET", "content-type,x-api-key,x-station-capabilities"],
+  [
+    "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "GET",
+    "x-api-key,x-station-capabilities",
+  ],
   ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
@@ -26,10 +31,9 @@ test("matches the authoritative API Station CORS surface", async () => {
   );
   const block = source.match(/const documentedStationSurface = \[([\s\S]*?)\] as const;/)?.[1];
   assert.ok(block, "API Station CORS surface must remain declarative");
-  const apiSurface = [...block.matchAll(/\["(GET|POST)", "([^"]+)"\]/g)].map(([, method, path]) => [
-    path.replace("/shift-1/", "/cors-probe/"),
-    method,
-  ]);
+  const apiSurface = [...block.matchAll(/\[\s*"(GET|POST)",\s*"([^"]+)",?\s*\]/g)].map(
+    ([, method, path]) => [path.replace("/shift-1/", "/cors-probe/"), method],
+  );
 
   assert.deepEqual(
     STATION_PREFLIGHTS.map(({ path, method }) => [path, method]).toSorted(),

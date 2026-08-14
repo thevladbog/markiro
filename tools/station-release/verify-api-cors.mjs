@@ -16,6 +16,11 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/products/00000000-0000-0000-0000-000000000000/image/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    method: "GET",
+    headers: "x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/scans",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
