@@ -173,13 +173,19 @@ and the browser gallery do not satisfy these checks.
       from the cabinet. Confirm deletion is rejected with an actionable
       conflict, the default remains configured, and no template or shift
       binding is silently cleared.
-- [ ] Before upgrading, preserve the previously affected active aggregation
-      shift in persistent unresolved box-label recovery and record its box and
-      18-digit SSCC. After the database migration and API rollout, install the
-      packaged beta, run `Повторить восстановление`, and print on the same real
-      printer. Confirm backfill selects the expected template and recovery
-      retains the exact same box and SSCC without a second box close, SSCC
-      allocation, journal entry, or outbox entry.
+- [ ] Use a separate legacy test tenant for the backfilled recovery case; do
+      not reuse the preceding A/B tenant. Before migration, confirm this tenant
+      has exactly one tenant-owned label template, no organisation default, and
+      the previously affected active aggregation shift has a null template
+      snapshot. Preserve that shift in persistent unresolved box-label recovery
+      and record its box and 18-digit SSCC. After the database migration and API
+      rollout, confirm the sole template became both the organisation default
+      and the shift snapshot. Install the packaged beta, run
+      `Повторить восстановление`, and print on the same real printer. Confirm
+      recovery uses that template and retains the exact same box and SSCC
+      without a second box close, SSCC allocation, journal entry, or outbox
+      entry. Do not add or remove templates before migration: zero- or
+      multiple-template tenants are intentionally not auto-backfilled.
 - [ ] For the same backfilled active-shift case, disconnect the network before
       `Повторить восстановление`. Confirm recovery remains blocked with an
       honest offline error and preserves the same box, SSCC, journal, outbox,
