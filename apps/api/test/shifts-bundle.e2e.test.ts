@@ -155,12 +155,12 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     await agent.post(`/shifts/${id}/open`).expect(409);
   });
 
-  it("GET /shifts/:id/bundle returns shift+product+labelTemplate+counterpartyGln and the operator roster", async () => {
+  it("GET /shifts/:id/bundle nulls seeded legacy item bindings while retaining the real box template", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const counterpartyId = await seedCounterparty(orgId, "Buyer");
     const templateId = await seedLabelTemplate(orgId, "Bundle Template");
-    await setDefaultBoxLabelTemplate(agent, orgId);
+    const boxTemplateId = await setDefaultBoxLabelTemplate(agent, orgId, "Bundle Box Template");
     const productId = await seedProduct(orgId, {
       status: "active",
       productGroup: "Beverages",
@@ -182,12 +182,29 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       .send({ productId, mode: "aggregation" })
       .expect(201);
     const id = created.body.id as string;
+    await db
+      .update(schema.shifts)
+      .set({ labelTemplateId: templateId })
+      .where(and(eq(schema.shifts.tenantId, orgId), eq(schema.shifts.id, id)));
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.shift).toMatchObject({ id, productId });
-    expect(bundle.body.product).toMatchObject({ id: productId, gtin14: expect.any(String) });
-    expect(bundle.body.labelTemplate).toMatchObject({ id: templateId, name: "Bundle Template" });
-    expect(bundle.body.labelTemplate.spec).toMatchObject({ language: "zpl" });
+    expect(bundle.body.shift).toMatchObject({
+      id,
+      productId,
+      labelTemplateId: null,
+      labelTemplateName: null,
+    });
+    expect(bundle.body.product).toMatchObject({
+      id: productId,
+      gtin14: expect.any(String),
+      defaultLabelTemplateId: null,
+    });
+    expect(bundle.body.labelTemplate).toBeNull();
+    expect(bundle.body.boxLabelTemplate).toMatchObject({
+      id: boxTemplateId,
+      name: "Bundle Box Template",
+      spec: { language: "zpl" },
+    });
     expect(bundle.body.counterpartyGln).toBe("6291041500213");
     expect(bundle.body.operators).toHaveLength(1);
     expect(bundle.body.operators[0]).toMatchObject({
@@ -201,15 +218,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.operators[0].pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
   });
 
-  // CodeRabbit PR33 review, Finding 3: the box template column, schema, and
-  // admin picker were all fully wired, but `getBundle` only ever resolved
-  // `labelTemplate` off `shift.labelTemplateId` -- the ITEM template -- and
-  // never touched `shift.boxLabelTemplateId` at all. The station therefore
-  // had no way to print anything but the item template on a box label. This
-  // pins the fix at the bundle level: a shift with its own distinct box
-  // template returns that template's spec under a NEW `boxLabelTemplate`
-  // field, clearly distinct from `labelTemplate`.
-  it("GET /shifts/:id/bundle resolves boxLabelTemplateId into its own boxLabelTemplate field, distinct from labelTemplate (Finding 3)", async () => {
+  it("GET /shifts/:id/bundle resolves the box snapshot without an item-template fallback", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const itemTemplateId = await seedLabelTemplate(orgId, "Item Template");
@@ -229,10 +238,14 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(created.body.boxLabelTemplateId).toBe(boxTemplateId);
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.labelTemplate).toMatchObject({ id: itemTemplateId, name: "Item Template" });
+    expect(bundle.body.shift).toMatchObject({
+      labelTemplateId: null,
+      labelTemplateName: null,
+    });
+    expect(bundle.body.product.defaultLabelTemplateId).toBeNull();
+    expect(bundle.body.labelTemplate).toBeNull();
     expect(bundle.body.boxLabelTemplate).toMatchObject({ id: boxTemplateId, name: "Box Template" });
     expect(bundle.body.boxLabelTemplate.spec).toMatchObject({ language: "zpl" });
-    expect(bundle.body.boxLabelTemplate.id).not.toBe(bundle.body.labelTemplate.id);
   });
 
   it("GET /shifts/:id/bundle resolves only the snapshotted box template after the organisation default changes", async () => {
@@ -285,7 +298,12 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const id = created.body.id as string;
 
     const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
-    expect(bundle.body.labelTemplate).toMatchObject({ id: itemTemplateId });
+    expect(bundle.body.shift).toMatchObject({
+      labelTemplateId: null,
+      labelTemplateName: null,
+    });
+    expect(bundle.body.product.defaultLabelTemplateId).toBeNull();
+    expect(bundle.body.labelTemplate).toBeNull();
     expect(bundle.body.boxLabelTemplate).toBeNull();
   });
 
@@ -610,7 +628,12 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
         .expect(200);
 
       expect(res.body.product).toMatchObject({ id: productId });
-      expect(res.body.labelTemplate).toMatchObject({ id: templateId });
+      expect(res.body.shift).toMatchObject({
+        labelTemplateId: null,
+        labelTemplateName: null,
+      });
+      expect(res.body.product.defaultLabelTemplateId).toBeNull();
+      expect(res.body.labelTemplate).toBeNull();
       expect(res.body.operators).toHaveLength(1);
       expect(res.body.sscc).toBeNull();
     });

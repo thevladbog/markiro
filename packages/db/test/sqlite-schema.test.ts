@@ -48,6 +48,19 @@ describe("STATION_MIGRATIONS", () => {
     expect(names).toContain("boxes_mirror");
   });
 
+  it("retains deprecated item-label columns for rolling station compatibility", () => {
+    const db = migratedDb();
+    const columnNames = (table: string) =>
+      (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(
+        ({ name }) => name,
+      );
+
+    expect(columnNames("shift_mirror")).toEqual(
+      expect.arrayContaining(["label_template_id", "label_template_name", "label_template_spec"]),
+    );
+    expect(columnNames("product_mirror")).toContain("default_label_template_id");
+  });
+
   it("keeps operators_mirror and operators_mirror_b column-for-column identical", () => {
     // apps/station/src/lib/mirror.ts alternates the active offline-roster
     // slot between operators_mirror ("a") and operators_mirror_b ("b") and

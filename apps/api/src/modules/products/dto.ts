@@ -16,7 +16,6 @@ export const createProductSchema = z.object({
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
-  defaultLabelTemplateId: z.string().uuid().nullable().optional(),
   unitPrice: z
     .string()
     .regex(/^\d+(\.\d{1,2})?$/)
@@ -35,7 +34,6 @@ export const updateProductSchema = z.object({
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   defaultCounterpartyId: z.string().uuid().nullable().optional(),
-  defaultLabelTemplateId: z.string().uuid().nullable().optional(),
   unitPrice: z
     .string()
     .regex(/^\d+(\.\d{1,2})?$/)
@@ -77,7 +75,6 @@ export interface ProductDto {
   palletCapacity: number | null;
   status: ProductStatus;
   defaultCounterpartyId: string | null;
-  defaultLabelTemplateId: string | null;
   unitPrice: string | null;
   egaisCode: string | null;
   externalRef: string | null;

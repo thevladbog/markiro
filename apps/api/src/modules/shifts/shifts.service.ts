@@ -13,7 +13,6 @@ import { schema, type Db } from "@markiro/db";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
-import type { ProductDto } from "../products/dto";
 import type { ProductImageDescriptor } from "../products/dto";
 import {
   BOX_EXTENSION_DIGIT,
@@ -35,7 +34,8 @@ import { EntitlementsService } from "../../subscriptions/entitlements.service";
 import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-errors";
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
-type ProductRow = typeof schema.products.$inferSelect;
+type CurrentShiftRow = Omit<ShiftRow, "labelTemplateId">;
+type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId">;
 type JoinedShiftRow = Omit<ShiftDto, "image"> & {
   imageChecksum: string | null;
   imageByteSize: number | null;
@@ -43,6 +43,45 @@ type JoinedShiftRow = Omit<ShiftDto, "image"> & {
   imageHeight: number | null;
 };
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
+
+const CURRENT_SHIFT_STORAGE_SELECTION = {
+  id: schema.shifts.id,
+  tenantId: schema.shifts.tenantId,
+  status: schema.shifts.status,
+  mode: schema.shifts.mode,
+  productId: schema.shifts.productId,
+  lineId: schema.shifts.lineId,
+  counterpartyId: schema.shifts.counterpartyId,
+  ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
+  boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
+  plannedQty: schema.shifts.plannedQty,
+  plannedDate: schema.shifts.plannedDate,
+  boxCapacity: schema.shifts.boxCapacity,
+  palletCapacity: schema.shifts.palletCapacity,
+  palletsEnabled: schema.shifts.palletsEnabled,
+  createdFrom: schema.shifts.createdFrom,
+  openedAt: schema.shifts.openedAt,
+  closedAt: schema.shifts.closedAt,
+  closeReason: schema.shifts.closeReason,
+  lateDataAt: schema.shifts.lateDataAt,
+  createdAt: schema.shifts.createdAt,
+};
+
+const CURRENT_PRODUCT_SELECTION = {
+  id: schema.products.id,
+  tenantId: schema.products.tenantId,
+  gtin14: schema.products.gtin14,
+  name: schema.products.name,
+  productGroup: schema.products.productGroup,
+  boxCapacity: schema.products.boxCapacity,
+  palletCapacity: schema.products.palletCapacity,
+  status: schema.products.status,
+  defaultCounterpartyId: schema.products.defaultCounterpartyId,
+  unitPrice: schema.products.unitPrice,
+  egaisCode: schema.products.egaisCode,
+  externalRef: schema.products.externalRef,
+  createdAt: schema.products.createdAt,
+};
 
 /**
  * One block must outlast a shift even if the network drops at the worst
@@ -100,7 +139,6 @@ export class ShiftsService {
       )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
-      .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(...conditions))
       .orderBy(schema.shifts.createdAt);
 
@@ -130,7 +168,6 @@ export class ShiftsService {
       )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
-      .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
 
     if (!row) {
@@ -140,14 +177,9 @@ export class ShiftsService {
   }
 
   /**
-   * Create a shift. Server prefill (plan-03 contract, extended in plan-04
-   * for label templates): `boxCapacity`/`palletCapacity`/`counterpartyId`/
-   * `labelTemplateId` default from the product when omitted (`undefined`);
-   * an explicit `null` in the body opts out of the prefill. Draft products
-   * are rejected outright (422) -- a product must be "complete" (group +
-   * both capacities) before any shift can reference it. A shift may end up
-   * with no effective label template (neither the shift nor its product has
-   * one) -- allowed by design; the printing station decides the fallback.
+   * Create a shift. `boxCapacity`/`palletCapacity`/`counterpartyId` default
+   * from the product when omitted (`undefined`); explicit null opts out.
+   * Draft products are rejected outright (422).
    */
   async createShift(tenantId: string, data: CreateShiftDto): Promise<ShiftDto> {
     if (data.palletsEnabled === true) {
@@ -166,8 +198,6 @@ export class ShiftsService {
       data.palletCapacity !== undefined ? data.palletCapacity : product.palletCapacity;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : product.defaultCounterpartyId;
-    const labelTemplateId =
-      data.labelTemplateId !== undefined ? data.labelTemplateId : product.defaultLabelTemplateId;
     const boxLabelTemplateId =
       data.boxLabelTemplateId !== undefined
         ? data.boxLabelTemplateId
@@ -185,7 +215,6 @@ export class ShiftsService {
           productId: data.productId,
           lineId: data.lineId ?? null,
           counterpartyId: counterpartyId ?? null,
-          labelTemplateId: labelTemplateId ?? null,
           // The issuer is always explicit (unlike the org-defaulted box
           // template resolved above), so an omitted value is null ("our
           // organisation").
@@ -198,7 +227,7 @@ export class ShiftsService {
           palletCapacity: palletCapacity ?? null,
           palletsEnabled,
         })
-        .returning();
+        .returning({ id: schema.shifts.id });
 
       if (!row) {
         throw new InternalServerErrorException("Failed to create shift");
@@ -230,8 +259,6 @@ export class ShiftsService {
     const lineId = data.lineId !== undefined ? data.lineId : current.lineId;
     const counterpartyId =
       data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
-    const labelTemplateId =
-      data.labelTemplateId !== undefined ? data.labelTemplateId : current.labelTemplateId;
     const ssccIssuerCounterpartyId =
       data.ssccIssuerCounterpartyId !== undefined
         ? data.ssccIssuerCounterpartyId
@@ -256,7 +283,6 @@ export class ShiftsService {
           mode,
           lineId,
           counterpartyId,
-          labelTemplateId,
           ssccIssuerCounterpartyId,
           boxLabelTemplateId,
           plannedQty,
@@ -272,7 +298,7 @@ export class ShiftsService {
             eq(schema.shifts.status, "planned"),
           ),
         )
-        .returning();
+        .returning({ id: schema.shifts.id });
 
       if (!row) {
         throw new ConflictException("Shift can only be edited while planned");
@@ -390,7 +416,7 @@ export class ShiftsService {
     const productRow = await this.findProductRow(tenantId, shift.productId);
     if (!productRow) throw new NotFoundException("Shift product missing");
     const image = await this.findProductImage(tenantId, shift.productId);
-    const product: ProductDto = {
+    const product: ShiftBundleDto["product"] = {
       id: productRow.id,
       gtin14: productRow.gtin14,
       name: productRow.name,
@@ -399,7 +425,7 @@ export class ShiftsService {
       palletCapacity: productRow.palletCapacity,
       status: productRow.status,
       defaultCounterpartyId: productRow.defaultCounterpartyId,
-      defaultLabelTemplateId: productRow.defaultLabelTemplateId,
+      defaultLabelTemplateId: null,
       unitPrice: productRow.unitPrice,
       egaisCode: productRow.egaisCode,
       externalRef: productRow.externalRef,
@@ -407,14 +433,35 @@ export class ShiftsService {
       image,
     };
 
-    const labelTemplate = await this.findLabelTemplate(tenantId, shift.labelTemplateId);
-    // The box label's own template (Finding 3): resolved the exact same way
-    // as `labelTemplate` above, from `shift.boxLabelTemplateId` -- a
-    // completely separate column, with no fallback to the item template or
-    // to any product-level default (products have no equivalent "default box
-    // label template" column, unlike `defaultLabelTemplateId` for the item
-    // template).
     const boxLabelTemplate = await this.findLabelTemplate(tenantId, shift.boxLabelTemplateId);
+
+    const bundleShift: ShiftBundleDto["shift"] = {
+      id: shift.id,
+      status: shift.status,
+      mode: shift.mode,
+      productId: shift.productId,
+      productName: shift.productName,
+      image: shift.image ?? null,
+      lineId: shift.lineId,
+      lineName: shift.lineName,
+      counterpartyId: shift.counterpartyId,
+      counterpartyName: shift.counterpartyName,
+      labelTemplateId: null,
+      labelTemplateName: null,
+      ssccIssuerCounterpartyId: shift.ssccIssuerCounterpartyId,
+      boxLabelTemplateId: shift.boxLabelTemplateId,
+      plannedQty: shift.plannedQty,
+      plannedDate: shift.plannedDate,
+      boxCapacity: shift.boxCapacity,
+      palletCapacity: shift.palletCapacity,
+      palletsEnabled: shift.palletsEnabled,
+      createdFrom: shift.createdFrom,
+      openedAt: shift.openedAt,
+      closedAt: shift.closedAt,
+      closeReason: shift.closeReason,
+      lateDataAt: shift.lateDataAt,
+      createdAt: shift.createdAt,
+    };
 
     let counterpartyGln: string | null = null;
     if (shift.counterpartyId) {
@@ -445,14 +492,20 @@ export class ShiftsService {
         ? await this.bundleSscc(tenantId, shift.id, deviceId)
         : null;
 
-    return { shift, product, labelTemplate, boxLabelTemplate, counterpartyGln, operators, sscc };
+    return {
+      shift: bundleShift,
+      product,
+      labelTemplate: null,
+      boxLabelTemplate,
+      counterpartyGln,
+      operators,
+      sscc,
+    };
   }
 
   /**
-   * Resolves a label template id (tenant-scoped) into the `{ id, name, spec }`
-   * shape both `ShiftBundleDto.labelTemplate` and `.boxLabelTemplate` share.
-   * Null in, or a template this tenant does not own, both resolve to null --
-   * never a fallback to any other template.
+   * Resolves the box-label snapshot into the station bundle shape. Null in,
+   * or a template this tenant does not own, both resolve to null.
    */
   private async findLabelTemplate(
     tenantId: string,
@@ -555,9 +608,9 @@ export class ShiftsService {
     });
   }
 
-  private async findRow(tenantId: string, id: string): Promise<ShiftRow | undefined> {
+  private async findRow(tenantId: string, id: string): Promise<CurrentShiftRow | undefined> {
     const [row] = await this.db
-      .select()
+      .select(CURRENT_SHIFT_STORAGE_SELECTION)
       .from(schema.shifts)
       .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)));
     return row;
@@ -568,7 +621,7 @@ export class ShiftsService {
     productId: string,
   ): Promise<ProductRow | undefined> {
     const [row] = await this.db
-      .select()
+      .select(CURRENT_PRODUCT_SELECTION)
       .from(schema.products)
       .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)));
     return row;
@@ -673,8 +726,6 @@ export class ShiftsService {
       lineName: schema.lines.name,
       counterpartyId: schema.shifts.counterpartyId,
       counterpartyName: schema.counterparties.name,
-      labelTemplateId: schema.shifts.labelTemplateId,
-      labelTemplateName: schema.labelTemplates.name,
       ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
       boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
       plannedQty: schema.shifts.plannedQty,
@@ -709,9 +760,7 @@ export class ShiftsService {
 
   /**
    * Catch PostgreSQL violations: unique 23505 -> 409; FK 23503 -> 400,
-   * naming the referenced entity per FK constraint name (shifts has
-   * composite FKs to products/lines/counterparties/label_templates --
-   * see platform.ts).
+   * naming the referenced entity per FK constraint name.
    */
   private handleWriteError(error: unknown): never {
     const err = error as Error & { code?: string; constraint?: string; cause?: unknown };
@@ -731,9 +780,6 @@ export class ShiftsService {
       }
       if (constraint === "shifts_tenant_counterparty_fk") {
         throw new BadRequestException("Unknown counterparty for this organization");
-      }
-      if (constraint === "shifts_tenant_label_template_fk") {
-        throw new BadRequestException("Unknown label template for this organization");
       }
       if (constraint === "shifts_tenant_sscc_issuer_fk") {
         throw new BadRequestException("Unknown sscc issuer counterparty for this organization");

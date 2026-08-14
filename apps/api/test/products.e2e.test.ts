@@ -13,6 +13,7 @@ import { ObjectStorageService } from "../src/modules/storage/object-storage.serv
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
+import { createProductSchema, updateProductSchema } from "../src/modules/products/dto";
 
 /**
  * GTIN test vectors. Computed with node + @markiro/domain's gs1CheckDigit
@@ -59,6 +60,23 @@ const EAN13_COUNTERPARTY = "4600001000014";
 const GTIN14_COUNTERPARTY = "04600001000014";
 const UNKNOWN_PREFIX_GTIN = "9999999000010";
 const GTIN14_UNKNOWN = "09999999000010";
+
+describe("product DTO compatibility boundary", () => {
+  it("strips the retired defaultLabelTemplateId from create and update payloads", () => {
+    const legacyTemplateId = randomUUID();
+
+    expect(
+      createProductSchema.parse({
+        gtin: EAN13_CANONICAL,
+        name: "Legacy client product",
+        defaultLabelTemplateId: legacyTemplateId,
+      }),
+    ).toEqual({ gtin: EAN13_CANONICAL, name: "Legacy client product" });
+    expect(
+      updateProductSchema.parse({ name: "Renamed", defaultLabelTemplateId: legacyTemplateId }),
+    ).toEqual({ name: "Renamed" });
+  });
+});
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -208,8 +226,8 @@ describe.skipIf(!ready)("products e2e", () => {
       palletCapacity: null,
       status: "draft",
       defaultCounterpartyId: null,
-      defaultLabelTemplateId: null,
     });
+    expect(res.body).not.toHaveProperty("defaultLabelTemplateId");
     expect(res.body.id).toBeDefined();
     expect(res.body.createdAt).toBeDefined();
   });
@@ -491,7 +509,7 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(res.body.message).toEqual(expect.stringContaining("Unknown counterparty"));
   });
 
-  it("POST /products accepts a defaultLabelTemplateId and PATCH can clear it back to null", async () => {
+  it("POST /products ignores a legacy defaultLabelTemplateId and leaves storage null", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
@@ -505,17 +523,17 @@ describe.skipIf(!ready)("products e2e", () => {
         defaultLabelTemplateId: templateId,
       })
       .expect(201);
-    expect(createRes.body.defaultLabelTemplateId).toEqual(templateId);
     const id = createRes.body.id as string;
+    expect(createRes.body).not.toHaveProperty("defaultLabelTemplateId");
 
-    const clearRes = await agent
-      .patch(`/products/${id}`)
-      .send({ defaultLabelTemplateId: null })
-      .expect(200);
-    expect(clearRes.body.defaultLabelTemplateId).toBeNull();
+    const [stored] = await db
+      .select({ defaultLabelTemplateId: schema.products.defaultLabelTemplateId })
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, orgId), eq(schema.products.id, id)));
+    expect(stored?.defaultLabelTemplateId).toBeNull();
   });
 
-  it("PATCH /products/:id omitting defaultLabelTemplateId leaves it unchanged", async () => {
+  it("GET/list/PATCH omit a seeded legacy binding and PATCH leaves its column untouched", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
 
@@ -525,70 +543,33 @@ describe.skipIf(!ready)("products e2e", () => {
       .send({
         gtin: EAN13_CANONICAL,
         name: "Widget with Kept Template",
-        defaultLabelTemplateId: templateId,
       })
       .expect(201);
     const id = createRes.body.id as string;
+    await db
+      .update(schema.products)
+      .set({ defaultLabelTemplateId: templateId })
+      .where(and(eq(schema.products.tenantId, orgId), eq(schema.products.id, id)));
 
-    const patchRes = await agent.patch(`/products/${id}`).send({ name: "Renamed" }).expect(200);
-    expect(patchRes.body).toMatchObject({ name: "Renamed", defaultLabelTemplateId: templateId });
-  });
-
-  it("POST /products rejects a nonexistent defaultLabelTemplateId with 400", async () => {
-    const agent = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent);
-
-    const res = await agent
-      .post("/products")
-      .send({
-        gtin: EAN13_CANONICAL,
-        name: "Widget with Bad Template",
-        defaultLabelTemplateId: randomUUID(),
-      })
-      .expect(400);
-
-    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
-  });
-
-  it("POST /products rejects a cross-tenant defaultLabelTemplateId with 400", async () => {
-    const agent1 = request.agent(app!.getHttpServer());
-    const org1 = await signUpAndActivate(agent1);
-    const templateId = await seedLabelTemplate(db, org1, "Org1 Template");
-
-    const agent2 = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent2);
-
-    const res = await agent2
-      .post("/products")
-      .send({
-        gtin: EAN13_CANONICAL,
-        name: "Widget with Cross-Tenant Template",
-        defaultLabelTemplateId: templateId,
-      })
-      .expect(400);
-
-    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
-  });
-
-  it("PATCH /products/:id rejects a cross-tenant defaultLabelTemplateId with 400", async () => {
-    const agent1 = request.agent(app!.getHttpServer());
-    const org1 = await signUpAndActivate(agent1);
-    const templateId = await seedLabelTemplate(db, org1, "Org1 Template");
-
-    const agent2 = request.agent(app!.getHttpServer());
-    await signUpAndActivate(agent2);
-    const createRes = await agent2
-      .post("/products")
-      .send({ gtin: EAN13_CANONICAL, name: "Org2 Widget" })
-      .expect(201);
-    const id = createRes.body.id as string;
-
-    const res = await agent2
+    const getRes = await agent.get(`/products/${id}`).expect(200);
+    const listRes = await agent.get("/products").expect(200);
+    const patchRes = await agent
       .patch(`/products/${id}`)
-      .send({ defaultLabelTemplateId: templateId })
-      .expect(400);
+      .send({ name: "Renamed", defaultLabelTemplateId: null })
+      .expect(200);
 
-    expect(res.body.message).toEqual(expect.stringContaining("Unknown label template"));
+    expect(getRes.body).not.toHaveProperty("defaultLabelTemplateId");
+    expect(listRes.body.items.find((item: { id: string }) => item.id === id)).not.toHaveProperty(
+      "defaultLabelTemplateId",
+    );
+    expect(patchRes.body).toMatchObject({ name: "Renamed" });
+    expect(patchRes.body).not.toHaveProperty("defaultLabelTemplateId");
+
+    const [stored] = await db
+      .select({ defaultLabelTemplateId: schema.products.defaultLabelTemplateId })
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, orgId), eq(schema.products.id, id)));
+    expect(stored?.defaultLabelTemplateId).toBe(templateId);
   });
 
   it("POST /products accepts unitPrice, egaisCode, externalRef and GET returns them; PATCH unitPrice: null clears it", async () => {
