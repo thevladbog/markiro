@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Markiro">
+  <rect width="64" height="64" rx="8" fill="#131216"/>
+  <path fill="#3ddc7a" d="M15 15h14v14H15zm20 0h14v14H35zM15 35h14v14H15zm20 0h14v14H35z"/>
+  <path fill="#131216" d="M20 20h4v4h-4zm20 0h4v4h-4zM20 40h4v4h-4zm20 0h4v4h-4z"/>
+</svg>

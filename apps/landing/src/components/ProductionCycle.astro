@@ -1,0 +1,31 @@
+---
+import LineConsole from "./LineConsole.astro";
+
+const stages = [
+  ["01", "Проверка кода", "Система сверяет код и не пропускает проблемный."],
+  ["02", "Сборка группы", "Товар собирается в короб и паллету с сохранением родительства."],
+  ["03", "Этикетка и печать", "Макет строится из тех же данных, которые прошли проверку."],
+] as const;
+---
+
+<section class="section section--cycle" id="cycle" aria-labelledby="cycle-title">
+  <div class="container">
+    <p class="section-index">02 / ПРОИЗВОДСТВЕННЫЙ ЦИКЛ</p>
+    <h2 id="cycle-title" class="display-heading display-heading--wide">КОД ПРОШЁЛ.<br />КОРОБ СОБРАН.</h2>
+    <p class="section-lead">Оператор видит понятный текущий шаг. Система сохраняет связь между кодом, группой и этикеткой.</p>
+
+    <div class="cycle-grid">
+      <ol class="process-list" data-reveal-group>
+        {stages.map(([number, title, description]) => (
+          <li data-reveal>
+            <span>{number}</span>
+            <div><h3>{title}</h3><p>{description}</p></div>
+          </li>
+        ))}
+      </ol>
+      <div class="cycle-console" data-reveal>
+        <LineConsole compact inverse />
+      </div>
+    </div>
+  </div>
+</section>

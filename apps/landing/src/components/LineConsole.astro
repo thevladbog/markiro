@@ -1,0 +1,32 @@
+---
+interface Props {
+  compact?: boolean;
+  inverse?: boolean;
+}
+
+const { compact = false, inverse = false } = Astro.props;
+---
+
+<div class:list={["line-console", { "line-console--compact": compact, "line-console--inverse": inverse }]} aria-hidden="true">
+  <div class="line-console__topline">
+    <span>СТАНЦИЯ 03 / АГРЕГАЦИЯ</span>
+    <span class="status-inline"><i></i> ЛИНИЯ АКТИВНА</span>
+  </div>
+  <div class="line-console__body">
+    <div class="line-console__primary">
+      <span class="interface-kicker">СБОРКА</span>
+      <strong>Сборка короба</strong>
+      <div class="line-console__count"><b>18</b><span>/ 24</span></div>
+      <div class="progress-track"><i></i></div>
+    </div>
+    <div class="line-console__secondary">
+      <span class="interface-kicker">ПРИНЯТО ЗА СМЕНУ</span>
+      <strong>1 248</strong>
+      <small>КОДОВ МАРКИРОВКИ</small>
+    </div>
+  </div>
+  <div class="line-console__footer">
+    <span>Код принят</span>
+    <b>52,40 сек</b>
+  </div>
+</div>

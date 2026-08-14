@@ -91,4 +91,9 @@ overrides:
   # `a${b,c}d{e,f}`, where 5.0.9 is the one that matches bash.
   "minimatch@3>brace-expansion": "5.0.9"
 patchedDependencies:
+  # Astro 7.1 still default-imports js-yaml. The security override above moves
+  # it to ESM-only js-yaml 5, which exposes named exports instead. Keep the
+  # patched import narrow rather than downgrading the security pin.
+  "@astrojs/internal-helpers@0.10.2": patches/@astrojs__internal-helpers@0.10.2.patch
+  astro@7.1.6: patches/astro@7.1.6.patch
   minimatch@3.1.5: patches/minimatch@3.1.5.patch

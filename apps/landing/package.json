@@ -1,0 +1,26 @@
+{
+  "name": "@markiro/landing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "astro dev --port 5473",
+    "build": "astro build",
+    "preview": "astro preview --port 5473",
+    "lint": "eslint \"src/**/*.ts\" astro.config.mjs",
+    "typecheck": "astro check",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@markiro/ui": "workspace:*",
+    "astro": "7.1.6"
+  },
+  "devDependencies": {
+    "@astrojs/check": "0.9.10",
+    "@types/node": "26.1.1",
+    "jsdom": "29.1.1",
+    "sharp": "0.35.3",
+    "typescript": "6.0.3",
+    "vitest": "4.1.10"
+  }
+}

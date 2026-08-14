@@ -1,0 +1,17 @@
+{
+  "name": "Markiro",
+  "short_name": "Markiro",
+  "description": "Маркировка, агрегация и прослеживаемость для производственной линии.",
+  "lang": "ru",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#131216",
+  "theme_color": "#131216",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

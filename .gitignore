@@ -1,6 +1,7 @@
 .DS_Store
 node_modules/
 dist/
+.astro/
 .turbo/
 coverage/
 install.log
@@ -25,3 +26,6 @@ backend.hcl
 backend.tf
 !.terraform.lock.hcl
 !*.example
+
+# Pencil stores a cloud-scoped file token in this local design container.
+docs/design-briefs/landing.pen

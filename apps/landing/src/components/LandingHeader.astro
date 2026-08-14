@@ -1,0 +1,37 @@
+---
+import type { PublicPhone } from "../lib/site-config";
+import BrandMark from "./BrandMark.astro";
+
+interface Props {
+  phone: PublicPhone | null;
+}
+
+const { phone } = Astro.props;
+---
+
+<header class="landing-header" data-header>
+  <a class="landing-header__brand" href="#hero" aria-label="Markiro, к началу страницы">
+    <BrandMark />
+  </a>
+
+  <nav class="landing-nav" id="landing-navigation" aria-label="Основная навигация" data-menu>
+    <a href="#continuity">Возможности</a>
+    <a href="#cycle">Как работает</a>
+    <a href="#platform">Система</a>
+    {phone && <a class="landing-nav__phone" href={phone.href}>{phone.display}</a>}
+  </nav>
+
+  <a class="button button--compact landing-header__cta" href="#demo" data-analytics="landing_demo_click" data-placement="header">
+    Запросить демо
+  </a>
+  <button
+    class="menu-trigger"
+    type="button"
+    aria-controls="landing-navigation"
+    aria-expanded="false"
+    aria-label="Открыть меню"
+    data-menu-trigger
+  >
+    <span></span><span></span>
+  </button>
+</header>
