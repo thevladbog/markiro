@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, type AlertTone } from "@markiro/ui";
+import { Alert, Button, type AlertTone } from "@markiro/ui";
 import { classifyKioskScan } from "../domain-guard/classify.js";
 import type { ScanListener } from "../scanner/source.js";
+import type { CachedBranding, DisplayedBranding } from "../store/branding.js";
+import { BadgeScanAnimation } from "../ui/BadgeScanAnimation.js";
+import { MarkiroLogo } from "../ui/MarkiroLogo.js";
 
 /**
  * How long the header must be held to reach scanner setup.
@@ -43,6 +46,8 @@ const NOTICE: Record<IdleNotice, { key: string; tone: AlertTone }> = {
 };
 
 export interface IdleProps {
+  branding?: CachedBranding;
+  onBrandingError?: (displayed: DisplayedBranding) => void;
   /**
    * Subscribes `listener` to the device's scans, and MAY return a teardown —
    * which this screen calls on unmount. The return is optional so a caller with
@@ -62,15 +67,19 @@ export interface IdleProps {
   /** Exactly one call per session opened here, with the employee admitted. */
   onEmployee: (employeeId: string) => void;
   /**
-   * The way into scanner setup on a RUNNING kiosk, raised by a deliberate long
-   * press on the header (design brief 07 §5). Optional so a caller with nowhere
-   * to go simply leaves the gesture inert.
+   * The way into equipment settings on a RUNNING kiosk. The visible action is
+   * primary; the deliberate long press remains as a recovery gesture. Optional
+   * so a caller with nowhere to go exposes neither entry path.
    *
    * This screen only asks; it grants nothing. Everything behind it is still
    * gated on operator credentials by `ScannerSetup` — the press is an entry
    * path, not an authorisation.
    */
   onOpenSettings?: () => void;
+}
+
+interface DisplayedLogo extends DisplayedBranding {
+  url: string;
 }
 
 /**
@@ -88,6 +97,8 @@ export interface IdleProps {
  * whoever is looking. `ScannerSetup`'s test scan follows the same rule.
  */
 export function Idle({
+  branding = { organizationName: "Маркиро", logoBlob: null, revision: null, owner: null },
+  onBrandingError,
   onScan,
   resolveBadge,
   onEmployee,
@@ -97,6 +108,32 @@ export function Idle({
   const [notice, setNotice] = useState<IdleNotice | null>(null);
   /** Whether a press is currently being held long enough to be worth saying so. */
   const [holding, setHolding] = useState(false);
+  const [displayedLogo, setDisplayedLogo] = useState<DisplayedLogo | null>(null);
+  const liveLogoUrl = useRef<string | null>(null);
+
+  const releaseLogoUrl = useCallback((url?: string | null) => {
+    const target = url ?? liveLogoUrl.current;
+    if (!target) return;
+    URL.revokeObjectURL(target);
+    if (liveLogoUrl.current === target) liveLogoUrl.current = null;
+  }, []);
+
+  useEffect(() => {
+    releaseLogoUrl();
+    if (
+      !branding.logoBlob ||
+      !branding.owner ||
+      !branding.revision ||
+      typeof URL.createObjectURL !== "function"
+    ) {
+      setDisplayedLogo(null);
+      return;
+    }
+    const next = URL.createObjectURL(branding.logoBlob);
+    liveLogoUrl.current = next;
+    setDisplayedLogo({ url: next, owner: branding.owner, revision: branding.revision });
+    return () => releaseLogoUrl(next);
+  }, [branding.logoBlob, branding.owner, branding.revision, releaseLogoUrl]);
 
   // The callbacks, held in a ref so the listener below can read the current
   // ones without listing them as dependencies. The `useRef` initializer already
@@ -202,11 +239,10 @@ export function Idle({
   /**
    * The settings gesture, as two timers on one press.
    *
-   * NOT A BUTTON, and not focusable. Two reasons, and the second is the sharp
-   * one: this screen faces the public, and the kiosk's scanner is a keyboard
-   * wedge — it "types" a badge and finishes with Enter. Any focusable control
-   * standing on the idle screen is therefore one stray focus away from being
-   * activated by the next person who scans their badge.
+   * The hidden recovery gesture remains useful if the visible control is
+   * obscured by an unusual viewport. Keyboard-wedge keystrokes are consumed by
+   * the source, including its Enter suffix, so a scan cannot activate the
+   * visible settings button by accident.
    *
    * A press is cancelled by anything that is not a completed hold — a release,
    * a finger sliding off the title, the browser taking the pointer away for a
@@ -245,95 +281,53 @@ export function Idle({
   useEffect(() => endHold, [endHold]);
 
   return (
-    <main className="kiosk-screen kiosk-screen--centered kiosk-idle">
-      {/* Decoration: the wordless "this kiosk reads codes" cue the prototype
-          opens with. Hidden from assistive tech — everything it signals is
-          said in words below. */}
-      <svg width="88" height="88" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
-        <rect x="4" y="4" width="56" height="56" fill="var(--surface-inverse)" />
-        <g fill="var(--surface-page)">
-          <rect x="14" y="14" width="8" height="8" />
-          <rect x="14" y="26" width="8" height="8" />
-          <rect x="14" y="38" width="8" height="8" />
-          <rect x="26" y="22" width="8" height="8" />
-          <rect x="38" y="14" width="8" height="8" />
-          <rect x="38" y="26" width="8" height="8" />
-          <rect x="38" y="38" width="8" height="8" />
-          <rect x="26" y="42" width="8" height="8" fill="var(--ok-fg)" />
-        </g>
-      </svg>
-      {/* The header, and the kiosk's only way back into scanner setup. The
+    <main className="kiosk-screen kiosk-idle kiosk-login">
+      <div className="kiosk-login__brand">
+        {displayedLogo ? (
+          <img
+            key={displayedLogo.url}
+            className="kiosk-login__company-logo"
+            src={displayedLogo.url}
+            alt={branding.organizationName}
+            onError={() => {
+              const wasCurrent = liveLogoUrl.current === displayedLogo.url;
+              releaseLogoUrl(displayedLogo.url);
+              if (wasCurrent) setDisplayedLogo(null);
+              onBrandingError?.({ owner: displayedLogo.owner, revision: displayedLogo.revision });
+            }}
+          />
+        ) : (
+          <MarkiroLogo />
+        )}
+        <p>{branding.organizationName}</p>
+      </div>
+      <div className="kiosk-login__center">
+        <div className="kiosk-login__visual">
+          <BadgeScanAnimation />
+        </div>
+        {/* The header, and the kiosk's only way back into scanner setup. The
           handlers sit on the whole block rather than the title alone so a
           gloved thumb has a target it can actually hold; `userSelect` stops the
           press turning into a text selection on the way. */}
-      <header
-        onPointerDown={beginHold}
-        onPointerUp={endHold}
-        onPointerLeave={endHold}
-        onPointerCancel={endHold}
-        style={{
-          display: "grid",
-          gap: 10,
-          justifyItems: "center",
-          userSelect: "none",
-          WebkitUserSelect: "none",
-          touchAction: "manipulation",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "2.5rem", lineHeight: 1.2 }}>{t("idle.title")}</h1>
-        <p style={{ margin: 0, fontSize: "1.25rem", color: "var(--fg-2)" }}>{t("idle.subtitle")}</p>
-        {/* Only while a press is actually being held, and quiet: it tells the
+        <header
+          className="kiosk-login__copy"
+          onPointerDown={beginHold}
+          onPointerUp={endHold}
+          onPointerLeave={endHold}
+          onPointerCancel={endHold}
+        >
+          <p className="kiosk-login__eyebrow">{t("idle.eyebrow")}</p>
+          <h1>{t("idle.title")}</h1>
+          <p className="kiosk-login__subtitle">{t("idle.subtitle")}</p>
+          {/* Only while a press is actually being held, and quiet: it tells the
             operator the kiosk noticed, and says nothing a customer could act
             on — the gate behind it still wants a badge or a PIN. */}
-        {holding ? (
-          <p style={{ margin: 0, fontSize: "1rem", color: "var(--fg-3)" }}>
-            {t("idle.settingsHold")}
-          </p>
-        ) : null}
-      </header>
-      {/* A panel, not a button. The prototype's tap target exists only to fake
-          a scan for the demo; on the real device the scanner is the only way
-          in, and a control that does nothing under a gloved hand teaches the
-          worker that this screen is unresponsive. */}
-      <div
-        style={{
-          width: 420,
-          maxWidth: "100%",
-          boxSizing: "border-box",
-          padding: "36px 32px",
-          borderRadius: 16,
-          border: "2px dashed var(--line-strong)",
-          background: "var(--surface-card)",
-          display: "grid",
-          justifyItems: "center",
-          gap: 16,
-        }}
-      >
-        <svg
-          width="72"
-          height="72"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="var(--fg-2)"
-          strokeWidth="1.5"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3z" />
-          <path
-            d="M5.5 5.5h2v2h-2zM16.5 5.5h2v2h-2zM5.5 16.5h2v2h-2zM14 14h2.5v2.5H14zM18.5 14H21v2.5h-2.5zM14 18.5h2.5V21H14zM18.5 18.5H21V21h-2.5z"
-            fill="var(--fg-2)"
-            stroke="none"
-          />
-        </svg>
-        {/* Two keys, one sentence: the design breaks the line after «QR-код»,
-            and a dictionary entry carrying markup would push that break past
-            every future translator. */}
-        <p style={{ margin: 0, fontSize: "1.625rem", fontWeight: 600, lineHeight: 1.25 }}>
-          {t("idle.scan")}
-          <br />
-          {t("idle.scanTarget")}
-        </p>
+          {holding ? (
+            <p style={{ margin: 0, fontSize: "1rem", color: "var(--fg-3)" }}>
+              {t("idle.settingsHold")}
+            </p>
+          ) : null}
+        </header>
       </div>
       {/* `Alert` brings its own `role="alert"`, so this screen adds no live
           region of its own — exactly as `Pairing` does with its failures. */}
@@ -342,9 +336,19 @@ export function Idle({
           {t(NOTICE[notice].key)}
         </Alert>
       ) : null}
-      <p style={{ margin: 0, maxWidth: 560, fontSize: "1rem", color: "var(--fg-3)" }}>
-        {t("idle.hint")}
-      </p>
+      <footer className="kiosk-login__footer">
+        <span>{t("idle.footer")}</span>
+        {onOpenSettings ? (
+          <Button
+            className="kiosk-control kiosk-login__settings"
+            variant="secondary"
+            onClick={onOpenSettings}
+          >
+            {t("idle.settingsAction")}
+          </Button>
+        ) : null}
+        <MarkiroLogo compact />
+      </footer>
     </main>
   );
 }

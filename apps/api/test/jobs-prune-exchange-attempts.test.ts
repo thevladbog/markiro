@@ -10,6 +10,7 @@ import { ExchangeSessionService } from "../src/modules/exchange/exchange-session
 import type { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import type { MailRetentionService } from "../src/modules/mail/mail-retention.service";
 import type { SubscriptionStatusJob } from "../src/subscriptions/subscription-status.job";
+import type { ShiftExportRunnerService } from "../src/modules/shift-exports/shift-export-runner.service";
 
 const ready = Boolean(
   process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BETTER_AUTH_URL,
@@ -40,6 +41,7 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
     const exchangeSessions = new ExchangeSessionService(db, journal);
     const mailJobs = {} as MailJobsService;
     const mailRetention = {} as MailRetentionService;
+    const shiftExportRunner = {} as ShiftExportRunnerService;
     service = new PgBossService(
       db,
       "unused-in-this-test",
@@ -48,6 +50,7 @@ describe.skipIf(!ready)("PgBossService: prune exchange_attempts", () => {
       mailJobs,
       mailRetention,
       {} as SubscriptionStatusJob,
+      shiftExportRunner,
     );
   });
 

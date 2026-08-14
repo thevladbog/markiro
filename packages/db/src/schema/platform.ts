@@ -21,6 +21,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { organization } from "./auth.js";
 import { labelTemplates } from "./labels.js";
+import { mediaAssets } from "./media.js";
 import { employees } from "./pickup.js";
 
 export const productStatus = pgEnum("product_status", ["draft", "active"]);
@@ -84,6 +85,32 @@ export const products = pgTable(
       name: "products_tenant_default_label_template_fk",
       columns: [t.tenantId, t.defaultLabelTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+  ],
+);
+
+/** One tenant-owned media asset serves as the current product image. */
+export const productImages = pgTable(
+  "product_images",
+  {
+    tenantId: tenantId(),
+    productId: uuid("product_id").notNull(),
+    assetId: uuid("asset_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.productId] }),
+    unique("product_images_asset_id_uq").on(table.assetId),
+    foreignKey({
+      name: "product_images_tenant_product_fk",
+      columns: [table.tenantId, table.productId],
+      foreignColumns: [products.tenantId, products.id],
+    }),
+    foreignKey({
+      name: "product_images_tenant_asset_fk",
+      columns: [table.tenantId, table.assetId],
+      foreignColumns: [mediaAssets.ownerTenantId, mediaAssets.id],
     }),
   ],
 );
@@ -466,7 +493,7 @@ export const ssccCounters = pgTable(
     tenantId: tenantId(),
     issuerPrefix: char("issuer_prefix", { length: 9 }).notNull(),
     extensionDigit: integer("extension_digit").notNull(),
-    nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(0),
+    nextSerial: bigint("next_serial", { mode: "number" }).notNull().default(1),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.issuerPrefix, t.extensionDigit] })],
@@ -535,6 +562,30 @@ export const ssccBlocks = pgTable(
 );
 
 /**
+ * Committed tenant-wide cut for the kiosk box registry. Mutation transactions
+ * increment this row before stamping every changed box with the returned
+ * revision. Readers can therefore use the last committed counter value as a
+ * stable snapshot boundary without relying on wall-clock/MVCC timing.
+ */
+export const boxRegistryVersions = pgTable(
+  "box_registry_versions",
+  {
+    tenantId: text("tenant_id").primaryKey(),
+    currentVersion: bigint("current_version", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    foreignKey({
+      name: "box_registry_versions_tenant_fk",
+      columns: [t.tenantId],
+      foreignColumns: [organization.id],
+    }),
+  ],
+);
+
+/**
  * A transport box. The row is created when its FIRST ITEM arrives, not when
  * the closure event does: items are queued before the closure and the drain
  * is sequential, so this needs no buffering and no out-of-order handling.
@@ -575,12 +626,17 @@ export const boxes = pgTable(
      * a brand-new SSCC through the ordinary `SsccService.allocate` path.
      */
     disassembledAt: timestamp("disassembled_at", { withTimezone: true }),
+    registryVersion: bigint("registry_version", { mode: "bigint" })
+      .notNull()
+      .default(sql`0`),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     unique("boxes_tenant_id_uq").on(t.tenantId, t.id),
     // Two devices holding overlapping pools is precisely the situation
     // nothing else would reveal. An index, not a check in code.
     unique("boxes_tenant_sscc_uq").on(t.tenantId, t.sscc),
+    index("boxes_registry_cursor_idx").on(t.tenantId, t.registryVersion, t.id),
     // A device's own id for the box, unique within its shift and terminal:
     // this is what an arriving scan carries instead of a server id.
     //

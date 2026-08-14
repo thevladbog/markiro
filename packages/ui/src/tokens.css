@@ -23,6 +23,10 @@
   --line: #e0ded7;
   --line-strong: #c9c6bd;
 
+  /* scrollbars */
+  --scrollbar-thumb: rgba(69, 67, 62, 0.44);
+  --scrollbar-thumb-hover: rgba(69, 67, 62, 0.7);
+
   /* brand accent — только модуль знака и ключевые CTA */
   --accent: #0faf56;
   --accent-strong: #0b8a44;
@@ -71,6 +75,9 @@
 
   --line: #2e2d33;
   --line-strong: #45444b;
+
+  --scrollbar-thumb: rgba(182, 179, 171, 0.4);
+  --scrollbar-thumb-hover: rgba(182, 179, 171, 0.68);
 
   --accent: #3ddc7a;
   --accent-strong: #6be599;

@@ -37,6 +37,7 @@ export interface StationBundle {
     status: string;
     defaultCounterpartyId: string | null;
     defaultLabelTemplateId: string | null;
+    image?: StationProductImageDescriptor | null;
   };
   labelTemplate: { id: string; name: string; spec: unknown } | null;
   /**
@@ -68,6 +69,14 @@ export interface StationBundle {
     toSerial: number;
     consumedThroughSerial: number | null;
   } | null;
+}
+
+export interface StationProductImageDescriptor {
+  checksum: string;
+  contentType: "image/webp";
+  byteSize: number;
+  width: number;
+  height: number;
 }
 
 export interface ShiftMirrorRow {
@@ -122,13 +131,13 @@ const b = (v: boolean) => (v ? 1 : 0);
  * every `exec.run` call, so a `BEGIN`/`COMMIT`/`ROLLBACK` sent as separate
  * calls does not actually group these statements — see `journal.ts`'s
  * `recordScan` doc comment for the full story. These are therefore
- * individual statements: the shift upsert, then the product upsert, then
- * `replaceOperatorsMirror`. A failure during the shift or product upsert
- * leaves that half applied until the next successful sync repairs it.
- * Operators no longer share that risk: `replaceOperatorsMirror` publishes
- * the roster atomically on its own (see its doc comment), so a failure
- * partway through it never exposes a removed or deactivated operator to
- * offline sign-in.
+ * individual statements: the shift upsert, then the product upsert. A failure
+ * during either upsert leaves that half applied until the next successful
+ * sync repairs it. `bundle.operators` is deliberately ignored: the live
+ * `/station/operators` sync and initial pairing are the authoritative roster
+ * publishers. Letting an unversioned bundle response publish too would allow
+ * a request captured earlier to overwrite a newer removal, deactivation, or
+ * credential rotation when it finishes later.
  */
 export async function upsertBundle(exec: SqlExecutor, bundle: StationBundle): Promise<void> {
   await upsertBundleBody(exec, bundle);
@@ -188,16 +197,28 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
   );
 
   const p = bundle.product;
+  const imageColumns =
+    p.image === undefined
+      ? ""
+      : ", image_checksum, image_content_type, image_byte_size, image_width, image_height";
+  const imageValues = p.image === undefined ? "" : ", ?, ?, ?, ?, ?";
+  const imageUpdate =
+    p.image === undefined
+      ? ""
+      : `, image_checksum=excluded.image_checksum, image_content_type=excluded.image_content_type,
+       image_byte_size=excluded.image_byte_size, image_width=excluded.image_width,
+       image_height=excluded.image_height,
+       image_pointer_checksum=CASE WHEN excluded.image_checksum IS NULL THEN NULL ELSE product_mirror.image_pointer_checksum END`;
   await exec.run(
     `INSERT INTO product_mirror (
        id, gtin14, name, product_group, box_capacity, pallet_capacity, status,
-       default_counterparty_id, default_label_template_id
-     ) VALUES (?,?,?,?,?,?,?,?,?)
+       default_counterparty_id, default_label_template_id${imageColumns}
+     ) VALUES (?,?,?,?,?,?,?,?,?${imageValues})
      ON CONFLICT(id) DO UPDATE SET
        gtin14=excluded.gtin14, name=excluded.name, product_group=excluded.product_group,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
-       default_label_template_id=excluded.default_label_template_id`,
+       default_label_template_id=excluded.default_label_template_id${imageUpdate}`,
     [
       p.id,
       p.gtin14,
@@ -208,14 +229,21 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       p.status,
       p.defaultCounterpartyId,
       p.defaultLabelTemplateId,
+      ...(p.image === undefined
+        ? []
+        : [
+            p.image?.checksum ?? null,
+            p.image?.contentType ?? null,
+            p.image?.byteSize ?? null,
+            p.image?.width ?? null,
+            p.image?.height ?? null,
+          ]),
     ],
   );
-
-  await replaceOperatorsMirror(exec, bundle.operators);
 }
 
 const ACTIVE_SLOT_KEY = "operators_slot";
-const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
+export const SLOT_TABLES = { a: "operators_mirror", b: "operators_mirror_b" } as const;
 type RosterSlot = keyof typeof SLOT_TABLES;
 
 function otherSlot(slot: RosterSlot): RosterSlot {
@@ -244,9 +272,7 @@ async function activeSlot(exec: SqlExecutor): Promise<RosterSlot> {
 /**
  * Serializes publishes so two overlapping refreshes can never both resolve
  * the same INACTIVE slot as their target. `App.tsx` fires `syncOperatorRoster`
- * unawaited on mount AND again on every `online` event, and `upsertBundle` is
- * a third entry point (see `journal.ts`'s doc comment for the same kind of
- * overlap observed on real devices). Without this, a second refresh that
+ * unawaited on mount AND again on every `online` event. Without this, a second refresh that
  * starts before the first has flipped `station_meta` would resolve the same
  * target slot, race its DELETE/INSERT against the first's, and could end up
  * inserting into what has since become the LIVE slot.
@@ -438,9 +464,11 @@ export async function readShiftMirror(
 }
 
 export interface ShiftContextRow {
+  productId: string;
   gtin14: string;
   productName: string;
   counterpartyName: string | null;
+  image?: StationProductImageDescriptor | null | undefined;
 }
 
 /**
@@ -453,11 +481,18 @@ export async function readShiftContext(
   shiftId: string,
 ): Promise<ShiftContextRow | null> {
   const rows = await exec.all<{
+    product_id: string;
     gtin14: string;
     name: string;
     counterparty_name: string | null;
+    image_checksum: string | null;
+    image_content_type: "image/webp" | null;
+    image_byte_size: number | null;
+    image_width: number | null;
+    image_height: number | null;
   }>(
-    `SELECT p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name
+    `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
+       p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
      WHERE s.id = ?`,
     [shiftId],
@@ -465,10 +500,50 @@ export async function readShiftContext(
   const row = rows[0];
   if (!row) return null;
   return {
+    productId: row.product_id,
     gtin14: row.gtin14,
     productName: row.name,
     counterpartyName: row.counterparty_name,
+    image:
+      row.image_checksum &&
+      row.image_content_type &&
+      row.image_byte_size !== null &&
+      row.image_width !== null &&
+      row.image_height !== null
+        ? {
+            checksum: row.image_checksum,
+            contentType: row.image_content_type,
+            byteSize: row.image_byte_size,
+            width: row.image_width,
+            height: row.image_height,
+          }
+        : row.image_checksum === null
+          ? null
+          : undefined,
   };
+}
+
+export interface OperatorRosterSnapshot {
+  operators: OperatorMirrorRecord[];
+  generation: string;
+}
+
+function operatorRosterGeneration(operators: OperatorMirrorRecord[]): string {
+  return JSON.stringify(
+    [...operators]
+      .sort((left, right) =>
+        left.operatorId < right.operatorId ? -1 : left.operatorId > right.operatorId ? 1 : 0,
+      )
+      .map((operator) => [
+        operator.operatorId,
+        operator.name,
+        operator.login,
+        operator.role,
+        operator.pinHash,
+        operator.badgeHash,
+        operator.active,
+      ]),
+  );
 }
 
 /**
@@ -506,8 +581,15 @@ export async function readShiftContext(
  * this upgrade path works before migrations have run. The table names come
  * from `SLOT_TABLES`, the same closed set of two literals `activeSlot` and
  * `publishOperatorsMirror` use — never caller input.
+ * It also derives a content generation from every
+ * field that can affect authentication or the admitted operator identity.
+ * The generation never leaves the device; callers can use it to reject a
+ * credential result if a concurrent double-slot publication changed the
+ * roster while PBKDF2 was running.
  */
-export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+export async function readOperatorRosterSnapshot(
+  exec: SqlExecutor,
+): Promise<OperatorRosterSnapshot> {
   const rows = await exec.all<{
     operator_id: string;
     name: string;
@@ -528,7 +610,7 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
         AND COALESCE((SELECT value FROM station_meta WHERE key = ?), '0') <> '1'`,
     [ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY, ACTIVE_SLOT_KEY, OPERATORS_BLOCKED_KEY],
   );
-  return rows.map((r) => ({
+  const operators = rows.map((r) => ({
     operatorId: r.operator_id,
     name: r.name,
     // Legacy rows (mirrored before the column existed) read as "", which never
@@ -540,4 +622,9 @@ export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMi
     badgeHash: r.badge_hash,
     active: r.active === 1,
   }));
+  return { operators, generation: operatorRosterGeneration(operators) };
+}
+
+export async function readOperatorsMirror(exec: SqlExecutor): Promise<OperatorMirrorRecord[]> {
+  return (await readOperatorRosterSnapshot(exec)).operators;
 }

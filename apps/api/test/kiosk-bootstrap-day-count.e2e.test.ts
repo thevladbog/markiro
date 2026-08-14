@@ -74,6 +74,10 @@ describe.skipIf(!ready)("kiosk bootstrap: what an employee took at OTHER kiosks 
 
     const agent = request.agent(app!.getHttpServer());
     tenantId = await signUpAndActivate(agent);
+    await db
+      .insert(schema.pickupTenantPolicies)
+      .values({ tenantId, limitsEnabled: true })
+      .onConflictDoNothing();
 
     productId = randomUUID();
     await db
@@ -136,6 +140,7 @@ describe.skipIf(!ready)("kiosk bootstrap: what an employee took at OTHER kiosks 
   async function newEmployee(fullName: string): Promise<string> {
     const id = randomUUID();
     await db.insert(schema.employees).values({ id, tenantId, fullName });
+    await db.insert(schema.employeePickupPolicies).values({ tenantId, employeeId: id });
     await db
       .insert(schema.employeeBadges)
       .values({ tenantId, employeeId: id, badgeCode: `badge-${randomUUID()}` });
@@ -184,15 +189,63 @@ describe.skipIf(!ready)("kiosk bootstrap: what an employee took at OTHER kiosks 
   }
 
   /** The roster as the device receives it, by employee id. */
-  async function roster(): Promise<Map<string, { takenTodayElsewhere: number }>> {
+  async function bootstrap(): Promise<{
+    pickupPolicy: { limitsEnabled: boolean };
+    employees: {
+      id: string;
+      limitMode: "limited" | "unlimited";
+      dayLimit: number;
+      canWriteoff: boolean;
+      takenTodayElsewhere: number;
+    }[];
+  }> {
     const res = await request(app!.getHttpServer())
       .get("/kiosk/bootstrap")
       .set("x-kiosk-token", TOKEN)
       .expect(200);
-    return new Map(
-      (res.body.employees as { id: string; takenTodayElsewhere: number }[]).map((e) => [e.id, e]),
-    );
+    return res.body as {
+      pickupPolicy: { limitsEnabled: boolean };
+      employees: {
+        id: string;
+        limitMode: "limited" | "unlimited";
+        dayLimit: number;
+        canWriteoff: boolean;
+        takenTodayElsewhere: number;
+      }[];
+    };
   }
+
+  async function roster(): Promise<
+    Map<
+      string,
+      {
+        id: string;
+        limitMode: "limited" | "unlimited";
+        dayLimit: number;
+        canWriteoff: boolean;
+        takenTodayElsewhere: number;
+      }
+    >
+  > {
+    const snapshot = await bootstrap();
+    return new Map(snapshot.employees.map((employee) => [employee.id, employee]));
+  }
+
+  it("returns the effective policy inputs for every active employee", async () => {
+    await db
+      .update(schema.employeePickupPolicies)
+      .set({ limitMode: "unlimited", dayLimit: 9, canWriteoff: true })
+      .where(eq(schema.employeePickupPolicies.employeeId, commuter));
+
+    const snapshot = await bootstrap();
+    expect(snapshot.pickupPolicy).toEqual({ limitsEnabled: true });
+    expect(snapshot.employees.find((employee) => employee.id === commuter)).toMatchObject({
+      limitMode: "unlimited",
+      dayLimit: 9,
+      canWriteoff: true,
+      takenTodayElsewhere: 2,
+    });
+  });
 
   it("reports the other kiosk's items and NEVER this kiosk's own", async () => {
     const employees = await roster();
@@ -219,5 +272,26 @@ describe.skipIf(!ready)("kiosk bootstrap: what an employee took at OTHER kiosks 
     expect(employees.get(cancelled)?.takenTodayElsewhere).toBe(0);
     expect(employees.get(voided)?.takenTodayElsewhere).toBe(0);
     expect(employees.get(yesterday)?.takenTodayElsewhere).toBe(0);
+  });
+
+  it("reports an active employee without a pickup policy as a configuration error", async () => {
+    const missingPolicyEmployeeId = randomUUID();
+    await db.insert(schema.employees).values({
+      id: missingPolicyEmployeeId,
+      tenantId,
+      fullName: "Без Политики",
+    });
+    try {
+      const response = await request(app!.getHttpServer())
+        .get("/kiosk/bootstrap")
+        .set("x-kiosk-token", TOKEN)
+        .expect(500);
+      expect(response.body.message).toBe("Employee pickup policy is not configured");
+    } finally {
+      await db
+        .update(schema.employees)
+        .set({ status: "archived" })
+        .where(eq(schema.employees.id, missingPolicyEmployeeId));
+    }
   });
 });

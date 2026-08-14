@@ -50,6 +50,57 @@ describe("scan queue", () => {
     expect(seen).toEqual(["first", "second"]);
   });
 
+  it("discards buffered scans when a blocking floor state starts before they run", async () => {
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const seen: string[] = [];
+    let blocked = false;
+    const queue = createScanQueue({
+      shouldProcess: () => !blocked,
+      process: async (raw) => {
+        seen.push(raw);
+        if (raw === "closes-box") blocked = true;
+        return outcome(raw);
+      },
+      onOutcome: () => {},
+    });
+
+    queue.enqueue("closes-box");
+    queue.enqueue("arrived-during-close");
+    await queue.idle();
+
+    expect(seen).toEqual(["closes-box"]);
+    expect(consoleWarn).toHaveBeenCalledWith("station: scan discarded by floor admission");
+    expect(consoleWarn).not.toHaveBeenCalledWith(expect.stringContaining("arrived-during-close"));
+    consoleWarn.mockRestore();
+  });
+
+  it("can discard scans buffered during a close while preserving ordered jobs", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queue = createScanQueue({
+      process: async (raw) => {
+        order.push(`scan:${raw}`);
+        if (raw === "closing") await gate;
+        return outcome(raw);
+      },
+      onOutcome: () => {},
+    });
+
+    queue.enqueue("closing");
+    queue.enqueue("buffered");
+    queue.enqueueJob(async () => {
+      order.push("job");
+    });
+    queue.discardBufferedScans();
+    release();
+    await queue.idle();
+
+    expect(order).toEqual(["scan:closing", "job"]);
+  });
+
   it("runs side-channel jobs in strict order with scans, never concurrently", async () => {
     const order: string[] = [];
     let inFlight = 0;

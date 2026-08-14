@@ -1,3 +1,25 @@
+import { createElement } from "react";
+import { vi } from "vitest";
+
+vi.mock("@mdxeditor/editor", () => ({
+  MDXEditor: ({ markdown, onChange }: { markdown: string; onChange: (value: string) => void }) =>
+    createElement("textarea", {
+      "aria-label": "Markdown editor",
+      value: markdown,
+      onChange: (event: { target: { value: string } }) => onChange(event.target.value),
+    }),
+  headingsPlugin: () => ({}),
+  listsPlugin: () => ({}),
+  linkPlugin: () => ({}),
+  tablePlugin: () => ({}),
+  toolbarPlugin: () => ({}),
+  UndoRedo: () => null,
+  BoldItalicUnderlineToggles: () => null,
+  ListsToggle: () => null,
+  CreateLink: () => null,
+  InsertTable: () => null,
+}));
+
 class ResizeObserverMock {
   observe() {}
   unobserve() {}

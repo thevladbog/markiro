@@ -60,6 +60,14 @@ export const gtinCheckSchema = z.object({
 export type GtinCheckDto = z.infer<typeof gtinCheckSchema>;
 
 /** Response DTO for a product. */
+export interface ProductImageDescriptor {
+  checksum: string;
+  contentType: "image/webp";
+  byteSize: number;
+  width: number;
+  height: number;
+}
+
 export interface ProductDto {
   id: string;
   gtin14: string;
@@ -74,6 +82,8 @@ export interface ProductDto {
   egaisCode: string | null;
   externalRef: string | null;
   createdAt: Date;
+  /** Optional only for rolling compatibility; current server mappings always emit it. */
+  image?: ProductImageDescriptor | null;
 }
 
 /** GET /products response. */

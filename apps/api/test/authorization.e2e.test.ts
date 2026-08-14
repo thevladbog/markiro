@@ -97,6 +97,18 @@ describe.skipIf(!ready)("cabinet authorization e2e", () => {
     await agent.get("/access/me").expect(403);
   });
 
+  it("seeds the default pickup policy for a test-provisioned tenant", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const organizationId = await signUpWithInactiveOrg(agent);
+
+    const [policy] = await db
+      .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+      .from(schema.pickupTenantPolicies)
+      .where(eq(schema.pickupTenantPolicies.tenantId, organizationId));
+
+    expect(policy).toEqual({ limitsEnabled: true });
+  });
+
   it("gives an owner every cabinet capability", async () => {
     const { agent } = await activeOrganizationFixture();
 

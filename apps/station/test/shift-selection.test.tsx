@@ -89,7 +89,7 @@ describe("ShiftSelection", () => {
     expect(screen.queryByText("Product 4")).toBeNull();
   });
 
-  it("shows bounded loading, empty, and retry states", async () => {
+  it("shows a recoverable server-access alert after a transport failure without removing floor actions", async () => {
     let rejectList!: (reason: unknown) => void;
     const pendingList = new Promise<Response>((_resolve, reject) => {
       rejectList = reject;
@@ -98,14 +98,39 @@ describe("ShiftSelection", () => {
       .mockReturnValueOnce(pendingList)
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }));
 
-    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    render(
+      <ShiftSelection
+        client={client}
+        onSelected={() => {}}
+        onNew={() => {}}
+        onSetup={() => {}}
+        onConflicts={() => {}}
+      />,
+    );
     expect(screen.getByText("Loading shifts…")).toBeDefined();
 
-    rejectList(new Error("offline"));
+    rejectList(new TypeError("Failed to fetch"));
+    await waitFor(() =>
+      expect(screen.getByText("Could not load shifts. Check server access.")).toBeDefined(),
+    );
     await waitFor(() => expect(screen.getByRole("button", { name: "Retry" })).toBeDefined());
+    expect(screen.getByRole("button", { name: "New shift" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Workstation setup" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Conflicts" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+  });
+
+  it("keeps a safe server message when loading shifts receives an API error", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: "Shift list access is restricted" }), { status: 403 }),
+    );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText("Shift list access is restricted")).toBeDefined());
+    expect(screen.getByRole("button", { name: "Retry" })).toBeDefined();
   });
 
   it("keeps new-shift, setup, and conflict actions available in the fixed footer", async () => {

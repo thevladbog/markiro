@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Input, PinPad, Spinner } from "@markiro/ui";
-import { KioskApiError, pairKiosk } from "../api/client.js";
+import { createKioskClient, KioskApiError, pairKiosk } from "../api/client.js";
 import type { ScanListener } from "../scanner/source.js";
 import {
   assertMeasurableGeneratedAt,
@@ -9,9 +9,23 @@ import {
   UnusableBootstrapError,
 } from "../store/cache.js";
 import { kioskIdOf, writeConfig } from "../store/config.js";
+import { clearProductImages } from "../store/product-images.js";
+import { syncProductImages } from "../sync/product-images.js";
+import { MarkiroLogo } from "../ui/MarkiroLogo.js";
 
 /** `POST /kiosk/pair` accepts `/^\d{8}$/` — the admin panel issues nothing else. */
 const CODE_LENGTH = 8;
+
+export function nextPairCode(
+  current: string,
+  action: { type: "digit"; digit: string } | { type: "clear" } | { type: "backspace" },
+): string {
+  if (action.type === "clear") return "";
+  if (action.type === "backspace") return current.slice(0, -1);
+  return current.length < CODE_LENGTH && /^\d$/.test(action.digit)
+    ? current + action.digit
+    : current;
+}
 
 /**
  * How long the success confirmation stands before the device goes to work.
@@ -131,18 +145,19 @@ export function Pairing({
     // nobody can see or submit.
     if (bound) return;
     return subscribe((raw) => {
-      // A wedge payload can arrive with framing characters around the digits.
-      // What survives must be EXACTLY eight, and nothing else is accepted:
+      // The transports remove their own terminal framing before fan-out.
+      // What arrives here must therefore be EXACTLY eight digits, and nothing else is accepted:
       // truncating a longer one would submit the first eight digits of a
       // marking code as though the worker had meant to, and dropping a short
       // one silently leaves the dead button the pad exists to avoid. Say what
       // was wrong and keep listening — the next scan needs no reset.
-      const digits = raw.replace(/\D/g, "");
-      if (digits.length !== CODE_LENGTH) {
+      // Never trim or delete arbitrary characters here: that would turn a
+      // different scanner payload into a pairing credential.
+      if (!/^\d{8}$/.test(raw)) {
         setError("scan");
         return;
       }
-      setCode(digits);
+      setCode(raw);
       setError(null);
       // What the waiting state was waiting for has arrived, so the state ends.
       // A rejected scan deliberately leaves it standing: still listening, and
@@ -213,6 +228,9 @@ export function Pairing({
       // failure for what it is (`bundle`, below) instead of discovering it
       // halfway through a write sequence. `replaceSnapshot` refuses it too.
       assertMeasurableGeneratedAt(result.bootstrap);
+      // A re-pair is a tenant boundary. Finish the old-tenant media scrub
+      // before either the new snapshot or token can become durable.
+      await clearProductImages();
       // THE ORDER OF THESE TWO WRITES IS LOAD-BEARING — do not tidy it.
       // `config.token` is the state-machine trigger: `nextKioskView` reads
       // `paired` from it, and once it is set this screen is unreachable. So the
@@ -243,6 +261,10 @@ export function Pairing({
         // device cannot collide with the idempotency keys of its own past orders.
         nextDeviceSeq: result.nextDeviceSeq,
       });
+      const imageClient = createKioskClient({ token: result.token, serverUrl });
+      void syncProductImages(imageClient, result.bootstrap.products).catch((error) =>
+        console.warn("kiosk: product image sync after pairing failed", error),
+      );
       // AFTER both writes, and instead of handing over immediately: the device
       // is bound, and §5.2 wants the installer told WHICH kiosk it is bound to
       // before the working mode replaces this screen. Read off the response
@@ -337,17 +359,31 @@ export function Pairing({
   return (
     <main className="kiosk-screen kiosk-pairing" aria-labelledby="kiosk-pairing-title">
       <section className="kiosk-pairing__details" aria-labelledby="kiosk-pairing-title">
-        <header>
-          <h1 id="kiosk-pairing-title" style={{ fontSize: "2.25rem" }}>
+        <MarkiroLogo className="kiosk-pairing__brand" />
+        <header className="kiosk-pairing__copy">
+          <h1 id="kiosk-pairing-title" className="kiosk-pairing__title">
             {t("pairing.title")}
           </h1>
-          <p style={{ fontSize: "1.25rem" }}>{t("pairing.prompt")}</p>
+          <p className="kiosk-pairing__prompt">{t("pairing.prompt")}</p>
         </header>
         {/* `role="status"`: what has been entered so far is announced as it
             changes, which is what a worker filling it by scanner needs. It was an
             `aria-label="code"` — a test hook no screen reader reads out. */}
-        <div role="status" style={{ fontSize: "3rem", letterSpacing: "0.5rem", minHeight: "3rem" }}>
-          {code}
+        <div
+          role="status"
+          className="kiosk-pairing__code"
+          aria-label={t("pairing.codeValue", { code })}
+        >
+          {Array.from({ length: CODE_LENGTH }, (_, index) => (
+            <span
+              key={index}
+              className="kiosk-pairing__code-cell"
+              data-empty={code[index] === undefined ? "true" : undefined}
+              aria-hidden="true"
+            >
+              {code[index] ?? ""}
+            </span>
+          ))}
         </div>
         {/* Binding in progress. Redeeming the code also pulls the whole dataset
             down in the same response, and on a gate link that is long enough for
@@ -399,11 +435,11 @@ export function Pairing({
             and a serial source exists only where a port was granted), so a
             «scanning is impossible» state cannot be reached. */}
         {!serverOpen ? (
-          <div style={{ display: "grid", justifyItems: "center", gap: 12 }}>
+          <div className="kiosk-pairing__scan">
             <Button
-              className="kiosk-control"
+              className="kiosk-control kiosk-pairing__scan-button"
               variant="secondary"
-              style={{ minHeight: 88, minWidth: 320, fontSize: "1.5rem" }}
+              size="floor"
               aria-pressed={awaitingScan}
               disabled={busy}
               onClick={() => setAwaitingScan(true)}
@@ -411,21 +447,16 @@ export function Pairing({
               {t("pairing.scan")}
             </Button>
             {awaitingScan ? (
-              <div
-                aria-live="polite"
-                style={{ display: "grid", justifyItems: "center", gap: 8, textAlign: "center" }}
-              >
+              <div aria-live="polite" className="kiosk-pairing__scan-waiting">
                 <Spinner size={40} aria-hidden="true" />
-                <p style={{ fontSize: "1.75rem" }}>{t("pairing.scanWaiting")}</p>
-                <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>
-                  {t("pairing.scanWaitingHint")}
-                </p>
+                <p className="kiosk-pairing__scan-waiting-title">{t("pairing.scanWaiting")}</p>
+                <p className="kiosk-pairing__scan-hint">{t("pairing.scanWaitingHint")}</p>
               </div>
             ) : (
               // The line the previous round put here on its own. It stays, folded
               // under the button, because it carries the one thing the button
               // cannot say: pressing it is optional.
-              <p style={{ fontSize: "1rem", color: "var(--fg-3)" }}>{t("pairing.scanHint")}</p>
+              <p className="kiosk-pairing__scan-hint">{t("pairing.scanHint")}</p>
             )}
           </div>
         ) : null}
@@ -436,7 +467,7 @@ export function Pairing({
           <Button
             className="kiosk-control"
             variant="secondary"
-            style={{ minHeight: 44 }}
+            style={{ minHeight: 48 }}
             disabled={busy}
             onClick={onConfigureScanner}
           >
@@ -448,7 +479,7 @@ export function Pairing({
           <Button
             className="kiosk-control"
             variant="secondary"
-            style={{ minHeight: 44 }}
+            style={{ minHeight: 48 }}
             onClick={() => {
               setServerOpen((open) => !open);
               // The wedge is paused while this field has the keyboard, so a
@@ -477,22 +508,23 @@ export function Pairing({
             // claiming it is waiting for a scan. The listener stays armed either
             // way — only the announcement ends.
             onChange={(next) => {
-              setCode(next);
+              const action =
+                next === ""
+                  ? ({ type: "clear" } as const)
+                  : next.length < code.length
+                    ? ({ type: "backspace" } as const)
+                    : ({ type: "digit", digit: next.at(-1) ?? "" } as const);
+              setCode(nextPairCode(code, action));
               setAwaitingScan(false);
             }}
             maxLength={CODE_LENGTH}
+            size="floor"
+            ariaLabel={t("pairing.keypad")}
+            backspaceLabel={t("pairing.backspace")}
+            clearLabel={t("pairing.clear")}
           />
         </div>
         <div className="kiosk-pairing__actions">
-          <Button
-            className="kiosk-control"
-            variant="secondary"
-            style={{ minHeight: 64 }}
-            disabled={busy || code.length === 0}
-            onClick={() => setCode("")}
-          >
-            {t("pairing.clear")}
-          </Button>
           <Button
             className="kiosk-control"
             style={{ minHeight: 64 }}

@@ -1,4 +1,5 @@
 import {
+  Global,
   Inject,
   Injectable,
   Logger,
@@ -7,8 +8,8 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import { PgBoss } from "pg-boss";
-import { sql } from "drizzle-orm";
+import { PgBoss, type JobWithMetadata } from "pg-boss";
+import { asc, eq, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
 import type { Env } from "../env";
@@ -21,6 +22,8 @@ import {
 } from "../modules/mail/mail-jobs.service";
 import { MailModule } from "../modules/mail/mail.module";
 import { MailRetentionService } from "../modules/mail/mail-retention.service";
+import { ShiftExportRunnerService } from "../modules/shift-exports/shift-export-runner.service";
+import { ShiftExportSourceService } from "../modules/shift-exports/shift-export-source.service";
 import { currentMonthUTC, nextMonthUTC } from "./months";
 import {
   MATERIALIZE_SUBSCRIPTION_STATUSES_CRON,
@@ -29,6 +32,7 @@ import {
 } from "../subscriptions/subscription-status.job";
 
 export const PG_CONNECTION_STRING = "JOBS_PG_CONNECTION_STRING";
+export const BUILD_SHIFT_EXPORT_QUEUE = "build-shift-export";
 
 const QUEUE_NAME = "ensure-partitions";
 const QUEUE_CRON = "0 4 * * *";
@@ -77,6 +81,7 @@ const PRUNE_INTEGRATION_JOURNAL_QUEUE_CRON = "0 3 * * *";
 
 const DISPATCH_EMAIL_OUTBOX_QUEUE_NAME = "dispatch-email-outbox";
 const DISPATCH_EMAIL_OUTBOX_QUEUE_CRON = "* * * * *";
+const SHIFT_EXPORT_RECONCILE_LIMIT = 100;
 const RECONCILE_EMAIL_DELIVERIES_QUEUE_NAME = "reconcile-email-deliveries";
 const RECONCILE_EMAIL_DELIVERIES_QUEUE_CRON = "*/5 * * * *";
 const PRUNE_EMAIL_DELIVERIES_QUEUE_NAME = "prune-email-deliveries";
@@ -84,7 +89,7 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
 
 /**
  * Boots a dedicated pg-boss instance (its own `pgboss` schema, same
- * database as the app), one delivery worker, and nine schedules on it:
+ * database as the app), two request-driven workers, and nine schedules on it:
  *  - keeps the `codes`/`scan_events` monthly partitions ahead of traffic:
  *    ensures the current + next month exist once at startup, then again
  *    every day at 04:00 UTC.
@@ -106,6 +111,8 @@ const PRUNE_EMAIL_DELIVERIES_QUEUE_CRON = "30 2 * * *";
  *    daily at 02:30 UTC.
  *  - materializes subscription and add-on activation/expiry reporting status
  *    every minute while request-time entitlement checks remain authoritative.
+ *  - generates shift export artifacts on demand with bounded retries; this
+ *    queue is deliberately not scheduled because export requests enqueue it.
  *
  * pg-boss v12 requires a queue to be created (`createQueue`) before it can
  * be scheduled or worked -- scheduling against a queue that doesn't exist
@@ -129,6 +136,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly mailJobs: MailJobsService,
     private readonly mailRetention: MailRetentionService,
     private readonly subscriptionStatus: SubscriptionStatusJob,
+    private readonly shiftExportRunner: ShiftExportRunnerService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -247,6 +255,29 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         }),
       );
 
+      await boss.createQueue(BUILD_SHIFT_EXPORT_QUEUE, {
+        retryLimit: 5,
+        retryDelay: 30,
+        retryBackoff: true,
+        retryDelayMax: 900,
+        expireInSeconds: 900,
+      });
+      this.workerIds.push(
+        await boss.work(
+          BUILD_SHIFT_EXPORT_QUEUE,
+          { includeMetadata: true },
+          async (jobs: JobWithMetadata<{ exportId: string }>[]) => {
+            for (const job of jobs) {
+              await this.shiftExportRunner.run(job.data.exportId, {
+                retryCount: job.retryCount,
+                retryLimit: job.retryLimit,
+              });
+            }
+          },
+        ),
+      );
+      await this.reconcileQueuedShiftExports(boss);
+
       // Also run all nine maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -281,6 +312,42 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     this.logger.log("pg-boss stopped");
   }
 
+  async enqueueShiftExport(exportId: string): Promise<string> {
+    if (!this.boss || !this.started) throw new Error("pg-boss is not started");
+    const jobId = await this.boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId });
+    if (!jobId) throw new Error("shift export enqueue failed");
+    return jobId;
+  }
+
+  private async reconcileQueuedShiftExports(boss: PgBoss): Promise<void> {
+    let queued: { id: string }[];
+    try {
+      queued = await this.db
+        .select({ id: schema.shiftExports.id })
+        .from(schema.shiftExports)
+        .where(eq(schema.shiftExports.status, "queued"))
+        .orderBy(asc(schema.shiftExports.createdAt))
+        .limit(SHIFT_EXPORT_RECONCILE_LIMIT);
+    } catch (error) {
+      this.logger.error(
+        "shift export reconciliation query failed",
+        error instanceof Error ? error.stack : undefined,
+      );
+      return;
+    }
+    for (const row of queued) {
+      try {
+        const jobId = await boss.send(BUILD_SHIFT_EXPORT_QUEUE, { exportId: row.id });
+        if (!jobId) throw new Error("shift export enqueue returned no job id");
+      } catch (error) {
+        this.logger.error(
+          `shift export reconciliation failed for ${row.id}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      }
+    }
+  }
+
   async checkReady(): Promise<void> {
     if (!this.started || !this.boss) throw new Error("pg-boss is not started");
     try {
@@ -289,7 +356,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 10 ||
+      this.workerIds.length !== 11 ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
@@ -376,6 +443,7 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
+@Global()
 @Module({})
 export class JobsModule {
   /** `connectionString`: raw Postgres URL pg-boss uses for its own pool (separate from the app's Drizzle `Db`, which is injected globally via `AUTH`/`DB`'s `AuthModule`). */
@@ -388,6 +456,8 @@ export class JobsModule {
         PgBossService,
         JournalService,
         ExchangeSessionService,
+        ShiftExportSourceService,
+        ShiftExportRunnerService,
       ],
       exports: [PgBossService],
     };

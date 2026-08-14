@@ -146,7 +146,7 @@ export function useCreateShift(): UseMutationResult<ShiftDto, Error, CreateShift
   });
 }
 
-/** `PATCH /shifts/:id` -- allowed only while the shift is planned (409 otherwise). */
+/** `PATCH /shifts/:id` -- full patch while planned; restricted metadata patch while active. */
 export function useUpdateShift(): UseMutationResult<
   ShiftDto,
   Error,

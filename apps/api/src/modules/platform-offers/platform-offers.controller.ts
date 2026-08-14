@@ -10,10 +10,14 @@ import {
   type PaymentDto,
 } from "./dto";
 import { PlatformOffersService } from "./platform-offers.service";
+import { OfferDocumentsService } from "./offer-documents.service";
 
 @Controller("platform/offers")
 export class PlatformOffersController {
-  constructor(private readonly offers: PlatformOffersService) {}
+  constructor(
+    private readonly offers: PlatformOffersService,
+    private readonly documents: OfferDocumentsService,
+  ) {}
 
   @Get()
   @RequirePlatformCapabilities("billing.read")
@@ -46,7 +50,31 @@ export class PlatformOffersController {
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
-    return this.offers.publish(req.platformPrincipal!, id);
+    return this.offers.publish(req.platformPrincipal!, id).then(async (offer) => {
+      const documents = await this.documents.render(id);
+      return { ...offer, documents };
+    });
+  }
+
+  @Get(":id/documents")
+  @RequirePlatformCapabilities("billing.read")
+  documentsList(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
+    return this.documents.list(id);
+  }
+
+  @Post(":id/documents")
+  @RequirePlatformCapabilities("billing.write")
+  documentsRender(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
+    return this.documents.render(id);
+  }
+
+  @Get(":id/documents/:documentId/download")
+  @RequirePlatformCapabilities("billing.read")
+  documentsDownload(
+    @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
+    @Param("documentId") documentId: string,
+  ) {
+    return this.documents.url(id, documentId);
   }
 
   @Post(":id/cancel")

@@ -36,6 +36,37 @@ export function ThemeProvider({
     updateDocumentTheme(effectiveTheme);
   }, [theme]);
 
+  useEffect(() => {
+    const hideTimers = new Map<Element, number>();
+
+    const handleScroll = (event: Event) => {
+      const target =
+        event.target instanceof Element
+          ? event.target
+          : (document.scrollingElement ?? document.documentElement);
+      const previousTimer = hideTimers.get(target);
+      if (previousTimer !== undefined) window.clearTimeout(previousTimer);
+
+      target.setAttribute("data-scrollbar-active", "true");
+      hideTimers.set(
+        target,
+        window.setTimeout(() => {
+          target.removeAttribute("data-scrollbar-active");
+          hideTimers.delete(target);
+        }, 1_000),
+      );
+    };
+
+    document.addEventListener("scroll", handleScroll, true);
+    return () => {
+      document.removeEventListener("scroll", handleScroll, true);
+      for (const [target, timer] of hideTimers) {
+        window.clearTimeout(timer);
+        target.removeAttribute("data-scrollbar-active");
+      }
+    };
+  }, []);
+
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
     localStorage.setItem("markiro.theme", newTheme);

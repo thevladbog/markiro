@@ -83,9 +83,13 @@ export class BillingService {
         const unit = version?.unit ?? line.unit;
         if (!nameRu || !nameEn || !unit)
           throw new BadRequestException({ code: "invoice_line_name_required" });
-        const rate = BigInt(
-          line.vatRateBps ?? (version?.vatRate ? Math.round(Number(version.vatRate) * 100) : 0),
-        );
+        const vatRateBps =
+          line.vatRateBps !== undefined
+            ? line.vatRateBps
+            : version?.vatRate
+              ? Math.round(Number(version.vatRate) * 100)
+              : null;
+        const rate = BigInt(vatRateBps ?? 0);
         const lineGross = cents(line.agreedUnitPrice) * BigInt(line.quantity);
         const lineVat = line.vatIncluded
           ? (lineGross * rate) / (10_000n + rate)
@@ -108,9 +112,9 @@ export class BillingService {
           descriptionEn: version?.descriptionEn ?? line.descriptionEn ?? null,
           quantity: line.quantity,
           unit,
-          catalogUnitPrice: version?.unitPrice ?? null,
+          catalogUnitPrice: version?.unitPrice ?? line.catalogUnitPrice ?? null,
           agreedUnitPrice: line.agreedUnitPrice,
-          vatRate: `${(Number(rate) / 100).toFixed(2)}`,
+          vatRate: vatRateBps === null ? null : (vatRateBps / 100).toFixed(2),
           vatIncluded: line.vatIncluded,
           lineSubtotal: money(lineSubtotal),
           lineVat: money(lineVat),

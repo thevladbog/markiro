@@ -34,14 +34,12 @@ export interface KioskDto {
 export interface CreateKioskInput {
   name: string;
   location?: string | null;
-  dayLimitPerEmployee?: number;
   showPrices?: boolean;
 }
 
 export interface UpdateKioskInput {
   name?: string;
   location?: string | null;
-  dayLimitPerEmployee?: number;
   showPrices?: boolean;
   status?: KioskStatus;
 }
@@ -100,7 +98,13 @@ export async function issueKioskPairingCode(id: string): Promise<IssuePairingCod
 
 /** `GET /kiosks` -- the active tenant's pickup kiosks. */
 export function useKiosks(): UseQueryResult<KioskDto[]> {
-  return useQuery({ queryKey: KIOSKS_QUERY_KEY, queryFn: fetchKiosks });
+  return useQuery({
+    queryKey: KIOSKS_QUERY_KEY,
+    queryFn: fetchKiosks,
+    // `lastSeenAt` changes without a cabinet mutation. Polling keeps the table
+    // aligned with the kiosk's five-minute heartbeat while the page is open.
+    refetchInterval: 30_000,
+  });
 }
 
 /** `POST /kiosks`. Invalidates the kiosks list query on success. */

@@ -1,6 +1,6 @@
 import { isValidGtin, normalizeToGtin14 } from "../gs1/gtin.js";
 import { canonicalizeKm, type ParsedKm } from "../gs1/km.js";
-import { isValidSscc } from "../gs1/sscc.js";
+import { parseScannedSscc } from "../gs1/sscc.js";
 
 export type ScanInput =
   | { kind: "km"; km: ParsedKm }
@@ -11,10 +11,8 @@ export type ScanInput =
 /** Single classification point for every scanner event. */
 export function classifyScan(raw: string): ScanInput {
   const trimmed = raw.trim();
-  if (isValidSscc(trimmed)) return { kind: "sscc", sscc: trimmed };
-  if (trimmed.startsWith("00") && isValidSscc(trimmed.slice(2))) {
-    return { kind: "sscc", sscc: trimmed.slice(2) };
-  }
+  const sscc = parseScannedSscc(trimmed);
+  if (sscc) return { kind: "sscc", sscc };
   if (isValidGtin(trimmed)) {
     return { kind: "gtin", gtin14: normalizeToGtin14(trimmed) };
   }

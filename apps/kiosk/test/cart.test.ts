@@ -2,12 +2,14 @@ import { describe, expect, it } from "vitest";
 import type { KioskBootstrapDto } from "../src/api/types.js";
 import { classifyKioskScan, type KioskScan } from "../src/domain-guard/classify.js";
 import {
+  bottleCount,
   canSubmit,
   cartReducer,
   initialCartState,
   remainingToday,
   type CartAction,
   type CartState,
+  type BoxLine,
 } from "../src/session/cart.js";
 
 const GS = String.fromCharCode(0x1d);
@@ -61,6 +63,8 @@ function bootstrapWith(dayLimitPerEmployee: number): KioskBootstrapDto {
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee, showPrices: true },
     badgeSalt: "c2FsdA==",
     reasons: [{ id: "reason-defect", name: "Брак" }],
@@ -68,13 +72,24 @@ function bootstrapWith(dayLimitPerEmployee: number): KioskBootstrapDto {
       { id: "p-milk", gtin14: GTIN_MILK, name: "Молоко 3,2%", unitPrice: "89.90", egaisCode: null },
       { id: "p-bread", gtin14: GTIN_BREAD, name: "Хлеб", unitPrice: "45.00", egaisCode: null },
     ],
-    employees: [],
+    employees: [
+      {
+        id: "e1",
+        fullName: "Смирнов Алексей",
+        role: null,
+        badgeHash: null,
+        limitMode: "limited",
+        dayLimit: dayLimitPerEmployee,
+        canWriteoff: true,
+        takenTodayElsewhere: 0,
+      },
+    ],
     operators: [],
   };
 }
 
 function ctxOf(dayLimitPerEmployee: number, alreadyTakenToday = 0) {
-  return { bootstrap: bootstrapWith(dayLimitPerEmployee), alreadyTakenToday };
+  return { bootstrap: bootstrapWith(dayLimitPerEmployee), employeeId: "e1", alreadyTakenToday };
 }
 
 type Ctx = ReturnType<typeof ctxOf>;
@@ -85,6 +100,89 @@ function run(ctx: Ctx, ...actions: CartAction[]): CartState {
 
 const scan = (s: KioskScan): CartAction => ({ type: "scan", scan: s });
 
+const box = (over: Partial<BoxLine> = {}): BoxLine => ({
+  kind: "box",
+  boxId: "11111111-1111-4111-8111-111111111111",
+  sscc: "346006820000000021",
+  productId: "p-milk",
+  name: "Молоко 3,2%",
+  bottleCount: 12,
+  unitPrice: "89.90",
+  contentKeys: Array.from({ length: 12 }, (_, index) => `01${GTIN_MILK}21member-${index + 1}`),
+  registryVersion: "7",
+  ...over,
+});
+
+describe("cartReducer — atomic mixed lines", () => {
+  it("rejects the whole new box when one member is already loose", () => {
+    const loose = run(ctxOf(20), scan(km(GTIN_MILK, "member-2")));
+    const firstLine = loose.lines[0]!;
+    if (firstLine.kind !== "km") throw new Error("expected loose fixture");
+    const memberKey = firstLine.kmKey;
+    const next = cartReducer(
+      loose,
+      { type: "scanBox", box: box({ contentKeys: ["member-1", memberKey], bottleCount: 2 }) },
+      ctxOf(20),
+    );
+    expect(next.lines).toEqual(loose.lines);
+    expect(next.notice).toEqual({ kind: "duplicate-box" });
+  });
+
+  it("rejects a loose member and a later overlapping box after the first box wins", () => {
+    const ctx = ctxOf(30);
+    const first = cartReducer(initialCartState, { type: "scanBox", box: box() }, ctx);
+    const loose = cartReducer(first, scan(km(GTIN_MILK, "member-3")), ctx);
+    expect(loose.lines).toEqual(first.lines);
+    expect(loose.notice).toEqual({ kind: "duplicate" });
+    const second = cartReducer(
+      first,
+      {
+        type: "scanBox",
+        box: box({
+          sscc: "046006820000000018",
+          contentKeys: [`01${GTIN_MILK}21member-5`],
+          bottleCount: 1,
+        }),
+      },
+      ctx,
+    );
+    expect(second.lines).toEqual(first.lines);
+    expect(second.notice).toEqual({ kind: "duplicate-box" });
+  });
+
+  it("treats a repeated SSCC as a no-op notice", () => {
+    const ctx = ctxOf(30);
+    const first = cartReducer(initialCartState, { type: "scanBox", box: box() }, ctx);
+    const repeated = cartReducer(first, { type: "scanBox", box: box() }, ctx);
+    expect(repeated.lines).toEqual(first.lines);
+    expect(repeated.notice).toEqual({ kind: "duplicate-sscc" });
+  });
+
+  it("rejects a twelve-bottle box atomically when only five remain", () => {
+    const next = cartReducer(initialCartState, { type: "scanBox", box: box() }, ctxOf(10, 5));
+    expect(next.lines).toEqual([]);
+    expect(next.notice).toEqual({ kind: "limit", requested: 12, remaining: 5 });
+  });
+
+  it("counts and removes one whole box while unlimited remaining stays null", () => {
+    const unlimited = ctxOf(5);
+    unlimited.bootstrap.pickupPolicy.limitsEnabled = false;
+    const stocked = cartReducer(initialCartState, { type: "scanBox", box: box() }, unlimited);
+    expect(bottleCount(stocked)).toBe(12);
+    expect(remainingToday(stocked, unlimited)).toBeNull();
+    const removed = cartReducer(stocked, { type: "removeBox", sscc: box().sscc }, unlimited);
+    expect(removed.lines).toEqual([]);
+  });
+
+  it("keeps explicit registry refusal notices without changing lines", () => {
+    for (const kind of ["unknown-box", "registry-unavailable", "registry-blocked"] as const) {
+      const next = cartReducer(initialCartState, { type: "boxRejected", kind }, ctxOf(20));
+      expect(next.lines).toEqual([]);
+      expect(next.notice).toEqual({ kind });
+    }
+  });
+});
+
 describe("cartReducer — scanning", () => {
   // The serial is carried, not re-derived: it is the half of the item's
   // identity a worker reads off the screen, and the classifier has already
@@ -93,8 +191,9 @@ describe("cartReducer — scanning", () => {
   it("appends a scanned KM with its product's id, name, price and serial", () => {
     const state = run(ctxOf(5), scan(km(GTIN_MILK, "KYC9X7MQ")));
 
-    expect(state.items).toEqual([
+    expect(state.lines).toEqual([
       {
+        kind: "km",
         rawKm: `01${GTIN_MILK}21KYC9X7MQ${GS}93Abcd`,
         kmKey: `01${GTIN_MILK}21KYC9X7MQ`,
         gtin14: GTIN_MILK,
@@ -102,6 +201,7 @@ describe("cartReducer — scanning", () => {
         productId: "p-milk",
         name: "Молоко 3,2%",
         unitPrice: "89.90",
+        bottleCount: 1,
       },
     ]);
     expect(state.notice).toBeNull();
@@ -112,14 +212,14 @@ describe("cartReducer — scanning", () => {
     const state = run(ctxOf(5), scan(repeated), scan(repeated));
 
     expect(state.notice).toEqual({ kind: "duplicate" });
-    expect(state.items).toHaveLength(1);
+    expect(state.lines).toHaveLength(1);
   });
 
   it("keeps two serials of the same product apart — dedup is per kmKey, not per GTIN", () => {
     const state = run(ctxOf(5), scan(km(GTIN_MILK, "AAAA1111")), scan(km(GTIN_MILK, "BBBB2222")));
 
     expect(state.notice).toBeNull();
-    expect(state.items.map((i) => i.kmKey)).toEqual([
+    expect(state.lines.map((line) => (line.kind === "km" ? line.kmKey : line.sscc))).toEqual([
       `01${GTIN_MILK}21AAAA1111`,
       `01${GTIN_MILK}21BBBB2222`,
     ]);
@@ -129,32 +229,32 @@ describe("cartReducer — scanning", () => {
     const state = run(ctxOf(5), scan(km(GTIN_ABSENT, "KYC9X7MQ")));
 
     expect(state.notice).toEqual({ kind: "unknown-product" });
-    expect(state.items).toHaveLength(0);
+    expect(state.lines).toHaveLength(0);
   });
 
   it("refuses a scan once the day limit is already reached", () => {
     const state = run(ctxOf(1, 1), scan(km(GTIN_MILK, "KYC9X7MQ")));
 
-    expect(state.notice).toEqual({ kind: "limit" });
-    expect(state.items).toHaveLength(0);
+    expect(state.notice).toEqual({ kind: "limit", requested: 1, remaining: 0 });
+    expect(state.lines).toHaveLength(0);
   });
 
   it("counts alreadyTakenToday against the limit — 2 per day with 1 taken leaves exactly one", () => {
     const ctx = ctxOf(2, 1);
     const first = cartReducer(initialCartState, scan(km(GTIN_MILK, "AAAA1111")), ctx);
-    expect(first.items).toHaveLength(1);
+    expect(first.lines).toHaveLength(1);
     expect(first.notice).toBeNull();
 
     const second = cartReducer(first, scan(km(GTIN_BREAD, "BBBB2222")), ctx);
-    expect(second.notice).toEqual({ kind: "limit" });
-    expect(second.items).toHaveLength(1);
+    expect(second.notice).toEqual({ kind: "limit", requested: 1, remaining: 0 });
+    expect(second.lines).toHaveLength(1);
   });
 
   it("accepts nothing at dayLimitPerEmployee: 0 — zero is a limit, not 'unlimited'", () => {
     const state = run(ctxOf(0), scan(km(GTIN_MILK, "KYC9X7MQ")));
 
-    expect(state.notice).toEqual({ kind: "limit" });
-    expect(state.items).toHaveLength(0);
+    expect(state.notice).toEqual({ kind: "limit", requested: 1, remaining: 0 });
+    expect(state.lines).toHaveLength(0);
   });
 
   it("reports a duplicate as a duplicate even when the cart is already at the limit", () => {
@@ -164,21 +264,21 @@ describe("cartReducer — scanning", () => {
     const state = run(ctxOf(1), scan(repeated), scan(repeated));
 
     expect(state.notice).toEqual({ kind: "duplicate" });
-    expect(state.items).toHaveLength(1);
+    expect(state.lines).toHaveLength(1);
   });
 
   it("asks for a re-scan when the GS separator was dropped", () => {
     const state = run(ctxOf(5), scan(incompleteScan()));
 
     expect(state.notice).toEqual({ kind: "incomplete" });
-    expect(state.items).toHaveLength(0);
+    expect(state.lines).toHaveLength(0);
   });
 
   it("tells the worker a bare product barcode is not a marking code", () => {
     const state = run(ctxOf(5), scan(bareProductBarcode()));
 
     expect(state.notice).toEqual({ kind: "not-a-code" });
-    expect(state.items).toHaveLength(0);
+    expect(state.lines).toHaveLength(0);
   });
 
   it("leaves the cart entirely alone on a badge scan — identification is not cart input", () => {
@@ -188,7 +288,7 @@ describe("cartReducer — scanning", () => {
 
     const state = cartReducer(stocked, scan(badgeScan()), ctx);
 
-    expect(state.items).toEqual(stocked.items);
+    expect(state.lines).toEqual(stocked.lines);
     expect(state.notice).toEqual({ kind: "duplicate" });
   });
 
@@ -211,17 +311,19 @@ describe("cartReducer — plain actions", () => {
 
     const state = cartReducer(stocked, { type: "remove", kmKey: `01${GTIN_MILK}21AAAA1111` }, ctx);
 
-    expect(state.items.map((i) => i.kmKey)).toEqual([`01${GTIN_BREAD}21BBBB2222`]);
+    expect(state.lines.map((line) => (line.kind === "km" ? line.kmKey : line.sscc))).toEqual([
+      `01${GTIN_BREAD}21BBBB2222`,
+    ]);
   });
 
   it("clears a stale notice on remove — emptying the cart un-does the limit", () => {
     const ctx = ctxOf(1);
     const full = run(ctx, scan(km(GTIN_MILK, "AAAA1111")), scan(km(GTIN_BREAD, "BBBB2222")));
-    expect(full.notice).toEqual({ kind: "limit" });
+    expect(full.notice).toEqual({ kind: "limit", requested: 1, remaining: 0 });
 
     const state = cartReducer(full, { type: "remove", kmKey: `01${GTIN_MILK}21AAAA1111` }, ctx);
 
-    expect(state.items).toHaveLength(0);
+    expect(state.lines).toHaveLength(0);
     expect(state.notice).toBeNull();
   });
 
@@ -230,7 +332,7 @@ describe("cartReducer — plain actions", () => {
     const state = run(ctxOf(5), scan(repeated), scan(repeated), { type: "dismissNotice" });
 
     expect(state.notice).toBeNull();
-    expect(state.items).toHaveLength(1);
+    expect(state.lines).toHaveLength(1);
   });
 
   it("returns the initial state on reset", () => {
@@ -244,12 +346,33 @@ describe("cartReducer — plain actions", () => {
 
     expect(state).toEqual(initialCartState);
   });
+
+  it("does not enter writeoff when the effective employee policy forbids it", () => {
+    const current = bootstrapWith(5);
+    const ctx = {
+      bootstrap: {
+        ...current,
+        employees: current.employees.map((employee) => ({ ...employee, canWriteoff: false })),
+      },
+      employeeId: "e1",
+      alreadyTakenToday: 0,
+    };
+
+    const state = cartReducer(
+      run(ctx, scan(km(GTIN_MILK, "AAAA1111"))),
+      { type: "reason", reason: "writeoff" },
+      ctx,
+    );
+
+    expect(state.reason).toBe("buy");
+    expect(state.writeoffReasonId).toBeNull();
+  });
 });
 
 describe("initialCartState", () => {
   it("is frozen — `reset` hands this very object out, so a stray mutation would poison the app", () => {
     expect(Object.isFrozen(initialCartState)).toBe(true);
-    expect(Object.isFrozen(initialCartState.items)).toBe(true);
+    expect(Object.isFrozen(initialCartState.lines)).toBe(true);
   });
 });
 
@@ -294,31 +417,34 @@ describe("remainingToday", () => {
 
 describe("canSubmit", () => {
   it("is false while nothing has been scanned", () => {
-    expect(canSubmit(initialCartState)).toBe(false);
+    expect(canSubmit(initialCartState, ctxOf(5))).toBe(false);
   });
 
   it("is true for a non-empty buy cart", () => {
-    expect(canSubmit(run(ctxOf(5), scan(km(GTIN_MILK, "AAAA1111"))))).toBe(true);
+    const ctx = ctxOf(5);
+    expect(canSubmit(run(ctx, scan(km(GTIN_MILK, "AAAA1111"))), ctx)).toBe(true);
   });
 
   it("is false for a write-off with no sub-reason chosen", () => {
-    const state = run(ctxOf(5), scan(km(GTIN_MILK, "AAAA1111")), {
+    const ctx = ctxOf(5);
+    const state = run(ctx, scan(km(GTIN_MILK, "AAAA1111")), {
       type: "reason",
       reason: "writeoff",
     });
 
     expect(state.writeoffReasonId).toBeNull();
-    expect(canSubmit(state)).toBe(false);
+    expect(canSubmit(state, ctx)).toBe(false);
   });
 
   it("is true for a write-off once a sub-reason is chosen", () => {
+    const ctx = ctxOf(5);
     const state = run(
-      ctxOf(5),
+      ctx,
       scan(km(GTIN_MILK, "AAAA1111")),
       { type: "reason", reason: "writeoff" },
       { type: "writeoffReason", id: "reason-defect" },
     );
 
-    expect(canSubmit(state)).toBe(true);
+    expect(canSubmit(state, ctx)).toBe(true);
   });
 });

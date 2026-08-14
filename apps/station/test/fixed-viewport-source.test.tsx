@@ -88,4 +88,76 @@ describe("fixed station viewport source contract", () => {
       /#root :where\(button, \[role="button"\], a\[href\]\):is\(:disabled, \[aria-disabled="true"\]\)\s*\{[^}]*transform:\s*none;/s,
     );
   });
+
+  it("keeps the box cells and actions on one bounded instrument surface", () => {
+    const css = stationSource("station.css");
+    const instrument = stationSource("ui/work/BoxFillInstrument.tsx");
+
+    expect(instrument).toContain('className="work-box-fill__grid"');
+    expect(instrument).not.toContain('className="work-box-fill__track"');
+    expect(css).not.toContain(".work-box-fill__track");
+    expect(css).toMatch(
+      /\.work-box-fill__grid\s*\{[^}]*grid-template-columns:\s*repeat\(10, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(/\.work-box-fill__grid\[data-grouped="true"\]\s*\{/s);
+    expect(css).toMatch(
+      /\.work-box-fill__actions\s*\{(?![^}]*background:)[^}]*min-height:\s*64px;/s,
+    );
+    expect(css).toMatch(
+      /\.work-box-fill\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) minmax\(64px, auto\);/s,
+    );
+    expect(css).toMatch(
+      /\.work-box-fill\[data-grouped="true"\]\s*\{[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto minmax\(64px, auto\);/s,
+    );
+    expect(css).toMatch(/\.work-box-fill__grid\s*\{[^}]*height:\s*100%;/s);
+    expect(css).toMatch(/\.work-box-fill__cell\s*\{[^}]*height:\s*100%;/s);
+    expect(css).toMatch(
+      /\.work-box-fill__cell\[data-state="next"\]\s*\{[^}]*outline:\s*3px solid var\(--focus-ring\);/s,
+    );
+  });
+
+  it("keeps every print-recovery action floor-sized in a bounded no-scroll dialog", () => {
+    const recovery = stationSource("ui/BoxPrintRecovery.tsx");
+    const css = stationSource("station.css");
+
+    expect(recovery.match(/<Button/g)).toHaveLength(3);
+    expect(recovery.match(/size="floor"/g)).toHaveLength(3);
+    expect(recovery).not.toContain('size="compact"');
+    expect(recovery).toContain('className="box-print-recovery"');
+    expect(css).toMatch(/\.box-print-recovery\s*\{[^}]*overflow:\s*hidden;/s);
+    expect(css).not.toMatch(/\.box-print-recovery\s*\{[^}]*overflow(?:-y)?:\s*(?:auto|scroll);/s);
+  });
+
+  it("keeps floor header actions in bounded grid flow at wide and compact widths", () => {
+    const css = stationSource("station.css");
+
+    expect(css).toMatch(
+      /\.station-update-indicator\s*\{[^}]*position:\s*static;[^}]*min-height:\s*64px;/s,
+    );
+    expect(css).not.toMatch(/\.station-update-indicator\s*\{[^}]*position:\s*absolute;/s);
+    expect(css).toMatch(
+      /\.station-status-actions\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-actions\s*>\s*\*\s*\{[^}]*min-width:\s*0;[^}]*min-height:\s*64px;/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-bar\s*\{[^}]*grid-template-columns:[^;}]*minmax\(960px, 2fr\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1439px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 2fr\) minmax\(0, 1\.35fr\) minmax\(0, 1fr\);[^}]*\}[\s\S]*?\.station-status-actions\s*\{[^}]*grid-column:\s*1 \/ -1;[^}]*grid-template-columns:\s*repeat\(3, minmax\(0, 1fr\)\);/s,
+    );
+    expect(css).toMatch(
+      /@media \(max-width: 1179px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) minmax\(0, 1fr\);/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-actions \.window-mode-control__action\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,
+    );
+    expect(css).toMatch(
+      /\.station-update-indicator\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,
+    );
+    expect(css).toMatch(
+      /\.station-status-actions \.window-mode-control__error\s*\{[^}]*display:\s*grid;[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s,
+    );
+  });
 });

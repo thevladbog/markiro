@@ -4,7 +4,13 @@ import { resolve } from "node:path";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
-import { applyMigrations, replaceOperatorsMirror, type SqlExecutor } from "../src/lib/mirror.js";
+import {
+  applyMigrations,
+  replaceOperatorsMirror,
+  SLOT_TABLES,
+  type SqlExecutor,
+} from "../src/lib/mirror.js";
+import * as crypto from "../src/lib/crypto.js";
 import { hashSecret } from "../src/lib/crypto.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { createKeyboardWedgeSource } from "../src/lib/scan-source.js";
@@ -85,7 +91,9 @@ function cssRule(selector: string): string {
 
 describe("OperatorLogin", () => {
   it("keeps Markiro Station framing and spaced bounded actions across sign-in stages", async () => {
-    render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
+    render(
+      <OperatorLogin online={false} exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />,
+    );
 
     expect(screen.getByRole("img", { name: "Markiro Station" })).toBeDefined();
     expect(document.querySelector(".operator-login__actions")).not.toBeNull();
@@ -112,9 +120,25 @@ describe("OperatorLogin", () => {
   });
 
   it("starts in a badge-first state and opens the numeric fallback on a deliberate touch", () => {
-    render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
+    const { container } = render(
+      <OperatorLogin online={false} exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />,
+    );
 
     expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
+    const scannerStatus = screen.getByRole("status", { name: "Barcode scanner ready" });
+    expect(scannerStatus.className).toContain("operator-login__scanner-status");
+    expect(scannerStatus.closest(".operator-login__body")).toBeNull();
+    expect(scannerStatus.querySelector("[aria-hidden='true']")).not.toBeNull();
+    expect(screen.getByText("Hold the badge near the scanner")).toBeDefined();
+    expect(
+      screen.getByText(
+        "The station recognizes the code automatically. If the operator was just added, the roster will refresh from the server.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByTestId("badge-scan-illustration")).toBeDefined();
+    expect(screen.queryByRole("region", { name: "Badge scan illustration" })).toBeNull();
+    expect(container.textContent).not.toContain("▣");
+    expect(stationCss).not.toMatch(/operator-login__badge-panel[^}]*dashed/s);
     expect(screen.queryByRole("button", { name: "1" })).toBeNull();
 
     openNumericFallback();
@@ -136,7 +160,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     openNumericFallback();
     fireEvent.click(screen.getByRole("button", { name: "1" }));
@@ -163,7 +187,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
     const search = screen.getByRole("textbox", { name: "Operator name" });
@@ -192,7 +216,7 @@ describe("OperatorLogin", () => {
         active: true,
       },
     ]);
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={vi.fn()} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
     const search = screen.getByRole("textbox", { name: "Operator name" });
@@ -221,7 +245,14 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={createKeyboardWedgeSource()} onAuthed={onAuthed} />);
+    render(
+      <OperatorLogin
+        online={false}
+        exec={exec}
+        source={createKeyboardWedgeSource()}
+        onAuthed={onAuthed}
+      />,
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
     const search = screen.getByRole("textbox", { name: "Operator name" });
@@ -254,7 +285,7 @@ describe("OperatorLogin", () => {
     const onAuthed = vi.fn();
     const wedge = createKeyboardWedgeSource();
     const routing = vi.spyOn(wedge, "setManualTextEntryActive");
-    render(<OperatorLogin exec={exec} source={wedge} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={wedge} onAuthed={onAuthed} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
     const search = screen.getByRole("textbox", { name: "Operator name" });
@@ -282,7 +313,7 @@ describe("OperatorLogin", () => {
     const exec = makeExec();
     await applyMigrations(exec);
     const scanner = manualSource();
-    render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={vi.fn()} />);
+    render(<OperatorLogin online={false} exec={exec} source={scanner.source} onAuthed={vi.fn()} />);
 
     act(() => scanner.scan("unknown"));
 
@@ -320,7 +351,7 @@ describe("OperatorLogin", () => {
         active: true,
       },
     ]);
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={vi.fn()} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
     const search = screen.getByRole("textbox", { name: "Operator name" });
@@ -356,6 +387,7 @@ describe("OperatorLogin", () => {
     );
     render(
       <OperatorLogin
+        online={false}
         exec={exec}
         source={silentSource}
         onAuthed={vi.fn()}
@@ -406,7 +438,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     openNumericFallback();
     // Stage 1: personnel number -> Next
@@ -426,7 +458,9 @@ describe("OperatorLogin", () => {
   });
 
   it("enables submission only for 4-6 digits and caps the floor PIN pad at six", () => {
-    render(<OperatorLogin exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />);
+    render(
+      <OperatorLogin online={false} exec={makeExec()} source={silentSource} onAuthed={vi.fn()} />,
+    );
 
     openNumericFallback();
     for (const digit of "1042") fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -451,7 +485,7 @@ describe("OperatorLogin", () => {
       releaseQuery = () => resolve([]);
     });
     const exec: SqlExecutor = { run: async () => {}, all: async () => pending };
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={vi.fn()} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={vi.fn()} />);
 
     openNumericFallback();
     for (const digit of "1042") fireEvent.click(screen.getByRole("button", { name: digit }));
@@ -484,7 +518,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     openNumericFallback();
     for (const digit of "1042") {
@@ -510,7 +544,7 @@ describe("OperatorLogin", () => {
       all: () => Promise.reject(new Error("no such table: operators_mirror")),
     };
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     openNumericFallback();
     for (const digit of "1042") {
@@ -543,7 +577,7 @@ describe("OperatorLogin", () => {
       },
     ]);
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     openNumericFallback();
     for (const digit of "1042") {
@@ -579,7 +613,7 @@ describe("OperatorLogin", () => {
       all: async () => pending,
     };
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={silentSource} onAuthed={onAuthed} />);
+    render(<OperatorLogin online={false} exec={exec} source={silentSource} onAuthed={onAuthed} />);
 
     openNumericFallback();
     for (const digit of "1042") {
@@ -633,7 +667,9 @@ describe("OperatorLogin", () => {
     ]);
     const scanner = manualSource();
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={onAuthed} />);
+    render(
+      <OperatorLogin online={false} exec={exec} source={scanner.source} onAuthed={onAuthed} />,
+    );
 
     expect(screen.getByText("Scan your badge to sign in")).toBeDefined();
     act(() => scanner.scan("badge-1"));
@@ -658,7 +694,9 @@ describe("OperatorLogin", () => {
     ]);
     const scanner = manualSource();
     const onAuthed = vi.fn();
-    render(<OperatorLogin exec={exec} source={scanner.source} onAuthed={onAuthed} />);
+    render(
+      <OperatorLogin online={false} exec={exec} source={scanner.source} onAuthed={onAuthed} />,
+    );
     openNumericFallback();
     fireEvent.click(screen.getByRole("button", { name: "1" }));
 
@@ -687,10 +725,14 @@ describe("OperatorLogin", () => {
     const first = manualSource();
     const second = manualSource();
     const onAuthed = vi.fn();
-    const view = render(<OperatorLogin exec={exec} source={first.source} onAuthed={onAuthed} />);
+    const view = render(
+      <OperatorLogin online={false} exec={exec} source={first.source} onAuthed={onAuthed} />,
+    );
     expect(first.active()).toBe(true);
 
-    view.rerender(<OperatorLogin exec={exec} source={second.source} onAuthed={onAuthed} />);
+    view.rerender(
+      <OperatorLogin online={false} exec={exec} source={second.source} onAuthed={onAuthed} />,
+    );
     expect(first.active()).toBe(false);
     expect(second.active()).toBe(true);
     act(() => first.scan("badge-1"));
@@ -719,8 +761,12 @@ describe("OperatorLogin", () => {
     const retired = retainedSource();
     const current = manualSource();
     const onAuthed = vi.fn();
-    const view = render(<OperatorLogin exec={exec} source={retired.source} onAuthed={onAuthed} />);
-    view.rerender(<OperatorLogin exec={exec} source={current.source} onAuthed={onAuthed} />);
+    const view = render(
+      <OperatorLogin online={false} exec={exec} source={retired.source} onAuthed={onAuthed} />,
+    );
+    view.rerender(
+      <OperatorLogin online={false} exec={exec} source={current.source} onAuthed={onAuthed} />,
+    );
 
     act(() => {
       retired.scanRetired("badge-1");
@@ -728,5 +774,495 @@ describe("OperatorLogin", () => {
     });
 
     await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+  });
+
+  it("refreshes once after a badge miss and retries only the local badge check", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const scanner = manualSource();
+    const refreshRoster = vi.fn(async () => {
+      await replaceOperatorsMirror(exec, [
+        {
+          operatorId: "op-new",
+          name: "New Operator",
+          login: "1002",
+          role: "operator",
+          pinHash: await hashSecret("4821"),
+          badgeHash: await hashSecret("NEW-BADGE"),
+          active: true,
+        },
+      ]);
+      return "updated" as const;
+    });
+    const onAuthed = vi.fn();
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={scanner.source}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={onAuthed}
+      />,
+    );
+
+    act(() => scanner.scan("NEW-BADGE"));
+
+    expect(await screen.findByText("Refreshing operator list…")).toBeDefined();
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    expect(onAuthed.mock.calls[0]?.[0]).toMatchObject({ operatorId: "op-new" });
+    expect(refreshRoster).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an offline badge miss local and does not refresh", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const scanner = manualSource();
+    const refreshRoster = vi.fn(async () => "updated" as const);
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={scanner.source}
+        online={false}
+        refreshRoster={refreshRoster}
+        onAuthed={vi.fn()}
+      />,
+    );
+
+    act(() => scanner.scan("UNKNOWN-BADGE"));
+
+    expect(await screen.findByText("Badge not recognized")).toBeDefined();
+    expect(refreshRoster).not.toHaveBeenCalled();
+  });
+
+  it("shows a safe recovery message when the roster refresh is unavailable", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const scanner = manualSource();
+    const refreshRoster = vi.fn(async () => "unavailable" as const);
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={scanner.source}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={vi.fn()}
+      />,
+    );
+
+    act(() => scanner.scan("UNKNOWN-BADGE"));
+
+    expect(
+      await screen.findByText(
+        "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+      ),
+    ).toBeDefined();
+    expect(screen.queryByText("Badge not recognized")).toBeNull();
+  });
+
+  it("refreshes once after a PIN miss and retries only the local PIN check", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const refreshRoster = vi.fn(async () => {
+      await replaceOperatorsMirror(exec, [
+        {
+          operatorId: "op-new",
+          name: "New Operator",
+          login: "1002",
+          role: "operator",
+          pinHash: await hashSecret("4821"),
+          badgeHash: null,
+          active: true,
+        },
+      ]);
+      return "updated" as const;
+    });
+    const onAuthed = vi.fn();
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={silentSource}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={onAuthed}
+      />,
+    );
+
+    openNumericFallback();
+    for (const digit of "1002") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(await screen.findByText("Refreshing operator list…")).toBeDefined();
+    await waitFor(() => expect(onAuthed).toHaveBeenCalledTimes(1));
+    expect(refreshRoster).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the entered PIN when the roster refresh is unavailable", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const refreshRoster = vi.fn(async () => "unavailable" as const);
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={silentSource}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={vi.fn()}
+      />,
+    );
+
+    openNumericFallback();
+    for (const digit of "1002") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    expect(
+      await screen.findByText(
+        "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByLabelText("pin").textContent).toBe("••••");
+    expect(refreshRoster).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows cached name results while a background roster refresh is pending", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-cached",
+        name: "Alex Cached",
+        login: "1001",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    let resolveRefresh!: (result: "updated") => void;
+    const refreshRoster = vi.fn(
+      () =>
+        new Promise<"updated">((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={silentSource}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = await screen.findByRole("textbox", { name: "Operator name" });
+    fireEvent.change(search, { target: { value: "al" } });
+
+    expect(await screen.findByRole("button", { name: "Alex Cached" })).toBeDefined();
+    expect(refreshRoster).toHaveBeenCalledTimes(1);
+    await act(async () => resolveRefresh("updated"));
+  });
+
+  it("replaces cached name results after a background roster refresh", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const pinHash = await hashSecret("4821");
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-old",
+        name: "Alex Old",
+        login: "1001",
+        role: "operator",
+        pinHash,
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    let resolveRefresh!: (result: "updated") => void;
+    const refreshRoster = vi.fn(
+      () =>
+        new Promise<"updated">((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    render(
+      <OperatorLogin
+        exec={exec}
+        source={silentSource}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+    const search = await screen.findByRole("textbox", { name: "Operator name" });
+    fireEvent.change(search, { target: { value: "al" } });
+    expect(await screen.findByRole("button", { name: "Alex Old" })).toBeDefined();
+
+    await act(async () => {
+      await replaceOperatorsMirror(exec, [
+        {
+          operatorId: "op-new",
+          name: "Alex New",
+          login: "1002",
+          role: "operator",
+          pinHash,
+          badgeHash: null,
+          active: true,
+        },
+      ]);
+      resolveRefresh("updated");
+    });
+
+    expect(await screen.findByRole("button", { name: "Alex New" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Alex Old" })).toBeNull();
+  });
+
+  it("keeps cached name results recoverable when the post-refresh mirror reread fails", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-cached",
+        name: "Alex Cached",
+        login: "1001",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: null,
+        active: true,
+      },
+    ]);
+    let rosterReads = 0;
+    const failingReread: SqlExecutor = {
+      run: (sql, params) => exec.run(sql, params),
+      all: (sql, params) => {
+        if (new RegExp(`FROM ${SLOT_TABLES.a}\\b`).test(sql) && ++rosterReads === 2) {
+          return Promise.reject(new Error("post-publication reread failed"));
+        }
+        return exec.all(sql, params);
+      },
+    };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      render(
+        <OperatorLogin
+          exec={failingReread}
+          source={silentSource}
+          online
+          refreshRoster={vi.fn(async () => "updated" as const)}
+          onAuthed={vi.fn()}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Find by name" }));
+      const search = await screen.findByRole("textbox", { name: "Operator name" });
+      fireEvent.change(search, { target: { value: "al" } });
+
+      expect(await screen.findByRole("button", { name: "Alex Cached" })).toBeDefined();
+      expect(
+        await screen.findByText(
+          "Could not refresh the operator list. Check the connection or sign in with previously synchronized data.",
+        ),
+      ).toBeDefined();
+      expect((search as HTMLInputElement).disabled).toBe(false);
+      expect(screen.getByRole("button", { name: "Alex Cached" })).toBeDefined();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("does not authenticate from a retained badge callback after unmount during refresh", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const scanner = retainedSource();
+    let resolveRefresh!: (result: "updated") => void;
+    const refreshRoster = vi.fn(
+      () =>
+        new Promise<"updated">((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const onAuthed = vi.fn();
+    const view = render(
+      <OperatorLogin
+        exec={exec}
+        source={scanner.source}
+        online
+        refreshRoster={refreshRoster}
+        onAuthed={onAuthed}
+      />,
+    );
+
+    act(() => scanner.scanRetired("NEW-BADGE"));
+    await waitFor(() => expect(refreshRoster).toHaveBeenCalledTimes(1));
+    view.unmount();
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-new",
+        name: "New Operator",
+        login: "1002",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("NEW-BADGE"),
+        active: true,
+      },
+    ]);
+    resolveRefresh("updated");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(onAuthed).not.toHaveBeenCalled();
+  });
+
+  it("does not admit a removed operator when the roster changes during badge verification", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, [
+      {
+        operatorId: "op-revoked",
+        name: "Revoked Operator",
+        login: "1001",
+        role: "operator",
+        pinHash: await hashSecret("4821"),
+        badgeHash: await hashSecret("BADGE-OLD"),
+        active: true,
+      },
+    ]);
+    let announceVerification!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      announceVerification = resolve;
+    });
+    let resumeVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => {
+      resumeVerification = resolve;
+    });
+    const realVerifyBadge = crypto.verifyBadge;
+    const verifyBadgeSpy = vi.spyOn(crypto, "verifyBadge").mockImplementation(async (code, phc) => {
+      announceVerification();
+      await verificationGate;
+      return realVerifyBadge(code, phc);
+    });
+    const scanner = manualSource();
+    const onAuthed = vi.fn();
+    try {
+      render(
+        <OperatorLogin exec={exec} source={scanner.source} online={false} onAuthed={onAuthed} />,
+      );
+
+      act(() => scanner.scan("BADGE-OLD"));
+      await verificationStarted;
+      await replaceOperatorsMirror(exec, []);
+      resumeVerification();
+
+      expect(await screen.findByText("Badge not recognized")).toBeDefined();
+      expect(onAuthed).not.toHaveBeenCalled();
+    } finally {
+      resumeVerification();
+      verifyBadgeSpy.mockRestore();
+    }
+  });
+
+  it("does not admit a deactivated operator when the roster changes during PIN verification", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const operator = {
+      operatorId: "op-deactivated",
+      name: "Deactivated Operator",
+      login: "1002",
+      role: "operator",
+      pinHash: await hashSecret("4821"),
+      badgeHash: null,
+      active: true,
+    };
+    await replaceOperatorsMirror(exec, [operator]);
+    let announceVerification!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      announceVerification = resolve;
+    });
+    let resumeVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => {
+      resumeVerification = resolve;
+    });
+    const realVerifyPin = crypto.verifyPin;
+    const verifyPinSpy = vi.spyOn(crypto, "verifyPin").mockImplementation(async (pin, phc) => {
+      announceVerification();
+      await verificationGate;
+      return realVerifyPin(pin, phc);
+    });
+    const onAuthed = vi.fn();
+    try {
+      render(
+        <OperatorLogin exec={exec} source={silentSource} online={false} onAuthed={onAuthed} />,
+      );
+      openNumericFallback();
+      for (const digit of "1002") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await verificationStarted;
+      await replaceOperatorsMirror(exec, [{ ...operator, active: false }]);
+      resumeVerification();
+
+      expect(await screen.findByText("Wrong personnel number or PIN")).toBeDefined();
+      expect(onAuthed).not.toHaveBeenCalled();
+    } finally {
+      resumeVerification();
+      verifyPinSpy.mockRestore();
+    }
+  });
+
+  it("does not admit an old PIN when its verifier rotates during authentication", async () => {
+    const exec = makeExec();
+    await applyMigrations(exec);
+    const operator = {
+      operatorId: "op-rotated",
+      name: "Rotated Operator",
+      login: "1003",
+      role: "operator",
+      pinHash: await hashSecret("4821"),
+      badgeHash: null,
+      active: true,
+    };
+    await replaceOperatorsMirror(exec, [operator]);
+    let announceVerification!: () => void;
+    const verificationStarted = new Promise<void>((resolve) => {
+      announceVerification = resolve;
+    });
+    let resumeVerification!: () => void;
+    const verificationGate = new Promise<void>((resolve) => {
+      resumeVerification = resolve;
+    });
+    const realVerifyPin = crypto.verifyPin;
+    const verifyPinSpy = vi.spyOn(crypto, "verifyPin").mockImplementation(async (pin, phc) => {
+      announceVerification();
+      await verificationGate;
+      return realVerifyPin(pin, phc);
+    });
+    const onAuthed = vi.fn();
+    try {
+      render(
+        <OperatorLogin exec={exec} source={silentSource} online={false} onAuthed={onAuthed} />,
+      );
+      openNumericFallback();
+      for (const digit of "1003") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Next" }));
+      for (const digit of "4821") fireEvent.click(screen.getByRole("button", { name: digit }));
+      fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await verificationStarted;
+      await replaceOperatorsMirror(exec, [{ ...operator, pinHash: await hashSecret("8642") }]);
+      resumeVerification();
+
+      expect(await screen.findByText("Wrong personnel number or PIN")).toBeDefined();
+      expect(onAuthed).not.toHaveBeenCalled();
+    } finally {
+      resumeVerification();
+      verifyPinSpy.mockRestore();
+    }
   });
 });

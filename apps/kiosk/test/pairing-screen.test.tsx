@@ -6,8 +6,14 @@ import type { ScanListener } from "../src/scanner/source.js";
 import type * as CacheModule from "../src/store/cache.js";
 import type * as ConfigModule from "../src/store/config.js";
 import { readSnapshot } from "../src/store/cache.js";
-import { readConfig, type KioskConfig } from "../src/store/config.js";
+import { readConfig, writeConfig, type KioskConfig } from "../src/store/config.js";
 import { Pairing } from "../src/screens/Pairing.js";
+import {
+  activateBoxRegistryPage,
+  beginBoxRegistryStage,
+  lookupBox,
+  readBoxRegistryMeta,
+} from "../src/store/box-registry.js";
 
 /**
  * The screen imports its two writes directly, so the module boundary is the
@@ -38,7 +44,7 @@ vi.mock("../src/store/config.js", async (importOriginal) => {
     ...actual,
     writeConfig: async (cfg: KioskConfig) => {
       await writes.writeConfig(cfg);
-      await actual.writeConfig(cfg);
+      return actual.writeConfig(cfg);
     },
   };
 });
@@ -58,12 +64,23 @@ function bundle(generatedAt = "2026-07-28T07:00:00.000Z"): PairKioskResultDto {
         startsAt: "2026-07-01T00:00:00.000Z",
         endsAt: "2026-08-31T00:00:00.000Z",
       },
+      branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+      pickupPolicy: { limitsEnabled: true },
       config: { dayLimitPerEmployee: 5, showPrices: true },
       badgeSalt: "c2FsdA==",
       reasons: [{ id: "r1", name: "Брак" }],
       products: [],
       employees: [
-        { id: "e1", fullName: "Иванов И.", role: null, badgeHash: null, takenTodayElsewhere: 0 },
+        {
+          id: "e1",
+          fullName: "Иванов И.",
+          role: null,
+          badgeHash: null,
+          limitMode: "limited",
+          dayLimit: 5,
+          canWriteoff: true,
+          takenTodayElsewhere: 0,
+        },
       ],
       operators: [],
     },
@@ -204,8 +221,10 @@ describe("Pairing", () => {
     expect(details.contains(scannerSetupButton())).toBe(true);
     expect(keypad.contains(submitButton())).toBe(true);
     expect(submitButton().classList.contains("kiosk-control")).toBe(true);
+    expect(screen.getByLabelText("Маркиро")).toBeDefined();
+    expect(document.querySelectorAll(".kiosk-pairing__code-cell")).toHaveLength(8);
     expect(screen.getAllByRole("button", { name: "Clear" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "Backspace" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Backspace" })).toBeDefined();
   });
 
   it("enables the submit only once all eight digits are entered", () => {
@@ -254,6 +273,7 @@ describe("Pairing", () => {
       kioskName: "Склад №1",
       place: "Проходная",
       nextDeviceSeq: 7,
+      credentialGeneration: expect.any(String),
     });
     // The pair response embeds the bootstrap precisely so the device is usable
     // immediately -- a second round trip here would strand a kiosk paired at a
@@ -267,6 +287,57 @@ describe("Pairing", () => {
     expect(writes.replaceSnapshot.mock.invocationCallOrder[0]!).toBeLessThan(
       writes.writeConfig.mock.invocationCallOrder[0]!,
     );
+  });
+
+  it("clears a prior installation's registry when pairing binds this tablet elsewhere", async () => {
+    const oldBinding = { serverUrl: "https://old.example", kioskId: "old-kiosk" };
+    const oldConfig = await writeConfig({
+      ...oldBinding,
+      token: "old-token",
+      kioskName: "Old",
+      place: null,
+      nextDeviceSeq: 0,
+    });
+    const oldCut = {
+      binding: oldBinding,
+      credentialGeneration: oldConfig.credentialGeneration!,
+      owner: "seed",
+      since: null,
+      until: "99",
+    };
+    await beginBoxRegistryStage(oldCut);
+    await activateBoxRegistryPage(
+      oldCut,
+      [
+        {
+          kind: "upsert",
+          boxId: "00000000-0000-4000-8000-000000000001",
+          sscc: "346006820000000021",
+          productId: "00000000-0000-4000-8000-000000000002",
+          bottleCount: 1,
+          contentKeys: ["member"],
+          updatedAt: "2026-07-28T07:00:00Z",
+        },
+      ],
+      "2026-07-28T07:00:00Z",
+    );
+    stubFetch(() => Promise.resolve(okResponse(bundle())));
+    render(
+      <Pairing
+        defaultServerUrl={SERVER}
+        subscribe={fakeFanOut().subscribe}
+        onPaired={vi.fn()}
+        onConfigureScanner={vi.fn()}
+      />,
+    );
+
+    typeDigits("12345678");
+    fireEvent.click(submitButton());
+    await handOver();
+
+    const nextBinding = { serverUrl: SERVER, kioskId: "k-1" };
+    expect(await readBoxRegistryMeta(nextBinding)).toBeNull();
+    expect(await lookupBox(oldBinding, "346006820000000021")).toBeNull();
   });
 
   /**
@@ -626,7 +697,7 @@ describe("Pairing", () => {
     );
 
     expect(scanner.joins()).toBe(1);
-    scanner.emit(" 12345678 ");
+    scanner.emit("12345678");
 
     expect(codeDisplay().textContent).toBe("12345678");
     expect(submitButton().disabled).toBe(false);
@@ -668,7 +739,7 @@ describe("Pairing", () => {
     expect(screen.queryByText("Waiting for the scan")).toBeNull();
 
     fireEvent.click(scanButton());
-    scanner.emit(" 12345678 ");
+    scanner.emit("12345678");
     expect(codeDisplay().textContent).toBe("12345678");
     // ...and it ends when what it waited for arrives.
     expect(screen.queryByText("Waiting for the scan")).toBeNull();
@@ -689,7 +760,7 @@ describe("Pairing", () => {
     );
 
     expect(scanButton()).toBeDefined();
-    scanner.emit(" 12345678 ");
+    scanner.emit("12345678");
 
     expect(codeDisplay().textContent).toBe("12345678");
     expect(submitButton().disabled).toBe(false);
@@ -747,8 +818,25 @@ describe("Pairing", () => {
     expect(codeDisplay().textContent).toBe("");
     expect(submitButton().disabled).toBe(true);
 
-    // Still listening: the real code lands without anything being pressed.
-    scanner.emit(" 12345678 ");
+    // Arbitrary non-digits are payload, not transport framing. Removing them
+    // would turn a different scanner value into a valid credential.
+    for (const raw of ["12AB345678", "1234-5678", "X12345678", "12345678#"]) {
+      scanner.emit(raw);
+      expect(codeDisplay().textContent).toBe("");
+      expect(submitButton().disabled).toBe(true);
+    }
+
+    // The listener contract is already post-transport: framing and terminators
+    // were removed by the source. Any whitespace delivered here is payload and
+    // must not be canonicalised into a credential.
+    for (const raw of [" 12345678", "12345678 ", "\t12345678", "12345678\r\n"]) {
+      scanner.emit(raw);
+      expect(codeDisplay().textContent).toBe("");
+      expect(submitButton().disabled).toBe(true);
+    }
+
+    // Still listening: the exact raw code lands without a reset.
+    scanner.emit("12345678");
     expect(codeDisplay().textContent).toBe("12345678");
     expect(screen.queryByRole("alert")).toBeNull();
     expect(submitButton().disabled).toBe(false);

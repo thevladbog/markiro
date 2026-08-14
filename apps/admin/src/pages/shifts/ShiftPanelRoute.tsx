@@ -18,6 +18,7 @@ import {
   type UpdateShiftInput,
 } from "./api.js";
 import { ShiftForm, type ShiftFormValues } from "./ShiftForm.js";
+import { localCalendarDate } from "./date.js";
 
 export interface ShiftsPanelContext {
   shifts: ShiftDto[];
@@ -151,6 +152,7 @@ function EditShiftPanel() {
   const { context, close } = usePanelContext();
   const mutation = useUpdateShift();
   const [error, setError] = useState<string | null>(null);
+  const [criticalInput, setCriticalInput] = useState<UpdateShiftInput | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
   const shift = context.shifts.find((item) => item.id === shiftId);
   const initialValues = useMemo<ShiftFormValues | undefined>(
@@ -160,7 +162,7 @@ function EditShiftPanel() {
             productId: shift.productId,
             mode: shift.mode,
             plannedQty: shift.plannedQty === null ? "" : String(shift.plannedQty),
-            plannedDate: shift.plannedDate ?? "",
+            plannedDate: shift.plannedDate ?? localCalendarDate(shift.openedAt) ?? "",
             lineId: shift.lineId ?? "",
             counterpartyId: shift.counterpartyId ?? "",
             labelTemplateId: shift.labelTemplateId ?? "",
@@ -181,6 +183,7 @@ function EditShiftPanel() {
       shift?.labelTemplateId,
       shift?.lineId,
       shift?.mode,
+      shift?.openedAt,
       shift?.palletCapacity,
       shift?.palletsEnabled,
       shift?.plannedDate,
@@ -203,10 +206,34 @@ function EditShiftPanel() {
       </SidePanel>
     );
   }
+
+  const persist = async (input: UpdateShiftInput) => {
+    try {
+      setError(null);
+      await mutation.mutateAsync({ id: shift.id, input });
+      toast(
+        "ok",
+        t(
+          shift.status === "active"
+            ? "pages.shifts.toasts.updateActiveSuccess"
+            : "pages.shifts.toasts.updateSuccess",
+        ),
+        shift.status === "active" ? 8_000 : 4_000,
+      );
+      guard.finish();
+    } catch (cause) {
+      setCriticalInput(null);
+      setError(
+        cause instanceof ApiRequestError ? cause.message : t("pages.shifts.toasts.updateError"),
+      );
+    }
+  };
+
   return (
     <>
       <ShiftForm
         mode="edit"
+        editStatus={shift.status}
         initialValues={initialValues}
         products={context.products}
         lines={context.lines}
@@ -217,18 +244,25 @@ function EditShiftPanel() {
         onDirtyChange={guard.setDirty}
         onClose={guard.requestClose}
         onSubmit={async (input: CreateShiftInput | UpdateShiftInput) => {
-          try {
-            setError(null);
-            await mutation.mutateAsync({ id: shift.id, input });
-            toast("ok", t("pages.shifts.toasts.updateSuccess"));
-            guard.finish();
-          } catch (cause) {
-            setError(
-              cause instanceof ApiRequestError
-                ? cause.message
-                : t("pages.shifts.toasts.updateError"),
-            );
+          if (shift.status === "active") {
+            setCriticalInput(input);
+          } else {
+            await persist(input);
           }
+        }}
+      />
+      <ConfirmDialog
+        open={criticalInput !== null}
+        title={t("pages.shifts.activeEdit.title")}
+        description={<Alert tone="warn">{t("pages.shifts.activeEdit.description")}</Alert>}
+        cancelLabel={t("pages.shifts.activeEdit.cancel")}
+        confirmLabel={t("pages.shifts.activeEdit.confirm")}
+        busy={mutation.isPending}
+        onCancel={() => {
+          if (!mutation.isPending) setCriticalInput(null);
+        }}
+        onConfirm={() => {
+          if (criticalInput) void persist(criticalInput);
         }}
       />
       <DiscardDialog

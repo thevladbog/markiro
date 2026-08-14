@@ -73,6 +73,33 @@ it("keeps list search state while the create panel uses a nested route", async (
   expect((screen.getByLabelText("Поиск") as HTMLInputElement).value).toBe("milk");
 });
 
+it("rasterizes a selected product photo into a canvas preview instead of a DOM URL sink", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => jsonResponse(200, { items: [] })),
+  );
+  vi.stubGlobal(
+    "createImageBitmap",
+    vi.fn(async () => ({ width: 10, height: 5, close: vi.fn() })),
+  );
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    clearRect: vi.fn(),
+    drawImage: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const objectUrl = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:untrusted-preview");
+  const { user } = renderCreatePanel();
+
+  await user.upload(
+    await screen.findByLabelText("Фотография продукта"),
+    new File(["not-really-a-png"], "photo.png", { type: "image/png" }),
+  );
+
+  expect(await screen.findByRole("img", { name: "Фотография продукта" })).toBeInstanceOf(
+    HTMLCanvasElement,
+  );
+  expect(objectUrl).not.toHaveBeenCalled();
+});
+
 it("blocks Back until a dirty product form is explicitly discarded", async () => {
   vi.stubGlobal(
     "fetch",

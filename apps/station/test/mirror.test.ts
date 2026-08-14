@@ -81,6 +81,7 @@ describe("mirror", () => {
   it("applies migrations then upserts a bundle and reads it back offline", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);
+    await replaceOperatorsMirror(exec, bundle.operators);
     await upsertBundle(exec, bundle);
 
     const shift = await readShiftMirror(exec, "s1");
@@ -190,7 +191,7 @@ describe("mirror", () => {
     expect(rows[0]).toEqual({ product_id: "p2", product_name: "Sprite" });
   });
 
-  it("replaces the full operator set: a removed operator is deleted from the mirror", async () => {
+  it("does not publish the unversioned operator set carried by a shift bundle", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);
 
@@ -204,25 +205,20 @@ describe("mirror", () => {
       active: true,
     };
 
-    await upsertBundle(exec, { ...bundle, operators: [...bundle.operators, operatorB] });
-    let ops = await readOperatorsMirror(exec);
-    expect(ops.map((o) => o.operatorId).sort()).toEqual(["op1", "op2"]);
-
-    // Next refresh's bundle only carries operator A: B was removed server-side
-    // and must stop being able to authenticate offline.
+    await replaceOperatorsMirror(exec, [operatorB]);
     await upsertBundle(exec, bundle);
-    ops = await readOperatorsMirror(exec);
-    expect(ops.map((o) => o.operatorId)).toEqual(["op1"]);
+    const ops = await readOperatorsMirror(exec);
+    expect(ops.map((o) => o.operatorId)).toEqual(["op2"]);
   });
 
-  it("an empty-operators bundle clears the operators mirror entirely", async () => {
+  it("an empty-operators bundle leaves the authoritative roster intact", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);
-    await upsertBundle(exec, bundle);
+    await replaceOperatorsMirror(exec, bundle.operators);
     expect(await readOperatorsMirror(exec)).toHaveLength(1);
 
     await upsertBundle(exec, { ...bundle, operators: [] });
-    expect(await readOperatorsMirror(exec)).toEqual([]);
+    expect(await readOperatorsMirror(exec)).toEqual(bundle.operators);
   });
 
   it("round-trips an operator login and tolerates re-running the migrations", async () => {

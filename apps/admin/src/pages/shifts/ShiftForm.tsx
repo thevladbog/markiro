@@ -21,7 +21,7 @@ import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
 import type { ProductDto } from "../catalog/api.js";
 import type { LabelTemplateSummaryDto } from "../labels/api.js";
-import type { CreateShiftInput, LineDto, UpdateShiftInput } from "./api.js";
+import type { CreateShiftInput, LineDto, ShiftStatus, UpdateShiftInput } from "./api.js";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
 
@@ -69,6 +69,7 @@ export type ShiftFormValues = z.infer<typeof shiftFormSchema>;
 
 export interface ShiftFormProps {
   mode: "create" | "edit";
+  editStatus?: ShiftStatus;
   initialValues?: ShiftFormValues;
   /** All products (both draft and active) -- draft ones render disabled with a hint. */
   products: ProductDto[];
@@ -106,6 +107,7 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
 
 export function ShiftForm({
   mode: formMode,
+  editStatus,
   initialValues,
   products,
   lines,
@@ -142,7 +144,7 @@ export function ShiftForm({
     reset,
     watch,
     setValue,
-    formState: { errors, isDirty },
+    formState: { errors, isDirty, dirtyFields },
   } = useForm<ShiftFormValues>({
     resolver: zodResolver(shiftFormSchema),
     defaultValues: initialValues ?? EMPTY_VALUES,
@@ -156,6 +158,7 @@ export function ShiftForm({
   const ssccIssuerCounterpartyId = watch("ssccIssuerCounterpartyId");
   const boxLabelTemplateId = watch("boxLabelTemplateId");
   const palletsEnabled = watch("palletsEnabled");
+  const activeEdit = formMode === "edit" && editStatus === "active";
 
   const isDirtyRef = useRef(false);
 
@@ -233,12 +236,22 @@ export function ShiftForm({
 
   const submit = handleSubmit(async (values) => {
     await onSubmit(
-      toPayload(values, formMode, {
-        counterparty: counterpartyTouchedRef.current,
-        labelTemplate: labelTemplateTouchedRef.current,
-        ssccIssuer: ssccIssuerTouchedRef.current,
-        boxLabelTemplate: boxLabelTemplateTouchedRef.current,
-      }),
+      toPayload(
+        values,
+        formMode,
+        {
+          counterparty: counterpartyTouchedRef.current,
+          labelTemplate: labelTemplateTouchedRef.current,
+          ssccIssuer: ssccIssuerTouchedRef.current,
+          boxLabelTemplate: boxLabelTemplateTouchedRef.current,
+        },
+        editStatus,
+        {
+          lineId: dirtyFields.lineId === true,
+          plannedQty: dirtyFields.plannedQty === true,
+          plannedDate: dirtyFields.plannedDate === true,
+        },
+      ),
     );
   });
 
@@ -345,6 +358,7 @@ export function ShiftForm({
                     { value: "aggregation", label: t("pages.shifts.form.modeAggregation") },
                   ]}
                   value={field.value}
+                  disabled={activeEdit}
                   onValueChange={field.onChange}
                 />
               )}
@@ -396,6 +410,7 @@ export function ShiftForm({
               label={t("pages.shifts.form.counterpartyLabel")}
               options={counterpartyOptions}
               value={counterpartyId ?? ""}
+              disabled={activeEdit}
               onValueChange={(value) => {
                 counterpartyTouchedRef.current = true;
                 setValue("counterpartyId", value, { shouldDirty: true, shouldValidate: true });
@@ -406,6 +421,7 @@ export function ShiftForm({
                 label={t("pages.shifts.form.ssccIssuerLabel")}
                 options={ssccIssuerOptions}
                 value={ssccIssuerCounterpartyId ?? ""}
+                disabled={activeEdit}
                 hint={t("pages.shifts.form.ssccIssuerHint")}
                 onValueChange={(value) => {
                   ssccIssuerTouchedRef.current = true;
@@ -422,15 +438,17 @@ export function ShiftForm({
         <section className="mk-shift-form__section">
           <h3>{t("pages.shifts.sections.templates")}</h3>
           <div className="mk-shift-form__grid">
-            <Select
-              label={t("pages.shifts.form.labelTemplateLabel")}
-              options={labelTemplateOptions}
-              value={labelTemplateId ?? ""}
-              onValueChange={(value) => {
-                labelTemplateTouchedRef.current = true;
-                setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
-              }}
-            />
+            {!activeEdit ? (
+              <Select
+                label={t("pages.shifts.form.labelTemplateLabel")}
+                options={labelTemplateOptions}
+                value={labelTemplateId ?? ""}
+                onValueChange={(value) => {
+                  labelTemplateTouchedRef.current = true;
+                  setValue("labelTemplateId", value, { shouldDirty: true, shouldValidate: true });
+                }}
+              />
+            ) : null}
             <Select
               label={t("pages.shifts.form.boxLabelTemplateLabel")}
               options={boxLabelTemplateOptions}
@@ -455,6 +473,7 @@ export function ShiftForm({
                 mono
                 inputMode="numeric"
                 {...errorProp(translateFieldError(t, errors.boxCapacity?.message))}
+                disabled={activeEdit}
                 {...register("boxCapacity")}
               />
               <Controller
@@ -464,6 +483,7 @@ export function ShiftForm({
                   <Checkbox
                     label={t("pages.shifts.form.palletsEnabledLabel")}
                     checked={field.value}
+                    disabled={activeEdit}
                     onCheckedChange={field.onChange}
                   />
                 )}
@@ -474,6 +494,7 @@ export function ShiftForm({
                   mono
                   inputMode="numeric"
                   {...errorProp(translateFieldError(t, errors.palletCapacity?.message))}
+                  disabled={activeEdit}
                   {...register("palletCapacity")}
                 />
               ) : null}
@@ -513,6 +534,9 @@ export function ShiftForm({
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
  *   when hidden (`mode === "validation"`), where they're not applicable.
+ * - Active-shift edits send `lineId`, `plannedQty`, and `plannedDate` only
+ *   when their final value differs from the form default. This prevents a
+ *   stale edit panel from overwriting a concurrent correction.
  * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`,
  *   `palletsEnabled`) is always sent as shown, matching the simpler
  *   full-form-resend convention `ProductForm`/`CounterpartyForm` already use.
@@ -529,6 +553,12 @@ function toPayload(
     labelTemplate: boolean;
     ssccIssuer: boolean;
     boxLabelTemplate: boolean;
+  },
+  editStatus?: ShiftStatus,
+  changed: { lineId: boolean; plannedQty: boolean; plannedDate: boolean } = {
+    lineId: true,
+    plannedQty: true,
+    plannedDate: true,
   },
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
@@ -547,6 +577,17 @@ function toPayload(
     plannedQty: plannedQty ? Number(plannedQty) : null,
     plannedDate: plannedDate ? plannedDate : null,
   };
+
+  if (formMode === "edit" && editStatus === "active") {
+    const activePayload: UpdateShiftInput = {};
+    if (changed.lineId) activePayload.lineId = lineId ? lineId : null;
+    if (changed.plannedQty) activePayload.plannedQty = plannedQty ? Number(plannedQty) : null;
+    if (changed.plannedDate) activePayload.plannedDate = plannedDate ? plannedDate : null;
+    if (touched.boxLabelTemplate) {
+      activePayload.boxLabelTemplateId = boxLabelTemplateId ? boxLabelTemplateId : null;
+    }
+    return activePayload;
+  }
 
   if (touched.counterparty) {
     payload.counterpartyId = counterpartyId ? counterpartyId : null;

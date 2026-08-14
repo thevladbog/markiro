@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CreateOrderResultDto, OrderConflict } from "../api/types.js";
+import type { BoxConflictReason, CreateOrderResultDto, OrderConflict } from "../api/types.js";
 import type { CartState } from "../session/cart.js";
-import { formatMoney, moneyFormat, totalKopecks, UNPRICED } from "./money.js";
+import { acceptedTotalKopecks, kioskOutcomeOf } from "../session/flow.js";
+import { formatMoney, moneyFormat, UNPRICED } from "./money.js";
 
 /**
  * How long the confirmation stands before the kiosk returns to the idle
@@ -37,13 +38,13 @@ export interface DoneProps {
    * are cart-screen business, and a confirmation with a `notice` in its props is
    * a confirmation somebody will eventually render a banner on.
    */
-  cart: Pick<CartState, "items" | "reason">;
+  cart: Pick<CartState, "lines" | "reason">;
   /**
    * `bootstrap.config.showPrices`. Money is hidden device-wide when it is
    * false, and this screen must not be the one that leaks it back.
    */
   showPrices: boolean;
-  onReset: () => void;
+  onReset: () => void | Promise<void>;
 }
 
 /** The words for the reason, borrowed from the screen the worker chose it on.
@@ -93,6 +94,16 @@ const CONFLICT_REASON: Record<OrderConflict["reason"], string> = {
   not_allowed: "done.conflictReason.not_allowed",
   duplicate: "done.conflictReason.duplicate",
   over_limit: "done.conflictReason.over_limit",
+};
+
+const BOX_CONFLICT_REASON: Record<BoxConflictReason, string> = {
+  unknown_box: "done.boxConflictReason.unknown_box",
+  box_not_closed: "done.boxConflictReason.box_not_closed",
+  box_disassembled: "done.boxConflictReason.box_disassembled",
+  box_contents_changed: "done.boxConflictReason.box_contents_changed",
+  mixed_product_box: "done.boxConflictReason.mixed_product_box",
+  duplicate: "done.boxConflictReason.duplicate",
+  over_limit: "done.boxConflictReason.over_limit",
 };
 
 /**
@@ -146,40 +157,74 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
    */
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const spent = useRef(false);
+  const mounted = useRef(false);
+  const resetRef = useRef<() => void>(() => undefined);
+  const [resetting, setResetting] = useState(false);
+
+  const armTimer = useCallback(() => {
+    if (!mounted.current) return;
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = setTimeout(() => resetRef.current(), AUTO_RESET_MS);
+  }, []);
 
   const reset = useCallback(() => {
     if (spent.current) return;
     spent.current = true;
+    setResetting(true);
     if (timer.current !== null) {
       clearTimeout(timer.current);
       timer.current = null;
     }
-    latest.current();
-  }, []);
+    void Promise.resolve(latest.current()).catch(() => {
+      if (!mounted.current) return;
+      spent.current = false;
+      setResetting(false);
+      armTimer();
+    });
+  }, [armTimer]);
+  resetRef.current = reset;
 
   useEffect(() => {
-    timer.current = setTimeout(reset, AUTO_RESET_MS);
+    mounted.current = true;
+    armTimer();
     // Cleared on unmount, always. A timer that outlives this screen is one
     // leaked timer per order, each still holding the shell's `onReset`: the
     // kiosk would throw the NEXT worker back to idle mid-cart, on a schedule
     // set by somebody else's order.
     return () => {
+      mounted.current = false;
       if (timer.current !== null) {
         clearTimeout(timer.current);
         timer.current = null;
       }
     };
-  }, [reset]);
+  }, [armTimer]);
 
   // An empty `orderNo` is the server's way of saying it took nothing at all,
   // not a number it forgot to send.
   const orderNo = result && result.orderNo !== "" ? result.orderNo : null;
   const refused = result !== null && orderNo === null;
+  const outcome = kioskOutcomeOf(0, result, { ...cart, writeoffReasonId: null, notice: null });
+  const partial = outcome.kind === "partial";
+  const tone = result === null ? "warning" : refused || partial ? "error" : "success";
   // With a result this is the server's ACCEPTED count (`remaining.length`
   // server-side); offline it is what the worker scanned. Both are honest
   // answers to «how much is in this order», which is what the chip asks.
-  const count = result ? result.itemCount : cart.items.length;
+  const count = result
+    ? result.itemCount
+    : cart.lines.reduce((sum, line) => sum + line.bottleCount, 0);
   const conflicts = result?.conflicts ?? [];
+  const boxConflicts = result?.boxConflicts ?? [];
+  const visibleConflicts = [
+    ...conflicts.map((value) => ({ kind: "km", value }) as const),
+    ...boxConflicts.map((value) => ({ kind: "box", value }) as const),
+  ].slice(0, 2);
+  const hiddenConflictCount = Math.max(
+    0,
+    conflicts.length + boxConflicts.length - visibleConflicts.length,
+  );
+  const refusedCount =
+    conflicts.length + boxConflicts.reduce((sum, conflict) => sum + (conflict.bottleCount ?? 1), 0);
 
   const money = useMemo(() => moneyFormat(i18n.language), [i18n.language]);
   /**
@@ -200,7 +245,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
    * Offline (`result === null`) there are no conflicts to know about yet, and
    * the cart IS the order — so the sum is exactly what the worker handed over.
    */
-  const total = conflicts.length > 0 ? null : totalKopecks(cart.items);
+  const total = acceptedTotalKopecks(result, cart);
 
   // «Покупка · 3 шт · 269,70 ₽» — design 2026-07-24 §8.3's «сводка (причина ·
   // штук · сумма)». The money half is simply absent, not blanked, on a kiosk
@@ -220,19 +265,35 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         height="104"
         viewBox="0 0 24 24"
         fill="none"
-        stroke={refused ? "var(--warn-fg)" : "var(--ok-solid)"}
+        stroke={
+          tone === "success"
+            ? "var(--ok-solid)"
+            : tone === "warning"
+              ? "var(--warn-fg)"
+              : "var(--err-solid)"
+        }
         strokeWidth="2"
         aria-hidden="true"
         focusable="false"
       >
         <rect x="2" y="2" width="20" height="20" />
-        {refused ? <path d="M12 7v6M12 16.5v.5" /> : <path d="M7 12.5l3.5 3.5L17 8.5" />}
+        {refused || partial ? <path d="M12 7v6M12 16.5v.5" /> : <path d="M7 12.5l3.5 3.5L17 8.5" />}
       </svg>
 
       <div
         role="status"
+        data-tone={tone}
         style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 10 }}
       >
+        <strong className="kiosk-done__verdict">
+          {result === null
+            ? t("done.verdictQueued")
+            : refused
+              ? t("done.verdictRejected")
+              : partial
+                ? t("done.verdictPartial")
+                : t("done.verdictAccepted")}
+        </strong>
         <h1
           style={{
             margin: 0,
@@ -301,7 +362,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         </span>
       ) : null}
 
-      {conflicts.length > 0 ? (
+      {refusedCount > 0 ? (
         // `role="alert"`, like `Cart`'s banner: this is the one thing on the
         // screen the worker must not walk past.
         <div
@@ -321,7 +382,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
           }}
         >
           <span style={{ font: "700 22px/28px var(--font-ui)", color: "var(--warn-fg)" }}>
-            {t("done.conflictsTitle", { n: conflicts.length })}
+            {t("done.conflictsTitle", { n: refusedCount })}
           </span>
           <ul
             style={{
@@ -332,16 +393,30 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
               color: "var(--fg-2)",
             }}
           >
-            {conflicts.map((item, index) => (
-              // The index is part of the key because the same code can legally
-              // appear twice in one submission (that is what `duplicate`
-              // means), so `rawKm` alone is not unique. Nothing here reorders,
-              // so an index key is stable for this list's whole lifetime.
-              <li key={`${item.rawKm}-${item.reason}-${index}`}>
-                {t(CONFLICT_REASON[item.reason] ?? UNRECOGNISED_REASON)}
-              </li>
-            ))}
+            {visibleConflicts.map((conflict, index) =>
+              conflict.kind === "km" ? (
+                <li key={`km-${conflict.value.reason}-${index}`}>
+                  {t(CONFLICT_REASON[conflict.value.reason] ?? UNRECOGNISED_REASON)}
+                </li>
+              ) : (
+                <li key={`box-${conflict.value.sscc}-${conflict.value.reason}-${index}`}>
+                  {t("done.boxRejected", {
+                    sscc: conflict.value.sscc.slice(-6),
+                    count: conflict.value.bottleCount ?? 1,
+                    reason: t(
+                      BOX_CONFLICT_REASON[conflict.value.reason] ?? "done.boxConflictReason.other",
+                      { n: conflict.value.bottleCount ?? 1 },
+                    ),
+                  })}
+                </li>
+              ),
+            )}
           </ul>
+          {hiddenConflictCount > 0 ? (
+            <span className="kiosk-done__conflicts-more">
+              {t("done.conflictsMore", { count: hiddenConflictCount })}
+            </span>
+          ) : null}
           <span style={{ font: "400 17px/24px var(--font-ui)", color: "var(--fg-2)" }}>
             {t("done.conflictsHint")}
           </span>
@@ -352,6 +427,7 @@ export function Done({ result, cart, showPrices, onReset }: DoneProps): React.JS
         className="kiosk-control"
         type="button"
         onClick={reset}
+        disabled={resetting}
         style={{
           height: 72,
           padding: "0 48px",

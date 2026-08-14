@@ -482,3 +482,42 @@
     justify-content: flex-end;
   }
 }
+.mk-employees-bulk {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-card);
+}
+
+.mk-employees-bulk__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-4);
+}
+
+.mk-employees-bulk__group,
+.mk-employee-pickup-policy-section__form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.mk-employee-pickup-policy-section {
+  scroll-margin-top: var(--sp-4);
+}
+
+.mk-employee-pickup-policy-section__title {
+  margin: 0 0 var(--sp-3);
+  font: var(--text-h3);
+  color: var(--fg-1);
+}
+
+@media (max-width: 900px) {
+  .mk-employees-bulk__actions {
+    grid-template-columns: 1fr;
+  }
+}

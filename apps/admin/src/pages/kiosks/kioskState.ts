@@ -4,7 +4,10 @@ import { resolveDateTimeLocale } from "../../lib/datetime.js";
 export type KioskOperationalState = "archived" | "awaiting-pairing" | "online" | "offline";
 export type KioskStateFilter = "all" | KioskOperationalState;
 
-export const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+/** Kiosks heartbeat through their five-minute bootstrap refresh. Keep one
+ * minute of request/polling tolerance so a healthy device is not labelled
+ * offline between two expected heartbeats. */
+export const ONLINE_THRESHOLD_MS = 6 * 60 * 1000;
 
 export function getKioskOperationalState(
   kiosk: Pick<KioskDto, "status" | "enrolled" | "lastSeenAt">,

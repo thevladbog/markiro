@@ -1,10 +1,20 @@
-import { useLayoutEffect } from "react";
+import { useLayoutEffect, useRef } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 
 import i18n from "../i18n/index.js";
+import type { BoxPrintErrorCode } from "../lib/boxes.js";
+import type { RecentOperation } from "../lib/journal.js";
+import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
 import { StationScreen } from "../ui/StationScreen.js";
+import { WindowModeControl } from "../ui/WindowModeControl.js";
+import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
+import { RecentOperations } from "../ui/work/RecentOperations.js";
+import { ScanResultInstrument } from "../ui/work/ScanResultInstrument.js";
+import { WorkCounters } from "../ui/work/WorkCounters.js";
+import { WorkFooter } from "../ui/work/WorkFooter.js";
+import { buildWorkLabels } from "../ui/work/work-labels.js";
 import {
   getGalleryFixture,
   resolveGalleryRequest,
@@ -31,6 +41,12 @@ const COPY = {
     line: "Тестовая линия А",
     operator: "Оператор Тестов",
     shift: "Смена ДЕМО-01",
+    longStation: "Станция упаковки готовой продукции 01",
+    longLine: "Линия сериализации и агрегации готовой продукции А",
+    longOperator: "Александрова-Романовская Екатерина Владимировна",
+    longShift: "Смена производства маркированной продукции ДЕМО-01",
+    update: "Доступно критическое обновление 0.1.0-beta.123",
+    changeOperator: "Сменить оператора",
   },
   en: {
     back: "Back",
@@ -40,6 +56,12 @@ const COPY = {
     line: "Test line A",
     operator: "Sample Operator",
     shift: "Shift DEMO-01",
+    longStation: "Finished goods packaging station 01",
+    longLine: "Finished goods serialization and aggregation line A",
+    longOperator: "Alexandria Montgomery-Wellington the Third",
+    longShift: "Marked goods production shift DEMO-01",
+    update: "Critical update 0.1.0-beta.123 is available",
+    changeOperator: "Change operator",
   },
 } as const;
 
@@ -52,6 +74,36 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   }, [request.locale]);
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
+  const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
+  const headerControls =
+    headerVariant === null
+      ? null
+      : {
+          update: {
+            severity: "urgent" as const,
+            glyph: "!" as const,
+            available: true,
+            label: copy.update,
+          },
+          operatorControl: (
+            <Button size="floor" variant="secondary">
+              {copy.changeOperator}
+            </Button>
+          ),
+          windowControl: (
+            <WindowModeControl
+              snapshot={{
+                mode: "locked",
+                pending: false,
+                error: headerVariant === "window-error" ? "exit" : null,
+              }}
+              activeShift
+              onEnter={() => undefined}
+              onExit={() => undefined}
+              onDismissError={() => undefined}
+            />
+          ),
+        };
   return (
     <div
       className="station-gallery-capture"
@@ -60,16 +112,24 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
       data-gallery-locale={request.locale}
     >
       <FloorShell
-        stationName={copy.station}
-        lineName={copy.line}
-        operatorName={copy.operator}
-        shiftLabel={copy.shift}
-        online={syncVariant !== "offline"}
+        stationName={headerControls ? copy.longStation : copy.station}
+        lineName={headerControls ? copy.longLine : copy.line}
+        operatorName={headerControls ? copy.longOperator : copy.operator}
+        shiftLabel={headerControls ? copy.longShift : copy.shift}
+        serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
         scanner="connected"
         printerConfigured
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
         syncStuck={syncVariant === "stuck"}
         conflicts={fixture.kind === "conflicts" ? 4 : 0}
+        {...(headerControls
+          ? {
+              update: headerControls.update,
+              onOpenUpdates: () => undefined,
+              operatorControl: headerControls.operatorControl,
+              windowControl: headerControls.windowControl,
+            }
+          : {})}
       >
         <GalleryState fixture={fixture} locale={request.locale} />
       </FloorShell>
@@ -101,6 +161,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <SignalFixture tone={fixture.variant} locale={locale} />;
     case "box":
       return <BoxFixture full={fixture.variant === "full"} locale={locale} />;
+    case "box-print-recovery":
+      return <BoxPrintRecoveryFixture variant={fixture.variant} />;
     case "serial-recovery":
       return <SerialRecoveryFixture locale={locale} />;
     case "exception":
@@ -115,9 +177,26 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <PrintFixture variant={fixture.variant} locale={locale} />;
     case "updates":
       return <UpdateFixture variant={fixture.variant} locale={locale} />;
+    case "floor-header":
+      return <FloorHeaderFixture locale={locale} />;
     case "long-copy":
       return <LongCopyFixture locale={fixture.variant === "en" ? "en" : "ru"} />;
   }
+}
+
+function FloorHeaderFixture({ locale }: { locale: GalleryLocale }) {
+  const ru = locale === "ru";
+  return (
+    <StationScreen title={ru ? "Проверка верхней панели" : "Floor header review"}>
+      <div className="gallery-centered-card">
+        <p className="gallery-state-message">
+          {ru
+            ? "Проверьте читаемость действий и отсутствие перекрытий во всех поддерживаемых разрешениях."
+            : "Check action readability and absence of overlap at every supported viewport."}
+        </p>
+      </div>
+    </StationScreen>
+  );
 }
 
 function SystemFixture({ locale }: { locale: GalleryLocale }) {
@@ -442,39 +521,86 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const aggregation = mode === "aggregation";
+  const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
+  const operations = galleryRecentOperations();
   return (
-    <StationScreen
-      title={
-        aggregation
-          ? ru
-            ? "Агрегация короба"
-            : "Box aggregation"
-          : ru
-            ? "Проверка кодов"
-            : "Code validation"
-      }
-      actions={<GalleryFooter locale={locale} primary={ru ? "Исключения" : "Exceptions"} />}
-    >
-      <div className="gallery-work-grid">
-        <Card className="gallery-counter" title={ru ? "Принято" : "Accepted"}>
-          <strong>1 248</strong>
-        </Card>
-        <Card
-          className="gallery-counter"
-          title={aggregation ? (ru ? "В коробе" : "In box") : ru ? "Ошибки" : "Errors"}
-        >
-          <strong>{aggregation ? "18 / 24" : "3"}</strong>
-        </Card>
-        <Card
-          className="gallery-card gallery-wide"
-          title={ru ? "Последняя операция" : "Latest operation"}
-        >
-          <p className="gallery-mono">TEST-GTIN-04607000000042 · DEMO-SERIAL-000128</p>
-          <p>{ru ? "Синтетическая операция · 14:32:08" : "Synthetic operation · 14:32:08"}</p>
-        </Card>
+    <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
+      <div className="work-screen__content">
+        <div className="work-screen__instruments">
+          <div className="work-screen__primary">
+            <ScanResultInstrument
+              productName={ru ? "Тестовый товар А" : "Sample product A"}
+              counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
+              operation={operations[0] ?? null}
+              labels={workLabels.status}
+            />
+            {aggregation ? (
+              <BoxFillInstrument
+                box={{ boxId: "gallery-box-1", itemCount: 2 }}
+                ordinal={1}
+                acceptedToken="gallery-accepted-2"
+                capacity={20}
+                canUndo
+                labels={workLabels.box}
+                onClose={() => undefined}
+                onUndo={() => undefined}
+                onClear={() => undefined}
+              />
+            ) : null}
+          </div>
+          <aside className="work-screen__secondary" aria-label={workLabels.summary}>
+            <WorkCounters
+              accepted={1248}
+              rejected={3}
+              pendingSync={7}
+              locale={workLabels.locale}
+              labels={workLabels.counters}
+            />
+            <RecentOperations
+              operations={operations}
+              labels={workLabels.recent}
+              statusLabels={workLabels.status}
+              locale={workLabels.locale}
+            />
+          </aside>
+        </div>
       </div>
-    </StationScreen>
+      <WorkFooter
+        labels={workLabels.footer}
+        onExceptions={() => undefined}
+        onExit={() => undefined}
+      />
+    </main>
   );
+}
+
+function galleryRecentOperations(): RecentOperation[] {
+  const identityForSerial = (serial: string) => {
+    const crypto = [
+      { ai: "91" as const, value: "ABCD" },
+      {
+        ai: "92" as const,
+        value: "TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789",
+      },
+      { ai: "93" as const, value: "XYZ1" },
+    ];
+    return {
+      gtin14: "04607000000042",
+      serial,
+      crypto,
+      normalized: [
+        "(01)04607000000042",
+        `(21)${serial}`,
+        ...crypto.map(({ ai, value }) => `(${ai})${value}`),
+      ].join(" "),
+    };
+  };
+  return Array.from({ length: 6 }, (_, index) => ({
+    verdict: "ok",
+    scannedAt: `2026-08-13T14:32:0${8 - index}+03:00`,
+    codeSuffix: null,
+    identity: identityForSerial(`DEMO-SERIAL-00012${8 - index}`),
+  }));
 }
 
 function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: GalleryLocale }) {
@@ -545,25 +671,58 @@ function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }
 
 function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const capacity = full ? 120 : 20;
+  const itemCount = full ? capacity : 0;
+  const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
   return (
-    <StationScreen
-      title={ru ? "Текущий короб" : "Current box"}
-      actions={<GalleryFooter locale={locale} primary={ru ? "Закрыть короб" : "Close box"} />}
-    >
-      <div className="gallery-box">
-        <div className="gallery-box-count">
-          <strong>{full ? "24 / 24" : "0 / 24"}</strong>
-          <span>
-            {full ? (ru ? "Короб заполнен" : "Box is full") : ru ? "Короб пуст" : "Box is empty"}
-          </span>
-        </div>
-        <div className="gallery-box-meter">
-          <span style={{ width: full ? "100%" : "0%" }} />
-        </div>
-        <p className="gallery-mono">SSCC TEST 000000000000000000</p>
-      </div>
+    <StationScreen title={ru ? "Текущий короб" : "Current box"}>
+      <BoxFillInstrument
+        box={{ boxId: "gallery-box-standalone", itemCount }}
+        ordinal={1}
+        acceptedToken={full ? "gallery-full" : null}
+        capacity={capacity}
+        canUndo={itemCount > 0}
+        labels={workLabels.box}
+        onClose={() => undefined}
+        onUndo={() => undefined}
+        onClear={() => undefined}
+      />
     </StationScreen>
   );
+}
+
+const GALLERY_RECOVERY_SSCC = "046012345600000016";
+
+function BoxPrintRecoveryFixture({ variant }: { variant: string }) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const errorCode = galleryRecoveryErrorCode(variant);
+
+  useLayoutEffect(() => {
+    if (variant !== "skip-confirm") return;
+    rootRef.current
+      ?.querySelector<HTMLButtonElement>(".mk-full-screen-dialog > footer button:last-of-type")
+      ?.click();
+  }, [variant]);
+
+  return (
+    <div ref={rootRef} className="gallery-production-recovery">
+      <BoxPrintRecovery
+        sscc={GALLERY_RECOVERY_SSCC}
+        errorCode={errorCode}
+        pending={false}
+        onRetry={() => undefined}
+        onSetup={() => undefined}
+        onSkip={() => undefined}
+      />
+    </div>
+  );
+}
+
+function galleryRecoveryErrorCode(variant: string): BoxPrintErrorCode {
+  if (variant === "template_missing") return "template_missing";
+  if (variant === "printer_unconfigured") return "printer_unconfigured";
+  if (variant === "render_failed") return "render_failed";
+  return "transport_failed";
 }
 
 function SerialRecoveryFixture({ locale }: { locale: GalleryLocale }) {

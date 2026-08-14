@@ -91,6 +91,20 @@ export const productMirror = sqliteTable("product_mirror", {
   status: text("status").notNull(),
   defaultCounterpartyId: text("default_counterparty_id"),
   defaultLabelTemplateId: text("default_label_template_id"),
+  imageChecksum: text("image_checksum"),
+  imageContentType: text("image_content_type"),
+  imageByteSize: integer("image_byte_size"),
+  imageWidth: integer("image_width"),
+  imageHeight: integer("image_height"),
+  imagePointerChecksum: text("image_pointer_checksum"),
+});
+
+/** Validated, content-addressed WebP bytes for offline station rendering. */
+export const stationProductImages = sqliteTable("station_product_images", {
+  checksum: text("checksum").primaryKey(),
+  contentType: text("content_type").notNull(),
+  byteSize: integer("byte_size").notNull(),
+  bytesBase64: text("bytes_base64").notNull(),
 });
 
 /**
@@ -173,6 +187,8 @@ export const boxesMirror = sqliteTable("boxes_mirror", {
   printVerifiedAt: text("print_verified_at"),
   printSkippedAt: text("print_skipped_at"),
   disassembledAt: text("disassembled_at"),
+  printState: text("print_state").notNull().default("legacy"),
+  printErrorCode: text("print_error_code"),
 });
 
 /**

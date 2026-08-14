@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { OrderConflict } from "../pickup-orders/dto";
+import type { BoxConflictReason, OrderConflict } from "../pickup-orders/dto";
 
 /**
  * The kiosk's own six refusal reasons plus `unknown_badge` and
@@ -8,12 +8,22 @@ import type { OrderConflict } from "../pickup-orders/dto";
  * writeoff reason at step 3), so neither can appear in `POST /kiosk/orders`'
  * response and must not widen `OrderConflict`.
  */
-export type ScanRejectionReason = OrderConflict["reason"] | "unknown_badge" | "unknown_reason";
+export type ScanRejectionReason =
+  | OrderConflict["reason"]
+  | BoxConflictReason
+  | "unknown_badge"
+  | "unknown_reason"
+  | "writeoff_reason_required"
+  | "writeoff_forbidden";
 
-export interface ScanRejectionCode {
-  rawKm: string;
-  reason: ScanRejectionReason;
-}
+export type ScanRejectionCode =
+  | { rawKm: string; reason: ScanRejectionReason }
+  | {
+      source: "box";
+      sscc: string;
+      bottleCount: number | null;
+      reason: ScanRejectionReason;
+    };
 
 /** `YYYY-MM-DD`. */
 const dateOnlySchema = z.string().date();

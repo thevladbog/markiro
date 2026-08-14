@@ -9,6 +9,12 @@ export interface ScanOutcome {
 }
 
 export interface ScanQueueDeps {
+  /**
+   * Re-checks floor admission when a buffered scan reaches the head of the
+   * queue. A close can enter a blocking recovery state while later physical
+   * scans are already buffered; those scans must not reach the journal.
+   */
+  shouldProcess?(raw: string): boolean;
   /** Validate + journal one scan. Runs with no other scan in flight. */
   process(raw: string): Promise<ScanOutcome>;
   onOutcome(outcome: ScanOutcome): void;
@@ -30,6 +36,8 @@ export interface ScanQueue {
   enqueue(raw: string): boolean;
   /** Runs a side-channel write in strict order with scans. */
   enqueueJob(job: () => Promise<void>): boolean;
+  /** Drops scans buffered before a newly-entered blocking floor state. */
+  discardBufferedScans(): void;
   /** Resolves once the queue has drained (tests await this instead of sleeping). */
   idle(): Promise<void>;
   pending(): number;
@@ -80,6 +88,10 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
           continue;
         }
         const { raw } = entry;
+        if (deps.shouldProcess && !deps.shouldProcess(raw)) {
+          console.warn("station: scan discarded by floor admission");
+          continue;
+        }
         let outcome: ScanOutcome;
         try {
           outcome = await deps.process(raw);
@@ -120,6 +132,11 @@ export function createScanQueue(deps: ScanQueueDeps): ScanQueue {
       buffer.push({ type: "job", run: job });
       void drain();
       return true;
+    },
+    discardBufferedScans() {
+      for (let index = buffer.length - 1; index >= 0; index -= 1) {
+        if (buffer[index]?.type === "scan") buffer.splice(index, 1);
+      }
     },
     idle() {
       if (!draining && buffer.length === 0) return Promise.resolve();

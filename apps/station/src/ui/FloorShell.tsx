@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@markiro/ui";
+import type { ServerReachability } from "../lib/api-client.js";
 import { StatusBar, type ScannerIndicator, type UpdateIndicatorModel } from "./StatusBar.js";
 
 export interface FloorShellProps {
@@ -8,7 +9,7 @@ export interface FloorShellProps {
   lineName: string | null;
   operatorName: string;
   shiftLabel: string | null;
-  online: boolean;
+  serverReachability: ServerReachability;
   scanner: ScannerIndicator;
   printerConfigured: boolean;
   syncPending: number;
@@ -16,11 +17,13 @@ export interface FloorShellProps {
   conflicts: number;
   update?: UpdateIndicatorModel;
   onOpenUpdates?: () => void;
+  actionsDisabled?: boolean;
   tasks?: ReadonlyArray<{ id: string; label: string }>;
   activeTaskId?: string;
   onSelectTask?: (id: string) => void;
   footer?: ReactNode;
-  windowChrome?: ReactNode;
+  operatorControl?: ReactNode;
+  windowControl?: ReactNode;
   children: ReactNode;
 }
 
@@ -29,7 +32,7 @@ export function FloorShell({
   lineName,
   operatorName,
   shiftLabel,
-  online,
+  serverReachability,
   scanner,
   printerConfigured,
   syncPending,
@@ -37,23 +40,24 @@ export function FloorShell({
   conflicts,
   update,
   onOpenUpdates,
+  actionsDisabled = false,
   tasks = [],
   activeTaskId,
   onSelectTask,
   footer,
-  windowChrome,
+  operatorControl,
+  windowControl,
   children,
 }: FloorShellProps) {
   const { t } = useTranslation();
   return (
     <div className="station-root">
-      {windowChrome ? <div className="station-floor-window-chrome">{windowChrome}</div> : null}
       <StatusBar
         stationName={stationName}
         lineName={lineName}
         operatorName={operatorName}
         shiftLabel={shiftLabel}
-        online={online}
+        serverReachability={serverReachability}
         scanner={scanner}
         printerConfigured={printerConfigured}
         syncPending={syncPending}
@@ -61,6 +65,9 @@ export function FloorShell({
         conflicts={conflicts}
         {...(update ? { update } : {})}
         {...(onOpenUpdates ? { onOpenUpdates } : {})}
+        actionsDisabled={actionsDisabled}
+        {...(operatorControl ? { operatorControl } : {})}
+        {...(windowControl ? { windowControl } : {})}
       />
       {tasks.length > 0 ? (
         <nav aria-label={t("shell.tasks")} className="station-task-nav">

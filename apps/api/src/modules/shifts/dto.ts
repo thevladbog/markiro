@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import type { OperatorMirrorRecord } from "@markiro/db";
-import type { ProductDto } from "../products/dto";
+import type { ProductDto, ProductImageDescriptor } from "../products/dto";
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
 export type ShiftMode = (typeof SHIFT_MODES)[number];
@@ -43,7 +43,10 @@ export const createShiftSchema = z.object({
 });
 export type CreateShiftDto = z.infer<typeof createShiftSchema>;
 
-/** PATCH /shifts/:id schema -- partial update, only while `status === "planned"`. */
+/**
+ * PATCH /shifts/:id schema. Planned shifts accept the full shape; the service
+ * restricts active shifts to line/date/quantity/box-template metadata.
+ */
 export const updateShiftSchema = z.object({
   mode: z.enum(SHIFT_MODES).optional(),
   lineId: z.string().uuid().nullable().optional(),
@@ -81,6 +84,7 @@ export interface ShiftDto {
   mode: ShiftMode;
   productId: string;
   productName: string | null;
+  image?: ProductImageDescriptor | null;
   lineId: string | null;
   lineName: string | null;
   counterpartyId: string | null;

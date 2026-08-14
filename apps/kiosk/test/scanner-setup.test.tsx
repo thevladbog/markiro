@@ -69,6 +69,8 @@ async function bootstrapWith(seeds: OperatorSeed[]): Promise<KioskBootstrapDto> 
       startsAt: "2026-07-01T00:00:00.000Z",
       endsAt: "2026-08-31T00:00:00.000Z",
     },
+    branding: { organizationName: "ООО Маяк", logoUrl: null, logoRevision: null },
+    pickupPolicy: { limitsEnabled: true },
     config: { dayLimitPerEmployee: 5, showPrices: true },
     badgeSalt: SALT,
     reasons: [],
@@ -220,6 +222,34 @@ describe("ScannerSetup — transports offered", () => {
     expect(keyboard.getAttribute("aria-describedby")).toBe(keyboardHint.id);
     expect(serial.getAttribute("aria-describedby")).toBe(serialHint.id);
     expect(keyboardHint.id).not.toBe(serialHint.id);
+  });
+
+  it("shows whether a manual kiosk-data refresh, including branding, succeeded", async () => {
+    const onRefreshData = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    render(
+      <ScannerSetup
+        paired={false}
+        bootstrap={null}
+        subscribe={noFanOut}
+        onRefreshData={onRefreshData}
+        onClose={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh kiosk data" }));
+    await waitFor(() =>
+      expect(screen.getByText("Kiosk data and branding are up to date.")).toBeDefined(),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh kiosk data" }));
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          "Could not refresh kiosk data or branding. Check the connection and try again.",
+        ),
+      ).toBeDefined(),
+    );
+    expect(onRefreshData).toHaveBeenCalledTimes(2);
   });
 });
 

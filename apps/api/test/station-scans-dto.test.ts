@@ -31,6 +31,20 @@ function body(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function closure(overrides: Record<string, unknown> = {}) {
+  return {
+    boxId: "box-1",
+    shiftId: "11111111-1111-1111-8111-111111111111",
+    terminalId: "terminal-1",
+    sscc: "046012345600000016",
+    closedAt: "2026-08-13T10:00:00.000Z",
+    operatorId: null,
+    printVerifiedAt: null,
+    printSkippedAt: null,
+    ...overrides,
+  };
+}
+
 describe("syncBatchSchema marking-code contract", () => {
   it("derives canonicalRaw while preserving captured raw", () => {
     const parsed = syncBatchSchema.parse(body());
@@ -70,5 +84,19 @@ describe("syncBatchSchema marking-code contract", () => {
   it("returns validation errors instead of throwing for malformed accepted codes", () => {
     expect(() => syncBatchSchema.safeParse(body({ raw: `${RAW}\ud800` }))).not.toThrow();
     expect(syncBatchSchema.safeParse(body({ raw: `${RAW}\ud800` })).success).toBe(false);
+  });
+
+  it("rejects a box closure that claims both verification outcomes", () => {
+    expect(
+      syncBatchSchema.safeParse({
+        ...body(),
+        boxes: [
+          closure({
+            printVerifiedAt: "2026-08-13T10:01:00.000Z",
+            printSkippedAt: "2026-08-13T10:01:01.000Z",
+          }),
+        ],
+      }).success,
+    ).toBe(false);
   });
 });

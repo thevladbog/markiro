@@ -1,6 +1,7 @@
 import { classifyScan } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
 import { insertException } from "./box-exceptions-mirror.js";
+import { presentKm, type KmPresentation } from "./scan-presentation.js";
 
 /** One row of the local scan journal — every scan, accepted or not. */
 export interface ScanEventRow {
@@ -41,10 +42,30 @@ export interface RecentOperation {
   scannedAt: string | null;
   /** A deliberately short suffix for operator recognition, never the full code. */
   codeSuffix: string | null;
+  /** Parsed operator-safe AI values, or null when the captured payload cannot be trusted. */
+  identity: KmPresentation | null;
 }
 
 const RECENT_OPERATION_LIMIT = 6;
 const PRODUCT_CODE_VERDICTS = new Set(["ok", "duplicate", "wrong_gtin"]);
+
+function presentOperation(row: {
+  raw: string;
+  verdict: string;
+  scanned_at: string;
+}): RecentOperation {
+  const scan = PRODUCT_CODE_VERDICTS.has(row.verdict) ? classifyScan(row.raw) : null;
+  const characters =
+    scan?.kind === "km"
+      ? Array.from(scan.km.serial).filter((character) => /[\p{L}\p{N}]/u.test(character))
+      : [];
+  return {
+    verdict: row.verdict,
+    scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
+    codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
+    identity: scan?.kind === "km" ? presentKm(scan.km) : null,
+  };
+}
 
 /**
  * The latest bounded scan facts for one shift in durable journal order. The
@@ -70,18 +91,23 @@ export async function listRecentOperations(
     [shiftId, RECENT_OPERATION_LIMIT],
   );
 
-  return rows.map((row) => {
-    const scan = PRODUCT_CODE_VERDICTS.has(row.verdict) ? classifyScan(row.raw) : null;
-    const characters =
-      scan?.kind === "km"
-        ? Array.from(scan.km.serial).filter((character) => /[\p{L}\p{N}]/u.test(character))
-        : [];
-    return {
-      verdict: row.verdict,
-      scannedAt: Number.isNaN(Date.parse(row.scanned_at)) ? null : row.scanned_at,
-      codeSuffix: characters.length > 0 ? `…${characters.slice(-4).join("")}` : null,
-    };
-  });
+  return rows.map(presentOperation);
+}
+
+/** Latest durably accepted code, independent of the bounded activity feed. */
+export async function findLatestAcceptedOperation(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<RecentOperation | null> {
+  const rows = await exec.all<{ raw: string; verdict: string; scanned_at: string }>(
+    `SELECT raw, verdict, scanned_at
+       FROM scan_events_mirror
+      WHERE shift_id = ? AND verdict = 'ok'
+      ORDER BY id DESC
+      LIMIT 1`,
+    [shiftId],
+  );
+  return rows[0] ? presentOperation(rows[0]) : null;
 }
 
 /**

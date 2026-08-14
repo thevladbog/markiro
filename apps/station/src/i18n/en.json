@@ -18,6 +18,17 @@
     "dismiss": "Dismiss",
     "dismissError": "Dismiss window mode error"
   },
+  "operatorSwitch": {
+    "action": "Change operator",
+    "pending": "Saving the current operation…",
+    "confirmTitle": "Change operator?",
+    "confirmDetail": "The current shift will remain open. All recorded operations stay saved on this station.",
+    "confirm": "Change operator",
+    "stay": "Stay",
+    "error": "Could not change operator. The current operator and local work remain active.",
+    "retry": "Retry",
+    "retryLabel": "Retry operator change"
+  },
   "legacyIdentity": {
     "title": "Station service required",
     "resolving": "Updating station identity. Cached offline work remains available.",
@@ -75,7 +86,9 @@
   "login": {
     "title": "Operator sign-in",
     "badgePrimary": "Scan your badge to sign in",
-    "badgeReady": "Badge scanner ready",
+    "badgeReady": "Barcode scanner ready",
+    "badgeInstruction": "Hold the badge near the scanner",
+    "badgeExplanation": "The station recognizes the code automatically. If the operator was just added, the roster will refresh from the server.",
     "loginPrompt": "Enter your personnel number",
     "loginLabel": "Personnel number",
     "loginInvalid": "Enter 1 to 12 digits",
@@ -99,7 +112,9 @@
     "nameLabel": "Operator name",
     "nameHint": "Enter at least two letters",
     "nameEmpty": "No matching operators",
-    "searchUnavailable": "Operator list is temporarily unavailable"
+    "searchUnavailable": "Operator list is temporarily unavailable",
+    "refreshingRoster": "Refreshing operator list…",
+    "rosterRefreshUnavailable": "Could not refresh the operator list. Check the connection or sign in with previously synchronized data."
   },
   "shifts": {
     "title": "Shifts",
@@ -126,20 +141,23 @@
     "modeLabel": "Shift mode",
     "start": "Start",
     "actionFailed": "Action failed. Please try again.",
+    "serverUnavailable": "Could not load shifts. Check server access.",
     "active": "Shift active",
     "forCounterparty": "for:",
     "preparing": "Preparing the shift…"
   },
   "shell": {
     "statusBar": "Station status",
+    "stationActions": "Station actions",
     "activeScreen": "Active station screen",
     "station": "Station",
     "line": "Line",
     "operator": "Operator",
     "shift": "Shift",
-    "network": "Network",
-    "online": "Online",
-    "offline": "Offline",
+    "server": "Server",
+    "serverChecking": "Checking",
+    "serverAvailable": "Available",
+    "serverUnavailable": "No connection",
     "sync": "Sync",
     "syncStuck": "Not syncing",
     "scanner": "Scanner",
@@ -208,14 +226,19 @@
     "accepted": "Accepted",
     "rejected": "Rejected",
     "waiting": "Waiting for a scan…",
+    "gtin": "GTIN",
+    "serial": "Serial number",
+    "crypto": "Crypto tail",
     "exit": "Leave shift",
     "pauseFinish": "Pause / finish",
     "exceptions": "Exceptions",
     "backToWork": "Back to work",
     "summary": "Shift summary",
     "openBox": "Open box",
+    "boxNumber": "Box no. {{number}}",
     "noOpenBox": "No open box",
     "boxItems": "Items",
+    "boxGrouped": "One cell represents several positions",
     "capacityUnknown": "Capacity not set",
     "synchronized": "Synchronized",
     "pendingSync_one": "{{count}} pending",
@@ -369,7 +392,29 @@
     "printNotSscc": "This is not a group code",
     "printReprint": "Print again",
     "printSkip": "Skip",
-    "printNotAvailable": "Printing did not happen, so there is nothing to verify.",
+    "printRecovery": {
+      "title": "The box label was not printed",
+      "sscc": "Box SSCC",
+      "errors": {
+        "templateMissing": "No box label template is selected for this shift",
+        "printerUnconfigured": "Printer is not configured",
+        "renderFailed": "Could not prepare the label",
+        "transportFailed": "The printer did not accept the job",
+        "interrupted": "Printing was interrupted. Check the printer and retry."
+      },
+      "retry": "Retry printing",
+      "setup": "Set up printer",
+      "continueWithoutLabel": "Continue without a label",
+      "confirmTitle": "Continue without a label?",
+      "confirmDetail": "The box is already closed. It must be labelled later.",
+      "confirmContinue": "Confirm and continue",
+      "cancel": "Cancel",
+      "pending": "Working…",
+      "restoreFailed": "Could not restore the print state",
+      "restoreFailedDetail": "Scanning is paused. Retry restoring the local box state.",
+      "retryRestore": "Retry recovery",
+      "backToShifts": "Back to shifts"
+    },
     "invalidSerial": "Could not build a box number. Try closing the box again."
   }
 }

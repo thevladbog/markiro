@@ -52,6 +52,40 @@ describe("useStationUpdater", () => {
     unmount();
   });
 
+  it("rechecks a persisted available version on startup and clears it after an upgrade", async () => {
+    const { exec, port } = fixture();
+    const now = () => Date.parse("2026-08-11T00:00:00.000Z");
+    const first = renderHook(() =>
+      useStationUpdater({
+        enabled: true,
+        exec,
+        activeShift: false,
+        pendingOutbox: 0,
+        port,
+        now,
+      }),
+    );
+    await waitFor(() =>
+      expect(first.result.current.persisted?.available?.version).toBe("0.1.0-beta.2"),
+    );
+    first.unmount();
+
+    vi.mocked(port.check).mockClear().mockResolvedValue(null);
+    const upgraded = renderHook(() =>
+      useStationUpdater({
+        enabled: true,
+        exec,
+        activeShift: false,
+        pendingOutbox: 0,
+        port,
+        now,
+      }),
+    );
+
+    await waitFor(() => expect(port.check).toHaveBeenCalledOnce());
+    await waitFor(() => expect(upgraded.result.current.persisted?.available).toBeNull());
+  });
+
   it("denies install during a shift and installs only after explicit invocation", async () => {
     const handle = makeBeta2();
     const { exec, port } = fixture(handle);

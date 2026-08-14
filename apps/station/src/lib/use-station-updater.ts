@@ -210,7 +210,7 @@ export function useStationUpdater({
       const loaded = await loadUpdateState(exec);
       if (cancelled || currentGeneration !== generation.current) return;
       applyState(loaded);
-      await runCheck(false);
+      await runCheck(Boolean(loaded?.available));
     })();
     return () => {
       cancelled = true;

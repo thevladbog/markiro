@@ -69,8 +69,10 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
 - [ ] After that deployment and before the beta workflow, run
       `pnpm verify:station-production-cors` against production and record a
       PASS. The live preflight must prove the exact Windows `Origin` and Station
-      capability header for `https://admin.markiro.app/station/pair`; CI or a
-      browser run is not a substitute.
+      capability header for every Station route at
+      `https://admin.markiro.app` (pairing, roster, shifts and their open/bundle
+      actions, product lookup, and GTIN check); CI or a browser run is not a
+      substitute.
 - [ ] Only after the preceding preflight passes, run `Publish station beta` from
       `main` for the approved commit SHA. Record the workflow URL and result;
       the build must not be treated as Windows acceptance.
@@ -78,13 +80,18 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
       and SHA-256 with `SHA256SUMS`; verify the updater bundle signature against
       `latest.json`, its immutable release URL, and the recorded commit digest
       separately.
-- [ ] Install beta.1, then beta.2 while no shift is active; confirm installation
-      is blocked during an active shift and pending outbox data is retained.
+- [ ] Install beta.1 from the immutable NSIS `*.exe` produced by the workflow
+      step `Build signed Windows NSIS updater artifacts`, pin its taskbar
+      shortcut, then update through Station to beta.2 produced by the same step
+      while no shift is active. Confirm installation is blocked during an active
+      shift and pending outbox data is retained.
 - [ ] Record any SmartScreen prompt and operator decision in the beta acceptance
       table; CI cannot replace this Windows/hardware check.
-- [ ] After manual installation, installer shortcut, taskbar and application
-      window all show the branded Markiro Station icon. The old white-circle icon
-      is absent from every shipped icon surface.
+- [ ] After the beta.1 → beta.2 restart, the desktop shortcut, Start menu,
+      previously pinned taskbar shortcut and application window all show the
+      branded Markiro Station icon. The beta.1/old white-circle icon is absent
+      from every shipped icon surface. Record both versions, Windows build,
+      `Publish station beta` workflow URL and screenshots.
 - [ ] Pair the packaged Windows Tauri WebView with a real, currently valid code
       issued by `admin.markiro.app`; record only the outcome and release/station
       identity, never the pairing code. Confirm waiting, redeeming, error and
@@ -128,6 +135,36 @@ were used. A host browser or macOS Tauri run does not satisfy these checks.
       film used on the line. Confirm taps near adjacent actions do not select
       the wrong control and that repeated scanning does not leave focus on a
       destructive or exit action.
+
+### Live roster and floor recovery (next Station beta)
+
+These checks apply to the packaged Windows beta. Keep them unchecked until the
+named environment and hardware have been exercised; host tests and a browser
+gallery do not replace this record.
+
+- [ ] Create an active Station operator while badge login is already open; scan the new badge without restarting.
+- [ ] Disconnect the network; authenticate a previously cached operator without an HTTP request.
+- [ ] Load, open, create, and rejoin a shift through `https://admin.markiro.app`.
+- [ ] At 1280×800, 1024×768, and 1280×720, verify Update, Change operator, and window-mode controls do not overlap status or each other.
+- [ ] During an active shift, queue a scan, change operator, and verify the same shift resumes with correct old/new attribution.
+- [ ] Exercise keyboard-wedge and configured serial scanner input on Windows/WebView2 hardware.
+- [ ] Reveal and hide the Windows taskbar; verify the footer and all floor actions remain recoverable.
+
+### Aggregation and box-label recovery (next Station beta)
+
+Keep every item unchecked until it has been exercised in the packaged Windows
+beta with the named scanner, printer, and display conditions. Automated tests
+and the browser gallery do not satisfy these checks.
+
+- [ ] Start a fresh issuer prefix and confirm the first printed box uses serial `0000001` plus a valid final check digit.
+- [ ] Scan production-like EAN-13 and KM DataMatrix; verify GTIN, serial, and AI 91/92/93 presentation.
+- [ ] Fill a 20-place box and confirm each cell, auto-close, and reset after print resolution.
+- [ ] Disconnect the printer during close; confirm the exact persistent category survives restart.
+- [ ] On packaged Windows, from persistent unresolved box-label recovery choose `Configure printer / Настроить принтер`; while setup is open and after returning, confirm the same unresolved box and 18-digit SSCC remain, product scans and ordinary controls stay sealed, then resolve through retry and scan-back verification when enabled without a second close or serial allocation.
+- [ ] Retry after restoring the printer and confirm the same 18-digit SSCC prints once.
+- [ ] Repeat the failure and explicitly continue without a label; confirm the skip is synchronized and the next box accepts scans.
+- [ ] Enable scan-back verification and scan GS1-128 `(00)` plus the expected SSCC.
+- [ ] Repeat at packaged Windows 1280×800 and 1024×768 with the taskbar hidden in lockdown.
 
 ## Scanner and printer (plans 05b-2, 05b-3)
 

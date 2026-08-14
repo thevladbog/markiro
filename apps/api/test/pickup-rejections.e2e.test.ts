@@ -12,7 +12,7 @@ import { loadEnv } from "../src/env";
 import { hashDeviceToken } from "../src/pickup/device-token";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
-import { createTestStationDevice } from "./support/auth";
+import { createTestEmployee, createTestStationDevice } from "./support/auth";
 
 /** Check-digit VALID GTINs. GTIN is allowlisted on the kiosk; GTIN_NOT_ALLOWED is not. */
 const GTIN = "04600682000013";
@@ -62,9 +62,16 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     tenantId = await signUpAndActivate(agent);
 
     employeeId = randomUUID();
-    await db
-      .insert(schema.employees)
-      .values({ id: employeeId, tenantId, fullName: "Иван Иванов", role: "оператор" });
+    await createTestEmployee(
+      db,
+      {
+        id: employeeId,
+        tenantId,
+        fullName: "Иван Иванов",
+        role: "оператор",
+      },
+      { dayLimit: 20, canWriteoff: true },
+    );
     await db.insert(schema.employeeBadges).values({ tenantId, employeeId, badgeCode: BADGE });
 
     productId = randomUUID();
@@ -145,7 +152,15 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.orderId).toBeNull();
     expect(rows[0]!.employeeId).toBe(employeeId);
     expect(rows[0]!.badgeCode).toBeNull();
-    expect(rows[0]!.codes.map((c) => c.rawKm).sort()).toEqual([REFUSED_KM, REFUSED_KM_2].sort());
+    expect(
+      rows[0]!.codes
+        .filter(
+          (code): code is Extract<(typeof rows)[number]["codes"][number], { rawKm: string }> =>
+            "rawKm" in code,
+        )
+        .map((code) => code.rawKm)
+        .sort(),
+    ).toEqual([REFUSED_KM, REFUSED_KM_2].sort());
   });
 
   it("records a replayed all-refused sync exactly once", async () => {
@@ -200,7 +215,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
   it("recovers the plaintext code for a revoked badge the device named only by digest", async () => {
     const goneId = randomUUID();
     const goneBadge = `badge-gone-${randomUUID()}`;
-    await db.insert(schema.employees).values({ id: goneId, tenantId, fullName: "Ушедшев У." });
+    await createTestEmployee(db, { id: goneId, tenantId, fullName: "Ушедшев У." });
     await db
       .insert(schema.employeeBadges)
       .values({ tenantId, employeeId: goneId, badgeCode: goneBadge });
@@ -272,18 +287,17 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.badgeCode).toBe(stranger);
   });
 
-  // A badge heartbeat carries no codes, so nothing was lost -- a row here
-  // would be noise in a surface whose whole point is that it stays worth
-  // reading.
-  it("records nothing when an unrecognised-badge sync carried no codes", async () => {
+  it("records a submitted invalid code when the badge is unrecognised", async () => {
     await postScan({
       deviceSeq: 13,
       badgeCode: "badge-that-never-existed",
       reason: "buy",
-      items: [],
+      items: [{ rawKm: "not-a-km" }],
     }).expect(422);
 
-    expect(await rejectionsFor(13)).toHaveLength(0);
+    const rows = await rejectionsFor(13);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.codes).toEqual([{ rawKm: "not-a-km", reason: "unknown_badge" }]);
   });
 
   // The unified log has to be a superset: an admin asking "what got refused
@@ -359,18 +373,18 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "unknown_reason" }]);
   });
 
-  // A heartbeat-shaped writeoff sync (no codes) lost no product and must not
-  // add noise, mirroring the unrecognised-badge item-less guard.
-  it("records nothing when a bad-reason writeoff sync carried no codes", async () => {
+  it("records a submitted invalid code when the writeoff reason is unknown", async () => {
     await postScan({
       deviceSeq: 17,
       badgeCode: BADGE,
       reason: "writeoff",
       writeoffReasonId: randomUUID(),
-      items: [],
+      items: [{ rawKm: "not-a-km" }],
     }).expect(400);
 
-    expect(await rejectionsFor(17)).toHaveLength(0);
+    const rows = await rejectionsFor(17);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.codes).toEqual([{ rawKm: "not-a-km", reason: "unknown_reason" }]);
   });
 
   // `resolveWriteoffReasonId`'s OTHER throw site: a kiosk build that forgot to
@@ -389,7 +403,7 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(rows[0]!.employeeId).toBe(employeeId);
     expect(rows[0]!.badgeCode).toBeNull();
     expect(rows[0]!.orderId).toBeNull();
-    expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "unknown_reason" }]);
+    expect(rows[0]!.codes).toEqual([{ rawKm: WRITEOFF_KM, reason: "writeoff_reason_required" }]);
   });
 
   // A rejection consumes a device_seq without creating an order. If the
@@ -434,6 +448,23 @@ describe.skipIf(!ready)("pickup scan rejections e2e", () => {
     expect(row.orderNo).toBeNull();
     expect(row.codes).toHaveLength(2);
     expect(row.acknowledgedAt).toBeNull();
+  });
+
+  it("keeps the internal vNext replay marker out of admin rejection codes", async () => {
+    await db.insert(schema.pickupScanRejections).values({
+      tenantId,
+      kioskId,
+      employeeId,
+      deviceSeq: 79,
+      codes: [
+        { rawKm: "not-a-km", reason: "not_km" },
+        { source: "request", version: 2, terminalReason: "order_rejected" },
+      ],
+      scannedAt: new Date(),
+    });
+    const res = await agent.get("/pickup-rejections").expect(200);
+    const row = res.body.items.find((item: { deviceSeq: number }) => item.deviceSeq === 79);
+    expect(row.codes).toEqual([{ rawKm: "not-a-km", reason: "not_km" }]);
   });
 
   it("reports an unrecognised badge as its own kind", async () => {

@@ -2,12 +2,15 @@ import type { StationClient } from "./api-client.js";
 import type { CredentialGeneration } from "./credential-recovery.js";
 import { upsertBundle, type SqlExecutor, type StationBundle } from "./mirror.js";
 import { addRange } from "./sscc-pool.js";
+import { syncStationProductImage, trackStationProductImageSync } from "./product-image-cache.js";
 
 /**
  * Downloads the full shift bundle (`GET /shifts/:id/bundle`) and mirrors it
- * into the local SQLite tables (`upsertBundle`) so the shift + product
- * (+ operators, mocked `[]` in 05a — see plan decision, server side is a
- * parallel 05b workstream) are available offline.
+ * into the local SQLite tables (`upsertBundle`) so the shift + product are
+ * available offline. Although the backwards-compatible server DTO still
+ * includes `operators`, this path deliberately does not publish them: initial
+ * pairing and `/station/operators` are the authoritative roster sources, and
+ * an unversioned bundle response may complete after a newer live roster sync.
  *
  * `bundle.sscc` (aggregation shifts only; null in validation mode, and null
  * when the server could not resolve this device an issuer prefix) is
@@ -24,8 +27,8 @@ import { addRange } from "./sscc-pool.js";
  * poll of `readShiftMirror` sees that column non-null -- it does not itself
  * check whether the local pool actually has anything in it. With the OLD
  * order (`upsertBundle` first, `addRange` last), a poll landing in the gap
- * between them -- while `upsertBundle`'s own product-mirror and full
- * multi-statement roster-publish steps were still running -- could enable
+ * between them -- while `upsertBundle`'s product-mirror step was still
+ * running -- could enable
  * the box UI before the pool existed at all, and a scan arriving in that
  * window would auto-close as `no-serials` even though the range was about
  * to land. Worse, if `addRange` then failed, `issuer_prefix` stayed
@@ -50,7 +53,7 @@ import { addRange } from "./sscc-pool.js";
  * only caller) so it is unit-testable with a mocked client and a
  * `node:sqlite` executor, without rendering React or faking Tauri IPC.
  */
-const activeMirrors = new Set<Promise<void>>();
+const activeMirrors = new Set<Promise<boolean>>();
 
 /** Waits for bundle downloads/writes that started before credential sealing. */
 export async function waitForShiftBundleMirrors(): Promise<void> {
@@ -58,22 +61,34 @@ export async function waitForShiftBundleMirrors(): Promise<void> {
 }
 
 export function mirrorShiftBundle(
-  client: Pick<StationClient, "get">,
+  client: Pick<StationClient, "get"> & Partial<Pick<StationClient, "download">>,
   exec: SqlExecutor,
   shiftId: string,
   generation?: CredentialGeneration,
-): Promise<void> {
+  isEntryCurrent: () => boolean = () => true,
+): Promise<boolean> {
   const operation = (async () => {
     try {
       const bundle = await client.get<StationBundle>(`/shifts/${shiftId}/bundle`);
-      if (generation?.sealed) return;
+      if (generation?.sealed || !isEntryCurrent()) return false;
       if (bundle.sscc) {
         await addRange(exec, bundle.sscc);
       }
-      if (generation?.sealed) return;
+      if (generation?.sealed || !isEntryCurrent()) return false;
       await upsertBundle(exec, bundle);
+      if (client.download) {
+        const mediaSync = syncStationProductImage(
+          exec,
+          { download: client.download },
+          bundle.product,
+          () => generation?.sealed === true || !isEntryCurrent(),
+        );
+        trackStationProductImageSync(mediaSync);
+      }
+      return true;
     } catch (err) {
       console.error("station: shift bundle download/mirror failed", err);
+      return false;
     }
   })();
   activeMirrors.add(operation);

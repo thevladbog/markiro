@@ -21,7 +21,9 @@ import {
   type CreateProductInput,
   type GtinCheckResult,
   type ProductStatus,
+  type ProductImageDescriptor,
 } from "./api.js";
+import { productImageUrl } from "./api.js";
 
 /**
  * Client-side mirror of the server's zod schema
@@ -94,12 +96,16 @@ export interface ProductFormProps {
    * GUID today.
    */
   externalRef?: string | null;
+  image?: ProductImageDescriptor | null;
+  imageAltName?: string;
+  imageBusy?: boolean;
+  onDeleteImage?: () => void | Promise<void>;
   counterparties: CounterpartyDto[];
   labelTemplates: LabelTemplateSummaryDto[];
   submitting?: boolean;
   submissionError?: string | null;
   onDirtyChange?: (dirty: boolean) => void;
-  onSubmit: (input: CreateProductInput) => void | Promise<void>;
+  onSubmit: (input: CreateProductInput, image?: File | null) => void | Promise<void>;
   onClose: (reason: OverlayDismissReason) => void;
 }
 
@@ -166,6 +172,10 @@ export function ProductForm({
   productStatus,
   productId,
   externalRef,
+  image,
+  imageAltName,
+  imageBusy = false,
+  onDeleteImage,
   counterparties,
   labelTemplates,
   submitting = false,
@@ -186,6 +196,9 @@ export function ProductForm({
   // captured when the row's "Изменить" was clicked, per `CatalogPage`) to
   // catch up with the invalidated query on its own.
   const [linkedExternalRef, setLinkedExternalRef] = useState<string | null>(externalRef ?? null);
+  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
   const {
     register,
@@ -220,9 +233,45 @@ export function ProductForm({
   }, [externalRef]);
 
   useEffect(() => {
+    if (!selectedImage) return;
+    let cancelled = false;
+    setImageLoadFailed(false);
+    void createImageBitmap(selectedImage)
+      .then((bitmap) => {
+        if (cancelled) {
+          bitmap.close();
+          return;
+        }
+        const canvas = previewCanvasRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !context) {
+          bitmap.close();
+          setImageLoadFailed(true);
+          return;
+        }
+        const scale = Math.min(1, 1024 / Math.max(bitmap.width, bitmap.height));
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+        bitmap.close();
+      })
+      .catch(() => {
+        if (!cancelled) setImageLoadFailed(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedImage]);
+
+  useEffect(() => {
+    setImageLoadFailed(false);
+  }, [image]);
+
+  useEffect(() => {
     isDirtyRef.current = isDirty;
-    onDirtyChange(isDirty);
-  }, [isDirty, onDirtyChange]);
+    onDirtyChange(isDirty || Boolean(selectedImage));
+  }, [isDirty, onDirtyChange, selectedImage]);
 
   // GTIN owner hint (design brief 03): only ever calls the check for a
   // checksum-valid GTIN (`isValidGtin`, client-side, before any network
@@ -256,7 +305,7 @@ export function ProductForm({
   }, [gtinValue]);
 
   const submit = handleSubmit(async (values) => {
-    await onSubmit(toCreateInput(values));
+    await onSubmit(toCreateInput(values), selectedImage);
   });
 
   const counterpartyOptions: SelectOption[] = [
@@ -404,6 +453,50 @@ export function ProductForm({
             {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
             {...register("egaisCode")}
           />
+        </section>
+        <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
+          <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
+          <div className="mk-product-image-control">
+            {selectedImage && !imageLoadFailed ? (
+              <canvas
+                ref={previewCanvasRef}
+                role="img"
+                aria-label={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                className="mk-product-image-control__preview"
+              />
+            ) : mode === "edit" && productId && image && !imageLoadFailed ? (
+              <img
+                src={productImageUrl({ id: productId, image }) ?? undefined}
+                alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                onError={() => setImageLoadFailed(true)}
+                className="mk-product-image-control__preview"
+              />
+            ) : (
+              <div className="mk-product-image-control__empty">
+                {t("pages.catalog.form.imageEmpty")}
+              </div>
+            )}
+            <Input
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              label={t("pages.catalog.form.imageLabel")}
+              disabled={submitting || imageBusy}
+              onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
+            />
+            {mode === "edit" && image && onDeleteImage ? (
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                loading={imageBusy}
+                disabled={submitting}
+                onClick={() => void onDeleteImage()}
+              >
+                {t("pages.catalog.form.imageRemove")}
+              </Button>
+            ) : null}
+            <p className="mk-product-image-control__hint">{t("pages.catalog.form.imageHint")}</p>
+          </div>
         </section>
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-defaults">
           <h3 id="product-form-defaults">{t("pages.catalog.form.sections.defaults")}</h3>

@@ -3,8 +3,8 @@ import { describe, expect, it } from "vitest";
 import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
 
 /** Mirrors apps/station/src/lib/mirror.ts's applyMigrations against a raw node:sqlite handle. */
-function applyStationMigrations(db: DatabaseSync): void {
-  for (const stmt of STATION_MIGRATIONS) {
+function applyStatements(db: DatabaseSync, statements: readonly string[]): void {
+  for (const stmt of statements) {
     try {
       db.exec(stmt);
     } catch (err) {
@@ -18,6 +18,10 @@ function applyStationMigrations(db: DatabaseSync): void {
   }
 }
 
+function applyStationMigrations(db: DatabaseSync): void {
+  applyStatements(db, STATION_MIGRATIONS);
+}
+
 function migratedDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   applyStationMigrations(db);
@@ -25,7 +29,7 @@ function migratedDb(): DatabaseSync {
 }
 
 describe("STATION_MIGRATIONS", () => {
-  it("creates all eleven mirror tables", () => {
+  it("creates the durable product image cache table", () => {
     const db = migratedDb();
     const rows = db
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -42,6 +46,7 @@ describe("STATION_MIGRATIONS", () => {
     expect(names).toContain("conflicts_mirror");
     expect(names).toContain("sscc_pool");
     expect(names).toContain("boxes_mirror");
+    expect(names).toContain("station_product_images");
   });
 
   it("keeps operators_mirror and operators_mirror_b column-for-column identical", () => {
@@ -113,6 +118,53 @@ describe("STATION_MIGRATIONS", () => {
     const terminalId = columns.find((c) => c.name === "terminal_id");
     expect(terminalId).toBeDefined();
     expect(terminalId?.notnull).toBe(0);
+  });
+
+  it("adds the box print lifecycle columns with a legacy default and survives a second migration run", () => {
+    const db = new DatabaseSync(":memory:");
+    applyStationMigrations(db);
+    expect(() => applyStationMigrations(db)).not.toThrow();
+
+    const columns = db.prepare("PRAGMA table_info(boxes_mirror)").all() as Array<{
+      name: string;
+      dflt_value: string | null;
+    }>;
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "print_state", dflt_value: "'legacy'" }),
+        expect.objectContaining({ name: "print_error_code", dflt_value: null }),
+      ]),
+    );
+  });
+
+  it("migrates a historical closed box as legacy rather than pending", () => {
+    const firstPrintMigration = STATION_MIGRATIONS.findIndex((stmt) =>
+      stmt.includes("ADD COLUMN print_state"),
+    );
+    expect(firstPrintMigration).toBeGreaterThan(0);
+
+    const db = new DatabaseSync(":memory:");
+    applyStatements(db, STATION_MIGRATIONS.slice(0, firstPrintMigration));
+    db.prepare(
+      `INSERT INTO boxes_mirror (box_id, shift_id, sscc, opened_at, closed_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      "historical-box",
+      "s1",
+      "004601234560000017",
+      "2026-07-29T10:00:00.000Z",
+      "2026-07-29T10:05:00.000Z",
+    );
+
+    for (const stmt of STATION_MIGRATIONS.slice(firstPrintMigration)) {
+      db.exec(stmt);
+    }
+
+    expect(
+      db
+        .prepare("SELECT print_state, print_error_code FROM boxes_mirror WHERE box_id = ?")
+        .get("historical-box"),
+    ).toEqual({ print_state: "legacy", print_error_code: null });
   });
 
   it("round-trips boxes_mirror.disassembled_at and box_exceptions_mirror", () => {

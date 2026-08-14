@@ -303,6 +303,36 @@ describe("CounterpartiesPage", () => {
     expect(await screen.findByText("Acme Updated")).toBeDefined();
   });
 
+  it("normalizes a historical box counter zero and blocks saving zero", async () => {
+    const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => {
+      if (url === "/api/counterparties/1/sscc") {
+        return jsonResponse(200, { extensionDigit: 0, nextSerial: 0 });
+      }
+      return jsonResponse(200, { items: [ACME] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Acme Ltd");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    expect(input.value).toBe("1");
+    fireEvent.change(input, { target: { value: "0" } });
+    const section = input.closest(".mk-counterparty-panel-section");
+    if (!section) throw new Error("SSCC section not found");
+    fireEvent.click(within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }));
+
+    expect(await screen.findByText("Введите целое число от 1 до 9 999 999")).toBeDefined();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, request]) =>
+          url === "/api/counterparties/1/sscc" &&
+          (request as RequestInit | undefined)?.method === "PUT",
+      ),
+    ).toBe(false);
+  });
+
   it("calls DELETE after confirming in the delete modal", async () => {
     let didDelete = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {

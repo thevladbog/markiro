@@ -30,6 +30,48 @@ import type { KeyTarget, ScanListener, ScanSource } from "./source.js";
  * being a speed filter. Prefer Web Serial for such a scanner instead.
  */
 const DEFAULT_SILENCE_MS = 60;
+const GS = "\u001d";
+
+const US_PUNCTUATION: Readonly<Record<string, readonly [plain: string, shifted: string]>> = {
+  Backquote: ["`", "~"],
+  Minus: ["-", "_"],
+  Equal: ["=", "+"],
+  BracketLeft: ["[", "{"],
+  BracketRight: ["]", "}"],
+  Backslash: ["\\", "|"],
+  IntlBackslash: ["\\", "|"],
+  Semicolon: [";", ":"],
+  Quote: ["'", '"'],
+  Comma: [",", "<"],
+  Period: [".", ">"],
+  Slash: ["/", "?"],
+};
+
+const SHIFTED_DIGITS = ")!@#$%^&*(";
+
+/**
+ * HID scanners emit physical key positions. `KeyboardEvent.key` is the text
+ * the host layout assigned to that position, so the same badge becomes
+ * `badge` under US and `ифвпу` under RU. Decode the US keyboard position the
+ * scanner was configured for instead, while retaining `key` as a fallback for
+ * synthetic/legacy events that carry no `code`.
+ */
+function scannerCharacter(event: KeyboardEvent): string | null {
+  if (event.ctrlKey && event.code === "BracketRight") return GS;
+  if (/^Key[A-Z]$/.test(event.code)) {
+    const letter = event.code.slice(3).toLowerCase();
+    return event.shiftKey ? letter.toUpperCase() : letter;
+  }
+  if (/^Digit[0-9]$/.test(event.code)) {
+    const digit = Number(event.code.slice(5));
+    return event.shiftKey ? (SHIFTED_DIGITS[digit] ?? null) : String(digit);
+  }
+  if (/^Numpad[0-9]$/.test(event.code)) return event.code.slice(6);
+  if (event.code === "Space") return " ";
+  const punctuation = US_PUNCTUATION[event.code];
+  if (punctuation) return punctuation[event.shiftKey ? 1 : 0];
+  return event.key.length === 1 ? event.key : null;
+}
 
 export function isWebSerialSupported(): boolean {
   return typeof navigator !== "undefined" && "serial" in navigator;
@@ -66,13 +108,16 @@ export function createKeyboardWedgeSource(
       };
 
       const onKeyDown = (event: Event) => {
-        const { key } = event as KeyboardEvent;
-        if (key === "Enter") {
+        const keyboardEvent = event as KeyboardEvent;
+        if (keyboardEvent.key === "Enter" || keyboardEvent.code === "Enter") {
+          keyboardEvent.preventDefault?.();
           flush();
           return;
         }
-        if (key.length !== 1) return; // modifier / navigation key
-        payload += key;
+        const character = scannerCharacter(keyboardEvent);
+        if (character === null) return; // modifier / navigation key
+        keyboardEvent.preventDefault?.();
+        payload += character;
         if (timer) clearTimeout(timer);
         timer = setTimeout(flush, silenceMs);
       };

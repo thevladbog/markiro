@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, PinPad } from "@markiro/ui";
-import type { KioskBootstrapDto } from "../api/types.js";
+import type { KioskBootstrapSnapshotDto } from "../api/types.js";
 import { verifyOperatorBadge, verifyOperatorPin } from "../credentials/operator.js";
 import { classifyKioskScan, type KioskScan } from "../domain-guard/classify.js";
 import { isWebSerialSupported } from "../scanner/keyboard.js";
@@ -32,6 +32,7 @@ const RESULT_KEY: Record<KioskScan["kind"], string> = {
   km: "scannerSetup.resultKm",
   badge: "scannerSetup.resultBadge",
   incomplete: "scannerSetup.resultIncomplete",
+  sscc: "scannerSetup.resultUnknown",
   unknown: "scannerSetup.resultUnknown",
 };
 
@@ -60,7 +61,7 @@ export interface ScannerSetupProps {
   paired: boolean;
   /** null before pairing — an unpaired device has no roster to check against,
    * and by design needs none (see the access tiers below). */
-  bootstrap: KioskBootstrapDto | null;
+  bootstrap: KioskBootstrapSnapshotDto | null;
   /**
    * THE DEVICE'S SCANNER, and the only one this screen has: the shell's
    * fan-out over the transport the kiosk is CURRENTLY running — the very
@@ -119,6 +120,9 @@ export interface ScannerSetupProps {
    * behaviour and the best a caller that cannot say has to offer.
    */
   activeTransport?: Transport;
+  /** Forces a bootstrap and branding refresh for this paired kiosk. The
+   * boolean is rendered as an explicit success/failure result for the operator. */
+  onRefreshData?: () => Promise<boolean>;
   onClose: () => void;
 }
 
@@ -148,6 +152,7 @@ export function ScannerSetup({
   subscribe,
   onTransportChange,
   activeTransport,
+  onRefreshData,
   onClose,
 }: ScannerSetupProps): React.JSX.Element {
   const { t } = useTranslation();
@@ -165,6 +170,7 @@ export function ScannerSetup({
   const [transport, setTransport] = useState<Transport>(activeTransport ?? "keyboard");
   const [portRefused, setPortRefused] = useState(false);
   const [result, setResult] = useState<KioskScan | null>(null);
+  const [dataRefresh, setDataRefresh] = useState<"idle" | "busy" | "success" | "error">("idle");
 
   const serialSupported = isWebSerialSupported();
 
@@ -338,6 +344,16 @@ export function ScannerSetup({
     }
   }
 
+  async function refreshData(): Promise<void> {
+    if (!onRefreshData || dataRefresh === "busy") return;
+    setDataRefresh("busy");
+    try {
+      setDataRefresh((await onRefreshData()) ? "success" : "error");
+    } catch {
+      setDataRefresh("error");
+    }
+  }
+
   if (!unlocked) {
     return (
       <main className="kiosk-screen kiosk-credential-gate" aria-labelledby="kiosk-gate-title">
@@ -499,6 +515,24 @@ export function ScannerSetup({
         </section>
       </div>
       <footer className="kiosk-setup__footer">
+        {onRefreshData ? (
+          <div className="kiosk-setup__refresh">
+            {dataRefresh === "success" ? (
+              <Alert tone="ok">{t("scannerSetup.refreshSuccess")}</Alert>
+            ) : null}
+            {dataRefresh === "error" ? (
+              <Alert tone="error">{t("scannerSetup.refreshError")}</Alert>
+            ) : null}
+            <Button
+              className="kiosk-control kiosk-control--floor"
+              variant="secondary"
+              loading={dataRefresh === "busy"}
+              onClick={() => void refreshData()}
+            >
+              {t("scannerSetup.refreshData")}
+            </Button>
+          </div>
+        ) : null}
         <Button className="kiosk-control kiosk-control--floor kiosk-setup__done" onClick={onClose}>
           {t("scannerSetup.done")}
         </Button>

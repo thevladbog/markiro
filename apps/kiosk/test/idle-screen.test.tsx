@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import type { ScanListener } from "../src/scanner/source.js";
@@ -16,8 +17,96 @@ beforeAll(async () => {
 
 const GS = String.fromCharCode(0x1d);
 const GTIN = "04600682000013";
+const REVISION = "11111111-1111-4111-8111-111111111111";
 
 describe("Idle", () => {
+  it("renders tenant identity with a bundled Markiro fallback and the approved login grid", () => {
+    const { container } = render(
+      <Idle
+        branding={{
+          organizationName: "Северная вода",
+          logoBlob: null,
+          revision: null,
+          owner: null,
+        }}
+        onEmployee={vi.fn()}
+        resolveBadge={vi.fn()}
+        onScan={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Северная вода")).toBeDefined();
+    expect(screen.getAllByLabelText("Маркиро").length).toBeGreaterThan(0);
+    expect(container.querySelector(".kiosk-login__visual")).toBeDefined();
+    expect(container.querySelector(".kiosk-login__copy")).toBeDefined();
+    expect(screen.queryByText(/Зона сканирования|Scan zone/i)).toBeNull();
+  });
+
+  it("offers a visible equipment-settings action after pairing", () => {
+    const onOpenSettings = vi.fn();
+    render(
+      <Idle
+        onEmployee={vi.fn()}
+        resolveBadge={vi.fn()}
+        onScan={vi.fn()}
+        onOpenSettings={onOpenSettings}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Настройки оборудования" }));
+
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses equal landscape columns, left-aligned copy and reduced-motion fallback", () => {
+    const css = readFileSync(`${process.cwd()}/src/kiosk.css`, "utf8");
+
+    expect(css).toMatch(
+      /\.kiosk-login__center[\s\S]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/,
+    );
+    expect(css).toMatch(/\.kiosk-login__copy[\s\S]*text-align:\s*left/);
+    expect(css).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)[\s\S]*\.badge-scan-animation/,
+    );
+  });
+
+  it("revokes and durably invalidates a cached logo that the browser cannot render", () => {
+    const logo = new Blob(["platform-broken"], { type: "image/webp" });
+    const onLogoError = vi.fn();
+    const displayed = {
+      organizationName: "Северная вода",
+      logoBlob: logo,
+      revision: REVISION,
+      owner: {
+        serverUrl: "https://kiosk.example",
+        kioskId: "kiosk-1",
+        credentialGeneration: "33333333-3333-4333-8333-333333333333",
+      },
+    };
+    const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:company");
+    const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
+    render(
+      <Idle
+        branding={displayed}
+        onBrandingError={onLogoError}
+        onEmployee={vi.fn()}
+        resolveBadge={vi.fn()}
+        onScan={vi.fn()}
+      />,
+    );
+
+    fireEvent.error(screen.getByRole("img", { name: "Северная вода" }));
+
+    expect(revoke).toHaveBeenCalledWith("blob:company");
+    expect(onLogoError).toHaveBeenCalledWith({
+      owner: displayed.owner,
+      revision: REVISION,
+    });
+    expect(screen.getAllByLabelText("Маркиро").length).toBeGreaterThan(0);
+    create.mockRestore();
+    revoke.mockRestore();
+  });
+
   it("hands the recognised employee to its caller", async () => {
     const onEmployee = vi.fn();
     const resolveBadge = vi.fn(async () => "e1");

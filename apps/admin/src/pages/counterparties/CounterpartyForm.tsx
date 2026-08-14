@@ -74,7 +74,7 @@ const ssccFormSchema = z.object({
       "pages.counterparties.form.sscc.errors.nextSerialInvalid",
     )
     .refine(
-      (value) => Number(value) <= 9_999_999,
+      (value) => Number(value) >= 1 && Number(value) <= 9_999_999,
       "pages.counterparties.form.sscc.errors.nextSerialInvalid",
     ),
 });
@@ -231,12 +231,12 @@ function CounterpartySsccSection({
     formState: { errors, isDirty },
   } = useForm<SsccFormValues>({
     resolver: zodResolver(ssccFormSchema),
-    defaultValues: { nextSerial: "0" },
+    defaultValues: { nextSerial: "1" },
   });
 
   useEffect(() => {
     if (ssccQuery.data && !isDirty) {
-      reset({ nextSerial: String(ssccQuery.data.nextSerial) });
+      reset({ nextSerial: String(Math.max(1, ssccQuery.data.nextSerial)) });
     }
   }, [isDirty, reset, ssccQuery.data]);
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);

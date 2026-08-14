@@ -17,6 +17,7 @@ export interface FullScreenDialogProps {
   footer?: ReactNode;
   onClose: () => void;
   backLabel?: string;
+  backDisabled?: boolean;
   /**
    * Focus the inert dialog container when opening flows where the first
    * action must not be triggerable by the key event that opened the dialog.
@@ -120,6 +121,7 @@ export function FullScreenDialog({
   footer,
   onClose,
   backLabel = "Back",
+  backDisabled = false,
   initialFocus = "first",
   className,
   style,
@@ -151,7 +153,7 @@ export function FullScreenDialog({
     const dialog = dialogRef.current;
     if (event.defaultPrevented || !dialog || !isTopmostDialog(dialog)) return;
 
-    if (event.key === "Escape") {
+    if (event.key === "Escape" && !backDisabled) {
       event.preventDefault();
       event.stopPropagation();
       onClose();
@@ -219,6 +221,7 @@ export function FullScreenDialog({
         <Button
           size="floor"
           variant="secondary"
+          disabled={backDisabled}
           style={{ width: "auto", minWidth: "var(--control-floor)", flexShrink: 0 }}
           onClick={onClose}
         >

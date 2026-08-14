@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, max } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import { BillingService } from "./billing.service";
+import { renderPrintHtml } from "./print-document-html";
+import { toInvoicePrintModel } from "./print-document-model";
+import { renderPrintPdf } from "./print-document-pdf";
+
+type Format = "html" | "pdf";
 
 @Injectable()
 export class BillingDocumentsService {
@@ -14,96 +19,154 @@ export class BillingDocumentsService {
     private readonly storage: ObjectStorageService,
   ) {}
 
-  async renderAndStore(invoiceId: string) {
+  async renderInvoice(invoiceId: string, requestedRevision?: number) {
     const invoice = await this.billing.get(invoiceId);
-    const html = renderInvoice(invoice);
-    const body = Buffer.from(html, "utf8");
-    const revision = 1;
-    const key = `tenants/${invoice.tenantId}/invoices/${invoice.id}/r${revision}.html`;
-    await this.storage.ensureBucket();
-    await this.storage.put(key, body, "text/html; charset=utf-8");
-    const checksum = createHash("sha256").update(body).digest("hex");
-    const [document] = await this.db
-      .insert(schema.invoiceDocuments)
-      .values({
-        tenantId: invoice.tenantId,
-        invoiceId: invoice.id,
-        revision,
-        format: "html",
-        status: "ready",
-        objectKey: key,
-        contentType: "text/html; charset=utf-8",
-        sha256: checksum,
-        byteSize: body.byteLength,
-        rendererVersion: "billing-html-v1",
-      })
-      .onConflictDoUpdate({
-        target: [
-          schema.invoiceDocuments.invoiceId,
-          schema.invoiceDocuments.revision,
-          schema.invoiceDocuments.format,
-        ],
-        set: {
-          status: "ready",
-          objectKey: key,
-          sha256: checksum,
-          byteSize: body.byteLength,
-          updatedAt: new Date(),
-          errorCode: null,
-        },
-      })
-      .returning();
-    return { document, url: await this.storage.presignRead(key) };
+    if (invoice.status === "draft") {
+      throw new NotFoundException({ code: "invoice_not_issued" });
+    }
+    const revision = requestedRevision ?? (await this.nextRevision(invoiceId));
+    const pending = await this.ensurePending(invoice.tenantId, invoiceId, revision);
+    const model = toInvoicePrintModel(invoice);
+    const results = await Promise.all(pending.map((document) => this.renderOne(document, model)));
+    return { revision, documents: results };
   }
 
-  async url(invoiceId: string) {
+  async renderAndStore(invoiceId: string) {
+    return this.renderInvoice(invoiceId);
+  }
+
+  async list(invoiceId: string) {
+    return this.db
+      .select({
+        id: schema.invoiceDocuments.id,
+        revision: schema.invoiceDocuments.revision,
+        format: schema.invoiceDocuments.format,
+        status: schema.invoiceDocuments.status,
+        contentType: schema.invoiceDocuments.contentType,
+        byteSize: schema.invoiceDocuments.byteSize,
+        sha256: schema.invoiceDocuments.sha256,
+        errorCode: schema.invoiceDocuments.errorCode,
+        createdAt: schema.invoiceDocuments.createdAt,
+        updatedAt: schema.invoiceDocuments.updatedAt,
+      })
+      .from(schema.invoiceDocuments)
+      .where(eq(schema.invoiceDocuments.invoiceId, invoiceId))
+      .orderBy(desc(schema.invoiceDocuments.revision), schema.invoiceDocuments.format);
+  }
+
+  async url(invoiceId: string, documentId?: string) {
     const [document] = await this.db
       .select()
       .from(schema.invoiceDocuments)
-      .where(eq(schema.invoiceDocuments.invoiceId, invoiceId))
+      .where(
+        documentId
+          ? and(
+              eq(schema.invoiceDocuments.invoiceId, invoiceId),
+              eq(schema.invoiceDocuments.id, documentId),
+            )
+          : eq(schema.invoiceDocuments.invoiceId, invoiceId),
+      )
+      .orderBy(desc(schema.invoiceDocuments.revision))
       .limit(1);
     if (!document?.objectKey || document.status !== "ready") {
       throw new NotFoundException({ code: "invoice_document_not_ready" });
     }
     return { url: await this.storage.presignRead(document.objectKey) };
   }
-}
 
-function escapeHtml(value: unknown): string {
-  const text =
-    value === null || value === undefined
-      ? ""
-      : typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-        ? String(value)
-        : "";
-  return text
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
-}
+  private async nextRevision(invoiceId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ revision: max(schema.invoiceDocuments.revision) })
+      .from(schema.invoiceDocuments)
+      .where(eq(schema.invoiceDocuments.invoiceId, invoiceId));
+    return Number(row?.revision ?? 0) + 1;
+  }
 
-function renderInvoice(invoice: {
-  number: string;
-  issueDate: Date | null;
-  dueDate: Date | null;
-  total: string;
-  subtotal: string;
-  vatTotal: string;
-  lines: Array<{
-    position: number;
-    nameRu: string;
-    unit: string;
-    quantity: number;
-    agreedUnitPrice: string;
-    lineTotal: string;
-  }>;
-}) {
-  const rows = invoice.lines
-    .map(
-      (line) =>
-        `<tr><td>${line.position}</td><td>${escapeHtml(line.nameRu)}</td><td>${escapeHtml(line.unit)}</td><td>${line.quantity}</td><td>${escapeHtml(line.agreedUnitPrice)}</td><td>${escapeHtml(line.lineTotal)}</td></tr>`,
-    )
-    .join("");
-  return `<!doctype html><html lang="ru"><meta charset="utf-8"><title>Счет ${escapeHtml(invoice.number)}</title><style>body{font:14px Arial;color:#171717;margin:40px}h1{font-size:24px}table{border-collapse:collapse;width:100%;margin-top:24px}th,td{border:1px solid #bbb;padding:8px;text-align:left}th{background:#f3f3f3}.totals{margin-top:24px;margin-left:auto;width:280px}.totals div{display:flex;justify-content:space-between;padding:4px}</style><h1>Счет ${escapeHtml(invoice.number)}</h1><p>Дата: ${invoice.issueDate?.toISOString().slice(0, 10) ?? "черновик"}</p><table><thead><tr><th>№</th><th>Позиция</th><th>Ед.</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>${rows}</tbody></table><div class="totals"><div><span>Подытог</span><strong>${escapeHtml(invoice.subtotal)} ₽</strong></div><div><span>НДС</span><strong>${escapeHtml(invoice.vatTotal)} ₽</strong></div><div><span>Итого</span><strong>${escapeHtml(invoice.total)} ₽</strong></div></div></html>`;
+  private async ensurePending(tenantId: string, invoiceId: string, revision: number) {
+    await this.db
+      .insert(schema.invoiceDocuments)
+      .values(
+        (["html", "pdf"] as const).map((format) => ({
+          tenantId,
+          invoiceId,
+          revision,
+          format,
+          status: "pending" as const,
+          rendererVersion: "billing-print-v1",
+        })),
+      )
+      .onConflictDoNothing({
+        target: [
+          schema.invoiceDocuments.invoiceId,
+          schema.invoiceDocuments.revision,
+          schema.invoiceDocuments.format,
+        ],
+      });
+    return this.db
+      .select()
+      .from(schema.invoiceDocuments)
+      .where(
+        and(
+          eq(schema.invoiceDocuments.invoiceId, invoiceId),
+          eq(schema.invoiceDocuments.revision, revision),
+        ),
+      );
+  }
+
+  private async renderOne(
+    document: typeof schema.invoiceDocuments.$inferSelect,
+    model: Parameters<typeof renderPrintHtml>[0],
+  ) {
+    if (document.status === "ready") return this.publicDocument(document);
+    try {
+      const format = document.format as Format;
+      const body =
+        format === "html"
+          ? Buffer.from(renderPrintHtml(model), "utf8")
+          : await renderPrintPdf(model);
+      const contentType = format === "html" ? "text/html; charset=utf-8" : "application/pdf";
+      const key = `tenants/${document.tenantId}/invoices/${document.invoiceId}/r${document.revision}.${format}`;
+      await this.storage.ensureBucket();
+      await this.storage.put(key, body, contentType);
+      const [updated] = await this.db
+        .update(schema.invoiceDocuments)
+        .set({
+          status: "ready",
+          objectKey: key,
+          contentType,
+          sha256: createHash("sha256").update(body).digest("hex"),
+          byteSize: body.byteLength,
+          rendererVersion: "billing-print-v1",
+          updatedAt: new Date(),
+          errorCode: null,
+        })
+        .where(eq(schema.invoiceDocuments.id, document.id))
+        .returning();
+      return this.publicDocument(updated ?? document);
+    } catch (error) {
+      const [failed] = await this.db
+        .update(schema.invoiceDocuments)
+        .set({
+          status: "failed",
+          errorCode: error instanceof Error ? error.message.slice(0, 120) : "render_failed",
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.invoiceDocuments.id, document.id))
+        .returning();
+      return this.publicDocument(failed ?? document);
+    }
+  }
+
+  private publicDocument(document: typeof schema.invoiceDocuments.$inferSelect) {
+    return {
+      id: document.id,
+      revision: document.revision,
+      format: document.format,
+      status: document.status,
+      contentType: document.contentType,
+      byteSize: document.byteSize,
+      sha256: document.sha256,
+      errorCode: document.errorCode,
+    };
+  }
 }

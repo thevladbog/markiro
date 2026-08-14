@@ -279,10 +279,11 @@ export class SsccService {
     transaction?: SsccTransaction,
   ): Promise<SsccBlock> {
     const capacity = ssccSerialCapacity(issuerPrefix);
+    const firstSerial = extensionDigit === 0 ? 1 : 0;
     const perform = async (tx: SsccTransaction): Promise<SsccBlock> => {
       const [row] = await tx
         .insert(schema.ssccCounters)
-        .values({ tenantId, issuerPrefix, extensionDigit, nextSerial: size })
+        .values({ tenantId, issuerPrefix, extensionDigit, nextSerial: firstSerial + size })
         .onConflictDoUpdate({
           target: [
             schema.ssccCounters.tenantId,
@@ -290,7 +291,7 @@ export class SsccService {
             schema.ssccCounters.extensionDigit,
           ],
           set: {
-            nextSerial: sql`${schema.ssccCounters.nextSerial} + ${size}`,
+            nextSerial: sql`GREATEST(${schema.ssccCounters.nextSerial}, ${firstSerial}) + ${size}`,
             updatedAt: sql`now()`,
           },
         })

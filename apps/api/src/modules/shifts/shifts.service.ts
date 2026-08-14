@@ -14,6 +14,7 @@ import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
 import type { ProductDto } from "../products/dto";
+import type { ProductImageDescriptor } from "../products/dto";
 import {
   BOX_EXTENSION_DIGIT,
   SsccCapacityExhaustedException,
@@ -27,6 +28,7 @@ import type {
   ShiftBundleDto,
   ShiftDto,
   ShiftMode,
+  ShiftOrigin,
   UpdateShiftDto,
 } from "./dto";
 import { EntitlementsService } from "../../subscriptions/entitlements.service";
@@ -34,6 +36,12 @@ import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-
 
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type ProductRow = typeof schema.products.$inferSelect;
+type JoinedShiftRow = Omit<ShiftDto, "image"> & {
+  imageChecksum: string | null;
+  imageByteSize: number | null;
+  imageWidth: number | null;
+  imageHeight: number | null;
+};
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
 
 /**
@@ -75,13 +83,28 @@ export class ShiftsService {
       .select(this.joinedSelection())
       .from(schema.shifts)
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
       .where(and(...conditions))
       .orderBy(schema.shifts.createdAt);
 
-    return { items: rows };
+    return { items: rows.map((row) => this.mapShiftRow(row)) };
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
@@ -90,6 +113,21 @@ export class ShiftsService {
       .select(this.joinedSelection())
       .from(schema.shifts)
       .leftJoin(schema.products, eq(schema.shifts.productId, schema.products.id))
+      .leftJoin(
+        schema.productImages,
+        and(
+          eq(schema.productImages.tenantId, schema.shifts.tenantId),
+          eq(schema.productImages.productId, schema.shifts.productId),
+        ),
+      )
+      .leftJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .leftJoin(schema.labelTemplates, eq(schema.shifts.labelTemplateId, schema.labelTemplates.id))
@@ -98,7 +136,7 @@ export class ShiftsService {
     if (!row) {
       throw new NotFoundException();
     }
-    return row;
+    return this.mapShiftRow(row);
   }
 
   /**
@@ -111,7 +149,11 @@ export class ShiftsService {
    * with no effective label template (neither the shift nor its product has
    * one) -- allowed by design; the printing station decides the fallback.
    */
-  async createShift(tenantId: string, data: CreateShiftDto): Promise<ShiftDto> {
+  async createShift(
+    tenantId: string,
+    data: CreateShiftDto,
+    createdFrom: ShiftOrigin = "admin",
+  ): Promise<ShiftDto> {
     if (data.palletsEnabled === true) {
       await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
@@ -154,6 +196,7 @@ export class ShiftsService {
           boxCapacity: boxCapacity ?? null,
           palletCapacity: palletCapacity ?? null,
           palletsEnabled,
+          createdFrom,
         })
         .returning();
 
@@ -167,20 +210,24 @@ export class ShiftsService {
   }
 
   /**
-   * Partial update, allowed only while `status === "planned"` (409
-   * otherwise). Capacity/mode rules are re-checked against the merged
-   * (post-patch) values, mirroring the create-time validation.
+   * Planned shifts accept the full planning patch. Active shifts accept only
+   * administrative metadata plus the box-label template; changing mode,
+   * product-derived rules, or other print semantics after stations have
+   * mirrored a bundle would split the line across incompatible local state.
    */
   async updateShift(tenantId: string, id: string, data: UpdateShiftDto): Promise<ShiftDto> {
-    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
-      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
-    }
     const current = await this.findRow(tenantId, id);
     if (!current) {
       throw new NotFoundException();
     }
-    if (current.status !== "planned") {
-      throw new ConflictException("Shift can only be edited while planned");
+    if (current.status === "closed") {
+      throw new ConflictException("Closed shifts cannot be edited");
+    }
+    if (current.status === "active") {
+      return this.updateActiveShift(tenantId, id, data);
+    }
+    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
 
     const mode = data.mode !== undefined ? data.mode : current.mode;
@@ -233,6 +280,54 @@ export class ShiftsService {
       if (!row) {
         throw new ConflictException("Shift can only be edited while planned");
       }
+      return this.getShift(tenantId, row.id);
+    } catch (error) {
+      this.handleWriteError(error);
+    }
+  }
+
+  private async updateActiveShift(
+    tenantId: string,
+    id: string,
+    data: UpdateShiftDto,
+  ): Promise<ShiftDto> {
+    const allowedFields = new Set<keyof UpdateShiftDto>([
+      "lineId",
+      "plannedQty",
+      "plannedDate",
+      "boxLabelTemplateId",
+    ]);
+    const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
+      (field) => !allowedFields.has(field),
+    );
+    if (forbiddenField) {
+      throw new ConflictException(`Active shift field cannot be edited: ${String(forbiddenField)}`);
+    }
+
+    const changes: Partial<
+      Pick<ShiftRow, "lineId" | "plannedQty" | "plannedDate" | "boxLabelTemplateId">
+    > = {};
+    if (data.lineId !== undefined) changes.lineId = data.lineId;
+    if (data.plannedQty !== undefined) changes.plannedQty = data.plannedQty;
+    if (data.plannedDate !== undefined) changes.plannedDate = data.plannedDate;
+    if (data.boxLabelTemplateId !== undefined) {
+      changes.boxLabelTemplateId = data.boxLabelTemplateId;
+    }
+    if (Object.keys(changes).length === 0) return this.getShift(tenantId, id);
+
+    try {
+      const [row] = await this.db
+        .update(schema.shifts)
+        .set(changes)
+        .where(
+          and(
+            eq(schema.shifts.tenantId, tenantId),
+            eq(schema.shifts.id, id),
+            eq(schema.shifts.status, "active"),
+          ),
+        )
+        .returning();
+      if (!row) throw new ConflictException("Shift is no longer active");
       return this.getShift(tenantId, row.id);
     } catch (error) {
       this.handleWriteError(error);
@@ -345,6 +440,7 @@ export class ShiftsService {
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
     if (!productRow) throw new NotFoundException("Shift product missing");
+    const image = await this.findProductImage(tenantId, shift.productId);
     const product: ProductDto = {
       id: productRow.id,
       gtin14: productRow.gtin14,
@@ -359,6 +455,7 @@ export class ShiftsService {
       egaisCode: productRow.egaisCode,
       externalRef: productRow.externalRef,
       createdAt: productRow.createdAt,
+      image,
     };
 
     const labelTemplate = await this.findLabelTemplate(tenantId, shift.labelTemplateId);
@@ -528,6 +625,44 @@ export class ShiftsService {
     return row;
   }
 
+  private async findProductImage(
+    tenantId: string,
+    productId: string,
+  ): Promise<ProductImageDescriptor | null> {
+    const [row] = await this.db
+      .select({
+        checksum: schema.mediaAssets.checksum,
+        byteSize: schema.mediaAssets.byteSize,
+        width: schema.mediaAssets.width,
+        height: schema.mediaAssets.height,
+      })
+      .from(schema.productImages)
+      .innerJoin(
+        schema.mediaAssets,
+        and(
+          eq(schema.mediaAssets.id, schema.productImages.assetId),
+          eq(schema.mediaAssets.ownerTenantId, tenantId),
+          eq(schema.mediaAssets.status, "active"),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.productImages.tenantId, tenantId),
+          eq(schema.productImages.productId, productId),
+        ),
+      )
+      .limit(1);
+    return row
+      ? {
+          checksum: row.checksum,
+          contentType: "image/webp",
+          byteSize: row.byteSize ?? 0,
+          width: row.width ?? 0,
+          height: row.height ?? 0,
+        }
+      : null;
+  }
+
   /**
    * aggregation mode needs an effective box capacity; a pallets-enabled
    * aggregation shift additionally needs an effective pallet capacity.
@@ -553,6 +688,10 @@ export class ShiftsService {
       mode: schema.shifts.mode,
       productId: schema.shifts.productId,
       productName: schema.products.name,
+      imageChecksum: schema.mediaAssets.checksum,
+      imageByteSize: schema.mediaAssets.byteSize,
+      imageWidth: schema.mediaAssets.width,
+      imageHeight: schema.mediaAssets.height,
       lineId: schema.shifts.lineId,
       lineName: schema.lines.name,
       counterpartyId: schema.shifts.counterpartyId,
@@ -572,6 +711,22 @@ export class ShiftsService {
       closeReason: schema.shifts.closeReason,
       lateDataAt: schema.shifts.lateDataAt,
       createdAt: schema.shifts.createdAt,
+    };
+  }
+
+  private mapShiftRow(row: JoinedShiftRow): ShiftDto {
+    const { imageChecksum, imageByteSize, imageWidth, imageHeight, ...shift } = row;
+    return {
+      ...shift,
+      image: imageChecksum
+        ? {
+            checksum: imageChecksum,
+            contentType: "image/webp",
+            byteSize: imageByteSize ?? 0,
+            width: imageWidth ?? 0,
+            height: imageHeight ?? 0,
+          }
+        : null,
     };
   }
 

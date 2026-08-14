@@ -68,6 +68,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /lines/:id (LinesController.getLine)",
       "GET /operators (OperatorsController.listOperators)",
       "GET /org/profile (OrgProfileController.getProfile)",
+      "GET /org/profile/logo/:revision (OrgProfileController.getLogo)",
       "GET /org/profile/sscc (OrgProfileController.getSscc)",
       "GET /pickup-orders (PickupOrdersController.list)",
       "GET /pickup-orders/:id (PickupOrdersController.detail)",
@@ -76,8 +77,15 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /pickup-rejections (PickupRejectionsController.list)",
       "GET /products (ProductsController.listProducts)",
       "GET /products/:id (ProductsController.getProduct)",
+      "GET /products/:id/image/:checksum (ProductsController.readImage)",
+      "GET /billing/invoices (TenantBillingController.list)",
+      "GET /billing/invoices/:id (TenantBillingController.detail)",
+      "GET /billing/invoices/:id/documents/:documentId/download (TenantBillingController.download)",
+      "GET /shift-exports/:exportId/artifacts/:artifactId/download (ShiftExportsController.download)",
+      "GET /shift-exports/formats (ShiftExportsController.formats)",
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/:id (ShiftsController.getShift)",
+      "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /station-devices (StationDevicesController.list)",
       "GET /team (TeamController.list)",
       "POST /products/gtin-check (ProductsController.checkGtinOwner)",
@@ -104,7 +112,11 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       mode: "read_only_allowed",
       reason: "export",
     }),
-    routes: ["POST /pickup-orders/export (PickupOrdersController.export)"],
+    routes: [
+      "POST /pickup-orders/export (PickupOrdersController.export)",
+      "POST /shift-exports/:exportId/retry (ShiftExportsController.retry)",
+      "POST /shifts/:shiftId/exports (ShiftExportsController.create)",
+    ],
   },
   {
     contract: customerContract(CABINET_GUARDS, {
@@ -137,13 +149,18 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "DELETE /counterparties/:id (CounterpartiesController.deleteCounterparty)",
       "DELETE /employees/:id (EmployeesController.archiveEmployee)",
       "DELETE /lines/:id (LinesController.deleteLine)",
+      "DELETE /org/profile/logo (OrgProfileController.deleteLogo)",
       "DELETE /pickup-reasons/:id (PickupReasonsController.archiveReason)",
       "DELETE /products/:id (ProductsController.deleteProduct)",
+      "DELETE /products/:id/image (ProductsController.deleteImage)",
       "DELETE /products/:id/external-link (ProductExternalLinkController.unlink)",
       "DELETE /shifts/:id (ShiftsController.deleteShift)",
       "DELETE /team/members/:id/employee (TeamController.unlinkEmployee)",
       "PATCH /counterparties/:id (CounterpartiesController.updateCounterparty)",
+      "PATCH /employees/pickup-policy/limits (EmployeesController.bulkUpdatePickupLimits)",
+      "PATCH /employees/pickup-policy/writeoff-permission (EmployeesController.bulkUpdatePickupWriteoff)",
       "PATCH /employees/:id (EmployeesController.updateEmployee)",
+      "PATCH /employees/:id/pickup-policy (EmployeesController.updatePickupPolicy)",
       "PATCH /integrations/:type (IntegrationsController.update)",
       "PATCH /kiosks/:id (KiosksController.updateKiosk)",
       "PATCH /lines/:id (LinesController.updateLine)",
@@ -165,11 +182,13 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /kiosks/:id/enroll (KiosksController.enroll)",
       "POST /kiosks/:id/pairing-code (KiosksController.issuePairingCode)",
       "POST /lines (LinesController.createLine)",
+      "POST /org/profile/logo (OrgProfileController.uploadLogo)",
       "POST /pickup-orders/:id/cancel (PickupOrdersController.cancel)",
       "POST /pickup-orders/:id/resolve (PickupOrdersController.resolve)",
       "POST /pickup-reasons (PickupReasonsController.createReason)",
       "POST /pickup-rejections/:id/acknowledge (PickupRejectionsController.acknowledge)",
       "POST /products (ProductsController.createProduct)",
+      "POST /products/:id/image (ProductsController.uploadImage)",
       "POST /shifts (ShiftsController.createShift)",
       "POST /shifts/:id/open (ShiftsController.openShift)",
       "POST /station-devices (StationDevicesController.create)",
@@ -186,7 +205,12 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "read_only_allowed", reason: "read" }),
-    routes: ["GET /kiosk/bootstrap (KioskController.bootstrap)"],
+    routes: [
+      "GET /kiosk/bootstrap (KioskController.bootstrap)",
+      "GET /kiosk/branding/logo/:revision (KioskController.logo)",
+      "GET /kiosk/box-registry (KioskController.boxRegistry)",
+      "GET /kiosk/products/:id/image/:checksum (KioskController.readProductImage)",
+    ],
   },
   {
     contract: customerContract(KIOSK_GUARDS, { mode: "recovery", kind: "kiosk" }),
@@ -199,6 +223,12 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: ["POST /station/scans (StationScansController.ingest)"],
+  },
+  {
+    contract: customerContract(STATION_GUARDS, { mode: "read_only_allowed", reason: "read" }),
+    routes: [
+      "GET /station/products/:id/image/:checksum (StationProductImagesController.readProductImage)",
+    ],
   },
 ] as const;
 
@@ -232,6 +262,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "BillingController.document": platform(
     "platform invoice document rendering is guarded by platform billing capabilities",
   ),
+  "BillingController.documentsRender": platform(
+    "platform invoice document rendering is guarded by platform billing capabilities",
+  ),
   "BillingController.apply": platform(
     "platform invoice application is guarded by platform billing capabilities",
   ),
@@ -255,6 +288,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "PlatformOffersController.publish": platform(
     "platform billing offer publication is guarded by platform capabilities",
+  ),
+  "PlatformOffersController.documentsRender": platform(
+    "platform billing offer document rendering is guarded by platform capabilities",
   ),
   "PlatformOffersController.cancel": platform(
     "platform billing offer cancellation is guarded by platform capabilities",
@@ -508,7 +544,8 @@ describe("registered subscription route inventory", () => {
         const expected =
           route.controller.name === "KioskController"
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
-            : route.controller.name === "StationScansController"
+            : route.controller.name === "StationScansController" ||
+                route.controller.name === "StationProductImagesController"
               ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
               : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
         expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(

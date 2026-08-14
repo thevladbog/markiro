@@ -66,6 +66,7 @@ const JANE = {
   fullName: "Jane Doe",
   role: "Кассир",
   status: "active",
+  pickupPolicy: { limitMode: "limited", dayLimit: 12, canWriteoff: false },
   badges: [],
   createdAt: "2026-01-01T00:00:00.000Z",
 };
@@ -677,9 +678,11 @@ it("keeps all employee resources mounted with named section metadata", async () 
   const profile = within(panel).getByRole("region", { name: "Профиль" });
   const badges = within(panel).getByRole("region", { name: "Бейджи" });
   const stationAccess = within(panel).getByRole("region", { name: "Доступ на станцию" });
+  const pickupPolicy = within(panel).getByRole("region", { name: "Правила выдачи" });
   expect(profile).toBeDefined();
   expect(badges).toBeDefined();
   expect(stationAccess).toBeDefined();
+  expect(pickupPolicy).toBeDefined();
   await within(stationAccess).findByText("Табельный номер 123456");
 
   const sectionNav = within(panel).getByRole("navigation", {
@@ -690,9 +693,44 @@ it("keeps all employee resources mounted with named section metadata", async () 
   const stationAccessNav = within(sectionNav).getByRole("button", {
     name: /Доступ на станцию/,
   });
+  expect(within(sectionNav).getByRole("button", { name: /Правила выдачи/ })).toBeDefined();
   expect(profileNav.getAttribute("aria-current")).toBe("location");
   expect(badgesNav.textContent).toContain("0");
   await waitFor(() => expect(stationAccessNav.textContent).toContain("Активен"));
+});
+
+it("keeps the employee numeric limit and writeoff permission when switching to unlimited", async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url) === "/api/employees/1/pickup-policy" && init?.method === "PATCH") {
+      return jsonResponse(200, {
+        ...JANE,
+        pickupPolicy: { limitMode: "unlimited", dayLimit: 12, canWriteoff: false },
+      });
+    }
+    if (String(url) === "/api/employees") return jsonResponse(200, { items: [JANE] });
+    if (String(url) === "/api/operators") return jsonResponse(200, { items: [ACTIVE_OPERATOR] });
+    throw new Error(`Unexpected request: ${String(url)}`);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const { user } = renderPanel(["/employees/1/edit"]);
+  const policy = await screen.findByRole("region", { name: "Правила выдачи" });
+
+  await user.click(within(policy).getByRole("radio", { name: "Без лимита" }));
+  await user.click(within(policy).getByRole("button", { name: "Сохранить правила выдачи" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/employees/1/pickup-policy",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ limitMode: "unlimited", dayLimit: 12, canWriteoff: false }),
+      }),
+    ),
+  );
+  const successToast = await screen.findByText("Правила выдачи сохранены");
+  const toastStatus = successToast.closest("[role=status]");
+  if (!toastStatus) throw new Error("Pickup policy success toast not found");
+  await user.click(within(toastStatus as HTMLElement).getByRole("button", { name: "Закрыть" }));
 });
 
 it("shows one Station access error marker instead of duplicating the error status", async () => {

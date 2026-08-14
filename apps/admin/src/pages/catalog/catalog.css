@@ -22,6 +22,34 @@
   color: var(--fg-1);
   font: var(--text-h3);
 }
+.mk-product-image-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  align-items: flex-start;
+}
+.mk-product-image-control__preview,
+.mk-product-image-control__empty {
+  width: 180px;
+  height: 140px;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+.mk-product-image-control__empty {
+  display: grid;
+  place-items: center;
+  padding: var(--sp-3);
+  box-sizing: border-box;
+  color: var(--fg-3);
+  text-align: center;
+}
+.mk-product-image-control__hint {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-body-sm);
+}
 
 @media (max-width: 767px) {
   .mk-catalog-filters__search,

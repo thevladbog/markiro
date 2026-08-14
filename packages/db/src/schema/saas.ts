@@ -262,8 +262,10 @@ export const commercialOffers = pgTable(
     revision: integer("revision").notNull(),
     previousRevisionId: uuid("previous_revision_id"),
     status: offerStatus("status").notNull().default("draft"),
+    number: text("number"),
     total: numeric("total", { precision: 14, scale: 2 }).notNull().default("0"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    termsMarkdown: text("terms_markdown"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     publishedByPlatformUserId: text("published_by_platform_user_id").references(
       () => platformUsers.id,
@@ -275,6 +277,7 @@ export const commercialOffers = pgTable(
   },
   (table) => [
     unique("commercial_offers_tenant_id_uq").on(table.tenantId, table.id),
+    unique("commercial_offers_number_uq").on(table.number),
     unique("commercial_offers_tenant_family_revision_uq").on(
       table.tenantId,
       table.familyId,
@@ -287,6 +290,85 @@ export const commercialOffers = pgTable(
     }),
     check("commercial_offers_revision_positive", sql`${table.revision} > 0`),
     check("commercial_offers_total_nonnegative", sql`${table.total} >= 0`),
+  ],
+);
+
+export const commercialOfferPrintSnapshots = pgTable(
+  "commercial_offer_print_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    offerId: uuid("offer_id").notNull(),
+    revision: integer("revision").notNull(),
+    number: text("number").notNull(),
+    publishedAt: timestamp("published_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    sellerSnapshot: jsonb("seller_snapshot").notNull(),
+    buyerSnapshot: jsonb("buyer_snapshot").notNull(),
+    linesSnapshot: jsonb("lines_snapshot").notNull(),
+    subtotal: numeric("subtotal", { precision: 14, scale: 2 }).notNull(),
+    vatTotal: numeric("vat_total", { precision: 14, scale: 2 }).notNull(),
+    total: numeric("total", { precision: 14, scale: 2 }).notNull(),
+    termsMarkdown: text("terms_markdown"),
+    termsHtml: text("terms_html"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("commercial_offer_print_snapshots_tenant_id_uq").on(table.tenantId, table.id),
+    unique("commercial_offer_print_snapshots_offer_revision_uq").on(table.offerId, table.revision),
+    foreignKey({
+      name: "commercial_offer_print_snapshots_tenant_offer_fk",
+      columns: [table.tenantId, table.offerId],
+      foreignColumns: [commercialOffers.tenantId, commercialOffers.id],
+    }),
+    check("commercial_offer_print_snapshots_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "commercial_offer_print_snapshots_totals_nonnegative",
+      sql`${table.subtotal} >= 0 and ${table.vatTotal} >= 0 and ${table.total} >= 0`,
+    ),
+  ],
+);
+
+export const commercialOfferDocuments = pgTable(
+  "commercial_offer_documents",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: text("tenant_id").notNull(),
+    offerId: uuid("offer_id").notNull(),
+    revision: integer("revision").notNull(),
+    format: text("format").notNull(),
+    status: text("status").notNull().default("pending"),
+    objectKey: text("object_key"),
+    contentType: text("content_type"),
+    sha256: text("sha256"),
+    byteSize: integer("byte_size"),
+    rendererVersion: text("renderer_version").notNull(),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    unique("commercial_offer_documents_tenant_id_uq").on(table.tenantId, table.id),
+    unique("commercial_offer_documents_offer_revision_format_uq").on(
+      table.offerId,
+      table.revision,
+      table.format,
+    ),
+    foreignKey({
+      name: "commercial_offer_documents_tenant_offer_fk",
+      columns: [table.tenantId, table.offerId],
+      foreignColumns: [commercialOffers.tenantId, commercialOffers.id],
+    }),
+    check("commercial_offer_documents_revision_positive", sql`${table.revision} > 0`),
+    check("commercial_offer_documents_format_check", sql`${table.format} in ('pdf', 'html')`),
+    check(
+      "commercial_offer_documents_status_check",
+      sql`${table.status} in ('pending', 'ready', 'failed')`,
+    ),
+    check(
+      "commercial_offer_documents_ready_metadata_check",
+      sql`${table.status} <> 'ready' or (${table.objectKey} is not null and ${table.sha256} is not null and ${table.byteSize} is not null)`,
+    ),
   ],
 );
 

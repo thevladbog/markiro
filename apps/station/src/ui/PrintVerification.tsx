@@ -1,18 +1,19 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { parseScannedSscc } from "@markiro/domain";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
+import type { BoxPrintErrorCode } from "../lib/boxes.js";
 import type { ScanSource } from "../lib/scan-source.js";
 
 export interface PrintVerificationProps {
   /** The bare 18-digit SSCC the operator should scan off the printed label. */
   expected: string;
   /** Fires the instant a scan matches `expected`. */
-  onVerified: () => void;
+  onVerified: () => void | boolean | Promise<void | boolean>;
   /** The label did not match, or was unreadable -- print the same bytes again. */
-  onReprint: () => void;
+  onReprint: () => void | BoxPrintErrorCode | Promise<void | BoxPrintErrorCode>;
   /** The scanner is disconnected, or the label is ruined -- move on without verifying. */
-  onSkip: () => void;
+  onSkip: () => void | boolean | Promise<void | boolean>;
   /** The physical scan source, same seam `WorkScreen` reads from. */
   scanSource: ScanSource;
 }
@@ -29,7 +30,9 @@ export type PrintVerificationMessage = "waiting" | "mismatch" | "notSscc";
  *
  * It must always have an exit: a mismatched or unreadable scan offers
  * reprint; a disconnected scanner or a ruined label offers skip. Neither
- * button is ever disabled or hidden, whatever the last scan's outcome was.
+ * action is hidden after scan feedback. Both are disabled only while a
+ * resolution is in flight, so a second input cannot resolve the next queued
+ * label by mistake.
  */
 export function PrintVerification({
   expected,
@@ -43,12 +46,65 @@ export function PrintVerification({
     expected: string;
     message: PrintVerificationMessage;
   }>({ expected, message: "waiting" });
+  const [resolvingExpected, setResolvingExpected] = useState<string | null>(null);
+  const [reprintingExpected, setReprintingExpected] = useState<string | null>(null);
+  const [reprintError, setReprintError] = useState<BoxPrintErrorCode | null>(null);
+  const resolutionStartedFor = useRef<string | null>(null);
+  const reprintingFor = useRef<string | null>(null);
+  const resolving = resolvingExpected === expected;
+  const reprinting = reprintingExpected === expected;
   const message = feedback.expected === expected ? feedback.message : "waiting";
+
+  const beginResolution = useCallback(
+    (action: () => void | boolean | Promise<void | boolean>): void => {
+      if (resolutionStartedFor.current === expected || reprintingFor.current === expected) return;
+      const startedFor = expected;
+      resolutionStartedFor.current = startedFor;
+      setResolvingExpected(startedFor);
+      const release = (): void => {
+        if (resolutionStartedFor.current !== startedFor) return;
+        resolutionStartedFor.current = null;
+        setResolvingExpected((current) => (current === startedFor ? null : current));
+      };
+      try {
+        void Promise.resolve(action()).then((won) => {
+          if (won === false) release();
+        }, release);
+      } catch {
+        release();
+      }
+    },
+    [expected],
+  );
+
+  async function reprint(): Promise<void> {
+    if (reprintingFor.current === expected || resolutionStartedFor.current === expected) return;
+    const startedFor = expected;
+    reprintingFor.current = startedFor;
+    setReprintingExpected(startedFor);
+    setReprintError(null);
+    try {
+      const result = await onReprint();
+      if (result) setReprintError(result);
+    } catch {
+      setReprintError("transport_failed");
+    } finally {
+      if (reprintingFor.current === startedFor) {
+        reprintingFor.current = null;
+        setReprintingExpected((current) => (current === startedFor ? null : current));
+      }
+    }
+  }
 
   useEffect(() => {
     let active = true;
     const stop = scanSource.start((raw) => {
-      if (!active) return;
+      if (
+        !active ||
+        resolutionStartedFor.current === expected ||
+        reprintingFor.current === expected
+      )
+        return;
       const parsed = parseScannedSscc(raw);
       if (parsed === null) {
         setFeedback({ expected, message: "notSscc" });
@@ -59,23 +115,29 @@ export function PrintVerification({
         return;
       }
       setFeedback({ expected, message: "waiting" });
-      onVerified();
+      beginResolution(onVerified);
     });
     return () => {
       active = false;
       stop();
     };
-  }, [scanSource, expected, onVerified]);
+  }, [beginResolution, scanSource, expected, onVerified]);
 
   return (
     <FullScreenDialog
       open
       title={t("box.printExpected")}
       backLabel={t("box.printSkip")}
-      onClose={onSkip}
+      backDisabled={resolving || reprinting}
+      onClose={() => beginResolution(onSkip)}
       initialFocus="dialog"
       footer={
-        <Button type="button" size="floor" onClick={onReprint}>
+        <Button
+          type="button"
+          size="floor"
+          disabled={resolving || reprinting}
+          onClick={() => void reprint()}
+        >
           {t("box.printReprint")}
         </Button>
       }
@@ -97,6 +159,20 @@ export function PrintVerification({
 
         {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
         {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
+        {reprintError ? (
+          <Alert
+            tone="error"
+            title={t(
+              reprintError === "template_missing"
+                ? "box.printRecovery.errors.templateMissing"
+                : reprintError === "printer_unconfigured"
+                  ? "box.printRecovery.errors.printerUnconfigured"
+                  : reprintError === "render_failed"
+                    ? "box.printRecovery.errors.renderFailed"
+                    : "box.printRecovery.errors.transportFailed",
+            )}
+          />
+        ) : null}
       </div>
     </FullScreenDialog>
   );

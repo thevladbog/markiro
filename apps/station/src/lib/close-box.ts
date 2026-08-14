@@ -41,7 +41,8 @@ export interface CloseBoxDeps {
 
 /**
  * Closes the shift's current open box: burns one serial from this device's
- * local pool, builds the box's SSCC, and writes both onto `boxes_mirror`.
+ * local pool, builds the box's SSCC, and writes the identity, closure, and
+ * pending print state onto `boxes_mirror` in one SQLite statement.
  *
  * Refuses -- burning nothing -- for two distinct, non-exceptional reasons a
  * caller must tell apart: `empty` (no box is open, or the open box has no

@@ -5,6 +5,12 @@ import { describe, expect, it } from "vitest";
 const tauriRoot = process.cwd();
 
 describe("packaged station updater contract", () => {
+  it("allows locally cached product image object URLs", async () => {
+    const config = JSON.parse(await readFile(join(tauriRoot, "src-tauri/tauri.conf.json"), "utf8"));
+
+    expect(config.app.security.csp).toContain("img-src 'self' data: blob:");
+  });
+
   it("pins one beta endpoint, updater artifacts, a real public key and restart only", async () => {
     const config = JSON.parse(await readFile(join(tauriRoot, "src-tauri/tauri.conf.json"), "utf8"));
     const capability = JSON.parse(
