@@ -1,9 +1,13 @@
 import { type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DemoRequestsController } from "../src/modules/demo-requests/demo-requests.controller";
 import { DemoRequestService } from "../src/modules/demo-requests/demo-request.service";
+import {
+  DEMO_REQUEST_SUBMISSION_ENABLED,
+  DemoRequestSubmissionGuard,
+} from "../src/modules/demo-requests/demo-request-submission.guard";
 import {
   captchaInvalidError,
   captchaUnavailableError,
@@ -36,6 +40,7 @@ describe("POST /demo-requests", () => {
   let captchaFailure: "invalid" | "unavailable" | undefined;
   let repositoryFailure: boolean;
   const acceptedInputs: unknown[] = [];
+  const disabledSubmit = vi.fn();
 
   beforeAll(async () => {
     const service = new DemoRequestService(
@@ -60,21 +65,23 @@ describe("POST /demo-requests", () => {
     );
     const ref = await Test.createTestingModule({
       controllers: [DemoRequestsController],
-      providers: [{ provide: DemoRequestService, useValue: service }],
+      providers: [
+        { provide: DemoRequestService, useValue: service },
+        { provide: DEMO_REQUEST_SUBMISSION_ENABLED, useValue: true },
+        DemoRequestSubmissionGuard,
+      ],
     }).compile();
     app = ref.createNestApplication();
     await app.init();
     await listenOnLoopback(app);
 
-    const disabledService = new DemoRequestService(
-      { enabled: false, consentVersion: undefined },
-      { assertAllowed: () => undefined },
-      { assertHuman: async () => undefined },
-      { accept: async () => undefined },
-    );
     const disabledRef = await Test.createTestingModule({
       controllers: [DemoRequestsController],
-      providers: [{ provide: DemoRequestService, useValue: disabledService }],
+      providers: [
+        { provide: DemoRequestService, useValue: { submit: disabledSubmit } },
+        { provide: DEMO_REQUEST_SUBMISSION_ENABLED, useValue: false },
+        DemoRequestSubmissionGuard,
+      ],
     }).compile();
     disabledApp = disabledRef.createNestApplication();
     await disabledApp.init();
@@ -150,10 +157,19 @@ describe("POST /demo-requests", () => {
     expect(JSON.stringify(response.body)).not.toContain("database");
   });
 
-  it("returns a bounded 404 while submissions are disabled", async () => {
+  it("returns a bounded 404 before body validation while submissions are disabled", async () => {
+    await request(disabledApp.getHttpServer())
+      .post("/demo-requests")
+      .send({})
+      .expect(404, { code: "submission_disabled" });
+    await request(disabledApp.getHttpServer())
+      .post("/demo-requests")
+      .send({ requestId: "invalid", unexpected: "field" })
+      .expect(404, { code: "submission_disabled" });
     await request(disabledApp.getHttpServer())
       .post("/demo-requests")
       .send(body())
       .expect(404, { code: "submission_disabled" });
+    expect(disabledSubmit).not.toHaveBeenCalled();
   });
 });

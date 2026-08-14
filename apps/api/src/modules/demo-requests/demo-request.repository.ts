@@ -32,13 +32,14 @@ export class DemoRequestRepository {
   ) {}
 
   async accept(input: DemoRequestDto): Promise<"created" | "existing"> {
+    const requestId = input.requestId.toLowerCase();
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${input.requestId}, 0))`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${requestId}, 0))`);
 
       const existing = await tx
         .select({ kind: schema.emailDeliveries.kind })
         .from(schema.emailDeliveries)
-        .where(eq(schema.emailDeliveries.publicRequestId, input.requestId));
+        .where(eq(schema.emailDeliveries.publicRequestId, requestId));
       if (existing.length > 0) {
         const kinds = new Set(existing.map((row) => row.kind));
         if (
@@ -54,13 +55,13 @@ export class DemoRequestRepository {
       const receivedAt = this.now();
       const phone = input.phone === undefined ? {} : { phone: input.phone };
       await this.mail.enqueue(tx, {
-        scope: { publicRequestId: input.requestId },
+        scope: { publicRequestId: requestId },
         recipient: this.options.recipient,
-        sourceId: input.requestId,
+        sourceId: requestId,
         template: {
           kind: "landing-demo-notification",
           locale: input.locale,
-          requestId: input.requestId,
+          requestId,
           receivedAt,
           sourcePath: input.sourcePath,
           recipientName: input.name,
@@ -70,13 +71,13 @@ export class DemoRequestRepository {
         },
       });
       await this.mail.enqueue(tx, {
-        scope: { publicRequestId: input.requestId },
+        scope: { publicRequestId: requestId },
         recipient: input.email,
-        sourceId: input.requestId,
+        sourceId: requestId,
         template: {
           kind: "landing-demo-confirmation",
           locale: input.locale,
-          requestId: input.requestId,
+          requestId,
           recipientName: input.name,
           company: input.company,
           email: input.email,

@@ -165,6 +165,37 @@ describe.skipIf(!ready)("landing demo request mail pipeline", () => {
     expect(outbox).toHaveLength(2);
   });
 
+  it("canonicalizes mixed-case UUID retries before locking and persistence", async () => {
+    const canonicalRequestId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const upperRequestId = "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA";
+    const upper = input(upperRequestId);
+    const lower = input(canonicalRequestId);
+
+    const results = await Promise.all([repository().accept(upper), repository().accept(lower)]);
+
+    expect(results.sort()).toEqual(["created", "existing"]);
+    const { deliveries, outbox } = await rowsFor(canonicalRequestId);
+    expect(deliveries).toHaveLength(2);
+    expect(outbox).toHaveLength(2);
+    expect(deliveries.map((row) => row.publicRequestId)).toEqual([
+      canonicalRequestId,
+      canonicalRequestId,
+    ]);
+    expect(deliveries.map((row) => row.sourceId)).toEqual([canonicalRequestId, canonicalRequestId]);
+    for (const row of deliveries) {
+      if (!row.encryptedPayload || !row.payloadNonce || !row.payloadTag) {
+        throw new Error("Expected an encrypted mail payload");
+      }
+      expect(
+        crypto.decrypt<{ requestId: string }>(row.id, {
+          encryptedPayload: row.encryptedPayload,
+          payloadNonce: row.payloadNonce,
+          payloadTag: row.payloadTag,
+        }).requestId,
+      ).toBe(canonicalRequestId);
+    }
+  });
+
   it("rolls back the first enqueue when the second enqueue fails", async () => {
     const demo = input();
     let calls = 0;

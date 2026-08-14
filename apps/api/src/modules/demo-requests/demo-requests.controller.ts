@@ -9,12 +9,14 @@ import {
   Ip,
   Post,
   UseFilters,
+  UseGuards,
   type ExceptionFilter,
 } from "@nestjs/common";
 import type { Response } from "express";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { demoRequestSchema, type DemoRequestDto } from "./demo-request.schema";
 import { DemoRequestService } from "./demo-request.service";
+import { DemoRequestSubmissionGuard } from "./demo-request-submission.guard";
 
 const PUBLIC_ERROR_CODES = new Set([
   "invalid_request",
@@ -43,6 +45,7 @@ class DemoRequestPublicErrorFilter implements ExceptionFilter<HttpException> {
 
 @Controller("demo-requests")
 @UseFilters(new DemoRequestPublicErrorFilter())
+@UseGuards(DemoRequestSubmissionGuard)
 export class DemoRequestsController {
   constructor(private readonly service: DemoRequestService) {}
 

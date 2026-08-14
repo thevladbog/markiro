@@ -6,6 +6,10 @@ import { DemoRequestCaptchaService } from "./demo-request-captcha.service";
 import { DemoRequestRateLimiter } from "./demo-request-rate-limiter";
 import { DemoRequestRepository } from "./demo-request.repository";
 import { DemoRequestService } from "./demo-request.service";
+import {
+  DEMO_REQUEST_SUBMISSION_ENABLED,
+  DemoRequestSubmissionGuard,
+} from "./demo-request-submission.guard";
 import { DemoRequestsController } from "./demo-requests.controller";
 import type { Db } from "@markiro/db";
 
@@ -16,6 +20,11 @@ export class DemoRequestsModule {
       module: DemoRequestsModule,
       controllers: [DemoRequestsController],
       providers: [
+        {
+          provide: DEMO_REQUEST_SUBMISSION_ENABLED,
+          useValue: env.LANDING_DEMO_SUBMISSION_ENABLED,
+        },
+        DemoRequestSubmissionGuard,
         {
           provide: DemoRequestRateLimiter,
           useFactory: () =>
