@@ -19,7 +19,11 @@ const image = {
 
 describe("ProductImage", () => {
   it("renders the published blob and revokes its object URL on unmount", async () => {
-    await publishProductImage("p1", image.checksum, new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }));
+    await publishProductImage(
+      "p1",
+      image.checksum,
+      new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }),
+    );
     const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:test");
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => undefined);
     const view = render(<ProductImage productId="p1" name="Молоко" image={image} />);
@@ -31,7 +35,11 @@ describe("ProductImage", () => {
   });
 
   it("renders a retained pointer when a rolling legacy payload omits image", async () => {
-    await publishProductImage("p1", image.checksum, new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }));
+    await publishProductImage(
+      "p1",
+      image.checksum,
+      new Blob([new Uint8Array([1, 2, 3])], { type: "image/webp" }),
+    );
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:legacy");
     render(<ProductImage productId="p1" name="Молоко" />);
 

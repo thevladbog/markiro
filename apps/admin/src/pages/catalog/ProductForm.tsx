@@ -436,14 +436,22 @@ export function ProductForm({
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
           <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
           <div className="mk-product-image-control">
-            {(previewUrl || (mode === "edit" && productId && image)) && !imageLoadFailed
-              ? <img
-                  src={previewUrl ?? productImageUrl({ id: productId!, image: image ?? null }) ?? undefined}
-                  alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
-                  onError={() => setImageLoadFailed(true)}
-                  className="mk-product-image-control__preview"
-                />
-              : <div className="mk-product-image-control__empty">{t("pages.catalog.form.imageEmpty")}</div>}
+            {(previewUrl || (mode === "edit" && productId && image)) && !imageLoadFailed ? (
+              <img
+                src={
+                  previewUrl ??
+                  productImageUrl({ id: productId!, image: image ?? null }) ??
+                  undefined
+                }
+                alt={imageAltName ?? t("pages.catalog.form.imageAlt")}
+                onError={() => setImageLoadFailed(true)}
+                className="mk-product-image-control__preview"
+              />
+            ) : (
+              <div className="mk-product-image-control__empty">
+                {t("pages.catalog.form.imageEmpty")}
+              </div>
+            )}
             <Input
               type="file"
               accept="image/jpeg,image/png,image/webp"
@@ -452,7 +460,14 @@ export function ProductForm({
               onChange={(event) => setSelectedImage(event.target.files?.[0] ?? null)}
             />
             {mode === "edit" && image && onDeleteImage ? (
-              <Button type="button" size="compact" variant="secondary" loading={imageBusy} disabled={submitting} onClick={() => void onDeleteImage()}>
+              <Button
+                type="button"
+                size="compact"
+                variant="secondary"
+                loading={imageBusy}
+                disabled={submitting}
+                onClick={() => void onDeleteImage()}
+              >
                 {t("pages.catalog.form.imageRemove")}
               </Button>
             ) : null}

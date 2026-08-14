@@ -197,13 +197,15 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
   );
 
   const p = bundle.product;
-  const imageColumns = p.image === undefined
-    ? ""
-    : ", image_checksum, image_content_type, image_byte_size, image_width, image_height";
+  const imageColumns =
+    p.image === undefined
+      ? ""
+      : ", image_checksum, image_content_type, image_byte_size, image_width, image_height";
   const imageValues = p.image === undefined ? "" : ", ?, ?, ?, ?, ?";
-  const imageUpdate = p.image === undefined
-    ? ""
-    : `, image_checksum=excluded.image_checksum, image_content_type=excluded.image_content_type,
+  const imageUpdate =
+    p.image === undefined
+      ? ""
+      : `, image_checksum=excluded.image_checksum, image_content_type=excluded.image_content_type,
        image_byte_size=excluded.image_byte_size, image_width=excluded.image_width,
        image_height=excluded.image_height,
        image_pointer_checksum=CASE WHEN excluded.image_checksum IS NULL THEN NULL ELSE product_mirror.image_pointer_checksum END`;
@@ -229,7 +231,13 @@ async function upsertBundleBody(exec: SqlExecutor, bundle: StationBundle): Promi
       p.defaultLabelTemplateId,
       ...(p.image === undefined
         ? []
-        : [p.image?.checksum ?? null, p.image?.contentType ?? null, p.image?.byteSize ?? null, p.image?.width ?? null, p.image?.height ?? null]),
+        : [
+            p.image?.checksum ?? null,
+            p.image?.contentType ?? null,
+            p.image?.byteSize ?? null,
+            p.image?.width ?? null,
+            p.image?.height ?? null,
+          ]),
     ],
   );
 }
@@ -496,9 +504,22 @@ export async function readShiftContext(
     gtin14: row.gtin14,
     productName: row.name,
     counterpartyName: row.counterparty_name,
-    image: row.image_checksum && row.image_content_type && row.image_byte_size !== null && row.image_width !== null && row.image_height !== null
-      ? { checksum: row.image_checksum, contentType: row.image_content_type, byteSize: row.image_byte_size, width: row.image_width, height: row.image_height }
-      : row.image_checksum === null ? null : undefined,
+    image:
+      row.image_checksum &&
+      row.image_content_type &&
+      row.image_byte_size !== null &&
+      row.image_width !== null &&
+      row.image_height !== null
+        ? {
+            checksum: row.image_checksum,
+            contentType: row.image_content_type,
+            byteSize: row.image_byte_size,
+            width: row.image_width,
+            height: row.image_height,
+          }
+        : row.image_checksum === null
+          ? null
+          : undefined,
   };
 }
 

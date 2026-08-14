@@ -58,11 +58,14 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
     }
     if (shiftIds.length) await db.delete(shifts).where(inArray(shifts.id, shiftIds));
     if (productImageProductIds.length) {
-      await db.delete(productImages).where(inArray(productImages.productId, productImageProductIds));
+      await db
+        .delete(productImages)
+        .where(inArray(productImages.productId, productImageProductIds));
     }
     if (lineIds.length) await db.delete(lines).where(inArray(lines.id, lineIds));
     if (productIds.length) await db.delete(products).where(inArray(products.id, productIds));
-    if (mediaAssetIds.length) await db.delete(mediaAssets).where(inArray(mediaAssets.id, mediaAssetIds));
+    if (mediaAssetIds.length)
+      await db.delete(mediaAssets).where(inArray(mediaAssets.id, mediaAssetIds));
     if (counterpartyIds.length) {
       await db.delete(counterparties).where(inArray(counterparties.id, counterpartyIds));
     }
@@ -205,7 +208,11 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
       .values({ tenantId: orgA.id, productId: productA!.id, assetId: assetA!.id })
       .returning();
 
-    expect(image).toMatchObject({ tenantId: orgA.id, productId: productA!.id, assetId: assetA!.id });
+    expect(image).toMatchObject({
+      tenantId: orgA.id,
+      productId: productA!.id,
+      assetId: assetA!.id,
+    });
   });
 
   it("rejects a second asset binding for the same tenant product", async () => {

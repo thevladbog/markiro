@@ -54,7 +54,10 @@ export async function prefetchStationProductImage(
     );
     if (isSealed?.()) return;
     await validateBlob(blob, product.image);
-    await cache.put(key, new Response(blob, { headers: { "Content-Type": product.image.contentType } }));
+    await cache.put(
+      key,
+      new Response(blob, { headers: { "Content-Type": product.image.contentType } }),
+    );
   } catch (error) {
     console.error("station: product image prefetch failed", error);
   }
@@ -70,7 +73,9 @@ export async function syncStationProductImage(
     if (isSealed?.()) return;
     if (product.image === undefined) return;
     if (product.image === null) {
-      await exec.run("UPDATE product_mirror SET image_pointer_checksum = NULL WHERE id = ?", [product.id]);
+      await exec.run("UPDATE product_mirror SET image_pointer_checksum = NULL WHERE id = ?", [
+        product.id,
+      ]);
       const cache = await openImageCache();
       for (const request of await cache.keys()) {
         if (request.url.startsWith(`${CACHE_ORIGIN}${encodeURIComponent(product.id)}/`)) {
@@ -97,14 +102,16 @@ export async function syncStationProductImage(
       );
       if (isSealed?.()) return;
       await validateBlob(blob, product.image);
-      await cache.put(key, new Response(blob, { headers: { "Content-Type": product.image.contentType } }));
+      await cache.put(
+        key,
+        new Response(blob, { headers: { "Content-Type": product.image.contentType } }),
+      );
     }
     if (isSealed?.()) return;
-    await exec.run("UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ? AND image_checksum = ?", [
-      product.image.checksum,
-      product.id,
-      product.image.checksum,
-    ]);
+    await exec.run(
+      "UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ? AND image_checksum = ?",
+      [product.image.checksum, product.id, product.image.checksum],
+    );
   } catch (error) {
     console.error("station: product image sync failed", error);
   }

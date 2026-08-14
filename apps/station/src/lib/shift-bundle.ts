@@ -2,10 +2,7 @@ import type { StationClient } from "./api-client.js";
 import type { CredentialGeneration } from "./credential-recovery.js";
 import { upsertBundle, type SqlExecutor, type StationBundle } from "./mirror.js";
 import { addRange } from "./sscc-pool.js";
-import {
-  syncStationProductImage,
-  trackStationProductImageSync,
-} from "./product-image-cache.js";
+import { syncStationProductImage, trackStationProductImageSync } from "./product-image-cache.js";
 
 /**
  * Downloads the full shift bundle (`GET /shifts/:id/bundle`) and mirrors it

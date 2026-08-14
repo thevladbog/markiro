@@ -502,7 +502,11 @@ export function Cart({
                         borderBottom: "1px solid var(--line)",
                       }}
                     >
-                      <ProductImage productId={item.productId} name={item.name} image={item.image} />
+                      <ProductImage
+                        productId={item.productId}
+                        name={item.name}
+                        image={item.image}
+                      />
                       <span
                         style={{
                           flex: 1,

@@ -139,7 +139,9 @@ function deleteProductImage(id: string): Promise<void> {
 }
 
 export function productImageUrl(product: Pick<ProductDto, "id" | "image">): string | null {
-  return product.image ? `${API_BASE}/products/${product.id}/image/${product.image.checksum}` : null;
+  return product.image
+    ? `${API_BASE}/products/${product.id}/image/${product.image.checksum}`
+    : null;
 }
 
 /** `GET /products` -- the active tenant's catalog, optionally filtered by search/status. */

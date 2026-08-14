@@ -20,9 +20,11 @@ export interface ProductImageSyncResult {
 }
 
 function checksumHex(bytes: ArrayBuffer): Promise<string> {
-  return crypto.subtle.digest("SHA-256", bytes).then((digest) =>
-    [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join(""),
-  );
+  return crypto.subtle
+    .digest("SHA-256", bytes)
+    .then((digest) =>
+      [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join(""),
+    );
 }
 
 async function validate(blob: Blob, descriptor: ProductImageDescriptor): Promise<void> {
@@ -62,7 +64,10 @@ export async function syncProductImages(
           continue;
         }
         const previous = await readPublishedProductImagePointer(product.id);
-        if (previous?.checksum === descriptor.checksum && (await hasProductImageBlob(descriptor.checksum))) {
+        if (
+          previous?.checksum === descriptor.checksum &&
+          (await hasProductImageBlob(descriptor.checksum))
+        ) {
           const cached = await readProductImageBlob(descriptor.checksum);
           if (cached) {
             try {

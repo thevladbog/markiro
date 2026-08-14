@@ -28,10 +28,17 @@ describe("product image sync", () => {
   it("validates bytes and publishes blob before pointer", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
     const hash = await crypto.subtle.digest("SHA-256", bytes);
-    const image = { ...descriptor(bytes), checksum: [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join("") };
+    const image = {
+      ...descriptor(bytes),
+      checksum: [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join(""),
+    };
     const download = vi.fn(async () => new Blob([bytes], { type: "image/webp" }));
-    await expect(syncProductImages({ downloadProductImage: download }, [product(image)])).resolves.toMatchObject({ downloaded: 1 });
-    expect(await readPublishedProductImagePointer("p1")).toMatchObject({ checksum: image.checksum });
+    await expect(
+      syncProductImages({ downloadProductImage: download }, [product(image)]),
+    ).resolves.toMatchObject({ downloaded: 1 });
+    expect(await readPublishedProductImagePointer("p1")).toMatchObject({
+      checksum: image.checksum,
+    });
     expect((await readPublishedProductImage("p1"))?.size).toBe(3);
   });
 
@@ -41,11 +48,19 @@ describe("product image sync", () => {
     const good = new Blob([bytes], { type: "image/webp" });
     // Seed a valid old record through the first sync.
     const oldHash = await crypto.subtle.digest("SHA-256", bytes);
-    const oldDescriptor = { ...old, checksum: [...new Uint8Array(oldHash)].map((b) => b.toString(16).padStart(2, "0")).join("") };
+    const oldDescriptor = {
+      ...old,
+      checksum: [...new Uint8Array(oldHash)].map((b) => b.toString(16).padStart(2, "0")).join(""),
+    };
     await syncProductImages({ downloadProductImage: async () => good }, [product(oldDescriptor)]);
     const bad = { ...oldDescriptor, checksum: "c".repeat(64) };
-    await syncProductImages({ downloadProductImage: async () => new Blob([bytes], { type: "image/webp" }) }, [product(bad)]);
-    expect(await readPublishedProductImagePointer("p1")).toMatchObject({ checksum: oldDescriptor.checksum });
+    await syncProductImages(
+      { downloadProductImage: async () => new Blob([bytes], { type: "image/webp" }) },
+      [product(bad)],
+    );
+    expect(await readPublishedProductImagePointer("p1")).toMatchObject({
+      checksum: oldDescriptor.checksum,
+    });
   });
 
   it("treats undefined as legacy retention and null as deletion", async () => {
@@ -53,9 +68,7 @@ describe("product image sync", () => {
     const hash = await crypto.subtle.digest("SHA-256", bytes);
     const oldImage = {
       ...descriptor(bytes),
-      checksum: [...new Uint8Array(hash)]
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join(""),
+      checksum: [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join(""),
     };
     await syncProductImages(
       { downloadProductImage: async () => new Blob([bytes], { type: "image/webp" }) },
@@ -85,11 +98,13 @@ describe("product image sync", () => {
     const hash = await crypto.subtle.digest("SHA-256", replacement);
     const replacementImage = {
       ...descriptor(replacement),
-      checksum: [...new Uint8Array(hash)]
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join(""),
+      checksum: [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join(""),
     };
-    await publishProductImage("p1", replacementImage.checksum, new Blob([1, 2, 3], { type: "image/webp" }));
+    await publishProductImage(
+      "p1",
+      replacementImage.checksum,
+      new Blob([1, 2, 3], { type: "image/webp" }),
+    );
     const download = vi.fn(async () => new Blob([replacement], { type: "image/webp" }));
     await syncProductImages({ downloadProductImage: download }, [product(replacementImage)]);
     expect(download).toHaveBeenCalledOnce();

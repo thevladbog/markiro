@@ -21,7 +21,12 @@ export interface ProductImageProps {
  * blob first, then this component reads the pointer. Missing, legacy, deleted,
  * or failed media always has the same useful fallback — the product monogram.
  */
-export function ProductImage({ productId, name, image, size = 56 }: ProductImageProps): React.JSX.Element {
+export function ProductImage({
+  productId,
+  name,
+  image,
+  size = 56,
+}: ProductImageProps): React.JSX.Element {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
 

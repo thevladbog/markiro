@@ -67,23 +67,20 @@ async function normalizeInWorker(
       void worker.terminate();
       reject(new Error(`${profile.subject} processing exceeded 5 seconds`));
     }, WORKER_TIMEOUT_MS);
-    worker.once(
-      "message",
-      (message: WorkerMessage) => {
-        clearTimeout(timeout);
-        worker.removeAllListeners("exit");
-        void worker.terminate();
-        if (message.ok) {
-          resolve({
-            buffer: Buffer.from(message.buffer),
-            width: message.width,
-            height: message.height,
-          });
-        } else {
-          reject(new Error(validationErrorMessage(message.error, profile)));
-        }
-      },
-    );
+    worker.once("message", (message: WorkerMessage) => {
+      clearTimeout(timeout);
+      worker.removeAllListeners("exit");
+      void worker.terminate();
+      if (message.ok) {
+        resolve({
+          buffer: Buffer.from(message.buffer),
+          width: message.width,
+          height: message.height,
+        });
+      } else {
+        reject(new Error(validationErrorMessage(message.error, profile)));
+      }
+    });
     worker.once("error", (error) => {
       clearTimeout(timeout);
       const message = error instanceof Error ? error.message : "unknown worker error";

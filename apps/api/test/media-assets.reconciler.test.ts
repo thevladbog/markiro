@@ -56,7 +56,9 @@ function fakeDb(
               )
               .slice(0, limit);
             claimIndex = 0;
-            return candidates.map(({ referenceAfterClaim: _race, claimLost: _lost, ...row }) => row);
+            return candidates.map(
+              ({ referenceAfterClaim: _race, claimLost: _lost, ...row }) => row,
+            );
           }
           if (!claimed?.referenceAfterClaim) return [];
           return [
@@ -225,9 +227,7 @@ describe("MediaAssetsService", () => {
       const storage = fakeStorage();
 
       await expect(
-        new MediaAssetsService(state.db, storage).reconcile(
-          new Date("2026-08-13T12:00:00.000Z"),
-        ),
+        new MediaAssetsService(state.db, storage).reconcile(new Date("2026-08-13T12:00:00.000Z")),
       ).resolves.toBe(0);
       expect(storage.delete).not.toHaveBeenCalled();
       expect(state.rows).toEqual([fresh]);

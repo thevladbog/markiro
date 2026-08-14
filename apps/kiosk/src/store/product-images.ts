@@ -1,8 +1,4 @@
-import {
-  STORE_PRODUCT_IMAGE_BLOBS,
-  STORE_PRODUCT_IMAGE_POINTERS,
-  withStore,
-} from "./db.js";
+import { STORE_PRODUCT_IMAGE_BLOBS, STORE_PRODUCT_IMAGE_POINTERS, withStore } from "./db.js";
 
 interface ProductImagePointer {
   productId: string;
@@ -49,7 +45,11 @@ export async function deleteProductImageBlob(checksum: string): Promise<void> {
 }
 
 /** Blob-first, pointer-second publication. A failed pointer write never loses the old pointer. */
-export async function publishProductImage(productId: string, checksum: string, blob: Blob): Promise<void> {
+export async function publishProductImage(
+  productId: string,
+  checksum: string,
+  blob: Blob,
+): Promise<void> {
   await withStore(STORE_PRODUCT_IMAGE_BLOBS, "readwrite", (store) => store.put(blob, checksum));
   await withStore(STORE_PRODUCT_IMAGE_POINTERS, "readwrite", (store) =>
     store.put({ productId, checksum } satisfies ProductImagePointer, productId),
@@ -77,10 +77,8 @@ export async function pruneProductImages(allowedProductIds: ReadonlySet<string>)
     if (allowedProductIds.has(pointer.productId)) retained.add(pointer.checksum);
     else await clearPublishedProductImage(pointer.productId);
   }
-  const checksums = await withStore<IDBValidKey[]>(
-    STORE_PRODUCT_IMAGE_BLOBS,
-    "readonly",
-    (store) => store.getAllKeys(),
+  const checksums = await withStore<IDBValidKey[]>(STORE_PRODUCT_IMAGE_BLOBS, "readonly", (store) =>
+    store.getAllKeys(),
   );
   for (const checksum of checksums ?? []) {
     if (typeof checksum === "string" && !retained.has(checksum)) {

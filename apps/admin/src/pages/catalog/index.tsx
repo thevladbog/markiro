@@ -27,7 +27,13 @@ import { toast } from "../../lib/toast.js";
 import { useCounterparties } from "../counterparties/api.js";
 import { useCandidates } from "../integrations/api.js";
 import { useLabelTemplates } from "../labels/api.js";
-import { productImageUrl, useDeleteProduct, useProducts, type ProductDto, type ProductStatus } from "./api.js";
+import {
+  productImageUrl,
+  useDeleteProduct,
+  useProducts,
+  type ProductDto,
+  type ProductStatus,
+} from "./api.js";
 import type { CatalogPanelContext, CatalogPanelLocationState } from "./ProductPanelRoute.js";
 import "./catalog.css";
 

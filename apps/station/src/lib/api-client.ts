@@ -180,7 +180,8 @@ export function createStationClient(
   return {
     get: (path) => request("GET", path),
     download: async (path) => {
-      if (credentialBoundary?.generation.sealed) throw new Error("station credential generation is sealed");
+      if (credentialBoundary?.generation.sealed)
+        throw new Error("station credential generation is sealed");
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
       try {

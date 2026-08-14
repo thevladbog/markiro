@@ -96,8 +96,10 @@ function CreateProductPanel() {
             gtin: createdProduct.gtin14,
             name: createdProduct.name,
             productGroup: createdProduct.productGroup ?? "",
-            boxCapacity: createdProduct.boxCapacity === null ? "" : String(createdProduct.boxCapacity),
-            palletCapacity: createdProduct.palletCapacity === null ? "" : String(createdProduct.palletCapacity),
+            boxCapacity:
+              createdProduct.boxCapacity === null ? "" : String(createdProduct.boxCapacity),
+            palletCapacity:
+              createdProduct.palletCapacity === null ? "" : String(createdProduct.palletCapacity),
             unitPrice: createdProduct.unitPrice ?? "",
             egaisCode: createdProduct.egaisCode ?? "",
             defaultCounterpartyId: createdProduct.defaultCounterpartyId ?? "",
@@ -112,7 +114,9 @@ function CreateProductPanel() {
       <ProductForm
         mode={createdProduct ? "edit" : "create"}
         {...(createdInitialValues ? { initialValues: createdInitialValues } : {})}
-        {...(createdProduct ? { productId: createdProduct.id, imageAltName: createdProduct.name } : {})}
+        {...(createdProduct
+          ? { productId: createdProduct.id, imageAltName: createdProduct.name }
+          : {})}
         counterparties={context.counterparties}
         labelTemplates={context.labelTemplates}
         submitting={mutation.isPending || imageMutation.isPending}
@@ -234,7 +238,9 @@ function EditProductPanel() {
             await deleteImageMutation.mutateAsync(product.id);
             toast("ok", t("pages.catalog.form.imageRemoveSuccess"));
           } catch (cause) {
-            setError(cause instanceof ApiRequestError ? cause.message : t("pages.catalog.form.imageError"));
+            setError(
+              cause instanceof ApiRequestError ? cause.message : t("pages.catalog.form.imageError"),
+            );
           }
         }}
         submissionError={error}

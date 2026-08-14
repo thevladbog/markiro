@@ -175,10 +175,7 @@ describe("mirrorShiftBundle", () => {
     const rows = await exec.all<{
       image_checksum: string | null;
       image_pointer_checksum: string | null;
-    }>(
-      "SELECT image_checksum, image_pointer_checksum FROM product_mirror WHERE id = ?",
-      ["p1"],
-    );
+    }>("SELECT image_checksum, image_pointer_checksum FROM product_mirror WHERE id = ?", ["p1"]);
     expect(rows).toEqual([
       { image_checksum: image.checksum, image_pointer_checksum: image.checksum },
     ]);

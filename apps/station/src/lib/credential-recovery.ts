@@ -1,6 +1,9 @@
 import { purgeOperatorsMirror, type SqlExecutor } from "./mirror.js";
 import { waitForShiftBundleMirrors } from "./shift-bundle.js";
-import { clearStationProductImages, waitForStationProductImageMirrors } from "./product-image-cache.js";
+import {
+  clearStationProductImages,
+  waitForStationProductImageMirrors,
+} from "./product-image-cache.js";
 
 export interface SealedWorkSummary {
   scans: number;

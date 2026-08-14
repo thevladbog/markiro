@@ -86,7 +86,10 @@ describe("mail and media schema", () => {
         ?.columns.map((column) => column.name),
     ).toEqual(["asset_id"]);
     expect(productImagesConfig.foreignKeys.map((one) => one.getName())).toEqual(
-      expect.arrayContaining(["product_images_tenant_product_fk", "product_images_tenant_asset_fk"]),
+      expect.arrayContaining([
+        "product_images_tenant_product_fk",
+        "product_images_tenant_asset_fk",
+      ]),
     );
 
     const productForeignKey = getTableConfig(schema.productImages).foreignKeys.find(

@@ -15,7 +15,14 @@ export interface ProductImageProps {
 }
 
 /** Offline-first product photo. A missing/corrupt photo deliberately degrades to text. */
-export function ProductImage({ exec, productId, productName, image, className, refreshKey }: ProductImageProps) {
+export function ProductImage({
+  exec,
+  productId,
+  productName,
+  image,
+  className,
+  refreshKey,
+}: ProductImageProps) {
   const [objectUrl, setObjectUrl] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
@@ -48,24 +55,34 @@ export function ProductImage({ exec, productId, productName, image, className, r
     })().catch(() => {
       if (!cancelled) setFailed(true);
     });
-    const retry = retryKey < 2 ? window.setTimeout(() => {
-      if (!cancelled) setRetryKey((key) => key + 1);
-    }, 350) : undefined;
+    const retry =
+      retryKey < 2
+        ? window.setTimeout(() => {
+            if (!cancelled) setRetryKey((key) => key + 1);
+          }, 350)
+        : undefined;
     return () => {
       cancelled = true;
       if (retry !== undefined) window.clearTimeout(retry);
     };
   }, [exec, image, productId, refreshKey, retryKey]);
 
-  useEffect(() => () => {
-    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
-    objectUrlRef.current = null;
-  }, []);
+  useEffect(
+    () => () => {
+      if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    },
+    [],
+  );
 
   const label = productName ?? "Product";
   const classes = ["product-image", className].filter(Boolean).join(" ");
   if (!objectUrl || failed) {
-    return <div className={`${classes} product-image--fallback`} aria-label={label}>{label}</div>;
+    return (
+      <div className={`${classes} product-image--fallback`} aria-label={label}>
+        {label}
+      </div>
+    );
   }
   return (
     <img
