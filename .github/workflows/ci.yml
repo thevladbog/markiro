@@ -122,6 +122,7 @@ jobs:
       MARKIRO_EDGE_IMAGE_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       MARKIRO_DOMAIN: localhost
       MARKIRO_KIOSK_DOMAIN: kiosk.localhost
+      MARKIRO_LANDING_DOMAIN: landing.localhost
       MARKIRO_HTTP_PORT: "18080"
       MARKIRO_HTTPS_PORT: "18443"
       ACME_EMAIL: ci@markiro.local

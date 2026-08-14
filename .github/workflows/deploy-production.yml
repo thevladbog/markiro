@@ -32,6 +32,7 @@ jobs:
       APP_SSH_HOST_KEYS_B64: ${{ vars.APP_SSH_HOST_KEYS_B64 }}
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
       MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
+      MARKIRO_LANDING_DOMAIN: ${{ vars.MARKIRO_LANDING_DOMAIN }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
       YC_APP_DEPLOY_LOGIN: markiro-deploy
     steps:

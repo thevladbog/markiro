@@ -18,6 +18,7 @@ const environment = {
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+  MARKIRO_LANDING_DOMAIN: "markiro.example",
   MARKIRO_HTTPS_PORT: "443",
   ACME_EMAIL: "ops@example.test",
   DATABASE_URL: "postgres://private:password@database/markiro",
@@ -209,7 +210,7 @@ test(
   },
 );
 
-test("passes both configured authorities and the immutable tag to public smoke", async () => {
+test("passes all configured authorities and the immutable tag to public smoke", async () => {
   const { dependencies, releaseDirectory } = await fixture();
   let smokeOptions;
   let readinessUrl;
@@ -232,6 +233,7 @@ test("passes both configured authorities and the immutable tag to public smoke",
 
   assert.equal(smokeOptions.adminBaseUrl, "https://app.markiro.example:18443");
   assert.equal(smokeOptions.kioskBaseUrl, "https://kiosk.markiro.example:18443");
+  assert.equal(smokeOptions.landingBaseUrl, "https://markiro.example:18443");
   assert.equal(smokeOptions.expectedReleaseSha, tag);
   assert.equal(readinessUrl, "https://app.markiro.example:18443/health/live");
 });

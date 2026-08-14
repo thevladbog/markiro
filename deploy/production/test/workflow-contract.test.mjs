@@ -15,6 +15,7 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   assert.match(source, /pnpm format:check/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
+  assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
 });
 
 test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {
@@ -31,6 +32,7 @@ test("release publication is main-only, digest-bound and writes the immutable ma
   assert.doesNotMatch(source, /:latest\b/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
+  assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
 });
 
 test("production deploy is one protected manual GitHub-hosted SSH job", async () => {
@@ -53,12 +55,18 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   assert.match(source, /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
   assert.match(source, /APP_SSH_HOST_KEYS_B64/);
   assert.match(source, /ACME_EMAIL:\s*\$\{\{ vars\.ACME_EMAIL \}\}/);
+  assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
   assert.match(source, /GHCR_TOKEN:\s*\$\{\{ github\.token \}\}/);
   assert.match(source, /if:\s*always\(\)/);
   assert.doesNotMatch(
     source,
     /workflow_run|self-hosted|id-token|deployment_phase|rollback_rehearsal|production-controller|production-cleanup|YC_IAM|YC_LOAD_BALANCER/i,
   );
+});
+
+test("infrastructure workflow passes the landing domain to Terraform", async () => {
+  const source = await read(".github/workflows/yandex-infrastructure.yml");
+  assert.match(source, /TF_VAR_landing_domain:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
 });
 
 test("retired DNS and post-DNS workflows are absent", async () => {

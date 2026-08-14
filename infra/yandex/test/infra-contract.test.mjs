@@ -91,20 +91,25 @@ test("production graph is the direct VM MVP and cannot reintroduce managed edge 
   for (const mutation of mutations) assert.throws(() => assertDirectGraph(mutation));
 });
 
-test("both public names are gated together and resolve only to the retained app address", async () => {
+test("all public names are gated together and resolve only to the retained app address", async () => {
   const production = await source("infra/yandex/production/main.tf");
-  for (const name of ["application", "kiosk_application"]) {
+  for (const name of ["application", "kiosk_application", "landing_application"]) {
     const record = block(production, `resource "yandex_dns_recordset" "${name}"`);
     assert.match(record, /count\s*=\s*var\.public_dns_enabled\s*\?\s*1\s*:\s*0/);
     assert.match(record, /type\s*=\s*"A"/);
     assert.match(record, /data\s*=\s*\[module\.compute\.app_public_ip\]/);
-    assert.match(record, /name\s*=\s*local\.(?:admin|kiosk)_dns_name/);
+    assert.match(record, /name\s*=\s*local\.(?:admin|kiosk|landing)_dns_name/);
   }
   assert.match(production, /admin_dns_name\s*=\s*"\$\{trimsuffix\(var\.domain, "\."\)\}\."/);
   assert.match(production, /kiosk_dns_name\s*=\s*"\$\{trimsuffix\(var\.kiosk_domain, "\."\)\}\."/);
+  assert.match(
+    production,
+    /landing_dns_name\s*=\s*"\$\{trimsuffix\(var\.landing_domain, "\."\)\}\."/,
+  );
   const outputs = await source("infra/yandex/production/outputs.tf");
   assert.match(outputs, /\(local\.admin_dns_name\)\s*=\s*module\.compute\.app_public_ip/);
   assert.match(outputs, /\(local\.kiosk_dns_name\)\s*=\s*module\.compute\.app_public_ip/);
+  assert.match(outputs, /\(local\.landing_dns_name\)\s*=\s*module\.compute\.app_public_ip/);
   const variables = await source("infra/yandex/production/variables.tf");
   const publicDns = block(variables, 'variable "public_dns_enabled"');
   assert.match(publicDns, /default\s*=\s*false/);

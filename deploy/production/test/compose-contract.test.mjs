@@ -21,6 +21,7 @@ function renderCompose(files) {
           ...process.env,
           MARKIRO_DOMAIN: "localhost",
           MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+          MARKIRO_LANDING_DOMAIN: "landing.localhost",
           MARKIRO_ENV_FILE: ".env.production.example",
           MARKIRO_IMAGE_TAG: "a".repeat(40),
           MARKIRO_API_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
@@ -64,7 +65,7 @@ test("production edge receives the immutable release SHA used by its public iden
   );
 });
 
-test("production edge requires separate admin and kiosk production domains", async () => {
+test("production edge requires separate admin, kiosk and landing production domains", async () => {
   const model = loadYaml(await readFile(productionCompose, "utf8"));
 
   assert.equal(
@@ -74,6 +75,10 @@ test("production edge requires separate admin and kiosk production domains", asy
   assert.equal(
     model.services.edge.environment.MARKIRO_KIOSK_DOMAIN,
     "${MARKIRO_KIOSK_DOMAIN:?MARKIRO_KIOSK_DOMAIN is required}",
+  );
+  assert.equal(
+    model.services.edge.environment.MARKIRO_LANDING_DOMAIN,
+    "${MARKIRO_LANDING_DOMAIN:?MARKIRO_LANDING_DOMAIN is required}",
   );
 });
 
@@ -99,6 +104,7 @@ test("merged CI Compose config preserves production restart policies", () => {
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
         MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+        MARKIRO_LANDING_DOMAIN: "landing.localhost",
         MARKIRO_ENV_FILE: envExample,
         MARKIRO_IMAGE_TAG: "contract-test",
         MARKIRO_API_IMAGE_DIGEST: apiDigest,
@@ -234,6 +240,7 @@ test("merged CI Compose uses local SHA-tagged images while validating dummy base
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
         MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+        MARKIRO_LANDING_DOMAIN: "landing.localhost",
         MARKIRO_ENV_FILE: envExample,
         MARKIRO_IMAGE_TAG: "0123456789abcdef0123456789abcdef01234567",
         MARKIRO_API_IMAGE_DIGEST: apiDigest,

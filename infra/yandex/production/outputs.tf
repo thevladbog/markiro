@@ -48,10 +48,16 @@ output "kiosk_domain" {
   value       = var.kiosk_domain
 }
 
+output "landing_domain" {
+  description = "Exact landing authority served directly by the app VM."
+  value       = var.landing_domain
+}
+
 output "approved_a_records" {
   description = "Direct-VM A records approved for gated publication."
   value = var.public_dns_enabled ? {
-    (local.admin_dns_name) = module.compute.app_public_ip
-    (local.kiosk_dns_name) = module.compute.app_public_ip
+    (local.admin_dns_name)   = module.compute.app_public_ip
+    (local.kiosk_dns_name)   = module.compute.app_public_ip
+    (local.landing_dns_name) = module.compute.app_public_ip
   } : {}
 }

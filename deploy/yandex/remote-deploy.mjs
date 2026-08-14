@@ -283,16 +283,17 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
     rm,
     streamArchive,
     run,
-    smoke: ({ adminBaseUrl, kioskBaseUrl, expectedReleaseSha }) =>
-      runPublicSmoke({ adminBaseUrl, kioskBaseUrl, expectedReleaseSha }),
+    smoke: ({ adminBaseUrl, kioskBaseUrl, landingBaseUrl, expectedReleaseSha }) =>
+      runPublicSmoke({ adminBaseUrl, kioskBaseUrl, landingBaseUrl, expectedReleaseSha }),
     ...supplied,
   };
   const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH", environment);
   const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID", environment);
   const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA", environment);
-  const { domain, kioskDomain } = validateProductionDomains(
+  const { domain, kioskDomain, landingDomain } = validateProductionDomains(
     environment.MARKIRO_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
+    environment.MARKIRO_LANDING_DOMAIN,
   );
   const acmeEmail = deploymentEmail(requiredEnvironment("ACME_EMAIL", environment));
   const manifestText = await system.readFile(manifestPath, "utf8");
@@ -363,6 +364,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           "MARKIRO_COMPOSE_PROJECT=markiro-production",
           `MARKIRO_DOMAIN=${domain}`,
           `MARKIRO_KIOSK_DOMAIN=${kioskDomain}`,
+          `MARKIRO_LANDING_DOMAIN=${landingDomain}`,
           "MARKIRO_EDGE_MODE=direct",
           `ACME_EMAIL=${acmeEmail}`,
           "MARKIRO_REQUIRE_PREVIOUS_HEALTHY=0",
@@ -456,11 +458,13 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
           const baseUrls = productionBaseUrls({
             MARKIRO_DOMAIN: domain,
             MARKIRO_KIOSK_DOMAIN: kioskDomain,
+            MARKIRO_LANDING_DOMAIN: landingDomain,
             MARKIRO_EDGE_MODE: "direct",
           });
           return system.smoke({
             adminBaseUrl: baseUrls.admin,
             kioskBaseUrl: baseUrls.kiosk,
+            landingBaseUrl: baseUrls.landing,
             expectedReleaseSha: manifest.commit,
           });
         },

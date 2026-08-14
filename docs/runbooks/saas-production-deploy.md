@@ -9,7 +9,7 @@ runner, deployment controller и rehearsal workflow не участвуют.
 - environment `production-deploy`;
 - variable `YC_APP_PUBLIC_ADDRESS`;
 - variable `APP_SSH_HOST_KEYS_B64` с проверенными host keys app VM;
-- variables `MARKIRO_DOMAIN` и `MARKIRO_KIOSK_DOMAIN`;
+- variables `MARKIRO_DOMAIN`, `MARKIRO_KIOSK_DOMAIN` и `MARKIRO_LANDING_DOMAIN`;
 - secret `YC_APP_DEPLOY_SSH_PRIVATE_KEY` для пользователя `markiro-deploy`.
 
 ## Запуск
@@ -25,6 +25,6 @@ backward-compatible с предыдущим образом.
 Если bounded rollback не завершился, используйте
 [`yandex-recovery.md`](./yandex-recovery.md).
 
-Caddy слушает 80/443 на VM и выпускает ACME TLS для admin и kiosk. API не
+Caddy слушает 80/443 на VM и выпускает ACME TLS для admin, kiosk и landing. API не
 публикует отдельный host port. Production env материализуется из runtime
 Lockbox; секреты не передаются в аргументах или release archive.

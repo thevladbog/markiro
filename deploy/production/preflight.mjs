@@ -60,6 +60,7 @@ export async function composeQuiet(environment, supplied = {}) {
     MARKIRO_EDGE_IMAGE_DIGEST: environment.MARKIRO_EDGE_IMAGE_DIGEST,
     MARKIRO_DOMAIN: environment.MARKIRO_DOMAIN,
     MARKIRO_KIOSK_DOMAIN: environment.MARKIRO_KIOSK_DOMAIN,
+    MARKIRO_LANDING_DOMAIN: environment.MARKIRO_LANDING_DOMAIN,
     MARKIRO_EDGE_MODE: environment.MARKIRO_EDGE_MODE,
     MARKIRO_ENV_FILE: environment.MARKIRO_ENV_FILE,
     MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
@@ -149,6 +150,7 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} MARKIRO_EDGE_IMAGE_DIGEST
  * @property {string | undefined} MARKIRO_DOMAIN
  * @property {string | undefined} MARKIRO_KIOSK_DOMAIN
+ * @property {string | undefined} MARKIRO_LANDING_DOMAIN
  * @property {string | undefined} MARKIRO_EDGE_MODE
  * @property {string | undefined} ACME_EMAIL
  * @property {string | undefined} MARKIRO_ENV_FILE
@@ -163,6 +165,7 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string} edgeImageDigest
  * @property {string} domain
  * @property {string} kioskDomain
+ * @property {string} landingDomain
  * @property {string | undefined} acmeEmail
  * @property {string} envFile
  * @property {"direct"} edgeMode
@@ -190,6 +193,7 @@ export async function runPreflight(
   const edgeImageDigest = environment.MARKIRO_EDGE_IMAGE_DIGEST;
   const domain = environment.MARKIRO_DOMAIN;
   const kioskDomain = environment.MARKIRO_KIOSK_DOMAIN;
+  const landingDomain = environment.MARKIRO_LANDING_DOMAIN;
   const edgeMode = environment.MARKIRO_EDGE_MODE || "direct";
   const acmeEmail = environment.ACME_EMAIL;
   const envFile = environment.MARKIRO_ENV_FILE || ".env.production";
@@ -199,12 +203,17 @@ export async function runPreflight(
     throw invalid("MARKIRO_API_IMAGE_DIGEST");
   if (!edgeImageDigest || !IMAGE_DIGEST_PATTERN.test(edgeImageDigest))
     throw invalid("MARKIRO_EDGE_IMAGE_DIGEST");
-  validateProductionDomains(domain, kioskDomain);
+  validateProductionDomains(domain, kioskDomain, landingDomain);
   if (edgeMode !== "direct") throw invalid("MARKIRO_EDGE_MODE");
-  const isDirectLocalPair = domain === "localhost" && kioskDomain === "kiosk.localhost";
-  if (domain === "localhost" && !isDirectLocalPair) throw invalid("MARKIRO_DOMAIN");
-  if (kioskDomain === "kiosk.localhost" && !isDirectLocalPair)
+  const isDirectLocalSet =
+    domain === "localhost" &&
+    kioskDomain === "kiosk.localhost" &&
+    landingDomain === "landing.localhost";
+  if (domain === "localhost" && !isDirectLocalSet) throw invalid("MARKIRO_DOMAIN");
+  if (kioskDomain === "kiosk.localhost" && !isDirectLocalSet)
     throw invalid("MARKIRO_KIOSK_DOMAIN");
+  if (landingDomain === "landing.localhost" && !isDirectLocalSet)
+    throw invalid("MARKIRO_LANDING_DOMAIN");
   if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
 
   try {
@@ -231,6 +240,7 @@ export async function runPreflight(
       MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
       MARKIRO_DOMAIN: domain,
       MARKIRO_KIOSK_DOMAIN: kioskDomain,
+      MARKIRO_LANDING_DOMAIN: landingDomain,
       MARKIRO_EDGE_MODE: edgeMode,
       ACME_EMAIL: acmeEmail,
       MARKIRO_ENV_FILE: envFile,
@@ -251,6 +261,7 @@ export async function runPreflight(
     edgeImageDigest,
     domain,
     kioskDomain,
+    landingDomain,
     acmeEmail,
     envFile,
     edgeMode,

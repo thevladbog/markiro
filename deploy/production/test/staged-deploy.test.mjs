@@ -19,6 +19,7 @@ const ENVIRONMENT = {
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+  MARKIRO_LANDING_DOMAIN: "markiro.example",
 };
 
 function legacyFileName(record) {
@@ -104,6 +105,9 @@ test("prepare stops after local API and edge readiness with an exclusive pending
   assert.equal(candidate.previousTag, PREVIOUS_TAG);
   assert.ok(
     calls.every(({ environment }) => environment.MARKIRO_KIOSK_DOMAIN === "kiosk.markiro.example"),
+  );
+  assert.ok(
+    calls.every(({ environment }) => environment.MARKIRO_LANDING_DOMAIN === "markiro.example"),
   );
   assert.deepEqual(
     calls
