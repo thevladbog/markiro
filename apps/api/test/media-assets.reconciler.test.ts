@@ -126,7 +126,7 @@ describe("MediaAssetsService", () => {
   });
 
   it("does not let an immediate-cleanup metadata deletion failure escape after object deletion", async () => {
-    let metadataPresent = true;
+    const metadataPresent = true;
     const query = {
       from: () => query,
       where: () => query,

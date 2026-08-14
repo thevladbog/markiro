@@ -103,7 +103,7 @@ export class ShiftsService {
       .where(and(...conditions))
       .orderBy(schema.shifts.createdAt);
 
-    return { items: rows.map((row) => this.mapShiftRow(row as unknown as JoinedShiftRow)) };
+    return { items: rows.map((row) => this.mapShiftRow(row)) };
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
@@ -135,7 +135,7 @@ export class ShiftsService {
     if (!row) {
       throw new NotFoundException();
     }
-    return this.mapShiftRow(row as unknown as JoinedShiftRow);
+    return this.mapShiftRow(row);
   }
 
   /**
