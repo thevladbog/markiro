@@ -70,6 +70,8 @@ export const shiftMirror = sqliteTable("shift_mirror", {
   palletCapacity: integer("pallet_capacity"),
   palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),
   openedAt: text("opened_at"),
+  stationClosePolicy: text("station_close_policy"),
+  stationCloseOwnerDeviceId: text("station_close_owner_device_id"),
   // This device's box-SSCC issuer prefix (Task 13 review, plan 06c) -- see
   // migrations.ts's ALTER for why this trails the rest of the table.
   issuerPrefix: text("issuer_prefix"),
@@ -105,6 +107,24 @@ export const stationProductImages = sqliteTable("station_product_images", {
   contentType: text("content_type").notNull(),
   byteSize: integer("byte_size").notNull(),
   bytesBase64: text("bytes_base64").notNull(),
+});
+
+/** Durable local close facts awaiting the station close endpoint. */
+export const shiftCloseOutbox = sqliteTable("shift_close_outbox", {
+  eventId: text("event_id").primaryKey(),
+  shiftId: text("shift_id").notNull(),
+  deviceId: text("device_id").notNull(),
+  operatorId: text("operator_id"),
+  productId: text("product_id").notNull(),
+  productName: text("product_name").notNull(),
+  plannedQtySnapshot: integer("planned_qty_snapshot"),
+  actualQty: integer("actual_qty").notNull(),
+  closedBoxCount: integer("closed_box_count").notNull(),
+  reasonCode: text("reason_code"),
+  closedAt: text("closed_at").notNull(),
+  state: text("state").notNull().default("pending"),
+  conflictCode: text("conflict_code"),
+  lastCheckedAt: text("last_checked_at"),
 });
 
 /**

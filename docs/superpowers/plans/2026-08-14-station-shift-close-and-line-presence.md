@@ -106,8 +106,8 @@ git commit -m "feat(domain): define station shift close reasons"
 - Modify: `packages/db/src/schema.ts`
 - Modify: `packages/db/src/sqlite/migrations.ts`
 - Modify: `packages/db/src/sqlite/schema.ts`
-- Create: `packages/db/migrations/0042_station_shift_close_presence.sql`
-- Create: `packages/db/migrations/meta/0042_snapshot.json`
+- Create: `packages/db/migrations/0043_station_shift_close_presence.sql`
+- Create: `packages/db/migrations/meta/0043_snapshot.json`
 - Modify: `packages/db/migrations/meta/_journal.json`
 - Create: `packages/db/test/station-shift-close-schema.test.ts`
 - Modify: `packages/db/test/station-sync-recovery-schema.test.ts`
@@ -164,7 +164,7 @@ Create `shift_device_participants` with first/last entry timestamps. Create `sta
 
 Run: `corepack pnpm --filter @markiro/db db:generate -- --name station_shift_close_presence`
 
-Rename only if Drizzle does not emit the declared `0042_station_shift_close_presence.sql` tag, then reconcile the snapshot and `_journal.json` together. Inspect SQL for additive enums/tables/columns, tenant composite foreign keys, unique keys, defaults, and indexes. Do not edit migrations `0000`–`0041`.
+Rename only if Drizzle does not emit the declared `0043_station_shift_close_presence.sql` tag, then reconcile the snapshot and `_journal.json` together. Inspect SQL for additive enums/tables/columns, tenant composite foreign keys, unique keys, defaults, and indexes. Do not edit migrations `0000`–`0042`.
 
 - [ ] **Step 5: Add the SQLite runtime migration**
 
@@ -204,7 +204,7 @@ Expected: all pass; database-backed skips, if any, are reported explicitly.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add packages/db/src/schema/platform.ts packages/db/src/schema.ts packages/db/src/sqlite/migrations.ts packages/db/src/sqlite/schema.ts packages/db/migrations/0042_station_shift_close_presence.sql packages/db/migrations/meta/0042_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/station-shift-close-schema.test.ts packages/db/test/station-sync-recovery-schema.test.ts
+git add packages/db/src/schema/platform.ts packages/db/src/schema.ts packages/db/src/sqlite/migrations.ts packages/db/src/sqlite/schema.ts packages/db/migrations/0043_station_shift_close_presence.sql packages/db/migrations/meta/0043_snapshot.json packages/db/migrations/meta/_journal.json packages/db/test/station-shift-close-schema.test.ts packages/db/test/station-sync-recovery-schema.test.ts
 git commit -m "feat(db): persist station shift close events"
 ```
 
