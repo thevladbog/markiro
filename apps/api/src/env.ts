@@ -30,6 +30,11 @@ const canonicalOriginSchema = z.url().transform((value, ctx) => {
   return url.origin;
 });
 
+const exactCanonicalOriginSchema = z
+  .url()
+  .refine((value) => new URL(value).origin === value, "must be a canonical browser origin")
+  .pipe(canonicalOriginSchema);
+
 const canonicalHttpUrlSchema = z.url().transform((value, ctx) => {
   const url = new URL(value);
   if (url.protocol !== "http:" && url.protocol !== "https:") {
@@ -165,6 +170,17 @@ const EnvSchema = z
     SMTP_FROM_NAME: z.string().min(1),
     SMTP_REPLY_TO: z.email().optional(),
     MAIL_PAYLOAD_ENCRYPTION_KEY: mailEncryptionKeySchema,
+    LANDING_DEMO_SUBMISSION_ENABLED: explicitBooleanSchema
+      .optional()
+      .transform((value) => value ?? false),
+    LANDING_ORIGIN: exactCanonicalOriginSchema.optional(),
+    LANDING_DEMO_RECIPIENT: z.email().optional(),
+    LANDING_DEMO_REPLY_TO: z.email().optional(),
+    LANDING_DEMO_CONSENT_VERSION: z.string().trim().min(1).optional(),
+    SMARTCAPTCHA_SERVER_KEY: z.string().startsWith("ysc2_").optional(),
+    LANDING_DEMO_RATE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
+    LANDING_DEMO_SOURCE_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
+    LANDING_DEMO_GLOBAL_LIMIT: z.coerce.number().int().min(1).max(10_000).default(100),
     S3_ENDPOINT: storageEndpointSchema,
     S3_REGION: z.string().min(1),
     S3_BUCKET: z.string().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/),
@@ -201,6 +217,26 @@ const EnvSchema = z
         message: "port 587 requires STARTTLS",
       });
     }
+    if (env.LANDING_DEMO_GLOBAL_LIMIT < env.LANDING_DEMO_SOURCE_LIMIT) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["LANDING_DEMO_GLOBAL_LIMIT"],
+        message: "must be at least LANDING_DEMO_SOURCE_LIMIT",
+      });
+    }
+    if (env.LANDING_DEMO_SUBMISSION_ENABLED) {
+      for (const name of [
+        "LANDING_ORIGIN",
+        "LANDING_DEMO_RECIPIENT",
+        "LANDING_DEMO_REPLY_TO",
+        "LANDING_DEMO_CONSENT_VERSION",
+        "SMARTCAPTCHA_SERVER_KEY",
+      ] as const) {
+        if (!env[name]) {
+          ctx.addIssue({ code: "custom", path: [name], message: "required when enabled" });
+        }
+      }
+    }
     if (env.NODE_ENV !== "production") return;
     if (!env.SMTP_USER) {
       ctx.addIssue({ code: "custom", path: ["SMTP_USER"], message: "required in production" });
@@ -233,6 +269,15 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "SMTP_USER",
     "SMTP_PASSWORD",
     "SMTP_REPLY_TO",
+    "LANDING_DEMO_SUBMISSION_ENABLED",
+    "LANDING_ORIGIN",
+    "LANDING_DEMO_RECIPIENT",
+    "LANDING_DEMO_REPLY_TO",
+    "LANDING_DEMO_CONSENT_VERSION",
+    "SMARTCAPTCHA_SERVER_KEY",
+    "LANDING_DEMO_RATE_WINDOW_SECONDS",
+    "LANDING_DEMO_SOURCE_LIMIT",
+    "LANDING_DEMO_GLOBAL_LIMIT",
     ...Object.keys(DEVELOPMENT_STORAGE_DEFAULTS),
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];

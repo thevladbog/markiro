@@ -106,3 +106,122 @@ describe("mail environment", () => {
     });
   });
 });
+
+describe("landing demo environment", () => {
+  it("keeps demo submissions disabled with bounded limiter defaults", () => {
+    expect(loadEnv(productionMailEnv)).toMatchObject({
+      LANDING_DEMO_SUBMISSION_ENABLED: false,
+      LANDING_DEMO_RATE_WINDOW_SECONDS: 900,
+      LANDING_DEMO_SOURCE_LIMIT: 5,
+      LANDING_DEMO_GLOBAL_LIMIT: 100,
+    });
+  });
+
+  it("requires every delivery setting only when demo submissions are enabled", () => {
+    let thrown: unknown;
+    try {
+      loadEnv({
+        ...productionMailEnv,
+        LANDING_DEMO_SUBMISSION_ENABLED: "true",
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    const message = String(thrown);
+    for (const name of [
+      "LANDING_ORIGIN",
+      "LANDING_DEMO_RECIPIENT",
+      "LANDING_DEMO_REPLY_TO",
+      "LANDING_DEMO_CONSENT_VERSION",
+      "SMARTCAPTCHA_SERVER_KEY",
+    ]) {
+      expect(message).toContain(name);
+    }
+
+    expect(
+      loadEnv({
+        ...productionMailEnv,
+        LANDING_DEMO_SUBMISSION_ENABLED: "true",
+        LANDING_ORIGIN: "https://markiro.app",
+        LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
+        LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
+        LANDING_DEMO_CONSENT_VERSION: "2026-08-14",
+        SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
+      }),
+    ).toMatchObject({ LANDING_DEMO_SUBMISSION_ENABLED: true });
+  });
+
+  it.each([
+    ["LANDING_ORIGIN", "https://markiro.app/demo"],
+    ["LANDING_DEMO_RECIPIENT", "not-an-email"],
+    ["LANDING_DEMO_REPLY_TO", "not-an-email"],
+    ["LANDING_DEMO_CONSENT_VERSION", "   "],
+    ["SMARTCAPTCHA_SERVER_KEY", "test-secret-without-prefix"],
+  ] as const)("rejects invalid %s without echoing its value", (name, value) => {
+    const source = {
+      ...productionMailEnv,
+      LANDING_DEMO_SUBMISSION_ENABLED: "true",
+      LANDING_ORIGIN: "https://markiro.app",
+      LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
+      LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
+      LANDING_DEMO_CONSENT_VERSION: "2026-08-14",
+      SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
+      [name]: value,
+    };
+
+    let thrown: unknown;
+    try {
+      loadEnv(source);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    const message = String(thrown);
+    expect(message).toContain(name);
+    if (value.trim()) expect(message).not.toContain(value);
+  });
+
+  it.each([
+    ["LANDING_DEMO_RATE_WINDOW_SECONDS", "59"],
+    ["LANDING_DEMO_RATE_WINDOW_SECONDS", "3601"],
+    ["LANDING_DEMO_SOURCE_LIMIT", "0"],
+    ["LANDING_DEMO_SOURCE_LIMIT", "101"],
+    ["LANDING_DEMO_GLOBAL_LIMIT", "0"],
+    ["LANDING_DEMO_GLOBAL_LIMIT", "10001"],
+  ] as const)("rejects an out-of-range %s", (name, value) => {
+    expect(() => loadEnv({ ...productionMailEnv, [name]: value })).toThrow(new RegExp(name));
+  });
+
+  it("requires the global limiter budget to cover at least one source budget", () => {
+    expect(() =>
+      loadEnv({
+        ...productionMailEnv,
+        LANDING_DEMO_SOURCE_LIMIT: "6",
+        LANDING_DEMO_GLOBAL_LIMIT: "5",
+      }),
+    ).toThrow(/LANDING_DEMO_GLOBAL_LIMIT/);
+  });
+
+  it("treats blank disabled feature settings as unset", () => {
+    expect(
+      loadEnv({
+        ...productionMailEnv,
+        LANDING_DEMO_SUBMISSION_ENABLED: "",
+        LANDING_ORIGIN: "",
+        LANDING_DEMO_RECIPIENT: "",
+        LANDING_DEMO_REPLY_TO: "",
+        LANDING_DEMO_CONSENT_VERSION: "",
+        SMARTCAPTCHA_SERVER_KEY: "",
+        LANDING_DEMO_RATE_WINDOW_SECONDS: "",
+        LANDING_DEMO_SOURCE_LIMIT: "",
+        LANDING_DEMO_GLOBAL_LIMIT: "",
+      }),
+    ).toMatchObject({
+      LANDING_DEMO_SUBMISSION_ENABLED: false,
+      LANDING_DEMO_RATE_WINDOW_SECONDS: 900,
+      LANDING_DEMO_SOURCE_LIMIT: 5,
+      LANDING_DEMO_GLOBAL_LIMIT: 100,
+    });
+  });
+});
