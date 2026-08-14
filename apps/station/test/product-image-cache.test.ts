@@ -2,9 +2,11 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import {
+  clearStationProductImages,
   prefetchStationProductImage,
   readCachedStationProductImage,
   readStationProductImage,
+  stationProductImageCacheKey,
   syncStationProductImage,
 } from "../src/lib/product-image-cache.js";
 
@@ -27,6 +29,26 @@ const descriptor = {
   width: 2,
   height: 2,
 };
+
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
+}
+
+function checksumBuffer(checksum: string): ArrayBuffer {
+  const buffer = new ArrayBuffer(checksum.length / 2);
+  const bytes = new Uint8Array(buffer);
+  for (let index = 0; index < bytes.length; index += 1) {
+    bytes[index] = Number.parseInt(checksum.slice(index * 2, index * 2 + 2), 16);
+  }
+  return buffer;
+}
 
 async function insertProduct(exec: SqlExecutor): Promise<void> {
   await exec.run(
@@ -140,5 +162,103 @@ describe("station product image cache", () => {
     const shared = await readCachedStationProductImage("p2", descriptor, exec);
     if (!shared) throw new Error("expected shared prefetched bytes to remain cached");
     expect([...new Uint8Array(await shared.arrayBuffer())]).toEqual([1, 2, 3, 4]);
+  });
+
+  it("does not publish downloaded bytes after the credential is sealed during validation", async () => {
+    const cachePut = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({
+        match: vi.fn().mockResolvedValue(undefined),
+        put: cachePut,
+      }),
+      delete: vi.fn().mockResolvedValue(true),
+    });
+    const digest = deferred<ArrayBuffer>();
+    const digestCall = vi.fn().mockReturnValue(digest.promise);
+    vi.stubGlobal("crypto", { subtle: { digest: digestCall } });
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await insertProduct(exec);
+    let sealed = false;
+
+    const syncing = syncStationProductImage(
+      exec,
+      {
+        download: vi
+          .fn()
+          .mockResolvedValue(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/webp" })),
+      },
+      { id: "p1", image: descriptor },
+      () => sealed,
+    );
+    await vi.waitFor(() => expect(digestCall).toHaveBeenCalledOnce());
+    sealed = true;
+    await clearStationProductImages(exec);
+    digest.resolve(checksumBuffer(descriptor.checksum));
+    await syncing;
+
+    expect(await exec.all("SELECT checksum FROM station_product_images")).toEqual([]);
+    expect(cachePut).not.toHaveBeenCalled();
+  });
+
+  it("does not copy browser-cached bytes into SQLite after sealing during validation", async () => {
+    const digest = deferred<ArrayBuffer>();
+    const digestCall = vi.fn().mockReturnValue(digest.promise);
+    vi.stubGlobal("crypto", { subtle: { digest: digestCall } });
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({
+        match: vi.fn().mockResolvedValue(
+          new Response(new Uint8Array([1, 2, 3, 4]), {
+            headers: { "Content-Type": "image/webp" },
+          }),
+        ),
+        delete: vi.fn().mockResolvedValue(true),
+      }),
+      delete: vi.fn().mockResolvedValue(true),
+    });
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await insertProduct(exec);
+    let sealed = false;
+
+    const syncing = syncStationProductImage(
+      exec,
+      { download: vi.fn().mockRejectedValue(new Error("download must not be needed")) },
+      { id: "p1", image: descriptor },
+      () => sealed,
+    );
+    await vi.waitFor(() => expect(digestCall).toHaveBeenCalledOnce());
+    sealed = true;
+    await clearStationProductImages(exec);
+    digest.resolve(checksumBuffer(descriptor.checksum));
+    await syncing;
+
+    expect(await exec.all("SELECT checksum FROM station_product_images")).toEqual([]);
+  });
+
+  it("rejects and deletes an invalid browser entry when only retained pointer metadata is available", async () => {
+    const cacheDelete = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal("caches", {
+      open: vi.fn().mockResolvedValue({
+        match: vi.fn().mockResolvedValue(
+          new Response(new Uint8Array([9, 9, 9, 9]), {
+            headers: { "Content-Type": "image/webp" },
+          }),
+        ),
+        delete: cacheDelete,
+      }),
+    });
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await insertProduct(exec);
+    await exec.run("UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ?", [
+      descriptor.checksum,
+      "p1",
+    ]);
+
+    await expect(readStationProductImage(exec, "p1", undefined)).resolves.toBeNull();
+    expect(cacheDelete).toHaveBeenCalledWith(
+      stationProductImageCacheKey("p1", descriptor.checksum),
+    );
   });
 });

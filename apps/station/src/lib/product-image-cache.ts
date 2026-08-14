@@ -153,7 +153,10 @@ export async function prefetchStationProductImage(
     if (sqliteImage) return;
     const browserImage = await readBrowserImage(product.id, product.image);
     if (browserImage) {
-      if (exec) await writeSqliteImage(exec, product.image, browserImage);
+      if (exec) {
+        if (isSealed?.()) return;
+        await writeSqliteImage(exec, product.image, browserImage);
+      }
       return;
     }
     const blob = await client.download(
@@ -161,7 +164,11 @@ export async function prefetchStationProductImage(
     );
     if (isSealed?.()) return;
     await validateBlob(blob, product.image);
-    if (exec) await writeSqliteImage(exec, product.image, blob);
+    if (exec) {
+      if (isSealed?.()) return;
+      await writeSqliteImage(exec, product.image, blob);
+    }
+    if (isSealed?.()) return;
     await writeBrowserImage(product.id, product.image, blob);
   } catch (error) {
     console.error("station: product image prefetch failed", error);
@@ -196,7 +203,10 @@ export async function syncStationProductImage(
     let blob = await readSqliteImage(exec, product.image.checksum, product.image);
     if (!blob) {
       blob = await readBrowserImage(product.id, product.image);
-      if (blob) await writeSqliteImage(exec, product.image, blob);
+      if (blob) {
+        if (isSealed?.()) return;
+        await writeSqliteImage(exec, product.image, blob);
+      }
     }
     if (!blob) {
       const blob = await client.download(
@@ -204,7 +214,9 @@ export async function syncStationProductImage(
       );
       if (isSealed?.()) return;
       await validateBlob(blob, product.image);
+      if (isSealed?.()) return;
       await writeSqliteImage(exec, product.image, blob);
+      if (isSealed?.()) return;
       await writeBrowserImage(product.id, product.image, blob);
     }
     if (isSealed?.()) return;
@@ -231,24 +243,41 @@ export async function readStationProductImage(
   productId: string,
   descriptor?: StationProductImageDescriptor,
 ): Promise<Blob | null> {
-  const rows = await exec.all<{ image_pointer_checksum: string | null }>(
-    "SELECT image_pointer_checksum FROM product_mirror WHERE id = ?",
+  const rows = await exec.all<{
+    image_pointer_checksum: string | null;
+    image_checksum: string | null;
+    image_content_type: string | null;
+    image_byte_size: number | null;
+    image_width: number | null;
+    image_height: number | null;
+  }>(
+    `SELECT image_pointer_checksum, image_checksum, image_content_type,
+            image_byte_size, image_width, image_height
+       FROM product_mirror WHERE id = ?`,
     [productId],
   );
-  const checksum = rows[0]?.image_pointer_checksum;
+  const row = rows[0];
+  const checksum = row?.image_pointer_checksum;
   if (!checksum) return null;
   const sqliteImage = await readSqliteImage(exec, checksum, descriptor);
   if (sqliteImage) return sqliteImage;
-  try {
-    const cache = await openImageCache();
-    const response = await cache.match(cacheKey(productId, checksum));
-    if (!response) return null;
-    const blob = await response.blob();
-    if (descriptor) await validateBlob(blob, descriptor);
-    return blob;
-  } catch {
-    return null;
-  }
+  const retainedDescriptor =
+    row.image_checksum === checksum &&
+    row.image_content_type === "image/webp" &&
+    row.image_byte_size !== null &&
+    row.image_width !== null &&
+    row.image_height !== null
+      ? {
+          checksum,
+          contentType: "image/webp" as const,
+          byteSize: row.image_byte_size,
+          width: row.image_width,
+          height: row.image_height,
+        }
+      : null;
+  const validationDescriptor = descriptor ?? retainedDescriptor;
+  if (!validationDescriptor) return null;
+  return readBrowserImage(productId, validationDescriptor);
 }
 
 export async function readCachedStationProductImage(
