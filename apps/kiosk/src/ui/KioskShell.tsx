@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Button, Modal } from "@markiro/ui";
 import { useTranslation } from "react-i18next";
 // Imported from the module that owns the routing decision, which imports this
 // file back to render it. The cycle is safe and deliberate: `nextKioskView` is
@@ -83,6 +84,10 @@ import { StatusStrip } from "./StatusStrip.js";
  * from the pairing screen's server field, and the stored value wins after. */
 const DEFAULT_SERVER_URL = "/api";
 
+/** The warning gives a worker time to keep their cart before the kiosk makes it private again. */
+const INACTIVITY_WARNING_MS = 10_000;
+const INACTIVITY_LOGOUT_MS = 5_000;
+
 /** The device's own clock, in one place. Everything time-shaped downstream
  * (`cacheAge`, `flushQueue`'s journal stamps, an order's `createdAt`) takes it
  * as a parameter, so this is the shell's single reading of `Date`. */
@@ -165,6 +170,7 @@ export function KioskShell(): React.JSX.Element {
   const [flow, dispatchFlow] = useReducer(kioskFlowReducer, initialKioskFlowState);
   const session = "session" in flow ? flow.session : null;
   const submitted = flow.screen === "outcome" ? flow : null;
+  const [inactivityWarning, setInactivityWarning] = useState(false);
   /** The live scan transport: `null` is the keyboard wedge, a port is Web Serial. */
   const [scanPort, setScanPort] = useState<SerialPort | null>(null);
   /**
@@ -179,6 +185,46 @@ export function KioskShell(): React.JSX.Element {
    * zero here is the safe direction — see `countTakenToday`.
    */
   const [takenToday, setTakenToday] = useState<{ sessionId: number; count: number } | null>(null);
+
+  /** Timers belong to the current worker only; an idle or confirmation screen has no session to end. */
+  const inactivityTimers = useRef<{
+    warning: ReturnType<typeof setTimeout> | null;
+    logout: ReturnType<typeof setTimeout> | null;
+  }>({ warning: null, logout: null });
+
+  const clearInactivityTimers = useCallback(() => {
+    const timers = inactivityTimers.current;
+    if (timers.warning !== null) clearTimeout(timers.warning);
+    if (timers.logout !== null) clearTimeout(timers.logout);
+    timers.warning = null;
+    timers.logout = null;
+  }, []);
+
+  const restartInactivityTimers = useCallback(() => {
+    clearInactivityTimers();
+    setInactivityWarning(false);
+    inactivityTimers.current.warning = setTimeout(
+      () => setInactivityWarning(true),
+      INACTIVITY_WARNING_MS,
+    );
+    inactivityTimers.current.logout = setTimeout(() => {
+      setInactivityWarning(false);
+      dispatchFlow({ type: "idleReset" });
+    }, INACTIVITY_WARNING_MS + INACTIVITY_LOGOUT_MS);
+  }, [clearInactivityTimers]);
+
+  useEffect(() => {
+    if (session === null || flow.screen === "outcome") {
+      clearInactivityTimers();
+      setInactivityWarning(false);
+      return undefined;
+    }
+
+    restartInactivityTimers();
+    return () => {
+      clearInactivityTimers();
+    };
+  }, [clearInactivityTimers, flow.screen, restartInactivityTimers, session]);
 
   /**
    * The config as the ASYNC work sees it. The refresh interval, the `online`
@@ -1114,7 +1160,12 @@ export function KioskShell(): React.JSX.Element {
         // Zero until the read lands (and if it fails), for the same reason.
         alreadyTakenToday={takenToday?.sessionId === session.id ? takenToday.count : 0}
         initialState={session.cart}
-        onScan={subscribe}
+        onScan={(listener) =>
+          subscribe((raw) => {
+            restartInactivityTimers();
+            listener(raw);
+          })
+        }
         resolveBox={resolveCartBox}
         onSubmit={(state) => {
           dispatchFlow({ type: "cartChanged", cart: state });
@@ -1266,5 +1317,30 @@ export function KioskShell(): React.JSX.Element {
       <StatusStrip online={online} age={age} ageMs={ageMs} quarantined={quarantinedCount} />
     ) : undefined;
 
-  return <KioskLayout status={status}>{screen}</KioskLayout>;
+  return (
+    <>
+      <KioskLayout
+        status={status}
+        {...(session !== null && submitted === null ? { onActivity: restartInactivityTimers } : {})}
+      >
+        <>
+          {screen}
+          <Modal
+            open={inactivityWarning}
+            width={520}
+            title={t("inactivity.title")}
+            footer={
+              <Button className="kiosk-control" size="floor" onClick={restartInactivityTimers}>
+                {t("inactivity.continue")}
+              </Button>
+            }
+          >
+            <p style={{ margin: 0, font: "var(--floor-body)", color: "var(--fg-2)" }}>
+              {t("inactivity.body")}
+            </p>
+          </Modal>
+        </>
+      </KioskLayout>
+    </>
+  );
 }

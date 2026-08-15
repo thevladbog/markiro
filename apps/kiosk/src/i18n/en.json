@@ -208,6 +208,11 @@
     "staleDays": "The data was last refreshed {{n}} days ago",
     "quarantined": "Orders the server refused: {{n}} — an administrator is needed"
   },
+  "inactivity": {
+    "title": "Your session will end soon",
+    "body": "Tap Continue within 5 seconds or the kiosk will return to the badge screen.",
+    "continue": "Continue"
+  },
   "scannerSetup": {
     "title": "Scanner setup",
     "done": "Done",
