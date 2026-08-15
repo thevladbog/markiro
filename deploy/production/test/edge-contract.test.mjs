@@ -556,7 +556,14 @@ function assertAuthorityContract(adapted, { alb }) {
       assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
     }
   }
-  for (const path of ["/", "/faq/", "/robots.txt", "/sitemap.xml", "/llms.txt"]) {
+  for (const path of [
+    "/",
+    "/faq/",
+    "/d/MKR-PD-01/2026.08.01/2026-08-15",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/llms.txt",
+  ]) {
     const request = { method: "GET", path };
     const selected = selectedAdaptedRoute(landingRoutes, request);
     assert.ok(
@@ -566,6 +573,38 @@ function assertAuthorityContract(adapted, { alb }) {
     assert.ok(
       nestedObjects(selected).every((candidate) => candidate.handler !== "reverse_proxy"),
       `landing GET ${path} must remain static-only`,
+    );
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) => candidate.handler !== "static_response" || candidate.status_code === 404,
+      ),
+      `landing GET ${path} must not redirect to a slash-appended route`,
+    );
+  }
+  for (const method of ["GET", "HEAD"]) {
+    const request = { method, path: "/definitely-missing/" };
+    const selected = landingRoutes.find(
+      (candidate) =>
+        adaptedRouteMatches(candidate, request) &&
+        nestedObjects(candidate).some(
+          (handler) => handler.handler === "rewrite" && handler.uri === "/404.html",
+        ),
+    );
+    assert.ok(selected, "landing route table must contain a branded missing-document fallback");
+    const objects = nestedObjects(selected);
+    assert.deepEqual(
+      objects.filter((candidate) => candidate.handler === "rewrite"),
+      [{ handler: "rewrite", uri: "/404.html" }],
+      "landing unknown reads must rewrite only to the bounded branded 404 artifact",
+    );
+    assert.deepEqual(
+      objects.filter((candidate) => candidate.handler === "file_server"),
+      [{ handler: "file_server", hide: ["/etc/caddy/Caddyfile"], status_code: 404 }],
+      "landing branded 404 must keep the actual HTTP 404 status",
+    );
+    assert.ok(
+      objects.every((candidate) => candidate.handler !== "reverse_proxy"),
+      "landing branded 404 must remain static-only",
     );
   }
   const landingReverseProxies = nestedObjects(landing).filter(
@@ -676,10 +715,20 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
       arguments: `${name}=\${${name}}`,
     })),
   );
-  assert.deepEqual(landingInstructions.at(-1), {
-    name: "RUN",
-    arguments: "pnpm turbo build --filter @markiro/landing...",
-  });
+  assert.deepEqual(
+    landingInstructions.filter((instruction) => instruction.name === "RUN"),
+    [
+      { name: "RUN", arguments: "pnpm --filter @markiro/domain build" },
+      { name: "RUN", arguments: "pnpm --filter @markiro/ui build" },
+      { name: "RUN", arguments: "pnpm --filter @markiro/legal-documents build" },
+      {
+        name: "RUN",
+        arguments:
+          "node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json",
+      },
+      { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
+    ],
+  );
   for (const instruction of [...baseInstructions, ...applicationInstructions]) {
     for (const name of publicLandingBuildVariables) {
       assert.doesNotMatch(`${instruction.name} ${instruction.arguments}`, new RegExp(name));
@@ -707,6 +756,10 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
   assert.doesNotMatch(runtime, /node|pnpm/);
+  assert.doesNotMatch(
+    runtime,
+    /soffice|libreoffice|verapdf|java|\.markiro-releases|generate-artifacts|\.docx/i,
+  );
   const runtimeCopies = runtimeInstructions
     .filter((instruction) => instruction.name === "COPY")
     .map((instruction) => instruction.arguments);
@@ -752,6 +805,40 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(dockerignore, /^dist\/$/m);
   assert.match(dockerignore, /^\*\*\/dist\/$/m);
 }
+
+test("edge build validates every tracked legal artifact before copying landing output", async () => {
+  const [dockerfile, dockerignore, manifestSource] = await Promise.all([
+    readFile("deploy/production/edge.Dockerfile", "utf8"),
+    readFile(".dockerignore", "utf8"),
+    readFile("apps/landing/public/legal/artifacts.json", "utf8"),
+  ]);
+  const artifacts = JSON.parse(manifestSource);
+  assert.equal(artifacts.length, 12);
+  assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
+  for (const artifact of artifacts) {
+    assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
+    await readFile(`apps/landing/public/legal/files/${artifact.fileName}`);
+  }
+  assert.match(dockerfile, /COPY apps\/landing \.\/apps\/landing/);
+  assert.match(
+    dockerfile,
+    /COPY deploy\/production\/legal-artifacts-attestation\.json \.\/deploy\/production\/legal-artifacts-attestation\.json/,
+  );
+  assert.match(
+    dockerfile,
+    /COPY deploy\/production\/cli-main\.mjs \.\/deploy\/production\/cli-main\.mjs/,
+  );
+  assert.match(dockerignore, /^!deploy\/production\/legal-artifacts-attestation\.json$/m);
+  assert.match(dockerignore, /^!deploy\/production\/cli-main\.mjs$/m);
+  assert.match(
+    dockerfile,
+    /node deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal deploy\/production\/legal-artifacts-attestation\.json/,
+  );
+  assert.match(
+    dockerfile,
+    /COPY --from=landing-build \/workspace\/apps\/landing\/dist \/srv\/landing/,
+  );
+});
 
 function mutate(source, search, replacement) {
   const changed = source.replace(search, replacement);

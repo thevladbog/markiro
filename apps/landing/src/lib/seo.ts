@@ -196,7 +196,9 @@ ${urls}
 
 export function renderLlmsTxt(): string {
   const links = (locale: "ru" | "en", homePath: string) =>
-    INDEXABLE_PAGES.filter((page) => page.locale === locale && page.path !== homePath)
+    INDEXABLE_PAGES.filter(
+      (page) => page.locale === locale && page.path !== homePath && !page.path.startsWith("/d/"),
+    )
       .map((page) => `- [${page.navigationLabel}](${absoluteUrl(page.path)}): ${page.description}`)
       .join("\n");
 

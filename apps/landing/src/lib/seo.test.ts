@@ -35,7 +35,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(26);
+    expect(sitemap.match(/<url>/g)).toHaveLength(30);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -77,14 +77,20 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(26);
+    expect(sitemap.match(/<url>/g)).toHaveLength(30);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/en\/privacy\/<\/loc>[\s\S]*?hreflang="ru" href="https:\/\/markiro\.app\/privacy\/"/,
     );
-    expect(sitemap).not.toContain("/d/");
+    for (const code of ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"]) {
+      expect(
+        sitemap.match(
+          new RegExp(`<loc>https://markiro\\.app/d/${code}/2026\\.08\\.01/2026-08-15</loc>`, "g"),
+        ),
+      ).toHaveLength(1);
+    }
     expect(llms).not.toContain("/d/");
   });
 

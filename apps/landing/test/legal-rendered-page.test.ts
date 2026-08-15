@@ -23,7 +23,14 @@ const LEGAL_ROUTES = [
   "/en/legal/brand-letterhead/",
 ] as const;
 
-const documents = new Map<(typeof LEGAL_ROUTES)[number], Document>();
+const VERIFICATION_ROUTES = [
+  "/d/MKR-PD-01/2026.08.01/2026-08-15",
+  "/d/MKR-PD-02/2026.08.01/2026-08-15",
+  "/d/MKR-DPA-01/2026.08.01/2026-08-15",
+  "/d/MKR-BRD-01/2026.08.01/2026-08-15",
+] as const;
+
+const documents = new Map<string, Document>();
 
 beforeAll(() => {
   execFileSync(
@@ -41,7 +48,7 @@ beforeAll(() => {
     },
   );
 
-  for (const route of LEGAL_ROUTES) {
+  for (const route of [...LEGAL_ROUTES, ...VERIFICATION_ROUTES]) {
     const html = readFileSync(path.join(outputDirectory, route.slice(1), "index.html"), "utf8");
     documents.set(route, new JSDOM(html).window.document);
   }
@@ -86,7 +93,7 @@ describe("rendered legal pages", () => {
 
   it("renders operator contacts as accessible text and links", () => {
     for (const route of ["/privacy/", "/en/privacy/"] as const) {
-      const document = documents.get(route);
+      const document = documents.get(route)!;
       expect(document?.body.textContent).toContain(
         "353745, Краснодарский край, Ленинградский район, ст. Ленинградская, ул. Грузская, д. 26",
       );
@@ -99,9 +106,60 @@ describe("rendered legal pages", () => {
     }
   });
 
-  it("does not advertise downloads before immutable artifacts exist", () => {
-    for (const document of documents.values()) {
-      expect(document.querySelector('a[download], a[href$=".pdf"], a[href$=".docx"]')).toBeNull();
+  it("publishes the verified PDF/A download, digest, and Data Matrix on document results", () => {
+    for (const route of [
+      ...LEGAL_ROUTES.filter((candidate) => !candidate.endsWith("/legal/")),
+      ...VERIFICATION_ROUTES,
+    ]) {
+      const document = documents.get(route)!;
+      expect(document.querySelector('a[download$=".pdf"]')).not.toBeNull();
+      expect(document.querySelector("[data-artifact-sha256]")?.textContent?.trim()).toMatch(
+        /^[a-f0-9]{64}$/,
+      );
+      expect(document.querySelector("[data-document-datamatrix] svg")).not.toBeNull();
     }
   });
+
+  it("publishes editable DOCX only for template releases with an explicit warning", () => {
+    for (const route of LEGAL_ROUTES.filter((candidate) => !candidate.endsWith("/legal/"))) {
+      const document = documents.get(route)!;
+      const docx = document.querySelector('a[download$=".docx"]');
+      const isTemplate =
+        route.includes("tenant-data-processing") || route.includes("brand-letterhead");
+      expect(docx === null).toBe(!isTemplate);
+      expect(document.querySelector("[data-template-warning]") !== null).toBe(isTemplate);
+    }
+  });
+
+  it("lists all localized immutable artifacts in each registry", () => {
+    for (const route of ["/legal/", "/en/legal/"] as const) {
+      const document = documents.get(route);
+      expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(4);
+      expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
+      expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(6);
+    }
+  });
+
+  it.each(VERIFICATION_ROUTES)(
+    "renders the bilingual bounded verification result at %s",
+    (route) => {
+      const document = documents.get(route);
+      expect(document?.querySelectorAll("h1")).toHaveLength(1);
+      expect(document?.querySelector("[data-document-id]")?.textContent).toContain(
+        route.split("/")[2],
+      );
+      expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(2);
+      const literalUrl = `https://markiro.app${route}`;
+      expect(
+        document
+          ?.querySelector("[data-document-datamatrix]")
+          ?.getAttribute("data-document-datamatrix"),
+      ).toBe(literalUrl);
+      expect(document?.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        literalUrl,
+      );
+      expect(document?.body.textContent).toMatch(/Проверка документа/);
+      expect(document?.body.textContent).toMatch(/Document verification/);
+    },
+  );
 });

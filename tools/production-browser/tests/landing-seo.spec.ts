@@ -1,4 +1,24 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+interface LegalArtifactManifestEntry {
+  readonly fileName: string;
+  readonly bytes: number;
+  readonly mediaType: string;
+}
+
+const repositoryRoot = fileURLToPath(new URL("../../../", import.meta.url));
+const legalArtifacts = JSON.parse(
+  readFileSync(path.join(repositoryRoot, "apps/landing/public/legal/artifacts.json"), "utf8"),
+) as LegalArtifactManifestEntry[];
+const verificationRoutes = [
+  "/d/MKR-PD-01/2026.08.01/2026-08-15",
+  "/d/MKR-PD-02/2026.08.01/2026-08-15",
+  "/d/MKR-DPA-01/2026.08.01/2026-08-15",
+  "/d/MKR-BRD-01/2026.08.01/2026-08-15",
+] as const;
 
 test.beforeEach(async ({ page }) => {
   await page.route("https://smartcaptcha.cloud.yandex.ru/captcha.js", async (route) => {
@@ -37,6 +57,7 @@ const routes = [
   "/en/personal-data-consent/",
   "/en/legal/tenant-data-processing/",
   "/en/legal/brand-letterhead/",
+  ...verificationRoutes,
 ];
 const MARKIRO_MODULE_LAYOUT = [
   { position: "0-0", row: "1", column: "1", color: "rgb(250, 250, 248)" },
@@ -289,3 +310,85 @@ test("unknown routes are real 404s", async ({ page }) => {
   const response = await page.goto("/definitely-missing/");
   expect(response?.status()).toBe(404);
 });
+
+test("every manifest artifact downloads with its released size and media type", async ({
+  page,
+  request,
+}) => {
+  const declaredMediaTypes = new Map<string, string>();
+  for (const registry of ["/legal/", "/en/legal/"]) {
+    await page.goto(registry);
+    for (const link of await page.locator("a[download][type]").evaluateAll((anchors) =>
+      anchors.map((anchor) => ({
+        fileName: anchor.getAttribute("download") ?? "",
+        mediaType: anchor.getAttribute("type") ?? "",
+      })),
+    )) {
+      declaredMediaTypes.set(link.fileName, link.mediaType);
+    }
+  }
+
+  for (const artifact of legalArtifacts) {
+    const response = await request.get(`/legal/files/${artifact.fileName}`);
+    expect(response.status(), artifact.fileName).toBe(200);
+    expect(declaredMediaTypes.get(artifact.fileName), artifact.fileName).toBe(artifact.mediaType);
+    const responseMediaType = response.headers()["content-type"];
+    if (responseMediaType) {
+      expect(responseMediaType, artifact.fileName).toContain(artifact.mediaType);
+    } else {
+      expect(artifact.fileName, "Astro preview omits MIME only for DOCX static files").toMatch(
+        /\.docx$/,
+      );
+    }
+    const bytes = await response.body();
+    expect(bytes.byteLength, artifact.fileName).toBe(artifact.bytes);
+    expect(bytes.byteLength, artifact.fileName).toBeGreaterThan(0);
+    expect(bytes.byteLength, artifact.fileName).toBeLessThanOrEqual(5 * 1024 * 1024);
+  }
+});
+
+for (const route of verificationRoutes) {
+  test(`${route} exposes bilingual verification and bounded downloads`, async ({ page }) => {
+    await page.goto(route);
+    await expect(page.locator("[data-document-id]")).toContainText(route.split("/")[2]!);
+    await expect(page.locator("h1")).toContainText("Проверка документа");
+    await expect(page.locator("h1")).toContainText("Document verification");
+    await expect(page.locator("[data-document-datamatrix] svg")).toHaveCount(2);
+    await expect(page.locator('a[download$=".pdf"]')).toHaveCount(2);
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+      "href",
+      `https://markiro.app${route}`,
+    );
+    expect(page.url()).toBe(`http://127.0.0.1:5473${route}`);
+    for (const matrix of await page.locator("[data-document-datamatrix]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const symbol = node.querySelector("svg");
+        const wrapper = node.getBoundingClientRect();
+        const symbolRect = symbol?.getBoundingClientRect();
+        return {
+          payload: node.getAttribute("data-document-datamatrix"),
+          symbolWidth: symbolRect?.width ?? 0,
+          wrapperWidth: wrapper.width,
+        };
+      }),
+    )) {
+      expect(matrix.payload).toBe(`https://markiro.app${route}`);
+      expect(matrix.symbolWidth).toBeGreaterThan(43);
+      expect(matrix.symbolWidth).toBeLessThan(44);
+      expect(matrix.wrapperWidth).toBeGreaterThan(matrix.symbolWidth);
+    }
+  });
+}
+
+for (const route of ["/d/mkr-pd-01/2026.08.01/2026-08-15", "/d/MKR-PD-01/2026.08.01/not-a-date"]) {
+  test(`${route} returns the bounded branded verification 404`, async ({ page }) => {
+    const response = await page.goto(route);
+    expect(response?.status()).toBe(404);
+    await expect(page.locator("h1")).toContainText("Revision not found");
+    const body = await page.locator("body").innerText();
+    expect(body.length).toBeLessThan(5_000);
+    expect(body).not.toContain("MKR-PD-02");
+    expect(body).not.toContain(".pdf");
+    expect(body).not.toContain("artifacts.json");
+  });
+}

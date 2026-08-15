@@ -4,9 +4,11 @@ import { findLegalDocument } from "@markiro/legal-documents";
 import { ACTIVE_LEGAL_RELEASES } from "../content/legal-pages";
 import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
 import { readPublicSiteConfig } from "../lib/site-config";
+import { artifactsForRelease, loadLegalArtifacts } from "../lib/legal-artifacts";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
+import LegalArtifactControls from "./LegalArtifactControls.astro";
 
 interface Props {
   metadata: PageMetadata;
@@ -15,6 +17,7 @@ interface Props {
 const { metadata } = Astro.props;
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
 const graph = buildLegalPageGraph(metadata);
+const publishedArtifacts = await loadLegalArtifacts();
 ---
 
 <BaseLayout metadata={metadata} graph={graph}>
@@ -47,23 +50,31 @@ const graph = buildLegalPageGraph(metadata);
         {ACTIVE_LEGAL_RELEASES.map((release) => {
           const content = findLegalDocument(release.code).content[metadata.locale];
           return (
-            <a class="legal-registry__item" href={release.routes[metadata.locale]} data-legal-status={release.status}>
-              <span class="legal-registry__code" data-registry-code data-legal-code>{release.code}</span>
-              <span class="legal-registry__title">{content.title}</span>
-              <span class="legal-registry__meta">
-                <span data-legal-revision>{release.revision}</span>
-                <span aria-hidden="true">·</span>
-                <time datetime={release.effectiveDate} data-legal-effective-date>{release.effectiveDate}</time>
-              </span>
-              <span class="legal-registry__arrow" aria-hidden="true">→</span>
-            </a>
+            <article class="legal-registry__entry" data-legal-status={release.status}>
+              <a class="legal-registry__item" href={release.routes[metadata.locale]}>
+                <span class="legal-registry__code" data-registry-code data-legal-code>{release.code}</span>
+                <span class="legal-registry__title">{content.title}</span>
+                <span class="legal-registry__meta">
+                  <span data-legal-revision>{release.revision}</span>
+                  <span aria-hidden="true">·</span>
+                  <time datetime={release.effectiveDate} data-legal-effective-date>{release.effectiveDate}</time>
+                </span>
+                <span class="legal-registry__arrow" aria-hidden="true">→</span>
+              </a>
+              <LegalArtifactControls
+                release={release}
+                locale={metadata.locale}
+                artifacts={artifactsForRelease(publishedArtifacts, release.code, release.revision, metadata.locale)}
+                compact
+              />
+            </article>
           );
         })}
       </div>
       <p class="legal-registry__note">
         {metadata.locale === "ru"
-          ? "Загружаемые PDF и DOCX появятся после отдельной проверки воспроизводимости, PDF/A и машиночитаемого кода."
-          : "Downloadable PDF and DOCX artifacts will appear after separate reproducibility, PDF/A, and machine-readable-code validation."}
+          ? "PDF/A опубликованы как неизменяемые версии. DOCX доступны только для документов-шаблонов."
+          : "PDF/A files are published as immutable releases. DOCX is available only for template documents."}
       </p>
     </article>
   </main>

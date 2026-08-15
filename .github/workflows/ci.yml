@@ -154,7 +154,9 @@ jobs:
         run: pnpm test:production-bundle:contract
       - name: Verify landing browser and Lighthouse release gates
         run: |
+          pnpm --filter @markiro/domain build
           pnpm --filter @markiro/legal-documents build
+          node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json
           pnpm test:landing:browser
           pnpm test:landing:lighthouse
       - name: Generate masked test-only environment

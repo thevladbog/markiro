@@ -145,3 +145,32 @@ test("landing publication runbook keeps enablement, monitoring, and rollback fai
   ])
     assert.match(runbook, new RegExp(escapeRegExp(required), "i"));
 });
+
+test("landing publication records every external legal and artifact acceptance gate", async () => {
+  const [runbook, secrets] = await Promise.all([
+    read("docs/runbooks/landing-publication.md"),
+    read("docs/runbooks/yandex-secrets.md"),
+  ]);
+  for (const required of [
+    "квалифицированного российского юриста",
+    "наименование провайдера",
+    "договор с провайдером",
+    "хранение в Российской Федерации",
+    "Роскомнадзор",
+    "уведомление не подано",
+    "PDF/A-2b",
+    "veraPDF 1.30.2",
+    "Microsoft Word",
+    "LibreOffice 26.2.5",
+    "физическое сканирование",
+    "A4",
+    "12 месяцев",
+    "удаление из почтового ящика",
+  ])
+    assert.match(runbook + "\n" + secrets, new RegExp(escapeRegExp(required), "i"));
+
+  assert.match(runbook, /статус уведомления[^\n]*не является секретом/i);
+  assert.match(runbook, /тесты репозитория не доказывают[^\n]*PDF\/A/i);
+  assert.match(runbook, /тесты репозитория не доказывают[^\n]*Microsoft Word/i);
+  assert.match(runbook, /тесты репозитория не доказывают[^\n]*физическ/i);
+});

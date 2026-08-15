@@ -10,15 +10,24 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./artifacts": {
+      "types": "./dist/artifacts/index.d.ts",
+      "default": "./dist/artifacts/index.js"
     }
   },
   "scripts": {
+    "artifacts:generate": "tsc -p tsconfig.json && node dist/cli/generate-artifacts.js --out-dir ../../apps/landing/public/legal",
+    "artifacts:verify": "tsc -p tsconfig.json && node dist/cli/verify-artifacts.js --out-dir ../../apps/landing/public/legal",
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
     "test": "vitest run"
   },
   "devDependencies": {
+    "@markiro/domain": "workspace:*",
+    "docx": "9.7.1",
+    "fflate": "0.8.3",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }

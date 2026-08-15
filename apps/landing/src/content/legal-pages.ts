@@ -104,4 +104,12 @@ export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
       };
     }),
   ),
+  ...ACTIVE_LEGAL_RELEASES.map((release) => ({
+    path: `/d/${release.code}/${release.revision}/${release.effectiveDate}`,
+    alternatePath: `/d/${release.code}/${release.revision}/${release.effectiveDate}`,
+    locale: "ru" as const,
+    navigationLabel: `${release.code} ${release.revision} — проверка / verification`,
+    description: `Проверка опубликованной редакции ${release.code} и её SHA-256. Document revision verification.`,
+    lastModified: release.effectiveDate,
+  })),
 ];

@@ -1,0 +1,91 @@
+---
+import {
+  findLegalDocument,
+  type LegalDocumentRelease,
+} from "@markiro/legal-documents";
+
+import { artifactsForRelease, loadLegalArtifacts, legalVerificationPath } from "../lib/legal-artifacts";
+import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
+import { readPublicSiteConfig } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+import LegalArtifactControls from "./LegalArtifactControls.astro";
+
+interface Props {
+  release: LegalDocumentRelease;
+}
+
+const { release } = Astro.props;
+const route = legalVerificationPath(release);
+const source = findLegalDocument(release.code, release.revision);
+const artifacts = await loadLegalArtifacts();
+const metadata: PageMetadata = {
+  path: route,
+  alternatePath: route,
+  locale: "ru",
+  title: `${release.code} ${release.revision} — проверка документа / document verification`,
+  description: `Проверка опубликованной редакции ${release.code} ${release.revision}, файлов и SHA-256. Verification of the published revision and artifacts.`,
+  socialImage: "/og-markiro.jpg",
+  socialImageAlt: "Markiro document verification",
+};
+const graph = buildLegalPageGraph(metadata, {
+  published: release.effectiveDate,
+  modified: release.effectiveDate,
+});
+const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={metadata} graph={graph}>
+  <LandingHeader page={metadata} phone={siteConfig.phone} />
+  <main id="main" class="legal-page legal-verification-page">
+    <header class="legal-hero legal-hero--verification">
+      <div class="container legal-hero__inner">
+        <a class="legal-backlink" href="/legal/">← Реестр документов / Document registry</a>
+        <p class="section-index">MKR / VERIFY</p>
+        <h1>Проверка документа<br /><span lang="en">Document verification</span></h1>
+        <p class="legal-hero__summary" data-document-id>
+          {release.code} · {release.revision} · {release.effectiveDate}
+        </p>
+      </div>
+    </header>
+
+    <article class="container legal-verification" data-legal-document data-legal-kind="verification">
+      <section lang="ru" aria-labelledby="verification-ru">
+        <div class="legal-verification__copy">
+          <p class="section-index">RU / ОПУБЛИКОВАНО</p>
+          <h2 id="verification-ru">{source.content.ru.title}</h2>
+          <p>Код, редакция, дата и контрольные суммы совпадают с публичным реестром Markiro. Русская редакция является основной.</p>
+          <a href={release.routes.ru}>Читать русскую редакцию →</a>
+        </div>
+        <LegalArtifactControls
+          release={release}
+          locale="ru"
+          artifacts={artifactsForRelease(artifacts, release.code, release.revision, "ru")}
+          showVerificationLink={false}
+        />
+      </section>
+
+      <section lang="en" aria-labelledby="verification-en">
+        <div class="legal-verification__copy">
+          <p class="section-index">EN / PUBLISHED</p>
+          <h2 id="verification-en">{source.content.en.title}</h2>
+          <p>The code, revision, date, and checksums match the Markiro public registry. The English text is an informational translation.</p>
+          <a href={release.routes.en}>Read the English translation →</a>
+        </div>
+        <LegalArtifactControls
+          release={release}
+          locale="en"
+          artifacts={artifactsForRelease(artifacts, release.code, release.revision, "en")}
+          showVerificationLink={false}
+        />
+      </section>
+    </article>
+  </main>
+  <LandingFooter page={metadata} />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>

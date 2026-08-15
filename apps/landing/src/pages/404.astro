@@ -1,0 +1,32 @@
+---
+import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
+import { readPublicSiteConfig } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import LandingFooter from "../components/LandingFooter.astro";
+import LandingHeader from "../components/LandingHeader.astro";
+
+const metadata: PageMetadata = {
+  path: "/404.html",
+  alternatePath: "/404.html",
+  locale: "ru",
+  title: "Страница не найдена / Page not found — Markiro",
+  description: "Запрошенная страница или редакция документа не найдена. The requested page or document revision was not found.",
+  socialImage: "/og-markiro.jpg",
+  socialImageAlt: "Markiro",
+};
+const graph = buildLegalPageGraph(metadata);
+const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+---
+
+<BaseLayout metadata={metadata} graph={graph} noindex>
+  <LandingHeader page={metadata} phone={siteConfig.phone} />
+  <main id="main" class="not-found-page">
+    <div class="container not-found-page__inner">
+      <p class="section-index">404 / NOT FOUND</p>
+      <h1>Редакция не найдена<br /><span lang="en">Revision not found</span></h1>
+      <p>Проверьте адрес или вернитесь в публичный реестр. Check the address or return to the public registry.</p>
+      <a class="button" href="/legal/">Реестр документов / Document registry</a>
+    </div>
+  </main>
+  <LandingFooter page={metadata} />
+</BaseLayout>
