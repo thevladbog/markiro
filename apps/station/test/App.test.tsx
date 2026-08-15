@@ -2621,14 +2621,22 @@ describe("App", () => {
       persistedConfig,
     );
     let rejectRoster!: () => void;
+    let credentialRevoked = false;
     const roster = new Promise<Response>((resolve) => {
-      rejectRoster = () =>
+      rejectRoster = () => {
+        credentialRevoked = true;
         resolve(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
+      };
     });
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string) => {
         if (new URL(url).pathname === "/station/operators") return roster;
+        if (new URL(url).pathname === "/shifts" && credentialRevoked) {
+          return Promise.resolve(
+            new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+          );
+        }
         return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
       }),
     );
@@ -2695,6 +2703,7 @@ describe("App", () => {
       [],
       persistedConfig,
     );
+    let credentialRevoked = false;
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string, init?: RequestInit) => {
@@ -2703,6 +2712,11 @@ describe("App", () => {
           return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
         }
         if (path === "/shifts") {
+          if (credentialRevoked) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+            );
+          }
           return Promise.resolve(
             new Response(
               JSON.stringify({
@@ -2721,6 +2735,7 @@ describe("App", () => {
           );
         }
         if (init?.method === "POST" && path === "/shifts/shift-1/open") {
+          credentialRevoked = true;
           return Promise.resolve(
             new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
           );
@@ -2750,6 +2765,7 @@ describe("App", () => {
       [],
       persistedConfig,
     );
+    let credentialRevoked = false;
     vi.stubGlobal(
       "fetch",
       vi.fn((url: string, init?: RequestInit) => {
@@ -2758,6 +2774,11 @@ describe("App", () => {
           return Promise.resolve(new Response(JSON.stringify({ items: [] }), { status: 200 }));
         }
         if (path === "/shifts") {
+          if (credentialRevoked) {
+            return Promise.resolve(
+              new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
+            );
+          }
           return Promise.resolve(
             new Response(
               JSON.stringify({
@@ -2783,6 +2804,7 @@ describe("App", () => {
           );
         }
         if (path === "/shifts/shift-1/bundle") {
+          credentialRevoked = true;
           return Promise.resolve(
             new Response(JSON.stringify({ message: "revoked" }), { status: 401 }),
           );

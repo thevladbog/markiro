@@ -218,12 +218,44 @@ describe("createStationClient", () => {
     expect(settled).toBe(false);
     expect(onCredentialRejected).not.toHaveBeenCalled();
     await expect(client.get("/shifts")).rejects.toThrow("credential generation is sealed");
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     lease.release();
     await expect(rejected).rejects.toEqual(new StationApiError(401, "revoked"));
     expect(generation.phase).toBe("sealed");
     expect(onCredentialRejected).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the credential active when a dedicated auth probe disproves an isolated 401", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "temporary auth failure" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "still-valid", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    await expect(client.get("/station/operators")).rejects.toEqual(
+      new StationApiError(401, "temporary auth failure"),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:3000/shifts");
+    expect(generation.phase).toBe("active");
+    expect(onCredentialRejected).not.toHaveBeenCalled();
   });
 
   it("keeps the station enrolled when an optional product image download returns 401", async () => {
@@ -261,7 +293,8 @@ describe("createStationClient", () => {
         new Promise((resolve) => {
           resolveSecond = resolve;
         }),
-      );
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify({ message: "revoked" }), { status: 401 }));
     const generation = createCredentialGeneration();
     const onCredentialRejected = vi.fn();
     const client = createStationClient(
@@ -281,6 +314,7 @@ describe("createStationClient", () => {
     ]);
     expect(onCredentialRejected).toHaveBeenCalledTimes(1);
     expect(generation.phase).toBe("sealed");
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
   });
 
   it.each([

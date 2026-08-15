@@ -525,7 +525,8 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
-  const aggregation = mode === "aggregation";
+  const aggregation = mode.startsWith("aggregation");
+  const waiting = mode === "validation" || mode === "aggregation-waiting";
   const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
   const operations = galleryRecentOperations();
   return (
@@ -539,7 +540,7 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               image={galleryProductImage}
               productName={ru ? "Тестовый товар А" : "Sample product A"}
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
-              operation={operations[0] ?? null}
+              operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
             />
             {aggregation ? (

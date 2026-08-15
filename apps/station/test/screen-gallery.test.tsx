@@ -135,6 +135,22 @@ describe("development screen gallery", () => {
     expect(image.classList.contains("work-scan-result__image")).toBe(true);
   });
 
+  it("covers the compact active-shift waiting state with the product image", async () => {
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:gallery-product");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+
+    const view = render(
+      <StationScreenGallery request={{ state: "work-aggregation-waiting", locale: "ru" }} />,
+    );
+
+    expect(await screen.findByRole("img", { name: "Тестовый товар А" })).toBeDefined();
+    expect(within(view.container).getByText("Ожидание скана…")).toBeDefined();
+    expect(
+      view.container.querySelector(".work-scan-result__verdict[data-tone='neutral']"),
+    ).not.toBeNull();
+    expect(within(view.container).getByText("Короб № 1")).toBeDefined();
+  });
+
   it("renders active work with the production header controls before collapse", async () => {
     render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
 
@@ -149,6 +165,8 @@ describe("development screen gallery", () => {
     const collapse = within(header).getByRole("button", {
       name: "Свернуть панель состояния",
     });
+
+    expect(collapse.querySelector(".station-status-toggle__chevron")).not.toBeNull();
 
     for (const action of [update, operator, windowMode, collapse]) {
       expect(action.classList.contains("mk-btn--floor")).toBe(true);

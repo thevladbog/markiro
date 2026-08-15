@@ -4,6 +4,7 @@ import {
 } from "../ui/persistent-station-states.js";
 
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
+  "work-aggregation-waiting",
   "pairing-recovery",
   "floor-header-actions",
   "floor-header-window-error",
@@ -118,6 +119,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "shift-page-2", kind: "shift", variant: "2", source: "synthetic" },
   { id: "work-validation", kind: "work", variant: "validation", source: "synthetic" },
   { id: "work-aggregation", kind: "work", variant: "aggregation", source: "synthetic" },
+  {
+    id: "work-aggregation-waiting",
+    kind: "work",
+    variant: "aggregation-waiting",
+    source: "synthetic",
+  },
   {
     id: "work-exit-pending",
     kind: "work-overlay",
