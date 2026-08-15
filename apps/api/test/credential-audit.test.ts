@@ -367,6 +367,7 @@ describe("credential mutation audit", () => {
       name: "Front gate",
       dayLimitPerEmployee: 5,
       showPrices: true,
+      printEmployeeQrOnSlip: false,
     });
 
     expect(result).toBe(created);
@@ -391,6 +392,7 @@ describe("credential mutation audit", () => {
         name: "Sensitive kiosk name",
         dayLimitPerEmployee: 5,
         showPrices: true,
+        printEmployeeQrOnSlip: false,
       }),
     ).rejects.toBe(businessError);
     expect(audit.credentialMutation).toHaveBeenCalledWith({

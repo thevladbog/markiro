@@ -21,11 +21,12 @@ export interface PickupSlipItem {
 export interface PickupSlipData {
   orderNo: string;
   createdAt: Date;
-  org: { name: string; inn: string | null } | null;
+  org: { name: string; inn: string | null; logo: string | null } | null;
   employee: { fullName: string; role: string | null; badgeCode: string | null };
   kioskName: string;
   reason: "buy" | "writeoff";
   writeoffReasonName: string | null;
+  printEmployeeQrOnSlip: boolean;
   /** Pre-computed order total, formatted as a decimal string (e.g. "126.00"), or null if unknown. */
   total: string | null;
   items: PickupSlipItem[];
@@ -126,7 +127,7 @@ export function renderPickupSlipHtml(data: PickupSlipData): string {
 
   const itemCountLabel = `${data.items.length} шт.`;
 
-  const badgeQr = data.employee.badgeCode
+  const badgeQr = data.printEmployeeQrOnSlip && data.employee.badgeCode
     ? `
     <div style="display: flex; align-items: center; gap: 14px; border: 1px solid #E0DED7; border-radius: 8px; padding: 10px 14px">
       <span class="qr-box" style="width: 22mm; height: 22mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center">${renderQrSvg(data.employee.badgeCode)}</span>

@@ -1105,6 +1105,7 @@ export class PickupOrdersService {
         employeeFullName: schema.employees.fullName,
         employeeRole: schema.employees.role,
         kioskName: schema.kiosks.name,
+        kioskPrintEmployeeQrOnSlip: schema.kiosks.printEmployeeQrOnSlip,
         writeoffReasonName: schema.pickupOrderReasons.name,
       })
       .from(schema.pickupOrders)
@@ -1130,7 +1131,11 @@ export class PickupOrdersService {
       );
 
     const [org] = await this.db
-      .select({ name: schema.organization.name, inn: schema.orgProfiles.inn })
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        logo: schema.organization.logo,
+      })
       .from(schema.organization)
       .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
       .where(eq(schema.organization.id, tenantId));
@@ -1157,7 +1162,7 @@ export class PickupOrdersService {
     return {
       orderNo: row.orderNo,
       createdAt: row.createdAt,
-      org: org ? { name: org.name, inn: org.inn } : null,
+      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
       employee: {
         fullName: row.employeeFullName ?? "",
         role: row.employeeRole,
@@ -1166,6 +1171,7 @@ export class PickupOrdersService {
       kioskName: row.kioskName ?? "",
       reason: row.reason,
       writeoffReasonName: row.writeoffReasonName,
+      printEmployeeQrOnSlip: row.kioskPrintEmployeeQrOnSlip ?? false,
       // Derived FROM the (non-voided) items rendered below, not from the stored
       // `pickupOrders.totalPrice` passthrough — that column isn't recomputed by
       // `cancel()` when it voids items, so it would go stale (non-zero total

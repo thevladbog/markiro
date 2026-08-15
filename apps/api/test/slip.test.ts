@@ -19,7 +19,7 @@ function fixture(overrides: Partial<PickupSlipData> = {}): PickupSlipData {
   return {
     orderNo: "ORD-26-0042",
     createdAt: new Date("2026-07-23T14:05:00.000Z"),
-    org: { name: "ООО «Пивзавод „Заря“»", inn: "5029087641" },
+    org: { name: "ООО «Пивзавод „Заря“»", inn: "5029087641", logo: null },
     employee: {
       fullName: "Смирнов Алексей Петрович",
       role: "оператор линии",
@@ -28,6 +28,7 @@ function fixture(overrides: Partial<PickupSlipData> = {}): PickupSlipData {
     kioskName: "Киоск-1, проходная цеха",
     reason: "buy",
     writeoffReasonName: null,
+    printEmployeeQrOnSlip: false,
     total: "126.00",
     items: [
       {
@@ -67,13 +68,18 @@ describe("renderPickupSlipHtml", () => {
     expect(html).toContain("Квас традиционный 1,5 л");
   });
 
-  it("embeds at least 2 item DataMatrix SVGs + 1 Code128 SVG (>= 3 <svg occurrences)", () => {
+  it("omits the employee QR block by default", () => {
     const html = renderPickupSlipHtml(fixture());
     const svgCount = (html.match(/<svg/g) ?? []).length;
-    // 2 items' DataMatrix + footer Code128 = 3 minimum; a badge QR (present in
-    // this fixture) brings it to 4.
-    expect(svgCount).toBeGreaterThanOrEqual(3);
+    expect(svgCount).toBe(3);
+    expect(html).not.toContain("Отсканируйте код, чтобы найти сотрудника");
+  });
+
+  it("renders the employee QR block when the kiosk setting is enabled", () => {
+    const html = renderPickupSlipHtml(fixture({ printEmployeeQrOnSlip: true }));
+    const svgCount = (html.match(/<svg/g) ?? []).length;
     expect(svgCount).toBe(4);
+    expect(html).toContain("Отсканируйте код, чтобы найти сотрудника");
   });
 
   it("declares an A4 @page", () => {
