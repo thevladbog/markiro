@@ -15,6 +15,7 @@ interface QueryCall {
 }
 
 const DELIVERY_ID = "44444444-4444-4444-8444-444444444444";
+const CONSENT_VERSION_AT_LIMIT = "v".repeat(64);
 
 function fakePool(
   handler: (call: QueryCall) => { rows?: unknown[]; rowCount?: number | null } = () => ({}),
@@ -142,6 +143,134 @@ describe("MailJobsService delivery claim", () => {
       expect.objectContaining({ kind: "platform-user-activation" }),
     );
     expect(transport.send).toHaveBeenCalledWith(expect.anything(), "platform@example.test");
+  });
+
+  it("decrypts, validates, renders, and sends a landing notification with Reply-To intact", async () => {
+    const crypto = new MailCryptoService(Buffer.alloc(32, 9));
+    const encrypted = crypto.encrypt(DELIVERY_ID, {
+      kind: "landing-demo-notification",
+      locale: "en",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      receivedAt: "2026-08-14T12:00:00.000Z",
+      sourcePath: "/en/",
+      consentVersion: CONSENT_VERSION_AT_LIMIT,
+      recipientName: "Ada",
+      company: "Factory",
+      email: "ada@example.test",
+      phone: "+12025550114",
+    });
+    const { pool } = fakePool(({ text }) => {
+      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+        return {
+          rows: [
+            {
+              id: DELIVERY_ID,
+              tenantId: null,
+              userId: null,
+              recipient: "hello@v-b.tech",
+              kind: "landing-demo-notification",
+              sourceId: null,
+              attemptCount: 1,
+              ...encrypted,
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    const transport = {
+      verify: vi.fn(async () => true),
+      send: vi.fn(async () => undefined),
+    };
+    const renderer = vi.fn(async () => ({
+      subject: "subject",
+      html: "<p>body</p>",
+      text: "body",
+      replyTo: "ada@example.test",
+    }));
+    const service = new MailJobsService(
+      pool,
+      crypto,
+      transport,
+      renderer,
+      () => "33333333-3333-4333-8333-333333333333",
+    );
+
+    await service.processDelivery(DELIVERY_ID);
+
+    expect(renderer).toHaveBeenCalledWith({
+      kind: "landing-demo-notification",
+      locale: "en",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      receivedAt: new Date("2026-08-14T12:00:00.000Z"),
+      sourcePath: "/en/",
+      consentVersion: CONSENT_VERSION_AT_LIMIT,
+      recipientName: "Ada",
+      company: "Factory",
+      email: "ada@example.test",
+      phone: "+12025550114",
+    });
+    expect(transport.send).toHaveBeenCalledWith(
+      {
+        subject: "subject",
+        html: "<p>body</p>",
+        text: "body",
+        replyTo: "ada@example.test",
+      },
+      "hello@v-b.tech",
+    );
+  });
+
+  it.each([
+    ["blank", " "],
+    ["longer than 64 characters", "v".repeat(65)],
+  ])("rejects a %s consent version before rendering", async (_case, consentVersion) => {
+    const crypto = new MailCryptoService(Buffer.alloc(32, 9));
+    const encrypted = crypto.encrypt(DELIVERY_ID, {
+      kind: "landing-demo-notification",
+      locale: "en",
+      requestId: "11111111-1111-4111-8111-111111111111",
+      receivedAt: "2026-08-14T12:00:00.000Z",
+      sourcePath: "/en/",
+      consentVersion,
+      recipientName: "Ada",
+      company: "Factory",
+      email: "ada@example.test",
+    });
+    const { pool, calls } = fakePool(({ text }) => {
+      if (text.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }] };
+      if (text.includes("RETURNING") && text.includes("email_deliveries")) {
+        return {
+          rows: [
+            {
+              id: DELIVERY_ID,
+              tenantId: null,
+              userId: null,
+              recipient: "hello@v-b.tech",
+              kind: "landing-demo-notification",
+              sourceId: null,
+              attemptCount: 1,
+              ...encrypted,
+            },
+          ],
+        };
+      }
+      return {};
+    });
+    const { service, renderer, transport } = createService(pool);
+
+    await service.processDelivery(DELIVERY_ID);
+
+    expect(renderer).not.toHaveBeenCalled();
+    expect(transport.send).not.toHaveBeenCalled();
+    expect(calls.find(({ text }) => text.includes("error_category = $3"))?.values).toEqual([
+      DELIVERY_ID,
+      "failed",
+      "message",
+      "RENDER",
+      "message:RENDER",
+    ]);
   });
 
   it("holds an advisory lock, revalidates the invitation, sends, and erases payload", async () => {

@@ -24,6 +24,7 @@ function assertDirectDeployWorkflow(source) {
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
     "release_run_id",
     "release_sha",
+    "landing_demo_submission_state",
   ]);
   assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
   const deploy = workflow.jobs.deploy;

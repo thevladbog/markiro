@@ -7,6 +7,16 @@ import { afterEach, describe, expect, it } from "vitest";
 import { auditBuiltSite, type AuditFindingCode } from "./audit";
 
 const roots: string[] = [];
+const MARKIRO_MODULE_GRID = [
+  { x: "18", y: "8" },
+  { x: "38", y: "8" },
+  { x: "28", y: "18" },
+  { x: "18", y: "28" },
+  { x: "38", y: "28" },
+  { x: "18", y: "38" },
+  { x: "38", y: "38" },
+  { x: "28", y: "48" },
+] as const;
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -39,9 +49,34 @@ function html({
   return `<!doctype html><html><head><title>${title}</title><meta name="description" content="${description}"><link rel="canonical" href="https://markiro.app${route}"><script type="application/ld+json">${jsonLd}</script></head><body>${body}</body></html>`;
 }
 
+function brandAssets({
+  faviconModules = 8,
+  ordinaryFill = "#fafaf8",
+  accentFill = "#3ddc7a",
+  ruManifest = { lang: "ru", name: "маркиро", short_name: "маркиро" },
+  enManifest = { lang: "en", name: "Markiro", short_name: "Markiro" },
+}: {
+  faviconModules?: number;
+  ordinaryFill?: string;
+  accentFill?: string;
+  ruManifest?: Record<string, string>;
+  enManifest?: Record<string, string>;
+} = {}): Record<string, string> {
+  const modules = MARKIRO_MODULE_GRID.slice(0, faviconModules).map(
+    ({ x, y }, index) =>
+      `<rect data-markiro-module="" x="${x}" y="${y}" width="8" height="8" fill="${index === faviconModules - 1 ? accentFill : ordinaryFill}"/>`,
+  );
+  return {
+    "favicon.svg": `<svg>${modules.join("")}</svg>`,
+    "site.webmanifest": JSON.stringify(ruManifest),
+    "site.en.webmanifest": JSON.stringify(enManifest),
+  };
+}
+
 describe("auditBuiltSite", () => {
   it("accepts a bounded site whose routes and assets match its sitemap", async () => {
     const root = await fixture({
+      ...brandAssets(),
       "index.html": html(),
       "faq/index.html": html({
         route: "/faq/",
@@ -59,6 +94,7 @@ describe("auditBuiltSite", () => {
 
   it("reports every deterministic SEO integrity failure code", async () => {
     const root = await fixture({
+      ...brandAssets(),
       "index.html": html({
         title: "Duplicate",
         description: "Duplicate description",
@@ -95,6 +131,7 @@ describe("auditBuiltSite", () => {
 
   it("reports duplicate canonicals independently of route validation", async () => {
     const root = await fixture({
+      ...brandAssets(),
       "index.html": html(),
       "faq/index.html": html({ route: "/", title: "FAQ", description: "FAQ description" }),
       "image.svg": "<svg></svg>",
@@ -103,5 +140,88 @@ describe("auditBuiltSite", () => {
     });
 
     expect((await auditBuiltSite(root)).map(({ code }) => code)).toContain("DUPLICATE_CANONICAL");
+  });
+
+  it("rejects manifests and favicons that drift from the localized Markiro brand", async () => {
+    const root = await fixture({
+      ...brandAssets({
+        faviconModules: 4,
+        ruManifest: { lang: "ru", name: "Markiro", short_name: "Markiro" },
+        enManifest: { lang: "en", name: "Markiro", short_name: "markiro" },
+      }),
+      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg">' }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url></urlset>',
+    });
+
+    const findings = await auditBuiltSite(root);
+    expect(findings.map(({ code }) => code)).toEqual([
+      "INVALID_FAVICON",
+      "INVALID_MANIFEST",
+      "INVALID_MANIFEST",
+    ]);
+    expect(findings.map(({ detail }) => detail)).toEqual([
+      "favicon must contain exactly eight Markiro modules",
+      "English manifest must use the Markiro name",
+      "Russian manifest must use the маркиро name",
+    ]);
+  });
+
+  it("rejects a favicon without the single green accent module", async () => {
+    const root = await fixture({
+      ...brandAssets({ accentFill: "#fafaf8" }),
+      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg">' }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url></urlset>',
+    });
+
+    await expect(auditBuiltSite(root)).resolves.toContainEqual({
+      code: "INVALID_FAVICON",
+      route: "/favicon.svg",
+      detail: "favicon modules must use seven off-white marks and one green accent",
+    });
+  });
+
+  it("rejects a favicon whose modules drift from the Markiro grid", async () => {
+    const modules = Array.from(
+      { length: 8 },
+      (_, index) =>
+        `<rect data-markiro-module="" x="19" y="8" width="8" height="8" fill="${index === 7 ? "#3ddc7a" : "#fafaf8"}"/>`,
+    );
+    const root = await fixture({
+      ...brandAssets(),
+      "favicon.svg": `<svg>${modules.join("")}</svg>`,
+      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg">' }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url></urlset>',
+    });
+
+    await expect(auditBuiltSite(root)).resolves.toContainEqual({
+      code: "INVALID_FAVICON",
+      route: "/favicon.svg",
+      detail: "favicon modules must match the 3 by 5 Markiro grid",
+    });
+  });
+
+  it("reports a malformed manifest without echoing its contents", async () => {
+    const root = await fixture({
+      ...brandAssets(),
+      "site.webmanifest": `{${"x".repeat(512)}`,
+      "index.html": html({ body: '<h1>Heading</h1><img src="/image.svg">' }),
+      "image.svg": '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/</loc></url></urlset>',
+    });
+
+    const findings = await auditBuiltSite(root);
+    expect(findings).toContainEqual({
+      code: "INVALID_MANIFEST",
+      route: "/site.webmanifest",
+      detail: "Russian manifest must be a JSON object",
+    });
+    expect(findings.map(({ detail }) => detail).join(" ")).not.toContain("x".repeat(512));
   });
 });

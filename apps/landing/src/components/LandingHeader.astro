@@ -31,7 +31,7 @@ const paths = page.locale === "ru"
 
 <header class="landing-header" data-header>
   <a class="landing-header__brand" href={homePath} aria-label={copy.homeLabel}>
-    <BrandMark />
+    <BrandMark locale={page.locale} />
   </a>
 
   <nav class="landing-nav" id="landing-navigation" aria-label={copy.navigationLabel} data-menu>

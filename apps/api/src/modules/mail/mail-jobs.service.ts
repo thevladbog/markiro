@@ -129,7 +129,41 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
       expiresInMinutes: z.number().int().positive(),
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("landing-demo-notification"),
+      locale: z.enum(["ru", "en"]),
+      requestId: z.uuid(),
+      receivedAt: z.coerce.date(),
+      sourcePath: z.string().min(1),
+      consentVersion: z.string().trim().min(1).max(64),
+      recipientName: z.string().min(1),
+      company: z.string().min(1),
+      email: z.email(),
+      phone: z.string().min(1).optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("landing-demo-confirmation"),
+      locale: z.enum(["ru", "en"]),
+      requestId: z.uuid(),
+      recipientName: z.string().min(1),
+      company: z.string().min(1),
+      email: z.email(),
+      phone: z.string().min(1).optional(),
+      contactEmail: z.email(),
+    })
+    .strict(),
 ]);
+
+function toEmailTemplateInput(input: z.output<typeof emailTemplateSchema>): EmailTemplateInput {
+  if (input.kind !== "landing-demo-notification" && input.kind !== "landing-demo-confirmation") {
+    return input;
+  }
+  const { phone, ...required } = input;
+  return { ...required, ...(phone !== undefined ? { phone } : {}) };
+}
 
 @Injectable()
 export class MailJobsService {
@@ -219,12 +253,14 @@ export class MailJobsService {
         return;
       }
       try {
-        template = emailTemplateSchema.parse(
-          this.crypto.decrypt(delivery.id, {
-            encryptedPayload: delivery.encryptedPayload,
-            payloadNonce: delivery.payloadNonce,
-            payloadTag: delivery.payloadTag,
-          }),
+        template = toEmailTemplateInput(
+          emailTemplateSchema.parse(
+            this.crypto.decrypt(delivery.id, {
+              encryptedPayload: delivery.encryptedPayload,
+              payloadNonce: delivery.payloadNonce,
+              payloadTag: delivery.payloadTag,
+            }),
+          ),
         );
         rendered = await this.renderer(template);
       } catch {

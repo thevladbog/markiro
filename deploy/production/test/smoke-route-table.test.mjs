@@ -12,6 +12,8 @@ import {
 
 const csp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const landingCsp =
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const shell =
   '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
 const kioskShell =
@@ -169,11 +171,11 @@ test("rejects malformed and equal smoke authorities without disclosing their val
   }
 });
 
-function response({ status = 200, body = "{}", headers = {} } = {}) {
+function response({ status = 200, body = "{}", headers = {}, cspPolicy = csp } = {}) {
   return {
     status,
     headers: new Headers({
-      "content-security-policy": csp,
+      "content-security-policy": cspPolicy,
       "strict-transport-security": "max-age=63072000; includeSubDomains",
       "x-content-type-options": "nosniff",
       "x-frame-options": "SAMEORIGIN",
@@ -184,7 +186,11 @@ function response({ status = 200, body = "{}", headers = {} } = {}) {
   };
 }
 
-function smokeClient(releaseSha) {
+function landingResponse(options = {}) {
+  return response({ ...options, cspPolicy: landingCsp });
+}
+
+function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
   const requests = [];
   return {
     requests,
@@ -209,7 +215,7 @@ function smokeClient(releaseSha) {
           "/en/faq/",
         ].includes(path)
       )
-        return response({
+        return landingResponse({
           body: landingShell(path),
           headers: {
             "cache-control": "no-cache",
@@ -218,7 +224,7 @@ function smokeClient(releaseSha) {
           },
         });
       if (landing && path === "/robots.txt")
-        return response({
+        return landingResponse({
           body: landingRobots,
           headers: {
             "cache-control": "public, max-age=300",
@@ -226,7 +232,7 @@ function smokeClient(releaseSha) {
           },
         });
       if (landing && path === "/sitemap.xml")
-        return response({
+        return landingResponse({
           body: landingSitemap,
           headers: {
             "cache-control": "public, max-age=300",
@@ -234,15 +240,24 @@ function smokeClient(releaseSha) {
           },
         });
       if (landing && path === "/llms.txt")
-        return response({
+        return landingResponse({
           body: landingLlms,
           headers: {
             "cache-control": "public, max-age=300",
             "content-type": "text/plain; charset=utf-8",
           },
         });
+      if (landing && path === "/api/demo-requests" && (init?.method ?? "GET") === "POST")
+        return landingResponse({
+          status: landingDemoSubmissionState === "enabled" ? 400 : 404,
+          body: JSON.stringify({
+            code:
+              landingDemoSubmissionState === "enabled" ? "invalid_request" : "submission_disabled",
+          }),
+          headers: { "content-type": "application/json; charset=utf-8" },
+        });
       if (landing)
-        return response({
+        return landingResponse({
           status: 404,
           body: "not found",
           headers: { "content-type": "text/plain; charset=utf-8" },
@@ -285,6 +300,12 @@ function smokeClient(releaseSha) {
           headers: { "content-type": "application/json" },
         });
       if (kiosk)
+        return response({
+          status: 404,
+          body: "not found",
+          headers: { "content-type": "text/plain" },
+        });
+      if (path === "/api/demo-requests")
         return response({
           status: 404,
           body: "not found",
@@ -359,6 +380,89 @@ test("runner public smoke exercises the external route contract without local Do
   );
 });
 
+test("public smoke rejects demo-request proxy leakage on the admin authority", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = (url, init) => {
+    if (
+      new URL(url).hostname === "app.markiro.example" &&
+      new URL(url).pathname === "/api/demo-requests" &&
+      init?.method === "POST"
+    )
+      return response({
+        body: '{"status":"proxied"}',
+        headers: { "content-type": "application/json" },
+      });
+    return original(url, init);
+  };
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+      },
+      client,
+    ),
+    /non-HTML 404/,
+  );
+});
+
+test("landing smoke exercises the approved enabled API state without captcha or mail", async () => {
+  const client = smokeClient(undefined, "enabled");
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+      landingDemoSubmissionState: "enabled",
+    },
+    client,
+  );
+
+  const submission = client.requests.find(
+    ({ url, init }) =>
+      new URL(url).hostname === "markiro.example" &&
+      new URL(url).pathname === "/api/demo-requests" &&
+      init?.method === "POST",
+  );
+  assert.equal(submission.init.body, "{}");
+  assert.equal(submission.init.headers["content-type"], "application/json");
+});
+
+test("landing smoke rejects the wrong disabled API error code", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = (url, init) => {
+    if (
+      new URL(url).hostname === "markiro.example" &&
+      new URL(url).pathname === "/api/demo-requests" &&
+      init?.method === "POST"
+    )
+      return landingResponse({
+        status: 404,
+        body: '{"code":"not_found"}',
+        headers: { "content-type": "application/json" },
+      });
+    return original(url, init);
+  };
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+        landingDemoSubmissionState: "disabled",
+      },
+      client,
+    ),
+    /submission_disabled/,
+  );
+});
+
 test("public smoke rejects a different live release identity before exercising routes", async () => {
   const client = smokeClient("b".repeat(40));
 
@@ -421,7 +525,7 @@ test("landing smoke permits only the public canonical URL outside the deployment
       client.request = async (url, init) => {
         const parsed = new URL(url);
         if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
-          return response({
+          return landingResponse({
             body: mutate(landingShell()),
             headers: { "cache-control": "no-cache", "content-type": "text/html" },
           });
@@ -449,7 +553,7 @@ test("landing smoke permits public hreflang metadata outside the deployment orig
   client.request = async (url, init) => {
     const parsed = new URL(url);
     if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
-      return response({
+      return landingResponse({
         body: landingShell().replace(
           "</head>",
           '<link rel="alternate" hreflang="ru" href="https://markiro.app/"><link rel="alternate" hreflang="en" href="https://markiro.app/en/"><link rel="alternate" hreflang="x-default" href="https://markiro.app/"></head>',
@@ -466,6 +570,33 @@ test("landing smoke permits public hreflang metadata outside the deployment orig
       landingBaseUrl: "https://markiro.example",
     },
     client,
+  );
+});
+
+test("landing smoke rejects the application CSP without SmartCaptcha isolation", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === "markiro.example" && parsed.pathname === "/") {
+      return response({
+        body: landingShell(),
+        headers: { "cache-control": "no-cache", "content-type": "text/html" },
+      });
+    }
+    return original(url, init);
+  };
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+      },
+      client,
+    ),
+    /CSP is not the production policy on landing \/$/,
   );
 });
 
@@ -618,6 +749,8 @@ test("defines the complete immutable public-route smoke contract", () => {
       ["GET", "/health/ready", "ready-json", "200 JSON ok or degraded"],
       ["GET", "/openapi.json", "json", "200 JSON"],
       ["GET", "/docs", "docs", "same-origin executable documentation shell"],
+      ["GET", "/api/demo-requests", "not-found", "404, not HTML on admin authority"],
+      ["POST", "/api/demo-requests", "not-found", "404, not HTML on admin authority"],
       ["POST", "/unknown", "not-found", "404, not HTML"],
     ],
   );
@@ -659,7 +792,12 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/sitemap.xml", "sitemap"],
     ["GET", "/llms.txt", "llms"],
     ["GET", "/api/demo-requests", "not-found"],
-    ["POST", "/api/demo-requests", "not-found"],
+    ["HEAD", "/api/demo-requests", "not-found"],
+    ["PUT", "/api/demo-requests", "not-found"],
+    ["POST", "/api/demo-request", "not-found"],
+    ["POST", "/api/demo-requests/", "not-found"],
+    ["POST", "/api/demo-requests/extra", "not-found"],
+    ["POST", "/api/other", "not-found"],
     ["GET", "/missing/", "not-found"],
   ]);
   for (const check of LANDING_ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
@@ -692,7 +830,7 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
 
   assert.equal(
     client.requests.length,
-    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 3,
+    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 4,
   );
   assert.deepEqual(
     client.requests

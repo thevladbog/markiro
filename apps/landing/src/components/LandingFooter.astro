@@ -24,7 +24,7 @@ const paths = page.locale === "ru"
 
 <footer class="landing-footer">
   <div class="container landing-footer__inner">
-    <a href={homePath} aria-label={copy.homeLabel}><BrandMark /></a>
+    <a href={homePath} aria-label={copy.homeLabel}><BrandMark locale={page.locale} /></a>
     <nav aria-label={copy.footerLabel}>
       {paths.map(([path, label]) => <a href={path}>{label}</a>)}
     </nav>

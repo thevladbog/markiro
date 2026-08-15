@@ -11,6 +11,13 @@ on:
         description: Exact 40-character release commit
         required: true
         type: string
+      landing_demo_submission_state:
+        description: Expected API demo-submission state during public smoke
+        required: true
+        type: choice
+        options:
+          - disabled
+          - enabled
 
 permissions: {}
 
@@ -33,6 +40,7 @@ jobs:
       MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
       MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       MARKIRO_LANDING_DOMAIN: ${{ vars.MARKIRO_LANDING_DOMAIN }}
+      MARKIRO_LANDING_DEMO_SUBMISSION_STATE: ${{ inputs.landing_demo_submission_state }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
       YC_APP_DEPLOY_LOGIN: markiro-deploy
     steps:

@@ -170,6 +170,7 @@ function environment(overrides = {}) {
     MARKIRO_DOMAIN: "admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_LANDING_DOMAIN: "markiro.example",
+    MARKIRO_LANDING_DEMO_SUBMISSION_STATE: "disabled",
     ACME_EMAIL: "ops@example.test",
     ...overrides,
   };
@@ -272,6 +273,20 @@ test("direct stages use fresh transient units with explicit runtime environment 
     assert.ok(args.includes("--property=Requires=markiro-runtime-env.service"));
     assert.ok(args.includes("--property=After=markiro-runtime-env.service"));
   }
+});
+
+test("direct deployment passes the approved landing submission state to public smoke", async () => {
+  const fixture = systemFixture();
+  const calls = [];
+  fixture.system.smoke = async (options) => calls.push(options);
+
+  await runRemoteDeployment(
+    environment({ MARKIRO_LANDING_DEMO_SUBMISSION_STATE: "enabled" }),
+    fixture.system,
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].landingDemoSubmissionState, "enabled");
 });
 
 for (const [name, overrides] of [

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { loadEnv } from "../src/env";
-import { buildSmtpOptions } from "../src/modules/mail/mail-transport.service";
+import { buildMessageOptions, buildSmtpOptions } from "../src/modules/mail/mail-transport.service";
 import { PLATFORM_TEST_ENV } from "./support/platform-test-env";
 
 const baseEnv = {
@@ -72,6 +72,45 @@ describe("buildSmtpOptions", () => {
       secure: true,
       requireTLS: false,
       auth: { user: "mailer", pass: "secret" },
+    });
+  });
+});
+
+describe("buildMessageOptions", () => {
+  const rendered = {
+    subject: "subject",
+    html: "<p>body</p>",
+    text: "body",
+  };
+  const envWithGlobalReplyTo = loadEnv({
+    ...baseEnv,
+    SMTP_REPLY_TO: "support@example.test",
+  });
+
+  it("prefers the message Reply-To over the global fallback", () => {
+    expect(
+      buildMessageOptions(
+        envWithGlobalReplyTo,
+        { ...rendered, replyTo: "lead@example.test" },
+        "hello@v-b.tech",
+      ),
+    ).toMatchObject({
+      from: {
+        name: envWithGlobalReplyTo.SMTP_FROM_NAME,
+        address: envWithGlobalReplyTo.SMTP_FROM_EMAIL,
+      },
+      to: "hello@v-b.tech",
+      replyTo: "lead@example.test",
+      subject: "subject",
+      html: "<p>body</p>",
+      text: "body",
+    });
+  });
+
+  it("uses the global Reply-To when the rendered message has none", () => {
+    expect(buildMessageOptions(envWithGlobalReplyTo, rendered, "user@example.test")).toMatchObject({
+      to: "user@example.test",
+      replyTo: "support@example.test",
     });
   });
 });

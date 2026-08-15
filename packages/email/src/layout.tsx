@@ -13,12 +13,15 @@ import {
 } from "react-email";
 
 interface EmailLayoutProps {
+  locale?: EmailLocale;
   preview: string;
   eyebrow?: string;
   heading: string;
   footer?: string;
   children: ReactNode;
 }
+
+export type EmailLocale = "ru" | "en";
 
 const palette = {
   ink: "#17161a",
@@ -50,9 +53,29 @@ const responsiveStyles = `
   }
 `;
 
-function EmailBrand() {
+const localizedShell = {
+  ru: {
+    brandLabel: "Маркиро",
+    wordmark: "маркиро",
+    eyebrow: "Маркиро",
+    footer:
+      "Это автоматическое письмо от Маркиро. Если вы не запрашивали это действие, письмо можно удалить.",
+    signature: "МАРКИРО · ПРОИЗВОДСТВО И МАРКИРОВКА",
+  },
+  en: {
+    brandLabel: "Markiro",
+    wordmark: "MARKIRO",
+    eyebrow: "Markiro",
+    footer:
+      "This is an automated email from Markiro. If you did not request this action, you can delete this message.",
+    signature: "MARKIRO · MANUFACTURING AND LABELLING",
+  },
+} as const;
+
+function EmailBrand({ locale }: { locale: EmailLocale }) {
+  const copy = localizedShell[locale];
   return (
-    <table aria-label="Маркиро" role="img" cellPadding="0" cellSpacing="0">
+    <table aria-label={copy.brandLabel} role="img" cellPadding="0" cellSpacing="0">
       <tbody>
         <tr>
           <td style={styles.markCell}>
@@ -85,7 +108,7 @@ function EmailBrand() {
               </tbody>
             </table>
           </td>
-          <td style={styles.wordmark}>маркиро</td>
+          <td style={styles.wordmark}>{copy.wordmark}</td>
         </tr>
       </tbody>
     </table>
@@ -93,14 +116,16 @@ function EmailBrand() {
 }
 
 export function EmailLayout({
+  locale = "ru",
   preview,
-  eyebrow = "Маркиро",
+  eyebrow,
   heading,
   footer,
   children,
 }: EmailLayoutProps) {
+  const copy = localizedShell[locale];
   return (
-    <Html lang="ru">
+    <Html lang={locale}>
       <Head>
         <style>{responsiveStyles}</style>
       </Head>
@@ -108,19 +133,16 @@ export function EmailLayout({
       <Body style={styles.body}>
         <Container style={styles.container}>
           <Section className="mk-email-hero" style={styles.hero}>
-            <EmailBrand />
-            <Text style={styles.eyebrow}>{eyebrow}</Text>
+            <EmailBrand locale={locale} />
+            <Text style={styles.eyebrow}>{eyebrow ?? copy.eyebrow}</Text>
             <Heading style={styles.heading}>{heading}</Heading>
           </Section>
           <Section className="mk-email-content" style={styles.content}>
             {children}
           </Section>
           <Section className="mk-email-footer" style={styles.footer}>
-            <Text style={styles.footerText}>
-              {footer ??
-                "Это автоматическое письмо от Маркиро. Если вы не запрашивали это действие, письмо можно удалить."}
-            </Text>
-            <Text style={styles.footerSignature}>МАРКИРО · ПРОИЗВОДСТВО И МАРКИРОВКА</Text>
+            <Text style={styles.footerText}>{footer ?? copy.footer}</Text>
+            <Text style={styles.footerSignature}>{copy.signature}</Text>
           </Section>
         </Container>
       </Body>
@@ -209,6 +231,35 @@ export const emailStyles = {
     lineHeight: "20px",
     textDecoration: "underline",
     wordBreak: "break-all" as const,
+  },
+  summary: {
+    border: `1px solid ${palette.line}`,
+    borderRadius: "4px",
+    margin: "26px 0 0",
+    overflow: "hidden",
+  },
+  summaryTable: {
+    borderCollapse: "collapse" as const,
+    width: "100%",
+  },
+  summaryLabel: {
+    color: palette.muted,
+    fontSize: "12px",
+    fontWeight: "600",
+    lineHeight: "18px",
+    padding: "12px 10px 12px 16px",
+    textAlign: "left" as const,
+    verticalAlign: "top",
+    width: "34%",
+  },
+  summaryValue: {
+    color: palette.ink,
+    fontSize: "14px",
+    lineHeight: "20px",
+    padding: "11px 16px 11px 10px",
+    textAlign: "left" as const,
+    verticalAlign: "top",
+    wordBreak: "break-word" as const,
   },
 } as const;
 

@@ -2,9 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import { readPublicSiteConfig } from "./site-config";
 
+const ENABLED_ENV = {
+  PUBLIC_DEMO_CONSENT_VERSION: "2026-08-14",
+  PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+  PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
+  PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
+  PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_test-client-key",
+} as const;
+
 describe("readPublicSiteConfig", () => {
-  it("keeps optional contact channels absent instead of inventing placeholders", () => {
+  it("keeps optional contact channels and the demo boundary absent", () => {
     expect(readPublicSiteConfig({})).toEqual({
+      captchaClientKey: null,
+      consentVersion: null,
       demoEndpoint: null,
       legalLinks: null,
       phone: null,
@@ -30,14 +40,10 @@ describe("readPublicSiteConfig", () => {
     },
   );
 
-  it("uses only the fixed same-origin lead route when legal links are configured", () => {
-    expect(
-      readPublicSiteConfig({
-        PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
-        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
-        PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
-      }),
-    ).toEqual({
+  it("enables only the fixed same-origin route after the complete public config passes", () => {
+    expect(readPublicSiteConfig(ENABLED_ENV)).toEqual({
+      captchaClientKey: "ysc1_test-client-key",
+      consentVersion: "2026-08-14",
       demoEndpoint: "/api/demo-requests",
       legalLinks: {
         consent: "/personal-data-consent/",
@@ -45,30 +51,60 @@ describe("readPublicSiteConfig", () => {
       },
       phone: null,
     });
+  });
 
-    expect(() => readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toThrow(
-      "demo submission requires privacy and personal-data consent paths",
-    );
+  it.each([
+    "PUBLIC_DEMO_CONSENT_VERSION",
+    "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
+    "PUBLIC_PRIVACY_POLICY_PATH",
+    "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
+  ] as const)("rejects enabled mode without %s", (missing) => {
+    const env: Record<string, string | undefined> = { ...ENABLED_ENV };
+    delete env[missing];
+    expect(() => readPublicSiteConfig(env)).toThrow("demo submission requires");
+  });
 
+  it.each(["captcha-key", "ysc2_wrong-prefix", " ysc1_ "])(
+    "rejects an invalid SmartCaptcha public key: %s",
+    (key) => {
+      expect(() =>
+        readPublicSiteConfig({ ...ENABLED_ENV, PUBLIC_SMARTCAPTCHA_CLIENT_KEY: key }),
+      ).toThrow("PUBLIC_SMARTCAPTCHA_CLIENT_KEY must begin with ysc1_");
+    },
+  );
+
+  it("rejects unsafe legal paths in enabled mode", () => {
     expect(() =>
       readPublicSiteConfig({
-        PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
-        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
+        ...ENABLED_ENV,
         PUBLIC_PRIVACY_POLICY_PATH: "https://other.example/privacy",
       }),
     ).toThrow("PUBLIC_PRIVACY_POLICY_PATH must be a same-origin absolute path");
   });
 
-  it("does not accept a public cross-origin lead endpoint", () => {
+  it("ignores all stray demo values while disabled", () => {
     expect(
       readPublicSiteConfig({
+        PUBLIC_DEMO_CONSENT_VERSION: "stray-version",
         PUBLIC_DEMO_ENDPOINT: "https://admin.markiro.app/public/demo-requests",
+        PUBLIC_DEMO_SUBMISSION_ENABLED: "false",
+        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "https://other.example/consent",
+        PUBLIC_PRIVACY_POLICY_PATH: "https://other.example/privacy",
+        PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "stray-key",
       }),
-    ).toEqual({ demoEndpoint: null, legalLinks: null, phone: null });
+    ).toEqual({
+      captchaClientKey: null,
+      consentVersion: null,
+      demoEndpoint: null,
+      legalLinks: null,
+      phone: null,
+    });
   });
 
   it("treats whitespace-only values as absent", () => {
     expect(readPublicSiteConfig({ PUBLIC_PHONE: "  " })).toEqual({
+      captchaClientKey: null,
+      consentVersion: null,
       demoEndpoint: null,
       legalLinks: null,
       phone: null,

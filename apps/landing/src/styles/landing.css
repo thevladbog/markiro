@@ -107,11 +107,55 @@ input:focus-visible {
   white-space: nowrap;
 }
 
-.brand-mark__signal {
-  width: 0.625rem;
-  height: 0.625rem;
+.brand-mark__symbol {
+  display: grid;
+  grid-template-columns: repeat(3, 0.25rem);
+  grid-template-rows: repeat(5, 0.25rem);
+  gap: 0.0625rem;
+  width: 0.875rem;
+  height: 1.5rem;
+}
+
+.brand-mark__module {
+  width: 0.25rem;
+  height: 0.25rem;
+  background: var(--fg-1);
+}
+
+.brand-mark__module[data-position="0-0"] {
+  grid-area: 1 / 1;
+}
+
+.brand-mark__module[data-position="0-2"] {
+  grid-area: 1 / 3;
+}
+
+.brand-mark__module[data-position="1-1"] {
+  grid-area: 2 / 2;
+}
+
+.brand-mark__module[data-position="2-0"] {
+  grid-area: 3 / 1;
+}
+
+.brand-mark__module[data-position="2-2"] {
+  grid-area: 3 / 3;
+}
+
+.brand-mark__module[data-position="3-0"] {
+  grid-area: 4 / 1;
+}
+
+.brand-mark__module[data-position="3-2"] {
+  grid-area: 4 / 3;
+}
+
+.brand-mark__module[data-position="4-1"] {
+  grid-area: 5 / 2;
+}
+
+.brand-mark__module--accent {
   background: var(--accent);
-  box-shadow: 0 0 0 1px rgb(61 220 122 / 25%);
 }
 
 .brand-mark__word {
@@ -1091,6 +1135,53 @@ input:focus-visible {
   padding-top: var(--sp-1);
   color: var(--danger, #ff8585);
   font: 400 0.75rem / 1.2 var(--font-ui);
+}
+
+.demo-form__honeypot {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.demo-form__consent {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: start;
+}
+
+.demo-form__consent input {
+  width: 1.125rem;
+  height: 1.125rem;
+  margin-top: 0.125rem;
+  accent-color: var(--accent);
+}
+
+.demo-form__consent label {
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.demo-form__consent .field-error {
+  grid-column: 2;
+}
+
+.demo-form__consent a,
+.form-legal a {
+  color: var(--fg-1);
+  text-underline-offset: 0.18em;
+}
+
+.demo-form__captcha {
+  display: grid;
+}
+
+.smart-captcha {
+  min-height: 6.25rem;
+  overflow: hidden;
 }
 
 .demo-form__submit {
