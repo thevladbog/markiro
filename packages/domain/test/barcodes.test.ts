@@ -3,6 +3,7 @@ import bwipjs from "bwip-js";
 import { DomainError } from "../src/errors.js";
 import { renderLiteralDataMatrixSvg } from "../src/artifacts.js";
 import { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "../src/barcodes/svg.js";
+import { decodeDataMatrixAscii } from "./helpers/decode-data-matrix.js";
 
 const GS = String.fromCharCode(0x1d); // ASCII 0x1D separator
 const GTIN14 = "04006381333931"; // valid GS1 mod-10 check digit
@@ -76,22 +77,29 @@ describe("barcode SVG renderers", () => {
     );
   });
 
-  it("encodes the exact URL as a literal Data Matrix symbol without FNC1 or AIM normalization", () => {
-    const literalSymbol = bwipjs.raw({ bcid: "datamatrix", text: LITERAL_URL });
+  it("recovers the exact literal URL from the rendered Data Matrix symbol", () => {
     const renderedSymbol = bwipjs.raw({
       bcid: "datamatrix",
       text: LITERAL_URL,
       scale: 3,
     });
 
-    expect(renderedSymbol).toEqual(literalSymbol);
-    expect(LITERAL_URL).not.toContain("]d2");
-    expect(LITERAL_URL).not.toContain("\u001d");
-    expect(LITERAL_URL).not.toContain("^FNC1");
+    const decoded = decodeDataMatrixAscii(renderedSymbol);
+    expect(decoded).toBe(LITERAL_URL);
+    expect(decoded.startsWith("]d2")).toBe(false);
+    expect(decoded.startsWith(GS)).toBe(false);
+    expect(decoded).not.toContain("^FNC1");
   });
 
   it("rejects literal Data Matrix input outside its UTF-8 byte limit", () => {
-    expect(() => renderLiteralDataMatrixSvg("")).toThrow(DomainError);
-    expect(() => renderLiteralDataMatrixSvg("я".repeat(257))).toThrow(DomainError);
+    expect(renderLiteralDataMatrixSvg("я".repeat(256))).toMatch(/^<svg/);
+    for (const text of ["", `${"я".repeat(256)}a`]) {
+      expect(() => renderLiteralDataMatrixSvg(text)).toThrow(
+        expect.objectContaining({
+          code: "LITERAL_DATA_MATRIX_TEXT_INVALID",
+        }),
+      );
+      expect(() => renderLiteralDataMatrixSvg(text)).toThrow(DomainError);
+    }
   });
 });
