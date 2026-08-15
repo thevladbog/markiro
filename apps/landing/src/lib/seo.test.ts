@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { findSeoPage } from "../content/pages";
+import { getLegalDocumentPage } from "../content/legal-pages";
 import {
   buildPageGraph,
+  buildLegalPageGraph,
   renderLlmsTxt,
   renderRobotsTxt,
   renderSitemapXml,
@@ -33,7 +35,7 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(16);
+    expect(sitemap.match(/<url>/g)).toHaveLength(26);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
@@ -50,6 +52,55 @@ describe("SEO generators", () => {
     );
     expect(llms).toContain("https://markiro.app/en/sscc-and-aggregation/");
     expect(llms).not.toMatch(/ranking|ранжир/i);
+  });
+
+  it("discovers every active bilingual legal route exactly once", () => {
+    const sitemap = renderSitemapXml();
+    const llms = renderLlmsTxt();
+    const legalRoutes = [
+      "/legal/",
+      "/privacy/",
+      "/personal-data-consent/",
+      "/legal/tenant-data-processing/",
+      "/legal/brand-letterhead/",
+      "/en/legal/",
+      "/en/privacy/",
+      "/en/personal-data-consent/",
+      "/en/legal/tenant-data-processing/",
+      "/en/legal/brand-letterhead/",
+    ];
+    for (const route of legalRoutes) {
+      expect(
+        sitemap.match(new RegExp(`<loc>https://markiro\\.app${route}</loc>`, "g")),
+      ).toHaveLength(1);
+      expect(
+        llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
+      ).toHaveLength(1);
+    }
+    expect(sitemap.match(/<url>/g)).toHaveLength(26);
+    expect(sitemap).toMatch(
+      /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
+    );
+    expect(sitemap).toMatch(
+      /<loc>https:\/\/markiro\.app\/en\/privacy\/<\/loc>[\s\S]*?hreflang="ru" href="https:\/\/markiro\.app\/privacy\/"/,
+    );
+    expect(sitemap).not.toContain("/d/");
+    expect(llms).not.toContain("/d/");
+  });
+
+  it("links English legal structured data to the authoritative Russian revision", () => {
+    const page = getLegalDocumentPage("MKR-PD-01", "en");
+    const graph = buildLegalPageGraph(page.metadata, {
+      basedOn: "/privacy/",
+      modified: "2026-08-15",
+      published: "2026-08-15",
+    });
+    expect(graph["@graph"].find((entry) => entry["@type"] === "WebPage")).toMatchObject({
+      dateModified: "2026-08-15",
+      datePublished: "2026-08-15",
+      inLanguage: "en",
+      isBasedOn: "https://markiro.app/privacy/",
+    });
   });
 
   it("builds truthful breadcrumb data for an inner route", () => {

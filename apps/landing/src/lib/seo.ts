@@ -1,6 +1,16 @@
-import { SEO_PAGES, type SeoPageDefinition } from "../content/pages";
+import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
+import {
+  MARKETING_SEARCH_PAGES,
+  SEO_PAGES,
+  type SearchPageRecord,
+  type SeoPageDefinition,
+} from "../content/pages";
 
 const SITE_URL = "https://markiro.app";
+const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
+  ...MARKETING_SEARCH_PAGES,
+  ...LEGAL_SEARCH_PAGES,
+];
 
 type JsonLdObject = Record<string, unknown>;
 
@@ -167,13 +177,13 @@ Sitemap: ${SITE_URL}/sitemap.xml
 }
 
 export function renderSitemapXml(): string {
-  const urls = SEO_PAGES.map(
+  const urls = INDEXABLE_PAGES.map(
     (page) => `  <url>
     <loc>${absoluteUrl(page.path)}</loc>
     <xhtml:link rel="alternate" hreflang="${page.locale}" href="${absoluteUrl(page.path)}" />
     <xhtml:link rel="alternate" hreflang="${page.locale === "ru" ? "en" : "ru"}" href="${absoluteUrl(page.alternatePath)}" />
     <xhtml:link rel="alternate" hreflang="x-default" href="${absoluteUrl(page.locale === "ru" ? page.path : page.alternatePath)}" />
-    <lastmod>${page.reviewedAt}</lastmod>
+    <lastmod>${page.lastModified}</lastmod>
   </url>`,
   ).join("\n");
 
@@ -186,7 +196,7 @@ ${urls}
 
 export function renderLlmsTxt(): string {
   const links = (locale: "ru" | "en", homePath: string) =>
-    SEO_PAGES.filter((page) => page.locale === locale && page.path !== homePath)
+    INDEXABLE_PAGES.filter((page) => page.locale === locale && page.path !== homePath)
       .map((page) => `- [${page.navigationLabel}](${absoluteUrl(page.path)}): ${page.description}`)
       .join("\n");
 

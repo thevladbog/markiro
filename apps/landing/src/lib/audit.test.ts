@@ -224,4 +224,47 @@ describe("auditBuiltSite", () => {
     });
     expect(findings.map(({ detail }) => detail).join(" ")).not.toContain("x".repeat(512));
   });
+
+  it("reports every missing legal-document identity and navigation field", async () => {
+    const root = await fixture({
+      ...brandAssets(),
+      "privacy/index.html": html({
+        route: "/privacy/",
+        body: '<main><h1>Policy</h1><article data-legal-document data-legal-kind="document"></article></main>',
+      }),
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/privacy/</loc></url></urlset>',
+    });
+
+    expect((await auditBuiltSite(root)).map(({ code }) => code)).toEqual([
+      "MISSING_LEGAL_CODE",
+      "MISSING_LEGAL_EFFECTIVE_DATE",
+      "MISSING_LEGAL_REGISTRY_LINK",
+      "MISSING_LEGAL_REVISION",
+    ]);
+  });
+
+  it("requires an authoritative Russian link on an English legal document", async () => {
+    const root = await fixture({
+      ...brandAssets(),
+      "en/privacy/index.html": html({
+        route: "/en/privacy/",
+        body: '<main><h1>Policy</h1><a href="/en/legal/">Registry</a><article data-legal-document data-legal-kind="document"><span data-legal-code>MKR-PD-01</span><span data-legal-revision>2026.08.01</span><time data-legal-effective-date>2026-08-15</time></article></main>',
+      }),
+      "en/legal/index.html": html({
+        route: "/en/legal/",
+        title: "Registry",
+        description: "Legal registry",
+        body: '<main><h1>Registry</h1><a href="/en/privacy/">Policy</a></main>',
+      }),
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/en/privacy/</loc></url><url><loc>https://markiro.app/en/legal/</loc></url></urlset>',
+    });
+
+    await expect(auditBuiltSite(root)).resolves.toContainEqual({
+      code: "MISSING_AUTHORITATIVE_LANGUAGE_LINK",
+      route: "/en/privacy/",
+      detail: "English legal document must link to its authoritative Russian revision",
+    });
+  });
 });

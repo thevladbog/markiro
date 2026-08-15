@@ -69,7 +69,7 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
         </nav>
       </aside>
 
-      <article class="legal-document" data-legal-document>
+      <article class="legal-document" data-legal-document data-legal-kind="document">
         {content.sections.map((section) => (
           <section id={section.id} aria-labelledby={`${section.id}-heading`}>
             <h2 id={`${section.id}-heading`}>{section.heading}</h2>

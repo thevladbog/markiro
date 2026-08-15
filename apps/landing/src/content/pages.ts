@@ -18,6 +18,15 @@ export type CanonicalPath =
 
 export type Locale = "ru" | "en";
 
+export interface SearchPageRecord {
+  readonly path: string;
+  readonly alternatePath: string;
+  readonly locale: Locale;
+  readonly navigationLabel: string;
+  readonly description: string;
+  readonly lastModified: `${number}-${number}-${number}`;
+}
+
 export interface ContentSection {
   heading: string;
   paragraphs: readonly string[];
@@ -678,6 +687,15 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     ],
   },
 ];
+
+export const MARKETING_SEARCH_PAGES: readonly SearchPageRecord[] = SEO_PAGES.map((page) => ({
+  path: page.path,
+  alternatePath: page.alternatePath,
+  locale: page.locale,
+  navigationLabel: page.navigationLabel,
+  description: page.description,
+  lastModified: page.reviewedAt,
+}));
 
 export function findSeoPage(path: string): SeoPageDefinition {
   const page = SEO_PAGES.find((candidate) => candidate.path === path);

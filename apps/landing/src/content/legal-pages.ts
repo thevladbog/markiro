@@ -7,6 +7,7 @@ import {
 } from "@markiro/legal-documents";
 
 import type { PageMetadata } from "../lib/seo";
+import type { SearchPageRecord } from "./pages";
 
 const SOCIAL_IMAGE = "/og-markiro.jpg";
 const SOCIAL_IMAGE_ALT = {
@@ -77,3 +78,30 @@ export function getLegalRegistryPage(locale: LegalLocale): PageMetadata {
 }
 
 export const ACTIVE_LEGAL_RELEASES = LEGAL_RELEASES.filter(({ status }) => status === "active");
+
+export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
+  ...(["ru", "en"] as const).map((locale) => {
+    const metadata = getLegalRegistryPage(locale);
+    return {
+      path: metadata.path,
+      alternatePath: metadata.alternatePath,
+      locale,
+      navigationLabel: locale === "ru" ? "Юридические документы" : "Legal documents",
+      description: metadata.description,
+      lastModified: "2026-08-15" as const,
+    };
+  }),
+  ...ACTIVE_LEGAL_RELEASES.flatMap((release) =>
+    (["ru", "en"] as const).map((locale) => {
+      const page = getLegalDocumentPage(release.code, locale);
+      return {
+        path: page.metadata.path,
+        alternatePath: page.metadata.alternatePath,
+        locale,
+        navigationLabel: findLegalDocument(release.code).content[locale].title,
+        description: page.metadata.description,
+        lastModified: release.effectiveDate,
+      };
+    }),
+  ),
+];

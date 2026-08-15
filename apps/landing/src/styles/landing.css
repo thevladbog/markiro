@@ -1954,6 +1954,11 @@ input:focus-visible {
   color: var(--accent);
 }
 
+.legal-backlink:focus-visible {
+  outline: 0.125rem solid var(--accent);
+  outline-offset: 0.25rem;
+}
+
 .legal-hero h1 {
   max-width: 20ch;
   margin: 1rem 0 1.5rem;
