@@ -18,6 +18,7 @@ COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/legal-documents ./packages/legal-documents
 COPY packages/ui ./packages/ui
+COPY deploy/production/cli-main.mjs ./deploy/production/cli-main.mjs
 COPY deploy/production/verify-legal-artifacts.mjs ./deploy/production/verify-legal-artifacts.mjs
 COPY deploy/production/legal-artifacts-attestation.json ./deploy/production/legal-artifacts-attestation.json
 

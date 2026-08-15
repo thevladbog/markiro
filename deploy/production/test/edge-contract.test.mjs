@@ -824,7 +824,12 @@ test("edge build validates every tracked legal artifact before copying landing o
     dockerfile,
     /COPY deploy\/production\/legal-artifacts-attestation\.json \.\/deploy\/production\/legal-artifacts-attestation\.json/,
   );
+  assert.match(
+    dockerfile,
+    /COPY deploy\/production\/cli-main\.mjs \.\/deploy\/production\/cli-main\.mjs/,
+  );
   assert.match(dockerignore, /^!deploy\/production\/legal-artifacts-attestation\.json$/m);
+  assert.match(dockerignore, /^!deploy\/production\/cli-main\.mjs$/m);
   assert.match(
     dockerfile,
     /node deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal deploy\/production\/legal-artifacts-attestation\.json/,
