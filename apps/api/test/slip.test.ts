@@ -70,15 +70,17 @@ describe("renderPickupSlipHtml", () => {
 
   it("omits the employee QR block by default", () => {
     const html = renderPickupSlipHtml(fixture());
-    const svgCount = (html.match(/<svg/g) ?? []).length;
-    expect(svgCount).toBe(3);
+    expect(html.match(/class="dm-box"/g)).toHaveLength(2);
+    expect(html.match(/class="code128-box"/g)).toHaveLength(1);
+    expect(html).not.toContain('class="qr-box"');
     expect(html).not.toContain("Отсканируйте код, чтобы найти сотрудника");
   });
 
   it("renders the employee QR block when the kiosk setting is enabled", () => {
     const html = renderPickupSlipHtml(fixture({ printEmployeeQrOnSlip: true }));
-    const svgCount = (html.match(/<svg/g) ?? []).length;
-    expect(svgCount).toBe(4);
+    expect(html.match(/class="dm-box"/g)).toHaveLength(2);
+    expect(html.match(/class="code128-box"/g)).toHaveLength(1);
+    expect(html.match(/class="qr-box"/g)).toHaveLength(1);
     expect(html).toContain("Отсканируйте код, чтобы найти сотрудника");
   });
 
@@ -88,14 +90,69 @@ describe("renderPickupSlipHtml", () => {
     expect(html).toMatch(/size:\s*A4/);
   });
 
+  it("renders explicit numbered A4 pages with repeated document furniture", () => {
+    const baseItem = fixture().items[0]!;
+    const items = Array.from({ length: 17 }, (_, index) => ({
+      ...baseItem,
+      n: index + 1,
+      productName: `Товар ${index + 1}`,
+      serial: `SERIAL${index + 1}`,
+      rawKm: `01${GTIN}21SERIAL${index + 1}${GS}93Abcd`,
+    }));
+
+    const html = renderPickupSlipHtml(fixture({ items }));
+    expect(html.match(/data-slip-page="\d+"/g)).toHaveLength(3);
+    expect(html.match(/class="slip-table-head"/g)).toHaveLength(3);
+    expect(html.match(/class="code128-box"/g)).toHaveLength(3);
+    expect(html.match(/стр\. \d+ из \d+/g)).toEqual(["стр. 1 из 3", "стр. 2 из 3", "стр. 3 из 3"]);
+    expect(html.match(/class="slip-final-blocks"/g)).toHaveLength(1);
+  });
+
+  it("uses organization branding when safe and falls back to Markiro for unsafe sources", () => {
+    const organizationHtml = renderPickupSlipHtml(
+      fixture({
+        org: {
+          name: "ООО Логотип",
+          inn: "1234567890",
+          logo: "https://assets.example.test/logo.svg?a=1&b=2",
+        },
+      }),
+    );
+    expect(organizationHtml).toContain('src="https://assets.example.test/logo.svg?a=1&amp;b=2"');
+    expect(organizationHtml).not.toContain('data-brand-logo="markiro"');
+
+    const fallbackHtml = renderPickupSlipHtml(
+      fixture({
+        org: { name: "ООО Небезопасный URL", inn: null, logo: "javascript:alert(1)" },
+      }),
+    );
+    expect(fallbackHtml).not.toContain("javascript:alert(1)");
+    expect(fallbackHtml).toContain('data-brand-logo="markiro"');
+  });
+
+  it("prints document copy, price, title and signatures in the required layout", () => {
+    const html = renderPickupSlipHtml(fixture());
+    expect(html).toContain(
+      "Цена является информационной. Окончательная цена будет указана в чеке.",
+    );
+    expect(html).not.toMatch(/(?:52\.00|74\.00|126\.00)\s*₽/);
+    expect(html).not.toContain("Платформа маркировки «Честный ЗНАК»");
+    expect(html).toContain('<span class="slip-title-order">№ ORD-26-0042</span>');
+    expect(html).toContain('class="code128-box"><svg viewBox="0 0 290 58"');
+    expect(html).not.toContain('class="code128-box"><svg viewBox="0 0 290 74"');
+    expect(html).toMatch(
+      /class="signature-line"[^>]*><\/span>\s*<span class="signature-name">Смирнов Алексей Петрович<\/span>/,
+    );
+  });
+
   it("renders gracefully with no org profile and no active badge", () => {
     const html = renderPickupSlipHtml(
       fixture({ org: null, employee: { fullName: "Без бейджа", role: null, badgeCode: null } }),
     );
     expect(html).toContain("Без бейджа");
-    const svgCount = (html.match(/<svg/g) ?? []).length;
-    // No badge -> no QR block; still 2 DataMatrix + 1 Code128.
-    expect(svgCount).toBe(3);
+    expect(html.match(/class="dm-box"/g)).toHaveLength(2);
+    expect(html.match(/class="code128-box"/g)).toHaveLength(1);
+    expect(html).not.toContain('class="qr-box"');
   });
 
   it("keeps the printable slip available when one stored marking code cannot be rendered", () => {

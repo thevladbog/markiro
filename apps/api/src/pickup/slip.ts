@@ -80,7 +80,63 @@ function escapeHtml(value: string): string {
 }
 
 function money(value: string | null): string {
-  return value === null ? "—" : `${value} ₽`;
+  return value === null ? "—" : value;
+}
+
+const REGULAR_PAGE_ITEM_CAPACITY = 10;
+const FINAL_PAGE_ITEM_CAPACITY = 6;
+
+function paginatePickupSlipItems(items: PickupSlipItem[]): PickupSlipItem[][] {
+  if (items.length === 0) return [[]];
+  if (items.length <= FINAL_PAGE_ITEM_CAPACITY) return [items];
+
+  const pageCount =
+    1 + Math.ceil((items.length - FINAL_PAGE_ITEM_CAPACITY) / REGULAR_PAGE_ITEM_CAPACITY);
+  const finalPageSize = Math.min(FINAL_PAGE_ITEM_CAPACITY, Math.ceil(items.length / pageCount));
+  const regularItemCount = items.length - finalPageSize;
+  const regularPageCount = pageCount - 1;
+  const pages: PickupSlipItem[][] = [];
+  let offset = 0;
+
+  for (let pageIndex = 0; pageIndex < regularPageCount; pageIndex += 1) {
+    const remainingPages = regularPageCount - pageIndex;
+    const remainingItems = regularItemCount - offset;
+    const pageSize = Math.min(
+      REGULAR_PAGE_ITEM_CAPACITY,
+      Math.ceil(remainingItems / remainingPages),
+    );
+    pages.push(items.slice(offset, offset + pageSize));
+    offset += pageSize;
+  }
+
+  pages.push(items.slice(offset));
+  return pages;
+}
+
+function safeLogoSrc(value: string | null): string | null {
+  const candidate = value?.trim();
+  if (!candidate) return null;
+  if (/^data:image\/(?:png|jpe?g|gif|webp|svg\+xml);base64,/i.test(candidate)) {
+    return candidate;
+  }
+  try {
+    const url = new URL(candidate);
+    return url.protocol === "https:" || url.protocol === "http:" ? candidate : null;
+  } catch {
+    return null;
+  }
+}
+
+function brandLogo(data: PickupSlipData): string {
+  const organizationLogo = safeLogoSrc(data.org?.logo ?? null);
+  if (organizationLogo) {
+    return `<img class="brand-logo brand-logo--organization" src="${escapeHtml(organizationLogo)}" alt="${escapeHtml(data.org?.name ?? "Логотип организации")}">`;
+  }
+  return `<svg class="brand-logo brand-logo--markiro" data-brand-logo="markiro" viewBox="0 0 150 34" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="5" width="24" height="24" rx="5" fill="#17161A"/>
+    <path d="M6 23V11h3.8l2.2 5.6 2.2-5.6H18v12h-3v-6.8l-2 4.8h-2l-2-4.8V23H6Z" fill="#fff"/>
+    <text x="32" y="24" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#17161A">маркиро</text>
+  </svg>`;
 }
 
 /** Human-readable AI breakdown ("01 <gtin14> 21 <serial>") — the crypto tail isn't printable text. */
@@ -97,22 +153,85 @@ function itemRow(item: PickupSlipItem): string {
       '<span style="font-size: 9px; line-height: 1.2; color: #6B6862; text-align: center">Код не отображается</span>';
   }
   return `
-        <div style="display: grid; grid-template-columns: 8mm 1fr 58mm 13mm 15mm; gap: 0 4mm; align-items: center; border-bottom: 1px solid #E0DED7; padding: 4px 10px">
-          <span class="mono">${item.n}</span>
-          <span>${escapeHtml(item.productName)}</span>
-          <span class="mono" style="font-size: 10px; color: #45433E">${escapeHtml(kmLabel(item))}</span>
-          <span class="mono" style="text-align: right">${escapeHtml(money(item.unitPrice))}</span>
-          <span class="dm-box" style="width: 13mm; height: 13mm; display: flex; align-items: center; justify-content: center; justify-self: center">${dm}</span>
-        </div>`;
+      <tr class="slip-item-row">
+        <td class="mono slip-item-number">${item.n}</td>
+        <td><span class="slip-product-name">${escapeHtml(item.productName)}</span></td>
+        <td class="mono slip-km-label">${escapeHtml(kmLabel(item))}</td>
+        <td class="mono slip-price">${escapeHtml(money(item.unitPrice))}</td>
+        <td><span class="dm-box">${dm}</span></td>
+      </tr>`;
+}
+
+function metadataBlock(data: PickupSlipData, orgBlock: string, employeeTail: string): string {
+  return `<div class="slip-meta">
+    <div class="slip-meta-cell">
+      <span class="slip-meta-label">Организация</span>
+      ${orgBlock}
+    </div>
+    <div class="slip-meta-cell">
+      <span class="slip-meta-label">Сотрудник</span>
+      <span class="slip-meta-value">${escapeHtml(data.employee.fullName)}</span>
+      <span class="slip-meta-detail">${escapeHtml(employeeTail) || "—"}</span>
+    </div>
+    <div class="slip-meta-cell">
+      <span class="slip-meta-label">Заявка</span>
+      <span class="slip-meta-value">№ ${escapeHtml(data.orderNo)} · ${formatDateTime(data.createdAt)}</span>
+      <span class="slip-meta-detail">${escapeHtml(data.kioskName)} · причина: <strong>${reasonLabel(data.reason)}</strong></span>
+    </div>
+  </div>`;
+}
+
+function tableHead(): string {
+  return `<thead class="slip-table-head">
+    <tr>
+      <th>№</th>
+      <th>Продукт</th>
+      <th>Код маркировки (КМ)</th>
+      <th class="slip-price">Цена, ₽</th>
+      <th class="slip-dm-heading">DataMatrix</th>
+    </tr>
+  </thead>`;
+}
+
+function finalBlocks(data: PickupSlipData, writeoffSubReason: string, badgeQr: string): string {
+  return `<div class="slip-final-blocks">
+    <div class="slip-total">
+      <span>Итого по заявке:</span>
+      <span class="mono">${data.items.length} шт. · ${escapeHtml(money(data.total))}</span>
+    </div>
+    <div class="slip-operation">
+      <span class="slip-meta-label">Способ вывода из оборота</span>
+      <div class="slip-operation-options">
+        <span><i class="checkbox-mark"></i>Продажа сотруднику — чек ККТ № ______</span>
+        <span><i class="checkbox-mark"></i>Списание — акт № ______ · подпричина: ____________</span>
+      </div>
+      <span>Причина, выбранная сотрудником на киоске: <strong>${reasonLabel(data.reason)}</strong>${writeoffSubReason}.</span>
+      <strong class="slip-price-notice">Цена является информационной. Окончательная цена будет указана в чеке.</strong>
+      <span class="slip-operation-note">DataMatrix в таблице пригоден для сканирования на кассе. После операции статусы кодов обновятся в ГИС МТ автоматически.</span>
+    </div>
+    ${badgeQr}
+    <div class="slip-signatures">
+      <div class="slip-signature">
+        <span class="slip-meta-label">Продукцию получил</span>
+        <span class="signature-line"></span>
+        <span class="signature-name">${escapeHtml(data.employee.fullName)}</span>
+      </div>
+      <div class="slip-signature">
+        <span class="slip-meta-label">Администратор</span>
+        <span class="signature-line"></span>
+        <span class="signature-name">ФИО</span>
+      </div>
+    </div>
+  </div>`;
 }
 
 /** Pure: builds the print-ready A4 "Ведомость отбора по заявке" document. No I/O, no `Date.now()`. */
 export function renderPickupSlipHtml(data: PickupSlipData): string {
   const orgBlock = data.org
-    ? `<span style="font-weight: 600">${escapeHtml(data.org.name)}</span>
-        <span style="color: #45433E; font-size: 11.5px">${data.org.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "ИНН не указан"}</span>`
-    : `<span style="font-weight: 600">—</span>
-        <span style="color: #45433E; font-size: 11.5px">Профиль организации не заполнен</span>`;
+    ? `<span class="slip-meta-value">${escapeHtml(data.org.name)}</span>
+      <span class="slip-meta-detail">${data.org.inn ? `ИНН ${escapeHtml(data.org.inn)}` : "ИНН не указан"}</span>`
+    : `<span class="slip-meta-value">—</span>
+      <span class="slip-meta-detail">Профиль организации не заполнен</span>`;
 
   const employeeTail = [
     data.employee.role,
@@ -125,20 +244,52 @@ export function renderPickupSlipHtml(data: PickupSlipData): string {
     ? ` (подпричина: ${escapeHtml(data.writeoffReasonName)})`
     : "";
 
-  const itemCountLabel = `${data.items.length} шт.`;
-
-  const badgeQr = data.printEmployeeQrOnSlip && data.employee.badgeCode
-    ? `
-    <div style="display: flex; align-items: center; gap: 14px; border: 1px solid #E0DED7; border-radius: 8px; padding: 10px 14px">
-      <span class="qr-box" style="width: 22mm; height: 22mm; flex-shrink: 0; display: flex; align-items: center; justify-content: center">${renderQrSvg(data.employee.badgeCode)}</span>
-      <span style="display: flex; flex-direction: column; gap: 4px">
-        <span style="font: 600 12.5px/1.3 sans-serif">Отсканируйте код, чтобы найти сотрудника на кассе или в системе</span>
-        <span style="color: #6B6862; font-size: 10.5px">QR бейджа ${escapeHtml(data.employee.fullName)} (${escapeHtml(maskBadge(data.employee.badgeCode))}) — открывает карточку сотрудника и его заявки в Платформе маркиро.</span>
+  const badgeQr =
+    data.printEmployeeQrOnSlip && data.employee.badgeCode
+      ? `<div class="slip-employee-qr">
+      <span class="qr-box">${renderQrSvg(data.employee.badgeCode)}</span>
+      <span class="slip-employee-qr-copy">
+        <strong>Отсканируйте код, чтобы найти сотрудника на кассе или в системе</strong>
+        <span>QR бейджа ${escapeHtml(data.employee.fullName)} (${escapeHtml(maskBadge(data.employee.badgeCode))}) — открывает карточку сотрудника и его заявки.</span>
       </span>
     </div>`
-    : "";
+      : "";
 
-  const orderBarcode = renderCode128Svg(data.orderNo);
+  const orderBarcode = renderCode128Svg(data.orderNo, { includeText: false });
+  const pages = paginatePickupSlipItems(data.items);
+  const totalPages = pages.length;
+  const logo = brandLogo(data);
+  const metadata = metadataBlock(data, orgBlock, employeeTail);
+  const renderedPages = pages
+    .map((items, index) => {
+      const pageNumber = index + 1;
+      const isLastPage = pageNumber === totalPages;
+      return `<section class="slip-page" data-slip-page="${pageNumber}">
+    <header class="slip-header">
+      <div class="slip-brand">${logo}</div>
+      <div class="slip-title">
+        <span class="slip-title-label">Ведомость отбора по заявке</span>
+        <span class="slip-title-order">№ ${escapeHtml(data.orderNo)}</span>
+        <span class="slip-title-detail">от ${formatDateLong(data.createdAt)} · ${escapeHtml(data.kioskName)}, причина: <strong>${reasonLabel(data.reason)}</strong>${writeoffSubReason}</span>
+      </div>
+    </header>
+    ${metadata}
+    <main class="slip-content">
+      <table class="slip-table">
+        <colgroup><col class="col-n"><col class="col-product"><col class="col-km"><col class="col-price"><col class="col-dm"></colgroup>
+        ${tableHead()}
+        <tbody>${items.map(itemRow).join("")}</tbody>
+      </table>
+      ${isLastPage ? finalBlocks(data, writeoffSubReason, badgeQr) : ""}
+    </main>
+    <footer class="slip-footer">
+      <span class="code128-box">${orderBarcode}</span>
+      <span class="slip-footer-copy">Сформировано в Маркиро · Заявка № ${escapeHtml(data.orderNo)}</span>
+      <span class="slip-page-number">стр. ${pageNumber} из ${totalPages}</span>
+    </footer>
+  </section>`;
+    })
+    .join("\n");
 
   return `<!DOCTYPE html>
 <html lang="ru">
@@ -147,87 +298,69 @@ export function renderPickupSlipHtml(data: PickupSlipData): string {
 <title>Ведомость отбора по заявке № ${escapeHtml(data.orderNo)}</title>
 <style>
 @page { size: A4; margin: 0 }
-body { margin: 0; font-family: sans-serif; color: #17161A; }
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .mono { font-family: monospace; font-variant-numeric: tabular-nums; }
-/* The barcode SVGs from @markiro/domain carry no width/height attributes
-   (only a viewBox) — force them to fill their sized container instead of
-   falling back to the ~300x150 default replaced-element size. */
+.slip-page { width: 210mm; height: 297mm; margin: 8mm auto; padding: 11mm 14mm 10mm; background: #fff; display: grid; grid-template-rows: auto auto 1fr auto; gap: 4mm; overflow: hidden; break-after: page; page-break-after: always; font-size: 11px; line-height: 1.35; }
+.slip-page:last-child { break-after: auto; page-break-after: auto; }
+.slip-header { min-height: 18mm; display: flex; align-items: flex-start; justify-content: space-between; gap: 10mm; }
+.slip-brand { width: 48mm; min-width: 48mm; height: 12mm; display: flex; align-items: center; }
+.brand-logo { display: block; max-width: 44mm; max-height: 12mm; width: auto; height: auto; object-fit: contain; object-position: left center; }
+.brand-logo--markiro { width: 40mm; height: 9mm; }
+.slip-title { min-width: 0; text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 1mm; }
+.slip-title-label, .slip-title-order { font-size: 18px; line-height: 1.05; font-weight: 700; }
+.slip-title-order { overflow-wrap: anywhere; }
+.slip-title-detail { color: #45433E; font-size: 10.5px; }
+.slip-meta { min-height: 18mm; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6mm; }
+.slip-meta-cell { min-width: 0; display: flex; flex-direction: column; gap: 1mm; }
+.slip-meta-label { color: #6B6862; font-size: 9px; line-height: 1; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.slip-meta-value { font-weight: 700; }
+.slip-meta-detail { color: #45433E; font-size: 10px; }
+.slip-content { min-height: 0; display: flex; flex-direction: column; gap: 2.5mm; overflow: hidden; }
+.slip-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
+.col-n { width: 8mm; } .col-product { width: auto; } .col-km { width: 58mm; } .col-price { width: 18mm; } .col-dm { width: 17mm; }
+.slip-table-head { display: table-header-group; }
+.slip-table-head tr { height: 7mm; background: #17161A; color: #FAFAF8; }
+.slip-table-head th { padding: 1.5mm 2mm; font-size: 8.5px; line-height: 1; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
+.slip-table-head th:first-child { border-radius: 2mm 0 0 0; }
+.slip-table-head th:last-child { border-radius: 0 2mm 0 0; }
+.slip-item-row { height: 14.5mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #E0DED7; }
+.slip-item-row td { height: 14.5mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.slip-item-number { text-align: center; }
+.slip-product-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.25; }
+.slip-km-label { color: #45433E; font-size: 8.5px; overflow-wrap: anywhere; }
+.slip-price { text-align: right !important; white-space: nowrap; }
+.slip-dm-heading { text-align: center !important; }
 .dm-box svg, .qr-box svg { display: block; width: 100%; height: 100%; }
+.dm-box { width: 11.5mm; height: 11.5mm; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
+.slip-final-blocks { break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; gap: 2.5mm; }
+.slip-total { min-height: 7mm; padding: 1.5mm 2mm; border-bottom: .25mm solid #C9C6BD; display: flex; justify-content: flex-end; align-items: baseline; gap: 8mm; font-size: 12px; font-weight: 700; }
+.slip-operation { padding: 3mm 4mm; border: .25mm solid #E0DED7; border-radius: 2mm; background: #F7F6F2; display: flex; flex-direction: column; gap: 1.5mm; color: #45433E; font-size: 9.5px; }
+.slip-operation-options { display: flex; gap: 7mm; }
+.slip-operation-options > span { display: flex; align-items: center; gap: 2mm; }
+.checkbox-mark { width: 3mm; height: 3mm; border: .35mm solid #45433E; border-radius: .5mm; display: inline-block; flex: 0 0 auto; }
+.slip-price-notice { color: #17161A; }
+.slip-operation-note { color: #6B6862; }
+.slip-employee-qr { min-height: 23mm; padding: 2mm 4mm; border: .25mm solid #E0DED7; border-radius: 2mm; display: flex; align-items: center; gap: 4mm; }
+.qr-box { width: 19mm; height: 19mm; flex: 0 0 auto; }
+.slip-employee-qr-copy { display: flex; flex-direction: column; gap: 1mm; color: #6B6862; font-size: 9px; }
+.slip-employee-qr-copy strong { color: #17161A; font-size: 10.5px; }
+.slip-signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 12mm; padding: 1mm 3mm 0; }
+.slip-signature { display: grid; grid-template-columns: 1fr; gap: 1.5mm; }
+.signature-line { width: 48mm; height: 4mm; border-bottom: .35mm solid #17161A; display: block; }
+.signature-name { min-height: 4mm; color: #6B6862; font-size: 9.5px; }
+.slip-footer { min-height: 11mm; padding-top: 2mm; border-top: .25mm solid #E0DED7; display: grid; grid-template-columns: 48mm 1fr auto; align-items: center; gap: 4mm; color: #6B6862; font: 9px/1.3 monospace; }
+.code128-box { height: 9mm; display: flex; align-items: center; }
 .code128-box svg { display: block; width: auto; height: 100%; }
+.slip-footer-copy { text-align: right; }
+.slip-page-number { min-width: 20mm; text-align: right; color: #17161A; font-weight: 700; }
+@media print {
+  body { background: #fff; }
+  .slip-page { margin: 0; }
+}
 </style>
 </head>
-<body>
-  <section style="background: #FFFFFF; padding: 13mm 15mm; box-sizing: border-box; display: flex; flex-direction: column; gap: 6mm; font-size: 12px; line-height: 1.5">
-
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 24px">
-      <div style="display: flex; flex-direction: column; gap: 2px">
-        <span style="font: 600 22px/1 monospace">маркиро</span>
-        <span style="font: 400 11px/1 sans-serif; color: #6B6862">Платформа маркировки «Честный ЗНАК» · markiro.ru</span>
-      </div>
-      <div style="text-align: right; display: flex; flex-direction: column; gap: 2px">
-        <span style="font: 700 20px/1.2 sans-serif">Ведомость отбора по заявке № ${escapeHtml(data.orderNo)}</span>
-        <span style="font: 400 12.5px/1.4 sans-serif; color: #45433E">от ${formatDateLong(data.createdAt)} · ${escapeHtml(data.kioskName)}, причина: <strong>${reasonLabel(data.reason)}</strong>${writeoffSubReason}</span>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px">
-      <div style="display: flex; flex-direction: column; gap: 3px">
-        <span style="font: 600 10px/1 sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Организация</span>
-        ${orgBlock}
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 3px">
-        <span style="font: 600 10px/1 sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Сотрудник</span>
-        <span style="font-weight: 600">${escapeHtml(data.employee.fullName)}</span>
-        <span style="color: #45433E; font-size: 11.5px">${escapeHtml(employeeTail) || "—"}</span>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 3px">
-        <span style="font: 600 10px/1 sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Заявка</span>
-        <span style="font-weight: 600">№ ${escapeHtml(data.orderNo)} · ${formatDateTime(data.createdAt)}</span>
-        <span style="color: #45433E; font-size: 11.5px">${escapeHtml(data.kioskName)} · причина: <strong>${reasonLabel(data.reason)}</strong></span>
-      </div>
-    </div>
-
-    <div style="display: flex; flex-direction: column">
-      <div style="display: grid; grid-template-columns: 8mm 1fr 58mm 13mm 15mm; gap: 0 4mm; align-items: center; background: #17161A; color: #FAFAF8; border-radius: 6px 6px 0 0; padding: 7px 10px; font: 600 10px/1 sans-serif; text-transform: uppercase; letter-spacing: 0.05em">
-        <span>№</span><span>Продукт</span><span>Код маркировки (КМ)</span><span style="text-align: right">Цена, ₽</span><span style="text-align: center">DataMatrix</span>
-      </div>${data.items.map(itemRow).join("")}
-      <div style="display: flex; justify-content: flex-end; gap: 24px; align-items: baseline; padding: 8px 10px; border-bottom: 1px solid #C9C6BD">
-        <span style="font: 600 13px/1.4 sans-serif">Итого по заявке:</span>
-        <span class="mono" style="font: 600 14px/1.4 monospace">${itemCountLabel} · ${escapeHtml(money(data.total))}</span>
-      </div>
-    </div>
-
-    <div style="background: #F7F6F2; border: 1px solid #E0DED7; border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: #45433E">
-      <span style="font: 600 10px/1 sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.05em">Способ вывода из оборота</span>
-      <span style="display: flex; gap: 28px">
-        <span style="display: flex; align-items: center; gap: 7px"><span style="width: 11px; height: 11px; border: 1.5px solid #45433E; border-radius: 2px; display: inline-block"></span>Продажа сотруднику — чек ККТ № ______</span>
-        <span style="display: flex; align-items: center; gap: 7px"><span style="width: 11px; height: 11px; border: 1.5px solid #45433E; border-radius: 2px; display: inline-block"></span>Списание — акт № ______ · подпричина: ____________</span>
-      </span>
-      <span style="color: #45433E; font-size: 10.5px">Причина, выбранная сотрудником на киоске: <strong>${reasonLabel(data.reason)}</strong>${writeoffSubReason}.</span>
-      <span style="color: #6B6862; font-size: 10.5px">DataMatrix в таблице пригоден для сканирования на кассе. После операции статусы кодов обновятся в ГИС МТ автоматически.</span>
-    </div>
-
-    ${badgeQr}
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; padding: 0 10px">
-      <div style="display: flex; flex-direction: column; gap: 14px">
-        <span style="font: 600 10px/1 sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Продукцию получил</span>
-        <span style="display: flex; align-items: baseline; gap: 10px"><span style="display: inline-block; width: 48mm; border-bottom: 1px solid #17161A"></span><span style="font-size: 11px; color: #6B6862">${escapeHtml(data.employee.fullName)}</span></span>
-      </div>
-      <div style="display: flex; flex-direction: column; gap: 14px">
-        <span style="font: 600 10px/1 sans-serif; color: #6B6862; text-transform: uppercase; letter-spacing: 0.06em">Администратор</span>
-        <span style="display: flex; align-items: baseline; gap: 10px"><span style="display: inline-block; width: 48mm; border-bottom: 1px solid #17161A"></span><span style="font-size: 11px; color: #6B6862"></span></span>
-      </div>
-    </div>
-
-    <div style="border-top: 1px solid #E0DED7; padding-top: 8px; display: flex; justify-content: space-between; align-items: center; font: 400 10px/1.4 monospace; color: #6B6862">
-      <span style="display: flex; align-items: center; gap: 8px">
-        <span class="code128-box" style="height: 12mm; display: flex; align-items: center">${orderBarcode}</span>
-      </span>
-      <span style="text-align: right">Сформировано в Платформе маркиро<br>Заявка № ${escapeHtml(data.orderNo)} · стр. 1 из 1</span>
-    </div>
-
-  </section>
-</body>
+<body>${renderedPages}</body>
 </html>`;
 }

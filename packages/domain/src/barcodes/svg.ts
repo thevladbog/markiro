@@ -59,13 +59,13 @@ export function renderQrSvg(text: string): string {
   return bwipjs.toSVG({ bcid: "qrcode", text, scale: 3 });
 }
 
-export function renderCode128Svg(text: string): string {
+export function renderCode128Svg(text: string, options: { includeText?: boolean } = {}): string {
   return bwipjs.toSVG({
     bcid: "code128",
     text,
     scale: 2,
     height: 10,
-    includetext: true,
+    includetext: options.includeText ?? true,
     textxalign: "center",
   });
 }

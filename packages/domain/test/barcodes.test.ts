@@ -67,7 +67,6 @@ describe("barcode SVG renderers", () => {
   it("renders a Code128 SVG for an order number", () => {
     expect(renderCode128Svg("ORD-26-0037").startsWith("<svg")).toBe(true);
   });
-
   it("renders a literal Data Matrix exactly as bwip-js without GS1 transformation", () => {
     expect(renderLiteralDataMatrixSvg(LITERAL_URL)).toBe(
       bwipjs.toSVG({ bcid: "datamatrix", text: LITERAL_URL, scale: 3 }),
@@ -101,5 +100,12 @@ describe("barcode SVG renderers", () => {
       );
       expect(() => renderLiteralDataMatrixSvg(text)).toThrow(DomainError);
     }
+  });
+
+  it("can omit the human-readable Code128 caption without changing the default", () => {
+    expect(renderCode128Svg("ORD-26-0037")).toContain('viewBox="0 0 290 74"');
+    expect(renderCode128Svg("ORD-26-0037", { includeText: false })).toContain(
+      'viewBox="0 0 290 58"',
+    );
   });
 });
