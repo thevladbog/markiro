@@ -15,27 +15,36 @@ import {
 const sectionIds = (code: LegalDocumentCode, locale: LegalLocale): string[] =>
   findLegalDocument(code).content[locale].sections.map(({ id }) => id);
 
+const documentContent = (code: LegalDocumentCode, locale: LegalLocale) =>
+  findLegalDocument(code).content[locale];
+
 const blockText = (block: LegalBlock): string => {
   if (block.kind === "paragraph") return block.text;
   if (block.kind === "definition-list") {
-    return block.items.map(({ term, detail }) => `${term} ${detail}`).join(" ");
+    return block.items.map(({ term, detail }) => `${term} — ${detail}`).join(" ");
   }
   return block.items.join(" ");
 };
 
-const documentText = (code: LegalDocumentCode, locale: LegalLocale): string => {
-  const content = findLegalDocument(code).content[locale];
+const flattenedDocument = (code: LegalDocumentCode, locale: LegalLocale): string[] => {
+  const content = documentContent(code, locale);
   return [
     content.title,
     content.summary,
     ...content.sections.flatMap(({ heading, blocks }) => [heading, ...blocks.map(blockText)]),
-  ].join(" ");
+  ];
 };
 
-const sectionText = (code: LegalDocumentCode, locale: LegalLocale, sectionId: string): string => {
-  const section = findLegalDocument(code).content[locale].sections.find(
-    ({ id }) => id === sectionId,
+const documentText = (code: LegalDocumentCode, locale: LegalLocale): string =>
+  flattenedDocument(code, locale).join(" ");
+
+const definitionItems = (code: LegalDocumentCode, locale: LegalLocale) =>
+  documentContent(code, locale).sections.flatMap(({ blocks }) =>
+    blocks.flatMap((block) => (block.kind === "definition-list" ? block.items : [])),
   );
+
+const sectionText = (code: LegalDocumentCode, locale: LegalLocale, sectionId: string): string => {
+  const section = documentContent(code, locale).sections.find(({ id }) => id === sectionId);
   if (!section) throw new Error(`Unknown legal section: ${code}/${locale}/${sectionId}`);
   return [section.heading, ...section.blocks.map(blockText)].join(" ");
 };
@@ -69,6 +78,54 @@ describe("bilingual legal document sources", () => {
     expect(legalVerificationUrl(release)).toBe(
       "https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
     );
+  });
+
+  it("uses the normalized product name in each localized legal document", () => {
+    const bilingualFirstUse = "Маркиро (англ. — Markiro)";
+
+    for (const source of LEGAL_DOCUMENTS) {
+      const code = findCode(source.content.ru.title);
+      const russian = documentText(code, "ru");
+      const russianMentions = russian.match(/Маркиро(?: \(англ\. — Markiro\))?|Markiro/gu) ?? [];
+
+      expect(russian.match(/Маркиро \(англ\. — Markiro\)/gu)).toHaveLength(1);
+      expect(russianMentions[0]).toBe(bilingualFirstUse);
+      expect(russianMentions.slice(1)).toEqual(
+        Array.from({ length: russianMentions.length - 1 }, () => "Маркиро"),
+      );
+
+      const english = documentText(code, "en");
+      expect(english).toContain("Markiro");
+      expect(english).not.toContain("Маркиро");
+    }
+  });
+
+  it("uses dash-separated definitions with unpunctuated source terms", () => {
+    for (const source of LEGAL_DOCUMENTS) {
+      const code = findCode(source.content.ru.title);
+      for (const locale of ["ru", "en"] as const) {
+        const text = documentText(code, locale);
+        for (const { term, detail } of definitionItems(code, locale)) {
+          expect(term).not.toMatch(/[.,;:!?…]$/u);
+          expect(text).toContain(`${term} — ${detail}`);
+        }
+      }
+    }
+  });
+
+  it("uses the localized revision and effective-date wording in public prose", () => {
+    for (const source of LEGAL_DOCUMENTS) {
+      const code = findCode(source.content.ru.title);
+      const russian = documentText(code, "ru");
+      const english = documentText(code, "en");
+
+      expect(russian).toContain("2026.08/01");
+      expect(russian).toContain("15.08.2026");
+      expect(russian).not.toContain("2026-08-15");
+      expect(english).toContain("2026.08/01");
+      expect(english).toContain("15 August 2026");
+      expect(english).not.toContain("2026-08-15");
+    }
   });
 
   it("uses stable section identifiers for the privacy policy", () => {
@@ -199,7 +256,7 @@ describe("bilingual legal document sources", () => {
       const text = sectionText(code, locale, sectionId);
       expect(text).toContain(release.code);
       expect(text).toContain(release.revision);
-      expect(text).toContain(release.effectiveDate);
+      expect(text).toContain(formatLegalEffectiveDate(release.effectiveDate, locale));
     }
   });
 

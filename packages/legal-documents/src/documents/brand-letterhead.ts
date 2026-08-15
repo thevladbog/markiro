@@ -3,7 +3,7 @@ import type { LegalDocumentLocaleContent, LegalLocale } from "../types.js";
 export const BRAND_LETTERHEAD_CONTENT = {
   ru: {
     locale: "ru",
-    title: "Фирменный бланк Markiro",
+    title: "Фирменный бланк Маркиро (англ. — Markiro)",
     summary: "Правила использования компактного редактируемого фирменного бланка.",
     sections: [
       {
@@ -22,7 +22,7 @@ export const BRAND_LETTERHEAD_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Шаблон предназначен для официальной переписки и индивидуальных документов Markiro. Следует сохранять фирменный знак, типографику, компактную верхнюю область, нижний колонтитул, поля и стили заголовков.",
+            text: "Шаблон предназначен для официальной переписки и индивидуальных документов Маркиро. Следует сохранять фирменный знак, типографику, компактную верхнюю область, нижний колонтитул, поля и стили заголовков.",
           },
         ],
       },
@@ -42,7 +42,7 @@ export const BRAND_LETTERHEAD_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Код шаблона: MKR-BRD-01. Редакция: 2026.08/01. Дата вступления в силу: 2026-08-15. Нижний колонтитул содержит номер страницы и Data Matrix, ведущий на запись именно этого шаблона в публичном реестре. Русский текст является приоритетным; английский — информационным переводом.",
+            text: "Код шаблона: MKR-BRD-01. Редакция: 2026.08/01. Дата вступления в силу: 15.08.2026. Нижний колонтитул содержит номер страницы и Data Matrix, ведущий на запись именно этого шаблона в публичном реестре. Русский текст является приоритетным; английский — информационным переводом.",
           },
         ],
       },
@@ -100,7 +100,7 @@ export const BRAND_LETTERHEAD_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Template code: MKR-BRD-01. Revision: 2026.08/01. Effective date: 2026-08-15. The footer carries the page number and a Data Matrix linking to this template's public registry record. The Russian text is authoritative; English is informational.",
+            text: "Template code: MKR-BRD-01. Revision: 2026.08/01. Effective date: 15 August 2026. The footer carries the page number and a Data Matrix linking to this template's public registry record. The Russian text is authoritative; English is informational.",
           },
         ],
       },
