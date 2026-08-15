@@ -723,7 +723,8 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
       { name: "RUN", arguments: "pnpm --filter @markiro/legal-documents build" },
       {
         name: "RUN",
-        arguments: "node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal",
+        arguments:
+          "node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json",
       },
       { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
     ],
@@ -806,8 +807,9 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
 }
 
 test("edge build validates every tracked legal artifact before copying landing output", async () => {
-  const [dockerfile, manifestSource] = await Promise.all([
+  const [dockerfile, dockerignore, manifestSource] = await Promise.all([
     readFile("deploy/production/edge.Dockerfile", "utf8"),
+    readFile(".dockerignore", "utf8"),
     readFile("apps/landing/public/legal/artifacts.json", "utf8"),
   ]);
   const artifacts = JSON.parse(manifestSource);
@@ -820,7 +822,12 @@ test("edge build validates every tracked legal artifact before copying landing o
   assert.match(dockerfile, /COPY apps\/landing \.\/apps\/landing/);
   assert.match(
     dockerfile,
-    /node deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal/,
+    /COPY deploy\/production\/legal-artifacts-attestation\.json \.\/deploy\/production\/legal-artifacts-attestation\.json/,
+  );
+  assert.match(dockerignore, /^!deploy\/production\/legal-artifacts-attestation\.json$/m);
+  assert.match(
+    dockerfile,
+    /node deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal deploy\/production\/legal-artifacts-attestation\.json/,
   );
   assert.match(
     dockerfile,

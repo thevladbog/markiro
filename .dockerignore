@@ -34,6 +34,7 @@
 !deploy/production/edge-entrypoint.sh
 !deploy/production/healthcheck.mjs
 !deploy/production/verify-legal-artifacts.mjs
+!deploy/production/legal-artifacts-attestation.json
 !deploy/production/yandex-cloud-ca.pem
 
 .git
