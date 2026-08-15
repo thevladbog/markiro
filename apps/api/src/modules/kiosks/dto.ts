@@ -5,6 +5,7 @@ export const createKioskSchema = z.object({
   location: z.string().trim().min(1).max(200).nullable().optional(),
   dayLimitPerEmployee: z.number().int().min(1).default(5),
   showPrices: z.boolean().default(true),
+  printEmployeeQrOnSlip: z.boolean().default(false),
 });
 export type CreateKioskDto = z.infer<typeof createKioskSchema>;
 
@@ -13,6 +14,7 @@ export const updateKioskSchema = z.object({
   location: z.string().trim().min(1).max(200).nullable().optional(),
   dayLimitPerEmployee: z.number().int().min(1).optional(),
   showPrices: z.boolean().optional(),
+  printEmployeeQrOnSlip: z.boolean().optional(),
   status: z.enum(["active", "archived"]).optional(),
 });
 export type UpdateKioskDto = z.infer<typeof updateKioskSchema>;
@@ -31,6 +33,7 @@ export interface KioskDto {
   location: string | null;
   dayLimitPerEmployee: number;
   showPrices: boolean;
+  printEmployeeQrOnSlip: boolean;
   status: "active" | "archived";
   lastSeenAt: Date | null;
   enrolled: boolean;

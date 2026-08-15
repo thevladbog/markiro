@@ -24,6 +24,7 @@ export interface KioskDto {
   location: string | null;
   dayLimitPerEmployee: number;
   showPrices: boolean;
+  printEmployeeQrOnSlip: boolean;
   status: KioskStatus;
   lastSeenAt: string | null;
   enrolled: boolean;
@@ -35,12 +36,14 @@ export interface CreateKioskInput {
   name: string;
   location?: string | null;
   showPrices?: boolean;
+  printEmployeeQrOnSlip?: boolean;
 }
 
 export interface UpdateKioskInput {
   name?: string;
   location?: string | null;
   showPrices?: boolean;
+  printEmployeeQrOnSlip?: boolean;
   status?: KioskStatus;
 }
 

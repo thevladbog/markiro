@@ -145,6 +145,7 @@ export const kiosks = pgTable(
     deviceTokenHash: text("device_token_hash"),
     dayLimitPerEmployee: integer("day_limit_per_employee").notNull().default(5),
     showPrices: boolean("show_prices").notNull().default(true),
+    printEmployeeQrOnSlip: boolean("print_employee_qr_on_slip").notNull().default(false),
     lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
     status: kioskStatus("status").notNull().default("active"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

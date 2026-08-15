@@ -383,6 +383,7 @@ describe.skipIf(!ready)("kiosk pairing e2e", () => {
         },
         config: {
           dayLimitPerEmployee: expect.any(Number),
+          printEmployeeQrOnSlip: false,
           showPrices: expect.any(Boolean),
         },
         badgeSalt: expect.any(String),

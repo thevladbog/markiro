@@ -60,7 +60,8 @@ const KIOSK = {
   location: "Зал 1",
   dayLimitPerEmployee: 5,
   showPrices: true,
-  status: "active",
+  printEmployeeQrOnSlip: false,
+  status: "active" as const,
   lastSeenAt: null,
   enrolled: false,
   productIds: [],
@@ -124,10 +125,12 @@ function renderKiosksRouter(
     "/kiosks",
   ],
   access: AccessDocument = WRITE_ACCESS,
+  initialKiosks?: KiosksApiModule.KioskDto[],
 ) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
+  if (initialKiosks) queryClient.setQueryData(["kiosks"], initialKiosks);
   const router = createMemoryRouter(
     createRoutesFromElements(
       <Route
@@ -234,6 +237,7 @@ it("creates through the nested panel with the exact normalized payload and retur
           name: "Киоск склада",
           location: "Цех 2",
           showPrices: true,
+          printEmployeeQrOnSlip: false,
         }),
       }),
     ),
@@ -600,6 +604,7 @@ it("submits only the exact normalized profile PATCH and closes after success", a
   await user.clear(within(panel).getByLabelText("Расположение"));
   expect(within(panel).queryByLabelText("Лимит позиций на сотрудника в день")).toBeNull();
   await user.click(within(panel).getByLabelText("Показывать цены"));
+  await user.click(within(panel).getByLabelText("Печатать QR-код сотрудника в ведомости"));
   await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
 
   await waitFor(() =>
@@ -611,11 +616,30 @@ it("submits only the exact normalized profile PATCH and closes after success", a
           name: "Новый склад",
           location: null,
           showPrices: false,
+          printEmployeeQrOnSlip: true,
         }),
       }),
     ),
   );
   await waitFor(() => expect(router.state.location.pathname).toBe("/kiosks"));
+});
+
+it("initializes the employee QR checkbox from an enabled kiosk profile", async () => {
+  const kioskWithEmployeeQr = { ...KIOSK, printEmployeeQrOnSlip: true };
+  stubFetch((path) => {
+    if (path === "/api/kiosks") return jsonResponse(200, { items: [kioskWithEmployeeQr] });
+    if (path === "/api/products?status=active") return jsonResponse(200, { items: [PRODUCT] });
+    return undefined;
+  });
+  renderKiosksRouter(
+    ["/kiosks", { pathname: `/kiosks/${KIOSK.id}/edit`, state: { kiosksBackground: true } }],
+    WRITE_ACCESS,
+    [kioskWithEmployeeQr],
+  );
+
+  const panel = await screen.findByRole("dialog", { name: "Изменить киоск" });
+  const checkbox = await within(panel).findByLabelText("Печатать QR-код сотрудника в ведомости");
+  expect(checkbox.getAttribute("aria-checked")).toBe("true");
 });
 
 it("keeps product work independent when profile update fails", async () => {

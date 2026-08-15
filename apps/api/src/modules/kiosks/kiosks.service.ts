@@ -53,6 +53,7 @@ export class KiosksService {
             location: dto.location ?? null,
             dayLimitPerEmployee: dto.dayLimitPerEmployee,
             showPrices: dto.showPrices,
+            printEmployeeQrOnSlip: dto.printEmployeeQrOnSlip,
           })
           .returning();
         return created;
@@ -67,6 +68,8 @@ export class KiosksService {
     if (dto.location !== undefined) set.location = dto.location;
     if (dto.dayLimitPerEmployee !== undefined) set.dayLimitPerEmployee = dto.dayLimitPerEmployee;
     if (dto.showPrices !== undefined) set.showPrices = dto.showPrices;
+    if (dto.printEmployeeQrOnSlip !== undefined)
+      set.printEmployeeQrOnSlip = dto.printEmployeeQrOnSlip;
     if (dto.status !== undefined) set.status = dto.status;
 
     if (Object.keys(set).length === 0) {
@@ -322,6 +325,7 @@ export class KiosksService {
       location: row.location,
       dayLimitPerEmployee: row.dayLimitPerEmployee,
       showPrices: row.showPrices,
+      printEmployeeQrOnSlip: row.printEmployeeQrOnSlip,
       status: row.status,
       lastSeenAt: row.lastSeenAt,
       enrolled: row.deviceTokenHash !== null,
