@@ -24,6 +24,7 @@ import { unzlibSync, zlibSync } from "fflate";
 import { renderLegalDocx } from "../artifacts/docx.js";
 import type { LegalArtifactRequest } from "../artifacts/names.js";
 import { artifactFileName } from "../artifacts/names.js";
+import { legalVerificationUrl } from "../identity.js";
 import { OPERATOR_PROFILES } from "../operator.js";
 import { findLegalDocument, LEGAL_RELEASES } from "../registry.js";
 import type { LegalBlock, LegalDocumentCode } from "../types.js";
@@ -1066,7 +1067,7 @@ function currentRequests(): readonly LegalArtifactRequest[] {
         effectiveDate: release.effectiveDate,
         locale,
         kind: "legal-pdf" as const,
-        verificationUrl: `https://markiro.app/d/${release.code}/${release.revision}/${release.effectiveDate}`,
+        verificationUrl: legalVerificationUrl(release),
       },
       ...(TEMPLATE_CODES.has(release.code)
         ? [
@@ -1076,7 +1077,7 @@ function currentRequests(): readonly LegalArtifactRequest[] {
               effectiveDate: release.effectiveDate,
               locale,
               kind: "template-docx" as const,
-              verificationUrl: `https://markiro.app/d/${release.code}/${release.revision}/${release.effectiveDate}`,
+              verificationUrl: legalVerificationUrl(release),
             },
           ]
         : []),

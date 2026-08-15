@@ -16,6 +16,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { zlibSync } from "fflate";
 
+import type { LegalArtifactRequest } from "../src/artifacts/names.js";
 import {
   MAX_LEGAL_PDF_BYTES,
   canonicalArtifactManifest,
@@ -287,13 +288,13 @@ function artifactEntry(
   kind: PublishedLegalArtifact["kind"],
 ): { readonly entry: PublishedLegalArtifact; readonly bytes: Uint8Array } {
   const extension = kind === "pdfa-2b" ? "pdf" : "docx";
-  const fileName = `markiro_${code.toLowerCase()}_2026.08.01_${locale}.${extension}`;
+  const fileName = `markiro_${code.toLowerCase()}_2026.08-01_${locale}.${extension}`;
   const bytes = artifactBytes(fileName);
   return {
     bytes,
     entry: {
       code,
-      revision: "2026.08.01",
+      revision: "2026.08/01",
       effectiveDate: "2026-08-15",
       locale,
       kind,
@@ -649,14 +650,21 @@ describe("published legal artifact manifest verification", () => {
 
 function fakeGenerationDependencies(
   options: { readonly failValidationAt?: number } = {},
-): ArtifactGenerationDependencies & { readonly converted: string[] } {
+): ArtifactGenerationDependencies & {
+  readonly converted: string[];
+  readonly requests: LegalArtifactRequest[];
+} {
   const converted: string[] = [];
+  const requests: LegalArtifactRequest[] = [];
   let validations = 0;
   return {
     converted,
+    requests,
     getLibreOfficeVersion: async () => "LibreOffice 26.2.5.2 60(Build:2)",
-    renderDocx: async (request) =>
-      Buffer.from(`DOCX:${request.code}:${request.locale}:${request.kind}`),
+    renderDocx: async (request) => {
+      requests.push(request);
+      return Buffer.from(`DOCX:${request.code}:${request.locale}:${request.kind}`);
+    },
     convertPdf: async ({ outputDirectory, sourcePath }) => {
       const stem = path.basename(sourcePath, ".docx");
       converted.push(stem);
@@ -813,9 +821,9 @@ describe("legal artifact release generation", () => {
     expect(
       libreOfficeProfileDirectory(
         "/tmp/legal-build/release/files",
-        "/tmp/legal-build/internal/markiro_mkr-pd-01_2026.08.01_ru.docx",
+        "/tmp/legal-build/internal/markiro_mkr-pd-01_2026.08-01_ru.docx",
       ),
-    ).toBe("/tmp/legal-build/internal/libreoffice-home/markiro_mkr-pd-01_2026.08.01_ru");
+    ).toBe("/tmp/legal-build/internal/libreoffice-home/markiro_mkr-pd-01_2026.08-01_ru");
   });
 
   it.each([
@@ -916,7 +924,7 @@ describe("legal artifact release generation", () => {
     const expected = [
       "Политика обработки персональных данных",
       "MKR-PD-01",
-      "2026.08.01",
+      "2026.08/01",
       "Богатырев Владислав Сергеевич",
       "1. Общие положения и оператор",
       "13. Редакции и применимый текст",
@@ -991,7 +999,7 @@ describe("legal artifact release generation", () => {
       "20260815180159+03'00'",
       "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
     );
-    const identity = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+    const identity = "markiro_mkr-pd-01_2026.08-01_ru.pdf";
     const expectedId = createHash("sha256")
       .update(identity)
       .digest("hex")
@@ -1022,7 +1030,7 @@ describe("legal artifact release generation", () => {
       "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
       [2026, 8, 15, 15, 1, 59],
     );
-    const identity = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+    const identity = "markiro_mkr-pd-01_2026.08-01_ru.pdf";
 
     const normalizedFirst = normalizeLibreOfficePdf(first, "2026-08-15", identity);
     const normalizedSecond = normalizeLibreOfficePdf(second, "2026-08-15", identity);
@@ -1041,7 +1049,7 @@ describe("legal artifact release generation", () => {
       "A335EE20CB831FE28287D9DB23DB822E",
       [2026, 8, 15, 14, 56, 4] as const,
     ] as const;
-    const identity = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+    const identity = "markiro_mkr-pd-01_2026.08-01_ru.pdf";
     const first = pdfWithIccTimestamp(...argumentsForPdf, false);
     const second = pdfWithIccTimestamp(...argumentsForPdf, true);
 
@@ -1058,7 +1066,7 @@ describe("legal artifact release generation", () => {
       "A335EE20CB831FE28287D9DB23DB822E",
       [2026, 8, 15, 14, 56, 4] as const,
     ] as const;
-    const identity = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+    const identity = "markiro_mkr-pd-01_2026.08-01_ru.pdf";
     const first = pdfWithIccTimestamp(...argumentsForPdf, false, true);
     const second = pdfWithIccTimestamp(...argumentsForPdf, true, true);
     const expectedProtectedContent = [
@@ -1153,6 +1161,28 @@ describe("legal artifact release generation", () => {
     expect(beforePublishCalls).toBe(1);
     expect(entries).toHaveLength(12);
     expect(dependencies.converted).toHaveLength(8);
+    expect(dependencies.requests).toHaveLength(12);
+    expect(
+      dependencies.requests.map(({ code, verificationUrl }) => `${code}|${verificationUrl}`),
+    ).toEqual([
+      "MKR-PD-01|https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
+      "MKR-PD-01|https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
+      "MKR-PD-02|https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
+      "MKR-PD-02|https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
+      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+    ]);
+    expect(new Set(entries.map(({ revision }) => revision))).toEqual(new Set(["2026.08/01"]));
+    expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
+      new Set(["2026-08-15"]),
+    );
+    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(8);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
     expect(await readdir(outDir)).toEqual(["artifacts.json", "files"]);
     expect(await readdir(path.join(outDir, "files"))).toHaveLength(12);
@@ -1273,7 +1303,7 @@ describe("legal artifact release generation", () => {
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),
     ).resolves.toHaveLength(12);
 
-    const changed = path.join(outDir, "files", "markiro_mkr-pd-01_2026.08.01_ru.pdf");
+    const changed = path.join(outDir, "files", "markiro_mkr-pd-01_2026.08-01_ru.pdf");
     await writeFile(changed, "%PDF-1.7\nchanged\n%%EOF\n");
     await expect(
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),

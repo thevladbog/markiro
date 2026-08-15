@@ -10,6 +10,21 @@ import { verifyPublishedLegalArtifacts } from "../verify-legal-artifacts.mjs";
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
 const releasedAttestation = new URL("deploy/production/legal-artifacts-attestation.json", root);
+const releaseId = "MKR-LEGAL-2026.08-01-2026-08-15";
+const manifestSha256 = "5e7550ed78ce08d35211353fee4e45378cdc88a46f70441b1a98e333ca3cbbae";
+const releasedPdfNames = [
+  "markiro_mkr-brd-01_2026.08-01_en.pdf",
+  "markiro_mkr-brd-01_2026.08-01_ru.pdf",
+  "markiro_mkr-dpa-01_2026.08-01_en.pdf",
+  "markiro_mkr-dpa-01_2026.08-01_ru.pdf",
+  "markiro_mkr-pd-01_2026.08-01_en.pdf",
+  "markiro_mkr-pd-01_2026.08-01_ru.pdf",
+  "markiro_mkr-pd-02_2026.08-01_en.pdf",
+  "markiro_mkr-pd-02_2026.08-01_ru.pdf",
+];
+const oldPdfNames = releasedPdfNames.map((fileName) =>
+  fileName.replace("2026.08-01", "2026.08.01"),
+);
 
 async function fixture() {
   const directory = await mkdtemp(path.join(tmpdir(), "markiro-legal-attestation-"));
@@ -46,6 +61,18 @@ test("committed attestation independently binds the exact released PDF set", asy
 
   await verifyPublishedLegalArtifacts(work.artifactRoot, work.attestationPath, spy.verify);
 
+  const attestation = await readJson(work.attestationPath);
+  const manifestBytes = await readFile(path.join(work.artifactRoot, "artifacts.json"));
+  assert.equal(attestation.releaseId, releaseId);
+  assert.equal(attestation.manifestSha256, manifestSha256);
+  assert.equal(
+    attestation.manifestSha256,
+    createHash("sha256").update(manifestBytes).digest("hex"),
+  );
+  assert.deepEqual(
+    attestation.pdfs.map(({ fileName }) => fileName),
+    releasedPdfNames,
+  );
   assert.equal(spy.calls.length, 1);
   assert.equal(spy.calls[0].pdfaValidatedFiles.size, 8);
   assert.deepEqual(
@@ -53,6 +80,21 @@ test("committed attestation independently binds the exact released PDF set", asy
     (await readJson(work.attestationPath)).pdfs.map(({ fileName }) => fileName).sort(),
   );
 });
+
+for (const [index, oldFileName] of oldPdfNames.entries()) {
+  test(`rejects legacy trusted filename ${oldFileName}`, async (context) => {
+    const work = await fixture();
+    context.after(() => rm(work.directory, { recursive: true, force: true }));
+    const attestation = await readJson(work.attestationPath);
+    attestation.pdfs[index].fileName = oldFileName;
+    await writeJson(work.attestationPath, attestation);
+
+    await assert.rejects(
+      verifyPublishedLegalArtifacts(work.artifactRoot, work.attestationPath, verifierSpy().verify),
+      /attestation|attested PDF|manifest SHA-256/i,
+    );
+  });
+}
 
 test("self-consistent manifest and PDF tampering cannot rewrite release evidence", async (context) => {
   const work = await fixture();

@@ -4,6 +4,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { LEGAL_RELEASES } from "../registry.js";
+import { legalVerificationUrl } from "../identity.js";
 import type { LegalDocumentCode, LegalLocale } from "../types.js";
 import { artifactFileName } from "../artifacts/names.js";
 
@@ -15,7 +16,7 @@ const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-0
 const LEGAL_LOCALES = ["ru", "en"] as const;
 const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01)_\d{4}\.\d{2}\.\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01)_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface PublishedLegalArtifact {
@@ -167,11 +168,11 @@ function parseArtifact(value: unknown, index: number): PublishedLegalArtifact {
 
   const expectedFileName = artifactFileName({
     code,
-    revision: value.revision,
-    effectiveDate: value.effectiveDate,
+    revision: release.revision,
+    effectiveDate: release.effectiveDate,
     locale,
     kind: kind === "pdfa-2b" ? "legal-pdf" : "template-docx",
-    verificationUrl: `https://markiro.app/d/${code}/${value.revision}/${value.effectiveDate}`,
+    verificationUrl: legalVerificationUrl(release),
   });
   if (value.fileName !== expectedFileName) {
     throw new Error(`Artifact file name does not match its descriptor: ${value.fileName}`);

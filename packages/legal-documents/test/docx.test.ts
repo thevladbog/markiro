@@ -16,7 +16,7 @@ const PRIVACY_REQUEST = {
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "legal-pdf",
-  verificationUrl: "https://markiro.app/d/MKR-PD-01/2026.08/01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const LETTERHEAD_REQUEST = {
@@ -25,7 +25,7 @@ const LETTERHEAD_REQUEST = {
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "template-docx",
-  verificationUrl: "https://markiro.app/d/MKR-BRD-01/2026.08/01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const DPA_REQUEST = {
@@ -34,7 +34,7 @@ const DPA_REQUEST = {
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "template-docx",
-  verificationUrl: "https://markiro.app/d/MKR-DPA-01/2026.08/01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const CONSENT_REQUEST = {
@@ -43,7 +43,7 @@ const CONSENT_REQUEST = {
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "legal-pdf",
-  verificationUrl: "https://markiro.app/d/MKR-PD-02/2026.08/01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const decoder = new TextDecoder();
@@ -166,6 +166,18 @@ function svgPath(svg: string): string {
 }
 
 describe("legal artifact descriptors", () => {
+  it("uses the canonical revision file token in PDF and DOCX names", () => {
+    expect(artifactFileName(PRIVACY_REQUEST)).toBe("markiro_mkr-pd-01_2026.08-01_ru.pdf");
+    expect(artifactFileName(LETTERHEAD_REQUEST)).toBe("markiro_mkr-brd-01_2026.08-01_ru.docx");
+  });
+
+  it.each([PRIVACY_REQUEST, LETTERHEAD_REQUEST, DPA_REQUEST, CONSENT_REQUEST])(
+    "never exposes the $code revision slash in an artifact file name",
+    (request) => {
+      expect(artifactFileName(request)).not.toContain("/");
+    },
+  );
+
   it.each([
     [{ ...PRIVACY_REQUEST, locale: "RU" }, "locale"],
     [{ ...PRIVACY_REQUEST, revision: "2026.08.01/../secret" }, "release"],
