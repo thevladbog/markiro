@@ -26,6 +26,7 @@ import {
 import { unzipSync, zipSync } from "fflate";
 
 import { OPERATOR_PROFILES } from "../operator.js";
+import { formatLegalEffectiveDate } from "../identity.js";
 import { findLegalDocument, findLegalRelease } from "../registry.js";
 import type { LegalBlock } from "../types.js";
 import {
@@ -42,6 +43,11 @@ const PAGE_MARGIN = 1134;
 const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
 const META_LABEL_WIDTH = 2835;
 const META_VALUE_WIDTH = CONTENT_WIDTH - META_LABEL_WIDTH;
+const HEADER_IDENTITY_WIDTH = 4535;
+const HEADER_WORDMARK_WIDTH = CONTENT_WIDTH - HEADER_IDENTITY_WIDTH;
+const FIRST_HEADER_HEIGHT = 520;
+const DEFAULT_HEADER_HEIGHT = 400;
+const FOOTER_HEIGHT = 620;
 // 47 px at 96 DPI makes the inner 156/168 symbol 11.55 mm; the remaining
 // 0.89 mm is the required external one-module quiet zone.
 const DATA_MATRIX_IMAGE_SIZE = 47;
@@ -64,6 +70,7 @@ const copy = {
     language: "Язык",
     operator: "Оператор",
     contacts: "Контакты",
+    verification: "Проверка редакции",
     page: "Страница",
   },
   en: {
@@ -74,6 +81,7 @@ const copy = {
     language: "Language",
     operator: "Operator",
     contacts: "Contacts",
+    verification: "Revision verification",
     page: "Page",
   },
 } as const;
@@ -144,19 +152,35 @@ export async function renderLegalDocx(input: LegalArtifactRequest): Promise<Uint
         headers: {
           first: new Header({
             children: [
-              createHeader(input, markSvg, markPng, 680, 28, copy[input.locale].documentClass),
+              createHeader(
+                input,
+                markSvg,
+                markPng,
+                FIRST_HEADER_HEIGHT,
+                24,
+                copy[input.locale].documentClass,
+              ),
             ],
           }),
           default: new Header({
-            children: [createHeader(input, markSvg, markPng, 510, 20, input.code)],
+            children: [
+              createHeader(
+                input,
+                markSvg,
+                markPng,
+                DEFAULT_HEADER_HEIGHT,
+                20,
+                copy[input.locale].documentClass,
+              ),
+            ],
           }),
         },
         footers: {
           first: new Footer({
-            children: [createFooter(input, dataMatrix, 907)],
+            children: [createFooter(input, dataMatrix)],
           }),
           default: new Footer({
-            children: [createFooter(input, dataMatrix, 794)],
+            children: [createFooter(input, dataMatrix)],
           }),
         },
         children: [
@@ -228,6 +252,14 @@ function createStyles(): IStylesOptions {
         run: { font: "IBM Plex Mono", size: 16, color: MARKIRO_COLORS.ink },
         paragraph: { spacing: { before: 0, after: 0, line: 220 } },
       },
+      {
+        id: "FurnitureMono",
+        name: "Document Furniture Mono",
+        basedOn: "Normal",
+        next: "Normal",
+        run: { font: "IBM Plex Mono", size: 14, color: MARKIRO_COLORS.ink },
+        paragraph: { spacing: { before: 0, after: 0, line: 180 } },
+      },
     ],
   };
 }
@@ -243,20 +275,21 @@ function createHeader(
   const localeWordmark = input.locale === "ru" ? "маркиро" : "MARKIRO";
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
-    columnWidths: [CONTENT_WIDTH - 3402, 3402],
+    columnWidths: [HEADER_WORDMARK_WIDTH, HEADER_IDENTITY_WIDTH],
     layout: TableLayoutType.FIXED,
     borders: TABLE_BORDERS,
     rows: [
       new TableRow({
-        height: { value: height, rule: HeightRule.EXACT },
+        height: { value: height, rule: HeightRule.ATLEAST },
         children: [
           new TableCell({
             verticalAlign: VerticalAlign.CENTER,
-            width: { size: CONTENT_WIDTH - 3402, type: WidthType.DXA },
-            margins: { top: 0, bottom: 0, left: 0, right: 0 },
+            width: { size: HEADER_WORDMARK_WIDTH, type: WidthType.DXA },
+            margins: { top: 40, bottom: 40, left: 40, right: 80 },
             borders: TABLE_BORDERS,
             children: [
               new Paragraph({
+                spacing: { before: 0, after: 0 },
                 children: [
                   createSvgImage(markSvg, markPng, markSize, "Markiro symbol"),
                   new TextRun({
@@ -272,16 +305,17 @@ function createHeader(
           }),
           new TableCell({
             verticalAlign: VerticalAlign.CENTER,
-            width: { size: 3402, type: WidthType.DXA },
-            margins: { top: 0, bottom: 0, left: 80, right: 0 },
+            width: { size: HEADER_IDENTITY_WIDTH, type: WidthType.DXA },
+            margins: { top: 40, bottom: 40, left: 80, right: 40 },
             borders: TABLE_BORDERS,
             children: [
               new Paragraph({
                 alignment: AlignmentType.RIGHT,
-                style: "MetaMono",
+                style: "FurnitureMono",
+                wordWrap: true,
                 children: [
                   new TextRun({ text: classLabel, bold: true }),
-                  new TextRun({ text: `\n${input.code} · ${input.revision}` }),
+                  new TextRun({ text: ` · ${input.code} · ${input.revision}` }),
                 ],
               }),
             ],
@@ -295,9 +329,9 @@ function createHeader(
 function createFooter(
   input: LegalArtifactRequest,
   dataMatrix: { readonly svg: string; readonly png: Uint8Array },
-  height: number,
 ): Table {
   const labels = copy[input.locale];
+  const effectiveDate = formatLegalEffectiveDate(input.effectiveDate, input.locale);
   return new Table({
     width: { size: CONTENT_WIDTH, type: WidthType.DXA },
     columnWidths: [850, CONTENT_WIDTH - 850],
@@ -308,15 +342,16 @@ function createFooter(
     },
     rows: [
       new TableRow({
-        height: { value: height, rule: HeightRule.EXACT },
+        height: { value: FOOTER_HEIGHT, rule: HeightRule.ATLEAST },
         children: [
           new TableCell({
             verticalAlign: VerticalAlign.CENTER,
             width: { size: 850, type: WidthType.DXA },
-            margins: { top: 0, bottom: 0, left: 0, right: 120 },
+            margins: { top: 40, bottom: 40, left: 40, right: 120 },
             borders: TABLE_BORDERS,
             children: [
               new Paragraph({
+                alignment: AlignmentType.CENTER,
                 spacing: { before: 0, after: 0 },
                 children: [
                   createSvgImage(
@@ -332,18 +367,18 @@ function createFooter(
           new TableCell({
             verticalAlign: VerticalAlign.CENTER,
             width: { size: CONTENT_WIDTH - 850, type: WidthType.DXA },
-            margins: { top: 0, bottom: 0, left: 100, right: 0 },
+            margins: { top: 40, bottom: 40, left: 100, right: 40 },
             borders: TABLE_BORDERS,
             children: [
               new Paragraph({
-                style: "MetaMono",
+                alignment: AlignmentType.CENTER,
+                style: "FurnitureMono",
+                wordWrap: true,
                 children: [
                   new TextRun({
-                    text: `${input.code} · ${input.revision} · ${input.effectiveDate}`,
+                    text: `${input.code} · ${input.revision} · ${effectiveDate} · ${labels.page} `,
                     bold: true,
                   }),
-                  new TextRun({ text: `\n${input.verificationUrl}` }),
-                  new TextRun({ text: `\n${labels.page} ` }),
                   new TextRun({ children: [PageNumber.CURRENT] }),
                 ],
               }),
@@ -375,10 +410,12 @@ function createMetadataTable(
   operator: (typeof OPERATOR_PROFILES)[keyof typeof OPERATOR_PROFILES],
 ): Table {
   const labels = copy[input.locale];
+  const effectiveDate = formatLegalEffectiveDate(input.effectiveDate, input.locale);
   const rows = [
     [labels.code, input.code],
     [labels.revision, input.revision],
-    [labels.effectiveDate, input.effectiveDate],
+    [labels.effectiveDate, effectiveDate],
+    [labels.verification, input.verificationUrl],
     [labels.language, input.locale.toUpperCase()],
     [labels.operator, operator.name],
     [labels.contacts, `${operator.site} · ${operator.email} · ${operator.phone}`],
@@ -401,12 +438,14 @@ function createMetadataTable(
           cantSplit: true,
           children: [
             new TableCell({
+              verticalAlign: VerticalAlign.CENTER,
               width: { size: META_LABEL_WIDTH, type: WidthType.DXA },
               shading: { type: ShadingType.CLEAR, fill: MARKIRO_COLORS.paper },
               margins: { top: 80, bottom: 80, left: 120, right: 120 },
               children: [new Paragraph({ style: "MetaMono", children: [new TextRun(label)] })],
             }),
             new TableCell({
+              verticalAlign: VerticalAlign.CENTER,
               width: { size: META_VALUE_WIDTH, type: WidthType.DXA },
               margins: { top: 80, bottom: 80, left: 120, right: 120 },
               children: [
@@ -442,7 +481,11 @@ function renderBlock(block: LegalBlock): readonly FileChild[] {
       return block.items.map(
         ({ term, detail }) =>
           new Paragraph({
-            children: [new TextRun({ text: `${term}. `, bold: true }), new TextRun(detail)],
+            children: [
+              new TextRun({ text: term, bold: true }),
+              new TextRun(" — "),
+              new TextRun(detail),
+            ],
           }),
       );
   }
