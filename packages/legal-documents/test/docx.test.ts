@@ -1,4 +1,5 @@
-import { unzipSync } from "fflate";
+import { renderLiteralDataMatrixSvg } from "@markiro/domain/artifacts";
+import { unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 
 import * as legalDocuments from "../src/index.js";
@@ -8,6 +9,7 @@ import {
   renderLegalDocx,
   type LegalArtifactRequest,
 } from "../src/artifacts/index.js";
+import { normalizeZipDates } from "../src/artifacts/docx.js";
 
 const PRIVACY_REQUEST = {
   code: "MKR-PD-01",
@@ -36,6 +38,15 @@ const DPA_REQUEST = {
   verificationUrl: "https://markiro.app/d/MKR-DPA-01/2026.08.01/2026-08-15",
 } as const satisfies LegalArtifactRequest;
 
+const CONSENT_REQUEST = {
+  code: "MKR-PD-02",
+  revision: "2026.08.01",
+  effectiveDate: "2026-08-15",
+  locale: "ru",
+  kind: "legal-pdf",
+  verificationUrl: "https://markiro.app/d/MKR-PD-02/2026.08.01/2026-08-15",
+} as const satisfies LegalArtifactRequest;
+
 const decoder = new TextDecoder();
 
 function docxEntries(bytes: Uint8Array): Record<string, Uint8Array> {
@@ -55,18 +66,82 @@ function joinedXml(entries: Record<string, Uint8Array>, prefix: string): string 
     .join("\n");
 }
 
-function centralDirectoryDosDates(bytes: Uint8Array): number[] {
+interface TestCentralRecord {
+  readonly crc: number;
+  readonly dateTime: number;
+  readonly localOffset: number;
+  readonly name: string;
+}
+
+function readCentralRecords(bytes: Uint8Array): readonly TestCentralRecord[] {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const dates: number[] = [];
-  for (let offset = 0; offset <= bytes.byteLength - 46; offset += 1) {
-    if (view.getUint32(offset, true) !== 0x02014b50) continue;
-    dates.push(view.getUint32(offset + 12, true));
+  let eocdOffset = -1;
+  for (
+    let offset = bytes.byteLength - 22;
+    offset >= Math.max(0, bytes.byteLength - 65_557);
+    offset -= 1
+  ) {
+    if (
+      view.getUint32(offset, true) === 0x06054b50 &&
+      offset + 22 + view.getUint16(offset + 20, true) === bytes.byteLength
+    ) {
+      eocdOffset = offset;
+      break;
+    }
+  }
+  if (eocdOffset < 0) throw new Error("Test ZIP parser could not locate EOCD");
+
+  const entryCount = view.getUint16(eocdOffset + 10, true);
+  const centralSize = view.getUint32(eocdOffset + 12, true);
+  const centralOffset = view.getUint32(eocdOffset + 16, true);
+  expect(centralOffset + centralSize).toBe(eocdOffset);
+
+  const records: TestCentralRecord[] = [];
+  let offset = centralOffset;
+  for (let index = 0; index < entryCount; index += 1) {
+    expect(view.getUint32(offset, true)).toBe(0x02014b50);
     const nameLength = view.getUint16(offset + 28, true);
     const extraLength = view.getUint16(offset + 30, true);
     const commentLength = view.getUint16(offset + 32, true);
-    offset += 45 + nameLength + extraLength + commentLength;
+    const nameStart = offset + 46;
+    records.push({
+      crc: view.getUint32(offset + 16, true),
+      dateTime: view.getUint32(offset + 12, true),
+      localOffset: view.getUint32(offset + 42, true),
+      name: decoder.decode(bytes.subarray(nameStart, nameStart + nameLength)),
+    });
+    offset = nameStart + nameLength + extraLength + commentLength;
   }
-  return dates;
+  expect(offset).toBe(centralOffset + centralSize);
+  return records;
+}
+
+function crc32(input: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const value of input) {
+    crc ^= value;
+    for (let bit = 0; bit < 8; bit += 1) {
+      crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function expectIndependentZipIntegrity(bytes: Uint8Array): void {
+  const entries = unzipSync(bytes);
+  const records = readCentralRecords(bytes);
+  expect(records).toHaveLength(Object.keys(entries).length);
+  for (const record of records) {
+    const entry = entries[record.name];
+    if (!entry) throw new Error(`ZIP central record has no extracted entry: ${record.name}`);
+    expect(crc32(entry), record.name).toBe(record.crc);
+  }
+}
+
+function svgPath(svg: string): string {
+  const path = /<path d="[^"]+"[^>]*fill="#000000"[^>]*\/>/.exec(svg)?.[0];
+  if (!path) throw new Error("Missing Data Matrix SVG path");
+  return path;
 }
 
 describe("legal artifact descriptors", () => {
@@ -86,10 +161,16 @@ describe("legal artifact descriptors", () => {
     [{ ...PRIVACY_REQUEST, verificationUrl: `${PRIVACY_REQUEST.verificationUrl} secret` }, "URL"],
     [{ ...PRIVACY_REQUEST, revision: "2026.08.02" }, "release"],
     [{ ...PRIVACY_REQUEST, effectiveDate: "2026-08-16" }, "release"],
-    [{ ...PRIVACY_REQUEST, kind: "template-docx" }, "template"],
   ])("rejects an unsafe or non-current descriptor %#", (request, message) => {
     expect(() => artifactFileName(request as LegalArtifactRequest)).toThrow(message);
   });
+
+  it.each([PRIVACY_REQUEST, CONSENT_REQUEST])(
+    "rejects a $code downloadable DOCX request",
+    (request) => {
+      expect(() => artifactFileName({ ...request, kind: "template-docx" })).toThrow("template");
+    },
+  );
 
   it("keeps render-only dependencies outside the root entry", () => {
     expect(legalDocuments).not.toHaveProperty("renderLegalDocx");
@@ -156,6 +237,7 @@ describe("deterministic branded DOCX", () => {
     expect(headerXml).toContain('<w:trHeight w:val="510" w:hRule="exact"/>');
     expect(footerXml).toContain('<w:trHeight w:val="907" w:hRule="exact"/>');
     expect(footerXml).toContain('<w:trHeight w:val="794" w:hRule="exact"/>');
+    expect(footerXml).toMatch(/<w:spacing(?=[^>]*w:before="0")(?=[^>]*w:after="0")[^>]*\/>/);
 
     expect(stylesXml).toContain('w:ascii="IBM Plex Sans"');
     expect(stylesXml).toContain('w:ascii="IBM Plex Mono"');
@@ -167,21 +249,50 @@ describe("deterministic branded DOCX", () => {
     );
     expect(allXml).toContain('descr="Markiro symbol"');
     expect(allXml).toContain('descr="Verification Data Matrix"');
-    expect(allXml).toContain('<wp:extent cx="419100" cy="419100"/>');
     expect(markSvg?.match(/<rect /g)).toHaveLength(9);
     expect(markSvg).toContain('<rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>');
     expect(dataMatrixSvg).toContain('viewBox="-6 -6 168 168"');
     expect(dataMatrixSvg).toContain(
       '<rect x="-6" y="-6" width="168" height="168" fill="#FFFFFF"/>',
     );
+    if (!dataMatrixSvg) throw new Error("Missing embedded Data Matrix SVG");
+    expect(svgPath(dataMatrixSvg)).toBe(
+      svgPath(renderLiteralDataMatrixSvg(PRIVACY_REQUEST.verificationUrl)),
+    );
+
+    const dataMatrixExtent = /<wp:extent cx="(\d+)" cy="\1"\/>/.exec(footerXml)?.[1];
+    if (!dataMatrixExtent) throw new Error("Missing Data Matrix drawing extent");
+    const wholeImageMm = Number(dataMatrixExtent) / 36_000;
+    const innerSymbolMm = wholeImageMm * (156 / 168);
+    expect(innerSymbolMm).toBeGreaterThanOrEqual(11);
+    expect(innerSymbolMm).toBeLessThanOrEqual(12);
+    expect(wholeImageMm).toBeLessThanOrEqual(14);
 
     expect(coreXml).toContain("2026-08-15T00:00:00Z");
     expect(coreXml.match(/2026-08-15T00:00:00Z/g)).toHaveLength(2);
   });
 
-  it("preserves the exact warning in downloadable templates", async () => {
-    const entries = docxEntries(await renderLegalDocx(LETTERHEAD_REQUEST));
-    expect(xml(entries, "word/document.xml")).toContain(
+  it("omits template warnings from privacy and consent internal source renders", async () => {
+    const documents = await Promise.all(
+      [PRIVACY_REQUEST, CONSENT_REQUEST].map(async (request) =>
+        xml(docxEntries(await renderLegalDocx(request)), "word/document.xml"),
+      ),
+    );
+    for (const document of documents) {
+      expect(document).not.toContain("ШАБЛОН — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ");
+    }
+  });
+
+  it("preserves the exact warning in DPA and brand downloadable templates", async () => {
+    const [dpaDocument, letterheadDocument] = await Promise.all(
+      [DPA_REQUEST, LETTERHEAD_REQUEST].map(async (request) =>
+        xml(docxEntries(await renderLegalDocx(request)), "word/document.xml"),
+      ),
+    );
+    expect(dpaDocument).toContain(
+      "ШАБЛОН — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ. Этот текст не создает поручение до заполнения сведений о сторонах, целях, категориях субъектов и данных, сроках, специальных инструкциях и до оформления сторонами согласованным способом.",
+    );
+    expect(letterheadDocument).toContain(
       "ШАБЛОН — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ. Бланк становится частью документа только после заполнения, проверки и оформления уполномоченным лицом.",
     );
   });
@@ -193,7 +304,34 @@ describe("deterministic branded DOCX", () => {
 
     expect(first).toEqual(second);
     expect(entryNames).toEqual([...entryNames].sort());
-    expect(centralDirectoryDosDates(first)).not.toHaveLength(0);
-    expect(new Set(centralDirectoryDosDates(first))).toEqual(new Set([0x5d0f0000]));
+    const centralRecords = readCentralRecords(first);
+    expect(centralRecords).not.toHaveLength(0);
+    expect(new Set(centralRecords.map(({ dateTime }) => dateTime))).toEqual(new Set([0x5d0f0000]));
+    expectIndependentZipIntegrity(first);
+  });
+
+  it("normalizes only declared ZIP records and preserves payload CRCs", () => {
+    const payload = new Uint8Array(80);
+    new DataView(payload.buffer).setUint32(8, 0x02014b50, true);
+    const archive = zipSync({ "payload.bin": payload }, { level: 0 });
+
+    normalizeZipDates(archive, "2026-08-15");
+
+    expect(unzipSync(archive)["payload.bin"]).toEqual(payload);
+    expectIndependentZipIntegrity(archive);
+  });
+
+  it("does not partially mutate a malformed ZIP archive", () => {
+    const archive = zipSync({
+      "first.txt": new Uint8Array([1]),
+      "second.txt": new Uint8Array([2]),
+    });
+    const secondRecord = readCentralRecords(archive)[1];
+    if (!secondRecord) throw new Error("Test ZIP is missing its second record");
+    archive[secondRecord.localOffset] = 0;
+    const malformedBytes = archive.slice();
+
+    expect(() => normalizeZipDates(archive, "2026-08-15")).toThrow("local header signature");
+    expect(archive).toEqual(malformedBytes);
   });
 });

@@ -42,6 +42,9 @@ const PAGE_MARGIN = 1134;
 const CONTENT_WIDTH = PAGE_WIDTH - PAGE_MARGIN * 2;
 const META_LABEL_WIDTH = 2835;
 const META_VALUE_WIDTH = CONTENT_WIDTH - META_LABEL_WIDTH;
+// 47 px at 96 DPI makes the inner 156/168 symbol 11.55 mm; the remaining
+// 0.89 mm is the required external one-module quiet zone.
+const DATA_MATRIX_IMAGE_SIZE = 47;
 const NO_BORDER = { style: BorderStyle.NONE, size: 0, color: MARKIRO_COLORS.paper } as const;
 const TABLE_BORDERS = {
   top: NO_BORDER,
@@ -314,8 +317,14 @@ function createFooter(
             borders: TABLE_BORDERS,
             children: [
               new Paragraph({
+                spacing: { before: 0, after: 0 },
                 children: [
-                  createSvgImage(dataMatrix.svg, dataMatrix.png, 44, "Verification Data Matrix"),
+                  createSvgImage(
+                    dataMatrix.svg,
+                    dataMatrix.png,
+                    DATA_MATRIX_IMAGE_SIZE,
+                    "Verification Data Matrix",
+                  ),
                 ],
               }),
             ],
@@ -460,28 +469,141 @@ function normalizeDocx(bytes: Uint8Array, effectiveDate: string): Uint8Array {
   return normalized;
 }
 
-function normalizeZipDates(bytes: Uint8Array, effectiveDate: string): void {
-  const [yearText, monthText, dayText] = effectiveDate.split("-");
-  const year = Number(yearText);
-  const month = Number(monthText);
-  const day = Number(dayText);
-  if (year < 1980 || year > 2107 || !month || !day) {
+export function normalizeZipDates(bytes: Uint8Array, effectiveDate: string): void {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(effectiveDate);
+  const year = Number(dateMatch?.[1]);
+  const month = Number(dateMatch?.[2]);
+  const day = Number(dateMatch?.[3]);
+  const parsedDate = new Date(Date.UTC(year, month - 1, day));
+  if (
+    year < 1980 ||
+    year > 2107 ||
+    parsedDate.getUTCFullYear() !== year ||
+    parsedDate.getUTCMonth() + 1 !== month ||
+    parsedDate.getUTCDate() !== day
+  ) {
     throw new Error(`Legal artifact effective date is not representable in ZIP: ${effectiveDate}`);
   }
   const dosDate = ((year - 1980) << 9) | (month << 5) | day;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  for (let offset = 0; offset <= bytes.byteLength - 46; offset += 1) {
-    if (view.getUint32(offset, true) !== 0x02014b50) continue;
-    view.setUint16(offset + 12, 0, true);
-    view.setUint16(offset + 14, dosDate, true);
-    const localOffset = view.getUint32(offset + 42, true);
-    if (localOffset + 14 <= bytes.byteLength && view.getUint32(localOffset, true) === 0x04034b50) {
-      view.setUint16(localOffset + 10, 0, true);
-      view.setUint16(localOffset + 12, dosDate, true);
+  const directory = findEndOfCentralDirectory(view, bytes.byteLength);
+  const centralEnd = directory.centralOffset + directory.centralSize;
+  const timestampOffsets: { readonly central: number; readonly local: number }[] = [];
+  let centralCursor = directory.centralOffset;
+
+  for (let index = 0; index < directory.entryCount; index += 1) {
+    assertZipRange(centralCursor, 46, centralEnd, "central directory record");
+    if (view.getUint32(centralCursor, true) !== 0x02014b50) {
+      throw new Error(`Invalid ZIP central directory signature at entry ${index}`);
     }
-    const nameLength = view.getUint16(offset + 28, true);
-    const extraLength = view.getUint16(offset + 30, true);
-    const commentLength = view.getUint16(offset + 32, true);
-    offset += 45 + nameLength + extraLength + commentLength;
+
+    const compressedSize = view.getUint32(centralCursor + 20, true);
+    const uncompressedSize = view.getUint32(centralCursor + 24, true);
+    const nameLength = view.getUint16(centralCursor + 28, true);
+    const extraLength = view.getUint16(centralCursor + 30, true);
+    const commentLength = view.getUint16(centralCursor + 32, true);
+    const diskStart = view.getUint16(centralCursor + 34, true);
+    const localOffset = view.getUint32(centralCursor + 42, true);
+    if (
+      compressedSize === 0xffffffff ||
+      uncompressedSize === 0xffffffff ||
+      localOffset === 0xffffffff ||
+      diskStart !== 0
+    ) {
+      throw new Error("ZIP64 and multi-disk legal artifacts are not supported");
+    }
+
+    const centralNameStart = centralCursor + 46;
+    const centralRecordLength = 46 + nameLength + extraLength + commentLength;
+    assertZipRange(centralCursor, centralRecordLength, centralEnd, "central directory entry");
+    assertZipRange(localOffset, 30, directory.centralOffset, "referenced local header");
+    if (view.getUint32(localOffset, true) !== 0x04034b50) {
+      throw new Error(`Invalid ZIP local header signature for central entry ${index}`);
+    }
+
+    const localNameLength = view.getUint16(localOffset + 26, true);
+    const localExtraLength = view.getUint16(localOffset + 28, true);
+    const localNameStart = localOffset + 30;
+    const localDataStart = localNameStart + localNameLength + localExtraLength;
+    assertZipRange(
+      localOffset,
+      30 + localNameLength + localExtraLength + compressedSize,
+      directory.centralOffset,
+      "local file entry",
+    );
+    if (
+      nameLength !== localNameLength ||
+      !equalBytes(
+        bytes.subarray(centralNameStart, centralNameStart + nameLength),
+        bytes.subarray(localNameStart, localNameStart + localNameLength),
+      )
+    ) {
+      throw new Error(`ZIP local and central names differ at entry ${index}`);
+    }
+    if (localDataStart + compressedSize > directory.centralOffset) {
+      throw new Error(`ZIP local payload exceeds the central directory at entry ${index}`);
+    }
+
+    timestampOffsets.push({ central: centralCursor, local: localOffset });
+    centralCursor += centralRecordLength;
   }
+
+  if (centralCursor !== centralEnd) {
+    throw new Error("ZIP central directory size does not match its declared entries");
+  }
+  for (const offsets of timestampOffsets) {
+    view.setUint16(offsets.central + 12, 0, true);
+    view.setUint16(offsets.central + 14, dosDate, true);
+    view.setUint16(offsets.local + 10, 0, true);
+    view.setUint16(offsets.local + 12, dosDate, true);
+  }
+}
+
+function findEndOfCentralDirectory(
+  view: DataView,
+  byteLength: number,
+): {
+  readonly centralOffset: number;
+  readonly centralSize: number;
+  readonly entryCount: number;
+} {
+  if (byteLength < 22) throw new Error("Generated DOCX is too short to be a ZIP archive");
+  const lowerBound = Math.max(0, byteLength - 65_557);
+  for (let offset = byteLength - 22; offset >= lowerBound; offset -= 1) {
+    if (view.getUint32(offset, true) !== 0x06054b50) continue;
+    const commentLength = view.getUint16(offset + 20, true);
+    if (offset + 22 + commentLength !== byteLength) continue;
+
+    const diskNumber = view.getUint16(offset + 4, true);
+    const centralDisk = view.getUint16(offset + 6, true);
+    const diskEntries = view.getUint16(offset + 8, true);
+    const entryCount = view.getUint16(offset + 10, true);
+    const centralSize = view.getUint32(offset + 12, true);
+    const centralOffset = view.getUint32(offset + 16, true);
+    if (
+      diskNumber !== 0 ||
+      centralDisk !== 0 ||
+      diskEntries !== entryCount ||
+      entryCount === 0xffff ||
+      centralSize === 0xffffffff ||
+      centralOffset === 0xffffffff ||
+      centralOffset + centralSize !== offset ||
+      entryCount * 46 > centralSize
+    ) {
+      continue;
+    }
+    return { centralOffset, centralSize, entryCount };
+  }
+  throw new Error("Generated DOCX has no valid single-disk ZIP central directory");
+}
+
+function assertZipRange(offset: number, length: number, limit: number, label: string): void {
+  if (offset < 0 || length < 0 || offset > limit || length > limit - offset) {
+    throw new Error(`Generated DOCX has an out-of-bounds ${label}`);
+  }
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
 }
