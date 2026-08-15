@@ -22,7 +22,7 @@ export interface PickupSlipData {
   orderNo: string;
   createdAt: Date;
   org: { name: string; inn: string | null; logo: string | null } | null;
-  employee: { fullName: string; role: string | null; badgeCode: string | null };
+  employee: { id: string; fullName: string; role: string | null; badgeCode: string | null };
   kioskName: string;
   reason: "buy" | "writeoff";
   writeoffReasonName: string | null;
@@ -244,16 +244,18 @@ export function renderPickupSlipHtml(data: PickupSlipData): string {
     ? ` (подпричина: ${escapeHtml(data.writeoffReasonName)})`
     : "";
 
-  const badgeQr =
-    data.printEmployeeQrOnSlip && data.employee.badgeCode
-      ? `<div class="slip-employee-qr">
-      <span class="qr-box">${renderQrSvg(data.employee.badgeCode)}</span>
+  const badgeLabel = data.employee.badgeCode
+    ? ` (бейдж ${escapeHtml(maskBadge(data.employee.badgeCode))})`
+    : "";
+  const badgeQr = data.printEmployeeQrOnSlip
+    ? `<div class="slip-employee-qr">
+      <span class="qr-box">${renderQrSvg(data.employee.id)}</span>
       <span class="slip-employee-qr-copy">
         <strong>Отсканируйте код, чтобы найти сотрудника на кассе или в системе</strong>
-        <span>QR бейджа ${escapeHtml(data.employee.fullName)} (${escapeHtml(maskBadge(data.employee.badgeCode))}) — открывает карточку сотрудника и его заявки.</span>
+        <span>QR сотрудника ${escapeHtml(data.employee.fullName)}${badgeLabel} — открывает карточку сотрудника и его заявки.</span>
       </span>
     </div>`
-      : "";
+    : "";
 
   const orderBarcode = renderCode128Svg(data.orderNo, { includeText: false });
   const pages = paginatePickupSlipItems(data.items);

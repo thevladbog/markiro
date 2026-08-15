@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { renderQrSvg } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -78,15 +79,13 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     });
 
     kioskId = randomUUID();
-    await db
-      .insert(schema.kiosks)
-      .values({
-        id: kioskId,
-        tenantId,
-        name: "Киоск-1",
-        dayLimitPerEmployee: 20,
-        printEmployeeQrOnSlip: true,
-      });
+    await db.insert(schema.kiosks).values({
+      id: kioskId,
+      tenantId,
+      name: "Киоск-1",
+      dayLimitPerEmployee: 20,
+      printEmployeeQrOnSlip: true,
+    });
     await db.insert(schema.kioskProducts).values({ tenantId, kioskId, productId });
     await db
       .update(schema.kiosks)
@@ -153,6 +152,9 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     expect(res.text).toContain("Жигулёвское светлое 0,5 л");
     expect(res.text).toContain("https://assets.example.test/org-logo.svg");
     expect(res.text).toContain("Отсканируйте код, чтобы найти сотрудника");
+    expect(res.text).toContain(renderQrSvg(employeeId));
+    expect(res.text).not.toContain(renderQrSvg(BADGE));
+    expect(res.text).not.toContain(BADGE);
     expect(res.text).toContain("@page");
     const svgCount = (res.text.match(/<svg/g) ?? []).length;
     expect(svgCount).toBeGreaterThanOrEqual(3);

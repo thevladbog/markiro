@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { renderQrSvg } from "@markiro/domain";
 import { renderPickupSlipHtml, type PickupSlipData } from "../src/pickup/slip";
 
 /**
@@ -21,6 +22,7 @@ function fixture(overrides: Partial<PickupSlipData> = {}): PickupSlipData {
     createdAt: new Date("2026-07-23T14:05:00.000Z"),
     org: { name: "ООО «Пивзавод „Заря“»", inn: "5029087641", logo: null },
     employee: {
+      id: "employee-42",
       fullName: "Смирнов Алексей Петрович",
       role: "оператор линии",
       badgeCode: "MARKIRO-BADGE-4412",
@@ -82,6 +84,9 @@ describe("renderPickupSlipHtml", () => {
     expect(html.match(/class="code128-box"/g)).toHaveLength(1);
     expect(html.match(/class="qr-box"/g)).toHaveLength(1);
     expect(html).toContain("Отсканируйте код, чтобы найти сотрудника");
+    expect(html).toContain(renderQrSvg("employee-42"));
+    expect(html).not.toContain(renderQrSvg("MARKIRO-BADGE-4412"));
+    expect(html).not.toContain("MARKIRO-BADGE-4412");
   });
 
   it("declares an A4 @page", () => {
@@ -91,7 +96,8 @@ describe("renderPickupSlipHtml", () => {
   });
 
   it("renders explicit numbered A4 pages with repeated document furniture", () => {
-    const baseItem = fixture().items[0]!;
+    const [baseItem] = fixture().items;
+    if (!baseItem) throw new Error("Pickup slip fixture must contain an item");
     const items = Array.from({ length: 17 }, (_, index) => ({
       ...baseItem,
       n: index + 1,
@@ -106,6 +112,15 @@ describe("renderPickupSlipHtml", () => {
     expect(html.match(/class="code128-box"/g)).toHaveLength(2);
     expect(html.match(/стр\. \d+ из \d+/g)).toEqual(["стр. 1 из 2", "стр. 2 из 2"]);
     expect(html.match(/class="slip-final-blocks"/g)).toHaveLength(1);
+
+    const pages = html.match(/<section class="slip-page"[\s\S]*?<\/section>/g);
+    expect(pages).toHaveLength(2);
+    if (!pages) throw new Error("Pickup slip must contain numbered page sections");
+    const renderedSerials = pages.flatMap((page) =>
+      Array.from(page.matchAll(/21 SERIAL(\d+)/g), (match) => Number(match[1])),
+    );
+    expect(renderedSerials).toEqual(Array.from({ length: 17 }, (_, index) => index + 1));
+    expect(pages.map((page) => page.match(/class="slip-item-row"/g)?.length ?? 0)).toEqual([9, 8]);
   });
 
   it("uses organization branding when safe and falls back to Markiro for unsafe sources", () => {
@@ -147,7 +162,15 @@ describe("renderPickupSlipHtml", () => {
 
   it("renders gracefully with no org profile and no active badge", () => {
     const html = renderPickupSlipHtml(
-      fixture({ org: null, employee: { fullName: "Без бейджа", role: null, badgeCode: null } }),
+      fixture({
+        org: null,
+        employee: {
+          id: "employee-without-badge",
+          fullName: "Без бейджа",
+          role: null,
+          badgeCode: null,
+        },
+      }),
     );
     expect(html).toContain("Без бейджа");
     expect(html.match(/class="dm-box"/g)).toHaveLength(2);

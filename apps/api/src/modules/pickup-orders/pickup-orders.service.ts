@@ -1164,6 +1164,7 @@ export class PickupOrdersService {
       createdAt: row.createdAt,
       org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
       employee: {
+        id: row.employeeId,
         fullName: row.employeeFullName ?? "",
         role: row.employeeRole,
         badgeCode: badge?.badgeCode ?? null,

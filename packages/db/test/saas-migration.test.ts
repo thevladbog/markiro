@@ -51,6 +51,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0042_default_box_label_template.sql"));
     await rm(join(legacyMigrations, "0043_station_shift_close_presence.sql"));
     await rm(join(legacyMigrations, "0044_landing_demo_email.sql"));
+    await rm(join(legacyMigrations, "0045_flawless_overlord.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -66,6 +67,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "meta", "0042_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0043_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0044_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0045_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -86,7 +88,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0041_product_images" &&
         entry.tag !== "0042_default_box_label_template" &&
         entry.tag !== "0043_station_shift_close_presence" &&
-        entry.tag !== "0044_landing_demo_email",
+        entry.tag !== "0044_landing_demo_email" &&
+        entry.tag !== "0045_flawless_overlord",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));
@@ -104,6 +107,10 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       "INSERT INTO organization (id, name, slug, created_at) VALUES ($1, $2, $3, $4)",
       ["existing-unmanaged", "Existing unmanaged", "existing-unmanaged", new Date()],
     );
+    await pool.query("INSERT INTO kiosks (tenant_id, name) VALUES ($1, $2)", [
+      "existing-unmanaged",
+      "Legacy kiosk",
+    ]);
     const legacyDeviceId = "00000000-0000-4000-8000-000000000036";
     await pool.query("INSERT INTO station_devices (id, tenant_id, name) VALUES ($1, $2, $3)", [
       legacyDeviceId,
@@ -160,6 +167,25 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
   it("upgrades from a schema older than the default box label contract", () => {
     expect(legacyHasDefaultBoxLabelTemplateColumn).toBe(false);
     expect(upgradedHasDefaultBoxLabelTemplateColumn).toBe(true);
+  });
+
+  it("disables employee QR printing for an existing kiosk during upgrade", async () => {
+    const result = await pool.query(
+      `SELECT print_employee_qr_on_slip
+       FROM kiosks
+       WHERE tenant_id = $1 AND name = $2`,
+      ["existing-unmanaged", "Legacy kiosk"],
+    );
+    expect(result.rows).toEqual([{ print_employee_qr_on_slip: false }]);
+
+    const column = await pool.query(
+      `SELECT is_nullable, column_default
+       FROM information_schema.columns
+       WHERE table_schema = 'public'
+         AND table_name = 'kiosks'
+         AND column_name = 'print_employee_qr_on_slip'`,
+    );
+    expect(column.rows).toEqual([{ is_nullable: "NO", column_default: "false" }]);
   });
 
   it("moves only untouched box counters from zero to one", async () => {
