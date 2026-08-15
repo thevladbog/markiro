@@ -33,6 +33,11 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
   assert.match(source, /FROM node:24\.19\.0-bookworm-slim AS build/);
   assert.match(source, /corepack prepare pnpm@11\.10\.0 --activate/);
   assert.match(source, /pnpm install --frozen-lockfile/);
+  assert.match(
+    source,
+    /COPY packages\/legal-documents\/package\.json \.\/packages\/legal-documents\/package\.json/,
+  );
+  assert.match(source, /COPY packages\/legal-documents \.\/packages\/legal-documents/);
   assert.match(source, /turbo build --filter @markiro\/api\.\.\./);
   assert.match(
     source,
@@ -100,13 +105,14 @@ test("Docker build context excludes local state while retaining required build i
     "!packages/db/**",
     "!packages/domain/**",
     "!packages/email/**",
+    "!packages/legal-documents/**",
     "!packages/db/migrations/**",
     "!deploy/production/yandex-cloud-ca.pem",
   ]) {
     assert.match(source, new RegExp(`^${entry.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"));
   }
 
-  const lastSourceInclude = source.lastIndexOf("!packages/db/**");
+  const lastSourceInclude = source.lastIndexOf("!packages/legal-documents/**");
   assert.ok(source.lastIndexOf("**/node_modules") > lastSourceInclude);
   assert.ok(source.lastIndexOf("**/dist/") > lastSourceInclude);
 });
