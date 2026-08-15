@@ -66,6 +66,7 @@ export interface WorkScreenProps {
   productId?: string;
   productImage?: StationProductImageDescriptor | null | undefined;
   counterpartyName?: string | null;
+  plannedQty?: number | null | undefined;
   source: ScanSource;
   sound: SoundSettings;
   /** Signals a scan was just written, so a queued outbox row does not have
@@ -139,6 +140,7 @@ export function WorkScreen({
   productId,
   productImage,
   counterpartyName,
+  plannedQty,
   source,
   sound,
   onScanRecorded,
@@ -1433,6 +1435,8 @@ export function WorkScreen({
               <ScanResultInstrument
                 productName={productName}
                 counterpartyName={counterpartyName ?? null}
+                plannedQty={plannedQty}
+                planLabel={t("work.plan")}
                 operation={latestAcceptedOperation}
                 labels={workLabels.status}
                 exec={exec}

@@ -1389,6 +1389,7 @@ export function App() {
             productId={shiftContext.productId}
             productImage={shiftContext.image}
             counterpartyName={shiftContext.counterpartyName}
+            plannedQty={shiftContext.plannedQty}
             source={scanSource}
             sound={sound}
             onScanRecorded={nudgeSync}

@@ -257,6 +257,7 @@
     "boxNumber": "Короб № {{number}}",
     "noOpenBox": "Нет открытого короба",
     "boxItems": "Позиций",
+    "plan": "План",
     "boxGrouped": "Одна ячейка показывает несколько позиций",
     "capacityUnknown": "Вместимость не задана",
     "synchronized": "Синхронизировано",
