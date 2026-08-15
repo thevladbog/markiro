@@ -17,6 +17,45 @@ export interface OfflineShiftCloseSummary {
   closedAt: string;
 }
 
+interface StoredShiftCloseSummary {
+  event_id: string;
+  shift_id: string;
+  product_id: string;
+  product_name: string;
+  planned_qty_snapshot: number | null;
+  actual_qty: number;
+  closed_box_count: number;
+  reason_code: string | null;
+  closed_at: string;
+}
+
+function presentStoredClose(row: StoredShiftCloseSummary): OfflineShiftCloseSummary {
+  return {
+    eventId: row.event_id,
+    shiftId: row.shift_id,
+    productId: row.product_id,
+    productName: row.product_name,
+    plannedQtySnapshot: row.planned_qty_snapshot,
+    actualQty: row.actual_qty,
+    closedBoxCount: row.closed_box_count,
+    reasonCode: row.reason_code && isShiftCloseReasonCode(row.reason_code) ? row.reason_code : null,
+    closedAt: row.closed_at,
+  };
+}
+
+async function removeEmptyOpenBoxes(exec: SqlExecutor, shiftId: string): Promise<void> {
+  // WorkScreen opens the next box immediately after closing the previous one.
+  // It has never been sent to the server and has no contents, so it must not
+  // prevent closing the shift or survive a resumed close attempt.
+  await exec.run(
+    `DELETE FROM boxes_mirror
+      WHERE shift_id = ?
+        AND closed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM codes_mirror c WHERE c.box_id = boxes_mirror.box_id)`,
+    [shiftId],
+  );
+}
+
 export async function closeShiftOffline(
   exec: SqlExecutor,
   input: {
@@ -37,6 +76,24 @@ export async function closeShiftOffline(
     input.shiftId,
   ]);
   if (!shift) throw new Error("Shift is not available offline");
+
+  const [storedClose] = await exec.all<StoredShiftCloseSummary>(
+    `SELECT event_id, shift_id, product_id, product_name, planned_qty_snapshot,
+            actual_qty, closed_box_count, reason_code, closed_at
+       FROM shift_close_outbox
+      WHERE shift_id = ?
+      ORDER BY closed_at
+      LIMIT 1`,
+    [input.shiftId],
+  );
+  if (storedClose) {
+    // A previous attempt may have persisted the durable event before its
+    // following mirror updates completed. Resume those idempotent writes and
+    // return the original snapshot instead of creating a second close event.
+    await removeEmptyOpenBoxes(exec, input.shiftId);
+    await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
+    return presentStoredClose(storedClose);
+  }
   if (shift.status === "closed") throw new Error("Shift is already closed");
 
   const [{ actualQty = 0 } = {}] = await exec.all<{ actualQty: number }>(
@@ -67,43 +124,31 @@ export async function closeShiftOffline(
 
   const closedAt = now().toISOString();
   const eventId = crypto.randomUUID();
-  await exec.run("BEGIN");
-  try {
-    // WorkScreen opens the next box immediately after closing the previous
-    // one. It has never been sent to the server and has no contents, so it
-    // must not prevent closing the shift.
-    await exec.run(
-      `DELETE FROM boxes_mirror
-        WHERE shift_id = ?
-          AND closed_at IS NULL
-          AND NOT EXISTS (SELECT 1 FROM codes_mirror c WHERE c.box_id = boxes_mirror.box_id)`,
-      [input.shiftId],
-    );
-    await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
-    await exec.run(
-      `INSERT INTO shift_close_outbox
-       (event_id, shift_id, device_id, operator_id, product_id, product_name,
-        planned_qty_snapshot, actual_qty, closed_box_count, reason_code, closed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        eventId,
-        input.shiftId,
-        input.deviceId,
-        input.operatorId,
-        shift.product_id,
-        shift.product_name ?? "",
-        shift.planned_qty,
-        actualQty,
-        closedBoxCount,
-        reason,
-        closedAt,
-      ],
-    );
-    await exec.run("COMMIT");
-  } catch (error) {
-    await exec.run("ROLLBACK").catch(() => undefined);
-    throw error;
-  }
+  // Do not use BEGIN/COMMIT here: tauri-plugin-sql may dispatch consecutive
+  // executor calls to different pooled SQLite connections. Persist the close
+  // fact first, then make the remaining writes idempotent so a retry can
+  // finish them safely after an interruption.
+  await exec.run(
+    `INSERT INTO shift_close_outbox
+     (event_id, shift_id, device_id, operator_id, product_id, product_name,
+      planned_qty_snapshot, actual_qty, closed_box_count, reason_code, closed_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      eventId,
+      input.shiftId,
+      input.deviceId,
+      input.operatorId,
+      shift.product_id,
+      shift.product_name ?? "",
+      shift.planned_qty,
+      actualQty,
+      closedBoxCount,
+      reason,
+      closedAt,
+    ],
+  );
+  await removeEmptyOpenBoxes(exec, input.shiftId);
+  await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
   return {
     eventId,
     shiftId: input.shiftId,

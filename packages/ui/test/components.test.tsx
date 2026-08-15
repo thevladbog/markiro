@@ -1011,6 +1011,31 @@ describe("FullScreenDialog", () => {
     expect(document.activeElement).toBe(skip);
   });
 
+  it("can group the back action with the primary action in a centered footer", () => {
+    render(
+      <FullScreenDialog
+        open
+        title="Verify print"
+        backLabel="Skip verification"
+        backPlacement="footer"
+        onClose={() => undefined}
+        footer={<button type="button">Reprint</button>}
+      >
+        Scan the label
+      </FullScreenDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Verify print" });
+    const footer = dialog.querySelector("footer");
+    if (!(footer instanceof HTMLElement)) throw new Error("Dialog footer is missing");
+    expect(footer.style.justifyContent).toBe("center");
+    expect(Array.from(footer.querySelectorAll("button"), (button) => button.textContent)).toEqual([
+      "Skip verification",
+      "Reprint",
+    ]);
+    expect(dialog.querySelector("header button")).toBeNull();
+  });
+
   it("can disable both the back action and Escape while blocking work is pending", () => {
     const onClose = vi.fn();
     render(

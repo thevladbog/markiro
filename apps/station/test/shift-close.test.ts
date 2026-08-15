@@ -26,6 +26,7 @@ function executor(): { exec: SqlExecutor; statements: string[] } {
           },
         ] as T[];
       }
+      if (sql.includes("FROM shift_close_outbox")) return [];
       if (sql.includes("FROM codes_mirror")) return [{ actualQty: 9 }] as T[];
       if (sql.includes("openBoxCount")) return [{ openBoxCount: 0 }] as T[];
       return [{ closedBoxCount: 1 }] as T[];
@@ -45,7 +46,7 @@ describe("closeShiftOffline", () => {
     ).rejects.toThrow("reason");
   });
 
-  it("publishes the local closed state and outbox atomically", async () => {
+  it("publishes the local closed state and durable close event", async () => {
     const { exec, statements } = executor();
     const summary = await closeShiftOffline(
       exec,
@@ -59,10 +60,112 @@ describe("closeShiftOffline", () => {
     );
     expect(summary.actualQty).toBe(9);
     expect(summary.reasonCode).toBe("equipment_stop");
-    expect(statements[0]).toBe("BEGIN");
     expect(statements.some((sql) => sql.includes("UPDATE shift_mirror"))).toBe(true);
     expect(statements.some((sql) => sql.includes("INSERT INTO shift_close_outbox"))).toBe(true);
-    expect(statements.at(-1)).toBe("COMMIT");
+  });
+
+  it("closes through an executor that cannot keep a transaction across pooled calls", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const migration of STATION_MIGRATIONS) {
+      try {
+        db.exec(migration);
+      } catch (error) {
+        if (!/duplicate column name/i.test(String(error))) throw error;
+      }
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS shift_close_outbox (
+      event_id TEXT PRIMARY KEY,
+      shift_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      operator_id TEXT,
+      product_id TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      planned_qty_snapshot INTEGER,
+      actual_qty INTEGER NOT NULL,
+      closed_box_count INTEGER NOT NULL,
+      reason_code TEXT,
+      closed_at TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      conflict_code TEXT,
+      last_checked_at TEXT
+    );`);
+    db.prepare(
+      `INSERT INTO shift_mirror
+         (id, status, mode, product_id, product_name, planned_qty, pallets_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run("shift-pooled", "active", "aggregation", "product-1", "Widget", null, 0);
+    const exec: SqlExecutor = {
+      run: async (sql, params = []) => {
+        if (/^(BEGIN|COMMIT|ROLLBACK)/.test(sql)) {
+          throw new Error("multi-call transactions are unavailable");
+        }
+        db.prepare(sql).run(...(params as never[]));
+      },
+      all: async <T>(sql: string, params: unknown[] = []) =>
+        db.prepare(sql).all(...(params as never[])) as T[],
+    };
+
+    await expect(
+      closeShiftOffline(exec, {
+        shiftId: "shift-pooled",
+        deviceId: "device-1",
+        operatorId: "operator-1",
+      }),
+    ).resolves.toMatchObject({ shiftId: "shift-pooled", actualQty: 0 });
+    expect(await exec.all("SELECT event_id FROM shift_close_outbox")).toHaveLength(1);
+  });
+
+  it("returns the queued close summary when the operator retries a closed shift", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const migration of STATION_MIGRATIONS) {
+      try {
+        db.exec(migration);
+      } catch (error) {
+        if (!/duplicate column name/i.test(String(error))) throw error;
+      }
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS shift_close_outbox (
+      event_id TEXT PRIMARY KEY,
+      shift_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      operator_id TEXT,
+      product_id TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      planned_qty_snapshot INTEGER,
+      actual_qty INTEGER NOT NULL,
+      closed_box_count INTEGER NOT NULL,
+      reason_code TEXT,
+      closed_at TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending',
+      conflict_code TEXT,
+      last_checked_at TEXT
+    );`);
+    db.prepare(
+      `INSERT INTO shift_mirror
+         (id, status, mode, product_id, product_name, planned_qty, pallets_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run("shift-retry", "active", "aggregation", "product-1", "Widget", null, 0);
+    const exec: SqlExecutor = {
+      run: async (sql, params = []) => {
+        db.prepare(sql).run(...(params as never[]));
+      },
+      all: async <T>(sql: string, params: unknown[] = []) =>
+        db.prepare(sql).all(...(params as never[])) as T[],
+    };
+
+    const first = await closeShiftOffline(exec, {
+      shiftId: "shift-retry",
+      deviceId: "device-1",
+      operatorId: "operator-1",
+    });
+    const retried = await closeShiftOffline(exec, {
+      shiftId: "shift-retry",
+      deviceId: "device-1",
+      operatorId: "operator-1",
+    });
+
+    expect(retried).toEqual(first);
+    expect(await exec.all("SELECT event_id FROM shift_close_outbox")).toHaveLength(1);
   });
 
   it("removes an empty auto-opened box before closing the shift", async () => {

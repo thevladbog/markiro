@@ -123,7 +123,7 @@ describe("FloorShell", () => {
     stylesheet.remove();
   });
 
-  it("collapses an active-shift header to critical production status and restores its controls", () => {
+  it("starts an active-shift header collapsed and restores its controls on demand", () => {
     render(
       <FloorShell
         {...status}
@@ -134,8 +134,6 @@ describe("FloorShell", () => {
         <CurrentFloorScreen />
       </FloorShell>,
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Collapse status panel" }));
 
     const collapsedHeader = screen.getByRole("banner", { name: "Station status" });
     expect(collapsedHeader.getAttribute("data-collapsed")).toBe("true");

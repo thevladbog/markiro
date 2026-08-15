@@ -65,6 +65,28 @@ function VerificationHarness({
 }
 
 describe("PrintVerification", () => {
+  it("centers the scan target, groups the SSCC, and keeps both recovery actions together", () => {
+    render(
+      <PrintVerification
+        expected={SSCC}
+        onVerified={vi.fn()}
+        onReprint={vi.fn()}
+        onSkip={vi.fn()}
+        scanSource={manualSource()}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Отсканируйте распечатанную этикетку" });
+    const waiting = screen.getByRole("status", { name: "Ожидание сканирования" });
+    expect(waiting.closest(".print-verification__stage")).not.toBeNull();
+    expect(screen.getByTestId("print-verification-sscc").textContent).toBe(
+      `${SSCC.slice(0, 1)} ${SSCC.slice(1, 10)} ${SSCC.slice(10, 17)} ${SSCC.slice(17)}`,
+    );
+    const footer = dialog.querySelector("footer");
+    expect(footer?.contains(screen.getByRole("button", { name: "Пропустить" }))).toBe(true);
+    expect(footer?.contains(screen.getByRole("button", { name: "Печатать заново" }))).toBe(true);
+  });
+
   it("moves focus inside, traps both tab directions, and restores the surviving opener on skip", () => {
     const onSkip = vi.fn();
     render(<VerificationHarness onSkip={onSkip} />);
@@ -258,7 +280,9 @@ describe("PrintVerification", () => {
         scanSource={source}
       />,
     );
-    expect(screen.getByText(OTHER_SSCC)).toBeDefined();
+    expect(screen.getByTestId("print-verification-sscc").textContent?.replaceAll(" ", "")).toBe(
+      OTHER_SSCC,
+    );
     expect(screen.getByRole("button", { name: "Пропустить" })).toHaveProperty("disabled", false);
 
     act(() => {
@@ -468,6 +492,8 @@ describe("PrintVerification", () => {
     );
 
     expect(screen.queryByText("Это другая этикетка")).toBeNull();
-    expect(screen.getByText(OTHER_SSCC)).toBeDefined();
+    expect(screen.getByTestId("print-verification-sscc").textContent?.replaceAll(" ", "")).toBe(
+      OTHER_SSCC,
+    );
   });
 });

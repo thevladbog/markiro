@@ -20,6 +20,10 @@ export interface PrintVerificationProps {
 
 export type PrintVerificationMessage = "waiting" | "mismatch" | "notSscc";
 
+function presentSscc(value: string): string {
+  return `${value.slice(0, 1)} ${value.slice(1, 10)} ${value.slice(10, 17)} ${value.slice(17)}`;
+}
+
 /**
  * The one deliberate exception to "nothing competes with a scan verdict"
  * (design brief 06c): a box has just closed, the operator is physically at
@@ -129,8 +133,10 @@ export function PrintVerification({
       title={t("box.printExpected")}
       backLabel={t("box.printSkip")}
       backDisabled={resolving || reprinting}
+      backPlacement="footer"
       onClose={() => beginResolution(onSkip)}
       initialFocus="dialog"
+      className="print-verification-dialog"
       footer={
         <Button
           type="button"
@@ -142,37 +148,46 @@ export function PrintVerification({
         </Button>
       }
     >
-      <div
-        style={{
-          height: "100%",
-          minHeight: 0,
-          minWidth: 0,
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-          gap: 24,
-        }}
-      >
-        <p style={{ margin: 0, fontSize: "2rem", fontWeight: 800, letterSpacing: "0.05em" }}>
-          {expected}
-        </p>
+      <div className="print-verification">
+        <section className="print-verification__stage" aria-label={t("box.printExpected")}>
+          <div className="print-verification__scanner" aria-hidden="true">
+            <span />
+          </div>
+          <p className="print-verification__instruction">{t("box.printInstruction")}</p>
+          <p className="print-verification__label">SSCC</p>
+          <p className="print-verification__sscc" data-testid="print-verification-sscc">
+            {presentSscc(expected)}
+          </p>
 
-        {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
-        {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
-        {reprintError ? (
-          <Alert
-            tone="error"
-            title={t(
-              reprintError === "template_missing"
-                ? "box.printRecovery.errors.templateMissing"
-                : reprintError === "printer_unconfigured"
-                  ? "box.printRecovery.errors.printerUnconfigured"
-                  : reprintError === "render_failed"
-                    ? "box.printRecovery.errors.renderFailed"
-                    : "box.printRecovery.errors.transportFailed",
-            )}
-          />
-        ) : null}
+          <div className="print-verification__feedback">
+            {message === "waiting" && !reprintError ? (
+              <div
+                className="print-verification__waiting"
+                role="status"
+                aria-label={t("box.printWaiting")}
+              >
+                <span aria-hidden="true" />
+                {t("box.printWaiting")}
+              </div>
+            ) : null}
+            {message === "mismatch" && <Alert tone="error" title={t("box.printMismatch")} />}
+            {message === "notSscc" && <Alert tone="error" title={t("box.printNotSscc")} />}
+            {reprintError ? (
+              <Alert
+                tone="error"
+                title={t(
+                  reprintError === "template_missing"
+                    ? "box.printRecovery.errors.templateMissing"
+                    : reprintError === "printer_unconfigured"
+                      ? "box.printRecovery.errors.printerUnconfigured"
+                      : reprintError === "render_failed"
+                        ? "box.printRecovery.errors.renderFailed"
+                        : "box.printRecovery.errors.transportFailed",
+                )}
+              />
+            ) : null}
+          </div>
+        </section>
       </div>
     </FullScreenDialog>
   );

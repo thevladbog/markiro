@@ -430,6 +430,8 @@
     "noSerials": "Box numbers have run out. Connect the station to the network to get more.",
     "noSerialsDetail": "Scanning is paused. Restore the connection, then return to work to retry box closing.",
     "printExpected": "Scan the printed label",
+    "printInstruction": "Point the scanner at the SSCC on the box label",
+    "printWaiting": "Waiting for scan",
     "printMismatch": "This is a different label",
     "printNotSscc": "This is not a group code",
     "printReprint": "Print again",
