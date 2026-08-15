@@ -1,4 +1,4 @@
-import { cp, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -25,7 +25,7 @@ afterEach(async () => {
 });
 
 async function fixture(files: Record<string, string>): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "markiro-landing-audit-"));
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), "markiro-landing-audit-"));
   roots.push(root);
   for (const [relative, contents] of Object.entries(files)) {
     const target = path.join(root, relative);
@@ -283,6 +283,23 @@ describe("auditBuiltSite", () => {
     });
     await cp(path.join(publicRoot, "legal"), path.join(root, "legal"), { recursive: true });
     await writeFile(path.join(root, "legal", "files", fileName), "not the released PDF");
+
+    await expect(auditBuiltSite(root)).resolves.toContainEqual({
+      code: "INVALID_LEGAL_ARTIFACT",
+      route: "/legal/artifacts.json",
+      detail: "legal artifact manifest or published bytes are invalid",
+    });
+  });
+
+  it("rejects an unlisted entry in the built legal files directory", async () => {
+    const root = await fixture({
+      ...brandAssets(),
+      "privacy/index.html": html({ route: "/privacy/", body: "<h1>Policy</h1>" }),
+      "sitemap.xml":
+        '<?xml version="1.0"?><urlset><url><loc>https://markiro.app/privacy/</loc></url></urlset>',
+    });
+    await cp(path.join(publicRoot, "legal"), path.join(root, "legal"), { recursive: true });
+    await writeFile(path.join(root, "legal", "files", "unlisted.bin"), "unexpected");
 
     await expect(auditBuiltSite(root)).resolves.toContainEqual({
       code: "INVALID_LEGAL_ARTIFACT",

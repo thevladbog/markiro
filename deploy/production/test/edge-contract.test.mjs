@@ -556,7 +556,14 @@ function assertAuthorityContract(adapted, { alb }) {
       assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
     }
   }
-  for (const path of ["/", "/faq/", "/robots.txt", "/sitemap.xml", "/llms.txt"]) {
+  for (const path of [
+    "/",
+    "/faq/",
+    "/d/MKR-PD-01/2026.08.01/2026-08-15",
+    "/robots.txt",
+    "/sitemap.xml",
+    "/llms.txt",
+  ]) {
     const request = { method: "GET", path };
     const selected = selectedAdaptedRoute(landingRoutes, request);
     assert.ok(
@@ -566,6 +573,38 @@ function assertAuthorityContract(adapted, { alb }) {
     assert.ok(
       nestedObjects(selected).every((candidate) => candidate.handler !== "reverse_proxy"),
       `landing GET ${path} must remain static-only`,
+    );
+    assert.ok(
+      nestedObjects(selected).every(
+        (candidate) => candidate.handler !== "static_response" || candidate.status_code === 404,
+      ),
+      `landing GET ${path} must not redirect to a slash-appended route`,
+    );
+  }
+  for (const method of ["GET", "HEAD"]) {
+    const request = { method, path: "/definitely-missing/" };
+    const selected = landingRoutes.find(
+      (candidate) =>
+        adaptedRouteMatches(candidate, request) &&
+        nestedObjects(candidate).some(
+          (handler) => handler.handler === "rewrite" && handler.uri === "/404.html",
+        ),
+    );
+    assert.ok(selected, "landing route table must contain a branded missing-document fallback");
+    const objects = nestedObjects(selected);
+    assert.deepEqual(
+      objects.filter((candidate) => candidate.handler === "rewrite"),
+      [{ handler: "rewrite", uri: "/404.html" }],
+      "landing unknown reads must rewrite only to the bounded branded 404 artifact",
+    );
+    assert.deepEqual(
+      objects.filter((candidate) => candidate.handler === "file_server"),
+      [{ handler: "file_server", hide: ["/etc/caddy/Caddyfile"], status_code: 404 }],
+      "landing branded 404 must keep the actual HTTP 404 status",
+    );
+    assert.ok(
+      objects.every((candidate) => candidate.handler !== "reverse_proxy"),
+      "landing branded 404 must remain static-only",
     );
   }
   const landingReverseProxies = nestedObjects(landing).filter(

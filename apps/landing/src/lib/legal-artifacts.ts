@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, open, readdir, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import {
@@ -53,6 +54,125 @@ const ARTIFACT_KEYS = [
 
 function fail(detail: string): never {
   throw new Error(`Invalid legal artifact manifest: ${detail}`);
+}
+
+function lexicalAncestors(target: string): readonly string[] {
+  const absolute = path.resolve(target);
+  const { root } = path.parse(absolute);
+  const segments = absolute.slice(root.length).split(path.sep).filter(Boolean);
+  const ancestors = [root];
+  let current = root;
+  for (const segment of segments) {
+    current = path.join(current, segment);
+    ancestors.push(current);
+  }
+  return ancestors;
+}
+
+interface PathIdentity {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+}
+
+async function snapshotNoSymlinkAncestors(
+  target: string,
+  label: string,
+): Promise<readonly PathIdentity[]> {
+  const identities: PathIdentity[] = [];
+  for (const ancestor of lexicalAncestors(target)) {
+    const stat = await lstat(ancestor);
+    if (stat.isSymbolicLink()) {
+      fail(`${label} must not contain a symbolic link`);
+    }
+    identities.push({ path: ancestor, dev: stat.dev, ino: stat.ino });
+  }
+  return identities;
+}
+
+async function assertSamePathIdentities(
+  expected: readonly PathIdentity[],
+  label: string,
+): Promise<void> {
+  const current = await snapshotNoSymlinkAncestors(expected.at(-1)?.path ?? "", label);
+  const unchanged =
+    current.length === expected.length &&
+    current.every(
+      (identity, index) =>
+        identity.path === expected[index]?.path &&
+        identity.dev === expected[index]?.dev &&
+        identity.ino === expected[index]?.ino,
+    );
+  if (!unchanged) fail(`${label} or one of its ancestors changed while it was being read`);
+}
+
+async function snapshotStableDirectory(
+  target: string,
+  label: string,
+): Promise<readonly PathIdentity[]> {
+  const identities = await snapshotNoSymlinkAncestors(target, label);
+  const stat = await lstat(target);
+  if (!stat.isDirectory()) fail(`${label} must be a directory`);
+  if ((await realpath(target)) !== path.resolve(target)) {
+    fail(`${label} must not resolve through a symbolic link`);
+  }
+  return identities;
+}
+
+async function readStableRegularFile(
+  target: string,
+  label: string,
+  stableTree?: readonly PathIdentity[],
+): Promise<Buffer> {
+  if (stableTree !== undefined) await assertSamePathIdentities(stableTree, label);
+  const pathIdentities = await snapshotNoSymlinkAncestors(target, label);
+  if ((await realpath(target)) !== path.resolve(target)) {
+    fail(`${label} must not resolve through a symbolic link`);
+  }
+
+  const handle = await open(target, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+  try {
+    const before = await handle.stat();
+    if (!before.isFile()) fail(`${label} must be a regular file`);
+    const bytes = await handle.readFile();
+    const after = await handle.stat();
+
+    await assertSamePathIdentities(pathIdentities, label);
+    if (stableTree !== undefined) await assertSamePathIdentities(stableTree, label);
+    const current = await lstat(target);
+    const stableHandle =
+      before.dev === after.dev &&
+      before.ino === after.ino &&
+      before.size === after.size &&
+      before.mtimeMs === after.mtimeMs &&
+      before.ctimeMs === after.ctimeMs;
+    const stablePath =
+      current.isFile() &&
+      current.dev === after.dev &&
+      current.ino === after.ino &&
+      (await realpath(target)) === path.resolve(target);
+    if (!stableHandle || !stablePath) fail(`${label} changed while it was being read`);
+    return bytes;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function assertExactArtifactDirectory(
+  filesRoot: string,
+  expectedNames: ReadonlySet<string>,
+  stableTree: readonly PathIdentity[],
+): Promise<void> {
+  await assertSamePathIdentities(stableTree, "artifact directory");
+  const entries = await readdir(filesRoot, { withFileTypes: true });
+  if (entries.some((entry) => entry.isSymbolicLink())) {
+    fail("artifact directory must not contain a symbolic link");
+  }
+  const exactEntries =
+    entries.length === expectedNames.size &&
+    entries.every((entry) => entry.isFile() && expectedNames.has(entry.name));
+  if (!exactEntries) fail("artifact directory contains an unlisted or non-file entry");
+  await assertSamePathIdentities(stableTree, "artifact directory");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -177,26 +297,19 @@ function assertCompleteReleaseSet(artifacts: readonly PublishedLegalArtifact[]):
 export async function loadLegalArtifacts(
   publicRoot: string = DEFAULT_PUBLIC_ROOT,
 ): Promise<readonly PublishedLegalArtifact[]> {
-  const resolvedPublicRoot = await realpath(publicRoot);
-  const legalRoot = path.join(resolvedPublicRoot, "legal");
+  const lexicalPublicRoot = path.resolve(publicRoot);
+  const legalRoot = path.join(lexicalPublicRoot, "legal");
   const filesRoot = path.join(legalRoot, "files");
   const manifestPath = path.join(legalRoot, "artifacts.json");
-  for (const [target, label] of [
-    [legalRoot, "legal directory"],
-    [filesRoot, "artifact directory"],
-    [manifestPath, "manifest"],
-  ] as const) {
-    const stat = await lstat(target);
-    if (stat.isSymbolicLink()) fail(`${label} must not be a symbolic link`);
-  }
-  const resolvedFilesRoot = await realpath(filesRoot);
-  if (path.dirname(resolvedFilesRoot) !== (await realpath(legalRoot))) {
-    fail("artifact directory is outside /legal/files/");
-  }
+  await snapshotStableDirectory(lexicalPublicRoot, "public root");
+  await snapshotStableDirectory(legalRoot, "legal directory");
+  const stableTree = await snapshotStableDirectory(filesRoot, "artifact directory");
 
   let manifest: unknown;
   try {
-    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+    manifest = JSON.parse(
+      (await readStableRegularFile(manifestPath, "manifest", stableTree)).toString("utf8"),
+    );
   } catch {
     fail("manifest is not valid JSON");
   }
@@ -204,27 +317,32 @@ export async function loadLegalArtifacts(
 
   const artifacts: PublishedLegalArtifact[] = [];
   const keys = new Set<string>();
+  const fileNames = new Set<string>();
+  const parsedArtifacts: Omit<PublishedLegalArtifact, "href">[] = [];
   for (const raw of manifest) {
     const parsed = parseArtifact(raw);
     const key = descriptorKey(parsed);
     if (keys.has(key)) fail("descriptor is duplicated");
     keys.add(key);
+    if (fileNames.has(parsed.fileName)) fail("artifact fileName is duplicated");
+    fileNames.add(parsed.fileName);
+    parsedArtifacts.push(parsed);
+  }
 
-    const artifactPath = path.join(resolvedFilesRoot, parsed.fileName);
-    const stat = await lstat(artifactPath);
-    if (stat.isSymbolicLink()) fail("artifact file must not be a symbolic link");
-    if (!stat.isFile()) fail("artifact path must be a regular file");
-    const resolvedArtifact = await realpath(artifactPath);
-    if (path.dirname(resolvedArtifact) !== resolvedFilesRoot) {
-      fail("artifact file is outside /legal/files/");
-    }
-    const bytes = await readFile(resolvedArtifact);
+  await assertExactArtifactDirectory(filesRoot, fileNames, stableTree);
+  for (const parsed of parsedArtifacts) {
+    const artifactPath = path.join(filesRoot, parsed.fileName);
+    const bytes = await readStableRegularFile(artifactPath, "artifact file", stableTree);
+
     const digest = createHash("sha256").update(bytes).digest("hex");
     if (bytes.byteLength !== parsed.bytes || digest !== parsed.sha256) {
       fail("artifact bytes do not match the immutable manifest");
     }
     artifacts.push({ ...parsed, href: `/legal/files/${parsed.fileName}` });
   }
+
+  await assertExactArtifactDirectory(filesRoot, fileNames, stableTree);
+  await assertSamePathIdentities(stableTree, "artifact directory");
 
   assertCompleteReleaseSet(artifacts);
   return artifacts.sort((left, right) => descriptorKey(left).localeCompare(descriptorKey(right)));
@@ -246,8 +364,8 @@ export function artifactsForRelease(
 
 export function legalVerificationPath(
   release: Pick<LegalDocumentRelease, "code" | "revision" | "effectiveDate">,
-): `/d/${string}/${string}/${string}/` {
-  return `/d/${release.code}/${release.revision}/${release.effectiveDate}/`;
+): `/d/${string}/${string}/${string}` {
+  return `/d/${release.code}/${release.revision}/${release.effectiveDate}`;
 }
 
 export function legalVerificationUrl(

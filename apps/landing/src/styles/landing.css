@@ -2208,9 +2208,9 @@ input:focus-visible {
 
 .legal-artifacts__datamatrix {
   display: grid;
-  flex: 0 0 11.5mm;
-  width: 11.5mm;
-  height: 11.5mm;
+  flex: 0 0 calc(11.5mm + 1.4mm);
+  width: calc(11.5mm + 1.4mm);
+  height: calc(11.5mm + 1.4mm);
   padding: 0.7mm;
   background: #fff;
 }

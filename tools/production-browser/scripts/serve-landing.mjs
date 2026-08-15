@@ -19,7 +19,9 @@ function collect(directory) {
       files.set(`/${relative}`, absolute);
       if (relative === "index.html") files.set("/", absolute);
       else if (relative.endsWith("/index.html")) {
-        files.set(`/${relative.slice(0, -"index.html".length)}`, absolute);
+        const directoryRoute = `/${relative.slice(0, -"index.html".length)}`;
+        files.set(directoryRoute, absolute);
+        files.set(directoryRoute.slice(0, -1), absolute);
       }
     }
   }

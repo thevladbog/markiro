@@ -141,6 +141,7 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/en/1c-integration/", "landing-page"]),
   Object.freeze(["GET", "/en/offline-production/", "landing-page"]),
   Object.freeze(["GET", "/en/faq/", "landing-page"]),
+  Object.freeze(["GET", "/d/MKR-PD-01/2026.08.01/2026-08-15", "landing-page"]),
   Object.freeze(["GET", "/robots.txt", "robots"]),
   Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
   Object.freeze(["GET", "/llms.txt", "llms"]),
@@ -151,7 +152,7 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["POST", "/api/demo-requests/", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests/extra", "not-found"]),
   Object.freeze(["POST", "/api/other", "not-found"]),
-  Object.freeze(["GET", "/missing/", "not-found"]),
+  Object.freeze(["GET", "/missing/", "branded-not-found"]),
 ]);
 
 function productionBaseUrl(domain, port) {
@@ -350,6 +351,19 @@ function assertLandingRoute(check, response, body, baseUrl) {
   if (kind === "not-found") {
     if (response.status !== 404 || /text\/html/i.test(contentType))
       throw new Error(`landing ${path} did not return a non-HTML 404`);
+    return;
+  }
+  if (kind === "branded-not-found") {
+    if (
+      response.status !== 404 ||
+      !/text\/html/i.test(contentType) ||
+      !/<h1\b[^>]*>[\s\S]*?Revision not found[\s\S]*?<\/h1>/i.test(body) ||
+      body.length > 50_000 ||
+      /artifacts\.json|MKR-PD-0[12]|\.pdf/i.test(body)
+    )
+      throw new Error(`landing ${path} did not return the bounded branded 404`);
+    if (response.headers.get("cache-control") !== "no-cache")
+      throw new Error(`landing ${path} branded 404 is not revalidation-only`);
     return;
   }
   if (response.status !== 200) throw new Error(`landing ${path} is unavailable`);
@@ -1034,8 +1048,12 @@ async function runLandingSmoke(options, client) {
 
   for (const check of LANDING_ROUTE_CHECKS) {
     const [method, path] = check;
+    const requestOptions = {
+      method,
+      ...(path.startsWith("/d/") ? { redirect: "manual" } : {}),
+    };
     const response =
-      path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
+      path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), requestOptions);
     const body = path === "/" ? rootBody : await getText(response);
     assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`, LANDING_CSP);
     assertLandingRoute(check, response, body, baseUrl);

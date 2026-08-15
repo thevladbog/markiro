@@ -24,10 +24,10 @@ const LEGAL_ROUTES = [
 ] as const;
 
 const VERIFICATION_ROUTES = [
-  "/d/MKR-PD-01/2026.08.01/2026-08-15/",
-  "/d/MKR-PD-02/2026.08.01/2026-08-15/",
-  "/d/MKR-DPA-01/2026.08.01/2026-08-15/",
-  "/d/MKR-BRD-01/2026.08.01/2026-08-15/",
+  "/d/MKR-PD-01/2026.08.01/2026-08-15",
+  "/d/MKR-PD-02/2026.08.01/2026-08-15",
+  "/d/MKR-DPA-01/2026.08.01/2026-08-15",
+  "/d/MKR-BRD-01/2026.08.01/2026-08-15",
 ] as const;
 
 const documents = new Map<string, Document>();
@@ -149,6 +149,15 @@ describe("rendered legal pages", () => {
         route.split("/")[2],
       );
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(2);
+      const literalUrl = `https://markiro.app${route}`;
+      expect(
+        document
+          ?.querySelector("[data-document-datamatrix]")
+          ?.getAttribute("data-document-datamatrix"),
+      ).toBe(literalUrl);
+      expect(document?.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+        literalUrl,
+      );
       expect(document?.body.textContent).toMatch(/Проверка документа/);
       expect(document?.body.textContent).toMatch(/Document verification/);
     },

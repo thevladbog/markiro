@@ -1,4 +1,14 @@
-import { cp, lstat, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,7 +25,7 @@ afterEach(async () => {
 });
 
 async function copiedPublicRoot(): Promise<string> {
-  const root = await mkdtemp(path.join(tmpdir(), "markiro-landing-artifacts-"));
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), "markiro-landing-artifacts-"));
   roots.push(root);
   await cp(path.join(publicRoot, "legal"), path.join(root, "legal"), { recursive: true });
   return root;
@@ -76,4 +86,39 @@ describe("loadLegalArtifacts", () => {
 
     await expect(loadLegalArtifacts(root)).rejects.toThrow(/symbolic link/i);
   });
+
+  it("rejects a public root that is itself a symbolic link", async () => {
+    const root = await copiedPublicRoot();
+    const alias = `${root}-alias`;
+    roots.push(alias);
+    await symlink(root, alias);
+
+    await expect(loadLegalArtifacts(alias)).rejects.toThrow(/symbolic link/i);
+  });
+
+  it("rejects a symbolic-link ancestor before opening the manifest", async () => {
+    const root = await copiedPublicRoot();
+    const ancestorRoot = await mkdtemp(
+      path.join(await realpath(tmpdir()), "markiro-landing-ancestor-"),
+    );
+    roots.push(ancestorRoot);
+    const alias = path.join(ancestorRoot, "public-parent");
+    await symlink(root, alias);
+
+    await expect(loadLegalArtifacts(path.join(alias, "."))).rejects.toThrow(/symbolic link/i);
+  });
+
+  it.each(["file", "directory", "symlink"] as const)(
+    "rejects an extra %s in /legal/files",
+    async (entryKind) => {
+      const root = await copiedPublicRoot();
+      const filesRoot = path.join(root, "legal", "files");
+      const extra = path.join(filesRoot, `unlisted-${entryKind}`);
+      if (entryKind === "file") await writeFile(extra, "unlisted");
+      else if (entryKind === "directory") await mkdir(extra);
+      else await symlink("markiro_mkr-pd-01_2026.08.01_ru.pdf", extra);
+
+      await expect(loadLegalArtifacts(root)).rejects.toThrow(/unlisted|entry|manifest/i);
+    },
+  );
 });

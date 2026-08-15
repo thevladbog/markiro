@@ -14,10 +14,10 @@ const legalArtifacts = JSON.parse(
   readFileSync(path.join(repositoryRoot, "apps/landing/public/legal/artifacts.json"), "utf8"),
 ) as LegalArtifactManifestEntry[];
 const verificationRoutes = [
-  "/d/MKR-PD-01/2026.08.01/2026-08-15/",
-  "/d/MKR-PD-02/2026.08.01/2026-08-15/",
-  "/d/MKR-DPA-01/2026.08.01/2026-08-15/",
-  "/d/MKR-BRD-01/2026.08.01/2026-08-15/",
+  "/d/MKR-PD-01/2026.08.01/2026-08-15",
+  "/d/MKR-PD-02/2026.08.01/2026-08-15",
+  "/d/MKR-DPA-01/2026.08.01/2026-08-15",
+  "/d/MKR-BRD-01/2026.08.01/2026-08-15",
 ] as const;
 
 test.beforeEach(async ({ page }) => {
@@ -355,13 +355,32 @@ for (const route of verificationRoutes) {
     await expect(page.locator("h1")).toContainText("Document verification");
     await expect(page.locator("[data-document-datamatrix] svg")).toHaveCount(2);
     await expect(page.locator('a[download$=".pdf"]')).toHaveCount(2);
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
+      "href",
+      `https://markiro.app${route}`,
+    );
+    expect(page.url()).toBe(`http://127.0.0.1:5473${route}`);
+    for (const matrix of await page.locator("[data-document-datamatrix]").evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const symbol = node.querySelector("svg");
+        const wrapper = node.getBoundingClientRect();
+        const symbolRect = symbol?.getBoundingClientRect();
+        return {
+          payload: node.getAttribute("data-document-datamatrix"),
+          symbolWidth: symbolRect?.width ?? 0,
+          wrapperWidth: wrapper.width,
+        };
+      }),
+    )) {
+      expect(matrix.payload).toBe(`https://markiro.app${route}`);
+      expect(matrix.symbolWidth).toBeGreaterThan(43);
+      expect(matrix.symbolWidth).toBeLessThan(44);
+      expect(matrix.wrapperWidth).toBeGreaterThan(matrix.symbolWidth);
+    }
   });
 }
 
-for (const route of [
-  "/d/mkr-pd-01/2026.08.01/2026-08-15/",
-  "/d/MKR-PD-01/2026.08.01/not-a-date/",
-]) {
+for (const route of ["/d/mkr-pd-01/2026.08.01/2026-08-15", "/d/MKR-PD-01/2026.08.01/not-a-date"]) {
   test(`${route} returns the bounded branded verification 404`, async ({ page }) => {
     const response = await page.goto(route);
     expect(response?.status()).toBe(404);

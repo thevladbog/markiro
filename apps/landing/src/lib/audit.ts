@@ -81,6 +81,10 @@ function routeForFile(relativePath: string): string {
   return `/${normalized}`;
 }
 
+function canonicalRoute(route: string): string {
+  return route.startsWith("/d/") && route.endsWith("/") ? route.slice(0, -1) : route;
+}
+
 function outputCandidates(url: URL): string[] {
   const pathname = decodeURIComponent(url.pathname);
   if (pathname.endsWith("/")) return [`${pathname.slice(1)}index.html`];
@@ -288,6 +292,7 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
     const route = routeForFile(relative);
     const html = await readFile(path.join(resolvedRoot, relative), "utf8");
     const pageUrl = new URL(route, SITE_ORIGIN);
+    const canonicalUrl = new URL(canonicalRoute(route), SITE_ORIGIN);
     const document = new JSDOM(html, { url: pageUrl.href }).window.document;
     const title = document.title.trim();
     const description =
@@ -301,7 +306,7 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
       findings.push(finding("MISSING_DESCRIPTION", route, "meta description is absent"));
     if (document.querySelectorAll("h1").length !== 1)
       findings.push(finding("INVALID_H1", route, "page must contain exactly one H1"));
-    if (canonical !== pageUrl.href)
+    if (canonical !== canonicalUrl.href)
       findings.push(finding("INVALID_CANONICAL", route, "canonical does not match the route"));
 
     const legalDocument = document.querySelector(
@@ -397,7 +402,7 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
     ? sitemapRoutes(await readFile(path.join(resolvedRoot, sitemapFile), "utf8"))
     : null;
   const pageRoutes = new Set(
-    pages.filter(({ route }) => route !== "/404.html").map(({ route }) => route),
+    pages.filter(({ route }) => route !== "/404.html").map(({ route }) => canonicalRoute(route)),
   );
   if (
     sitemap === null ||

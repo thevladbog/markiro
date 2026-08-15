@@ -91,7 +91,7 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
 
   {!compact && (
     <div class="legal-artifacts__verification">
-      <div class="legal-artifacts__datamatrix" data-document-datamatrix set:html={dataMatrixSvg} />
+      <div class="legal-artifacts__datamatrix" data-document-datamatrix={verificationUrl} set:html={dataMatrixSvg} />
       <p>
         <span>{locale === "ru" ? "Адрес проверки" : "Verification address"}</span>
         <a href={verificationPath}>{verificationUrl}</a>

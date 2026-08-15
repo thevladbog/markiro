@@ -33,6 +33,8 @@ const kioskServiceWorker =
   'precacheAndRoute([{url:"index.html",revision:"1"}],{});cleanupOutdatedCaches();registerRoute(new NavigationRoute(createHandlerBoundToURL("index.html"),{denylist:[/^\\/(?:api|station|kiosk)(?:\\/|$)/]}));';
 const landingShell = (path = "/") =>
   `<!doctype html><html lang="ru"><head><title>Маркировка Честный знак — Markiro</title><link rel="canonical" href="https://markiro.app${path}"></head><body><main><h1>Маркировка без остановки производства</h1></main></body></html>`;
+const landingNotFoundShell =
+  '<!doctype html><html lang="ru"><head><title>Страница не найдена / Page not found — Markiro</title></head><body><main><h1>Редакция не найдена<br><span>Revision not found</span></h1><a href="/legal/">Document registry</a></main></body></html>';
 const landingRobots = `User-agent: *
 Allow: /
 User-agent: OAI-SearchBot
@@ -213,6 +215,7 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           "/en/1c-integration/",
           "/en/offline-production/",
           "/en/faq/",
+          "/d/MKR-PD-01/2026.08.01/2026-08-15",
         ].includes(path)
       )
         return landingResponse({
@@ -255,6 +258,12 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
               landingDemoSubmissionState === "enabled" ? "invalid_request" : "submission_disabled",
           }),
           headers: { "content-type": "application/json; charset=utf-8" },
+        });
+      if (landing && path === "/missing/")
+        return landingResponse({
+          status: 404,
+          body: landingNotFoundShell,
+          headers: { "cache-control": "no-cache", "content-type": "text/html; charset=utf-8" },
         });
       if (landing)
         return landingResponse({
@@ -788,6 +797,7 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/en/1c-integration/", "landing-page"],
     ["GET", "/en/offline-production/", "landing-page"],
     ["GET", "/en/faq/", "landing-page"],
+    ["GET", "/d/MKR-PD-01/2026.08.01/2026-08-15", "landing-page"],
     ["GET", "/robots.txt", "robots"],
     ["GET", "/sitemap.xml", "sitemap"],
     ["GET", "/llms.txt", "llms"],
@@ -798,7 +808,7 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["POST", "/api/demo-requests/", "not-found"],
     ["POST", "/api/demo-requests/extra", "not-found"],
     ["POST", "/api/other", "not-found"],
-    ["GET", "/missing/", "not-found"],
+    ["GET", "/missing/", "branded-not-found"],
   ]);
   for (const check of LANDING_ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
 });
@@ -841,6 +851,11 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
   const commerceMl = client.requests.find(({ url }) => new URL(url).pathname === "/1c_exchange");
   assert.equal(commerceMl.init.body, "type=catalog&mode=checkauth");
   assert.equal(commerceMl.init.headers["content-type"], "application/x-www-form-urlencoded");
+  const verification = client.requests.find(
+    ({ url }) => new URL(url).pathname === "/d/MKR-PD-01/2026.08.01/2026-08-15",
+  );
+  assert.equal(verification.url.href, "https://markiro.example/d/MKR-PD-01/2026.08.01/2026-08-15");
+  assert.equal(verification.init.redirect, "manual");
   assert.deepEqual(
     dockerCalls.map(([command, args]) => [command, args.slice(-4)]),
     [
@@ -1553,7 +1568,7 @@ test("rejects unclean stopped container states and always restores the API", asy
   }
 });
 
-test("rejects an unknown route with an HTML content type and structurally distinguishes the shell", async () => {
+test("rejects an unbranded HTML body for the landing missing route", async () => {
   const docker = {
     run: async (command, args) =>
       args.includes("ps")
@@ -1567,8 +1582,12 @@ test("rejects an unknown route with an HTML content type and structurally distin
   const html404 = smokeClient();
   const original404 = html404.request;
   html404.request = async (url, init) =>
-    new URL(url).pathname === "/unknown"
-      ? response({ status: 404, body: "not found", headers: { "content-type": "text/html" } })
+    new URL(url).hostname === "markiro.example" && new URL(url).pathname === "/missing/"
+      ? landingResponse({
+          status: 404,
+          body: "not found",
+          headers: { "cache-control": "no-cache", "content-type": "text/html" },
+        })
       : original404(url, init);
   await assert.rejects(
     runSmoke(
@@ -1582,7 +1601,7 @@ test("rejects an unknown route with an HTML content type and structurally distin
       html404,
       docker,
     ),
-    /non-HTML/,
+    /bounded branded 404/,
   );
 
   const structured = smokeClient();
