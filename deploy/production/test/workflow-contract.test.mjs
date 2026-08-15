@@ -37,6 +37,18 @@ function namedStep(workflow, job, name) {
   return step;
 }
 
+function assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(workflow) {
+  const steps = workflow.jobs["production-bundle"].steps;
+  const contractIndex = steps.findIndex(
+    (step) => step.name === "Verify production bundle contracts",
+  );
+  assert.notEqual(contractIndex, -1, "production bundle contract step must exist");
+  assert.deepEqual(steps[contractIndex - 1], {
+    name: "Build legal verifier dependencies",
+    run: "pnpm --filter @markiro/domain build\npnpm --filter @markiro/legal-documents build\n",
+  });
+}
+
 function assertEdgeBuildStep(step, expectedEnvironment) {
   assert.deepEqual(step.env, expectedEnvironment);
   assert.deepEqual(
@@ -105,6 +117,12 @@ test("CI builds the workspace legal dependency before landing browser gates", as
   assert.equal(step.env.VERAPDF_CONTAINER_RUNTIME, "docker");
 });
 
+test("CI builds legal verifier dependencies immediately before production contracts", async () => {
+  assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(
+    await parse(".github/workflows/ci.yml"),
+  );
+});
+
 test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {
   const [workflow, source] = await Promise.all([
     parse(".github/workflows/release-images.yml"),
@@ -129,6 +147,12 @@ test("release publication is main-only, digest-bound and writes the immutable ma
     Object.fromEntries(
       publicLandingBuildVariables.map((variable) => [variable, "${{ vars." + variable + " }}"]),
     ),
+  );
+});
+
+test("release builds legal verifier dependencies immediately before production contracts", async () => {
+  assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(
+    await parse(".github/workflows/release-images.yml"),
   );
 });
 
