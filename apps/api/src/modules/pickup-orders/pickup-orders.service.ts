@@ -564,6 +564,7 @@ export class PickupOrdersService {
         .select({
           dayLimitPerEmployee: schema.kiosks.dayLimitPerEmployee,
           showPrices: schema.kiosks.showPrices,
+          printEmployeeQrOnSlip: schema.kiosks.printEmployeeQrOnSlip,
         })
         .from(schema.kiosks)
         .where(and(eq(schema.kiosks.tenantId, tenantId), eq(schema.kiosks.id, kioskId))),
@@ -666,6 +667,7 @@ export class PickupOrdersService {
       config: {
         dayLimitPerEmployee: kiosk?.dayLimitPerEmployee ?? 0,
         showPrices: kiosk?.showPrices ?? true,
+        printEmployeeQrOnSlip: kiosk?.printEmployeeQrOnSlip ?? false,
       },
       badgeSalt,
       reasons,

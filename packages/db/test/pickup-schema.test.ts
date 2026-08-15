@@ -317,6 +317,15 @@ describe.skipIf(!url)("pickup schema constraints", () => {
     });
   });
 
+  it("defaults employee QR printing off for a new kiosk", async () => {
+    const [savedKiosk] = await db
+      .select({ printEmployeeQrOnSlip: schema.kiosks.printEmployeeQrOnSlip })
+      .from(schema.kiosks)
+      .where(eq(schema.kiosks.id, kioskId));
+
+    expect(savedKiosk?.printEmployeeQrOnSlip).toBe(false);
+  });
+
   it("allows the km_key again once the first item is voided", async () => {
     // Self-contained: don't rely on the previous test's insert having run
     // first -- make sure order1's item exists regardless of execution order

@@ -133,10 +133,11 @@ const kioskBootstrapSchema: ResponseSchema = {
     },
     config: {
       type: "object",
-      required: ["dayLimitPerEmployee", "showPrices"],
+      required: ["dayLimitPerEmployee", "showPrices", "printEmployeeQrOnSlip"],
       properties: {
         dayLimitPerEmployee: { type: "integer", minimum: 1 },
         showPrices: { type: "boolean" },
+        printEmployeeQrOnSlip: { type: "boolean" },
       },
     },
     badgeSalt: { type: "string", format: "byte" },

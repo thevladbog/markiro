@@ -407,7 +407,11 @@ describe("self-hosted OpenAPI documentation", () => {
         "logoRevision",
       ]);
       expectExactObjectFields(property(bootstrap, "pickupPolicy"), ["limitsEnabled"]);
-      expectExactObjectFields(property(bootstrap, "config"), ["dayLimitPerEmployee", "showPrices"]);
+      expectExactObjectFields(property(bootstrap, "config"), [
+        "dayLimitPerEmployee",
+        "showPrices",
+        "printEmployeeQrOnSlip",
+      ]);
       expectExactObjectFields(arrayItems(property(bootstrap, "reasons")), ["id", "name"]);
       expectExactObjectFields(arrayItems(property(bootstrap, "products")), [
         "id",

@@ -122,6 +122,7 @@ describe.skipIf(!ready)("kiosks e2e", () => {
     expect(kiosk.body.enrolled).toBe(false);
     expect(kiosk.body.productIds).toEqual([]);
     expect(kiosk.body.status).toEqual("active");
+    expect(kiosk.body.printEmployeeQrOnSlip).toBe(false);
     const id = kiosk.body.id as string;
 
     const withList = await agent
@@ -258,9 +259,13 @@ describe.skipIf(!ready)("kiosks e2e", () => {
 
     const updated = await agent
       .patch(`/kiosks/${id}`)
-      .send({ name: "Киоск-5 renamed", showPrices: false })
+      .send({ name: "Киоск-5 renamed", showPrices: false, printEmployeeQrOnSlip: true })
       .expect(200);
-    expect(updated.body).toMatchObject({ name: "Киоск-5 renamed", showPrices: false });
+    expect(updated.body).toMatchObject({
+      name: "Киоск-5 renamed",
+      showPrices: false,
+      printEmployeeQrOnSlip: true,
+    });
 
     await agent.delete(`/kiosks/${id}`).expect(204);
     const list = await agent.get("/kiosks").expect(200);

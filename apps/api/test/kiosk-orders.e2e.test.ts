@@ -1267,6 +1267,7 @@ describe.skipIf(!ready)("kiosk orders e2e", () => {
       .expect(200);
     expect(res.body.config.dayLimitPerEmployee).toBeGreaterThan(0);
     expect(res.body.config.showPrices).toBe(true);
+    expect(res.body.config.printEmployeeQrOnSlip).toBe(false);
     expect(res.body.products.some((p: { gtin14: string }) => p.gtin14 === GTIN)).toBe(true);
     expect(res.body.products.every((p: { gtin14: string }) => p.gtin14 !== GTIN_NOT_ALLOWED)).toBe(
       true,

@@ -190,7 +190,11 @@ export interface KioskBootstrapDto {
   subscription: SubscriptionAccessSnapshot;
   branding: KioskBrandingDto;
   pickupPolicy: { limitsEnabled: boolean };
-  config: { dayLimitPerEmployee: number; showPrices: boolean };
+  config: {
+    dayLimitPerEmployee: number;
+    showPrices: boolean;
+    printEmployeeQrOnSlip: boolean;
+  };
   badgeSalt: string; // base64; the salt every badgeHash below shares
   reasons: { id: string; name: string }[];
   products: {
