@@ -176,10 +176,14 @@ function readCodewords(raw: unknown): number[] {
   return codewords;
 }
 
-const TEXT_SHIFT_2 = '!"#$%&\'()*+,-./:;<=>?@[\\]^_';
+const TEXT_SHIFT_2 = "!\"#$%&'()*+,-./:;<=>?@[\\]^_";
 const TEXT_SHIFT_3 = "`ABCDEFGHIJKLMNOPQRSTUVWXYZ{|}~\u007f";
 
-function decodeTextCodewords(codewords: readonly number[], start: number, output: string[]): number {
+function decodeTextCodewords(
+  codewords: readonly number[],
+  start: number,
+  output: string[],
+): number {
   let index = start;
   let shift = 0;
   while (index < codewords.length) {

@@ -34,7 +34,7 @@ live-проверка именно этой редакции не заверше
 | Landing Playwright                          | PASS прямым runner: 96/96 тестов, 1 worker, desktop и mobile.                                                                                                    |
 | Landing Lighthouse                          | PASS прямым runner: mobile performance 0.92 (прогоны 0.93/0.92/0.92), desktop performance 1.00; accessibility, best practices и SEO 1.00 для обеих конфигураций. |
 | `git diff --check` до отчёта                | PASS.                                                                                                                                                            |
-| `corepack pnpm format:check`                | FAIL на ранее существующем и не изменённом этим этапом `packages/domain/test/helpers/decode-data-matrix.ts`. Других файлов Prettier не назвал.                   |
+| `corepack pnpm format:check`                | PASS после механического форматирования добавленного этой веткой `packages/domain/test/helpers/decode-data-matrix.ts`; focused `barcodes.test.ts` прошёл 12/12.  |
 
 ### DB/API evidence и skips
 
@@ -74,6 +74,18 @@ production Postbox/mail evidence.
   прогон 96/96.
 - Сетевые команды в sandbox ожидаемо не могли bind/resolve localhost и публичный
   DNS. Подтверждающие read-only прогоны выполнены с разрешённым сетевым доступом.
+
+### Финальные исправления по review
+
+- Добавленный этой веткой helper Data Matrix приведён к repository Prettier без
+  изменения поведения; focused domain test прошёл 12/12, полный
+  `corepack pnpm format:check` прошёл.
+- Случайно отслеживаемый execution-файл
+  `.superpowers/sdd/2026-08-15-legal-artifacts-and-publication/task-4-report.md`
+  удалён из Git index, но оставлен локально под существующим `/.superpowers/`
+  ignore. `git ls-files` не находит других tracked-файлов этой execution-серии.
+  Полный `.superpowers` inventory содержит только 34 исторических файла, которые
+  уже находились в базовом `66a0f827e`; они не изменялись и не удалялись.
 
 ## Локальная визуальная приёмка HTML
 
@@ -150,9 +162,11 @@ Gate **INCOMPLETE**:
 - нет имени квалифицированного российского reviewer, даты и заключения по RU
   редакции `2026.08.01`, tenant/operator и Markiro/processor boundary;
 - нет внешнего подтверждения согласованности информационных EN-переводов;
-- runbook фиксирует последнее известное состояние на 2026-08-15:
-  «уведомление в Роскомнадзор не подано»; независимого registry evidence в этом
-  этапе не получено, поэтому gate не помечается завершённым;
+- состояние уведомления в Роскомнадзор известно: уведомление не подано. Пользователь
+  осознанно принимает этот промежуточный риск до первой реальной заявки и
+  возможной смены юридической формы. Это зафиксированное исключение, а не
+  неизвестный prerequisite, и само по себе не блокирует подготовку candidate или
+  запрос отдельного deploy approval;
 - нет принятой внешней процедуры 12-месячного удаления заявок, durable mail
   payload и операционных копий с отдельным legal-hold основанием.
 
@@ -169,7 +183,9 @@ Repository checks не являются юридическим заключен�
   контрольный неизвестный URL → 404.
 - Header `x-markiro-release-sha` на live root:
   `28e915fff83a53f573683952a3eec9544815a129`.
-- `/legal/`, `/privacy/`, `/en/privacy/` и `/legal/manifest.json` → 404. Это
+- `/legal/`, `/privacy/`, `/en/privacy/` и `/legal/artifacts.json` → 404. Свежая
+  read-only проверка правильного manifest endpoint вернула ровно 404 с успешной
+  TLS verification. Это
   подтверждает, что проверяемая legal-редакция ещё не live.
 - Публичные MX, apex TXT и `_dmarc.markiro.app` в read-only запросе не найдены.
   DKIM acceptance определить нельзя без утверждённого selector/provider
@@ -218,12 +234,12 @@ Postbox, Roskomnadzor state или сервисы этим этапом не и�
 
 1. внешнее юридическое заключение с reviewer/date/version и translation check;
 2. договоры/legal names и подтверждение российской storage boundary;
-3. фактический Roskomnadzor status и утверждённая retention/deletion procedure;
+3. утверждённая retention/deletion procedure; неподанное уведомление в
+   Роскомнадзор остаётся отдельно принятым пользователем промежуточным риском, а
+   не блокером этого решения;
 4. physical A4/scan gate и отдельно не выполненный print-preview;
 5. production Postbox DNS/identity и SmartCaptcha readiness без раскрытия
    секретов;
-6. исправление либо отдельно осознанное принятие единственного repository-wide
-   Prettier failure до release branch gate.
 
 После закрытия блокеров требуется отдельное пользовательское одобрение точных
 production targets. Порядок неизменяем: deploy legal-кода с формой/API disabled
