@@ -37,7 +37,14 @@ export default function ItemCode({
   return (
     <div
       className="mk-pickup-dm"
-      style={{ width: 64, height: 64, flexShrink: 0 }}
+      style={{
+        width: 64,
+        height: 64,
+        padding: 4,
+        boxSizing: "border-box",
+        flexShrink: 0,
+        background: "#fff",
+      }}
       dangerouslySetInnerHTML={{ __html: svg }}
     />
   );

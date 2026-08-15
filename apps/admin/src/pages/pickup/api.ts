@@ -82,6 +82,7 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   syncConflicts: SyncConflict[];
   boxConflicts: BoxConflict[];
   exportHeldProductNames: string[];
+  commercemlConfigured: boolean;
 }
 
 export interface ListPickupOrdersParams {

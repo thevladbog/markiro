@@ -91,4 +91,25 @@ describe("renderPickupSlipHtml", () => {
     // No badge -> no QR block; still 2 DataMatrix + 1 Code128.
     expect(svgCount).toBe(3);
   });
+
+  it("keeps the printable slip available when one stored marking code cannot be rendered", () => {
+    const html = renderPickupSlipHtml(
+      fixture({
+        items: [
+          {
+            n: 1,
+            productName: "Товар с повреждённым кодом",
+            gtin14: GTIN,
+            serial: "BROKEN",
+            rawKm: "not-a-valid-km",
+            unitPrice: "52.00",
+          },
+        ],
+      }),
+    );
+
+    expect(html).toContain("Товар с повреждённым кодом");
+    expect(html).toContain("Код не отображается");
+    expect(html).toContain("ORD-26-0042");
+  });
 });

@@ -88,7 +88,13 @@ function kmLabel(item: PickupSlipItem): string {
 }
 
 function itemRow(item: PickupSlipItem): string {
-  const dm = renderDataMatrixSvg(item.rawKm);
+  let dm: string;
+  try {
+    dm = renderDataMatrixSvg(item.rawKm);
+  } catch {
+    dm =
+      '<span style="font-size: 9px; line-height: 1.2; color: #6B6862; text-align: center">Код не отображается</span>';
+  }
   return `
         <div style="display: grid; grid-template-columns: 8mm 1fr 58mm 13mm 15mm; gap: 0 4mm; align-items: center; border-bottom: 1px solid #E0DED7; padding: 4px 10px">
           <span class="mono">${item.n}</span>

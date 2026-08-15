@@ -377,16 +377,18 @@ export function OrderDetailPage() {
             label={t("pages.pickup.detail.totalLabel")}
             value={order.totalPrice ?? "—"}
           />
-          <DetailField
-            label={t("pages.pickup.detail.exportStatusLabel")}
-            value={
-              order.exportedAt
-                ? t("pages.pickup.detail.exportStatus.exported", {
-                    time: formatCreatedAt(order.exportedAt, i18n.language),
-                  })
-                : t("pages.pickup.detail.exportStatus.notExported")
-            }
-          />
+          {order.commercemlConfigured ? (
+            <DetailField
+              label={t("pages.pickup.detail.exportStatusLabel")}
+              value={
+                order.exportedAt
+                  ? t("pages.pickup.detail.exportStatus.exported", {
+                      time: formatCreatedAt(order.exportedAt, i18n.language),
+                    })
+                  : t("pages.pickup.detail.exportStatus.notExported")
+              }
+            />
+          ) : null}
         </div>
       </Card>
 
@@ -418,7 +420,8 @@ export function OrderDetailPage() {
         </Alert>
       )}
 
-      {order.status === "pending" &&
+      {order.commercemlConfigured &&
+        order.status === "pending" &&
         !order.exportedAt &&
         order.exportHeldProductNames.length > 0 && (
           <Alert

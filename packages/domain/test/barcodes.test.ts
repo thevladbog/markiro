@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import bwipjs from "bwip-js";
 import { DomainError } from "../src/errors.js";
 import { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "../src/barcodes/svg.js";
 
@@ -22,8 +23,19 @@ describe("barcode SVG renderers", () => {
     const withoutGs = renderDataMatrixSvg(`01${GTIN14}21${SERIAL}93Abcd`);
     expect(withGs).not.toBe(withoutGs);
   });
-  it("rejects a KM whose AI value contains a literal paren (bwip-js GS1 element-string injection guard)", () => {
-    expect(() => renderDataMatrixSvg(`01${GTIN14}21${SERIAL}${GS}93Ab(cd`)).toThrow(/parenthesis/);
+  it("renders literal parentheses and carets from valid KM values without treating them as control syntax", () => {
+    const svg = renderDataMatrixSvg(`01${GTIN14_2}21SER)IAL${GS}93Ab(cd^ef`);
+    expect(svg.startsWith("<svg")).toBe(true);
+    expect(svg).toContain("</svg>");
+  });
+  it("keeps the explicit-FNC1 path equivalent to bwip-js's GS1 encoder for ordinary values", () => {
+    const raw = `01${GTIN14}21${SERIAL}${GS}93Abcd`;
+    const reference = bwipjs.toSVG({
+      bcid: "gs1datamatrix",
+      text: `(01)${GTIN14}(21)${SERIAL}(93)Abcd`,
+      scale: 3,
+    });
+    expect(renderDataMatrixSvg(raw)).toBe(reference);
   });
   it("feeds every trailing AI into the symbol, not just the last one", () => {
     // Same GTIN/serial, but the multi-AI variant carries 91/92/93 in order.

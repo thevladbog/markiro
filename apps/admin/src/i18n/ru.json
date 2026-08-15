@@ -1033,7 +1033,9 @@
         "itemCount": "Кодов",
         "totalPrice": "Сумма",
         "status": "Статус",
-        "actions": "Действия"
+        "actions": "Действия",
+        "openAction": "Открыть",
+        "openOrder": "Открыть заявку {{orderNo}}"
       },
       "bulkExport": {
         "toggleAction": "Массовая выгрузка",

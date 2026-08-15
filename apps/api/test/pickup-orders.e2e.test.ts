@@ -180,6 +180,8 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
       employeeBadgeCode: BADGE,
       receiptNo: null,
       actNo: null,
+      commercemlConfigured: false,
+      exportHeldProductNames: [],
     });
     expect(detailRes.body.items).toHaveLength(1);
     expect(detailRes.body.items[0]).toMatchObject({
@@ -477,6 +479,12 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
   });
 
   it("detail показывает уникальные непустые названия только для активных непривязанных товаров", async () => {
+    await db.insert(schema.integrationChannels).values({
+      tenantId,
+      type: "commerceml",
+      credentialLogin: `test-${randomUUID()}`,
+      credentialHash: "test-credential-hash",
+    });
     const namedProductId = randomUUID();
     const emptyProductId = randomUUID();
     const voidedProductId = randomUUID();
@@ -522,6 +530,7 @@ describe.skipIf(!ready)("pickup orders admin e2e", () => {
     );
 
     const detail = await pickupOrdersService.detail(tenantId, orderId);
+    expect(detail.commercemlConfigured).toBe(true);
     expect(detail.exportHeldProductNames).toEqual(["Непривязанный товар"]);
   });
 

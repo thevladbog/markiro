@@ -1033,7 +1033,9 @@
         "itemCount": "Codes",
         "totalPrice": "Total",
         "status": "Status",
-        "actions": "Actions"
+        "actions": "Actions",
+        "openAction": "Open",
+        "openOrder": "Open order {{orderNo}}"
       },
       "bulkExport": {
         "toggleAction": "Bulk export",
