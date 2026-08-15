@@ -25,6 +25,8 @@ import {
 } from "../src/cli/verify-artifacts.js";
 import {
   LIBREOFFICE_PDF_EXPORT_FILTER,
+  acquireArtifactGenerationLock,
+  artifactGenerationLockPath,
   assertEmbeddedPdfFonts,
   assertExtractedPdfText,
   assertNoFontSubstitutionWarnings,
@@ -214,6 +216,8 @@ function pdfWithIccTimestamp(
             ? [
                 "/Literal(keep 7 0 R nested (8 0 R) escaped \\(9 0 R\\))",
                 "/Hex<313020302052>",
+                "/7 0 R",
+                "/7#20escaped 0 R",
                 "% keep 11 0 R",
               ]
             : []),
@@ -673,6 +677,7 @@ function fakeGenerationDependencies(
       );
       return { stdout: `convert ${stem}`, stderr: "" };
     },
+    extractPdfText: async () => ({ stdout: "stable complete searchable text\n", stderr: "" }),
     validatePdf: async () => {
       validations += 1;
       if (validations === options.failValidationAt) throw new Error("synthetic PDF/A failure");
@@ -681,6 +686,102 @@ function fakeGenerationDependencies(
 }
 
 describe("legal artifact release generation", () => {
+  it("recovers a stale owned generation lock and its exact interrupted staging directory", async () => {
+    const repositoryRoot = await temporaryRoot();
+    const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
+    const staleTemporaryRoot = path.join(repositoryRoot, ".markiro-legal-build-stale-owned");
+    await mkdir(staleTemporaryRoot);
+    await writeFile(path.join(staleTemporaryRoot, "owned-marker"), "stale");
+    await acquireArtifactGenerationLock({
+      repositoryRoot,
+      outDir,
+      temporaryRoot: staleTemporaryRoot,
+      processId: 41001,
+      token: "a".repeat(32),
+    });
+
+    const replacementTemporaryRoot = path.join(repositoryRoot, ".markiro-legal-build-replacement");
+    await mkdir(replacementTemporaryRoot);
+    const replacement = await acquireArtifactGenerationLock({
+      repositoryRoot,
+      outDir,
+      temporaryRoot: replacementTemporaryRoot,
+      processId: 41002,
+      token: "b".repeat(32),
+      isProcessAlive: (processId) => processId !== 41001,
+    });
+
+    await expect(lstat(staleTemporaryRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (await readdir(repositoryRoot)).filter((entry) =>
+        entry.startsWith(".markiro-legal-artifacts.owner-"),
+      ),
+    ).toEqual([`.markiro-legal-artifacts.owner-${"b".repeat(32)}.json`]);
+    await replacement.release();
+    await expect(lstat(artifactGenerationLockPath(repositoryRoot))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("refuses a live owned generation lock without changing its identity", async () => {
+    const repositoryRoot = await temporaryRoot();
+    const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
+    const firstTemporaryRoot = path.join(repositoryRoot, ".markiro-legal-build-first-live");
+    const secondTemporaryRoot = path.join(repositoryRoot, ".markiro-legal-build-second-live");
+    await Promise.all([mkdir(firstTemporaryRoot), mkdir(secondTemporaryRoot)]);
+    const first = await acquireArtifactGenerationLock({
+      repositoryRoot,
+      outDir,
+      temporaryRoot: firstTemporaryRoot,
+      processId: 42001,
+      token: "c".repeat(32),
+    });
+    const lockPath = artifactGenerationLockPath(repositoryRoot);
+    const lockBefore = await lstat(lockPath);
+
+    await expect(
+      acquireArtifactGenerationLock({
+        repositoryRoot,
+        outDir,
+        temporaryRoot: secondTemporaryRoot,
+        processId: 42002,
+        token: "d".repeat(32),
+        isProcessAlive: (processId) => processId === 42001,
+      }),
+    ).rejects.toThrow("live legal artifact generation lock");
+    const lockAfter = await lstat(lockPath);
+    expect({ device: lockAfter.dev, inode: lockAfter.ino }).toEqual({
+      device: lockBefore.dev,
+      inode: lockBefore.ino,
+    });
+    await first.release();
+  });
+
+  it("refuses a foreign generation lock without deleting it or its staging data", async () => {
+    const repositoryRoot = await temporaryRoot();
+    const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
+    const lockPath = artifactGenerationLockPath(repositoryRoot);
+    const foreignTemporaryRoot = path.join(repositoryRoot, ".markiro-legal-build-foreign");
+    await mkdir(foreignTemporaryRoot);
+    await writeFile(path.join(foreignTemporaryRoot, "foreign-marker"), "keep");
+    await writeFile(lockPath, "foreign lock data", { flag: "wx" });
+
+    await expect(
+      acquireArtifactGenerationLock({
+        repositoryRoot,
+        outDir,
+        temporaryRoot: foreignTemporaryRoot,
+        processId: 43001,
+        token: "e".repeat(32),
+        isProcessAlive: () => false,
+      }),
+    ).rejects.toThrow("foreign or malformed");
+    await expect(readFile(lockPath, "utf8")).resolves.toBe("foreign lock data");
+    await expect(readFile(path.join(foreignTemporaryRoot, "foreign-marker"), "utf8")).resolves.toBe(
+      "keep",
+    );
+  });
+
   it("pins the exact Writer PDF/A-2 export argument", () => {
     const args = libreOfficePdfExportArguments("/tmp/out", "/tmp/source.docx");
     expect(LIBREOFFICE_PDF_EXPORT_FILTER).toBe(
@@ -950,7 +1051,7 @@ describe("legal artifact release generation", () => {
     );
   });
 
-  it("preserves PDF literal, hex, and comment content while canonicalizing font references", () => {
+  it("preserves PDF strings, comments, and name tokens while canonicalizing font references", () => {
     const argumentsForPdf = [
       "2026-08-15T17:56:04+03:00",
       "20260815175604+03'00'",
@@ -963,6 +1064,8 @@ describe("legal artifact release generation", () => {
     const expectedProtectedContent = [
       "/Literal(keep 7 0 R nested (8 0 R) escaped \\(9 0 R\\))",
       "/Hex<313020302052>",
+      "/7 0 R",
+      "/7#20escaped 0 R",
       "% keep 11 0 R",
     ] as const;
 
@@ -1020,10 +1123,21 @@ describe("legal artifact release generation", () => {
     await expect(readdir(outsideRoot)).resolves.toEqual([]);
   });
 
-  it("publishes all twelve files and the manifest only after every PDF validates", async () => {
+  it("publishes one complete directory atomically after keeping public paths absent", async () => {
     const repositoryRoot = await temporaryRoot();
     const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
     const dependencies = fakeGenerationDependencies();
+    let beforePublishCalls = 0;
+    const observedDependencies = {
+      ...dependencies,
+      beforePublish: async () => {
+        beforePublishCalls += 1;
+        await expect(lstat(outDir)).rejects.toMatchObject({ code: "ENOENT" });
+        await expect(readdir(path.dirname(outDir))).resolves.toEqual([]);
+        const lock = await lstat(path.join(repositoryRoot, ".markiro-legal-artifacts.lock"));
+        expect(lock.isFile()).toBe(true);
+      },
+    } as ArtifactGenerationDependencies;
 
     const entries = await generateLegalArtifacts(
       {
@@ -1033,15 +1147,21 @@ describe("legal artifact release generation", () => {
         preview: false,
         check: false,
       },
-      dependencies,
+      observedDependencies,
     );
 
+    expect(beforePublishCalls).toBe(1);
     expect(entries).toHaveLength(12);
     expect(dependencies.converted).toHaveLength(8);
+    expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
+    expect(await readdir(outDir)).toEqual(["artifacts.json", "files"]);
     expect(await readdir(path.join(outDir, "files"))).toHaveLength(12);
     expect(await readFile(path.join(outDir, "artifacts.json"), "utf8")).toBe(
       canonicalArtifactManifest(entries),
     );
+    expect(
+      (await readdir(repositoryRoot)).filter((entry) => entry.startsWith(".markiro-legal-")),
+    ).toEqual([]);
   });
 
   it("publishes nothing when one PDF validation fails", async () => {
@@ -1061,26 +1181,55 @@ describe("legal artifact release generation", () => {
       ),
     ).rejects.toThrow("synthetic PDF/A failure");
     await expect(lstat(outDir)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(
+      (await readdir(repositoryRoot)).filter((entry) => entry.startsWith(".markiro-legal-")),
+    ).toEqual([]);
+  });
+
+  it("rejects a complete raw-text mismatch across PDF canonicalization", async () => {
+    const repositoryRoot = await temporaryRoot();
+    const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
+    let extractions = 0;
+    const dependencies = {
+      ...fakeGenerationDependencies(),
+      extractPdfText: async () => {
+        extractions += 1;
+        return {
+          stdout: extractions === 1 ? "complete text before\n" : "complete text after\n",
+          stderr: "",
+        };
+      },
+    };
+
+    await expect(
+      generateLegalArtifacts(
+        {
+          repositoryRoot,
+          outDir,
+          sofficeBin: "/opt/libreoffice-26.2.5/program/soffice",
+          preview: false,
+          check: false,
+        },
+        dependencies,
+      ),
+    ).rejects.toThrow("complete searchable text");
+    expect(extractions).toBe(2);
+    await expect(lstat(outDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not clobber an empty destination created immediately before publication", async () => {
     const repositoryRoot = await temporaryRoot();
     const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
     const dependencies = fakeGenerationDependencies();
-    let validations = 0;
     let collisionIdentity: { readonly device: number; readonly inode: number } | undefined;
-    const collisionDependencies: ArtifactGenerationDependencies = {
+    const collisionDependencies = {
       ...dependencies,
-      validatePdf: async (input) => {
-        await dependencies.validatePdf(input);
-        validations += 1;
-        if (validations === 8) {
-          await mkdir(outDir);
-          const collision = await lstat(outDir);
-          collisionIdentity = { device: collision.dev, inode: collision.ino };
-        }
+      beforePublish: async () => {
+        await mkdir(outDir);
+        const collision = await lstat(outDir);
+        collisionIdentity = { device: collision.dev, inode: collision.ino };
       },
-    };
+    } as ArtifactGenerationDependencies;
 
     await expect(
       generateLegalArtifacts(
@@ -1100,6 +1249,9 @@ describe("legal artifact release generation", () => {
       collisionIdentity,
     );
     await expect(readdir(path.dirname(outDir))).resolves.toEqual(["legal"]);
+    expect(
+      (await readdir(repositoryRoot)).filter((entry) => entry.startsWith(".markiro-legal-")),
+    ).toEqual([]);
   });
 
   it("never overwrites a release and allows --check only for byte-identical output", async () => {

@@ -1,5 +1,5 @@
 import { execFile as execFileCallback } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import {
   lstat,
   link,
@@ -9,8 +9,8 @@ import {
   readFile,
   readdir,
   realpath,
+  rename,
   rm,
-  rmdir,
   stat,
   unlink,
   writeFile,
@@ -70,13 +70,29 @@ interface ValidatePdfInput {
   readonly pdfPath: string;
   readonly request: LegalArtifactRequest;
   readonly conversion: ConversionResult;
+  readonly extractedText: string;
 }
 
 export interface ArtifactGenerationDependencies {
   readonly getLibreOfficeVersion: (sofficeBin: string) => Promise<string>;
   readonly renderDocx: (request: LegalArtifactRequest) => Promise<Uint8Array>;
   readonly convertPdf: (input: ConvertPdfInput) => Promise<ConversionResult>;
+  readonly extractPdfText: (pdfPath: string) => Promise<ConversionResult>;
   readonly validatePdf: (input: ValidatePdfInput) => Promise<void>;
+  readonly beforePublish?: (outDir: string) => Promise<void>;
+}
+
+export interface AcquireArtifactGenerationLockOptions {
+  readonly repositoryRoot: string;
+  readonly outDir: string;
+  readonly temporaryRoot: string;
+  readonly processId?: number;
+  readonly token?: string;
+  readonly isProcessAlive?: (processId: number) => boolean;
+}
+
+export interface ArtifactGenerationLock {
+  readonly release: () => Promise<void>;
 }
 
 function pathIsInside(parent: string, candidate: string): boolean {
@@ -488,6 +504,17 @@ function replaceMappedReferences(
       while (end < value.length && !["\n", "\r"].includes(value.charAt(end))) end += 1;
       return end;
     }
+    if (opening === "/") {
+      let end = start + 1;
+      while (
+        end < value.length &&
+        !isWhitespace(value.charAt(end)) &&
+        !isDelimiter(value.charAt(end))
+      ) {
+        end += 1;
+      }
+      return end;
+    }
     if (opening === "<" && value.charAt(start - 1) !== "<" && value.charAt(start + 1) !== "<") {
       const closing = value.indexOf(">", start + 1);
       if (closing < 0) throw new Error("Generated PDF has an unterminated hex string");
@@ -810,6 +837,12 @@ export function assertExtractedPdfText(
   }
 }
 
+export function assertPdfNormalizationPreservesText(before: string, after: string): void {
+  if (before !== after) {
+    throw new Error("PDF normalization changed the complete searchable text");
+  }
+}
+
 export function parseVeraPdfValidationResult(output: string): void {
   let parsed: unknown;
   try {
@@ -984,7 +1017,9 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
         libreOfficeEnvironment(profileDirectory),
       );
     },
-    validatePdf: async ({ pdfPath, request, conversion }) => {
+    extractPdfText: async (pdfPath) =>
+      runTextCommand("pdftotext", ["-raw", "-enc", "UTF-8", pdfPath, "-"]),
+    validatePdf: async ({ pdfPath, request, conversion, extractedText }) => {
       assertNoFontSubstitutionWarnings(conversion.stdout, conversion.stderr);
       const pdfStats = await stat(pdfPath);
       if (!pdfStats.isFile() || pdfStats.size <= 0)
@@ -999,9 +1034,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
       const pdfFonts = await runTextCommand("pdffonts", [pdfPath]);
       assertNoFontSubstitutionWarnings(pdfFonts.stdout, pdfFonts.stderr);
       assertEmbeddedPdfFonts(pdfFonts.stdout);
-      const extracted = await runTextCommand("pdftotext", ["-raw", "-enc", "UTF-8", pdfPath, "-"]);
-      assertNoFontSubstitutionWarnings(extracted.stdout, extracted.stderr);
-      assertExtractedPdfText(extracted.stdout, requiredPdfText(request));
+      assertExtractedPdfText(extractedText, requiredPdfText(request));
 
       await ensureVeraPdfVersion();
       const artifactDirectory = path.dirname(pdfPath);
@@ -1118,179 +1151,280 @@ async function syncDirectory(directory: string): Promise<void> {
   }
 }
 
-interface LinkedPublicationFile {
-  readonly sourcePath: string;
-  readonly destinationPath: string;
-  readonly device: number;
-  readonly inode: number;
-}
-
-interface PublicationDirectory {
-  readonly path: string;
-  readonly device: number;
-  readonly inode: number;
-}
-
 function errorHasCode(error: unknown, code: string): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === code;
 }
 
-async function linkPublicationFile(
-  sourcePath: string,
-  destinationPath: string,
-): Promise<LinkedPublicationFile> {
-  const source = await lstat(sourcePath);
-  if (!source.isFile() || source.isSymbolicLink()) {
-    throw new Error(`Staged legal artifact is not a regular file: ${sourcePath}`);
-  }
-  try {
-    await link(sourcePath, destinationPath);
-  } catch (error) {
-    if (errorHasCode(error, "EXDEV")) {
-      throw new Error("Legal artifact publication must remain on one filesystem", {
-        cause: error,
-      });
-    }
-    throw error;
+const GENERATION_LOCK_NAME = ".markiro-legal-artifacts.lock";
+const GENERATION_OWNER_PREFIX = ".markiro-legal-artifacts.owner-";
+const GENERATION_TOKEN = /^[0-9a-f]{32}$/;
+
+interface GenerationLockOwner {
+  readonly version: 1;
+  readonly token: string;
+  readonly processId: number;
+  readonly outDir: string;
+  readonly temporaryRoot: string;
+  readonly temporaryDevice: number;
+  readonly temporaryInode: number;
+}
+
+interface OwnedGenerationLock {
+  readonly owner: GenerationLockOwner;
+  readonly ownerPath: string;
+  readonly device: number;
+  readonly inode: number;
+}
+
+export function artifactGenerationLockPath(repositoryRoot: string): string {
+  return path.join(path.resolve(repositoryRoot), GENERATION_LOCK_NAME);
+}
+
+function generationOwnerPath(repositoryRoot: string, token: string): string {
+  return path.join(path.resolve(repositoryRoot), `${GENERATION_OWNER_PREFIX}${token}.json`);
+}
+
+function canonicalGenerationLockOwner(owner: GenerationLockOwner): string {
+  return `${JSON.stringify(owner, null, 2)}\n`;
+}
+
+function parseGenerationLockOwner(value: unknown): GenerationLockOwner | undefined {
+  if (!isUnknownRecord(value)) return undefined;
+  const expectedKeys = [
+    "outDir",
+    "processId",
+    "temporaryDevice",
+    "temporaryInode",
+    "temporaryRoot",
+    "token",
+    "version",
+  ].sort();
+  const actualKeys = Object.keys(value).sort();
+  if (
+    actualKeys.length !== expectedKeys.length ||
+    !actualKeys.every((key, index) => key === expectedKeys[index]) ||
+    value.version !== 1 ||
+    typeof value.token !== "string" ||
+    !GENERATION_TOKEN.test(value.token) ||
+    !Number.isSafeInteger(value.processId) ||
+    (value.processId as number) <= 0 ||
+    typeof value.outDir !== "string" ||
+    path.resolve(value.outDir) !== value.outDir ||
+    typeof value.temporaryRoot !== "string" ||
+    path.resolve(value.temporaryRoot) !== value.temporaryRoot ||
+    !Number.isSafeInteger(value.temporaryDevice) ||
+    !Number.isSafeInteger(value.temporaryInode)
+  ) {
+    return undefined;
   }
   return {
-    sourcePath,
-    destinationPath,
-    device: source.dev,
-    inode: source.ino,
+    version: 1,
+    token: value.token,
+    processId: value.processId as number,
+    outDir: value.outDir,
+    temporaryRoot: value.temporaryRoot,
+    temporaryDevice: value.temporaryDevice as number,
+    temporaryInode: value.temporaryInode as number,
   };
 }
 
-async function unlinkOwnedPublicationFile(file: LinkedPublicationFile): Promise<void> {
+function isSafeOwnedTemporaryRoot(owner: GenerationLockOwner, repositoryRoot: string): boolean {
+  if (!path.basename(owner.temporaryRoot).startsWith(".markiro-legal-build-")) return false;
+  return (
+    pathIsInside(path.resolve(repositoryRoot), owner.temporaryRoot) ||
+    path.dirname(owner.temporaryRoot) === path.dirname(owner.outDir)
+  );
+}
+
+function foreignGenerationLockError(lockPath: string, cause?: unknown): Error {
+  return new Error(`Refusing foreign or malformed legal artifact generation lock: ${lockPath}`, {
+    ...(cause === undefined ? {} : { cause }),
+  });
+}
+
+async function readOwnedGenerationLock(
+  repositoryRoot: string,
+  lockPath: string,
+): Promise<OwnedGenerationLock> {
+  let lockInfo;
   try {
-    const [source, destination] = await Promise.all([
-      lstat(file.sourcePath),
-      lstat(file.destinationPath),
-    ]);
+    lockInfo = await lstat(lockPath);
+  } catch (error) {
+    throw foreignGenerationLockError(lockPath, error);
+  }
+  if (!lockInfo.isFile() || lockInfo.isSymbolicLink()) {
+    throw foreignGenerationLockError(lockPath);
+  }
+  let owner: GenerationLockOwner | undefined;
+  try {
+    owner = parseGenerationLockOwner(JSON.parse(await readFile(lockPath, "utf8")));
+  } catch (error) {
+    throw foreignGenerationLockError(lockPath, error);
+  }
+  if (!owner || !isSafeOwnedTemporaryRoot(owner, repositoryRoot)) {
+    throw foreignGenerationLockError(lockPath);
+  }
+  const ownerPath = generationOwnerPath(repositoryRoot, owner.token);
+  let ownerInfo;
+  let lockAfterRead;
+  try {
+    [ownerInfo, lockAfterRead] = await Promise.all([lstat(ownerPath), lstat(lockPath)]);
+  } catch (error) {
+    throw foreignGenerationLockError(lockPath, error);
+  }
+  if (
+    !ownerInfo.isFile() ||
+    ownerInfo.isSymbolicLink() ||
+    ownerInfo.dev !== lockInfo.dev ||
+    ownerInfo.ino !== lockInfo.ino ||
+    lockAfterRead.dev !== lockInfo.dev ||
+    lockAfterRead.ino !== lockInfo.ino
+  ) {
+    throw foreignGenerationLockError(lockPath);
+  }
+  return { owner, ownerPath, device: lockInfo.dev, inode: lockInfo.ino };
+}
+
+function processIsAlive(processId: number): boolean {
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    return !errorHasCode(error, "ESRCH");
+  }
+}
+
+async function assertOwnedLockIdentity(
+  lockPath: string,
+  owned: OwnedGenerationLock,
+): Promise<void> {
+  const [lockInfo, ownerInfo] = await Promise.all([lstat(lockPath), lstat(owned.ownerPath)]);
+  if (
+    !lockInfo.isFile() ||
+    lockInfo.isSymbolicLink() ||
+    lockInfo.dev !== owned.device ||
+    lockInfo.ino !== owned.inode ||
+    ownerInfo.dev !== owned.device ||
+    ownerInfo.ino !== owned.inode
+  ) {
+    throw new Error(`Legal artifact generation lock identity changed: ${lockPath}`);
+  }
+}
+
+async function recoverStaleGenerationLock(
+  repositoryRoot: string,
+  lockPath: string,
+  owned: OwnedGenerationLock,
+): Promise<void> {
+  try {
+    const temporaryInfo = await lstat(owned.owner.temporaryRoot);
     if (
-      source.dev === file.device &&
-      source.ino === file.inode &&
-      destination.dev === file.device &&
-      destination.ino === file.inode
+      !temporaryInfo.isDirectory() ||
+      temporaryInfo.isSymbolicLink() ||
+      temporaryInfo.dev !== owned.owner.temporaryDevice ||
+      temporaryInfo.ino !== owned.owner.temporaryInode
     ) {
-      await unlink(file.destinationPath);
+      throw new Error(
+        `Stale legal artifact staging path is no longer owned: ${owned.owner.temporaryRoot}`,
+      );
     }
+    await rm(owned.owner.temporaryRoot, { recursive: true });
   } catch (error) {
     if (!errorHasCode(error, "ENOENT")) throw error;
   }
+  await assertOwnedLockIdentity(lockPath, owned);
+  await unlink(lockPath);
+  await unlink(owned.ownerPath);
+  await syncDirectory(path.resolve(repositoryRoot));
 }
 
-async function removeOwnedPublicationDirectory(directory: PublicationDirectory): Promise<void> {
-  try {
-    const current = await lstat(directory.path);
-    if (
-      current.isDirectory() &&
-      !current.isSymbolicLink() &&
-      current.dev === directory.device &&
-      current.ino === directory.inode
-    ) {
-      await rmdir(directory.path);
-    }
-  } catch (error) {
-    if (!errorHasCode(error, "ENOENT") && !errorHasCode(error, "ENOTEMPTY")) throw error;
+export async function acquireArtifactGenerationLock(
+  options: AcquireArtifactGenerationLockOptions,
+): Promise<ArtifactGenerationLock> {
+  const repositoryRoot = path.resolve(options.repositoryRoot);
+  const outDir = path.resolve(options.outDir);
+  const temporaryRoot = path.resolve(options.temporaryRoot);
+  const processId = options.processId ?? process.pid;
+  const token = options.token ?? randomBytes(16).toString("hex");
+  if (!Number.isSafeInteger(processId) || processId <= 0 || !GENERATION_TOKEN.test(token)) {
+    throw new Error("Legal artifact generation lock owner identity is invalid");
   }
-}
-
-async function publishStagedReleaseWithoutReplace(
-  releaseRoot: string,
-  outDir: string,
-): Promise<void> {
-  const outputParent = path.dirname(outDir);
-  const [releaseInfo, outputParentInfo] = await Promise.all([
-    stat(releaseRoot),
-    stat(outputParent),
-  ]);
-  if (releaseInfo.dev !== outputParentInfo.dev) {
-    throw new Error("Legal artifact publication must remain on one filesystem");
+  const repositoryInfo = await lstat(repositoryRoot);
+  const temporaryInfo = await lstat(temporaryRoot);
+  if (
+    !repositoryInfo.isDirectory() ||
+    repositoryInfo.isSymbolicLink() ||
+    !temporaryInfo.isDirectory() ||
+    temporaryInfo.isSymbolicLink()
+  ) {
+    throw new Error("Legal artifact generation lock paths must be ordinary directories");
   }
+  const owner: GenerationLockOwner = {
+    version: 1,
+    token,
+    processId,
+    outDir,
+    temporaryRoot,
+    temporaryDevice: temporaryInfo.dev,
+    temporaryInode: temporaryInfo.ino,
+  };
+  if (!isSafeOwnedTemporaryRoot(owner, repositoryRoot)) {
+    throw new Error(`Legal artifact staging path is outside an allowed root: ${temporaryRoot}`);
+  }
+  const lockPath = artifactGenerationLockPath(repositoryRoot);
+  const ownerPath = generationOwnerPath(repositoryRoot, token);
+  await writeFile(ownerPath, canonicalGenerationLockOwner(owner), { flag: "wx", mode: 0o600 });
+  await syncFile(ownerPath);
 
-  let releaseDirectory: PublicationDirectory | undefined;
-  let filesDirectory: PublicationDirectory | undefined;
-  const linkedFiles: LinkedPublicationFile[] = [];
-  let committed = false;
+  let acquired: OwnedGenerationLock | undefined;
   try {
-    try {
-      await mkdir(outDir);
-    } catch (error) {
-      if (errorHasCode(error, "EEXIST")) {
-        throw new Error(`Immutable legal artifact release already exists: ${outDir}`, {
-          cause: error,
-        });
-      }
-      throw error;
-    }
-    const releaseDestinationInfo = await lstat(outDir);
-    releaseDirectory = {
-      path: outDir,
-      device: releaseDestinationInfo.dev,
-      inode: releaseDestinationInfo.ino,
-    };
-    if (releaseDestinationInfo.dev !== releaseInfo.dev) {
-      throw new Error("Legal artifact publication must remain on one filesystem");
-    }
-    await syncDirectory(outputParent);
-
-    const sourceFilesRoot = path.join(releaseRoot, "files");
-    const destinationFilesRoot = path.join(outDir, "files");
-    await mkdir(destinationFilesRoot);
-    const destinationFilesInfo = await lstat(destinationFilesRoot);
-    filesDirectory = {
-      path: destinationFilesRoot,
-      device: destinationFilesInfo.dev,
-      inode: destinationFilesInfo.ino,
-    };
-    const artifactFiles = (await readdir(sourceFilesRoot)).sort();
-    for (const fileName of artifactFiles) {
-      linkedFiles.push(
-        await linkPublicationFile(
-          path.join(sourceFilesRoot, fileName),
-          path.join(destinationFilesRoot, fileName),
-        ),
-      );
-    }
-    await syncDirectory(destinationFilesRoot);
-
-    const rootEntries = (await readdir(releaseRoot)).filter((entry) => entry !== "files").sort();
-    if (rootEntries.length !== 1) {
-      throw new Error("Staged legal artifact release has an invalid publication marker set");
-    }
-    const publicationMarker = rootEntries[0];
-    if (!publicationMarker) {
-      throw new Error("Staged legal artifact release has no publication marker");
-    }
-    // The verifier accepts a release only after this final no-replace link makes its manifest
-    // (or explicit preview marker) visible; every artifact link and directory sync precedes it.
-    linkedFiles.push(
-      await linkPublicationFile(
-        path.join(releaseRoot, publicationMarker),
-        path.join(outDir, publicationMarker),
-      ),
-    );
-    committed = true;
-    await syncDirectory(outDir);
-    await syncDirectory(outputParent);
-  } catch (error) {
-    if (!committed) {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        for (const file of [...linkedFiles].reverse()) await unlinkOwnedPublicationFile(file);
-        if (filesDirectory) await removeOwnedPublicationDirectory(filesDirectory);
-        if (releaseDirectory) await removeOwnedPublicationDirectory(releaseDirectory);
-        await syncDirectory(outputParent);
-      } catch (cleanupError) {
+        await link(ownerPath, lockPath);
+        const lockInfo = await lstat(lockPath);
+        acquired = { owner, ownerPath, device: lockInfo.dev, inode: lockInfo.ino };
+        await syncDirectory(repositoryRoot);
+        break;
+      } catch (error) {
+        if (!errorHasCode(error, "EEXIST")) throw error;
+        const existing = await readOwnedGenerationLock(repositoryRoot, lockPath);
+        const isAlive = options.isProcessAlive ?? processIsAlive;
+        if (isAlive(existing.owner.processId)) {
+          throw new Error(
+            `Refusing live legal artifact generation lock owned by process ${existing.owner.processId}`,
+            { cause: error },
+          );
+        }
+        await recoverStaleGenerationLock(repositoryRoot, lockPath, existing);
+      }
+    }
+    if (!acquired) throw new Error("Could not acquire the legal artifact generation lock");
+  } catch (error) {
+    try {
+      await unlink(ownerPath);
+    } catch (cleanupError) {
+      if (!errorHasCode(cleanupError, "ENOENT")) {
         throw new AggregateError(
           [error, cleanupError],
-          "Legal artifact publication failed and its owned reservation could not be cleaned",
+          "Legal artifact generation lock acquisition and owner cleanup both failed",
           { cause: cleanupError },
         );
       }
     }
     throw error;
   }
+
+  let released = false;
+  return {
+    release: async () => {
+      if (released || !acquired) return;
+      await assertOwnedLockIdentity(lockPath, acquired);
+      await unlink(lockPath);
+      await unlink(ownerPath);
+      await syncDirectory(repositoryRoot);
+      released = true;
+    },
+  };
 }
 
 async function compareReleaseDirectories(expectedRoot: string, actualRoot: string): Promise<void> {
@@ -1381,13 +1515,23 @@ async function writeGeneratedArtifacts(
     const outputPath = path.join(filesRoot, fileName);
     await assertNoSymlink(outputPath);
     if (!options.preview) {
+      const extractedBefore = await dependencies.extractPdfText(outputPath);
+      assertNoFontSubstitutionWarnings(extractedBefore.stdout, extractedBefore.stderr);
       const normalizedPdf = normalizeLibreOfficePdf(
         await readFile(outputPath),
         request.effectiveDate,
         fileName,
       );
       await writeFile(outputPath, normalizedPdf);
-      await dependencies.validatePdf({ pdfPath: outputPath, request, conversion });
+      const extractedAfter = await dependencies.extractPdfText(outputPath);
+      assertNoFontSubstitutionWarnings(extractedAfter.stdout, extractedAfter.stderr);
+      assertPdfNormalizationPreservesText(extractedBefore.stdout, extractedAfter.stdout);
+      await dependencies.validatePdf({
+        pdfPath: outputPath,
+        request,
+        conversion,
+        extractedText: extractedAfter.stdout,
+      });
       pdfaValidatedFiles.add(fileName);
     }
     const bytes = await readFile(outputPath);
@@ -1454,27 +1598,51 @@ export async function generateLegalArtifacts(
     : path.parse(options.outDir).root;
   await assertNoSymlinkAncestors(allowedOutputRoot, options.outDir);
 
-  const outputExists = await exists(options.outDir);
-  if (outputExists) {
-    await assertNoSymlink(options.outDir);
-    if (!options.check)
-      throw new Error(`Immutable legal artifact release already exists: ${options.outDir}`);
-  } else if (options.check) {
-    throw new Error(`Cannot --check a missing legal artifact release: ${options.outDir}`);
-  }
-
-  const version = await dependencies.getLibreOfficeVersion(options.sofficeBin);
-  assertReleaseLibreOfficeVersion(version, options.preview);
-
   const outputParent = path.dirname(options.outDir);
   await mkdir(outputParent, { recursive: true });
   await assertNoSymlinkAncestors(allowedOutputRoot, outputParent);
-  const temporaryRoot = await mkdtemp(path.join(outputParent, ".markiro-legal-build-"));
-  await assertNoSymlinkAncestors(outputParent, temporaryRoot);
+  const temporaryParent = options.preview ? outputParent : options.repositoryRoot;
+  const temporaryRoot = await mkdtemp(path.join(temporaryParent, ".markiro-legal-build-"));
+  await assertNoSymlinkAncestors(temporaryParent, temporaryRoot);
   const releaseRoot = path.join(temporaryRoot, "release");
   const internalRoot = path.join(temporaryRoot, "internal");
   await mkdir(releaseRoot);
-  try {
+  let generationLock: ArtifactGenerationLock | undefined;
+  const cleanup = async (): Promise<void> => {
+    const cleanupErrors: unknown[] = [];
+    try {
+      await rm(temporaryRoot, { recursive: true });
+    } catch (error) {
+      cleanupErrors.push(error);
+    }
+    if (generationLock) {
+      try {
+        await generationLock.release();
+      } catch (error) {
+        cleanupErrors.push(error);
+      }
+    }
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, "Legal artifact generation cleanup failed");
+    }
+  };
+  const runGeneration = async (): Promise<PublishedLegalArtifact[]> => {
+    generationLock = await acquireArtifactGenerationLock({
+      repositoryRoot: options.repositoryRoot,
+      outDir: options.outDir,
+      temporaryRoot,
+    });
+    const outputExists = await exists(options.outDir);
+    if (outputExists) {
+      await assertNoSymlink(options.outDir);
+      if (!options.check)
+        throw new Error(`Immutable legal artifact release already exists: ${options.outDir}`);
+    } else if (options.check) {
+      throw new Error(`Cannot --check a missing legal artifact release: ${options.outDir}`);
+    }
+
+    const version = await dependencies.getLibreOfficeVersion(options.sofficeBin);
+    assertReleaseLibreOfficeVersion(version, options.preview);
     const entries = await writeGeneratedArtifacts(releaseRoot, internalRoot, options, dependencies);
     if (outputExists) {
       await compareReleaseDirectories(releaseRoot, options.outDir);
@@ -1489,12 +1657,45 @@ export async function generateLegalArtifacts(
       }
       return entries;
     }
+    await dependencies.beforePublish?.(options.outDir);
     await assertNoSymlinkAncestors(allowedOutputRoot, options.outDir);
-    await publishStagedReleaseWithoutReplace(releaseRoot, options.outDir);
+    if (await exists(options.outDir)) {
+      await assertNoSymlink(options.outDir);
+      throw new Error(`Immutable legal artifact release already exists: ${options.outDir}`);
+    }
+    const [releaseInfo, outputParentInfo] = await Promise.all([
+      stat(releaseRoot),
+      stat(outputParent),
+    ]);
+    if (releaseInfo.dev !== outputParentInfo.dev) {
+      throw new Error("Atomic legal artifact publication requires staging on one filesystem");
+    }
+    // The external lock serializes cooperating generators, and the immediately preceding
+    // destination check prevents replacement of any observed release. Node exposes no portable
+    // atomic rename-without-replace primitive; a non-cooperating process can still race this
+    // check on platforms whose rename replaces an empty directory.
+    await rename(releaseRoot, options.outDir);
+    await Promise.all([syncDirectory(temporaryRoot), syncDirectory(outputParent)]);
     return entries;
-  } finally {
-    await rm(temporaryRoot, { recursive: true });
+  };
+
+  let entries: PublishedLegalArtifact[];
+  try {
+    entries = await runGeneration();
+  } catch (error) {
+    try {
+      await cleanup();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Legal artifact generation and cleanup both failed",
+        { cause: cleanupError },
+      );
+    }
+    throw error;
   }
+  await cleanup();
+  return entries;
 }
 
 function defaultRepositoryRoot(): string {
