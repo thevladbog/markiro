@@ -241,9 +241,13 @@ describe("deterministic branded DOCX", () => {
       expect(part).toContain(
         '<w:tblGrid><w:gridCol w:w="5103"/><w:gridCol w:w="4535"/></w:tblGrid>',
       );
-      expect(xmlElements(part, "w:tc")).toHaveLength(2);
+      const cells = xmlElements(part, "w:tc");
+      expect(cells).toHaveLength(2);
+      expect(cells[0]).not.toContain("<w:noWrap/>");
+      expect(cells[1]).toContain("<w:noWrap/>");
+      expect(part.match(/<w:noWrap\/>/g)).toHaveLength(1);
       expect(part).not.toContain("<w:br");
-      expect(part.match(/<w:wordWrap w:val="0"\/>/g)).toHaveLength(1);
+      expect(part).not.toContain("<w:wordWrap");
       expect(part).not.toContain(PRIVACY_REQUEST.verificationUrl);
       expectCenteredPaddedCells(part);
     }
@@ -253,7 +257,12 @@ describe("deterministic branded DOCX", () => {
       expect(part).toContain("PAGE");
       expect(part).toContain('descr="Verification Data Matrix"');
       expect(part).not.toContain(PRIVACY_REQUEST.verificationUrl);
-      expect(xmlElements(part, "w:tc")).toHaveLength(2);
+      const cells = xmlElements(part, "w:tc");
+      expect(cells).toHaveLength(2);
+      expect(cells[0]).not.toContain("<w:noWrap/>");
+      expect(cells[1]).toContain("<w:noWrap/>");
+      expect(part.match(/<w:noWrap\/>/g)).toHaveLength(1);
+      expect(part).not.toContain("<w:wordWrap");
       expectCenteredPaddedCells(part);
     }
     expect(mediaNames).not.toMatch(/signature|seal|stamp/i);

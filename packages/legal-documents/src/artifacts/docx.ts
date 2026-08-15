@@ -312,7 +312,6 @@ function createHeader(
               new Paragraph({
                 alignment: AlignmentType.RIGHT,
                 style: "FurnitureMono",
-                wordWrap: true,
                 children: [
                   new TextRun({ text: classLabel, bold: true }),
                   new TextRun({ text: ` · ${input.code} · ${input.revision}` }),
@@ -373,7 +372,6 @@ function createFooter(
               new Paragraph({
                 alignment: AlignmentType.CENTER,
                 style: "FurnitureMono",
-                wordWrap: true,
                 children: [
                   new TextRun({
                     text: `${input.code} · ${input.revision} · ${effectiveDate} · ${labels.page} `,
@@ -493,11 +491,17 @@ function renderBlock(block: LegalBlock): readonly FileChild[] {
 
 function normalizeDocx(bytes: Uint8Array, effectiveDate: string): Uint8Array {
   const entries = unzipSync(bytes);
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  for (const [name, value] of Object.entries(entries)) {
+    if (!/^word\/(?:header|footer)\d+\.xml$/.test(name)) continue;
+    entries[name] = encoder.encode(addNoWrapToIdentityCell(decoder.decode(value), name));
+  }
   const core = entries["docProps/core.xml"];
   if (!core) throw new Error("Generated DOCX is missing core properties");
   const timestamp = `${effectiveDate}T00:00:00Z`;
-  const coreXml = normalizeCorePropertyTimestamps(new TextDecoder().decode(core), timestamp);
-  entries["docProps/core.xml"] = new TextEncoder().encode(coreXml);
+  const coreXml = normalizeCorePropertyTimestamps(decoder.decode(core), timestamp);
+  entries["docProps/core.xml"] = encoder.encode(coreXml);
 
   const sortedEntries = Object.fromEntries(
     Object.keys(entries)
@@ -507,6 +511,40 @@ function normalizeDocx(bytes: Uint8Array, effectiveDate: string): Uint8Array {
   const normalized = zipSync(sortedEntries, { level: 9 });
   normalizeZipDates(normalized, effectiveDate);
   return normalized;
+}
+
+function addNoWrapToIdentityCell(xml: string, partName: string): string {
+  const cellTag = "<w:tc>";
+  const firstCellStart = xml.indexOf(cellTag);
+  const identityCellStart = xml.indexOf(cellTag, firstCellStart + cellTag.length);
+  const thirdCellStart = xml.indexOf(cellTag, identityCellStart + cellTag.length);
+  if (firstCellStart < 0 || identityCellStart < 0 || thirdCellStart >= 0) {
+    throw new Error(`Generated ${partName} must contain exactly two table cells`);
+  }
+
+  const identityCellEnd = xml.indexOf("</w:tc>", identityCellStart + cellTag.length);
+  const propertiesStart = xml.indexOf("<w:tcPr>", identityCellStart + cellTag.length);
+  const propertiesEnd = xml.indexOf("</w:tcPr>", propertiesStart + "<w:tcPr>".length);
+  if (
+    identityCellEnd < 0 ||
+    propertiesStart < 0 ||
+    propertiesEnd < 0 ||
+    propertiesStart > identityCellEnd ||
+    propertiesEnd > identityCellEnd
+  ) {
+    throw new Error(`Generated ${partName} identity cell has malformed properties`);
+  }
+
+  const propertiesXml = xml.slice(propertiesStart, propertiesEnd);
+  if (propertiesXml.includes("<w:noWrap")) {
+    throw new Error(`Generated ${partName} identity cell already has no-wrap properties`);
+  }
+  const marginsStart = xml.indexOf("<w:tcMar>", propertiesStart + "<w:tcPr>".length);
+  if (marginsStart < 0 || marginsStart > propertiesEnd) {
+    throw new Error(`Generated ${partName} identity cell is missing explicit margins`);
+  }
+
+  return `${xml.slice(0, marginsStart)}<w:noWrap/>${xml.slice(marginsStart)}`;
 }
 
 function isXmlWhitespace(value: string | undefined): boolean {
