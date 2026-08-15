@@ -176,7 +176,6 @@ const EnvSchema = z
     LANDING_ORIGIN: exactCanonicalOriginSchema.optional(),
     LANDING_DEMO_RECIPIENT: z.email().optional(),
     LANDING_DEMO_REPLY_TO: z.email().optional(),
-    LANDING_DEMO_CONSENT_VERSION: z.string().trim().min(1).max(64).optional(),
     SMARTCAPTCHA_SERVER_KEY: z.string().startsWith("ysc2_").optional(),
     LANDING_DEMO_RATE_WINDOW_SECONDS: z.coerce.number().int().min(60).max(3_600).default(900),
     LANDING_DEMO_SOURCE_LIMIT: z.coerce.number().int().min(1).max(100).default(5),
@@ -229,7 +228,6 @@ const EnvSchema = z
         "LANDING_ORIGIN",
         "LANDING_DEMO_RECIPIENT",
         "LANDING_DEMO_REPLY_TO",
-        "LANDING_DEMO_CONSENT_VERSION",
         "SMARTCAPTCHA_SERVER_KEY",
       ] as const) {
         if (!env[name]) {
@@ -273,7 +271,6 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "LANDING_ORIGIN",
     "LANDING_DEMO_RECIPIENT",
     "LANDING_DEMO_REPLY_TO",
-    "LANDING_DEMO_CONSENT_VERSION",
     "SMARTCAPTCHA_SERVER_KEY",
     "LANDING_DEMO_RATE_WINDOW_SECONDS",
     "LANDING_DEMO_SOURCE_LIMIT",

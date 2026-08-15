@@ -23,7 +23,7 @@ function body(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     requestId: REQUEST_ID,
     locale: "en",
     sourcePath: "/en/packing-workstation/",
-    consentVersion: "2026-08-14",
+    consentVersion: "MKR-PD-02/2026.08.01",
     name: " Ada ",
     company: " Factory ",
     email: " ADA@EXAMPLE.TEST ",
@@ -47,7 +47,7 @@ describe("POST /demo-requests", () => {
 
   beforeAll(async () => {
     const service = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       {
         assertAllowed: () => {
           if (limiterFailure) throw rateLimitedError();

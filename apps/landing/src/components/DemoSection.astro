@@ -1,4 +1,5 @@
 ---
+import { OPERATOR_PROFILES } from "@markiro/legal-documents";
 import type { PublicLegalLinks, PublicPhone } from "../lib/site-config";
 import type { Locale } from "../content/pages";
 import { getUiCopy } from "../content/ui";
@@ -24,6 +25,7 @@ const {
 } = Astro.props;
 const rootCopy = getUiCopy(locale);
 const copy = rootCopy.home.demo;
+const operatorEmail = OPERATOR_PROFILES["operator-2026-08-15"].email;
 const submissionEnabled =
   demoEndpoint !== null &&
   legalLinks !== null &&
@@ -114,7 +116,9 @@ const submissionEnabled =
       </button>
       <p class="form-status" data-form-status aria-live="polite"></p>
       {!submissionEnabled && (
-        <p class="form-legal">{copy.unavailable}</p>
+        <p class="form-legal">
+          {copy.unavailable} {copy.unavailableContact} <a href={`mailto:${operatorEmail}`}>{operatorEmail}</a>.
+        </p>
       )}
     </form>
   </div>

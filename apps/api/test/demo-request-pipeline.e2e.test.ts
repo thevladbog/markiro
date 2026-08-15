@@ -22,7 +22,7 @@ function input(requestId = randomUUID()): DemoRequestDto {
     requestId,
     locale: "en",
     sourcePath: "/en/packing-workstation/",
-    consentVersion: "2026-08-14",
+    consentVersion: "MKR-PD-02/2026.08.01",
     name: "Ada",
     company: "Factory",
     email: "ada@example.test",
@@ -137,7 +137,7 @@ describe.skipIf(!ready)("landing demo request mail pipeline", () => {
           kind: "landing-demo-notification",
           requestId: demo.requestId,
           receivedAt: RECEIVED_AT.toISOString(),
-          consentVersion: "2026-08-14",
+          consentVersion: "MKR-PD-02/2026.08.01",
           email: demo.email,
         }),
         expect.objectContaining({

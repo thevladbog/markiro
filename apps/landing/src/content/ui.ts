@@ -55,15 +55,15 @@ const RU = {
       kicker: "07 / ДЕМО НА ВАШЕЙ ЛИНИИ",
       lead: "Разберём ваш процесс и покажем рабочий сценарий без абстрактной презентации.",
       legal: {
-        consent: "согласие на обработку персональных данных",
-        prefix: "Я принимаю",
-        privacy: "политикой обработки данных",
+        consent: "согласия",
+        prefix: "Даю согласие на обработку персональных данных на условиях",
+        privacy: "политикой обработки персональных данных",
         separator: "и подтверждаю, что ознакомился с",
       },
       name: "Как к вам обращаться",
       phone: "Телефон для связи (необязательно)",
-      unavailable:
-        "Онлайн-отправка будет доступна после подключения CRM и утверждения документов об обработке данных.",
+      unavailable: "Онлайн-отправка временно недоступна.",
+      unavailableContact: "Напишите нам на",
     },
     hero: {
       heading: ["Линия идёт.", "Маркировка под контролем."],
@@ -212,15 +212,15 @@ const EN = {
       kicker: "07 / DEMO ON YOUR LINE",
       lead: "We will examine your process and demonstrate a working scenario instead of an abstract presentation.",
       legal: {
-        consent: "personal-data processing consent",
-        prefix: "I accept the",
-        privacy: "data processing policy",
+        consent: "personal-data consent",
+        prefix: "I consent to the processing of my personal data under the",
+        privacy: "personal-data processing policy",
         separator: "and confirm that I have read the",
       },
       name: "Your name",
       phone: "Contact phone (optional)",
-      unavailable:
-        "Online submission will be available after the CRM connection and data-processing documents are approved.",
+      unavailable: "Online submission is temporarily unavailable.",
+      unavailableContact: "Email us at",
     },
     hero: {
       heading: ["Keep the line moving.", "Keep serialization under control."],

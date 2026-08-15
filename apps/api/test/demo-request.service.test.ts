@@ -11,7 +11,7 @@ const INPUT: DemoRequestDto = {
   requestId: "11111111-1111-4111-8111-111111111111",
   locale: "en",
   sourcePath: "/en/packing-workstation/",
-  consentVersion: "2026-08-14",
+  consentVersion: "MKR-PD-02/2026.08.01",
   name: "Ada",
   company: "Factory",
   email: "ada@example.test",
@@ -40,7 +40,7 @@ describe("DemoRequestService", () => {
   it("runs limiter, honeypot/consent checks, captcha, and repository in exact order", async () => {
     const calls: string[] = [];
     const service = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       { assertAllowed: () => calls.push("limiter") },
       { assertHuman: async () => void calls.push("captcha") },
       { accept: async () => void calls.push("repository") },
@@ -56,7 +56,7 @@ describe("DemoRequestService", () => {
   it("returns bounded 404 before limiter or any later dependency when disabled", async () => {
     const calls: string[] = [];
     const service = new DemoRequestService(
-      { enabled: false, consentVersion: undefined },
+      { enabled: false },
       { assertAllowed: () => calls.push("limiter") },
       { assertHuman: async () => void calls.push("captcha") },
       { accept: async () => void calls.push("repository") },
@@ -73,7 +73,7 @@ describe("DemoRequestService", () => {
   it("charges the limiter before rejecting a filled honeypot", async () => {
     const calls: string[] = [];
     const service = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       { assertAllowed: () => calls.push("limiter") },
       { assertHuman: async () => void calls.push("captcha") },
       { accept: async () => void calls.push("repository") },
@@ -90,14 +90,14 @@ describe("DemoRequestService", () => {
   it("rejects a stale consent version after limiter and before captcha", async () => {
     const calls: string[] = [];
     const service = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       { assertAllowed: () => calls.push("limiter") },
       { assertHuman: async () => void calls.push("captcha") },
       { accept: async () => void calls.push("repository") },
     );
 
     expectHttpError(
-      await capture(service.submit({ ...INPUT, consentVersion: "2026-08-13" }, "203.0.113.7")),
+      await capture(service.submit({ ...INPUT, consentVersion: "2026-08-14" }, "203.0.113.7")),
       HttpStatus.BAD_REQUEST,
       "invalid_request",
     );
@@ -107,7 +107,7 @@ describe("DemoRequestService", () => {
   it("stops immediately on limiter or captcha rejection", async () => {
     const limiterCalls: string[] = [];
     const limiterFailure = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       {
         assertAllowed: () => {
           limiterCalls.push("limiter");
@@ -126,7 +126,7 @@ describe("DemoRequestService", () => {
 
     const captchaCalls: string[] = [];
     const captchaFailure = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       { assertAllowed: () => captchaCalls.push("limiter") },
       {
         assertHuman: async () => {
@@ -147,7 +147,7 @@ describe("DemoRequestService", () => {
   it("maps repository detail to one bounded unavailable response", async () => {
     const internalDetail = "duplicate constraint email_deliveries_public_request_kind_uq";
     const service = new DemoRequestService(
-      { enabled: true, consentVersion: "2026-08-14" },
+      { enabled: true },
       { assertAllowed: () => undefined },
       { assertHuman: async () => undefined },
       {

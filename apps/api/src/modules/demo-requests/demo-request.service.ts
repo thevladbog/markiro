@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { CURRENT_DEMO_CONSENT_ID } from "@markiro/legal-documents";
 import type { DemoRequestCaptchaService } from "./demo-request-captcha.service";
 import {
   invalidRequestError,
@@ -10,7 +11,6 @@ import type { DemoRequestDto } from "./demo-request.schema";
 
 export interface DemoRequestServiceOptions {
   enabled: boolean;
-  consentVersion: string | undefined;
 }
 
 type Limiter = Pick<DemoRequestRateLimiter, "assertAllowed">;
@@ -36,10 +36,7 @@ export class DemoRequestService {
 
     this.limiter.assertAllowed(source);
     if (input.website !== "") throw invalidRequestError();
-    if (
-      this.options.consentVersion === undefined ||
-      input.consentVersion !== this.options.consentVersion
-    ) {
+    if (input.consentVersion !== CURRENT_DEMO_CONSENT_ID) {
       throw invalidRequestError();
     }
 
