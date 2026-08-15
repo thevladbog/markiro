@@ -2,14 +2,17 @@ import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   lstat,
+  link,
   mkdir,
   mkdtemp,
   open,
   readFile,
   readdir,
-  rename,
+  realpath,
   rm,
+  rmdir,
   stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
@@ -458,11 +461,108 @@ function replaceMappedReferences(
   value: string,
   objectMapping: ReadonlyMap<number, number>,
 ): string {
-  return value.replace(/\b(\d+)\s+(\d+)\s+R\b/g, (reference, object, generation) => {
-    if (generation !== "0") return reference;
-    const mapped = objectMapping.get(Number(object));
-    return mapped === undefined ? reference : `${mapped} 0 R`;
-  });
+  const isWhitespace = (character: string): boolean =>
+    character === "\u0000" ||
+    character === "\t" ||
+    character === "\n" ||
+    character === "\f" ||
+    character === "\r" ||
+    character === " ";
+  const isDelimiter = (character: string): boolean =>
+    character === "(" ||
+    character === ")" ||
+    character === "<" ||
+    character === ">" ||
+    character === "[" ||
+    character === "]" ||
+    character === "{" ||
+    character === "}" ||
+    character === "/" ||
+    character === "%";
+  const isBoundary = (character: string): boolean =>
+    character === "" || isWhitespace(character) || isDelimiter(character);
+  const protectedEnd = (start: number): number | undefined => {
+    const opening = value.charAt(start);
+    if (opening === "%") {
+      let end = start + 1;
+      while (end < value.length && !["\n", "\r"].includes(value.charAt(end))) end += 1;
+      return end;
+    }
+    if (opening === "<" && value.charAt(start - 1) !== "<" && value.charAt(start + 1) !== "<") {
+      const closing = value.indexOf(">", start + 1);
+      if (closing < 0) throw new Error("Generated PDF has an unterminated hex string");
+      return closing + 1;
+    }
+    if (opening !== "(") return undefined;
+    let depth = 1;
+    let end = start + 1;
+    while (end < value.length) {
+      const character = value.charAt(end);
+      if (character === "\\") {
+        end += value.charAt(end + 1) === "\r" && value.charAt(end + 2) === "\n" ? 3 : 2;
+        continue;
+      }
+      if (character === "(") depth += 1;
+      if (character === ")") {
+        depth -= 1;
+        if (depth === 0) return end + 1;
+      }
+      end += 1;
+    }
+    throw new Error("Generated PDF has an unterminated literal string");
+  };
+
+  let rewritten = "";
+  let index = 0;
+  while (index < value.length) {
+    const end = protectedEnd(index);
+    if (end !== undefined) {
+      rewritten += value.slice(index, end);
+      index = end;
+      continue;
+    }
+
+    const previous = index === 0 ? "" : value.charAt(index - 1);
+    if (!/\d/.test(value.charAt(index)) || !isBoundary(previous)) {
+      rewritten += value.charAt(index);
+      index += 1;
+      continue;
+    }
+    let objectEnd = index;
+    while (/\d/.test(value.charAt(objectEnd))) objectEnd += 1;
+    let generationStart = objectEnd;
+    while (isWhitespace(value.charAt(generationStart))) generationStart += 1;
+    if (generationStart === objectEnd || !/\d/.test(value.charAt(generationStart))) {
+      rewritten += value.charAt(index);
+      index += 1;
+      continue;
+    }
+    let generationEnd = generationStart;
+    while (/\d/.test(value.charAt(generationEnd))) generationEnd += 1;
+    let referenceMarker = generationEnd;
+    while (isWhitespace(value.charAt(referenceMarker))) referenceMarker += 1;
+    if (
+      referenceMarker === generationEnd ||
+      value.charAt(referenceMarker) !== "R" ||
+      !isBoundary(value.charAt(referenceMarker + 1))
+    ) {
+      rewritten += value.charAt(index);
+      index += 1;
+      continue;
+    }
+    const objectNumber = Number(value.slice(index, objectEnd));
+    const generation = value.slice(generationStart, generationEnd);
+    const mapped = generation === "0" ? objectMapping.get(objectNumber) : undefined;
+    rewritten +=
+      mapped === undefined
+        ? value.slice(index, referenceMarker + 1)
+        : `${mapped}${value.slice(objectEnd, generationStart)}0${value.slice(
+            generationEnd,
+            referenceMarker,
+          )}R`;
+    index = referenceMarker + 1;
+  }
+  return rewritten;
 }
 
 function rewritePdfObjectReferences(
@@ -735,19 +835,40 @@ export function parseVeraPdfValidationResult(output: string): void {
       ? (firstJob.validationResult as readonly unknown[])
       : [];
   const validationResult: unknown = validationResults[0];
+  const validationDetails: unknown = isUnknownRecord(validationResult)
+    ? validationResult.details
+    : undefined;
   const validationSummary: unknown = isUnknownRecord(summary)
     ? summary.validationSummary
     : undefined;
+  const featuresSummary: unknown = isUnknownRecord(summary) ? summary.featuresSummary : undefined;
+  const repairSummary: unknown = isUnknownRecord(summary) ? summary.repairSummary : undefined;
   const conformant =
     jobs.length === 1 &&
     validationResults.length === 1 &&
     isUnknownRecord(validationResult) &&
     validationResult.compliant === true &&
     validationResult.jobEndStatus === "normal" &&
-    validationResult.profileName === "PDF/A-2b validation profile";
+    validationResult.profileName === "PDF/A-2b validation profile" &&
+    isUnknownRecord(validationDetails) &&
+    validationDetails.failedRules === 0 &&
+    validationDetails.failedChecks === 0;
   const summaryConformant =
     isUnknownRecord(summary) &&
     summary.totalJobs === 1 &&
+    summary.outOfMemory === 0 &&
+    summary.veraExceptions === 0 &&
+    summary.multiJob === false &&
+    summary.failedEncryptedJobs === 0 &&
+    summary.failedParsingJobs === 0 &&
+    isUnknownRecord(featuresSummary) &&
+    featuresSummary.failedJobCount === 0 &&
+    featuresSummary.totalJobCount === 0 &&
+    featuresSummary.successfulJobCount === 0 &&
+    isUnknownRecord(repairSummary) &&
+    repairSummary.failedJobCount === 0 &&
+    repairSummary.totalJobCount === 0 &&
+    repairSummary.successfulJobCount === 0 &&
     isUnknownRecord(validationSummary) &&
     validationSummary.totalJobCount === 1 &&
     validationSummary.successfulJobCount === 1 &&
@@ -947,6 +1068,38 @@ async function assertNoSymlink(filePath: string): Promise<void> {
   if (info.isSymbolicLink()) throw new Error(`Refusing to follow symbolic link: ${filePath}`);
 }
 
+async function assertNoSymlinkAncestors(allowedRoot: string, candidatePath: string): Promise<void> {
+  const root = path.resolve(allowedRoot);
+  const candidate = path.resolve(candidatePath);
+  if (!pathIsInside(root, candidate)) {
+    throw new Error(`Artifact path is outside its allowed root: ${candidate}`);
+  }
+  const rootInfo = await lstat(root);
+  if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) {
+    throw new Error(`Refusing symbolic-link ancestor for artifact output: ${root}`);
+  }
+  const canonicalRoot = await realpath(root);
+  const relative = path.relative(root, candidate);
+  let current = root;
+  for (const component of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, component);
+    let currentInfo;
+    try {
+      currentInfo = await lstat(current);
+    } catch (error) {
+      if (errorHasCode(error, "ENOENT")) return;
+      throw error;
+    }
+    if (currentInfo.isSymbolicLink()) {
+      throw new Error(`Refusing symbolic-link ancestor for artifact output: ${current}`);
+    }
+    const canonicalCurrent = await realpath(current);
+    if (!pathIsInside(canonicalRoot, canonicalCurrent)) {
+      throw new Error(`Refusing symbolic-link ancestor for artifact output: ${current}`);
+    }
+  }
+}
+
 async function syncFile(filePath: string): Promise<void> {
   const handle = await open(filePath, "r");
   try {
@@ -962,6 +1115,181 @@ async function syncDirectory(directory: string): Promise<void> {
     await handle.sync();
   } finally {
     await handle.close();
+  }
+}
+
+interface LinkedPublicationFile {
+  readonly sourcePath: string;
+  readonly destinationPath: string;
+  readonly device: number;
+  readonly inode: number;
+}
+
+interface PublicationDirectory {
+  readonly path: string;
+  readonly device: number;
+  readonly inode: number;
+}
+
+function errorHasCode(error: unknown, code: string): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === code;
+}
+
+async function linkPublicationFile(
+  sourcePath: string,
+  destinationPath: string,
+): Promise<LinkedPublicationFile> {
+  const source = await lstat(sourcePath);
+  if (!source.isFile() || source.isSymbolicLink()) {
+    throw new Error(`Staged legal artifact is not a regular file: ${sourcePath}`);
+  }
+  try {
+    await link(sourcePath, destinationPath);
+  } catch (error) {
+    if (errorHasCode(error, "EXDEV")) {
+      throw new Error("Legal artifact publication must remain on one filesystem", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  return {
+    sourcePath,
+    destinationPath,
+    device: source.dev,
+    inode: source.ino,
+  };
+}
+
+async function unlinkOwnedPublicationFile(file: LinkedPublicationFile): Promise<void> {
+  try {
+    const [source, destination] = await Promise.all([
+      lstat(file.sourcePath),
+      lstat(file.destinationPath),
+    ]);
+    if (
+      source.dev === file.device &&
+      source.ino === file.inode &&
+      destination.dev === file.device &&
+      destination.ino === file.inode
+    ) {
+      await unlink(file.destinationPath);
+    }
+  } catch (error) {
+    if (!errorHasCode(error, "ENOENT")) throw error;
+  }
+}
+
+async function removeOwnedPublicationDirectory(directory: PublicationDirectory): Promise<void> {
+  try {
+    const current = await lstat(directory.path);
+    if (
+      current.isDirectory() &&
+      !current.isSymbolicLink() &&
+      current.dev === directory.device &&
+      current.ino === directory.inode
+    ) {
+      await rmdir(directory.path);
+    }
+  } catch (error) {
+    if (!errorHasCode(error, "ENOENT") && !errorHasCode(error, "ENOTEMPTY")) throw error;
+  }
+}
+
+async function publishStagedReleaseWithoutReplace(
+  releaseRoot: string,
+  outDir: string,
+): Promise<void> {
+  const outputParent = path.dirname(outDir);
+  const [releaseInfo, outputParentInfo] = await Promise.all([
+    stat(releaseRoot),
+    stat(outputParent),
+  ]);
+  if (releaseInfo.dev !== outputParentInfo.dev) {
+    throw new Error("Legal artifact publication must remain on one filesystem");
+  }
+
+  let releaseDirectory: PublicationDirectory | undefined;
+  let filesDirectory: PublicationDirectory | undefined;
+  const linkedFiles: LinkedPublicationFile[] = [];
+  let committed = false;
+  try {
+    try {
+      await mkdir(outDir);
+    } catch (error) {
+      if (errorHasCode(error, "EEXIST")) {
+        throw new Error(`Immutable legal artifact release already exists: ${outDir}`, {
+          cause: error,
+        });
+      }
+      throw error;
+    }
+    const releaseDestinationInfo = await lstat(outDir);
+    releaseDirectory = {
+      path: outDir,
+      device: releaseDestinationInfo.dev,
+      inode: releaseDestinationInfo.ino,
+    };
+    if (releaseDestinationInfo.dev !== releaseInfo.dev) {
+      throw new Error("Legal artifact publication must remain on one filesystem");
+    }
+    await syncDirectory(outputParent);
+
+    const sourceFilesRoot = path.join(releaseRoot, "files");
+    const destinationFilesRoot = path.join(outDir, "files");
+    await mkdir(destinationFilesRoot);
+    const destinationFilesInfo = await lstat(destinationFilesRoot);
+    filesDirectory = {
+      path: destinationFilesRoot,
+      device: destinationFilesInfo.dev,
+      inode: destinationFilesInfo.ino,
+    };
+    const artifactFiles = (await readdir(sourceFilesRoot)).sort();
+    for (const fileName of artifactFiles) {
+      linkedFiles.push(
+        await linkPublicationFile(
+          path.join(sourceFilesRoot, fileName),
+          path.join(destinationFilesRoot, fileName),
+        ),
+      );
+    }
+    await syncDirectory(destinationFilesRoot);
+
+    const rootEntries = (await readdir(releaseRoot)).filter((entry) => entry !== "files").sort();
+    if (rootEntries.length !== 1) {
+      throw new Error("Staged legal artifact release has an invalid publication marker set");
+    }
+    const publicationMarker = rootEntries[0];
+    if (!publicationMarker) {
+      throw new Error("Staged legal artifact release has no publication marker");
+    }
+    // The verifier accepts a release only after this final no-replace link makes its manifest
+    // (or explicit preview marker) visible; every artifact link and directory sync precedes it.
+    linkedFiles.push(
+      await linkPublicationFile(
+        path.join(releaseRoot, publicationMarker),
+        path.join(outDir, publicationMarker),
+      ),
+    );
+    committed = true;
+    await syncDirectory(outDir);
+    await syncDirectory(outputParent);
+  } catch (error) {
+    if (!committed) {
+      try {
+        for (const file of [...linkedFiles].reverse()) await unlinkOwnedPublicationFile(file);
+        if (filesDirectory) await removeOwnedPublicationDirectory(filesDirectory);
+        if (releaseDirectory) await removeOwnedPublicationDirectory(releaseDirectory);
+        await syncDirectory(outputParent);
+      } catch (cleanupError) {
+        throw new AggregateError(
+          [error, cleanupError],
+          "Legal artifact publication failed and its owned reservation could not be cleaned",
+          { cause: cleanupError },
+        );
+      }
+    }
+    throw error;
   }
 }
 
@@ -1121,6 +1449,11 @@ export async function generateLegalArtifacts(
   if (options.preview && options.check)
     throw new Error("Preview generation does not support --check");
 
+  const allowedOutputRoot = pathIsInside(options.repositoryRoot, options.outDir)
+    ? options.repositoryRoot
+    : path.parse(options.outDir).root;
+  await assertNoSymlinkAncestors(allowedOutputRoot, options.outDir);
+
   const outputExists = await exists(options.outDir);
   if (outputExists) {
     await assertNoSymlink(options.outDir);
@@ -1135,7 +1468,9 @@ export async function generateLegalArtifacts(
 
   const outputParent = path.dirname(options.outDir);
   await mkdir(outputParent, { recursive: true });
+  await assertNoSymlinkAncestors(allowedOutputRoot, outputParent);
   const temporaryRoot = await mkdtemp(path.join(outputParent, ".markiro-legal-build-"));
+  await assertNoSymlinkAncestors(outputParent, temporaryRoot);
   const releaseRoot = path.join(temporaryRoot, "release");
   const internalRoot = path.join(temporaryRoot, "internal");
   await mkdir(releaseRoot);
@@ -1154,8 +1489,8 @@ export async function generateLegalArtifacts(
       }
       return entries;
     }
-    await rename(releaseRoot, options.outDir);
-    await syncDirectory(outputParent);
+    await assertNoSymlinkAncestors(allowedOutputRoot, options.outDir);
+    await publishStagedReleaseWithoutReplace(releaseRoot, options.outDir);
     return entries;
   } finally {
     await rm(temporaryRoot, { recursive: true });

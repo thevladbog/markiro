@@ -44,6 +44,80 @@ const temporaryRoots: string[] = [];
 const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
 
+interface VeraPdfFixture {
+  report: {
+    jobs: {
+      validationResult: {
+        compliant: boolean;
+        jobEndStatus: string;
+        profileName: string;
+        details: { failedRules: number; failedChecks: number };
+      }[];
+    }[];
+    batchSummary: {
+      totalJobs: number;
+      outOfMemory: number;
+      veraExceptions: number;
+      featuresSummary: {
+        failedJobCount: number;
+        totalJobCount: number;
+        successfulJobCount: number;
+      };
+      repairSummary: {
+        failedJobCount: number;
+        totalJobCount: number;
+        successfulJobCount: number;
+      };
+      multiJob: boolean;
+      failedEncryptedJobs: number;
+      failedParsingJobs: number;
+      validationSummary: {
+        totalJobCount: number;
+        successfulJobCount: number;
+        failedJobCount: number;
+        compliantPdfaCount: number;
+        nonCompliantPdfaCount: number;
+      };
+    };
+  };
+}
+
+function compliantVeraPdfFixture(): VeraPdfFixture {
+  return {
+    report: {
+      jobs: [
+        {
+          validationResult: [
+            {
+              compliant: true,
+              jobEndStatus: "normal",
+              profileName: "PDF/A-2b validation profile",
+              details: { failedRules: 0, failedChecks: 0 },
+            },
+          ],
+        },
+      ],
+      batchSummary: {
+        totalJobs: 1,
+        outOfMemory: 0,
+        veraExceptions: 0,
+        featuresSummary: { failedJobCount: 0, totalJobCount: 0, successfulJobCount: 0 },
+        repairSummary: { failedJobCount: 0, totalJobCount: 0, successfulJobCount: 0 },
+        multiJob: false,
+        failedEncryptedJobs: 0,
+        failedParsingJobs: 0,
+        validationSummary: {
+          totalJobCount: 1,
+          successfulJobCount: 1,
+          failedJobCount: 0,
+          compliantPdfaCount: 1,
+          nonCompliantPdfaCount: 0,
+        },
+      },
+    },
+  };
+}
+
 async function temporaryRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "markiro-legal-artifacts-test-"));
   temporaryRoots.push(root);
@@ -68,6 +142,7 @@ function pdfWithIccTimestamp(
   id: string,
   iccTime: readonly [number, number, number, number, number, number],
   swapFontGroups = false,
+  includeProtectedReferences = false,
 ): Buffer {
   const profile = Buffer.alloc(128);
   profile.writeUInt32BE(profile.byteLength, 0);
@@ -132,7 +207,20 @@ function pdfWithIccTimestamp(
     {
       number: 1,
       bytes: Buffer.from(
-        `1 0 obj\n<</Type/Catalog/OutputIntents[2 0 R]/Fonts[${monoRoot} 0 R ${sansRoot} 0 R]>>\nendobj\n`,
+        [
+          "1 0 obj",
+          `<</Type/Catalog/OutputIntents[2 0 R]/Fonts[${monoRoot} 0 R ${sansRoot} 0 R]`,
+          ...(includeProtectedReferences
+            ? [
+                "/Literal(keep 7 0 R nested (8 0 R) escaped \\(9 0 R\\))",
+                "/Hex<313020302052>",
+                "% keep 11 0 R",
+              ]
+            : []),
+          ">>",
+          "endobj",
+          "",
+        ].join("\n"),
       ),
     },
     {
@@ -303,6 +391,19 @@ describe("published legal artifact manifest verification", () => {
     ).resolves.toEqual(
       [...fixture.entries].sort((left, right) => left.fileName.localeCompare(right.fileName)),
     );
+  });
+
+  it("rejects a pre-commit publication root until its manifest marker appears", async () => {
+    const rootDir = await temporaryRoot();
+    await mkdir(path.join(rootDir, "files"));
+
+    await expect(
+      verifyArtifactManifest({
+        rootDir,
+        manifestPath: path.join(rootDir, "artifacts.json"),
+        pdfaValidatedFiles: new Set(),
+      }),
+    ).rejects.toThrow("artifact root entry");
   });
 
   it("rejects a manifest entry whose file is missing", async () => {
@@ -630,63 +731,85 @@ describe("legal artifact release generation", () => {
   });
 
   it("accepts only a machine-readable conforming veraPDF result", () => {
-    const compliant = JSON.stringify({
-      report: {
-        jobs: [
-          {
-            validationResult: [
-              {
-                compliant: true,
-                jobEndStatus: "normal",
-                profileName: "PDF/A-2b validation profile",
-              },
-            ],
-          },
-        ],
-        batchSummary: {
-          totalJobs: 1,
-          validationSummary: {
-            totalJobCount: 1,
-            successfulJobCount: 1,
-            failedJobCount: 0,
-            compliantPdfaCount: 1,
-            nonCompliantPdfaCount: 0,
-          },
-        },
-      },
-    });
+    const compliant = JSON.stringify(compliantVeraPdfFixture());
     expect(() => parseVeraPdfValidationResult(compliant)).not.toThrow();
-    expect(() =>
-      parseVeraPdfValidationResult(
-        JSON.stringify({
-          report: {
-            jobs: [
-              {
-                validationResult: [
-                  {
-                    compliant: false,
-                    jobEndStatus: "normal",
-                    profileName: "PDF/A-2b validation profile",
-                  },
-                ],
-              },
-            ],
-            batchSummary: {
-              totalJobs: 1,
-              validationSummary: {
-                totalJobCount: 1,
-                successfulJobCount: 1,
-                failedJobCount: 0,
-                compliantPdfaCount: 0,
-                nonCompliantPdfaCount: 1,
-              },
-            },
-          },
-        }),
-      ),
-    ).toThrow("not conformant");
+    const nonCompliant = compliantVeraPdfFixture();
+    const validationResult = nonCompliant.report.jobs[0]?.validationResult[0];
+    if (!validationResult) throw new Error("Fixture has no validation result");
+    validationResult.compliant = false;
+    nonCompliant.report.batchSummary.validationSummary.compliantPdfaCount = 0;
+    nonCompliant.report.batchSummary.validationSummary.nonCompliantPdfaCount = 1;
+    expect(() => parseVeraPdfValidationResult(JSON.stringify(nonCompliant))).toThrow(
+      "not conformant",
+    );
     expect(() => parseVeraPdfValidationResult("not json")).toThrow("machine-readable");
   });
+
+  const contradictoryVeraPdfFixtures: readonly [string, (fixture: VeraPdfFixture) => void][] = [
+    ["out-of-memory jobs", (fixture) => (fixture.report.batchSummary.outOfMemory = 1)],
+    ["veraPDF exceptions", (fixture) => (fixture.report.batchSummary.veraExceptions = 1)],
+    [
+      "failed feature jobs",
+      (fixture) => (fixture.report.batchSummary.featuresSummary.failedJobCount = 1),
+    ],
+    [
+      "failed repair jobs",
+      (fixture) => (fixture.report.batchSummary.repairSummary.failedJobCount = 1),
+    ],
+    ["multi-job mode", (fixture) => (fixture.report.batchSummary.multiJob = true)],
+    ["encrypted jobs", (fixture) => (fixture.report.batchSummary.failedEncryptedJobs = 1)],
+    ["parse failures", (fixture) => (fixture.report.batchSummary.failedParsingJobs = 1)],
+    [
+      "failed validation jobs",
+      (fixture) => (fixture.report.batchSummary.validationSummary.failedJobCount = 1),
+    ],
+    [
+      "noncompliant PDFs",
+      (fixture) => (fixture.report.batchSummary.validationSummary.nonCompliantPdfaCount = 1),
+    ],
+    [
+      "failed rules",
+      (fixture) => {
+        const result = fixture.report.jobs[0]?.validationResult[0];
+        if (!result) throw new Error("Fixture has no validation result");
+        result.details.failedRules = 1;
+      },
+    ],
+    [
+      "failed checks",
+      (fixture) => {
+        const result = fixture.report.jobs[0]?.validationResult[0];
+        if (!result) throw new Error("Fixture has no validation result");
+        result.details.failedChecks = 1;
+      },
+    ],
+    [
+      "an extra validation result",
+      (fixture) => {
+        const job = fixture.report.jobs[0];
+        const result = job?.validationResult[0];
+        if (!job || !result) throw new Error("Fixture has no validation result");
+        job.validationResult.push(structuredClone(result));
+      },
+    ],
+    [
+      "an extra job",
+      (fixture) => {
+        const job = fixture.report.jobs[0];
+        if (!job) throw new Error("Fixture has no job");
+        fixture.report.jobs.push(structuredClone(job));
+      },
+    ],
+  ];
+
+  it.each(contradictoryVeraPdfFixtures)(
+    "rejects a veraPDF result with %s despite a compliant result",
+    (_case, mutate) => {
+      const fixture = compliantVeraPdfFixture();
+      mutate(fixture);
+      expect(() => parseVeraPdfValidationResult(JSON.stringify(fixture))).toThrow("not conformant");
+    },
+  );
 
   it("requires searchable boundary text and Cyrillic", () => {
     const expected = [
@@ -827,6 +950,34 @@ describe("legal artifact release generation", () => {
     );
   });
 
+  it("preserves PDF literal, hex, and comment content while canonicalizing font references", () => {
+    const argumentsForPdf = [
+      "2026-08-15T17:56:04+03:00",
+      "20260815175604+03'00'",
+      "A335EE20CB831FE28287D9DB23DB822E",
+      [2026, 8, 15, 14, 56, 4] as const,
+    ] as const;
+    const identity = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+    const first = pdfWithIccTimestamp(...argumentsForPdf, false, true);
+    const second = pdfWithIccTimestamp(...argumentsForPdf, true, true);
+    const expectedProtectedContent = [
+      "/Literal(keep 7 0 R nested (8 0 R) escaped \\(9 0 R\\))",
+      "/Hex<313020302052>",
+      "% keep 11 0 R",
+    ] as const;
+
+    const normalizedFirst = normalizeLibreOfficePdf(first, "2026-08-15", identity);
+    const normalizedSecond = normalizeLibreOfficePdf(second, "2026-08-15", identity);
+
+    expect(normalizedFirst).toEqual(normalizedSecond);
+    for (const protectedContent of expectedProtectedContent) {
+      expect(first.toString("latin1")).toContain(protectedContent);
+      expect(second.toString("latin1")).toContain(protectedContent);
+      expect(normalizedFirst.toString("latin1")).toContain(protectedContent);
+      expect(normalizedSecond.toString("latin1")).toContain(protectedContent);
+    }
+  });
+
   it("requires release output to be the selected public legal root", async () => {
     const repositoryRoot = await temporaryRoot();
     const publicRoot = path.join(repositoryRoot, "apps/landing/public/legal");
@@ -845,6 +996,28 @@ describe("legal artifact release generation", () => {
     expect(
       resolveGenerationOutput(path.join(repositoryRoot, "preview"), repositoryRoot, true),
     ).toBe(path.join(repositoryRoot, "preview"));
+  });
+
+  it("rejects a symbolic-link output parent before writing through it", async () => {
+    const repositoryRoot = await temporaryRoot();
+    const outsideRoot = await temporaryRoot();
+    await mkdir(path.join(repositoryRoot, "apps/landing"), { recursive: true });
+    await symlink(outsideRoot, path.join(repositoryRoot, "apps/landing/public"), "dir");
+    const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
+
+    await expect(
+      generateLegalArtifacts(
+        {
+          repositoryRoot,
+          outDir,
+          sofficeBin: "/opt/libreoffice-26.2.5/program/soffice",
+          preview: false,
+          check: false,
+        },
+        fakeGenerationDependencies(),
+      ),
+    ).rejects.toThrow("symbolic-link ancestor");
+    await expect(readdir(outsideRoot)).resolves.toEqual([]);
   });
 
   it("publishes all twelve files and the manifest only after every PDF validates", async () => {
@@ -888,6 +1061,45 @@ describe("legal artifact release generation", () => {
       ),
     ).rejects.toThrow("synthetic PDF/A failure");
     await expect(lstat(outDir)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("does not clobber an empty destination created immediately before publication", async () => {
+    const repositoryRoot = await temporaryRoot();
+    const outDir = path.join(repositoryRoot, "apps/landing/public/legal");
+    const dependencies = fakeGenerationDependencies();
+    let validations = 0;
+    let collisionIdentity: { readonly device: number; readonly inode: number } | undefined;
+    const collisionDependencies: ArtifactGenerationDependencies = {
+      ...dependencies,
+      validatePdf: async (input) => {
+        await dependencies.validatePdf(input);
+        validations += 1;
+        if (validations === 8) {
+          await mkdir(outDir);
+          const collision = await lstat(outDir);
+          collisionIdentity = { device: collision.dev, inode: collision.ino };
+        }
+      },
+    };
+
+    await expect(
+      generateLegalArtifacts(
+        {
+          repositoryRoot,
+          outDir,
+          sofficeBin: "/opt/libreoffice-26.2.5/program/soffice",
+          preview: false,
+          check: false,
+        },
+        collisionDependencies,
+      ),
+    ).rejects.toThrow("already exists");
+    await expect(readdir(outDir)).resolves.toEqual([]);
+    const collisionAfterFailure = await lstat(outDir);
+    expect({ device: collisionAfterFailure.dev, inode: collisionAfterFailure.ino }).toEqual(
+      collisionIdentity,
+    );
+    await expect(readdir(path.dirname(outDir))).resolves.toEqual(["legal"]);
   });
 
   it("never overwrites a release and allows --check only for byte-identical output", async () => {
