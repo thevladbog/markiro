@@ -6,6 +6,8 @@ export interface ScanOutcome {
   verdict: ScanVerdict;
   /** When this code was first accepted — only set for a duplicate. */
   firstSeen: string | null;
+  /** The accepted scan brought this shift exactly to its planned quantity. */
+  planReached?: boolean;
 }
 
 export interface ScanQueueDeps {

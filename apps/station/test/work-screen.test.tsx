@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import { buildSscc, kmHash, parseKm, type LabelTemplateSpec } from "@markiro/domain";
@@ -177,6 +177,7 @@ interface RenderWorkScreenOverrides {
   expectedGtin14?: string;
   productName?: string;
   counterpartyName?: string | null;
+  plannedQty?: number | null;
   source?: ScanSource;
   sound?: SoundSettings;
   onScanRecorded?: () => void;
@@ -194,6 +195,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     expectedGtin14 = "04600000000015",
     productName = "Water 0.5",
     counterpartyName = null,
+    plannedQty,
     source = manualSource(),
     sound = { muted: true, volume: 1 },
     onScanRecorded,
@@ -211,6 +213,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       expectedGtin14={expectedGtin14}
       productName={productName}
       counterpartyName={counterpartyName}
+      plannedQty={plannedQty}
       source={source}
       sound={sound}
       {...(onScanRecorded ? { onScanRecorded } : {})}
@@ -444,6 +447,21 @@ describe("WorkScreen", () => {
       expect(rows).toHaveLength(1);
     });
     expect(await screen.findByText("1")).toBeDefined();
+  });
+
+  it("offers to close or continue once the accepted total reaches the plan", async () => {
+    const source = manualSource();
+    renderWorkScreen({ source, plannedQty: 1 });
+
+    act(() => source.emit(KM));
+
+    const title = await screen.findByText("Plan completed");
+    const prompt = title.closest('[role="alert"]');
+    if (!(prompt instanceof HTMLElement)) {
+      throw new Error("Plan-reached prompt is not available");
+    }
+    expect(within(prompt).getByRole("button", { name: "Close shift" })).toBeDefined();
+    expect(within(prompt).getByRole("button", { name: "Continue" })).toBeDefined();
   });
 
   it("presents accepted scans locally while retaining their success sound", async () => {
