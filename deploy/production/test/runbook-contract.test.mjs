@@ -4,6 +4,7 @@ import test from "node:test";
 
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 test("production deploy runbook describes one direct immutable Compose delivery", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
@@ -29,7 +30,7 @@ test("production deploy runbook requires key-only pinned SSH and ephemeral GHCR 
     "github.token",
     "password-stdin",
   ])
-    assert.match(runbook + "\n" + secrets, new RegExp(value.replace(".", "\\.")));
+    assert.match(runbook + "\n" + secrets, new RegExp(escapeRegExp(value)));
 });
 
 test("production runbooks keep API private and assign public TLS to direct Caddy", async () => {
@@ -65,7 +66,7 @@ test("landing publication runbook separates reachability from indexed search evi
     "consent",
     "docs/seo/ai-search-query-pack.md",
   ])
-    assert.match(runbook, new RegExp(required.replaceAll(".", "\\."), "i"));
+    assert.match(runbook, new RegExp(escapeRegExp(required), "i"));
   assert.match(runbook, /D0[^\n]*только[^\n]*(?:доступност|reachability)/i);
   assert.match(runbook, /D7/);
   assert.match(runbook, /D30/);
@@ -89,7 +90,7 @@ test("landing publication runbook keeps demo email release gates observable", as
     "retrying",
     "failed",
   ])
-    assert.match(runbook, new RegExp(required));
+    assert.match(runbook, new RegExp(escapeRegExp(required)));
 
   for (const unproved of [
     "юридическое одобрение",
@@ -99,7 +100,10 @@ test("landing publication runbook keeps demo email release gates observable", as
     "размещение в спаме",
     "отображение в почтовых клиентах",
   ])
-    assert.match(runbook, new RegExp(`Тесты репозитория не доказывают[^\\n]*${unproved}`));
+    assert.match(
+      runbook,
+      new RegExp(`Тесты репозитория не доказывают[^\\n]*${escapeRegExp(unproved)}`),
+    );
 });
 
 test("landing publication runbook keeps enablement, monitoring, and rollback fail-closed", async () => {
@@ -126,5 +130,5 @@ test("landing publication runbook keeps enablement, monitoring, and rollback fai
     "locale",
     "source path",
   ])
-    assert.match(runbook, new RegExp(required.replaceAll("+", "\\+"), "i"));
+    assert.match(runbook, new RegExp(escapeRegExp(required), "i"));
 });
