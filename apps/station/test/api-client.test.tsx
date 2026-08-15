@@ -258,6 +258,33 @@ describe("createStationClient", () => {
     expect(onCredentialRejected).not.toHaveBeenCalled();
   });
 
+  it("keeps the credential active when the dedicated auth probe cannot confirm a 401", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ message: "temporary auth failure" }), {
+          status: 401,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"));
+    const generation = createCredentialGeneration();
+    const onCredentialRejected = vi.fn();
+    const client = createStationClient(
+      { machineId: "m1", apiKey: "unconfirmed", serverUrl: "http://localhost:3000" },
+      { credentialBoundary: { machineId: "m1", generation, onCredentialRejected } },
+    );
+
+    await expect(client.get("/station/operators")).rejects.toEqual(
+      new StationApiError(401, "temporary auth failure"),
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("http://localhost:3000/shifts");
+    expect(generation.phase).toBe("active");
+    expect(onCredentialRejected).not.toHaveBeenCalled();
+  });
+
   it("keeps the station enrolled when an optional product image download returns 401", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ message: "image unavailable" }), {

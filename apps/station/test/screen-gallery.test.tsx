@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -165,8 +165,12 @@ describe("development screen gallery", () => {
     const collapse = within(header).getByRole("button", {
       name: "Свернуть панель состояния",
     });
+    const expandedChevronPath = collapse
+      .querySelector(".station-status-toggle__chevron path")
+      ?.getAttribute("d");
 
     expect(collapse.querySelector(".station-status-toggle__chevron")).not.toBeNull();
+    expect(expandedChevronPath).toBe("M4 11l5-5 5 5");
 
     for (const action of [update, operator, windowMode, collapse]) {
       expect(action.classList.contains("mk-btn--floor")).toBe(true);
@@ -175,6 +179,22 @@ describe("development screen gallery", () => {
     }
     expect(update.textContent).toBe("!Обновления");
     expect(windowMode.textContent).toContain("Оконный режим");
+
+    fireEvent.click(collapse);
+    const expand = within(header).getByRole("button", {
+      name: "Развернуть панель состояния",
+    });
+    expect(expand.querySelector(".station-status-toggle__chevron path")?.getAttribute("d")).toBe(
+      "M4 7l5 5 5-5",
+    );
+
+    fireEvent.click(expand);
+    const expandedAgain = within(header).getByRole("button", {
+      name: "Свернуть панель состояния",
+    });
+    expect(
+      expandedAgain.querySelector(".station-status-toggle__chevron path")?.getAttribute("d"),
+    ).toBe("M4 11l5-5 5 5");
   });
 
   it.each([
