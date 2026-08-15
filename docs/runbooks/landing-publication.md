@@ -1,22 +1,91 @@
 # Публикация и поисковая приёмка markiro.app
 
-Этот runbook применяется после отдельного одобрения production deploy и публичного DNS. Он не заменяет юридическую приёмку формы и не разрешает включать аналитику.
+Этот runbook — операторский чек-лист. Он применяется только после отдельных одобрений production deploy, публичного DNS и каждого live-гейта ниже. Репозиторные проверки не разрешают автоматически переключать DNS, включать форму или отправлять реальные письма.
 
-## До переключения DNS
+## Неизменяемые границы
 
 1. Убедиться, что release SHA опубликован workflow **Publish production images**, а `MARKIRO_LANDING_DOMAIN=markiro.app` задан в environments `production-deploy` и `production-infrastructure`.
-2. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`, пока CRM не предоставила точный контракт, rate limit, idempotency, хранение и аудит заявок.
-3. Не включать optional analytics/marketing до утверждения privacy policy, cookie policy, текста согласия на персональные данные и consent categories.
-4. Выполнить package, built-site, browser, Lighthouse, production bundle и Terraform gates из плана `docs/superpowers/plans/2026-08-14-landing-search-ai-audit.md`.
-5. Сохранить до-релизный SHA и время проверки; не сохранять cookies, form values, токены webmaster-сервисов или секреты.
+2. До соответствующего шага держать `PUBLIC_DEMO_SUBMISSION_ENABLED=false` в статической сборке и `LANDING_DEMO_SUBMISSION_ENABLED=false` в API. Эти флаги включаются и откатываются независимо.
+3. Секреты Postbox и SmartCaptcha хранить только в установленном production secret store. Не записывать значения API key, SMTP password, server key, captcha token, cookies или данные формы в этот runbook, команды, отчёты и логи.
+4. Не включать optional analytics/marketing. Форма создаёт только транзакционные письма и не означает согласия на маркетинг.
+5. Эта возможность не подключает внешнюю CRM; любое CRM forwarding требует отдельного контракта, privacy review и release gate.
+6. Сохранить release SHA, время и обезличенный результат каждого гейта. Code deploy, юридическое одобрение, Postbox/DNS, SmartCaptcha, контролируемая доставка, публичное включение, monitoring и rollback остаются отдельными наблюдаемыми решениями.
 
-## Публикация
+## Последовательность включения формы и писем
+
+Не менять порядок. Переходить к следующему гейту можно только после фиксации результата текущего; при ошибке остановиться и выполнить подходящий rollback.
+
+### Гейт 1. Развернуть код с двумя выключенными флагами
+
+1. Собрать immutable edge image с `PUBLIC_DEMO_SUBMISSION_ENABLED=false` и подготовить защищённое окружение API с `LANDING_DEMO_SUBMISSION_ENABLED=false`.
+2. Тем же release SHA развернуть additive migration, API, mail worker и edge. Миграция добавляет возможность безопасно и не является сигналом включения формы.
+3. Выполнить package, built-site, browser, Lighthouse и production bundle gates. Отдельно зафиксировать DB skips и недоступную внешнюю инфраструктуру.
+4. Проверить readiness, отсутствие активной формы и plain 404 для `POST /api/demo-requests`; убедиться, что проверка не создала заявок или писем.
+
+**Критерий выхода:** новый код работает, оба флага false, форма отсутствует, POST возвращает 404, реальная отправка не выполнялась.
+
+### Гейт 2. Подготовить Postbox и DNS отправителя
+
+1. Создать отдельный service account с узкой ролью `postbox.sender` и SMTP API key со scope `yc.postbox.send`. Сам ключ в runbook не записывать; передать его в production secret store по установленной процедуре.
+2. Настроить Nodemailer на `postbox.cloud.yandex.net`: порт 587 с STARTTLS либо 465 с SMTPS, с обязательной проверкой TLS certificate.
+3. Подтвердить sender identity домена `markiro.app` и статус acceptance в Postbox.
+4. Проверить выданные Postbox записи Easy DKIM, единственную SPF-запись домена, включающую `spf.postbox.yandexcloud.net`, и опубликованную DMARC policy. Не создавать вторую SPF-запись.
+
+**Критерий выхода:** Postbox принял identity, DKIM/SPF/DMARC проверены live, SMTP credentials находятся только в secret store. Флаги всё ещё false.
+
+### Гейт 3. Одобрить право и настроить SmartCaptcha
+
+1. Создать production client/server pair SmartCaptcha для утверждённого hostname. Публичный client key предназначен только для edge build; server key помещается только в secret store API.
+2. Утвердить privacy policy, текст согласия на обработку персональных данных, cookie/vendor disclosure о SmartCaptcha и неизменяемую версию согласия.
+3. Проверить canonical same-origin paths для privacy и consent документов и согласовать одно значение версии между `PUBLIC_DEMO_CONSENT_VERSION` и `LANDING_DEMO_CONSENT_VERSION`.
+4. Настроить server key, но оставить оба feature flags false до фиксации юридического одобрения и production-конфигурации captcha.
+
+**Критерий выхода:** юридические документы и consent version одобрены, production SmartCaptcha настроена, секреты не раскрыты, форма не опубликована.
+
+### Гейт 4. Включить только API и выполнить контролируемую доставку
+
+1. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`. Задать API `LANDING_DEMO_SUBMISSION_ENABLED=true`, утверждённый `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT=hello@v-b.tech`, публичный Reply-To, consent version и SmartCaptcha server key; перезапустить API тем же immutable release.
+2. Убедиться, что публичная HTML-форма всё ещё отсутствует, а контролируемый `POST /api/demo-requests` теперь проходит только с валидным production captcha token.
+3. Из контролируемых почтовых ящиков отправить ровно одну RU- и одну EN-заявку. Не фиксировать в evidence значения полей формы, captcha tokens или адреса посетителей.
+4. Для каждой заявки по обезличенному request id проверить ровно две mail delivery rows и две outbox rows. Обе доставки должны пройти из `queued` (или наблюдаемого `retrying`) в `sent`; состояние `failed` блокирует переход дальше.
+5. Проверить получение внутреннего письма на `hello@v-b.tech` и confirmation в соответствующем контролируемом ящике посетителя. Проверить папки spam/junk и направление Reply-To: внутреннее письмо отвечает посетителю, confirmation отвечает на публичный адрес Markiro.
+
+**Критерий выхода:** RU и EN запросы получили 202, для каждого создано и отправлено ровно два письма, оба адресата подтвердили arrival и Reply-To, spam/junk проверены.
+
+### Гейт 5. Собрать и опубликовать форму
+
+1. Указать только публичные build values: `PUBLIC_DEMO_SUBMISSION_ENABLED=true`, `PUBLIC_SMARTCAPTCHA_CLIENT_KEY`, `PUBLIC_PRIVACY_POLICY_PATH`, `PUBLIC_PERSONAL_DATA_CONSENT_PATH` и согласованный `PUBLIC_DEMO_CONSENT_VERSION`.
+2. Собрать новый immutable edge image и развернуть его после проверки, что server flag остаётся true. Не передавать SmartCaptcha server key в build arguments или image layers.
+3. Проверить RU и EN формы на desktop и mobile: тексты, ссылки на документы, consent, keyboard/focus flow, captcha fallback, 202/400/429/503 и отсутствие других публичных API routes.
+4. Проверить landing-only CSP и Caddy ordering: только exact `POST /api/demo-requests` проксируется; GET/HEAD/PUT, соседние и вложенные пути остаются 404.
+
+**Критерий выхода:** публичная форма доступна в RU и EN только на утверждённом release; legal paths, captcha и server route согласованы.
+
+### Гейт 6. Наблюдать после включения
+
+1. Наблюдать раздельные rates ответов 202/400/429/503 и неожиданные изменения source/global rate limits.
+2. Наблюдать классы captcha failure: rejected, unavailable/timeout и configuration error, не логируя token или данные посетителя.
+3. Наблюдать переходы mail `queued`/`retrying`/`failed`/`sent`, возраст очереди и независимый результат двух доставок.
+4. Сопоставлять Postbox delivery, bounce/rejection и abuse events с обезличенными request/delivery ids; отдельно следить за arrival внутреннего и confirmation письма.
+5. При росте 503, captcha unavailable, застрявших `retrying`, terminal `failed`, bounce/rejection или признаках abuse остановить публичный приём по rollback ниже.
+
+## Rollback формы и доставки
+
+1. Сначала пересобрать edge с `PUBLIC_DEMO_SUBMISSION_ENABLED=false`, развернуть его и проверить, что форма исчезла в RU и EN.
+2. Затем вернуть `LANDING_DEMO_SUBMISSION_ENABLED=false`, перезапустить API и проверить, что exact `POST /api/demo-requests` снова отвечает plain 404.
+3. Не откатывать additive migration и не удалять уже созданные или `queued` письма. Их состояние разбирается через существующий mail operations flow; rollback не скрывает durable work.
+4. Отзыв Postbox/SMTP credentials — отдельная security-мера, применяемая при подозрении на sender abuse или компрометацию. Обычный rollback формы сам по себе credentials не отзывает.
+5. DNS rollback и полный application rollback выполняются отдельно по production runbooks, если проблема затрагивает весь сайт, TLS или release, а не только форму.
+
+## Публикация сайта и поисковая приёмка
+
+Этот гейт не заменяет гейты формы выше и требует отдельного одобрения публичного DNS.
 
 1. Запустить защищённый infrastructure workflow с точным SHA и явным `enable_public_dns=true`. Он публикует A records admin, kiosk и landing на один утверждённый адрес.
 2. Дождаться точного совпадения authoritative и public DNS через `deploy/production/verify-dns.mjs`; лишний или устаревший адрес считается ошибкой.
 3. Запустить **Deploy production** для того же immutable release.
 4. Убедиться, что Caddy выпустил и обслуживает валидный TLS certificate для `markiro.app`. Не обходить ошибку ACME временным небезопасным сертификатом.
-5. Выполнить production public smoke: все восемь страниц, `robots.txt`, `sitemap.xml`, `llms.txt`, release SHA, headers/cache policy, запрет `/api/demo-requests` и настоящий внешний 404.
+5. Выполнить production public smoke: все восемь страниц, `robots.txt`, `sitemap.xml`, `llms.txt`, release SHA, headers/cache policy, ожидаемое состояние `/api/demo-requests` и настоящий внешний 404.
 
 ## Внешняя ручная проверка
 
@@ -40,6 +109,21 @@
 4. Передать новые или существенно изменённые URL через IndexNow по [официальному протоколу](https://www.indexnow.org/documentation). Не считать HTTP acceptance доказательством индексации.
 5. Зафиксировать baseline в `docs/seo/search-console-baseline-template.md`.
 
+## Независимое ревью перед публичным включением
+
+До гейта 5 независимый reviewer проверяет tenant-scope compatibility additive migration, сам migration SQL, idempotency и concurrency двух доставок, fail-closed SmartCaptcha, source/global limits, отсутствие PII в логах, escaping шаблонов и Reply-To, Caddy route ordering и CSP isolation, disabled defaults, а также RU/EN accessibility. Проверенные замечания исправляются новым RED/GREEN cycle и повторным прогоном затронутых гейтов.
+
+## Границы доказательств репозитория
+
+- Тесты репозитория не доказывают юридическое одобрение.
+- Тесты репозитория не доказывают работу live DNS/TLS.
+- Тесты репозитория не доказывают приём sender identity в Postbox.
+- Тесты репозитория не доказывают доставку письма во входящие.
+- Тесты репозитория не доказывают размещение в спаме или вне спама.
+- Тесты репозитория не доказывают отображение в почтовых клиентах.
+
+Поэтому approved legal documents, live DNS/TLS, Postbox identity/Easy DKIM/SPF/DMARC, production SmartCaptcha keys, controlled RU+EN two-recipient delivery, spam placement и representative inbox-client rendering фиксируются только по отдельному live evidence. Ни один из этих гейтов нельзя отметить выполненным по результатам unit, integration, browser, Lighthouse или production bundle tests.
+
 ## Временные точки и границы доказательств
 
 - **D0, только доступность (reachability):** DNS, TLS, HTTP, crawler parity и возможность получить контент. Отсутствие страницы или Markiro в поисковом/AI-ответе до индексации не блокирует релиз.
@@ -52,4 +136,4 @@ AI-поиск проверяется по `docs/seo/ai-search-query-pack.md`, р
 
 ## Стоп-условия
 
-Остановить публикацию или выключить только затронутую возможность, если обнаружены: неверный DNS/TLS, cross-host утечка cabinet/kiosk, HTML 200 вместо 404, несовпадающий canonical, crawler cloaking, публичный CRM endpoint без готового контракта, tracker до consent или юридические тексты без одобрения. DNS rollback и application rollback выполнять по существующим production runbooks; не удалять durable data.
+Остановить публикацию или выключить только затронутую возможность, если обнаружены: неверный DNS/TLS, cross-host утечка cabinet/kiosk, HTML 200 вместо ожидаемого 404, несовпадающий canonical, crawler cloaking, отклонение от exact demo-request route, captcha fail-open, tracker до consent или юридические тексты без одобрения. DNS rollback и application rollback выполнять по существующим production runbooks; не удалять durable data.

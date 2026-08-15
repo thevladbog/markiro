@@ -71,3 +71,33 @@ test("landing publication runbook separates reachability from indexed search evi
   assert.match(runbook, /D30/);
   assert.match(runbook, /field Core Web Vitals[^\n]*не[^\n]*Lighthouse/i);
 });
+
+test("landing publication runbook keeps demo email release gates observable", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  for (const required of [
+    "postbox.sender",
+    "yc.postbox.send",
+    "postbox.cloud.yandex.net",
+    "DKIM",
+    "SPF",
+    "DMARC",
+    "hello@v-b.tech",
+    "SmartCaptcha",
+    "PUBLIC_DEMO_SUBMISSION_ENABLED",
+    "LANDING_DEMO_SUBMISSION_ENABLED",
+    "queued",
+    "retrying",
+    "failed",
+  ])
+    assert.match(runbook, new RegExp(required));
+
+  for (const unproved of [
+    "юридическое одобрение",
+    "live DNS/TLS",
+    "приём sender identity в Postbox",
+    "доставку письма во входящие",
+    "размещение в спаме",
+    "отображение в почтовых клиентах",
+  ])
+    assert.match(runbook, new RegExp(`Тесты репозитория не доказывают[^\\n]*${unproved}`));
+});
