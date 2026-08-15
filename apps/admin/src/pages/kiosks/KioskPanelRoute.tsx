@@ -277,6 +277,7 @@ function KioskEditPanelContent({ kioskId }: { kioskId: string | undefined }): Re
             name: kiosk.name,
             location: kiosk.location ?? "",
             showPrices: kiosk.showPrices,
+            printEmployeeQrOnSlip: kiosk.printEmployeeQrOnSlip,
           }
         : undefined,
     [kiosk],

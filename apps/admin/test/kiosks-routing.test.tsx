@@ -60,6 +60,7 @@ const KIOSK = {
   location: "Зал 1",
   dayLimitPerEmployee: 5,
   showPrices: true,
+  printEmployeeQrOnSlip: false,
   status: "active",
   lastSeenAt: null,
   enrolled: false,
@@ -234,6 +235,7 @@ it("creates through the nested panel with the exact normalized payload and retur
           name: "Киоск склада",
           location: "Цех 2",
           showPrices: true,
+          printEmployeeQrOnSlip: false,
         }),
       }),
     ),
@@ -600,6 +602,7 @@ it("submits only the exact normalized profile PATCH and closes after success", a
   await user.clear(within(panel).getByLabelText("Расположение"));
   expect(within(panel).queryByLabelText("Лимит позиций на сотрудника в день")).toBeNull();
   await user.click(within(panel).getByLabelText("Показывать цены"));
+  await user.click(within(panel).getByLabelText("Печатать QR-код сотрудника в ведомости"));
   await user.click(within(panel).getByRole("button", { name: "Сохранить" }));
 
   await waitFor(() =>
@@ -611,6 +614,7 @@ it("submits only the exact normalized profile PATCH and closes after success", a
           name: "Новый склад",
           location: null,
           showPrices: false,
+          printEmployeeQrOnSlip: true,
         }),
       }),
     ),

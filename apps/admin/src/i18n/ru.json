@@ -1494,6 +1494,7 @@
         "nameLabel": "Название",
         "locationLabel": "Расположение",
         "showPricesLabel": "Показывать цены",
+        "printEmployeeQrOnSlipLabel": "Печатать QR-код сотрудника в ведомости",
         "productsLabel": "Разрешённые товары",
         "saveProductsAction": "Сохранить список",
         "submitCreate": "Создать",

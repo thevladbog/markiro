@@ -18,6 +18,7 @@ const kioskFormSchema = z.object({
     .max(200, "pages.kiosks.form.errors.nameTooLong"),
   location: z.string().trim().optional(),
   showPrices: z.boolean(),
+  printEmployeeQrOnSlip: z.boolean(),
 });
 
 export type KioskFormValues = z.infer<typeof kioskFormSchema>;
@@ -37,6 +38,7 @@ const EMPTY_VALUES: KioskFormValues = {
   name: "",
   location: "",
   showPrices: true,
+  printEmployeeQrOnSlip: false,
 };
 
 function translateFieldError(t: TFunction, message: string | undefined): string | undefined {
@@ -50,6 +52,7 @@ export function toKioskInput(values: KioskFormValues): CreateKioskInput {
     name: values.name.trim(),
     location: location ? location : null,
     showPrices: values.showPrices,
+    printEmployeeQrOnSlip: values.printEmployeeQrOnSlip,
   };
 }
 
@@ -121,6 +124,17 @@ export function KioskProfileForm({
         render={({ field }) => (
           <Checkbox
             label={t("pages.kiosks.form.showPricesLabel")}
+            checked={field.value}
+            onCheckedChange={field.onChange}
+          />
+        )}
+      />
+      <Controller
+        control={control}
+        name="printEmployeeQrOnSlip"
+        render={({ field }) => (
+          <Checkbox
+            label={t("pages.kiosks.form.printEmployeeQrOnSlipLabel")}
             checked={field.value}
             onCheckedChange={field.onChange}
           />

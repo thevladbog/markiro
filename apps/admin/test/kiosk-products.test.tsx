@@ -13,6 +13,7 @@ const ONLINE_KIOSK: KioskDto = {
   location: "Зал 1",
   dayLimitPerEmployee: 5,
   showPrices: true,
+  printEmployeeQrOnSlip: false,
   status: "active",
   lastSeenAt: "2026-08-06T10:00:00.000Z",
   enrolled: true,

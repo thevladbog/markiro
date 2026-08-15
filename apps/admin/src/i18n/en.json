@@ -1487,6 +1487,7 @@
         "nameLabel": "Name",
         "locationLabel": "Location",
         "showPricesLabel": "Show prices",
+        "printEmployeeQrOnSlipLabel": "Print employee QR code on pickup slip",
         "productsLabel": "Allowed products",
         "saveProductsAction": "Save list",
         "submitCreate": "Create",
