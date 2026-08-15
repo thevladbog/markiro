@@ -42,7 +42,7 @@ export const BRAND_LETTERHEAD_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Код шаблона: MKR-BRD-01. Редакция: 2026.08.01. Дата вступления в силу: 2026-08-15. Нижний колонтитул содержит номер страницы и Data Matrix, ведущий на запись именно этого шаблона в публичном реестре. Русский текст является приоритетным; английский — информационным переводом.",
+            text: "Код шаблона: MKR-BRD-01. Редакция: 2026.08/01. Дата вступления в силу: 2026-08-15. Нижний колонтитул содержит номер страницы и Data Matrix, ведущий на запись именно этого шаблона в публичном реестре. Русский текст является приоритетным; английский — информационным переводом.",
           },
         ],
       },
@@ -100,7 +100,7 @@ export const BRAND_LETTERHEAD_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Template code: MKR-BRD-01. Revision: 2026.08.01. Effective date: 2026-08-15. The footer carries the page number and a Data Matrix linking to this template's public registry record. The Russian text is authoritative; English is informational.",
+            text: "Template code: MKR-BRD-01. Revision: 2026.08/01. Effective date: 2026-08-15. The footer carries the page number and a Data Matrix linking to this template's public registry record. The Russian text is authoritative; English is informational.",
           },
         ],
       },

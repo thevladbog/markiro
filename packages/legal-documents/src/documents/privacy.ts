@@ -81,7 +81,7 @@ export const PRIVACY_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Для данных формы основанием служит отдельное согласие MKR-PD-02/2026.08.01. Эта редакция не предусматривает рекламу, маркетинговые рассылки, веб-аналитику, профилирование, обогащение лидов или передачу заявок в CRM.",
+            text: "Для данных формы основанием служит отдельное согласие MKR-PD-02/2026.08/01. Эта редакция не предусматривает рекламу, маркетинговые рассылки, веб-аналитику, профилирование, обогащение лидов или передачу заявок в CRM.",
           },
         ],
       },
@@ -199,7 +199,7 @@ export const PRIVACY_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Код документа — MKR-PD-01, редакция — 2026.08.01, дата вступления в силу — 2026-08-15. Новая редакция публикуется как отдельная версия с собственной датой и связью с заменяемым документом.",
+            text: "Код документа — MKR-PD-01, редакция — 2026.08/01, дата вступления в силу — 2026-08-15. Новая редакция публикуется как отдельная версия с собственной датой и связью с заменяемым документом.",
           },
           {
             kind: "paragraph",
@@ -288,7 +288,7 @@ export const PRIVACY_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Form data relies on separate consent MKR-PD-02/2026.08.01. This revision provides no advertising, marketing mail, web analytics, profiling, lead enrichment, or CRM forwarding.",
+            text: "Form data relies on separate consent MKR-PD-02/2026.08/01. This revision provides no advertising, marketing mail, web analytics, profiling, lead enrichment, or CRM forwarding.",
           },
         ],
       },
@@ -406,7 +406,7 @@ export const PRIVACY_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Document code: MKR-PD-01; revision: 2026.08.01; effective date: 2026-08-15. A replacement is published as a distinct revision with its own date and supersession link.",
+            text: "Document code: MKR-PD-01; revision: 2026.08/01; effective date: 2026-08-15. A replacement is published as a distinct revision with its own date and supersession link.",
           },
           {
             kind: "paragraph",

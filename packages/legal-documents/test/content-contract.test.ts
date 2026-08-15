@@ -3,6 +3,10 @@ import {
   LEGAL_DOCUMENTS,
   findLegalDocument,
   findLegalRelease,
+  formatLegalEffectiveDate,
+  legalRevisionFileToken,
+  legalVerificationPath,
+  legalVerificationUrl,
   type LegalBlock,
   type LegalDocumentCode,
   type LegalLocale,
@@ -47,7 +51,7 @@ function findCode(title: string): LegalDocumentCode {
     ({ content }) => content.ru.title === title || content.en.title === title,
   );
   if (!source) throw new Error(`Unknown legal document title: ${title}`);
-  return source.releaseKey.slice(0, source.releaseKey.lastIndexOf("/")) as LegalDocumentCode;
+  return source.releaseKey.slice(0, source.releaseKey.indexOf("/")) as LegalDocumentCode;
 }
 
 function neverCode(): never {
@@ -55,6 +59,18 @@ function neverCode(): never {
 }
 
 describe("bilingual legal document sources", () => {
+  it("formats localized legal identity display and verification paths", () => {
+    const release = findLegalRelease("MKR-PD-01");
+
+    expect(formatLegalEffectiveDate(release.effectiveDate, "ru")).toBe("15.08.2026");
+    expect(formatLegalEffectiveDate(release.effectiveDate, "en")).toBe("15 August 2026");
+    expect(legalRevisionFileToken(release.revision)).toBe("2026.08-01");
+    expect(legalVerificationPath(release)).toBe("/d/MKR-PD-01/2026.08/01/15.08.2026");
+    expect(legalVerificationUrl(release)).toBe(
+      "https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
+    );
+  });
+
   it("uses stable section identifiers for the privacy policy", () => {
     const expected = [
       "general",
@@ -161,7 +177,7 @@ describe("bilingual legal document sources", () => {
   it("makes the consent standalone and binds it to the exact revision", () => {
     const consent = documentText("MKR-PD-02", "ru");
     expect(consent).toContain("Я даю согласие");
-    expect(consent).toContain("MKR-PD-02/2026.08.01");
+    expect(consent).toContain("MKR-PD-02/2026.08/01");
     expect(consent).toContain("+7 934 355-14-90");
     expect(consent).toMatch(/автоматизированн.*без использования средств автоматизации/isu);
     expect(consent).toMatch(/отозв.*hello@v-b\.tech.*почтов/isu);

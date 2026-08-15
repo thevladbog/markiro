@@ -74,7 +74,7 @@ export const CONSENT_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Идентификатор принятого согласия: MKR-PD-02/2026.08.01. Код документа: MKR-PD-02. Редакция: 2026.08.01. Дата вступления в силу: 2026-08-15. Русский текст является юридически значимым и приоритетным.",
+            text: "Идентификатор принятого согласия: MKR-PD-02/2026.08/01. Код документа: MKR-PD-02. Редакция: 2026.08/01. Дата вступления в силу: 2026-08-15. Русский текст является юридически значимым и приоритетным.",
           },
         ],
       },
@@ -153,7 +153,7 @@ export const CONSENT_CONTENT = {
           },
           {
             kind: "paragraph",
-            text: "Accepted consent identifier: MKR-PD-02/2026.08.01. Document code: MKR-PD-02. Revision: 2026.08.01. Effective date: 2026-08-15. The Russian text is authoritative; this English text is an informational translation.",
+            text: "Accepted consent identifier: MKR-PD-02/2026.08/01. Document code: MKR-PD-02. Revision: 2026.08/01. Effective date: 2026-08-15. The Russian text is authoritative; this English text is an informational translation.",
           },
         ],
       },

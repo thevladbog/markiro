@@ -119,7 +119,7 @@ export const TENANT_PROCESSING_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Код шаблона: MKR-DPA-01. Редакция: 2026.08.01. Дата вступления в силу шаблона: 2026-08-15. После заполнения и оформления конкретный документ получает уникальный индивидуальный номер; код общего шаблона не подтверждает заключение поручения.",
+            text: "Код шаблона: MKR-DPA-01. Редакция: 2026.08/01. Дата вступления в силу шаблона: 2026-08-15. После заполнения и оформления конкретный документ получает уникальный индивидуальный номер; код общего шаблона не подтверждает заключение поручения.",
           },
           {
             kind: "paragraph",
@@ -247,7 +247,7 @@ export const TENANT_PROCESSING_CONTENT = {
         blocks: [
           {
             kind: "paragraph",
-            text: "Template code: MKR-DPA-01. Revision: 2026.08.01. Template effective date: 2026-08-15. A completed and executed document receives a unique individual number; the common template code is not proof of execution.",
+            text: "Template code: MKR-DPA-01. Revision: 2026.08/01. Template effective date: 2026-08-15. A completed and executed document receives a unique individual number; the common template code is not proof of execution.",
           },
           {
             kind: "paragraph",
