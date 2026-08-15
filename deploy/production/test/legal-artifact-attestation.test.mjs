@@ -54,12 +54,28 @@ function verifierSpy() {
   };
 }
 
+function pdfaValidatorSpy() {
+  const calls = [];
+  return {
+    calls,
+    validate: async (pdfPath) => {
+      calls.push(pdfPath);
+    },
+  };
+}
+
 test("committed attestation independently binds the exact released PDF set", async (context) => {
   const work = await fixture();
   context.after(() => rm(work.directory, { recursive: true, force: true }));
   const spy = verifierSpy();
+  const pdfaSpy = pdfaValidatorSpy();
 
-  await verifyPublishedLegalArtifacts(work.artifactRoot, work.attestationPath, spy.verify);
+  await verifyPublishedLegalArtifacts(
+    work.artifactRoot,
+    work.attestationPath,
+    spy.verify,
+    pdfaSpy.validate,
+  );
 
   const attestation = await readJson(work.attestationPath);
   const manifestBytes = await readFile(path.join(work.artifactRoot, "artifacts.json"));
@@ -74,6 +90,11 @@ test("committed attestation independently binds the exact released PDF set", asy
     releasedPdfNames,
   );
   assert.equal(spy.calls.length, 1);
+  assert.equal(pdfaSpy.calls.length, 8);
+  assert.deepEqual(
+    pdfaSpy.calls.map((pdfPath) => path.basename(pdfPath)),
+    releasedPdfNames.map((_fileName, index) => `document-${index}.pdf`),
+  );
   assert.equal(spy.calls[0].pdfaValidatedFiles.size, 8);
   assert.deepEqual(
     [...spy.calls[0].pdfaValidatedFiles].sort(),
@@ -112,6 +133,37 @@ test("self-consistent manifest and PDF tampering cannot rewrite release evidence
     verifyPublishedLegalArtifacts(work.artifactRoot, work.attestationPath, verifierSpy().verify),
     /manifest SHA-256 does not match the trusted attestation/,
   );
+});
+
+test("coordinated PDF, manifest, and attestation tampering cannot self-attest", async (context) => {
+  const work = await fixture();
+  context.after(() => rm(work.directory, { recursive: true, force: true }));
+  const manifestPath = path.join(work.artifactRoot, "artifacts.json");
+  const manifest = await readJson(manifestPath);
+  const pdf = manifest.find((entry) => entry.kind === "pdfa-2b");
+  const tampered = Buffer.from("%PDF-1.7\nnot PDF/A\n%%EOF\n");
+  await writeFile(path.join(work.artifactRoot, "files", pdf.fileName), tampered);
+  pdf.bytes = tampered.byteLength;
+  pdf.sha256 = createHash("sha256").update(tampered).digest("hex");
+  await writeJson(manifestPath, manifest);
+
+  const attestation = await readJson(work.attestationPath);
+  attestation.manifestSha256 = createHash("sha256")
+    .update(await readFile(manifestPath))
+    .digest("hex");
+  attestation.pdfs.find((entry) => entry.fileName === pdf.fileName).sha256 = pdf.sha256;
+  await writeJson(work.attestationPath, attestation);
+
+  const previousRuntime = process.env.VERAPDF_CONTAINER_RUNTIME;
+  process.env.VERAPDF_CONTAINER_RUNTIME = "docker";
+  context.after(() => {
+    if (previousRuntime === undefined) delete process.env.VERAPDF_CONTAINER_RUNTIME;
+    else process.env.VERAPDF_CONTAINER_RUNTIME = previousRuntime;
+  });
+
+  await assert.rejects(verifyPublishedLegalArtifacts(work.artifactRoot, work.attestationPath), {
+    message: "fresh pinned veraPDF validation failed",
+  });
 });
 
 for (const mutation of ["extra", "missing", "duplicate", "wrong hash", "unsafe path"]) {

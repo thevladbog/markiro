@@ -153,6 +153,8 @@ jobs:
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Verify landing browser and Lighthouse release gates
+        env:
+          VERAPDF_CONTAINER_RUNTIME: docker
         run: |
           pnpm --filter @markiro/domain build
           pnpm --filter @markiro/legal-documents build

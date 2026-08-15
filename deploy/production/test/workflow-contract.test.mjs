@@ -102,6 +102,7 @@ test("CI builds the workspace legal dependency before landing browser gates", as
     step.run,
     /^pnpm --filter @markiro\/domain build\npnpm --filter @markiro\/legal-documents build\nnode deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal deploy\/production\/legal-artifacts-attestation\.json\npnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/,
   );
+  assert.equal(step.env.VERAPDF_CONTAINER_RUNTIME, "docker");
 });
 
 test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {

@@ -15,6 +15,8 @@ const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
   "PUBLIC_PHONE",
 ]);
+const pinnedVeraPdfImage =
+  "docker.io/verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";
 
 const standardProxyTimeouts = Object.freeze({
   response_header_timeout: "30s",
@@ -718,14 +720,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(
     landingInstructions.filter((instruction) => instruction.name === "RUN"),
     [
-      { name: "RUN", arguments: "pnpm --filter @markiro/domain build" },
       { name: "RUN", arguments: "pnpm --filter @markiro/ui build" },
-      { name: "RUN", arguments: "pnpm --filter @markiro/legal-documents build" },
-      {
-        name: "RUN",
-        arguments:
-          "node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json",
-      },
       { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
     ],
   );
@@ -837,6 +832,81 @@ test("edge build validates every tracked legal artifact before copying landing o
   assert.match(
     dockerfile,
     /COPY --from=landing-build \/workspace\/apps\/landing\/dist \/srv\/landing/,
+  );
+});
+
+test("edge build obtains fresh PDF/A evidence from the pinned veraPDF image", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  assert.match(dockerfile, /^ARG LEGAL_PDFA_PLATFORM=linux\/amd64$/m);
+  assert.match(
+    dockerfile,
+    new RegExp(
+      `^FROM --platform=\\\${LEGAL_PDFA_PLATFORM} ${escapeRegExp(pinnedVeraPdfImage)} AS legal-pdfa-runtime$`,
+      "m",
+    ),
+  );
+  assert.match(
+    dockerfile,
+    /^FROM --platform=\$\{LEGAL_PDFA_PLATFORM\} node:24\.19\.0-alpine AS legal-artifact-verification$/m,
+  );
+  const verification = dockerfileStageInstructions(dockerfile, "legal-artifact-verification");
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "COPY"),
+    [
+      {
+        name: "COPY",
+        arguments: "--from=legal-pdfa-runtime /opt/java/openjdk /opt/java/openjdk",
+      },
+      {
+        name: "COPY",
+        arguments: "--from=legal-pdfa-runtime /opt/verapdf /opt/verapdf",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/packages/legal-documents/dist ./packages/legal-documents/dist",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/apps/landing/public/legal ./apps/landing/public/legal",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/deploy/production/cli-main.mjs ./deploy/production/cli-main.mjs",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/deploy/production/verify-legal-artifacts.mjs ./deploy/production/verify-legal-artifacts.mjs",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/deploy/production/legal-artifacts-attestation.json ./deploy/production/legal-artifacts-attestation.json",
+      },
+    ],
+  );
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "RUN"),
+    [
+      {
+        name: "RUN",
+        arguments:
+          "--network=none VERAPDF_BIN=/opt/verapdf/verapdf node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json && touch /tmp/legal-artifacts.verified",
+      },
+    ],
+  );
+
+  const landing = dockerfileStageInstructions(dockerfile, "landing-build");
+  assert.ok(
+    landing.some(
+      (instruction) =>
+        instruction.name === "COPY" &&
+        instruction.arguments ===
+          "--from=legal-artifact-verification /tmp/legal-artifacts.verified /tmp/legal-artifacts.verified",
+    ),
   );
 });
 

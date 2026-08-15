@@ -30,21 +30,21 @@ import { findLegalDocument, LEGAL_RELEASES } from "../registry.js";
 import type { LegalBlock, LegalDocumentCode } from "../types.js";
 import {
   MAX_LEGAL_PDF_BYTES,
+  VERAPDF_RELEASE_IMAGE,
+  VERAPDF_VERSION,
   canonicalArtifactManifest,
+  parseVeraPdfValidationResult,
   verifyArtifactManifest,
   type PublishedLegalArtifact,
 } from "./verify-artifacts.js";
+
+export { VERAPDF_RELEASE_IMAGE, parseVeraPdfValidationResult } from "./verify-artifacts.js";
 
 const execFile = promisify(execFileCallback);
 const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
 const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const RELEASE_LIBREOFFICE_VERSION = "26.2.5";
-const VERAPDF_VERSION = "1.30.2";
-
-export const VERAPDF_RELEASE_IMAGE =
-  "docker.io/verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";
-
 export const LIBREOFFICE_PDF_EXPORT_FILTER =
   'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"2"},"UseTaggedPDF":{"type":"boolean","value":"true"},"EnableTextAccessForAccessibilityTools":{"type":"boolean","value":"true"},"ExportBookmarks":{"type":"boolean","value":"true"}}';
 
@@ -841,76 +841,6 @@ export function assertExtractedPdfText(
 export function assertPdfNormalizationPreservesText(before: string, after: string): void {
   if (before !== after) {
     throw new Error("PDF normalization changed the complete searchable text");
-  }
-}
-
-export function parseVeraPdfValidationResult(output: string): void {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(output);
-  } catch {
-    throw new Error("veraPDF did not return a machine-readable JSON result");
-  }
-  if (!isUnknownRecord(parsed) || !("report" in parsed)) {
-    throw new Error("veraPDF machine-readable result is missing its report");
-  }
-  const report = parsed.report;
-  if (!isUnknownRecord(report)) {
-    throw new Error("veraPDF machine-readable result has an invalid report");
-  }
-  const jobsValue: unknown = report.jobs;
-  const jobs: readonly unknown[] = Array.isArray(jobsValue)
-    ? (jobsValue as readonly unknown[])
-    : [];
-  const summary: unknown = report.batchSummary;
-  const firstJob: unknown = jobs[0];
-  const validationResults: readonly unknown[] =
-    isUnknownRecord(firstJob) && Array.isArray(firstJob.validationResult)
-      ? (firstJob.validationResult as readonly unknown[])
-      : [];
-  const validationResult: unknown = validationResults[0];
-  const validationDetails: unknown = isUnknownRecord(validationResult)
-    ? validationResult.details
-    : undefined;
-  const validationSummary: unknown = isUnknownRecord(summary)
-    ? summary.validationSummary
-    : undefined;
-  const featuresSummary: unknown = isUnknownRecord(summary) ? summary.featuresSummary : undefined;
-  const repairSummary: unknown = isUnknownRecord(summary) ? summary.repairSummary : undefined;
-  const conformant =
-    jobs.length === 1 &&
-    validationResults.length === 1 &&
-    isUnknownRecord(validationResult) &&
-    validationResult.compliant === true &&
-    validationResult.jobEndStatus === "normal" &&
-    validationResult.profileName === "PDF/A-2b validation profile" &&
-    isUnknownRecord(validationDetails) &&
-    validationDetails.failedRules === 0 &&
-    validationDetails.failedChecks === 0;
-  const summaryConformant =
-    isUnknownRecord(summary) &&
-    summary.totalJobs === 1 &&
-    summary.outOfMemory === 0 &&
-    summary.veraExceptions === 0 &&
-    summary.multiJob === false &&
-    summary.failedEncryptedJobs === 0 &&
-    summary.failedParsingJobs === 0 &&
-    isUnknownRecord(featuresSummary) &&
-    featuresSummary.failedJobCount === 0 &&
-    featuresSummary.totalJobCount === 0 &&
-    featuresSummary.successfulJobCount === 0 &&
-    isUnknownRecord(repairSummary) &&
-    repairSummary.failedJobCount === 0 &&
-    repairSummary.totalJobCount === 0 &&
-    repairSummary.successfulJobCount === 0 &&
-    isUnknownRecord(validationSummary) &&
-    validationSummary.totalJobCount === 1 &&
-    validationSummary.successfulJobCount === 1 &&
-    validationSummary.failedJobCount === 0 &&
-    validationSummary.compliantPdfaCount === 1 &&
-    validationSummary.nonCompliantPdfaCount === 0;
-  if (!conformant || !summaryConformant) {
-    throw new Error("Generated PDF is not conformant with PDF/A-2b according to veraPDF");
   }
 }
 

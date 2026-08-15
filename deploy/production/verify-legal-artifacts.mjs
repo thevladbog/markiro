@@ -1,10 +1,15 @@
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstat, readFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
+import { lstat, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 
 import { isMainModule } from "./cli-main.mjs";
 
 const SHA256 = /^[0-9a-f]{64}$/;
+const execFile = promisify(execFileCallback);
 const RELEASE_ID = "MKR-LEGAL-2026.08-01-2026-08-15";
 const EXPECTED_PDFS = Object.freeze([
   "markiro_mkr-brd-01_2026.08-01_en.pdf",
@@ -81,10 +86,123 @@ function assertManifestMatchesAttestation(manifest, attestation) {
     throw new Error("legal artifact manifest PDF inventory does not match the trusted attestation");
 }
 
+async function runFreshVeraPdf(binary, args) {
+  try {
+    return await execFile(binary, args, {
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+    });
+  } catch {
+    throw new Error("fresh pinned veraPDF validation failed");
+  }
+}
+
+function createFreshPdfAValidator({ parseVeraPdfValidationResult, image, version }) {
+  const runtime = process.env.VERAPDF_CONTAINER_RUNTIME;
+  const binary = process.env.VERAPDF_BIN;
+  const hasRuntime = typeof runtime === "string" && runtime.length > 0;
+  const hasBinary = typeof binary === "string" && binary.length > 0;
+  if (
+    hasRuntime === hasBinary ||
+    (hasRuntime && runtime !== "docker" && runtime !== "podman") ||
+    (hasBinary && binary !== "/opt/verapdf/verapdf")
+  ) {
+    throw new Error("fresh pinned veraPDF validator configuration is invalid");
+  }
+
+  const command = hasRuntime ? runtime : binary;
+  let versionCheck;
+  const ensureVersion = async () => {
+    versionCheck ??= (async () => {
+      const args = hasRuntime
+        ? ["run", "--rm", "--network", "none", image, "--version"]
+        : ["--version"];
+      const result = await runFreshVeraPdf(command, args);
+      const exactVersion = new RegExp(`(?:^|\\D)${version.replaceAll(".", "\\.")}(?:\\D|$)`);
+      if (!exactVersion.test(result.stdout)) {
+        throw new Error("fresh pinned veraPDF validation failed");
+      }
+    })();
+    return versionCheck;
+  };
+
+  return async (pdfPath) => {
+    await ensureVersion();
+    const args = hasRuntime
+      ? [
+          "run",
+          "--rm",
+          "--network",
+          "none",
+          "--volume",
+          `${path.dirname(pdfPath)}:/data:ro`,
+          image,
+          "--format",
+          "json",
+          "--flavour",
+          "2b",
+          `/data/${path.basename(pdfPath)}`,
+        ]
+      : ["--format", "json", "--flavour", "2b", pdfPath];
+    const result = await runFreshVeraPdf(command, args);
+    try {
+      parseVeraPdfValidationResult(result.stdout);
+    } catch {
+      throw new Error("fresh pinned veraPDF validation failed");
+    }
+  };
+}
+
+async function readTrustedPdf(filePath) {
+  let handle;
+  try {
+    const initialStats = await lstat(filePath);
+    if (initialStats.isSymbolicLink() || !initialStats.isFile()) {
+      throw new Error("not ordinary");
+    }
+    handle = await open(filePath, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
+    const openedStats = await handle.stat();
+    if (!openedStats.isFile()) throw new Error("not ordinary");
+    return await handle.readFile();
+  } catch {
+    throw new Error("trusted legal PDF must be a readable ordinary file");
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function collectFreshPdfAEvidence(rootDir, attestation, validatePdf) {
+  let temporaryRoot;
+  try {
+    temporaryRoot = await mkdtemp(path.join(tmpdir(), "markiro-legal-pdfa-"));
+    const validated = new Set();
+    for (const [index, fileName] of EXPECTED_PDFS.entries()) {
+      const bytes = await readTrustedPdf(path.join(rootDir, "files", fileName));
+      const digest = createHash("sha256").update(bytes).digest("hex");
+      if (digest !== attestation.hashes.get(fileName)) {
+        throw new Error("trusted legal PDF changed before fresh validation");
+      }
+      const privatePath = path.join(temporaryRoot, `document-${index}.pdf`);
+      try {
+        await writeFile(privatePath, bytes, { flag: "wx", mode: 0o600 });
+      } catch {
+        throw new Error("fresh pinned veraPDF validation failed");
+      }
+      await validatePdf(privatePath);
+      validated.add(fileName);
+    }
+    return validated;
+  } finally {
+    if (temporaryRoot)
+      await rm(temporaryRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
 export async function verifyPublishedLegalArtifacts(
   rootArgument,
   attestationArgument,
   injectedVerifier,
+  injectedPdfAValidator,
 ) {
   if (typeof rootArgument !== "string" || rootArgument.length === 0)
     throw new Error("legal artifact root is required");
@@ -108,14 +226,23 @@ export async function verifyPublishedLegalArtifacts(
     throw new Error("legal artifact manifest is invalid JSON");
   }
   assertManifestMatchesAttestation(manifest, attestation);
-  const verifyArtifactManifest =
-    injectedVerifier ??
-    (await import("../../packages/legal-documents/dist/cli/verify-artifacts.js"))
-      .verifyArtifactManifest;
+  const legalVerifierModule =
+    injectedVerifier && injectedPdfAValidator
+      ? undefined
+      : await import("../../packages/legal-documents/dist/cli/verify-artifacts.js");
+  const validatePdf =
+    injectedPdfAValidator ??
+    createFreshPdfAValidator({
+      parseVeraPdfValidationResult: legalVerifierModule.parseVeraPdfValidationResult,
+      image: legalVerifierModule.VERAPDF_RELEASE_IMAGE,
+      version: legalVerifierModule.VERAPDF_VERSION,
+    });
+  const pdfaValidatedFiles = await collectFreshPdfAEvidence(rootDir, attestation, validatePdf);
+  const verifyArtifactManifest = injectedVerifier ?? legalVerifierModule.verifyArtifactManifest;
   return verifyArtifactManifest({
     rootDir,
     manifestPath,
-    pdfaValidatedFiles: new Set(attestation.hashes.keys()),
+    pdfaValidatedFiles,
   });
 }
 
