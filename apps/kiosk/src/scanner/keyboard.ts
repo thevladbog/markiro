@@ -31,6 +31,7 @@ import type { KeyTarget, ScanListener, ScanSource } from "./source.js";
  */
 const DEFAULT_SILENCE_MS = 60;
 const GS = "\u001d";
+const LEGACY_GS_KEY_CODE = 29;
 
 const US_PUNCTUATION: Readonly<Record<string, readonly [plain: string, shifted: string]>> = {
   Backquote: ["`", "~"],
@@ -58,6 +59,10 @@ const SHIFTED_DIGITS = ")!@#$%^&*(";
  */
 function scannerCharacter(event: KeyboardEvent): string | null {
   if (event.ctrlKey && event.code === "BracketRight") return GS;
+  // Some keyboard-capture drivers surface a raw GS byte as an unidentified
+  // keydown with only the legacy numeric fields populated. Without this
+  // branch the byte disappears while the rest of the DataMatrix is assembled.
+  if (event.keyCode === LEGACY_GS_KEY_CODE || event.which === LEGACY_GS_KEY_CODE) return GS;
   if (/^Key[A-Z]$/.test(event.code)) {
     const letter = event.code.slice(3).toLowerCase();
     return event.shiftKey ? letter.toUpperCase() : letter;
