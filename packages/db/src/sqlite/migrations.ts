@@ -211,6 +211,15 @@ export const STATION_MIGRATIONS: string[] = [
      conflict_code TEXT,
      last_checked_at TEXT
    );`,
+  // Older devices could admit two close attempts before this constraint
+  // existed. Keep the first durable fact for each shift, then make the
+  // one-close-event invariant enforceable across processes and restarts.
+  `DELETE FROM shift_close_outbox
+    WHERE rowid NOT IN (
+      SELECT MIN(rowid) FROM shift_close_outbox GROUP BY shift_id
+    );`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS shift_close_outbox_shift_id_uq
+     ON shift_close_outbox (shift_id);`,
   // Station exceptions (undo/clear/reprint/disassemble): the box's own
   // retired flag. Upgrade path for devices enrolled before this slice --
   // same re-runnable idempotency as the `login` ALTER above (SQLite has no

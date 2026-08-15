@@ -55,11 +55,15 @@ export function FloorShell({
   const canCollapseStatusBar = statusBarCollapsible && shiftLabel !== null;
   const [statusBarCollapsed, setStatusBarCollapsed] = useState(canCollapseStatusBar);
   const previousShiftLabel = useRef(shiftLabel);
+  const previousCanCollapseStatusBar = useRef(canCollapseStatusBar);
 
   useEffect(() => {
     if (!canCollapseStatusBar) setStatusBarCollapsed(false);
-    else if (previousShiftLabel.current !== shiftLabel) setStatusBarCollapsed(true);
+    else if (!previousCanCollapseStatusBar.current || previousShiftLabel.current !== shiftLabel) {
+      setStatusBarCollapsed(true);
+    }
     previousShiftLabel.current = shiftLabel;
+    previousCanCollapseStatusBar.current = canCollapseStatusBar;
   }, [canCollapseStatusBar, shiftLabel]);
 
   const collapsed = canCollapseStatusBar && statusBarCollapsed;

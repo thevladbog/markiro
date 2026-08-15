@@ -64,6 +64,24 @@ describe("closeShiftOffline", () => {
     expect(statements.some((sql) => sql.includes("INSERT INTO shift_close_outbox"))).toBe(true);
   });
 
+  it("propagates a non-uniqueness outbox write failure", async () => {
+    const { exec } = executor();
+    const run = exec.run;
+    exec.run = async (sql, params = []) => {
+      if (sql.includes("INSERT INTO shift_close_outbox")) throw new Error("disk full");
+      await run(sql, params);
+    };
+
+    await expect(
+      closeShiftOffline(exec, {
+        shiftId: "shift-1",
+        deviceId: "device-1",
+        operatorId: "operator-1",
+        reasonCode: "equipment_stop",
+      }),
+    ).rejects.toThrow("disk full");
+  });
+
   it("closes through an executor that cannot keep a transaction across pooled calls", async () => {
     const db = new DatabaseSync(":memory:");
     for (const migration of STATION_MIGRATIONS) {
@@ -165,6 +183,45 @@ describe("closeShiftOffline", () => {
     });
 
     expect(retried).toEqual(first);
+    expect(await exec.all("SELECT event_id FROM shift_close_outbox")).toHaveLength(1);
+  });
+
+  it("creates one durable event when the same shift is closed concurrently", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const migration of STATION_MIGRATIONS) {
+      try {
+        db.exec(migration);
+      } catch (error) {
+        if (!/duplicate column name/i.test(String(error))) throw error;
+      }
+    }
+    db.prepare(
+      `INSERT INTO shift_mirror
+         (id, status, mode, product_id, product_name, planned_qty, pallets_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    ).run("shift-concurrent", "active", "aggregation", "product-1", "Widget", null, 0);
+    const exec: SqlExecutor = {
+      run: async (sql, params = []) => {
+        db.prepare(sql).run(...(params as never[]));
+      },
+      all: async <T>(sql: string, params: unknown[] = []) =>
+        db.prepare(sql).all(...(params as never[])) as T[],
+    };
+
+    const results = await Promise.all([
+      closeShiftOffline(exec, {
+        shiftId: "shift-concurrent",
+        deviceId: "device-1",
+        operatorId: "operator-1",
+      }),
+      closeShiftOffline(exec, {
+        shiftId: "shift-concurrent",
+        deviceId: "device-1",
+        operatorId: "operator-1",
+      }),
+    ]);
+
+    expect(results[0]).toEqual(results[1]);
     expect(await exec.all("SELECT event_id FROM shift_close_outbox")).toHaveLength(1);
   });
 

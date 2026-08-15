@@ -518,10 +518,21 @@ export function WorkScreen({
   async function performClose(reasonCode?: string | null): Promise<void> {
     if (!onCloseShift || closeRequestRef.current) return;
     closeRequestRef.current = true;
+    ordinaryScanBlockedRef.current = true;
     setCloseRequestPending(true);
     setCloseError(null);
     try {
-      await onCloseShift(reasonCode ?? null);
+      await new Promise<void>((resolve, reject) => {
+        const accepted = queue.enqueueJob(async () => {
+          try {
+            await onCloseShift(reasonCode ?? null);
+            resolve();
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        if (!accepted) reject(new Error("station scan queue is closed"));
+      });
       setCloseReasonPicker(false);
       onExit();
     } catch (error) {

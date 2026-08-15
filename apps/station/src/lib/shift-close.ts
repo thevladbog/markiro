@@ -43,6 +43,29 @@ function presentStoredClose(row: StoredShiftCloseSummary): OfflineShiftCloseSumm
   };
 }
 
+async function loadStoredClose(
+  exec: SqlExecutor,
+  shiftId: string,
+): Promise<StoredShiftCloseSummary | undefined> {
+  const [storedClose] = await exec.all<StoredShiftCloseSummary>(
+    `SELECT event_id, shift_id, product_id, product_name, planned_qty_snapshot,
+            actual_qty, closed_box_count, reason_code, closed_at
+       FROM shift_close_outbox
+      WHERE shift_id = ?
+      ORDER BY closed_at
+      LIMIT 1`,
+    [shiftId],
+  );
+  return storedClose;
+}
+
+function isShiftCloseUniquenessConflict(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /unique constraint failed:\s*shift_close_outbox\.shift_id|shift_close_outbox_shift_id_uq/i.test(
+    message,
+  );
+}
+
 async function removeEmptyOpenBoxes(exec: SqlExecutor, shiftId: string): Promise<void> {
   // WorkScreen opens the next box immediately after closing the previous one.
   // It has never been sent to the server and has no contents, so it must not
@@ -77,15 +100,7 @@ export async function closeShiftOffline(
   ]);
   if (!shift) throw new Error("Shift is not available offline");
 
-  const [storedClose] = await exec.all<StoredShiftCloseSummary>(
-    `SELECT event_id, shift_id, product_id, product_name, planned_qty_snapshot,
-            actual_qty, closed_box_count, reason_code, closed_at
-       FROM shift_close_outbox
-      WHERE shift_id = ?
-      ORDER BY closed_at
-      LIMIT 1`,
-    [input.shiftId],
-  );
+  const storedClose = await loadStoredClose(exec, input.shiftId);
   if (storedClose) {
     // A previous attempt may have persisted the durable event before its
     // following mirror updates completed. Resume those idempotent writes and
@@ -128,25 +143,34 @@ export async function closeShiftOffline(
   // executor calls to different pooled SQLite connections. Persist the close
   // fact first, then make the remaining writes idempotent so a retry can
   // finish them safely after an interruption.
-  await exec.run(
-    `INSERT INTO shift_close_outbox
-     (event_id, shift_id, device_id, operator_id, product_id, product_name,
-      planned_qty_snapshot, actual_qty, closed_box_count, reason_code, closed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      eventId,
-      input.shiftId,
-      input.deviceId,
-      input.operatorId,
-      shift.product_id,
-      shift.product_name ?? "",
-      shift.planned_qty,
-      actualQty,
-      closedBoxCount,
-      reason,
-      closedAt,
-    ],
-  );
+  try {
+    await exec.run(
+      `INSERT INTO shift_close_outbox
+       (event_id, shift_id, device_id, operator_id, product_id, product_name,
+        planned_qty_snapshot, actual_qty, closed_box_count, reason_code, closed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        eventId,
+        input.shiftId,
+        input.deviceId,
+        input.operatorId,
+        shift.product_id,
+        shift.product_name ?? "",
+        shift.planned_qty,
+        actualQty,
+        closedBoxCount,
+        reason,
+        closedAt,
+      ],
+    );
+  } catch (error) {
+    if (!isShiftCloseUniquenessConflict(error)) throw error;
+    const concurrentClose = await loadStoredClose(exec, input.shiftId);
+    if (!concurrentClose) throw error;
+    await removeEmptyOpenBoxes(exec, input.shiftId);
+    await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
+    return presentStoredClose(concurrentClose);
+  }
   await removeEmptyOpenBoxes(exec, input.shiftId);
   await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
   return {

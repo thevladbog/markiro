@@ -547,6 +547,51 @@ describe("WorkScreen", () => {
     await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 
+  it("closes only after an already accepted scan finishes committing", async () => {
+    const base = makeExec();
+    let releaseScan!: () => void;
+    const scanBlocked = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    let reportScanWriteStarted!: () => void;
+    const scanWriteStarted = new Promise<void>((resolve) => {
+      reportScanWriteStarted = resolve;
+    });
+    const exec: SqlExecutor = {
+      all: base.all,
+      run: async (sql, params = []) => {
+        if (sql.includes("INSERT INTO scan_events_mirror")) {
+          reportScanWriteStarted();
+          await scanBlocked;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const source = manualSource();
+    const onCloseShift = vi.fn().mockResolvedValue({
+      eventId: "close-after-scan",
+      shiftId: "s1",
+      productId: "product-1",
+      productName: "Water 0.5",
+      plannedQtySnapshot: null,
+      actualQty: 1,
+      closedBoxCount: 0,
+      reasonCode: null,
+      closedAt: "2026-08-15T20:00:00.000Z",
+    });
+    renderWorkScreen({ exec, source, onCloseShift });
+
+    act(() => source.emit(KM));
+    await scanWriteStarted;
+    fireEvent.click(screen.getByRole("button", { name: "Close shift" }));
+    await act(async () => Promise.resolve());
+    expect(onCloseShift).not.toHaveBeenCalled();
+
+    releaseScan();
+    await waitFor(() => expect(onCloseShift).toHaveBeenCalledOnce());
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+  });
+
   it("presents accepted scans locally while retaining their success sound", async () => {
     const source = manualSource();
     const playSignalToneSpy = vi.spyOn(signalSound, "playSignalTone");
