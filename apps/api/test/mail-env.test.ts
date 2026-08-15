@@ -203,6 +203,41 @@ describe("landing demo environment", () => {
     ).toThrow(/LANDING_DEMO_GLOBAL_LIMIT/);
   });
 
+  it("accepts a 64-character consent version and rejects 65 without echoing it", () => {
+    const enabledEnv = {
+      ...productionMailEnv,
+      LANDING_DEMO_SUBMISSION_ENABLED: "true",
+      LANDING_ORIGIN: "https://markiro.app",
+      LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
+      LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
+      SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
+    };
+    const acceptedVersion = "a".repeat(64);
+    const rejectedVersion = "b".repeat(65);
+
+    expect(
+      loadEnv({
+        ...enabledEnv,
+        LANDING_DEMO_CONSENT_VERSION: acceptedVersion,
+      }).LANDING_DEMO_CONSENT_VERSION,
+    ).toBe(acceptedVersion);
+
+    let thrown: unknown;
+    try {
+      loadEnv({
+        ...enabledEnv,
+        LANDING_DEMO_CONSENT_VERSION: rejectedVersion,
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeDefined();
+    const message = String(thrown);
+    expect(message).toContain("LANDING_DEMO_CONSENT_VERSION");
+    expect(message).not.toContain(rejectedVersion);
+  });
+
   it("treats blank disabled feature settings as unset", () => {
     expect(
       loadEnv({
