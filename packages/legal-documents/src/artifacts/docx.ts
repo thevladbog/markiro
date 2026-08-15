@@ -453,10 +453,7 @@ function normalizeDocx(bytes: Uint8Array, effectiveDate: string): Uint8Array {
   const core = entries["docProps/core.xml"];
   if (!core) throw new Error("Generated DOCX is missing core properties");
   const timestamp = `${effectiveDate}T00:00:00Z`;
-  const coreXml = new TextDecoder()
-    .decode(core)
-    .replace(/(<dcterms:created[^>]*>)[^<]*(<\/dcterms:created>)/, `$1${timestamp}$2`)
-    .replace(/(<dcterms:modified[^>]*>)[^<]*(<\/dcterms:modified>)/, `$1${timestamp}$2`);
+  const coreXml = normalizeCorePropertyTimestamps(new TextDecoder().decode(core), timestamp);
   entries["docProps/core.xml"] = new TextEncoder().encode(coreXml);
 
   const sortedEntries = Object.fromEntries(
@@ -467,6 +464,74 @@ function normalizeDocx(bytes: Uint8Array, effectiveDate: string): Uint8Array {
   const normalized = zipSync(sortedEntries, { level: 9 });
   normalizeZipDates(normalized, effectiveDate);
   return normalized;
+}
+
+function isXmlWhitespace(value: string | undefined): boolean {
+  return value === " " || value === "\t" || value === "\n" || value === "\r";
+}
+
+function findXmlTagEnd(xml: string, start: number, qualifiedName: string): number {
+  let quote: '"' | "'" | undefined;
+  for (let index = start; index < xml.length; index += 1) {
+    const character = xml[index];
+    if (quote) {
+      if (character === quote) quote = undefined;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+    if (character === ">") return index;
+    if (character === "<") {
+      throw new Error(`Generated DOCX has malformed ${qualifiedName} XML element`);
+    }
+  }
+  throw new Error(`Generated DOCX has unterminated ${qualifiedName} XML element`);
+}
+
+function replaceXmlElementText(xml: string, qualifiedName: string, value: string): string {
+  const openingPrefix = `<${qualifiedName}`;
+  let openingStart = -1;
+  let searchFrom = 0;
+  while (searchFrom < xml.length) {
+    const candidate = xml.indexOf(openingPrefix, searchFrom);
+    if (candidate < 0) break;
+    const delimiter = xml[candidate + openingPrefix.length];
+    if (delimiter === ">" || isXmlWhitespace(delimiter)) {
+      if (openingStart >= 0) {
+        throw new Error(`Generated DOCX has duplicate ${qualifiedName} XML element`);
+      }
+      openingStart = candidate;
+    }
+    searchFrom = candidate + openingPrefix.length;
+  }
+  if (openingStart < 0) {
+    throw new Error(`Generated DOCX is missing ${qualifiedName} XML element`);
+  }
+
+  const openingEnd = findXmlTagEnd(xml, openingStart + openingPrefix.length, qualifiedName);
+  if (xml[openingEnd - 1] === "/") {
+    throw new Error(`Generated DOCX has empty ${qualifiedName} XML element`);
+  }
+  const closingTag = `</${qualifiedName}>`;
+  const closingStart = xml.indexOf(closingTag, openingEnd + 1);
+  if (closingStart < 0) {
+    throw new Error(`Generated DOCX is missing closing ${qualifiedName} XML element`);
+  }
+  if (xml.slice(openingEnd + 1, closingStart).includes("<")) {
+    throw new Error(`Generated DOCX has nested XML element inside ${qualifiedName}`);
+  }
+
+  return `${xml.slice(0, openingEnd + 1)}${value}${xml.slice(closingStart)}`;
+}
+
+export function normalizeCorePropertyTimestamps(xml: string, timestamp: string): string {
+  return replaceXmlElementText(
+    replaceXmlElementText(xml, "dcterms:created", timestamp),
+    "dcterms:modified",
+    timestamp,
+  );
 }
 
 export function normalizeZipDates(bytes: Uint8Array, effectiveDate: string): void {

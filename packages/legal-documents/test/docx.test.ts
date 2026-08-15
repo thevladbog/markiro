@@ -9,7 +9,7 @@ import {
   renderLegalDocx,
   type LegalArtifactRequest,
 } from "../src/artifacts/index.js";
-import { normalizeZipDates } from "../src/artifacts/docx.js";
+import { normalizeCorePropertyTimestamps, normalizeZipDates } from "../src/artifacts/docx.js";
 
 const PRIVACY_REQUEST = {
   code: "MKR-PD-01",
@@ -179,6 +179,21 @@ describe("legal artifact descriptors", () => {
 });
 
 describe("deterministic branded DOCX", () => {
+  it("rejects repeated core-property elements instead of scanning repeated XML prefixes", () => {
+    const coreXml = [
+      '<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dcterms="http://purl.org/dc/terms/">',
+      '<dcterms:created xsi:type="dcterms:W3CDTF">2026-08-15T10:00:00Z</dcterms:created>',
+      '<dcterms:modified xsi:type="dcterms:W3CDTF">'.repeat(4_096),
+      "2026-08-15T10:00:00Z",
+      "</dcterms:modified>".repeat(4_096),
+      "</cp:coreProperties>",
+    ].join("");
+
+    expect(() => normalizeCorePropertyTimestamps(coreXml, "2026-08-15T00:00:00Z")).toThrow(
+      "duplicate dcterms:modified XML element",
+    );
+  });
+
   it("renders compact A4 legal-source structure from the released content", async () => {
     const bytes = await renderLegalDocx(PRIVACY_REQUEST);
     const entries = docxEntries(bytes);
