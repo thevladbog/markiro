@@ -806,7 +806,7 @@ describe("legal artifact release generation", () => {
     expect(environment).toMatchObject({
       PATH: "/usr/bin",
       HOME: "/tmp/legal-profile",
-      TMPDIR: "/private/tmp",
+      TMPDIR: process.platform === "darwin" ? "/private/tmp" : "/tmp",
       XDG_CACHE_HOME: "/tmp/legal-profile/xdg-cache",
       XDG_CONFIG_HOME: "/tmp/legal-profile/xdg-config",
     });
