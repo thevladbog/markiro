@@ -9,9 +9,11 @@ import {
 import type { LegalDocumentPageDefinition } from "../content/legal-pages";
 import { buildLegalPageGraph } from "../lib/seo";
 import { readPublicSiteConfig } from "../lib/site-config";
+import { artifactsForRelease, loadLegalArtifacts } from "../lib/legal-artifacts";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import LandingFooter from "./LandingFooter.astro";
 import LandingHeader from "./LandingHeader.astro";
+import LegalArtifactControls from "./LegalArtifactControls.astro";
 
 interface Props {
   page: LegalDocumentPageDefinition;
@@ -24,6 +26,7 @@ const content = documentSource.content[page.locale];
 const operator = OPERATOR_PROFILES[release.operatorProfileId];
 const registryPath = page.locale === "ru" ? "/legal/" : "/en/legal/";
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
+const artifacts = artifactsForRelease(await loadLegalArtifacts(), release.code, release.revision, page.locale);
 const graph = buildLegalPageGraph(page.metadata, {
   published: release.effectiveDate,
   modified: release.effectiveDate,
@@ -70,6 +73,7 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
       </aside>
 
       <article class="legal-document" data-legal-document data-legal-kind="document">
+        <LegalArtifactControls release={release} locale={page.locale} artifacts={artifacts} />
         {content.sections.map((section) => (
           <section id={section.id} aria-labelledby={`${section.id}-heading`}>
             <h2 id={`${section.id}-heading`}>{section.heading}</h2>

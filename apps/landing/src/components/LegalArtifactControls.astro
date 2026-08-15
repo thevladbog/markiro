@@ -1,0 +1,124 @@
+---
+import { renderLiteralDataMatrixSvg } from "@markiro/domain/artifacts";
+import type {
+  LegalDocumentRelease,
+  LegalLocale,
+} from "@markiro/legal-documents";
+
+import type { PublishedLegalArtifact } from "../lib/legal-artifacts";
+import { legalVerificationPath, legalVerificationUrl } from "../lib/legal-artifacts";
+
+interface Props {
+  release: LegalDocumentRelease;
+  locale: LegalLocale;
+  artifacts: readonly PublishedLegalArtifact[];
+  compact?: boolean;
+  showVerificationLink?: boolean;
+}
+
+const { release, locale, artifacts, compact = false, showVerificationLink = true } = Astro.props;
+const pdf = artifacts.find((artifact) => artifact.kind === "pdfa-2b");
+const docx = artifacts.find((artifact) => artifact.kind === "template-docx");
+if (pdf === undefined) throw new Error(`Missing published PDF/A for ${release.code}/${locale}`);
+const verificationPath = legalVerificationPath(release);
+const verificationUrl = legalVerificationUrl(release);
+const dataMatrixSvg = renderLiteralDataMatrixSvg(verificationUrl);
+const otherLocale = locale === "ru" ? "en" : "ru";
+const status = {
+  active: locale === "ru" ? "Действует" : "Active",
+  superseded: locale === "ru" ? "Заменён" : "Superseded",
+  withdrawn: locale === "ru" ? "Отозван" : "Withdrawn",
+  draft: locale === "ru" ? "Черновик" : "Draft",
+}[release.status];
+const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
+---
+
+<section class:list={["legal-artifacts", { "legal-artifacts--compact": compact }]} aria-label={locale === "ru" ? "Файлы и проверка документа" : "Document files and verification"}>
+  <div class="legal-artifacts__heading">
+    <div>
+      <span class="legal-artifacts__status" data-legal-status={release.status}>{status}</span>
+      <p class="legal-artifacts__identity"><strong>{release.code}</strong> · {release.revision} · {release.effectiveDate}</p>
+    </div>
+    {showVerificationLink && (
+      <a class="legal-artifacts__verify-link" href={verificationPath}>
+        {locale === "ru" ? "Проверить редакцию" : "Verify revision"} <span aria-hidden="true">↗</span>
+      </a>
+    )}
+  </div>
+
+  <div class="legal-artifacts__files">
+    <article class="legal-artifact-file">
+      <div class="legal-artifact-file__topline">
+        <strong>PDF/A-2b</strong>
+        <span>{formatBytes(pdf.bytes)}</span>
+      </div>
+      <a class="legal-artifact-file__download" href={pdf.href} download={pdf.fileName} type={pdf.mediaType}>
+        {locale === "ru" ? "Скачать PDF/A" : "Download PDF/A"}
+      </a>
+      <div class="legal-artifact-file__digest">
+        <span>SHA-256</span>
+        <code data-artifact-sha256>{pdf.sha256}</code>
+        <button type="button" data-copy-artifact={pdf.sha256} aria-live="polite" aria-label={locale === "ru" ? "Скопировать SHA-256 PDF" : "Copy PDF SHA-256"}>
+          {locale === "ru" ? "Копировать" : "Copy"}
+        </button>
+      </div>
+    </article>
+
+    {docx && (
+      <article class="legal-artifact-file legal-artifact-file--template">
+        <div class="legal-artifact-file__topline">
+          <strong>DOCX</strong>
+          <span>{formatBytes(docx.bytes)}</span>
+        </div>
+        <p class="legal-artifact-file__warning" data-template-warning>
+          {locale === "ru"
+            ? "ШАБЛОН / TEMPLATE — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ"
+            : "TEMPLATE / ШАБЛОН — NOT AN EFFECTIVE DOCUMENT"}
+        </p>
+        <a class="legal-artifact-file__download" href={docx.href} download={docx.fileName} type={docx.mediaType}>
+          {locale === "ru" ? "Скачать шаблон DOCX" : "Download DOCX template"}
+        </a>
+        <div class="legal-artifact-file__digest">
+          <span>SHA-256</span>
+          <code data-artifact-sha256>{docx.sha256}</code>
+        <button type="button" data-copy-artifact={docx.sha256} aria-live="polite" aria-label={locale === "ru" ? "Скопировать SHA-256 DOCX" : "Copy DOCX SHA-256"}>
+            {locale === "ru" ? "Копировать" : "Copy"}
+          </button>
+        </div>
+      </article>
+    )}
+  </div>
+
+  {!compact && (
+    <div class="legal-artifacts__verification">
+      <div class="legal-artifacts__datamatrix" data-document-datamatrix set:html={dataMatrixSvg} />
+      <p>
+        <span>{locale === "ru" ? "Адрес проверки" : "Verification address"}</span>
+        <a href={verificationPath}>{verificationUrl}</a>
+      </p>
+    </div>
+  )}
+
+  <a class="legal-artifacts__translation" href={release.routes[otherLocale]} hreflang={otherLocale} lang={otherLocale}>
+    {locale === "ru" ? "Matching English translation" : "Соответствующая русская редакция"}
+  </a>
+</section>
+
+<script>
+  for (const button of document.querySelectorAll<HTMLButtonElement>("[data-copy-artifact]")) {
+    if (button.dataset.copyReady === "true") continue;
+    button.dataset.copyReady = "true";
+    button.addEventListener("click", async () => {
+      const digest = button.dataset.copyArtifact;
+      if (!digest) return;
+      const previous = button.textContent;
+      try {
+        await navigator.clipboard.writeText(digest);
+        button.textContent = document.documentElement.lang === "ru" ? "Скопировано" : "Copied";
+      } catch {
+        button.textContent = document.documentElement.lang === "ru" ? "Не удалось" : "Failed";
+      }
+      window.setTimeout(() => { button.textContent = previous; }, 1600);
+    });
+  }
+</script>

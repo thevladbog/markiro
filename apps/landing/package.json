@@ -13,6 +13,7 @@
     "test": "vitest run --no-file-parallelism"
   },
   "dependencies": {
+    "@markiro/domain": "workspace:*",
     "@markiro/legal-documents": "workspace:*",
     "@markiro/ui": "workspace:*",
     "astro": "7.1.6"

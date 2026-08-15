@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { JSDOM } from "jsdom";
 
+import { loadLegalArtifacts } from "./legal-artifacts.ts";
+
 export type AuditFindingCode =
   | "BROKEN_INTERNAL_LINK"
   | "MISSING_IMAGE"
@@ -22,7 +24,8 @@ export type AuditFindingCode =
   | "MISSING_LEGAL_REVISION"
   | "MISSING_LEGAL_EFFECTIVE_DATE"
   | "MISSING_AUTHORITATIVE_LANGUAGE_LINK"
-  | "MISSING_LEGAL_REGISTRY_LINK";
+  | "MISSING_LEGAL_REGISTRY_LINK"
+  | "INVALID_LEGAL_ARTIFACT";
 
 export interface AuditFinding {
   code: AuditFindingCode;
@@ -279,6 +282,7 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
   const files = await collectFiles(resolvedRoot);
   const findings: AuditFinding[] = [];
   const pages: PageRecord[] = [];
+  const linkedLegalArtifacts = new Set<string>();
 
   for (const relative of [...files].filter((file) => file.endsWith(".html")).sort()) {
     const route = routeForFile(relative);
@@ -354,6 +358,7 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
     for (const anchor of document.querySelectorAll("a[href]")) {
       const url = internalUrl(anchor.getAttribute("href") ?? "", pageUrl);
       if (!url) continue;
+      if (url.pathname.startsWith("/legal/files/")) linkedLegalArtifacts.add(url.pathname);
       if (!outputCandidates(url).some((candidate) => files.has(candidate)))
         findings.push(finding("BROKEN_INTERNAL_LINK", route, `missing target ${url.pathname}`));
     }
@@ -369,11 +374,31 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
   findings.push(...duplicateFindings(pages, "description", "DUPLICATE_DESCRIPTION"));
   findings.push(...duplicateFindings(pages, "canonical", "DUPLICATE_CANONICAL"));
 
+  if (files.has("legal/artifacts.json") || linkedLegalArtifacts.size > 0) {
+    try {
+      const artifacts = await loadLegalArtifacts(resolvedRoot);
+      const publishedPaths = new Set<string>(artifacts.map(({ href }) => href));
+      if ([...linkedLegalArtifacts].some((href) => !publishedPaths.has(href))) {
+        throw new Error("linked artifact is absent from manifest");
+      }
+    } catch {
+      findings.push(
+        finding(
+          "INVALID_LEGAL_ARTIFACT",
+          "/legal/artifacts.json",
+          "legal artifact manifest or published bytes are invalid",
+        ),
+      );
+    }
+  }
+
   const sitemapFile = "sitemap.xml";
   const sitemap = files.has(sitemapFile)
     ? sitemapRoutes(await readFile(path.join(resolvedRoot, sitemapFile), "utf8"))
     : null;
-  const pageRoutes = new Set(pages.map(({ route }) => route));
+  const pageRoutes = new Set(
+    pages.filter(({ route }) => route !== "/404.html").map(({ route }) => route),
+  );
   if (
     sitemap === null ||
     sitemap.size !== pageRoutes.size ||
