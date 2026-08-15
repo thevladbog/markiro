@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./artifacts": {
+      "types": "./dist/artifacts/index.d.ts",
+      "default": "./dist/artifacts/index.js"
     }
   },
   "scripts": {
@@ -19,6 +23,9 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@markiro/domain": "workspace:*",
+    "docx": "9.7.1",
+    "fflate": "0.8.3",
     "typescript": "6.0.3",
     "vitest": "4.1.10"
   }
