@@ -1044,6 +1044,18 @@ export class PickupOrdersService {
         ),
       );
 
+    const [commercemlChannel] = await this.db
+      .select({ credentialHash: schema.integrationChannels.credentialHash })
+      .from(schema.integrationChannels)
+      .where(
+        and(
+          eq(schema.integrationChannels.tenantId, tenantId),
+          eq(schema.integrationChannels.type, "commerceml"),
+        ),
+      );
+    const commercemlConfigured =
+      commercemlChannel?.credentialHash !== null && commercemlChannel !== undefined;
+
     const exportHeldProductNames = [
       ...new Set(
         itemRows
@@ -1068,7 +1080,8 @@ export class PickupOrdersService {
       actNo: row.actNo,
       syncConflicts: this.splitStoredConflicts(row.syncConflicts).conflicts,
       boxConflicts: this.splitStoredConflicts(row.syncConflicts).boxConflicts,
-      exportHeldProductNames,
+      exportHeldProductNames: commercemlConfigured ? exportHeldProductNames : [],
+      commercemlConfigured,
     };
   }
 

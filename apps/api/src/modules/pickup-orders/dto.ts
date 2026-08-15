@@ -327,6 +327,8 @@ export interface PickupOrderDetailDto extends PickupOrderRowDto {
   boxConflicts: BoxConflict[];
   /** Products this order's items reference that carry no 1С link yet — non-empty means this order is held back from `mode=query` (плана И-2, спека §5). */
   exportHeldProductNames: string[];
+  /** True only after this tenant has issued credentials for the CommerceML exchange channel. */
+  commercemlConfigured: boolean;
 }
 
 /** POST /pickup-orders/export body. */

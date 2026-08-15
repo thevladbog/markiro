@@ -31,6 +31,7 @@ afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
   writeHookMountSpy.mockClear();
+  delete document.documentElement.dataset.theme;
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -84,6 +85,7 @@ const ORDER = {
   syncConflicts: [],
   boxConflicts: [],
   exportHeldProductNames: [],
+  commercemlConfigured: true,
 };
 
 const REASONS = { items: [{ id: "r1", name: "Маркетинг", sortOrder: 0 }] };
@@ -178,6 +180,20 @@ describe("OrderDetailPage", () => {
     expect(screen.getByText("Сыр Российский")).toBeDefined();
     expect(screen.getByText(ITEM_A.rawKm)).toBeDefined();
     expect(screen.getByText(ITEM_B.rawKm)).toBeDefined();
+  });
+
+  it("keeps rendered DataMatrix codes on a white field in the dark theme", async () => {
+    document.documentElement.dataset.theme = "dark";
+    renderPage(defaultFetchMock());
+
+    await screen.findByText("Смирнов Алексей");
+    const code = await waitFor(() => {
+      const element = document.querySelector<HTMLElement>(".mk-pickup-dm");
+      if (!element) throw new Error("expected a rendered DataMatrix");
+      return element;
+    });
+
+    expect(getComputedStyle(code).backgroundColor).toBe("rgb(255, 255, 255)");
   });
 
   it("shows what the kiosk lost at sync time", async () => {
@@ -294,6 +310,27 @@ describe("OrderDetailPage", () => {
 
     await screen.findByText(/^Выгружена /);
     expect(screen.queryByText(/Заявка придержана/)).toBeNull();
+  });
+
+  it("hides all 1C export information when CommerceML is not configured", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const path = String(url);
+      if (path === "/api/pickup-orders/o1") {
+        return jsonResponse(200, {
+          ...ORDER,
+          commercemlConfigured: false,
+          exportHeldProductNames: ["Молоко 1л"],
+        });
+      }
+      if (path === "/api/pickup-reasons") return jsonResponse(200, REASONS);
+      throw new Error(`unexpected fetch: ${path}`);
+    });
+    renderPage(fetchMock, OPERATIONS_WRITE_WITH_INTEGRATIONS_READ);
+
+    await screen.findByText(ORDER.orderNo);
+    expect(screen.queryByText("Выгрузка в 1С")).toBeNull();
+    expect(screen.queryByText(/Заявка придержана/)).toBeNull();
+    expect(screen.queryByText("Перейти к очереди сопоставления")).toBeNull();
   });
 
   it("opens the receipt modal on 'Пробита на кассе' and POSTs resolve with action punch + receiptNo", async () => {

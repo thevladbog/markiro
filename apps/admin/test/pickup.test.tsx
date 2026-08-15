@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -86,7 +86,10 @@ function renderPage(access: AccessDocument = OPERATIONS_WRITE_ACCESS) {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
         <AccessProvider value={access}>
-          <PickupPage />
+          <Routes>
+            <Route path="/" element={<PickupPage />} />
+            <Route path="/pickup/:id" element={<div>Заявка открыта</div>} />
+          </Routes>
         </AccessProvider>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -153,6 +156,37 @@ describe("PickupPage", () => {
     expect(table.getByText("37")).toBeDefined();
     expect(table.getByText("36")).toBeDefined();
     expect(fetchMock).toHaveBeenCalledWith("/api/pickup-orders", expect.any(Object));
+  });
+
+  it("shows an explicit action for opening an order", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [ORDER_A, ORDER_B] })),
+    );
+
+    renderPage();
+
+    const openLink = await screen.findByRole("link", { name: "Открыть заявку 37" });
+    expect(openLink.textContent).toBe("Открыть");
+    expect(openLink.getAttribute("href")).toBe("/pickup/o1");
+  });
+
+  it("opens an order when its row is activated from the keyboard", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { items: [ORDER_A, ORDER_B] })),
+    );
+
+    renderPage();
+
+    const orderNumber = await screen.findByRole("link", { name: ORDER_A.orderNo });
+    const row = orderNumber.closest("tr");
+    if (!row) throw new Error("expected a table row for order 37");
+
+    expect(row.tabIndex).toBe(0);
+    fireEvent.keyDown(row, { key: "Enter" });
+
+    expect(await screen.findByText("Заявка открыта")).toBeDefined();
   });
 
   it("refetches with ?status=pending when the status filter changes to Ожидают", async () => {

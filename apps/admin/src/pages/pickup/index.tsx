@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router";
 
 import {
   Alert,
@@ -130,6 +130,7 @@ function PickupPageContent({
   write,
 }: PickupPageContentProps & { write?: PickupWriteControls }) {
   const { t, i18n } = useTranslation();
+  const navigate = useNavigate();
   const shownKiosks = rejections.kioskNames.slice(0, 3);
   const hiddenKioskCount = rejections.kioskNames.length - shownKiosks.length;
 
@@ -204,6 +205,20 @@ function PickupPageContent({
             </Badge>
           )}
         </div>
+      ),
+    },
+    {
+      key: "actions",
+      title: t("pages.pickup.table.actions"),
+      render: (row) => (
+        <Link
+          to={`/pickup/${row.id}`}
+          aria-label={t("pages.pickup.table.openOrder", { orderNo: row.orderNo })}
+          onClick={(event) => event.stopPropagation()}
+          style={{ color: "var(--link)", textDecoration: "underline" }}
+        >
+          {t("pages.pickup.table.openAction")}
+        </Link>
       ),
     },
   ];
@@ -339,7 +354,13 @@ function PickupPageContent({
       ) : items.length === 0 ? (
         <EmptyState title={t("pages.pickup.emptyTitle")} hint={t("pages.pickup.emptyHint")} />
       ) : (
-        <Table columns={columns} rows={items} />
+        <Table
+          columns={columns}
+          rows={items}
+          {...(write?.bulkMode === true
+            ? {}
+            : { onRowClick: (row: PickupOrderRowDto) => void navigate(`/pickup/${row.id}`) })}
+        />
       )}
     </div>
   );
