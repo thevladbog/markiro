@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import { beforeAll, describe, expect, it } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { StatusBar } from "../src/ui/StatusBar.js";
@@ -274,6 +274,28 @@ describe("StatusBar", () => {
       />,
     );
     expect(screen.getByTestId("conflicts-status").textContent).toBe("3");
+  });
+
+  it("labels duplicate-code conflicts clearly in Russian", async () => {
+    await act(() => i18n.changeLanguage("ru"));
+    try {
+      render(
+        <StatusBar
+          {...context}
+          serverReachability="reachable"
+          scanner="keyboard"
+          printerConfigured={false}
+          syncPending={0}
+          syncStuck={false}
+          conflicts={15}
+        />,
+      );
+      expect(screen.getByText("Дубли кодов")).toBeDefined();
+      expect(screen.getByText("Дубли")).toBeDefined();
+      expect(screen.getByTestId("conflicts-status").textContent).toBe("15");
+    } finally {
+      await act(() => i18n.changeLanguage("en"));
+    }
   });
 
   it("shows nothing to worry about at zero", () => {

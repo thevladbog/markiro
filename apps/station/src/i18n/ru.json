@@ -175,7 +175,7 @@
     "sync": "Синхронизация",
     "syncShort": "Синх.",
     "syncStuck": "Не отправляется",
-    "conflictsShort": "Расх.",
+    "conflictsShort": "Дубли",
     "scanner": "Сканер",
     "printer": "Принтер",
     "notConfigured": "Не настроено",
@@ -185,7 +185,7 @@
     "scannerDisconnected": "Нет связи",
     "tasks": "Задачи",
     "setup": "Настройка рабочего места",
-    "conflicts": "Расхождения"
+    "conflicts": "Дубли кодов"
   },
   "updates": {
     "title": "Обновления станции",

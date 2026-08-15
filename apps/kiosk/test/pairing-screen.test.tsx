@@ -957,7 +957,7 @@ describe("Pairing", () => {
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
     // ...and the scanner is let go with it: a code arriving now has no field to
     // land in, and the screen this one is about to hand over to wants it.
-    expect(scanner.listeners()).toBe(0);
+    await waitFor(() => expect(scanner.listeners()).toBe(0));
 
     fireEvent.click(startWorking());
     expect(onPaired).toHaveBeenCalledTimes(1);

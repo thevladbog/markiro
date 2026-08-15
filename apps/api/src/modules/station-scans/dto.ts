@@ -204,6 +204,18 @@ export const syncBatchSchema = z.object({
 export type ScanItemDto = z.input<typeof scanItemSchema>;
 export type SyncBatchDto = z.output<typeof syncBatchSchema>;
 
+export const stationConflictStatusSchema = z.object({
+  codeHashes: z
+    .array(z.string().regex(/^[0-9a-f]{64}$/))
+    .min(1)
+    .max(200),
+});
+export type StationConflictStatusDto = z.infer<typeof stationConflictStatusSchema>;
+
+export interface StationConflictStatusResponseDto {
+  reviewedCodeHashes: string[];
+}
+
 /** A code in THIS batch that lost ownership to an earlier scan elsewhere. */
 export interface BatchConflictDto {
   codeHash: string;

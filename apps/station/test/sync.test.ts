@@ -68,6 +68,42 @@ async function seedInstallId(exec: SqlExecutor, id: string): Promise<void> {
 }
 
 describe("sync engine", () => {
+  it("removes only conflicts the server confirms were reviewed", async () => {
+    const exec = await migratedExec();
+    const reviewedHash = "a".repeat(64);
+    const openHash = "b".repeat(64);
+    for (const codeHash of [reviewedHash, openHash]) {
+      await exec.run(
+        `INSERT INTO conflicts_mirror
+         (code_hash, winning_terminal_id, winning_scanned_at, detected_at)
+         VALUES (?, ?, ?, ?)`,
+        [codeHash, "device-2", "2026-08-15T10:00:00.000Z", "2026-08-15T10:00:01.000Z"],
+      );
+    }
+    const post = vi.fn().mockResolvedValue({ reviewedCodeHashes: [reviewedHash] });
+    const states: Array<{ conflicts: number }> = [];
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: (state) => states.push({ conflicts: state.conflicts }),
+    });
+
+    engine.nudge();
+    await engine.idle();
+
+    expect(post).toHaveBeenCalledWith("/station/conflicts/status", {
+      codeHashes: [reviewedHash, openHash],
+    });
+    expect(
+      await exec.all<{ code_hash: string }>(
+        "SELECT code_hash FROM conflicts_mirror ORDER BY code_hash",
+      ),
+    ).toEqual([{ code_hash: openHash }]);
+    expect(states.at(-1)).toMatchObject({ conflicts: 1 });
+    engine.stop();
+  });
+
   it("drains the queue and acknowledges what the server accepted", async () => {
     const exec = await migratedExec();
     await seed(exec, 3);
