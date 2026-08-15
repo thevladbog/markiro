@@ -6,7 +6,11 @@ import process from "node:process";
 
 import { parseReleaseManifest } from "../production/release-manifest.mjs";
 import { validateProductionDomains } from "../production/production-domain.mjs";
-import { productionBaseUrls, runPublicSmoke } from "../production/smoke.mjs";
+import {
+  landingDemoSubmissionState,
+  productionBaseUrls,
+  runPublicSmoke,
+} from "../production/smoke.mjs";
 import { isMainModule } from "./cli-main.mjs";
 import { registryCredentials } from "./registry-auth.mjs";
 
@@ -283,13 +287,28 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
     rm,
     streamArchive,
     run,
-    smoke: ({ adminBaseUrl, kioskBaseUrl, landingBaseUrl, expectedReleaseSha }) =>
-      runPublicSmoke({ adminBaseUrl, kioskBaseUrl, landingBaseUrl, expectedReleaseSha }),
+    smoke: ({
+      adminBaseUrl,
+      kioskBaseUrl,
+      landingBaseUrl,
+      expectedReleaseSha,
+      landingDemoSubmissionState: expectedDemoSubmissionState,
+    }) =>
+      runPublicSmoke({
+        adminBaseUrl,
+        kioskBaseUrl,
+        landingBaseUrl,
+        expectedReleaseSha,
+        landingDemoSubmissionState: expectedDemoSubmissionState,
+      }),
     ...supplied,
   };
   const manifestPath = requiredEnvironment("RELEASE_MANIFEST_PATH", environment);
   const expectedRunId = requiredEnvironment("EXPECTED_RELEASE_RUN_ID", environment);
   const expectedCommit = requiredEnvironment("EXPECTED_RELEASE_SHA", environment);
+  const expectedDemoSubmissionState = landingDemoSubmissionState(
+    requiredEnvironment("MARKIRO_LANDING_DEMO_SUBMISSION_STATE", environment),
+  );
   const { domain, kioskDomain, landingDomain } = validateProductionDomains(
     environment.MARKIRO_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
@@ -466,6 +485,7 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
             kioskBaseUrl: baseUrls.kiosk,
             landingBaseUrl: baseUrls.landing,
             expectedReleaseSha: manifest.commit,
+            landingDemoSubmissionState: expectedDemoSubmissionState,
           });
         },
         async finalize(candidate) {

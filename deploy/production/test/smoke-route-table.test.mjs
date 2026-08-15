@@ -190,7 +190,7 @@ function landingResponse(options = {}) {
   return response({ ...options, cspPolicy: landingCsp });
 }
 
-function smokeClient(releaseSha) {
+function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
   const requests = [];
   return {
     requests,
@@ -246,6 +246,15 @@ function smokeClient(releaseSha) {
             "cache-control": "public, max-age=300",
             "content-type": "text/plain; charset=utf-8",
           },
+        });
+      if (landing && path === "/api/demo-requests" && (init?.method ?? "GET") === "POST")
+        return landingResponse({
+          status: landingDemoSubmissionState === "enabled" ? 400 : 404,
+          body: JSON.stringify({
+            code:
+              landingDemoSubmissionState === "enabled" ? "invalid_request" : "submission_disabled",
+          }),
+          headers: { "content-type": "application/json; charset=utf-8" },
         });
       if (landing)
         return landingResponse({
@@ -362,6 +371,57 @@ test("runner public smoke exercises the external route contract without local Do
         new URL(url).hostname === "kiosk.markiro.example" &&
         new URL(url).pathname === "/api/kiosk/bootstrap",
     ),
+  );
+});
+
+test("landing smoke exercises the approved enabled API state without captcha or mail", async () => {
+  const client = smokeClient(undefined, "enabled");
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+      landingDemoSubmissionState: "enabled",
+    },
+    client,
+  );
+
+  const submission = client.requests.find(
+    ({ url, init }) => new URL(url).pathname === "/api/demo-requests" && init?.method === "POST",
+  );
+  assert.equal(submission.init.body, "{}");
+  assert.equal(submission.init.headers["content-type"], "application/json");
+});
+
+test("landing smoke rejects the wrong disabled API error code", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = (url, init) => {
+    if (
+      new URL(url).hostname === "markiro.example" &&
+      new URL(url).pathname === "/api/demo-requests" &&
+      init?.method === "POST"
+    )
+      return landingResponse({
+        status: 404,
+        body: '{"code":"not_found"}',
+        headers: { "content-type": "application/json" },
+      });
+    return original(url, init);
+  };
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+        landingDemoSubmissionState: "disabled",
+      },
+      client,
+    ),
+    /submission_disabled/,
   );
 });
 
@@ -693,7 +753,6 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/llms.txt", "llms"],
     ["GET", "/api/demo-requests", "not-found"],
     ["HEAD", "/api/demo-requests", "not-found"],
-    ["POST", "/api/demo-requests", "not-found"],
     ["PUT", "/api/demo-requests", "not-found"],
     ["POST", "/api/demo-request", "not-found"],
     ["POST", "/api/demo-requests/", "not-found"],
@@ -731,7 +790,7 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
 
   assert.equal(
     client.requests.length,
-    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 3,
+    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 4,
   );
   assert.deepEqual(
     client.requests

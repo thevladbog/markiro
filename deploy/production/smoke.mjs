@@ -134,7 +134,6 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/llms.txt", "llms"]),
   Object.freeze(["GET", "/api/demo-requests", "not-found"]),
   Object.freeze(["HEAD", "/api/demo-requests", "not-found"]),
-  Object.freeze(["POST", "/api/demo-requests", "not-found"]),
   Object.freeze(["PUT", "/api/demo-requests", "not-found"]),
   Object.freeze(["POST", "/api/demo-request", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests/", "not-found"]),
@@ -146,6 +145,12 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
 function productionBaseUrl(domain, port) {
   const authority = port && port !== "443" ? `${domain}:${port}` : domain;
   return `https://${authority}`;
+}
+
+export function landingDemoSubmissionState(value) {
+  if (value !== "disabled" && value !== "enabled")
+    throw new Error("landing demo submission smoke state is invalid");
+  return value;
 }
 
 export function productionBaseUrls(environment) {
@@ -383,6 +388,28 @@ function assertLandingRoute(check, response, body, baseUrl) {
     !body.includes(new URL("/en/faq/", `${LANDING_SITE_URL}/`).href)
   )
     throw new Error("landing llms index does not expose canonical topic routes");
+}
+
+function assertLandingDemoSubmission(response, body, state) {
+  const expected =
+    state === "enabled"
+      ? { status: 400, code: "invalid_request" }
+      : { status: 404, code: "submission_disabled" };
+  let payload;
+  try {
+    payload = JSON.parse(body);
+  } catch {
+    throw new Error(`landing demo submission did not return ${expected.code}`);
+  }
+  if (
+    response.status !== expected.status ||
+    !/application\/json/i.test(response.headers.get("content-type") || "") ||
+    payload === null ||
+    typeof payload !== "object" ||
+    Array.isArray(payload) ||
+    payload.code !== expected.code
+  )
+    throw new Error(`landing demo submission did not return ${expected.code}`);
 }
 
 function parseManifest(body, baseUrl) {
@@ -1001,13 +1028,32 @@ async function runLandingSmoke(options, client) {
     assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`, LANDING_CSP);
     assertLandingRoute(check, response, body, baseUrl);
   }
+  const demoSubmission = await publicRequest(client, new URL("/api/demo-requests", baseUrl), {
+    method: "POST",
+    body: "{}",
+    headers: { "content-type": "application/json" },
+  });
+  const demoSubmissionBody = await getText(demoSubmission);
+  assertHeaders(
+    demoSubmission,
+    new URL(baseUrl).protocol === "https:",
+    "landing POST /api/demo-requests",
+    LANDING_CSP,
+  );
+  assertLandingDemoSubmission(
+    demoSubmission,
+    demoSubmissionBody,
+    options.landingDemoSubmissionState,
+  );
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
 }
 
 export async function runPublicSmoke(options, client = requestClient()) {
-  const admin = await runAdminSmoke(options, client);
-  const kiosk = await runKioskSmoke(options, client, admin);
-  const landing = await runLandingSmoke(options, client);
+  const landingState = landingDemoSubmissionState(options.landingDemoSubmissionState ?? "disabled");
+  const smokeOptions = { ...options, landingDemoSubmissionState: landingState };
+  const admin = await runAdminSmoke(smokeOptions, client);
+  const kiosk = await runKioskSmoke(smokeOptions, client, admin);
+  const landing = await runLandingSmoke(smokeOptions, client);
   if (!options.expectedReleaseSha && (admin.releaseSha || kiosk.releaseSha || landing.releaseSha)) {
     if (
       !admin.releaseSha ||
@@ -1047,6 +1093,9 @@ if (isMainModule(import.meta.url)) {
       kioskBaseUrl: kiosk,
       landingBaseUrl: landing,
       expectedReleaseSha: process.env.MARKIRO_IMAGE_TAG,
+      landingDemoSubmissionState: landingDemoSubmissionState(
+        process.env.MARKIRO_LANDING_DEMO_SUBMISSION_STATE,
+      ),
       environment: process.env,
     });
   } catch (error) {

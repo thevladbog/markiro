@@ -19,6 +19,7 @@ const environment = {
   MARKIRO_DOMAIN: "app.markiro.example",
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
   MARKIRO_LANDING_DOMAIN: "markiro.example",
+  MARKIRO_LANDING_DEMO_SUBMISSION_STATE: "disabled",
   MARKIRO_HTTPS_PORT: "443",
   ACME_EMAIL: "ops@example.test",
   DATABASE_URL: "postgres://private:password@database/markiro",
@@ -235,6 +236,7 @@ test("passes all configured authorities and the immutable tag to public smoke", 
   assert.equal(smokeOptions.kioskBaseUrl, "https://kiosk.markiro.example:18443");
   assert.equal(smokeOptions.landingBaseUrl, "https://markiro.example:18443");
   assert.equal(smokeOptions.expectedReleaseSha, tag);
+  assert.equal(smokeOptions.landingDemoSubmissionState, "disabled");
   assert.equal(readinessUrl, "https://app.markiro.example:18443/health/live");
 });
 

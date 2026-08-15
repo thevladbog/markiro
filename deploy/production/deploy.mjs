@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
 import { runPreflight } from "./preflight.mjs";
-import { productionBaseUrls, runSmoke } from "./smoke.mjs";
+import { landingDemoSubmissionState, productionBaseUrls, runSmoke } from "./smoke.mjs";
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
@@ -703,6 +703,9 @@ export async function deployRelease(options, supplied = {}) {
   };
   dependencies.log("preflight");
   const preflight = await dependencies.runPreflight(options.environment);
+  const demoSubmissionState = landingDemoSubmissionState(
+    options.environment.MARKIRO_LANDING_DEMO_SUBMISSION_STATE ?? "disabled",
+  );
   const environment = {
     ...process.env,
     ...options.environment,
@@ -805,6 +808,7 @@ export async function deployRelease(options, supplied = {}) {
         kioskBaseUrl: baseUrls.kiosk,
         landingBaseUrl: baseUrls.landing,
         expectedReleaseSha: tag,
+        landingDemoSubmissionState: demoSubmissionState,
       });
     } catch {
       throw new Error("Public smoke failed");

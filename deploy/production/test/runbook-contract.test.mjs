@@ -101,3 +101,30 @@ test("landing publication runbook keeps demo email release gates observable", as
   ])
     assert.match(runbook, new RegExp(`Тесты репозитория не доказывают[^\\n]*${unproved}`));
 });
+
+test("landing publication runbook keeps enablement, monitoring, and rollback fail-closed", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  const disabledFirst = runbook.indexOf("Гейт 1. Развернуть код с двумя выключенными флагами");
+  const controlledPair = runbook.indexOf("контролируемую RU/EN пару");
+  const publicEnable = runbook.indexOf("Гейт 5. Собрать и опубликовать форму");
+  assert.ok(disabledFirst >= 0 && controlledPair > disabledFirst && publicEnable > controlledPair);
+
+  for (const required of [
+    "один и тот же request UUID",
+    "ровно две durable mail delivery rows",
+    "ровно две durable outbox rows",
+    "внутреннее письмо отвечает посетителю",
+    "confirmation отвечает на публичный адрес Markiro",
+    "400 + captcha_invalid",
+    "503 + captcha_unavailable",
+    "429 + rate_limited",
+    "сначала выключить публичную форму",
+    "сохранить уже созданные и queued письма",
+    "отзыв credentials выполняется отдельно",
+    "CRM integration остаётся отдельным release gate",
+    "status/code",
+    "locale",
+    "source path",
+  ])
+    assert.match(runbook, new RegExp(required.replaceAll("+", "\\+"), "i"));
+});

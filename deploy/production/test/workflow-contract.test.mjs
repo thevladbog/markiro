@@ -141,7 +141,14 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
     "release_run_id",
     "release_sha",
+    "landing_demo_submission_state",
   ]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.landing_demo_submission_state, {
+    description: "Expected API demo-submission state during public smoke",
+    required: true,
+    type: "choice",
+    options: ["disabled", "enabled"],
+  });
   assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
   const deploy = workflow.jobs.deploy;
   assert.equal(deploy["runs-on"], "ubuntu-latest");
@@ -153,6 +160,10 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   assert.match(source, /APP_SSH_HOST_KEYS_B64/);
   assert.match(source, /ACME_EMAIL:\s*\$\{\{ vars\.ACME_EMAIL \}\}/);
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
+  assert.match(
+    source,
+    /MARKIRO_LANDING_DEMO_SUBMISSION_STATE:\s*\$\{\{ inputs\.landing_demo_submission_state \}\}/,
+  );
   assert.match(source, /GHCR_TOKEN:\s*\$\{\{ github\.token \}\}/);
   assert.match(source, /if:\s*always\(\)/);
   assert.doesNotMatch(

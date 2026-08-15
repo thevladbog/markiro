@@ -17,7 +17,7 @@
 
 ### Гейт 1. Развернуть код с двумя выключенными флагами
 
-1. Собрать immutable edge image с `PUBLIC_DEMO_SUBMISSION_ENABLED=false` и подготовить защищённое окружение API с `LANDING_DEMO_SUBMISSION_ENABLED=false`.
+1. Собрать immutable edge image с `PUBLIC_DEMO_SUBMISSION_ENABLED=false` и подготовить защищённое окружение API с `LANDING_DEMO_SUBMISSION_ENABLED=false`. Запускать **Deploy production** только с `landing_demo_submission_state=disabled`, чтобы public smoke требовал точную пару `404 + submission_disabled`, не обращаясь к captcha или mail.
 2. Тем же release SHA развернуть additive migration, API, mail worker и edge. Миграция добавляет возможность безопасно и не является сигналом включения формы.
 3. Выполнить package, built-site, browser, Lighthouse и production bundle gates. Отдельно зафиксировать DB skips и недоступную внешнюю инфраструктуру.
 4. Проверить readiness, отсутствие активной формы и plain 404 для `POST /api/demo-requests`; убедиться, что проверка не создала заявок или писем.
@@ -46,8 +46,8 @@
 
 1. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`. Задать API `LANDING_DEMO_SUBMISSION_ENABLED=true`, утверждённый `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT=hello@v-b.tech`, публичный Reply-To, consent version и SmartCaptcha server key; перезапустить API тем же immutable release.
 2. Убедиться, что публичная HTML-форма всё ещё отсутствует, а контролируемый `POST /api/demo-requests` теперь проходит только с валидным production captcha token.
-3. Из контролируемых почтовых ящиков отправить ровно одну RU- и одну EN-заявку. Не фиксировать в evidence значения полей формы, captcha tokens или адреса посетителей.
-4. Для каждой заявки по обезличенному request id проверить ровно две mail delivery rows и две outbox rows. Обе доставки должны пройти из `queued` (или наблюдаемого `retrying`) в `sent`; состояние `failed` блокирует переход дальше.
+3. Из контролируемых почтовых ящиков отправить контролируемую RU/EN пару: ровно одну RU- и одну EN-заявку. Не фиксировать в evidence значения полей формы, captcha tokens или адреса посетителей.
+4. Для каждой заявки создать отдельный обезличенный request UUID и убедиться, что один и тот же request UUID связывает заявку, ровно две durable mail delivery rows и ровно две durable outbox rows. Обе доставки должны пройти из `queued` (или наблюдаемого `retrying`) в `sent`; состояние `failed` блокирует переход дальше.
 5. Проверить получение внутреннего письма на `hello@v-b.tech` и confirmation в соответствующем контролируемом ящике посетителя. Проверить папки spam/junk и направление Reply-To: внутреннее письмо отвечает посетителю, confirmation отвечает на публичный адрес Markiro.
 
 **Критерий выхода:** RU и EN запросы получили 202, для каждого создано и отправлено ровно два письма, оба адресата подтвердили arrival и Reply-To, spam/junk проверены.
@@ -55,15 +55,15 @@
 ### Гейт 5. Собрать и опубликовать форму
 
 1. Указать только публичные build values: `PUBLIC_DEMO_SUBMISSION_ENABLED=true`, `PUBLIC_SMARTCAPTCHA_CLIENT_KEY`, `PUBLIC_PRIVACY_POLICY_PATH`, `PUBLIC_PERSONAL_DATA_CONSENT_PATH` и согласованный `PUBLIC_DEMO_CONSENT_VERSION`.
-2. Собрать новый immutable edge image и развернуть его после проверки, что server flag остаётся true. Не передавать SmartCaptcha server key в build arguments или image layers.
-3. Проверить RU и EN формы на desktop и mobile: тексты, ссылки на документы, consent, keyboard/focus flow, captcha fallback, 202/400/429/503 и отсутствие других публичных API routes.
+2. Собрать новый immutable edge image и развернуть его после проверки, что server flag остаётся true. Запустить **Deploy production** с `landing_demo_submission_state=enabled`: smoke отправляет только пустой JSON и требует `400 + invalid_request`, поэтому не вызывает SmartCaptcha и не создаёт письмо. Не передавать SmartCaptcha server key в build arguments или image layers.
+3. Проверить RU и EN формы на desktop и mobile: тексты, ссылки на документы, consent, keyboard/focus flow, captcha fallback и отсутствие других публичных API routes. Зафиксировать точные стабильные пары: невалидный captcha даёт `400 + captcha_invalid`, недоступный/просроченный captcha provider даёт `503 + captcha_unavailable`, превышение лимита даёт `429 + rate_limited`; проверка только HTTP status без public error code не проходит гейт.
 4. Проверить landing-only CSP и Caddy ordering: только exact `POST /api/demo-requests` проксируется; GET/HEAD/PUT, соседние и вложенные пути остаются 404.
 
 **Критерий выхода:** публичная форма доступна в RU и EN только на утверждённом release; legal paths, captcha и server route согласованы.
 
 ### Гейт 6. Наблюдать после включения
 
-1. Наблюдать раздельные rates ответов 202/400/429/503 и неожиданные изменения source/global rate limits.
+1. Наблюдать раздельные rates ответов `202`, `400 + captcha_invalid`, `503 + captcha_unavailable` и `429 + rate_limited`, а также неожиданные изменения source/global rate limits. Обязательные обезличенные monitoring dimensions: `status/code`, `locale` и `source path`; не добавлять PII или captcha token.
 2. Наблюдать классы captcha failure: rejected, unavailable/timeout и configuration error, не логируя token или данные посетителя.
 3. Наблюдать переходы mail `queued`/`retrying`/`failed`/`sent`, возраст очереди и независимый результат двух доставок.
 4. Сопоставлять Postbox delivery, bounce/rejection и abuse events с обезличенными request/delivery ids; отдельно следить за arrival внутреннего и confirmation письма.
@@ -71,10 +71,10 @@
 
 ## Rollback формы и доставки
 
-1. Сначала пересобрать edge с `PUBLIC_DEMO_SUBMISSION_ENABLED=false`, развернуть его и проверить, что форма исчезла в RU и EN.
-2. Затем вернуть `LANDING_DEMO_SUBMISSION_ENABLED=false`, перезапустить API и проверить, что exact `POST /api/demo-requests` снова отвечает plain 404.
-3. Не откатывать additive migration и не удалять уже созданные или `queued` письма. Их состояние разбирается через существующий mail operations flow; rollback не скрывает durable work.
-4. Отзыв Postbox/SMTP credentials — отдельная security-мера, применяемая при подозрении на sender abuse или компрометацию. Обычный rollback формы сам по себе credentials не отзывает.
+1. Сначала выключить публичную форму: пересобрать edge с `PUBLIC_DEMO_SUBMISSION_ENABLED=false`, развернуть его с `landing_demo_submission_state=enabled` (API на этом шаге ещё включён) и проверить, что форма исчезла в RU и EN.
+2. Затем вернуть `LANDING_DEMO_SUBMISSION_ENABLED=false`, перезапустить API и выполнить public smoke с `MARKIRO_LANDING_DEMO_SUBMISSION_STATE=disabled`; exact `POST /api/demo-requests` должен вернуть `404 + submission_disabled`.
+3. Не откатывать additive migration и сохранить уже созданные и queued письма. Их состояние разбирается через существующий mail operations flow; rollback не скрывает durable work и не отменяет queued mail.
+4. Отзыв credentials выполняется отдельно как security-мера при подозрении на sender abuse или компрометацию. Обычный rollback формы сам по себе Postbox/SMTP credentials не отзывает.
 5. DNS rollback и полный application rollback выполняются отдельно по production runbooks, если проблема затрагивает весь сайт, TLS или release, а не только форму.
 
 ## Публикация сайта и поисковая приёмка
@@ -133,6 +133,8 @@
 Локальный Lighthouse даёт лабораторную оценку. field Core Web Vitals не являются Lighthouse-оценкой и записываются только после появления реальных полевых данных.
 
 AI-поиск проверяется по `docs/seo/ai-search-query-pack.md`, результаты записываются по `docs/seo/ai-search-audit-template.md`. Ответы оцениваются по фактической точности и качеству citations, а не только по упоминанию бренда.
+
+CRM integration остаётся отдельным release gate: включение формы, доставка писем или rollback не разрешают CRM forwarding и не меняют его статус.
 
 ## Стоп-условия
 
