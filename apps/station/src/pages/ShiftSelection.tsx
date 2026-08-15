@@ -34,6 +34,21 @@ interface ShiftListItem {
   } | null;
 }
 
+async function excludeLocallyClosedShifts(
+  exec: SqlExecutor | undefined,
+  items: ShiftListItem[],
+): Promise<ShiftListItem[]> {
+  if (!exec || items.length === 0) return items;
+  const placeholders = items.map(() => "?").join(", ");
+  const rows = await exec.all<{ id: string }>(
+    `SELECT shift_id AS id FROM shift_close_outbox WHERE shift_id IN (${placeholders})`,
+    items.map((shift) => shift.id),
+  );
+  if (rows.length === 0) return items;
+  const closedIds = new Set(rows.map((row) => row.id));
+  return items.filter((shift) => !closedIds.has(shift.id));
+}
+
 export interface ShiftSelectionProps {
   client: StationClient;
   exec?: SqlExecutor;
@@ -109,11 +124,17 @@ export function ShiftSelection({
     setError(null);
     void client
       .get<{ items: ShiftListItem[] }>("/shifts")
-      .then((response) => {
+      .then(async (response) => {
+        let visibleItems = response.items;
+        try {
+          visibleItems = await excludeLocallyClosedShifts(exec, response.items);
+        } catch (err) {
+          console.error("station: locally closed shift reconciliation failed", err);
+        }
         if (!mounted.current || listRequest.current?.id !== id) return;
-        setItems(response.items);
+        setItems(visibleItems);
         loadedClient.current = client;
-        for (const shift of response.items) {
+        for (const shift of visibleItems) {
           const currentCheck = isCurrentRef.current;
           const prefetch = prefetchStationProductImage(
             client,

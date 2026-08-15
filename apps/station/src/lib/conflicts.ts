@@ -20,6 +20,7 @@ export interface DeviceConflictPage {
 
 /** Two fixed-height cards leave room for the message, pager, and floor footer at 1024x768. */
 export const CONFLICTS_PAGE_SIZE = 2;
+export const CONFLICT_RECONCILE_BATCH_SIZE = 200;
 
 /**
  * Records conflicts the server reported for a batch. Keyed by code, so the
@@ -90,4 +91,27 @@ export async function readConflicts(
 export async function conflictCount(exec: SqlExecutor): Promise<number> {
   const rows = await exec.all<{ n: number }>("SELECT COUNT(*) AS n FROM conflicts_mirror");
   return rows[0]?.n ?? 0;
+}
+
+export async function readConflictHashesAfter(
+  exec: SqlExecutor,
+  after: string | null,
+): Promise<string[]> {
+  const rows = await exec.all<{ code_hash: string }>(
+    `SELECT code_hash FROM conflicts_mirror
+      WHERE (? IS NULL OR code_hash > ?)
+      ORDER BY code_hash
+      LIMIT ?`,
+    [after, after, CONFLICT_RECONCILE_BATCH_SIZE],
+  );
+  return rows.map((row) => row.code_hash);
+}
+
+export async function removeReviewedConflicts(
+  exec: SqlExecutor,
+  codeHashes: string[],
+): Promise<void> {
+  if (codeHashes.length === 0) return;
+  const placeholders = codeHashes.map(() => "?").join(", ");
+  await exec.run(`DELETE FROM conflicts_mirror WHERE code_hash IN (${placeholders})`, codeHashes);
 }

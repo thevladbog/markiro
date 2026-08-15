@@ -3,6 +3,7 @@ import {
   Controller,
   ForbiddenException,
   Headers,
+  HttpCode,
   Post,
   Req,
   UseGuards,
@@ -13,7 +14,14 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
-import { syncBatchSchema, type SyncBatchDto, type SyncBatchResponseDto } from "./dto";
+import {
+  stationConflictStatusSchema,
+  syncBatchSchema,
+  type StationConflictStatusDto,
+  type StationConflictStatusResponseDto,
+  type SyncBatchDto,
+  type SyncBatchResponseDto,
+} from "./dto";
 import { StationScansService } from "./station-scans.service";
 
 /**
@@ -27,6 +35,19 @@ import { StationScansService } from "./station-scans.service";
 @UseGuards(TenantGuard, StationOnlyGuard, SubscriptionAccessGuard)
 export class StationScansController {
   constructor(private readonly service: StationScansService) {}
+
+  @Post("conflicts/status")
+  @HttpCode(200)
+  @AllowSubscriptionRecovery("station")
+  async conflictStatus(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(stationConflictStatusSchema)) body: StationConflictStatusDto,
+  ): Promise<StationConflictStatusResponseDto> {
+    if (!req.deviceId) {
+      throw new ForbiddenException("Station device authentication required");
+    }
+    return this.service.reviewedConflictHashes(req.tenantId!, req.deviceId, body.codeHashes);
+  }
 
   @Post("scans")
   @AllowSubscriptionRecovery("station")

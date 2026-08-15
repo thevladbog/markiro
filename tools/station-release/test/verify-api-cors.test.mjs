@@ -14,6 +14,7 @@ const expected = [
     "GET",
     "x-api-key,x-station-capabilities",
   ],
+  ["/station/conflicts/status", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/scans", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/shift-closures", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],

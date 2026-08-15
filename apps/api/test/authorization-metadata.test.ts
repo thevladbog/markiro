@@ -258,7 +258,7 @@ const ADMINISTRATIVE_CONTROLLERS: readonly [
 
 const STATION_ONLY_CONTROLLERS: readonly [ControllerClass, readonly string[]][] = [
   [StationOperatorsController, ["listRoster"]],
-  [StationScansController, ["ingest"]],
+  [StationScansController, ["conflictStatus", "ingest"]],
 ];
 
 const reflector = new Reflector();

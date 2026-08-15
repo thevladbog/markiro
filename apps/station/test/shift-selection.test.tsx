@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
 import { createStationClient } from "../src/lib/api-client.js";
+import type { SqlExecutor } from "../src/lib/mirror.js";
 import { ShiftSelection } from "../src/pages/ShiftSelection.js";
 
 beforeAll(async () => {
@@ -19,6 +20,37 @@ const client = createStationClient({
 });
 
 describe("ShiftSelection", () => {
+  it("hides a locally closed shift while the server still reports it active", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "just-closed",
+              status: "active",
+              mode: "aggregation",
+              productName: "Waiting for close sync",
+              plannedQty: 10,
+              productId: "product-1",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const exec: SqlExecutor = {
+      async run() {},
+      async all<T>() {
+        return [{ id: "just-closed" }] as T[];
+      },
+    };
+
+    render(<ShiftSelection client={client} exec={exec} onSelected={() => {}} onNew={() => {}} />);
+
+    await waitFor(() => expect(screen.getByText("No open shifts")).toBeDefined());
+    expect(screen.queryByText("Waiting for close sync")).toBeNull();
+  });
+
   it("refreshes an open empty list and shows a shift created in the cabinet", async () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, "fetch")

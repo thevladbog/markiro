@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { BadRequestException, ConflictException, Inject, Injectable, Logger } from "@nestjs/common";
-import { and, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import {
@@ -18,6 +18,7 @@ import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import type {
   BatchConflictDto,
   DeniedStationRecordDto,
+  StationConflictStatusResponseDto,
   SyncBatchDto,
   SyncBatchResponseDto,
 } from "./dto";
@@ -139,6 +140,26 @@ export class StationScansService {
     private readonly ssccService: SsccService,
     private readonly entitlements: EntitlementsService,
   ) {}
+
+  async reviewedConflictHashes(
+    tenantId: string,
+    authenticatedTerminalId: string,
+    codeHashes: string[],
+  ): Promise<StationConflictStatusResponseDto> {
+    const rows = await this.db
+      .select({ codeHash: schema.codeConflicts.codeHash })
+      .from(schema.codeConflicts)
+      .where(
+        and(
+          eq(schema.codeConflicts.tenantId, tenantId),
+          eq(schema.codeConflicts.losingTerminalId, authenticatedTerminalId),
+          isNotNull(schema.codeConflicts.reviewedAt),
+          inArray(schema.codeConflicts.codeHash, codeHashes),
+        ),
+      )
+      .orderBy(asc(schema.codeConflicts.codeHash));
+    return { reviewedCodeHashes: rows.map((row) => row.codeHash) };
+  }
 
   /**
    * Applies one batch and records its key in a SINGLE transaction, so a

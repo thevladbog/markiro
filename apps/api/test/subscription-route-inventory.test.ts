@@ -235,7 +235,10 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   },
   {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
-    routes: ["POST /station/scans (StationScansController.ingest)"],
+    routes: [
+      "POST /station/conflicts/status (StationScansController.conflictStatus)",
+      "POST /station/scans (StationScansController.ingest)",
+    ],
   },
   {
     contract: customerContract(STATION_GUARDS, { mode: "read_only_allowed", reason: "read" }),

@@ -95,6 +95,7 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
     const apiKey = await deviceKey(agent);
+    const otherDeviceKey = await deviceKey(agent);
     const shiftId = await openShift(agent);
 
     const first = { ...item(shiftId, 1), terminalId: "t1" };
@@ -123,8 +124,29 @@ describe.skipIf(!ready)("conflicts e2e", () => {
     expect(items).toHaveLength(1);
     expect(items[0]!.reviewedAt).toBeNull();
 
+    const stillOpen = await request(app!.getHttpServer())
+      .post("/station/conflicts/status")
+      .set("x-api-key", apiKey)
+      .send({ codeHashes: [first.code!.codeHash] })
+      .expect(200);
+    expect(stillOpen.body).toEqual({ reviewedCodeHashes: [] });
+
     const reviewed = await agent.post(`/conflicts/${items[0]!.id}/review`).expect(200);
     expect((reviewed.body as { reviewedAt: string | null }).reviewedAt).not.toBeNull();
+
+    const stationStatus = await request(app!.getHttpServer())
+      .post("/station/conflicts/status")
+      .set("x-api-key", apiKey)
+      .send({ codeHashes: [first.code!.codeHash] })
+      .expect(200);
+    expect(stationStatus.body).toEqual({ reviewedCodeHashes: [first.code!.codeHash] });
+
+    const otherDeviceStatus = await request(app!.getHttpServer())
+      .post("/station/conflicts/status")
+      .set("x-api-key", otherDeviceKey)
+      .send({ codeHashes: [first.code!.codeHash] })
+      .expect(200);
+    expect(otherDeviceStatus.body).toEqual({ reviewedCodeHashes: [] });
 
     // The mutation's own response is application code and could report a
     // fabricated timestamp without ever writing it -- a fresh GET (a

@@ -1,6 +1,12 @@
 import { MAX_BOX_CLOSURES_PER_SYNC_BATCH } from "@markiro/domain";
 import { isStationCredentialRejection, type StationClient } from "./api-client.js";
-import { conflictCount, recordConflicts } from "./conflicts.js";
+import {
+  conflictCount,
+  CONFLICT_RECONCILE_BATCH_SIZE,
+  readConflictHashesAfter,
+  recordConflicts,
+  removeReviewedConflicts,
+} from "./conflicts.js";
 import {
   acquireCredentialCommitLease,
   createCredentialGeneration,
@@ -137,6 +143,10 @@ interface BatchResponse {
   denied?: DeniedStationRecord[];
 }
 
+interface ConflictStatusResponse {
+  reviewedCodeHashes: string[];
+}
+
 interface DeniedStationRecord {
   recordKind: "item" | "box" | "exception";
   recordIndex: number;
@@ -165,6 +175,36 @@ function isBatchConflict(value: unknown): value is BatchConflict {
     typeof c.winningScannedAt === "string" &&
     !Number.isNaN(Date.parse(c.winningScannedAt))
   );
+}
+
+function isCodeHash(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function isConflictStatusResponse(value: unknown): value is ConflictStatusResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const reviewed = (value as Record<string, unknown>).reviewedCodeHashes;
+  return Array.isArray(reviewed) && reviewed.every(isCodeHash);
+}
+
+async function reconcileReviewedConflicts(
+  exec: SqlExecutor,
+  client: Pick<StationClient, "post">,
+): Promise<void> {
+  let cursor: string | null = null;
+  for (;;) {
+    const codeHashes = await readConflictHashesAfter(exec, cursor);
+    if (codeHashes.length === 0) return;
+    const response = await client.post<unknown>("/station/conflicts/status", { codeHashes });
+    if (!isConflictStatusResponse(response)) {
+      throw new Error("station: unexpected /station/conflicts/status response shape");
+    }
+    const requested = new Set(codeHashes);
+    const reviewed = response.reviewedCodeHashes.filter((codeHash) => requested.has(codeHash));
+    await removeReviewedConflicts(exec, reviewed);
+    cursor = codeHashes.at(-1)!;
+    if (codeHashes.length < CONFLICT_RECONCILE_BATCH_SIZE) return;
+  }
 }
 
 function isDeniedStationRecord(value: unknown): value is DeniedStationRecord {
@@ -1123,6 +1163,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
           console.error("station: sync batch failed", err);
           scheduleRetry();
           break;
+        }
+      }
+      if (!pauseInvalidated() && !credentialGeneration.sealed && retryTimer === null) {
+        try {
+          await reconcileReviewedConflicts(deps.exec, deps.client);
+        } catch (err) {
+          if (isStationCredentialRejection(err)) await rejectCredential();
+          else console.error("station: conflict status reconciliation failed", err);
         }
       }
     } catch (err) {
