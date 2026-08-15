@@ -10,7 +10,8 @@ import {
   DEMO_REQUEST_SUBMISSION_ENABLED,
   DemoRequestSubmissionGuard,
 } from "./demo-request-submission.guard";
-import { DemoRequestsController } from "./demo-requests.controller";
+import { DemoRequestTelemetry } from "./demo-request.telemetry";
+import { DemoRequestPublicErrorFilter, DemoRequestsController } from "./demo-requests.controller";
 import type { Db } from "@markiro/db";
 
 @Module({})
@@ -20,6 +21,8 @@ export class DemoRequestsModule {
       module: DemoRequestsModule,
       controllers: [DemoRequestsController],
       providers: [
+        DemoRequestTelemetry,
+        DemoRequestPublicErrorFilter,
         {
           provide: DEMO_REQUEST_SUBMISSION_ENABLED,
           useValue: env.LANDING_DEMO_SUBMISSION_ENABLED,
@@ -27,21 +30,29 @@ export class DemoRequestsModule {
         DemoRequestSubmissionGuard,
         {
           provide: DemoRequestRateLimiter,
-          useFactory: () =>
-            new DemoRequestRateLimiter({
-              windowMs: env.LANDING_DEMO_RATE_WINDOW_SECONDS * 1_000,
-              sourceBudget: env.LANDING_DEMO_SOURCE_LIMIT,
-              globalBudget: env.LANDING_DEMO_GLOBAL_LIMIT,
-              maxTrackedWindows: 10_000,
-            }),
+          inject: [DemoRequestTelemetry],
+          useFactory: (telemetry: DemoRequestTelemetry) =>
+            new DemoRequestRateLimiter(
+              {
+                windowMs: env.LANDING_DEMO_RATE_WINDOW_SECONDS * 1_000,
+                sourceBudget: env.LANDING_DEMO_SOURCE_LIMIT,
+                globalBudget: env.LANDING_DEMO_GLOBAL_LIMIT,
+                maxTrackedWindows: 10_000,
+              },
+              telemetry,
+            ),
         },
         {
           provide: DemoRequestCaptchaService,
-          useFactory: () =>
-            new DemoRequestCaptchaService({
-              serverKey: env.SMARTCAPTCHA_SERVER_KEY ?? "",
-              landingOrigin: env.LANDING_ORIGIN ?? "http://landing-demo-disabled.invalid",
-            }),
+          inject: [DemoRequestTelemetry],
+          useFactory: (telemetry: DemoRequestTelemetry) =>
+            new DemoRequestCaptchaService(
+              {
+                serverKey: env.SMARTCAPTCHA_SERVER_KEY ?? "",
+                landingOrigin: env.LANDING_ORIGIN ?? "http://landing-demo-disabled.invalid",
+              },
+              telemetry,
+            ),
         },
         {
           provide: DemoRequestRepository,

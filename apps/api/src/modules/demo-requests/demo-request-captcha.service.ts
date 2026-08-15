@@ -1,5 +1,11 @@
 import { Injectable } from "@nestjs/common";
 import { captchaInvalidError, captchaUnavailableError } from "./demo-request.errors";
+import {
+  NOOP_DEMO_REQUEST_TELEMETRY,
+  recordDemoRequestTelemetry,
+  type DemoRequestTelemetryEvent,
+  type DemoRequestTelemetrySink,
+} from "./demo-request.telemetry";
 
 const SMARTCAPTCHA_VALIDATE_URL = "https://smartcaptcha.cloud.yandex.ru/validate";
 const SMARTCAPTCHA_TIMEOUT_MS = 1_500;
@@ -29,11 +35,16 @@ export class DemoRequestCaptchaService {
   readonly #serverKey: string;
   readonly #expectedHost: string;
   readonly #fetcher: typeof fetch;
+  readonly #telemetry: DemoRequestTelemetrySink;
 
-  constructor(options: DemoRequestCaptchaOptions) {
+  constructor(
+    options: DemoRequestCaptchaOptions,
+    telemetry: DemoRequestTelemetrySink = NOOP_DEMO_REQUEST_TELEMETRY,
+  ) {
     this.#serverKey = options.serverKey;
     this.#expectedHost = new URL(options.landingOrigin).host;
     this.#fetcher = options.fetcher ?? fetch;
+    this.#telemetry = telemetry;
   }
 
   async assertHuman(token: string, source: string): Promise<void> {
@@ -46,21 +57,42 @@ export class DemoRequestCaptchaService {
         signal: AbortSignal.timeout(SMARTCAPTCHA_TIMEOUT_MS),
       });
     } catch {
-      throw captchaUnavailableError();
+      this.#rejectUnavailable("network");
     }
 
-    if (response.status !== 200) throw captchaUnavailableError();
+    if (response.status !== 200) this.#rejectUnavailable("http_status");
 
     let payload: unknown;
     try {
       payload = await response.json();
     } catch {
-      throw captchaUnavailableError();
+      this.#rejectUnavailable("malformed_response");
     }
 
-    if (!isSmartCaptchaResponse(payload)) throw captchaUnavailableError();
-    if (payload.status !== "ok" || payload.host !== this.#expectedHost) {
-      throw captchaInvalidError();
-    }
+    if (!isSmartCaptchaResponse(payload)) this.#rejectUnavailable("malformed_response");
+    if (payload.status !== "ok") this.#rejectInvalid("provider_status");
+    if (payload.host !== this.#expectedHost) this.#rejectInvalid("host_mismatch");
+  }
+
+  #rejectInvalid(
+    reason: Extract<DemoRequestTelemetryEvent, { classification: "invalid" }>["reason"],
+  ): never {
+    recordDemoRequestTelemetry(this.#telemetry, {
+      event: "landing_demo_request_captcha_rejected",
+      classification: "invalid",
+      reason,
+    });
+    throw captchaInvalidError();
+  }
+
+  #rejectUnavailable(
+    reason: Extract<DemoRequestTelemetryEvent, { classification: "infrastructure" }>["reason"],
+  ): never {
+    recordDemoRequestTelemetry(this.#telemetry, {
+      event: "landing_demo_request_captcha_rejected",
+      classification: "infrastructure",
+      reason,
+    });
+    throw captchaUnavailableError();
   }
 }

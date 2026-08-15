@@ -64,6 +64,7 @@ export class DemoRequestRepository {
           requestId,
           receivedAt,
           sourcePath: input.sourcePath,
+          consentVersion: input.consentVersion,
           recipientName: input.name,
           company: input.company,
           email: input.email,

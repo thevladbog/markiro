@@ -8,6 +8,7 @@ import {
   DEMO_REQUEST_SUBMISSION_ENABLED,
   DemoRequestSubmissionGuard,
 } from "../src/modules/demo-requests/demo-request-submission.guard";
+import { DemoRequestTelemetry } from "../src/modules/demo-requests/demo-request.telemetry";
 import {
   captchaInvalidError,
   captchaUnavailableError,
@@ -36,11 +37,13 @@ function body(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 describe("POST /demo-requests", () => {
   let app: INestApplication;
   let disabledApp: INestApplication;
+  let throwingTelemetryApp: INestApplication;
   let limiterFailure: boolean;
   let captchaFailure: "invalid" | "unavailable" | undefined;
   let repositoryFailure: boolean;
   const acceptedInputs: unknown[] = [];
   const disabledSubmit = vi.fn();
+  const telemetryEvents: unknown[] = [];
 
   beforeAll(async () => {
     const service = new DemoRequestService(
@@ -68,6 +71,10 @@ describe("POST /demo-requests", () => {
       providers: [
         { provide: DemoRequestService, useValue: service },
         { provide: DEMO_REQUEST_SUBMISSION_ENABLED, useValue: true },
+        {
+          provide: DemoRequestTelemetry,
+          useValue: { record: (event: unknown) => telemetryEvents.push(event) },
+        },
         DemoRequestSubmissionGuard,
       ],
     }).compile();
@@ -80,19 +87,44 @@ describe("POST /demo-requests", () => {
       providers: [
         { provide: DemoRequestService, useValue: { submit: disabledSubmit } },
         { provide: DEMO_REQUEST_SUBMISSION_ENABLED, useValue: false },
+        {
+          provide: DemoRequestTelemetry,
+          useValue: { record: (event: unknown) => telemetryEvents.push(event) },
+        },
         DemoRequestSubmissionGuard,
       ],
     }).compile();
     disabledApp = disabledRef.createNestApplication();
     await disabledApp.init();
     await listenOnLoopback(disabledApp);
+
+    const throwingTelemetryRef = await Test.createTestingModule({
+      controllers: [DemoRequestsController],
+      providers: [
+        { provide: DemoRequestService, useValue: service },
+        { provide: DEMO_REQUEST_SUBMISSION_ENABLED, useValue: true },
+        {
+          provide: DemoRequestTelemetry,
+          useValue: {
+            record: () => {
+              throw new Error("telemetry unavailable");
+            },
+          },
+        },
+        DemoRequestSubmissionGuard,
+      ],
+    }).compile();
+    throwingTelemetryApp = throwingTelemetryRef.createNestApplication();
+    await throwingTelemetryApp.init();
+    await listenOnLoopback(throwingTelemetryApp);
   });
 
   afterAll(async () => {
-    await Promise.all([app.close(), disabledApp.close()]);
+    await Promise.all([app.close(), disabledApp.close(), throwingTelemetryApp.close()]);
   });
 
   it("is unauthenticated, normalizes the strict payload, and returns only the durable acknowledgement", async () => {
+    const telemetryStart = telemetryEvents.length;
     const response = await request(app.getHttpServer())
       .post("/demo-requests")
       .set("content-type", "application/json")
@@ -107,6 +139,28 @@ describe("POST /demo-requests", () => {
       email: "ada@example.test",
       phone: "+12025550114",
     });
+    expect(telemetryEvents.slice(telemetryStart)).toEqual([
+      {
+        event: "landing_demo_request_final",
+        status: 202,
+        code: "accepted",
+        locale: "en",
+        sourcePath: "/en/packing-workstation/",
+      },
+    ]);
+    const serialized = JSON.stringify(telemetryEvents.slice(telemetryStart));
+    for (const forbidden of [
+      REQUEST_ID,
+      "203.0.113.7",
+      "captcha-token",
+      "2026-08-14",
+      "Ada",
+      "Factory",
+      "ada@example.test",
+      "+12025550114",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 
   it("registers no alternate method, child path, or public /api-prefixed route", async () => {
@@ -118,6 +172,7 @@ describe("POST /demo-requests", () => {
   });
 
   it("returns only stable public 400, 429, and 503 codes", async () => {
+    const telemetryStart = telemetryEvents.length;
     await request(app.getHttpServer())
       .post("/demo-requests")
       .send(body({ unexpected: "field" }))
@@ -155,9 +210,69 @@ describe("POST /demo-requests", () => {
       .expect(503, { code: "submission_unavailable" });
     repositoryFailure = false;
     expect(JSON.stringify(response.body)).not.toContain("database");
+    expect(telemetryEvents.slice(telemetryStart)).toEqual([
+      {
+        event: "landing_demo_request_final",
+        status: 400,
+        code: "invalid_request",
+        locale: "unknown",
+        sourcePath: "unknown",
+      },
+      {
+        event: "landing_demo_request_final",
+        status: 400,
+        code: "invalid_request",
+        locale: "en",
+        sourcePath: "/en/packing-workstation/",
+      },
+      {
+        event: "landing_demo_request_final",
+        status: 429,
+        code: "rate_limited",
+        locale: "en",
+        sourcePath: "/en/packing-workstation/",
+      },
+      {
+        event: "landing_demo_request_final",
+        status: 400,
+        code: "captcha_invalid",
+        locale: "en",
+        sourcePath: "/en/packing-workstation/",
+      },
+      {
+        event: "landing_demo_request_final",
+        status: 503,
+        code: "captcha_unavailable",
+        locale: "en",
+        sourcePath: "/en/packing-workstation/",
+      },
+      {
+        event: "landing_demo_request_final",
+        status: 503,
+        code: "submission_unavailable",
+        locale: "en",
+        sourcePath: "/en/packing-workstation/",
+      },
+    ]);
+    const serialized = JSON.stringify(telemetryEvents.slice(telemetryStart));
+    for (const forbidden of [
+      REQUEST_ID,
+      "203.0.113.7",
+      "captcha-token",
+      "2026-08-14",
+      "Ada",
+      "Factory",
+      "ada@example.test",
+      "+12025550114",
+      "bot",
+      "private database detail",
+    ]) {
+      expect(serialized).not.toContain(forbidden);
+    }
   });
 
   it("returns a bounded 404 before body validation while submissions are disabled", async () => {
+    const telemetryStart = telemetryEvents.length;
     await request(disabledApp.getHttpServer())
       .post("/demo-requests")
       .send({})
@@ -171,5 +286,25 @@ describe("POST /demo-requests", () => {
       .send(body())
       .expect(404, { code: "submission_disabled" });
     expect(disabledSubmit).not.toHaveBeenCalled();
+    expect(telemetryEvents.slice(telemetryStart)).toEqual(
+      Array.from({ length: 3 }, () => ({
+        event: "landing_demo_request_final",
+        status: 404,
+        code: "submission_disabled",
+        locale: "unknown",
+        sourcePath: "unknown",
+      })),
+    );
+  });
+
+  it("keeps success and error responses stable when telemetry throws", async () => {
+    await request(throwingTelemetryApp.getHttpServer())
+      .post("/demo-requests")
+      .send(body())
+      .expect(202, { accepted: true, requestId: REQUEST_ID });
+    await request(throwingTelemetryApp.getHttpServer())
+      .post("/demo-requests")
+      .send(body({ unexpected: "field" }))
+      .expect(400, { code: "invalid_request" });
   });
 });

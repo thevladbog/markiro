@@ -137,6 +137,7 @@ describe.skipIf(!ready)("landing demo request mail pipeline", () => {
           kind: "landing-demo-notification",
           requestId: demo.requestId,
           receivedAt: RECEIVED_AT.toISOString(),
+          consentVersion: "2026-08-14",
           email: demo.email,
         }),
         expect.objectContaining({

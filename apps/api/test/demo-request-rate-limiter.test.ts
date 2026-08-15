@@ -24,24 +24,49 @@ function expectRateLimited(action: () => void): void {
 }
 
 describe("DemoRequestRateLimiter", () => {
-  it("rejects request 6 from one source", () => {
-    const limiter = new DemoRequestRateLimiter(DEFAULT_OPTIONS);
+  it("reports a source-scoped rejection without the source value", () => {
+    const events: unknown[] = [];
+    const limiter = new DemoRequestRateLimiter(DEFAULT_OPTIONS, {
+      record: (event) => events.push(event),
+    });
     const now = 1_000_000;
 
     for (let request = 1; request <= 5; request += 1) {
       expect(() => limiter.assertAllowed("203.0.113.7", now)).not.toThrow();
     }
     expectRateLimited(() => limiter.assertAllowed("203.0.113.7", now));
+    expect(events).toEqual([{ event: "landing_demo_request_rate_limited", scope: "source" }]);
+    expect(JSON.stringify(events)).not.toContain("203.0.113.7");
   });
 
-  it("rejects request 101 across distinct sources", () => {
-    const limiter = new DemoRequestRateLimiter(DEFAULT_OPTIONS);
+  it("reports a global-scoped rejection across distinct sources", () => {
+    const events: unknown[] = [];
+    const limiter = new DemoRequestRateLimiter(DEFAULT_OPTIONS, {
+      record: (event) => events.push(event),
+    });
     const now = 1_000_000;
 
     for (let request = 1; request <= 100; request += 1) {
       expect(() => limiter.assertAllowed(`source-${request}`, now)).not.toThrow();
     }
     expectRateLimited(() => limiter.assertAllowed("source-101", now));
+    expect(events).toEqual([{ event: "landing_demo_request_rate_limited", scope: "global" }]);
+    expect(JSON.stringify(events)).not.toContain("source-101");
+  });
+
+  it("reports global scope once when both budgets are exceeded", () => {
+    const events: unknown[] = [];
+    const limiter = new DemoRequestRateLimiter(
+      { ...DEFAULT_OPTIONS, sourceBudget: 1, globalBudget: 1 },
+      { record: (event) => events.push(event) },
+    );
+    const now = 1_000_000;
+
+    limiter.assertAllowed("private-source", now);
+    expectRateLimited(() => limiter.assertAllowed("private-source", now));
+
+    expect(events).toEqual([{ event: "landing_demo_request_rate_limited", scope: "global" }]);
+    expect(JSON.stringify(events)).not.toContain("private-source");
   });
 
   it("charges the global window even when a source is already over budget", () => {
