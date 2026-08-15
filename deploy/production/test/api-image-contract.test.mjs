@@ -38,7 +38,18 @@ test("API image keeps the production runtime closure minimal and hardened", asyn
     /COPY packages\/legal-documents\/package\.json \.\/packages\/legal-documents\/package\.json/,
   );
   assert.match(source, /COPY packages\/legal-documents \.\/packages\/legal-documents/);
-  assert.match(source, /turbo build --filter @markiro\/api\.\.\./);
+  const domainBuild = source.indexOf("RUN pnpm --filter @markiro/domain build");
+  const dbBuild = source.indexOf("RUN pnpm --filter @markiro/db build");
+  const emailBuild = source.indexOf("RUN pnpm --filter @markiro/email build");
+  const legalBuild = source.indexOf("RUN pnpm --filter @markiro/legal-documents build");
+  const apiBuild = source.indexOf("RUN pnpm --filter @markiro/api build");
+  assert.ok(
+    domainBuild >= 0 &&
+      dbBuild > domainBuild &&
+      emailBuild > dbBuild &&
+      legalBuild > emailBuild &&
+      apiBuild > legalBuild,
+  );
   assert.match(
     source,
     /pnpm --config\.allow-unused-patches=true --filter @markiro\/api deploy --legacy --prod \/out\/api/,

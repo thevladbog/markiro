@@ -18,6 +18,7 @@ COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/legal-documents ./packages/legal-documents
 COPY packages/ui ./packages/ui
+COPY deploy/production/verify-legal-artifacts.mjs ./deploy/production/verify-legal-artifacts.mjs
 
 FROM build-base AS application-build
 RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...
@@ -29,7 +30,11 @@ ARG PUBLIC_PHONE=
 ENV PUBLIC_DEMO_SUBMISSION_ENABLED=${PUBLIC_DEMO_SUBMISSION_ENABLED}
 ENV PUBLIC_SMARTCAPTCHA_CLIENT_KEY=${PUBLIC_SMARTCAPTCHA_CLIENT_KEY}
 ENV PUBLIC_PHONE=${PUBLIC_PHONE}
-RUN pnpm turbo build --filter @markiro/landing...
+RUN pnpm --filter @markiro/domain build
+RUN pnpm --filter @markiro/ui build
+RUN pnpm --filter @markiro/legal-documents build
+RUN node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal
+RUN pnpm --filter @markiro/landing build
 
 FROM caddy:2.11.4-alpine AS runtime
 COPY deploy/production/Caddyfile /etc/caddy/Caddyfile

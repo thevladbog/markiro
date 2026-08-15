@@ -100,7 +100,7 @@ test("CI builds the workspace legal dependency before landing browser gates", as
   );
   assert.match(
     step.run,
-    /^pnpm --filter @markiro\/legal-documents build\npnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/,
+    /^pnpm --filter @markiro\/legal-documents build\nnode deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal\npnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/,
   );
 });
 

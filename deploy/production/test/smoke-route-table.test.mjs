@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -53,6 +54,23 @@ const landingSitemap =
   '<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://markiro.app/</loc></url><url><loc>https://markiro.app/faq/</loc></url><url><loc>https://markiro.app/en/</loc></url><url><loc>https://markiro.app/en/faq/</loc></url></urlset>';
 const landingLlms =
   "# Markiro\n\n- [Главная](https://markiro.app/)\n- [Вопросы и ответы](https://markiro.app/faq/)\n- [Home](https://markiro.app/en/)\n- [Questions](https://markiro.app/en/faq/)\n";
+const legalPdf = "%PDF-1.7\nvalidated-pdfa-2b-test-fixture\n%%EOF\n";
+const legalPdfSha256 = createHash("sha256").update(legalPdf).digest("hex");
+const legalPdfFileName = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+const legalArtifacts = JSON.stringify([
+  {
+    code: "MKR-PD-01",
+    revision: "2026.08.01",
+    effectiveDate: "2026-08-15",
+    locale: "ru",
+    kind: "pdfa-2b",
+    fileName: legalPdfFileName,
+    bytes: Buffer.byteLength(legalPdf),
+    sha256: legalPdfSha256,
+    mediaType: "application/pdf",
+    generator: { docx: "9.7.1", libreOffice: "26.2.5", veraPdf: "1.30.2" },
+  },
+]);
 const docsShell =
   '<!doctype html><html><head><title>API docs</title></head><body><div id="app"></div><script src="/docs/scalar.js"></script ><script src="/docs/bootstrap.js"></script   ></body></html>';
 const docsBootstrap = `Scalar.createApiReference("#app", {
@@ -174,6 +192,7 @@ test("rejects malformed and equal smoke authorities without disclosing their val
 });
 
 function response({ status = 200, body = "{}", headers = {}, cspPolicy = csp } = {}) {
+  const bytes = Buffer.from(body);
   return {
     status,
     headers: new Headers({
@@ -185,6 +204,8 @@ function response({ status = 200, body = "{}", headers = {}, cspPolicy = csp } =
       ...headers,
     }),
     text: async () => body,
+    arrayBuffer: async () =>
+      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
   };
 }
 
@@ -215,6 +236,9 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           "/en/1c-integration/",
           "/en/offline-production/",
           "/en/faq/",
+          "/legal/",
+          "/privacy/",
+          "/personal-data-consent/",
           "/d/MKR-PD-01/2026.08.01/2026-08-15",
         ].includes(path)
       )
@@ -248,6 +272,22 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           headers: {
             "cache-control": "public, max-age=300",
             "content-type": "text/plain; charset=utf-8",
+          },
+        });
+      if (landing && path === "/legal/artifacts.json")
+        return landingResponse({
+          body: legalArtifacts,
+          headers: {
+            "cache-control": "public, max-age=300",
+            "content-type": "application/json; charset=utf-8",
+          },
+        });
+      if (landing && path === `/legal/files/${legalPdfFileName}`)
+        return landingResponse({
+          body: legalPdf,
+          headers: {
+            "cache-control": "public, max-age=31536000, immutable",
+            "content-type": "application/pdf",
           },
         });
       if (landing && path === "/api/demo-requests" && (init?.method ?? "GET") === "POST")
@@ -797,6 +837,9 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/en/1c-integration/", "landing-page"],
     ["GET", "/en/offline-production/", "landing-page"],
     ["GET", "/en/faq/", "landing-page"],
+    ["GET", "/legal/", "landing-page"],
+    ["GET", "/privacy/", "landing-page"],
+    ["GET", "/personal-data-consent/", "landing-page"],
     ["GET", "/d/MKR-PD-01/2026.08.01/2026-08-15", "landing-page"],
     ["GET", "/robots.txt", "robots"],
     ["GET", "/sitemap.xml", "sitemap"],
@@ -840,7 +883,7 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
 
   assert.equal(
     client.requests.length,
-    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 4,
+    ROUTE_CHECKS.length + KIOSK_ROUTE_CHECKS.length + LANDING_ROUTE_CHECKS.length + 6,
   );
   assert.deepEqual(
     client.requests
@@ -856,6 +899,10 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
   );
   assert.equal(verification.url.href, "https://markiro.example/d/MKR-PD-01/2026.08.01/2026-08-15");
   assert.equal(verification.init.redirect, "manual");
+  const pdf = client.requests.find(
+    ({ url }) => new URL(url).pathname === `/legal/files/${legalPdfFileName}`,
+  );
+  assert.ok(pdf);
   assert.deepEqual(
     dockerCalls.map(([command, args]) => [command, args.slice(-4)]),
     [

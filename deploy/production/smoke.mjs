@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
@@ -141,6 +142,9 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/en/1c-integration/", "landing-page"]),
   Object.freeze(["GET", "/en/offline-production/", "landing-page"]),
   Object.freeze(["GET", "/en/faq/", "landing-page"]),
+  Object.freeze(["GET", "/legal/", "landing-page"]),
+  Object.freeze(["GET", "/privacy/", "landing-page"]),
+  Object.freeze(["GET", "/personal-data-consent/", "landing-page"]),
   Object.freeze(["GET", "/d/MKR-PD-01/2026.08.01/2026-08-15", "landing-page"]),
   Object.freeze(["GET", "/robots.txt", "robots"]),
   Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
@@ -1058,6 +1062,64 @@ async function runLandingSmoke(options, client) {
     assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`, LANDING_CSP);
     assertLandingRoute(check, response, body, baseUrl);
   }
+  const manifestResponse = await publicRequest(client, new URL("/legal/artifacts.json", baseUrl), {
+    method: "GET",
+  });
+  assertHeaders(
+    manifestResponse,
+    new URL(baseUrl).protocol === "https:",
+    "landing /legal/artifacts.json",
+    LANDING_CSP,
+  );
+  if (
+    manifestResponse.status !== 200 ||
+    !/application\/json/i.test(manifestResponse.headers.get("content-type") || "")
+  )
+    throw new Error("landing legal artifact manifest is unavailable");
+  let artifacts;
+  try {
+    artifacts = JSON.parse(await getText(manifestResponse));
+  } catch {
+    throw new Error("landing legal artifact manifest is invalid");
+  }
+  if (!Array.isArray(artifacts)) throw new Error("landing legal artifact manifest is invalid");
+  const artifact = artifacts.find(
+    (candidate) =>
+      candidate?.code === "MKR-PD-01" && candidate.locale === "ru" && candidate.kind === "pdfa-2b",
+  );
+  if (
+    artifact === undefined ||
+    typeof artifact.fileName !== "string" ||
+    !/^markiro_[a-z0-9._-]+\.pdf$/.test(artifact.fileName) ||
+    !Number.isSafeInteger(artifact.bytes) ||
+    artifact.bytes <= 0 ||
+    typeof artifact.sha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(artifact.sha256) ||
+    artifact.mediaType !== "application/pdf"
+  )
+    throw new Error("landing legal PDF manifest entry is invalid");
+  const pdfResponse = await publicRequest(
+    client,
+    new URL(`/legal/files/${artifact.fileName}`, baseUrl),
+    { method: "GET" },
+  );
+  assertHeaders(
+    pdfResponse,
+    new URL(baseUrl).protocol === "https:",
+    `landing /legal/files/${artifact.fileName}`,
+    LANDING_CSP,
+  );
+  if (
+    pdfResponse.status !== 200 ||
+    !/application\/pdf/i.test(pdfResponse.headers.get("content-type") || "")
+  )
+    throw new Error("landing legal PDF is unavailable");
+  const pdfBytes = Buffer.from(await pdfResponse.arrayBuffer());
+  if (
+    pdfBytes.byteLength !== artifact.bytes ||
+    createHash("sha256").update(pdfBytes).digest("hex") !== artifact.sha256
+  )
+    throw new Error("landing legal PDF does not match its manifest");
   const demoSubmission = await publicRequest(client, new URL("/api/demo-requests", baseUrl), {
     method: "POST",
     body: "{}",

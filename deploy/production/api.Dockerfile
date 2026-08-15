@@ -14,7 +14,11 @@ COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/email ./packages/email
 COPY packages/legal-documents ./packages/legal-documents
-RUN pnpm turbo build --filter @markiro/api...
+RUN pnpm --filter @markiro/domain build
+RUN pnpm --filter @markiro/db build
+RUN pnpm --filter @markiro/email build
+RUN pnpm --filter @markiro/legal-documents build
+RUN pnpm --filter @markiro/api build
 RUN pnpm --config.allow-unused-patches=true --filter @markiro/api deploy --legacy --prod /out/api
 RUN find /out/api -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.mts' -o -name '*.cts' \) \
  ! -name '*.d.ts' ! -name '*.d.tsx' ! -name '*.d.mts' ! -name '*.d.cts' -delete \

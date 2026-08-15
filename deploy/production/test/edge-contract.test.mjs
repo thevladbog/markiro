@@ -715,10 +715,19 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
       arguments: `${name}=\${${name}}`,
     })),
   );
-  assert.deepEqual(landingInstructions.at(-1), {
-    name: "RUN",
-    arguments: "pnpm turbo build --filter @markiro/landing...",
-  });
+  assert.deepEqual(
+    landingInstructions.filter((instruction) => instruction.name === "RUN"),
+    [
+      { name: "RUN", arguments: "pnpm --filter @markiro/domain build" },
+      { name: "RUN", arguments: "pnpm --filter @markiro/ui build" },
+      { name: "RUN", arguments: "pnpm --filter @markiro/legal-documents build" },
+      {
+        name: "RUN",
+        arguments: "node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal",
+      },
+      { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
+    ],
+  );
   for (const instruction of [...baseInstructions, ...applicationInstructions]) {
     for (const name of publicLandingBuildVariables) {
       assert.doesNotMatch(`${instruction.name} ${instruction.arguments}`, new RegExp(name));
@@ -746,6 +755,10 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
   assert.doesNotMatch(runtime, /node|pnpm/);
+  assert.doesNotMatch(
+    runtime,
+    /soffice|libreoffice|verapdf|java|\.markiro-releases|generate-artifacts|\.docx/i,
+  );
   const runtimeCopies = runtimeInstructions
     .filter((instruction) => instruction.name === "COPY")
     .map((instruction) => instruction.arguments);
@@ -791,6 +804,29 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(dockerignore, /^dist\/$/m);
   assert.match(dockerignore, /^\*\*\/dist\/$/m);
 }
+
+test("edge build validates every tracked legal artifact before copying landing output", async () => {
+  const [dockerfile, manifestSource] = await Promise.all([
+    readFile("deploy/production/edge.Dockerfile", "utf8"),
+    readFile("apps/landing/public/legal/artifacts.json", "utf8"),
+  ]);
+  const artifacts = JSON.parse(manifestSource);
+  assert.equal(artifacts.length, 12);
+  assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
+  for (const artifact of artifacts) {
+    assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
+    await readFile(`apps/landing/public/legal/files/${artifact.fileName}`);
+  }
+  assert.match(dockerfile, /COPY apps\/landing \.\/apps\/landing/);
+  assert.match(
+    dockerfile,
+    /node deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal/,
+  );
+  assert.match(
+    dockerfile,
+    /COPY --from=landing-build \/workspace\/apps\/landing\/dist \/srv\/landing/,
+  );
+});
 
 function mutate(source, search, replacement) {
   const changed = source.replace(search, replacement);
