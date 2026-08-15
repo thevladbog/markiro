@@ -31,6 +31,21 @@ const boxLabels = {
 };
 
 describe("work instruments", () => {
+  it("shows the mirrored plan beside the product identity", () => {
+    render(
+      <ScanResultInstrument
+        productName="Widget"
+        counterpartyName={null}
+        plannedQty={120}
+        planLabel="Plan"
+        operation={null}
+        labels={labels}
+      />,
+    );
+
+    expect(screen.getByText("Plan: 120")).toBeDefined();
+  });
+
   it("keeps a long product identity and a non-color-only latest result visible", () => {
     const longName = "A very long production product name ".repeat(8);
     const { rerender } = render(

@@ -48,7 +48,11 @@ export async function closeShiftOffline(
     [input.shiftId],
   );
   const [{ openBoxCount = 0 } = {}] = await exec.all<{ openBoxCount: number }>(
-    "SELECT COUNT(*) AS openBoxCount FROM boxes_mirror WHERE shift_id = ? AND closed_at IS NULL",
+    `SELECT COUNT(*) AS openBoxCount
+       FROM boxes_mirror b
+      WHERE b.shift_id = ?
+        AND b.closed_at IS NULL
+        AND EXISTS (SELECT 1 FROM codes_mirror c WHERE c.box_id = b.box_id)`,
     [input.shiftId],
   );
   if (openBoxCount > 0) throw new Error("Close the open box before closing the shift");
@@ -65,6 +69,16 @@ export async function closeShiftOffline(
   const eventId = crypto.randomUUID();
   await exec.run("BEGIN");
   try {
+    // WorkScreen opens the next box immediately after closing the previous
+    // one. It has never been sent to the server and has no contents, so it
+    // must not prevent closing the shift.
+    await exec.run(
+      `DELETE FROM boxes_mirror
+        WHERE shift_id = ?
+          AND closed_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM codes_mirror c WHERE c.box_id = boxes_mirror.box_id)`,
+      [input.shiftId],
+    );
     await exec.run("UPDATE shift_mirror SET status = 'closed' WHERE id = ?", [input.shiftId]);
     await exec.run(
       `INSERT INTO shift_close_outbox

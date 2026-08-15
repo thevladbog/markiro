@@ -1,4 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { DatabaseSync } from "node:sqlite";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@markiro/domain", () => ({
+  isShiftCloseReasonCode: (value: unknown) =>
+    value === "production_defect" || value === "material_shortage" || value === "equipment_stop",
+  shiftCloseReasonRequired: (plannedQty: number | null, actualQty: number) =>
+    plannedQty !== null && plannedQty !== actualQty,
+}));
 import { closeShiftOffline } from "../src/lib/shift-close.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 
@@ -54,5 +63,59 @@ describe("closeShiftOffline", () => {
     expect(statements.some((sql) => sql.includes("UPDATE shift_mirror"))).toBe(true);
     expect(statements.some((sql) => sql.includes("INSERT INTO shift_close_outbox"))).toBe(true);
     expect(statements.at(-1)).toBe("COMMIT");
+  });
+
+  it("removes an empty auto-opened box before closing the shift", async () => {
+    const db = new DatabaseSync(":memory:");
+    for (const migration of STATION_MIGRATIONS) {
+      try {
+        db.exec(migration);
+      } catch (error) {
+        if (!/duplicate column name/i.test(String(error))) throw error;
+      }
+    }
+    db.exec(`CREATE TABLE IF NOT EXISTS shift_close_outbox (
+      event_id TEXT PRIMARY KEY,
+      shift_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      operator_id TEXT,
+      product_id TEXT NOT NULL,
+      product_name TEXT NOT NULL,
+      planned_qty_snapshot INTEGER,
+      actual_qty INTEGER NOT NULL,
+      closed_box_count INTEGER NOT NULL,
+      reason_code TEXT,
+      closed_at TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending'
+    );`);
+    const exec: SqlExecutor = {
+      run: async (sql, params = []) => {
+        db.prepare(sql).run(...(params as never[]));
+      },
+      all: async <T>(sql: string, params: unknown[] = []) =>
+        db.prepare(sql).all(...(params as never[])) as T[],
+    };
+    await exec.run(
+      `INSERT INTO shift_mirror
+         (id, status, mode, product_id, product_name, planned_qty, pallets_enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ["shift-empty-box", "active", "aggregation", "product-1", "Widget", null, 0],
+    );
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at)
+       VALUES (?, ?, ?)`,
+      ["box-empty", "shift-empty-box", "2026-08-15T12:00:00.000Z"],
+    );
+
+    await expect(
+      closeShiftOffline(exec, {
+        shiftId: "shift-empty-box",
+        deviceId: "device-1",
+        operatorId: "operator-1",
+      }),
+    ).resolves.toMatchObject({ shiftId: "shift-empty-box", actualQty: 0 });
+    expect(
+      await exec.all("SELECT box_id FROM boxes_mirror WHERE shift_id = ?", ["shift-empty-box"]),
+    ).toEqual([]);
   });
 });

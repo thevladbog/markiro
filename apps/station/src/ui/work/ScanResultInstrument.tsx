@@ -17,6 +17,8 @@ export interface ScanResultLabels {
 export interface ScanResultInstrumentProps {
   productName: string;
   counterpartyName: string | null;
+  plannedQty?: number | null | undefined;
+  planLabel?: string | undefined;
   operation: RecentOperation | null;
   labels: ScanResultLabels;
   exec?: SqlExecutor | undefined;
@@ -36,6 +38,8 @@ export function operationStatusLabel(verdict: string, labels: ScanResultLabels):
 export function ScanResultInstrument({
   productName,
   counterpartyName,
+  plannedQty,
+  planLabel,
   operation,
   labels,
   exec,
@@ -59,6 +63,9 @@ export function ScanResultInstrument({
         ) : null}
         <h2 title={productName}>{productName}</h2>
         {counterpartyName ? <p title={counterpartyName}>{counterpartyName}</p> : null}
+        {planLabel && plannedQty !== null && plannedQty !== undefined ? (
+          <p>{`${planLabel}: ${plannedQty}`}</p>
+        ) : null}
       </div>
       <div
         className="work-scan-result__verdict"

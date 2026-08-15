@@ -485,6 +485,7 @@ export interface ShiftContextRow {
   gtin14: string;
   productName: string;
   counterpartyName: string | null;
+  plannedQty: number | null;
   image?: StationProductImageDescriptor | null | undefined;
 }
 
@@ -502,6 +503,7 @@ export async function readShiftContext(
     gtin14: string;
     name: string;
     counterparty_name: string | null;
+    planned_qty: number | null;
     image_checksum: string | null;
     image_content_type: "image/webp" | null;
     image_byte_size: number | null;
@@ -509,6 +511,7 @@ export async function readShiftContext(
     image_height: number | null;
   }>(
     `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
+       s.planned_qty,
        p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
      WHERE s.id = ?`,
@@ -521,6 +524,7 @@ export async function readShiftContext(
     gtin14: row.gtin14,
     productName: row.name,
     counterpartyName: row.counterparty_name,
+    plannedQty: row.planned_qty,
     image:
       row.image_checksum &&
       row.image_content_type &&

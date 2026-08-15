@@ -257,6 +257,7 @@
     "boxNumber": "Box no. {{number}}",
     "noOpenBox": "No open box",
     "boxItems": "Items",
+    "plan": "Plan",
     "boxGrouped": "One cell represents several positions",
     "capacityUnknown": "Capacity not set",
     "synchronized": "Synchronized",
