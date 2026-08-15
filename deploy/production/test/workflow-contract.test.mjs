@@ -7,15 +7,81 @@ import { load } from "js-yaml";
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const parse = async (path) => load(await read(path));
+const publicLandingBuildVariables = Object.freeze([
+  "PUBLIC_DEMO_SUBMISSION_ENABLED",
+  "PUBLIC_PRIVACY_POLICY_PATH",
+  "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
+  "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
+  "PUBLIC_DEMO_CONSENT_VERSION",
+  "PUBLIC_PHONE",
+]);
+const demoRuntimeVariables = Object.freeze([
+  "LANDING_DEMO_SUBMISSION_ENABLED",
+  "LANDING_ORIGIN",
+  "LANDING_DEMO_RECIPIENT",
+  "LANDING_DEMO_REPLY_TO",
+  "LANDING_DEMO_CONSENT_VERSION",
+  "SMARTCAPTCHA_SERVER_KEY",
+]);
+
+function namedStep(workflow, job, name) {
+  const step = workflow.jobs[job].steps.find((candidate) => candidate.name === name);
+  assert.ok(step, `${job} must contain ${name}`);
+  return step;
+}
+
+function assertEdgeBuildStep(step, expectedEnvironment) {
+  assert.deepEqual(step.env, expectedEnvironment);
+  assert.deepEqual(
+    [...step.run.matchAll(/--build-arg\s+([A-Z0-9_]+)=/g)].map((match) => match[1]),
+    publicLandingBuildVariables,
+  );
+  for (const variable of publicLandingBuildVariables) {
+    assert.ok(step.run.includes(`--build-arg ${variable}="$${variable}"`));
+  }
+  assert.doesNotMatch(step.run, /--build-arg\s+(?:LANDING_|SMARTCAPTCHA_SERVER_KEY)/);
+  assert.doesNotMatch(step.run, /(?:echo|printf)[^\n]*PUBLIC_/);
+  assert.doesNotMatch(step.run, /set\s+-x/);
+}
+
+function assertProtectedDemoRuntimeInventory(step) {
+  assert.match(step.run, /captcha_server_key="ysc2_\$\(openssl rand -hex 24\)"/);
+  assert.ok(step.run.includes('"$captcha_server_key"'));
+  for (const [variable, value] of Object.entries({
+    LANDING_DEMO_SUBMISSION_ENABLED: "false",
+    LANDING_ORIGIN: "https://landing.localhost:18443",
+    LANDING_DEMO_RECIPIENT: "demo-recipient@markiro.local",
+    LANDING_DEMO_REPLY_TO: "demo-reply-to@markiro.local",
+    LANDING_DEMO_CONSENT_VERSION: "ci-disabled",
+    SMARTCAPTCHA_SERVER_KEY: "$captcha_server_key",
+  })) {
+    assert.ok(step.run.includes(`"${variable}=${value}"`), `${variable} must use the env file`);
+  }
+}
 
 test("CI keeps production bundle, Yandex runtime and infrastructure contracts", async () => {
-  const source = await read(".github/workflows/ci.yml");
+  const [workflow, source] = await Promise.all([
+    parse(".github/workflows/ci.yml"),
+    read(".github/workflows/ci.yml"),
+  ]);
   for (const command of ["test:production-bundle:contract", "test:yandex-runtime"])
     assert.match(source, new RegExp(command.replaceAll(":", "\\:")));
   assert.match(source, /pnpm format:check/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
+  assertProtectedDemoRuntimeInventory(
+    namedStep(workflow, "production-bundle", "Generate masked test-only environment"),
+  );
+  assertEdgeBuildStep(
+    namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
+    Object.fromEntries(
+      publicLandingBuildVariables.map((variable) => [
+        variable,
+        variable === "PUBLIC_DEMO_SUBMISSION_ENABLED" ? "false" : "",
+      ]),
+    ),
+  );
 });
 
 test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {
@@ -33,6 +99,37 @@ test("release publication is main-only, digest-bound and writes the immutable ma
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
+  assertProtectedDemoRuntimeInventory(
+    namedStep(workflow, "production-bundle", "Generate masked test-only environment"),
+  );
+  assertEdgeBuildStep(
+    namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
+    Object.fromEntries(
+      publicLandingBuildVariables.map((variable) => [variable, "${{ vars." + variable + " }}"]),
+    ),
+  );
+});
+
+test("demo server settings stay in the protected API environment file", async () => {
+  const [productionCompose, ciCompose] = await Promise.all([
+    parse("compose.production.yml"),
+    parse("deploy/production/compose.ci.yml"),
+  ]);
+  assert.deepEqual(productionCompose.services.api.env_file, [
+    "${MARKIRO_ENV_FILE:-.env.production}",
+  ]);
+  for (const service of [
+    ...Object.values(productionCompose.services),
+    ...Object.values(ciCompose.services),
+  ]) {
+    const composeArguments = JSON.stringify({
+      command: service.command,
+      environment: service.environment,
+    });
+    for (const variable of demoRuntimeVariables) {
+      assert.doesNotMatch(composeArguments, new RegExp(variable));
+    }
+  }
 });
 
 test("production deploy is one protected manual GitHub-hosted SSH job", async () => {

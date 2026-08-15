@@ -5,8 +5,19 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const expectedCsp =
+const expectedApplicationCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const smartCaptchaOrigin = "https://smartcaptcha.cloud.yandex.ru";
+const expectedLandingCsp =
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+const publicLandingBuildVariables = Object.freeze([
+  "PUBLIC_DEMO_SUBMISSION_ENABLED",
+  "PUBLIC_PRIVACY_POLICY_PATH",
+  "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
+  "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
+  "PUBLIC_DEMO_CONSENT_VERSION",
+  "PUBLIC_PHONE",
+]);
 
 const standardProxyTimeouts = Object.freeze({
   response_header_timeout: "30s",
@@ -87,38 +98,53 @@ function nestedObjects(value) {
   return [value, ...Object.values(value).flatMap(nestedObjects)];
 }
 
-async function adaptCaddy(source) {
+async function adaptCaddy(source, run = execFileSync) {
   const directory = await mkdtemp(join(tmpdir(), "markiro-caddy-contract-"));
   const caddyfile = join(directory, "Caddyfile");
   await writeFile(caddyfile, source);
   try {
-    return JSON.parse(
-      execFileSync(
-        "docker",
-        [
-          "run",
-          "--rm",
-          "-v",
-          `${caddyfile}:/etc/caddy/Caddyfile:ro`,
-          "-e",
-          `MARKIRO_DOMAIN=${adminHost}`,
-          "-e",
-          `MARKIRO_KIOSK_DOMAIN=${kioskHost}`,
-          "-e",
-          `MARKIRO_LANDING_DOMAIN=${landingHost}`,
-          "-e",
-          "ACME_EMAIL=ops@example.test",
-          "-e",
-          "MARKIRO_RELEASE_SHA=contract-sha",
-          "caddy:2.11.4-alpine",
-          "caddy",
-          "adapt",
-          "--config",
-          "/etc/caddy/Caddyfile",
-        ],
-        { encoding: "utf8" },
-      ),
-    );
+    try {
+      return JSON.parse(
+        run(
+          "docker",
+          [
+            "run",
+            "--rm",
+            "-v",
+            `${caddyfile}:/etc/caddy/Caddyfile:ro`,
+            "-e",
+            `MARKIRO_DOMAIN=${adminHost}`,
+            "-e",
+            `MARKIRO_KIOSK_DOMAIN=${kioskHost}`,
+            "-e",
+            `MARKIRO_LANDING_DOMAIN=${landingHost}`,
+            "-e",
+            "ACME_EMAIL=ops@example.test",
+            "-e",
+            "MARKIRO_RELEASE_SHA=contract-sha",
+            "caddy:2.11.4-alpine",
+            "caddy",
+            "adapt",
+            "--config",
+            "/etc/caddy/Caddyfile",
+          ],
+          { encoding: "utf8" },
+        ),
+      );
+    } catch (error) {
+      const stdout =
+        typeof error === "object" && error !== null && typeof error.stdout === "string"
+          ? error.stdout
+          : "";
+      if (stdout.length > 0) {
+        try {
+          return JSON.parse(stdout);
+        } catch {
+          // Preserve the command failure when stdout is absent, partial or not adapter JSON.
+        }
+      }
+      throw error;
+    }
   } finally {
     await rm(directory, { recursive: true });
   }
@@ -158,6 +184,7 @@ function proxyRoutes(route) {
       paths: candidate.match.flatMap(
         (matcher) => matcher.path ?? (matcher.path_regexp ? [matcher.path_regexp.pattern] : []),
       ),
+      methods: candidate.match.flatMap((matcher) => matcher.method ?? []),
       proxies: nestedObjects(candidate.handle).filter(
         (handler) => handler.handler === "reverse_proxy",
       ),
@@ -376,7 +403,6 @@ function assertAuthorityContract(adapted, { alb }) {
         return (
           handler.response?.deferred === true &&
           headers["X-Markiro-Release-Sha"]?.[0] === "contract-sha" &&
-          headers["Content-Security-Policy"]?.[0] === expectedCsp &&
           headers["Strict-Transport-Security"]?.[0] === "max-age=63072000; includeSubDomains" &&
           headers["X-Content-Type-Options"]?.[0] === "nosniff" &&
           headers["X-Frame-Options"]?.[0] === "SAMEORIGIN" &&
@@ -385,6 +411,23 @@ function assertAuthorityContract(adapted, { alb }) {
       }),
       `${host} must defer the common security and release headers through error responses`,
     );
+    const contentSecurityPolicies = headerSets.flatMap(
+      (headers) => headers["Content-Security-Policy"] ?? [],
+    );
+    assert.deepEqual(
+      contentSecurityPolicies,
+      [host === landingHost ? expectedLandingCsp : expectedApplicationCsp],
+      `${host} must emit exactly one authority-specific CSP`,
+    );
+    if (host === landingHost) {
+      assert.equal(
+        contentSecurityPolicies[0].split(smartCaptchaOrigin).length - 1,
+        3,
+        "landing CSP must add SmartCaptcha only to script, frame and connect sources",
+      );
+    } else {
+      assert.doesNotMatch(contentSecurityPolicies[0], /smartcaptcha/i);
+    }
     assert.ok(
       headerSets.some(
         (headers) => headers["Cache-Control"]?.[0] === "public, max-age=31536000, immutable",
@@ -404,12 +447,7 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost
           ? [["GET", "HEAD"]]
-          : [
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-              ["GET", "HEAD"],
-            ],
+          : [["POST"], ["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"]],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -447,14 +485,41 @@ function assertAuthorityContract(adapted, { alb }) {
   );
   assert.deepEqual(kioskProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
   assertKioskRoutingBoundary(kiosk);
-  const landingProxies = nestedObjects(landing).filter(
-    (candidate) => candidate.handler === "reverse_proxy",
-  );
-  assert.equal(landingProxies.length, 0, "landing CRM boundary must stay disabled");
+  const landingProxies = proxyRoutes(landing);
+  assert.equal(landingProxies.length, 1);
+  assert.deepEqual(landingProxies[0].paths, ["/api/demo-requests"]);
+  assert.deepEqual(landingProxies[0].methods, ["POST"]);
+  assert.deepEqual(landingProxies[0].rewrites, [{ handler: "rewrite", strip_path_prefix: "/api" }]);
   const landingRoutes = applicationOrderedRouteTable(landing);
+  const landingDemoRequest = { method: "POST", path: "/api/demo-requests" };
+  const selectedLandingDemoRequest = selectedAdaptedRoute(landingRoutes, landingDemoRequest);
+  assert.deepEqual(
+    nestedObjects(selectedLandingDemoRequest).filter(
+      (candidate) => candidate.handler === "request_body",
+    ),
+    [{ handler: "request_body", max_size: 4000 }],
+  );
+  assert.equal(
+    nestedObjects(selectedLandingDemoRequest).filter(
+      (candidate) => candidate.handler === "reverse_proxy",
+    ).length,
+    1,
+  );
+  assert.ok(
+    nestedObjects(selectedLandingDemoRequest).every(
+      (candidate) => candidate.handler !== "file_server" && candidate.handler !== "static_response",
+    ),
+  );
+  for (const method of ["GET", "HEAD", "PUT"]) {
+    const request = { method, path: "/api/demo-requests" };
+    assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
+  }
   for (const path of [
     "/api",
-    "/api/demo-requests",
+    "/api/demo-request",
+    "/api/demo-requests/",
+    "/api/demo-requests/extra",
+    "/api/other",
     "/api/auth/session",
     "/1c_exchange",
     "/station/bootstrap",
@@ -463,7 +528,7 @@ function assertAuthorityContract(adapted, { alb }) {
     "/openapi.json",
     "/docs",
   ]) {
-    for (const method of ["GET", "HEAD", "POST"]) {
+    for (const method of ["GET", "HEAD", "POST", "PUT"]) {
       const request = { method, path };
       assertOnlyPlain404(selectedAdaptedRoute(landingRoutes, request), request);
     }
@@ -480,7 +545,10 @@ function assertAuthorityContract(adapted, { alb }) {
       `landing GET ${path} must remain static-only`,
     );
   }
-  for (const proxy of [...adminReverseProxies, ...kioskReverseProxies]) {
+  const landingReverseProxies = nestedObjects(landing).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  for (const proxy of [...adminReverseProxies, ...kioskReverseProxies, ...landingReverseProxies]) {
     const forwardedProto = proxy.headers?.request?.set?.["X-Forwarded-Proto"];
     if (alb) assert.deepEqual(forwardedProto, ["https"]);
     else assert.equal(forwardedProto, undefined);
@@ -546,31 +614,70 @@ function dockerfileStageInstructions(dockerfile, stageName) {
 }
 
 function assertEdgeImageContract(dockerfile, dockerignore) {
-  const install = dockerfile.indexOf("RUN pnpm install --frozen-lockfile");
-  const adminManifest = dockerfile.indexOf("COPY apps/admin/package.json");
-  const kioskManifest = dockerfile.indexOf("COPY apps/kiosk/package.json");
-  const landingManifest = dockerfile.indexOf("COPY apps/landing/package.json");
-  const adminSource = dockerfile.indexOf("COPY apps/admin ./apps/admin");
-  const kioskSource = dockerfile.indexOf("COPY apps/kiosk ./apps/kiosk");
-  const landingSource = dockerfile.indexOf("COPY apps/landing ./apps/landing");
-  const build = dockerfile.indexOf(
-    "RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk... --filter @markiro/landing...",
+  const baseInstructions = dockerfileStageInstructions(dockerfile, "build-base");
+  const applicationInstructions = dockerfileStageInstructions(dockerfile, "application-build");
+  const landingInstructions = dockerfileStageInstructions(dockerfile, "landing-build");
+  const base = baseInstructions
+    .map((instruction) => `${instruction.name} ${instruction.arguments}`)
+    .join("\n");
+  assert.match(base, /RUN pnpm install --frozen-lockfile/);
+  for (const input of [
+    "apps/admin/package.json ./apps/admin/package.json",
+    "apps/kiosk/package.json ./apps/kiosk/package.json",
+    "apps/landing/package.json ./apps/landing/package.json",
+    "apps/admin ./apps/admin",
+    "apps/kiosk ./apps/kiosk",
+    "apps/landing ./apps/landing",
+  ]) {
+    assert.match(base, new RegExp(`COPY ${escapeRegExp(input)}`));
+  }
+  assert.deepEqual(applicationInstructions, [
+    {
+      name: "RUN",
+      arguments: "pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...",
+    },
+  ]);
+  assert.deepEqual(
+    landingInstructions.filter((instruction) => instruction.name === "ARG"),
+    publicLandingBuildVariables.map((name) => ({
+      name: "ARG",
+      arguments: `${name}=${name === "PUBLIC_DEMO_SUBMISSION_ENABLED" ? "false" : ""}`,
+    })),
   );
-  assert.ok(adminManifest >= 0 && adminManifest < install);
-  assert.ok(kioskManifest >= 0 && kioskManifest < install);
-  assert.ok(landingManifest >= 0 && landingManifest < install);
-  assert.ok(adminSource > install && adminSource < build);
-  assert.ok(kioskSource > install && kioskSource < build);
-  assert.ok(landingSource > install && landingSource < build);
-  assert.ok(build > install);
+  assert.deepEqual(
+    landingInstructions.filter((instruction) => instruction.name === "ENV"),
+    publicLandingBuildVariables.map((name) => ({
+      name: "ENV",
+      arguments: `${name}=\${${name}}`,
+    })),
+  );
+  assert.deepEqual(landingInstructions.at(-1), {
+    name: "RUN",
+    arguments: "pnpm turbo build --filter @markiro/landing...",
+  });
+  for (const instruction of [...baseInstructions, ...applicationInstructions]) {
+    for (const name of publicLandingBuildVariables) {
+      assert.doesNotMatch(`${instruction.name} ${instruction.arguments}`, new RegExp(name));
+    }
+  }
+  assert.doesNotMatch(dockerfile, /SMARTCAPTCHA_SERVER_KEY|ysc2_/);
 
   const runtimeInstructions = dockerfileStageInstructions(dockerfile, "runtime");
   const runtime = runtimeInstructions
     .map((instruction) => `${instruction.name} ${instruction.arguments}`)
     .join("\n");
-  assert.match(runtime, /COPY --from=build \/workspace\/apps\/admin\/dist \/srv\/admin/);
-  assert.match(runtime, /COPY --from=build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/);
-  assert.match(runtime, /COPY --from=build \/workspace\/apps\/landing\/dist \/srv\/landing/);
+  assert.match(
+    runtime,
+    /COPY --from=application-build \/workspace\/apps\/admin\/dist \/srv\/admin/,
+  );
+  assert.match(
+    runtime,
+    /COPY --from=application-build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/,
+  );
+  assert.match(
+    runtime,
+    /COPY --from=landing-build \/workspace\/apps\/landing\/dist \/srv\/landing/,
+  );
   assert.match(runtime, /addgroup -S -g 10001 markiro/);
   assert.match(runtime, /setcap -r \/usr\/bin\/caddy/);
   assert.match(runtime, /USER 10001:10001/);
@@ -581,18 +688,21 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(runtimeCopies, [
     "deploy/production/Caddyfile /etc/caddy/Caddyfile",
     "deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint",
-    "--from=build /workspace/apps/admin/dist /srv/admin",
-    "--from=build /workspace/apps/kiosk/dist /srv/kiosk",
-    "--from=build /workspace/apps/landing/dist /srv/landing",
+    "--from=application-build /workspace/apps/admin/dist /srv/admin",
+    "--from=application-build /workspace/apps/kiosk/dist /srv/kiosk",
+    "--from=landing-build /workspace/apps/landing/dist /srv/landing",
   ]);
   const buildCopies = runtimeCopies
-    .filter((copy) => copy.startsWith("--from=build "))
-    .map((copy) => copy.slice("--from=build ".length));
+    .filter((copy) => copy.startsWith("--from=application-build "))
+    .map((copy) => copy.slice("--from=application-build ".length));
   assert.deepEqual(buildCopies, [
     "/workspace/apps/admin/dist /srv/admin",
     "/workspace/apps/kiosk/dist /srv/kiosk",
-    "/workspace/apps/landing/dist /srv/landing",
   ]);
+  assert.deepEqual(
+    runtimeCopies.filter((copy) => copy.startsWith("--from=landing-build ")),
+    ["--from=landing-build /workspace/apps/landing/dist /srv/landing"],
+  );
 
   for (const buildInput of [
     "!apps/",
@@ -621,6 +731,17 @@ function mutate(source, search, replacement) {
   assert.notEqual(changed, source, `mutation must replace ${String(search)}`);
   return changed;
 }
+
+test("Caddy adapter keeps complete JSON after a container cleanup failure", async () => {
+  const cleanupError = new Error("unexpected EOF");
+  cleanupError.stdout = '{"apps":{"http":{"servers":{}}}}';
+
+  const adapted = await adaptCaddy("", () => {
+    throw cleanupError;
+  });
+
+  assert.deepEqual(adapted, { apps: { http: { servers: {} } } });
+});
 
 test("device proxy matcher retains exact infrastructure boundaries", async () => {
   const caddy = await readFile("deploy/production/Caddyfile", "utf8");
@@ -660,10 +781,10 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
     (match) => match[1],
   );
 
-  assert.equal(reverseProxies.length, 9);
+  assert.equal(reverseProxies.length, 10);
   assert.equal(
     reverseProxies.filter((block) => /import standard_api_transport/.test(block)).length,
-    8,
+    9,
   );
   assert.equal(
     reverseProxies.filter((block) => /import commerce_ml_transport/.test(block)).length,
@@ -816,7 +937,7 @@ test("production edge preserves its image and routing contract", async () => {
   const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
   const dockerignore = await readFile(".dockerignore", "utf8");
 
-  assert.match(dockerfile, /FROM node:24\.19\.0-bookworm-slim AS build/);
+  assert.match(dockerfile, /FROM node:24\.19\.0-bookworm-slim AS build-base/);
   assert.match(dockerfile, /FROM caddy:2\.11\.4-alpine AS runtime/);
   assertEdgeImageContract(dockerfile, dockerignore);
   assert.match(caddy, /reverse_proxy api:3000/);
@@ -831,9 +952,12 @@ test("production edge preserves its image and routing contract", async () => {
   assert.match(caddy, /root \* \/srv\/kiosk/);
   assert.match(caddy, /root \* \/srv\/landing/);
   assert.match(caddy, /try_files \{path\} \/index\.html/);
-  assert.doesNotMatch(caddy, /request_body|max_size|rate_limit/);
+  assert.match(caddy, /request_body/);
+  assert.match(caddy, /max_size 4KB/);
+  assert.doesNotMatch(caddy, /rate_limit/);
 
-  assert.ok(caddy.includes(expectedCsp), "must include the exact CSP");
+  assert.ok(caddy.includes(expectedApplicationCsp), "must include the exact application CSP");
+  assert.ok(caddy.includes(expectedLandingCsp), "must include the exact landing CSP");
   assert.match(caddy, /Strict-Transport-Security/);
   assert.match(caddy, /X-Content-Type-Options nosniff/);
   assert.match(caddy, /X-Frame-Options SAMEORIGIN/);
@@ -853,8 +977,8 @@ test("edge image mutations cannot omit or merge frontend build outputs", async (
       .replaceAll("/srv/admin", "/srv")
       .replaceAll("/srv/kiosk", "/srv")
       .replaceAll("/srv/landing", "/srv"),
-    mutate(dockerfile, "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n", ""),
-    mutate(dockerfile, "COPY --from=build /workspace/apps/landing/dist /srv/landing\n", ""),
+    mutate(dockerfile, "COPY --from=application-build /workspace/apps/kiosk/dist /srv/kiosk\n", ""),
+    mutate(dockerfile, "COPY --from=landing-build /workspace/apps/landing/dist /srv/landing\n", ""),
   ];
   assert.notEqual(mutations[1], dockerfile, "shared-root mutation must change the Dockerfile");
 
@@ -866,7 +990,7 @@ test("edge image mutations cannot omit or merge frontend build outputs", async (
 test("edge runtime rejects source COPY instructions even when frontend outputs remain", async () => {
   const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
   const dockerignore = await readFile(".dockerignore", "utf8");
-  const marker = "COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk\n";
+  const marker = "COPY --from=application-build /workspace/apps/kiosk/dist /srv/kiosk\n";
   const sourceCopies = [
     mutate(dockerfile, marker, `${marker}COPY apps/kiosk /srv/source\n`),
     mutate(dockerfile, marker, `${marker}copy apps/kiosk /srv/source\n`),

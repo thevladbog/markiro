@@ -1,4 +1,4 @@
-FROM node:24.19.0-bookworm-slim AS build
+FROM node:24.19.0-bookworm-slim AS build-base
 WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@11.10.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
@@ -16,14 +16,31 @@ COPY apps/landing ./apps/landing
 COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/ui ./packages/ui
-RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk... --filter @markiro/landing...
+
+FROM build-base AS application-build
+RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...
+
+FROM build-base AS landing-build
+ARG PUBLIC_DEMO_SUBMISSION_ENABLED=false
+ARG PUBLIC_PRIVACY_POLICY_PATH=
+ARG PUBLIC_PERSONAL_DATA_CONSENT_PATH=
+ARG PUBLIC_SMARTCAPTCHA_CLIENT_KEY=
+ARG PUBLIC_DEMO_CONSENT_VERSION=
+ARG PUBLIC_PHONE=
+ENV PUBLIC_DEMO_SUBMISSION_ENABLED=${PUBLIC_DEMO_SUBMISSION_ENABLED}
+ENV PUBLIC_PRIVACY_POLICY_PATH=${PUBLIC_PRIVACY_POLICY_PATH}
+ENV PUBLIC_PERSONAL_DATA_CONSENT_PATH=${PUBLIC_PERSONAL_DATA_CONSENT_PATH}
+ENV PUBLIC_SMARTCAPTCHA_CLIENT_KEY=${PUBLIC_SMARTCAPTCHA_CLIENT_KEY}
+ENV PUBLIC_DEMO_CONSENT_VERSION=${PUBLIC_DEMO_CONSENT_VERSION}
+ENV PUBLIC_PHONE=${PUBLIC_PHONE}
+RUN pnpm turbo build --filter @markiro/landing...
 
 FROM caddy:2.11.4-alpine AS runtime
 COPY deploy/production/Caddyfile /etc/caddy/Caddyfile
 COPY deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint
-COPY --from=build /workspace/apps/admin/dist /srv/admin
-COPY --from=build /workspace/apps/kiosk/dist /srv/kiosk
-COPY --from=build /workspace/apps/landing/dist /srv/landing
+COPY --from=application-build /workspace/apps/admin/dist /srv/admin
+COPY --from=application-build /workspace/apps/kiosk/dist /srv/kiosk
+COPY --from=landing-build /workspace/apps/landing/dist /srv/landing
 RUN addgroup -S -g 10001 markiro \
  && adduser -S -D -H -u 10001 -G markiro markiro \
  && chmod 0555 /usr/bin/edge-entrypoint \

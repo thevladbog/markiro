@@ -32,7 +32,20 @@
 		X-Content-Type-Options nosniff
 		X-Frame-Options SAMEORIGIN
 		Referrer-Policy strict-origin-when-cross-origin
+	}
+}
+
+(application_csp) {
+	header {
+		defer
 		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'"
+	}
+}
+
+(landing_csp) {
+	header {
+		defer
+		Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'"
 	}
 }
 
@@ -159,6 +172,20 @@
 (landing_routes) {
 	root * /srv/landing
 	route {
+		@landingDemo {
+			method POST
+			path /api/demo-requests
+		}
+		handle @landingDemo {
+			request_body {
+				max_size 4KB
+			}
+			uri strip_prefix /api
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
 		@landingReserved path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /health* /openapi.json /docs*
 		handle @landingReserved {
 			respond 404
@@ -215,15 +242,18 @@ http://{$MARKIRO_LANDING_DOMAIN}:8080 {
 
 https://{$MARKIRO_DOMAIN}:8443 {
 	import common_headers
+	import application_csp
 	import admin_routes
 }
 
 https://{$MARKIRO_KIOSK_DOMAIN}:8443 {
 	import common_headers
+	import application_csp
 	import kiosk_routes
 }
 
 https://{$MARKIRO_LANDING_DOMAIN}:8443 {
 	import common_headers
+	import landing_csp
 	import landing_routes
 }

@@ -6,8 +6,10 @@ import { productionComposeArgs } from "./compose-files.mjs";
 import { validateProductionDomains } from "./production-domain.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
-const CSP =
+const APPLICATION_CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+const LANDING_CSP =
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const LANDING_SITE_URL = "https://markiro.app";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
@@ -131,7 +133,13 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
   Object.freeze(["GET", "/llms.txt", "llms"]),
   Object.freeze(["GET", "/api/demo-requests", "not-found"]),
+  Object.freeze(["HEAD", "/api/demo-requests", "not-found"]),
   Object.freeze(["POST", "/api/demo-requests", "not-found"]),
+  Object.freeze(["PUT", "/api/demo-requests", "not-found"]),
+  Object.freeze(["POST", "/api/demo-request", "not-found"]),
+  Object.freeze(["POST", "/api/demo-requests/", "not-found"]),
+  Object.freeze(["POST", "/api/demo-requests/extra", "not-found"]),
+  Object.freeze(["POST", "/api/other", "not-found"]),
   Object.freeze(["GET", "/missing/", "not-found"]),
 ]);
 
@@ -205,10 +213,10 @@ function requestClient() {
   return { request: (url, init) => fetch(url, init) };
 }
 
-function assertHeaders(response, requiresHsts, routeLabel) {
+function assertHeaders(response, requiresHsts, routeLabel, expectedCsp = APPLICATION_CSP) {
   const headers = response.headers;
   const csp = headers.get("content-security-policy");
-  if (csp !== CSP)
+  if (csp !== expectedCsp)
     throw new Error(
       `CSP is ${csp === null ? "missing" : "not the production policy"} on ${routeLabel}`,
     );
@@ -983,14 +991,14 @@ async function runLandingSmoke(options, client) {
   )
     throw new Error("live release identity does not match the expected release");
   const rootBody = await getText(root);
-  assertHeaders(root, new URL(baseUrl).protocol === "https:", "landing /");
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "landing /", LANDING_CSP);
 
   for (const check of LANDING_ROUTE_CHECKS) {
     const [method, path] = check;
     const response =
       path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
     const body = path === "/" ? rootBody : await getText(response);
-    assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`);
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`, LANDING_CSP);
     assertLandingRoute(check, response, body, baseUrl);
   }
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
