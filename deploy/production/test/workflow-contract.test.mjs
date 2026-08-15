@@ -91,6 +91,19 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   );
 });
 
+test("CI builds the workspace legal dependency before landing browser gates", async () => {
+  const workflow = await parse(".github/workflows/ci.yml");
+  const step = namedStep(
+    workflow,
+    "production-bundle",
+    "Verify landing browser and Lighthouse release gates",
+  );
+  assert.match(
+    step.run,
+    /^pnpm --filter @markiro\/legal-documents build\npnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/,
+  );
+});
+
 test("release publication is main-only, digest-bound and writes the immutable manifest", async () => {
   const [workflow, source] = await Promise.all([
     parse(".github/workflows/release-images.yml"),
