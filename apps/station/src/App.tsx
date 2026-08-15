@@ -472,6 +472,10 @@ export function App() {
     let resolving = false;
     let normalMirrorStarted = false;
     let tick: ReturnType<typeof setInterval> | null = null;
+    // Only the first pass after entering a shift owns the recovery pause.
+    // A successful bundle mirror increments shiftBundleRevision and re-runs
+    // this effect after sync has resumed; that refresh must remain read-only.
+    const ownsRecoveryPause = shiftRecoverySyncPaused.current;
     const stopPolling = () => {
       if (tick !== null) clearInterval(tick);
       tick = null;
@@ -514,7 +518,7 @@ export function App() {
               )
             : null;
           if (cancelled) return;
-          if (!recovery && !normalMirrorStarted) {
+          if (!recovery && ownsRecoveryPause && !normalMirrorStarted) {
             normalMirrorStarted = true;
             startNormalShiftMirrorRef.current(shift.id);
           }
@@ -526,7 +530,7 @@ export function App() {
           setBoxCapacity(mirror?.boxCapacity ?? null);
           setIssuerPrefix(mirror?.issuerPrefix ?? null);
           setBoxTemplateRecovery(recovery ? { kind: "box", ...recovery, phase: "blocked" } : null);
-          if (!recovery && shiftRecoverySyncPaused.current) {
+          if (!recovery && ownsRecoveryPause && shiftRecoverySyncPaused.current) {
             setResumeSyncAfterRecoveryCommit(true);
           }
           stopPolling();
@@ -539,8 +543,10 @@ export function App() {
           console.error("station: readShiftContext poll failed", err);
         });
     };
-    void pauseSyncAndWaitForIdleRef
-      .current()
+    const recoveryBarrier = ownsRecoveryPause
+      ? pauseSyncAndWaitForIdleRef.current()
+      : Promise.resolve();
+    void recoveryBarrier
       .then(() => {
         if (cancelled) return;
         poll();
