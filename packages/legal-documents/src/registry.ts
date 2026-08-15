@@ -1,4 +1,13 @@
-import type { LegalDocumentCode, LegalDocumentRelease, LegalLocale } from "./types.js";
+import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
+import { CONSENT_CONTENT } from "./documents/consent.js";
+import { PRIVACY_CONTENT } from "./documents/privacy.js";
+import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
+import type {
+  LegalDocumentCode,
+  LegalDocumentRelease,
+  LegalDocumentSource,
+  LegalLocale,
+} from "./types.js";
 
 export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08.01" as const;
 
@@ -44,6 +53,13 @@ export const LEGAL_RELEASES = [
     routes: { ru: "/legal/brand-letterhead/", en: "/en/legal/brand-letterhead/" },
   },
 ] as const satisfies readonly LegalDocumentRelease[];
+
+export const LEGAL_DOCUMENTS = [
+  { releaseKey: "MKR-PD-01/2026.08.01", content: PRIVACY_CONTENT },
+  { releaseKey: "MKR-PD-02/2026.08.01", content: CONSENT_CONTENT },
+  { releaseKey: "MKR-DPA-01/2026.08.01", content: TENANT_PROCESSING_CONTENT },
+  { releaseKey: "MKR-BRD-01/2026.08.01", content: BRAND_LETTERHEAD_CONTENT },
+] as const satisfies readonly LegalDocumentSource[];
 
 function isCalendarDate(value: string): boolean {
   if (!DATE_PATTERN.test(value)) return false;
@@ -131,15 +147,15 @@ export function validateLegalRegistry(releases: readonly LegalDocumentRelease[])
   const activeConsent = releases.find(
     ({ code, status }) => code === "MKR-PD-02" && status === "active",
   );
-  if (!activeConsent || `${activeConsent.code}/${activeConsent.revision}` !== CURRENT_DEMO_CONSENT_ID) {
+  if (
+    !activeConsent ||
+    `${activeConsent.code}/${activeConsent.revision}` !== CURRENT_DEMO_CONSENT_ID
+  ) {
     throw new Error("Active consent release is inconsistent with the current consent identifier");
   }
 }
 
-export function findLegalRelease(
-  code: LegalDocumentCode,
-  revision?: string,
-): LegalDocumentRelease {
+export function findLegalRelease(code: LegalDocumentCode, revision?: string): LegalDocumentRelease {
   const release = LEGAL_RELEASES.find(
     (candidate) =>
       candidate.code === code &&
@@ -147,6 +163,14 @@ export function findLegalRelease(
   );
   if (!release) throw new Error(`Legal release not found: ${code}/${revision ?? "active"}`);
   return release;
+}
+
+export function findLegalDocument(code: LegalDocumentCode, revision?: string): LegalDocumentSource {
+  const release = findLegalRelease(code, revision);
+  const releaseKey = `${release.code}/${release.revision}`;
+  const source = LEGAL_DOCUMENTS.find((candidate) => candidate.releaseKey === releaseKey);
+  if (!source) throw new Error(`Legal document source not found: ${releaseKey}`);
+  return source;
 }
 
 validateLegalRegistry(LEGAL_RELEASES);

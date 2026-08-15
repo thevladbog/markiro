@@ -33,6 +33,11 @@ export interface LegalDocumentRelease {
   readonly supersedes?: `${LegalDocumentCode}/${number}.${number}.${number}`;
 }
 
+export interface LegalDocumentSource {
+  readonly releaseKey: `${LegalDocumentCode}/${number}.${number}.${number}`;
+  readonly content: Readonly<Record<LegalLocale, LegalDocumentLocaleContent>>;
+}
+
 export interface LegalOperatorProfile {
   readonly name: string;
   readonly address: string;
