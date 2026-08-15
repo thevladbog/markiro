@@ -164,7 +164,7 @@ describe("rendered landing page", () => {
   });
 
   it("renders the four visible fields in the accessible order with optional phone copy", () => {
-    const form = document.querySelector("form[data-demo-form]");
+    const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
     expect(form).not.toBeNull();
 
     for (const fieldId of ["name", "company", "email", "phone"]) {
@@ -180,9 +180,23 @@ describe("rendered landing page", () => {
   });
 
   it("keeps captcha, consent, and public submission data out of disabled builds", () => {
-    const form = document.querySelector("form[data-demo-form]");
+    const form = document.querySelector<HTMLFormElement>("form[data-demo-form]");
+    const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
     expect(form?.hasAttribute("data-endpoint")).toBe(false);
     expect(form?.hasAttribute("data-consent-version")).toBe(false);
+    expect(fieldset?.disabled).toBe(true);
+    expect(fieldset?.querySelectorAll("[name]")).toHaveLength(4);
+    expect(form?.querySelectorAll("[name]")).toHaveLength(4);
+    expect(
+      [...(form?.querySelectorAll<HTMLElement>("[name]") ?? [])].every((control) =>
+        fieldset?.contains(control),
+      ),
+    ).toBe(true);
+    const WindowFormData = form?.ownerDocument.defaultView?.FormData;
+    expect(
+      WindowFormData && form ? [...new WindowFormData(form).keys()] : ["missing-form"],
+    ).toEqual([]);
+    expect(fieldset?.querySelector('button[type="submit"]')).not.toBeNull();
     expect(form?.querySelector('input[name="consent"]')).toBeNull();
     expect(form?.querySelector(".smart-captcha")).toBeNull();
     expect(
@@ -201,10 +215,12 @@ describe("rendered landing page", () => {
     ] as const) {
       const enabledDocument = enabledDocuments.get(route) as Document;
       const form = enabledDocument.querySelector<HTMLFormElement>("form[data-demo-form]");
+      const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
       expect(form?.dataset.endpoint).toBe("/api/demo-requests");
       expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.08.01");
       expect(form?.dataset.locale).toBe(expectedLocale);
       expect(form?.dataset.sourcePath).toBe(route);
+      expect(fieldset?.disabled).toBe(false);
 
       const honeypot = form?.querySelector<HTMLElement>(".demo-form__honeypot");
       expect(honeypot?.getAttribute("aria-hidden")).toBe("true");
@@ -214,8 +230,9 @@ describe("rendered landing page", () => {
       expect(consent?.checked).toBe(false);
       expect(consent?.required).toBe(true);
       expect(form?.querySelector("[data-consent-error]")).not.toBeNull();
-      expect(form?.querySelector('a[href="/personal-data-consent/"]')).not.toBeNull();
-      expect(form?.querySelector('a[href="/privacy/"]')).not.toBeNull();
+      const legalPrefix = expectedLocale === "en" ? "/en" : "";
+      expect(form?.querySelector(`a[href="${legalPrefix}/personal-data-consent/"]`)).not.toBeNull();
+      expect(form?.querySelector(`a[href="${legalPrefix}/privacy/"]`)).not.toBeNull();
       expect(form?.querySelector("label[for=consent]")?.textContent).toContain(
         expectedLocale === "ru"
           ? "Даю согласие на обработку персональных данных"

@@ -13,7 +13,7 @@ export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08.01" as const;
 
 const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
-const REVISION_PATTERN = /^(\d{4})\.(0[1-9]|1[0-2])\.(\d{2})$/;
+const REVISION_PATTERN = /^(\d{4})\.(0[1-9]|1[0-2])\.(0[1-9]|[1-9]\d)$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const LEGAL_RELEASES = [

@@ -12,10 +12,7 @@ const expectedLandingCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_DEMO_SUBMISSION_ENABLED",
-  "PUBLIC_PRIVACY_POLICY_PATH",
-  "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
-  "PUBLIC_DEMO_CONSENT_VERSION",
   "PUBLIC_PHONE",
 ]);
 

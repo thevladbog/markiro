@@ -1,4 +1,4 @@
-import type { LegalDocumentLocaleContent } from "../types.js";
+import type { LegalDocumentLocaleContent, LegalLocale } from "../types.js";
 
 export const PRIVACY_CONTENT = {
   ru: {
@@ -416,4 +416,4 @@ export const PRIVACY_CONTENT = {
       },
     ],
   },
-} as const satisfies Readonly<Record<"ru" | "en", LegalDocumentLocaleContent>>;
+} as const satisfies Readonly<Record<LegalLocale, LegalDocumentLocaleContent>>;

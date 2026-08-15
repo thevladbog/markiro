@@ -30,7 +30,10 @@ HTML-страницы и реестр, а форма и API используют
   локализованный реестр.
 - В форме удалено сообщение о подключении CRM. Disabled-состояние сообщает
   только о временной недоступности онлайн-отправки и предлагает написать на
-  `hello@v-b.tech`.
+  `hello@v-b.tech`; все именованные поля и submit находятся в disabled fieldset,
+  поэтому native GET не может вынести введённые данные в URL.
+- Включённая английская форма ссылается на английские страницы согласия и
+  политики; русская форма сохраняет русские маршруты.
 - UI и API больше не принимают версию согласия из окружения; оба импортируют
   `CURRENT_DEMO_CONSENT_ID` из `@markiro/legal-documents`.
 - Новые поля формы, аналитика, маркетинг, профилирование, UTM/query/referrer
@@ -45,14 +48,14 @@ HTML-страницы и реестр, а форма и API используют
 
 ### `@markiro/legal-documents`
 
-- `corepack pnpm --filter @markiro/legal-documents test` — PASS, 2 файла / 21 тест.
+- `corepack pnpm --filter @markiro/legal-documents test` — PASS, 2 файла / 24 теста.
 - `corepack pnpm --filter @markiro/legal-documents typecheck` — PASS.
 - `corepack pnpm --filter @markiro/legal-documents lint` — PASS.
 - `corepack pnpm --filter @markiro/legal-documents build` — PASS.
 
 ### `@markiro/landing`
 
-- `corepack pnpm --filter @markiro/landing test` — PASS, 11 файлов / 112 тестов.
+- `corepack pnpm --filter @markiro/landing test` — PASS, 11 файлов / 113 тестов.
 - `corepack pnpm --filter @markiro/landing typecheck` — PASS, 0 diagnostics.
 - `corepack pnpm --filter @markiro/landing lint` — PASS.
 - `corepack pnpm --filter @markiro/landing build` — PASS, 26 HTML-страниц.
@@ -89,6 +92,8 @@ Mailpit/MinIO и subprocess-smoke provision tenant owner. Они не доказ
 
 ### Браузер, форматирование и diff
 
+- `corepack pnpm test:yandex-runtime` — PASS, 33/33.
+- `corepack pnpm test:production-bundle:contract` — PASS, 283/283.
 - Прямой Playwright runner — PASS, 74/74: desktop и Pixel 7, все 26 HTML-маршрутов,
   RU/EN формы, отсутствие console/layout errors и горизонтального overflow,
   юридическая навигация, якоря, клавиатурный focus ring, sitemap/llms и реальные 404.

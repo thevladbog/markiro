@@ -188,7 +188,6 @@ test("uses every and only the production environment example keys", async () => 
     "LANDING_ORIGIN",
     "LANDING_DEMO_RECIPIENT",
     "LANDING_DEMO_REPLY_TO",
-    "LANDING_DEMO_CONSENT_VERSION",
     "SMARTCAPTCHA_SERVER_KEY",
     "LANDING_DEMO_RATE_WINDOW_SECONDS",
     "LANDING_DEMO_SOURCE_LIMIT",

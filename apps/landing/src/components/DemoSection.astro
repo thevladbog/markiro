@@ -56,64 +56,66 @@ const submissionEnabled =
       novalidate
       data-reveal
     >
-      <div class="form-field">
-        <label for="name">{copy.name}</label>
-        <input id="name" name="name" type="text" autocomplete="name" maxlength="80" required />
-        <span class="field-error" id="name-error"></span>
-      </div>
-      <div class="form-field">
-        <label for="company">{copy.company}</label>
-        <input id="company" name="company" type="text" autocomplete="organization" maxlength="120" required />
-        <span class="field-error" id="company-error"></span>
-      </div>
-      <div class="form-field">
-        <label for="email">{copy.email}</label>
-        <input
-          id="email"
-          name="email"
-          type="email"
-          autocomplete="email"
-          maxlength="254"
-          required
-        />
-        <span class="field-error" id="email-error"></span>
-      </div>
-      <div class="form-field">
-        <label for="phone">{copy.phone}</label>
-        <input
-          id="phone"
-          name="phone"
-          type="tel"
-          autocomplete="tel"
-          inputmode="tel"
-          maxlength="30"
-          placeholder={locale === "ru" ? "+7 999 123-45-67" : "+1 202 555 0114"}
-        />
-        <span class="field-error" id="phone-error"></span>
-      </div>
-      {submissionEnabled && (
-        <>
-          <div class="demo-form__honeypot" aria-hidden="true">
-            <label for="website">Website</label>
-            <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
-          </div>
-          <div class="demo-form__consent">
-            <input id="consent" name="consent" type="checkbox" required />
-            <label for="consent">
-              {copy.legal.prefix} <a href={legalLinks.consent}>{copy.legal.consent}</a>
-              {copy.legal.separator} <a href={legalLinks.privacy}>{copy.legal.privacy}</a>.
-            </label>
-            <span class="field-error" id="consent-error" data-consent-error></span>
-          </div>
-          <div class="demo-form__captcha">
-            <div class="smart-captcha" data-sitekey={captchaClientKey} data-hl={locale}></div>
-            <p class="field-error" id="captcha-error" data-captcha-error tabindex="-1"></p>
-          </div>
-        </>
-      )}
-      <button class="button demo-form__submit" type="submit" data-analytics="landing_form_submit">
-        <span>{rootCopy.common.requestDemo}</span><span aria-hidden="true">→</span>
-      </button>
+      <fieldset class="demo-form__fields" data-demo-fields disabled={!submissionEnabled}>
+        <div class="form-field">
+          <label for="name">{copy.name}</label>
+          <input id="name" name="name" type="text" autocomplete="name" maxlength="80" required />
+          <span class="field-error" id="name-error"></span>
+        </div>
+        <div class="form-field">
+          <label for="company">{copy.company}</label>
+          <input id="company" name="company" type="text" autocomplete="organization" maxlength="120" required />
+          <span class="field-error" id="company-error"></span>
+        </div>
+        <div class="form-field">
+          <label for="email">{copy.email}</label>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email"
+            maxlength="254"
+            required
+          />
+          <span class="field-error" id="email-error"></span>
+        </div>
+        <div class="form-field">
+          <label for="phone">{copy.phone}</label>
+          <input
+            id="phone"
+            name="phone"
+            type="tel"
+            autocomplete="tel"
+            inputmode="tel"
+            maxlength="30"
+            placeholder={locale === "ru" ? "+7 999 123-45-67" : "+1 202 555 0114"}
+          />
+          <span class="field-error" id="phone-error"></span>
+        </div>
+        {submissionEnabled && (
+          <>
+            <div class="demo-form__honeypot" aria-hidden="true">
+              <label for="website">Website</label>
+              <input id="website" name="website" type="text" tabindex="-1" autocomplete="off" />
+            </div>
+            <div class="demo-form__consent">
+              <input id="consent" name="consent" type="checkbox" required />
+              <label for="consent">
+                {copy.legal.prefix} <a href={legalLinks.consent}>{copy.legal.consent}</a>
+                {copy.legal.separator} <a href={legalLinks.privacy}>{copy.legal.privacy}</a>.
+              </label>
+              <span class="field-error" id="consent-error" data-consent-error></span>
+            </div>
+            <div class="demo-form__captcha">
+              <div class="smart-captcha" data-sitekey={captchaClientKey} data-hl={locale}></div>
+              <p class="field-error" id="captcha-error" data-captcha-error tabindex="-1"></p>
+            </div>
+          </>
+        )}
+        <button class="button demo-form__submit" type="submit" data-analytics="landing_form_submit">
+          <span>{rootCopy.common.requestDemo}</span><span aria-hidden="true">→</span>
+        </button>
+      </fieldset>
       <p class="form-status" data-form-status aria-live="polite"></p>
       {!submissionEnabled && (
         <p class="form-legal">

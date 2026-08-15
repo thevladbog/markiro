@@ -1,4 +1,4 @@
-import type { LegalOperatorProfile } from "./types.js";
+import type { LegalOperatorProfile, LegalOperatorProfileId } from "./types.js";
 
 export const OPERATOR_PROFILES = {
   "operator-2026-08-15": {
@@ -9,4 +9,4 @@ export const OPERATOR_PROFILES = {
     phone: "+7 934 355-14-90",
     site: "https://markiro.app",
   },
-} as const satisfies Readonly<Record<"operator-2026-08-15", LegalOperatorProfile>>;
+} as const satisfies Readonly<Record<LegalOperatorProfileId, LegalOperatorProfile>>;

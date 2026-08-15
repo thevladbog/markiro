@@ -394,7 +394,7 @@ corepack pnpm --filter @markiro/landing test
 corepack pnpm --filter @markiro/landing typecheck
 corepack pnpm --filter @markiro/landing lint
 corepack pnpm --filter @markiro/landing build
-corepack pnpm --filter @markiro/landing audit
+corepack pnpm --filter @markiro/landing run audit
 corepack pnpm test:landing:browser
 git add apps/landing tools/production-browser/tests/landing.spec.ts
 git commit -m "feat(landing): verify and download legal documents"
@@ -520,7 +520,7 @@ corepack pnpm --filter @markiro/landing test
 corepack pnpm --filter @markiro/landing typecheck
 corepack pnpm --filter @markiro/landing lint
 corepack pnpm --filter @markiro/landing build
-corepack pnpm --filter @markiro/landing audit
+corepack pnpm --filter @markiro/landing run audit
 corepack pnpm --filter @markiro/api test
 corepack pnpm --filter @markiro/api typecheck
 corepack pnpm --filter @markiro/api lint

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   LEGAL_DOCUMENTS,
   findLegalDocument,
+  findLegalRelease,
   type LegalBlock,
   type LegalDocumentCode,
   type LegalLocale,
@@ -25,6 +26,14 @@ const documentText = (code: LegalDocumentCode, locale: LegalLocale): string => {
     content.summary,
     ...content.sections.flatMap(({ heading, blocks }) => [heading, ...blocks.map(blockText)]),
   ].join(" ");
+};
+
+const sectionText = (code: LegalDocumentCode, locale: LegalLocale, sectionId: string): string => {
+  const section = findLegalDocument(code).content[locale].sections.find(
+    ({ id }) => id === sectionId,
+  );
+  if (!section) throw new Error(`Unknown legal section: ${code}/${locale}/${sectionId}`);
+  return [section.heading, ...section.blocks.map(blockText)].join(" ");
 };
 
 const allPublicLegalText = (): string[] =>
@@ -163,6 +172,19 @@ describe("bilingual legal document sources", () => {
     const letterhead = documentText("MKR-BRD-01", "ru");
     expect(letterhead).toContain("ШАБЛОН — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ");
     expect(letterhead).toMatch(/не содержит.*контрагент.*подпис.*печат.*утвержден/isu);
+  });
+
+  it.each([
+    ["MKR-PD-01", "revisions"],
+    ["MKR-BRD-01", "document-control"],
+  ] as const)("keeps %s embedded control metadata aligned with its release", (code, sectionId) => {
+    const release = findLegalRelease(code);
+    for (const locale of ["ru", "en"] as const) {
+      const text = sectionText(code, locale, sectionId);
+      expect(text).toContain(release.code);
+      expect(text).toContain(release.revision);
+      expect(text).toContain(release.effectiveDate);
+    }
   });
 
   it("contains no unapproved claims, placeholders, or purposes", () => {

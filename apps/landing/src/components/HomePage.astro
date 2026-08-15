@@ -20,11 +20,14 @@ import TraceLog from "./TraceLog.astro";
 interface Props { page: SeoPageDefinition }
 const { page } = Astro.props;
 const copy = getUiCopy(page.locale);
-const siteConfig = readPublicSiteConfig({
-  PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
-  PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
-  PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
-});
+const siteConfig = readPublicSiteConfig(
+  {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
+  },
+  page.locale,
+);
 ---
 
 <BaseLayout metadata={page} graph={buildPageGraph(page)}>

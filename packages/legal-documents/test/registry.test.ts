@@ -55,6 +55,7 @@ describe("legal document registry", () => {
   it.each([
     ["invalid code", { code: "MKR-UNKNOWN-01" }],
     ["invalid calendar revision", { revision: "2026.13.01" }],
+    ["zero revision sequence", { revision: "2026.08.00" }],
     ["invalid revision day", { revision: "2026.02.31" }],
     ["invalid ISO date", { effectiveDate: "2026-02-31" }],
   ])("rejects %s", (_label, mutation) => {

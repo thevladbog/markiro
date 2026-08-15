@@ -1098,6 +1098,15 @@ input:focus-visible {
   background: #151419;
 }
 
+.demo-form__fields {
+  display: grid;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  gap: var(--sp-3);
+}
+
 .form-field {
   display: grid;
 }
@@ -1192,6 +1201,10 @@ input:focus-visible {
 .demo-form__submit:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.demo-form__fields:disabled .demo-form__submit {
+  cursor: not-allowed;
 }
 
 .form-status {

@@ -9,10 +9,7 @@ const read = (path) => readFile(new URL(path, root), "utf8");
 const parse = async (path) => load(await read(path));
 const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_DEMO_SUBMISSION_ENABLED",
-  "PUBLIC_PRIVACY_POLICY_PATH",
-  "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
-  "PUBLIC_DEMO_CONSENT_VERSION",
   "PUBLIC_PHONE",
 ]);
 const demoRuntimeVariables = Object.freeze([
@@ -20,9 +17,19 @@ const demoRuntimeVariables = Object.freeze([
   "LANDING_ORIGIN",
   "LANDING_DEMO_RECIPIENT",
   "LANDING_DEMO_REPLY_TO",
-  "LANDING_DEMO_CONSENT_VERSION",
   "SMARTCAPTCHA_SERVER_KEY",
 ]);
+const retiredLegalEnvironmentVariables = Object.freeze([
+  "PUBLIC_DEMO_CONSENT_VERSION",
+  "LANDING_DEMO_CONSENT_VERSION",
+  "PUBLIC_PRIVACY_POLICY_PATH",
+  "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
+]);
+
+function assertNoRetiredLegalEnvironmentVariables(source) {
+  for (const variable of retiredLegalEnvironmentVariables)
+    assert.doesNotMatch(source, new RegExp(variable));
+}
 
 function namedStep(workflow, job, name) {
   const step = workflow.jobs[job].steps.find((candidate) => candidate.name === name);
@@ -52,7 +59,6 @@ function assertProtectedDemoRuntimeInventory(step) {
     LANDING_ORIGIN: "https://landing.localhost:18443",
     LANDING_DEMO_RECIPIENT: "demo-recipient@markiro.local",
     LANDING_DEMO_REPLY_TO: "demo-reply-to@markiro.local",
-    LANDING_DEMO_CONSENT_VERSION: "ci-disabled",
     SMARTCAPTCHA_SERVER_KEY: "$captcha_server_key",
   })) {
     assert.ok(step.run.includes(`"${variable}=${value}"`), `${variable} must use the env file`);
@@ -70,6 +76,7 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
+  assertNoRetiredLegalEnvironmentVariables(source);
   assertProtectedDemoRuntimeInventory(
     namedStep(workflow, "production-bundle", "Generate masked test-only environment"),
   );
@@ -99,6 +106,7 @@ test("release publication is main-only, digest-bound and writes the immutable ma
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
+  assertNoRetiredLegalEnvironmentVariables(source);
   assertProtectedDemoRuntimeInventory(
     namedStep(workflow, "production-bundle", "Generate masked test-only environment"),
   );

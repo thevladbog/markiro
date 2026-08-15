@@ -23,7 +23,7 @@ const documentSource = findLegalDocument(page.code);
 const content = documentSource.content[page.locale];
 const operator = OPERATOR_PROFILES[release.operatorProfileId];
 const registryPath = page.locale === "ru" ? "/legal/" : "/en/legal/";
-const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
 const graph = buildLegalPageGraph(page.metadata, {
   published: release.effectiveDate,
   modified: release.effectiveDate,

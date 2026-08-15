@@ -4,6 +4,8 @@ export type LegalDocumentCode = "MKR-PD-01" | "MKR-PD-02" | "MKR-DPA-01" | "MKR-
 
 export type LegalDocumentStatus = "draft" | "active" | "superseded" | "withdrawn";
 
+export type LegalOperatorProfileId = "operator-2026-08-15";
+
 export type LegalBlock =
   | { readonly kind: "paragraph"; readonly text: string }
   | { readonly kind: "ordered-list" | "unordered-list"; readonly items: readonly string[] }
@@ -28,7 +30,7 @@ export interface LegalDocumentRelease {
   readonly revision: `${number}.${number}.${number}`;
   readonly effectiveDate: `${number}-${number}-${number}`;
   readonly status: LegalDocumentStatus;
-  readonly operatorProfileId: "operator-2026-08-15";
+  readonly operatorProfileId: LegalOperatorProfileId;
   readonly routes: Readonly<Record<LegalLocale, `/${string}/`>>;
   readonly supersedes?: `${LegalDocumentCode}/${number}.${number}.${number}`;
 }

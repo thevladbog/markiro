@@ -106,26 +106,19 @@ jobs:
             printf '%s\n' "LANDING_ORIGIN=https://landing.localhost:18443"
             printf '%s\n' "LANDING_DEMO_RECIPIENT=demo-recipient@markiro.local"
             printf '%s\n' "LANDING_DEMO_REPLY_TO=demo-reply-to@markiro.local"
-            printf '%s\n' "LANDING_DEMO_CONSENT_VERSION=ci-disabled"
             printf '%s\n' "SMARTCAPTCHA_SERVER_KEY=$captcha_server_key"
           } > "$MARKIRO_ENV_FILE"
           chmod 600 "$MARKIRO_ENV_FILE"
       - name: Build local SHA-tagged production images
         env:
           PUBLIC_DEMO_SUBMISSION_ENABLED: ${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED }}
-          PUBLIC_PRIVACY_POLICY_PATH: ${{ vars.PUBLIC_PRIVACY_POLICY_PATH }}
-          PUBLIC_PERSONAL_DATA_CONSENT_PATH: ${{ vars.PUBLIC_PERSONAL_DATA_CONSENT_PATH }}
           PUBLIC_SMARTCAPTCHA_CLIENT_KEY: ${{ vars.PUBLIC_SMARTCAPTCHA_CLIENT_KEY }}
-          PUBLIC_DEMO_CONSENT_VERSION: ${{ vars.PUBLIC_DEMO_CONSENT_VERSION }}
           PUBLIC_PHONE: ${{ vars.PUBLIC_PHONE }}
         run: |
           docker build --file deploy/production/api.Dockerfile --tag "ghcr.io/thevladbog/markiro-api:${{ github.sha }}" .
           docker build \
             --build-arg PUBLIC_DEMO_SUBMISSION_ENABLED="$PUBLIC_DEMO_SUBMISSION_ENABLED" \
-            --build-arg PUBLIC_PRIVACY_POLICY_PATH="$PUBLIC_PRIVACY_POLICY_PATH" \
-            --build-arg PUBLIC_PERSONAL_DATA_CONSENT_PATH="$PUBLIC_PERSONAL_DATA_CONSENT_PATH" \
             --build-arg PUBLIC_SMARTCAPTCHA_CLIENT_KEY="$PUBLIC_SMARTCAPTCHA_CLIENT_KEY" \
-            --build-arg PUBLIC_DEMO_CONSENT_VERSION="$PUBLIC_DEMO_CONSENT_VERSION" \
             --build-arg PUBLIC_PHONE="$PUBLIC_PHONE" \
             --file deploy/production/edge.Dockerfile \
             --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" \

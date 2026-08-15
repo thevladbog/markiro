@@ -50,6 +50,13 @@ describe("readPublicSiteConfig", () => {
     });
   });
 
+  it("uses the localized legal routes for an enabled English page", () => {
+    expect(readPublicSiteConfig(ENABLED_ENV, "en").legalLinks).toEqual({
+      consent: "/en/personal-data-consent/",
+      privacy: "/en/privacy/",
+    });
+  });
+
   it("rejects enabled mode without the public captcha key", () => {
     expect(() => readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toThrow(
       "demo submission requires",

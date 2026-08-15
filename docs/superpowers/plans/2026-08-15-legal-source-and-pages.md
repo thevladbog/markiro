@@ -126,7 +126,7 @@ source does not exist.
 - [ ] **Step 3: Add the package and minimal validator**
 
 Use pure deterministic validation. Parse revisions with
-`/^(\d{4})\.(0[1-9]|1[0-2])\.(\d{2})$/`, validate dates by round-tripping
+`/^(\d{4})\.(0[1-9]|1[0-2])\.(0[1-9]|[1-9]\d)$/`, validate dates by round-tripping
 `new Date(`${value}T00:00:00.000Z`)`, reject unexpected external routes, and
 build keys with `${code}/${revision}`. Do not use broad casts or `any`.
 
@@ -409,7 +409,7 @@ corepack pnpm --filter @markiro/landing test
 corepack pnpm --filter @markiro/landing typecheck
 corepack pnpm --filter @markiro/landing lint
 corepack pnpm --filter @markiro/landing build
-corepack pnpm --filter @markiro/landing audit
+corepack pnpm --filter @markiro/landing run audit
 ```
 
 Expected: all pass and the build reports 26 routes before artifact verification
@@ -588,7 +588,7 @@ corepack pnpm --filter @markiro/landing test
 corepack pnpm --filter @markiro/landing typecheck
 corepack pnpm --filter @markiro/landing lint
 corepack pnpm --filter @markiro/landing build
-corepack pnpm --filter @markiro/landing audit
+corepack pnpm --filter @markiro/landing run audit
 corepack pnpm test:landing:browser
 ```
 
@@ -629,7 +629,7 @@ corepack pnpm --filter @markiro/landing test
 corepack pnpm --filter @markiro/landing typecheck
 corepack pnpm --filter @markiro/landing lint
 corepack pnpm --filter @markiro/landing build
-corepack pnpm --filter @markiro/landing audit
+corepack pnpm --filter @markiro/landing run audit
 corepack pnpm --filter @markiro/api test
 corepack pnpm --filter @markiro/api typecheck
 corepack pnpm --filter @markiro/api lint

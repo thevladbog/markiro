@@ -1,3 +1,6 @@
+import { CURRENT_DEMO_CONSENT_ID } from "@markiro/legal-documents";
+import type { Locale } from "../content/pages";
+
 export interface PublicPhone {
   display: string;
   href: `tel:+7${string}`;
@@ -47,7 +50,10 @@ function readEnabled(value: string | undefined): boolean {
   throw new Error("PUBLIC_DEMO_SUBMISSION_ENABLED must be true or false");
 }
 
-export function readPublicSiteConfig(env: PublicEnvironment): PublicSiteConfig {
+export function readPublicSiteConfig(
+  env: PublicEnvironment,
+  locale: Locale = "ru",
+): PublicSiteConfig {
   const submissionEnabled = readEnabled(env.PUBLIC_DEMO_SUBMISSION_ENABLED);
   if (!submissionEnabled) {
     return {
@@ -71,8 +77,10 @@ export function readPublicSiteConfig(env: PublicEnvironment): PublicSiteConfig {
     captchaClientKey,
     consentVersion: CURRENT_DEMO_CONSENT_ID,
     demoEndpoint: "/api/demo-requests",
-    legalLinks: { consent: "/personal-data-consent/", privacy: "/privacy/" },
+    legalLinks:
+      locale === "en"
+        ? { consent: "/en/personal-data-consent/", privacy: "/en/privacy/" }
+        : { consent: "/personal-data-consent/", privacy: "/privacy/" },
     phone: readPhone(env.PUBLIC_PHONE),
   };
 }
-import { CURRENT_DEMO_CONSENT_ID } from "@markiro/legal-documents";

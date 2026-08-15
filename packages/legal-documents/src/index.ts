@@ -16,4 +16,5 @@ export type {
   LegalDocumentStatus,
   LegalLocale,
   LegalOperatorProfile,
+  LegalOperatorProfileId,
 } from "./types.js";
