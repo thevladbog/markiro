@@ -43,6 +43,12 @@ const definitionItems = (code: LegalDocumentCode, locale: LegalLocale) =>
     blocks.flatMap((block) => (block.kind === "definition-list" ? block.items : [])),
   );
 
+const expectUnpunctuatedDefinitionTerm = (term: string): void => {
+  const trimmedTerm = term.trimEnd();
+  expect(term).toBe(trimmedTerm);
+  expect(trimmedTerm).not.toMatch(/\p{P}$/u);
+};
+
 const sectionText = (code: LegalDocumentCode, locale: LegalLocale, sectionId: string): string => {
   const section = documentContent(code, locale).sections.find(({ id }) => id === sectionId);
   if (!section) throw new Error(`Unknown legal section: ${code}/${locale}/${sectionId}`);
@@ -106,12 +112,19 @@ describe("bilingual legal document sources", () => {
       for (const locale of ["ru", "en"] as const) {
         const text = documentText(code, locale);
         for (const { term, detail } of definitionItems(code, locale)) {
-          expect(term).not.toMatch(/[.,;:!?…]$/u);
+          expectUnpunctuatedDefinitionTerm(term);
           expect(text).toContain(`${term} — ${detail}`);
         }
       }
     }
   });
+
+  it.each(["Tenant)", "Термин—", "Term "])(
+    "rejects a definition term with trailing Unicode punctuation or whitespace: %j",
+    (term) => {
+      expect(() => expectUnpunctuatedDefinitionTerm(term)).toThrow();
+    },
+  );
 
   it("uses the localized revision and effective-date wording in public prose", () => {
     for (const source of LEGAL_DOCUMENTS) {
