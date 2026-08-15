@@ -336,6 +336,9 @@ importers:
 
   apps/landing:
     dependencies:
+      '@markiro/legal-documents':
+        specifier: workspace:*
+        version: link:../../packages/legal-documents
       '@markiro/ui':
         specifier: workspace:*
         version: link:../../packages/ui

@@ -4,6 +4,16 @@ const SITE_URL = "https://markiro.app";
 
 type JsonLdObject = Record<string, unknown>;
 
+export interface PageMetadata {
+  path: string;
+  alternatePath: string;
+  locale: "ru" | "en";
+  title: string;
+  description: string;
+  socialImage: string;
+  socialImageAlt: string;
+}
+
 export interface PageGraph extends JsonLdObject {
   "@context": "https://schema.org";
   "@graph": JsonLdObject[];
@@ -78,6 +88,47 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
   }
 
   return { "@context": "https://schema.org", "@graph": graph };
+}
+
+export function buildLegalPageGraph(
+  page: PageMetadata,
+  dates?: { readonly published: string; readonly modified: string; readonly basedOn?: string },
+): PageGraph {
+  const webPage: JsonLdObject = {
+    "@type": "WebPage",
+    "@id": `${absoluteUrl(page.path)}#webpage`,
+    url: absoluteUrl(page.path),
+    name: page.title,
+    description: page.description,
+    inLanguage: page.locale,
+    isPartOf: { "@id": `${SITE_URL}/#website` },
+  };
+  if (dates !== undefined) {
+    webPage.datePublished = dates.published;
+    webPage.dateModified = dates.modified;
+    if (dates.basedOn !== undefined) webPage.isBasedOn = absoluteUrl(dates.basedOn);
+  }
+
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": `${SITE_URL}/#website`,
+        url: `${SITE_URL}/`,
+        name: "Markiro",
+        inLanguage: ["ru", "en"],
+        publisher: { "@id": `${SITE_URL}/#organization` },
+      },
+      {
+        "@type": "Organization",
+        "@id": `${SITE_URL}/#organization`,
+        name: "Markiro",
+        url: `${SITE_URL}/`,
+      },
+      webPage,
+    ],
+  };
 }
 
 export function serializeJsonLd(value: unknown): string {

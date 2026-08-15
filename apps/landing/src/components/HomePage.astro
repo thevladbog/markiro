@@ -5,6 +5,7 @@ import factoryImage from "../assets/factory-line.jpg";
 import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
 import { readPublicSiteConfig } from "../lib/site-config";
+import { buildPageGraph } from "../lib/seo";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import DemoSection from "./DemoSection.astro";
 import ImplementationSteps from "./ImplementationSteps.astro";
@@ -29,7 +30,7 @@ const siteConfig = readPublicSiteConfig({
 });
 ---
 
-<BaseLayout page={page}>
+<BaseLayout metadata={page} graph={buildPageGraph(page)}>
   <LandingHeader page={page} phone={siteConfig.phone} />
 
   <main id="main">

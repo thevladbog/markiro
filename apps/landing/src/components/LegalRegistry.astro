@@ -1,0 +1,76 @@
+---
+import { findLegalDocument } from "@markiro/legal-documents";
+
+import { ACTIVE_LEGAL_RELEASES } from "../content/legal-pages";
+import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
+import { readPublicSiteConfig } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+
+interface Props {
+  metadata: PageMetadata;
+}
+
+const { metadata } = Astro.props;
+const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+const graph = buildLegalPageGraph(metadata);
+---
+
+<BaseLayout metadata={metadata} graph={graph}>
+  <LandingHeader page={metadata} phone={siteConfig.phone} />
+  <main id="main" class="legal-page">
+    <header class="legal-hero legal-hero--registry">
+      <div class="container legal-hero__inner">
+        <p class="section-index">MKR / LEGAL</p>
+        <h1>{metadata.locale === "ru" ? "Юридические документы" : "Legal documents"}</h1>
+        <p class="legal-hero__summary">
+          {metadata.locale === "ru"
+            ? "Действующие редакции политик, согласий и шаблонов Markiro. Новая редакция получает собственную дату и не перезаписывает опубликованную историю."
+            : "Active Markiro policy, consent, and template revisions. A new revision receives its own date and does not overwrite published history."}
+        </p>
+        {metadata.locale === "en" && (
+          <p class="legal-authority-notice" data-authoritative-language>
+            The matching <a href="/legal/" hreflang="ru">Russian revisions</a> are authoritative.
+            English pages are informational translations.
+          </p>
+        )}
+      </div>
+    </header>
+
+    <article class="container legal-registry" data-legal-document>
+      <div class="legal-registry__heading">
+        <p class="section-index">{metadata.locale === "ru" ? "Публичный реестр" : "Public registry"}</p>
+        <h2>{metadata.locale === "ru" ? "Действующие редакции" : "Active revisions"}</h2>
+      </div>
+      <div class="legal-registry__list">
+        {ACTIVE_LEGAL_RELEASES.map((release) => {
+          const content = findLegalDocument(release.code).content[metadata.locale];
+          return (
+            <a class="legal-registry__item" href={release.routes[metadata.locale]} data-legal-status={release.status}>
+              <span class="legal-registry__code" data-registry-code data-legal-code>{release.code}</span>
+              <span class="legal-registry__title">{content.title}</span>
+              <span class="legal-registry__meta">
+                <span data-legal-revision>{release.revision}</span>
+                <span aria-hidden="true">·</span>
+                <time datetime={release.effectiveDate} data-legal-effective-date>{release.effectiveDate}</time>
+              </span>
+              <span class="legal-registry__arrow" aria-hidden="true">→</span>
+            </a>
+          );
+        })}
+      </div>
+      <p class="legal-registry__note">
+        {metadata.locale === "ru"
+          ? "Загружаемые PDF и DOCX появятся после отдельной проверки воспроизводимости, PDF/A и машиночитаемого кода."
+          : "Downloadable PDF and DOCX artifacts will appear after separate reproducibility, PDF/A, and machine-readable-code validation."}
+      </p>
+    </article>
+  </main>
+  <LandingFooter page={metadata} />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>

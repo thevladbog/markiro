@@ -1,11 +1,11 @@
 ---
 import type { PublicPhone } from "../lib/site-config";
-import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
+import type { PageMetadata } from "../lib/seo";
 import BrandMark from "./BrandMark.astro";
 
 interface Props {
-  page: SeoPageDefinition;
+  page: Pick<PageMetadata, "locale" | "path" | "alternatePath">;
   phone: PublicPhone | null;
 }
 
