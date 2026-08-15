@@ -215,6 +215,8 @@ interface OutboxSeedRow {
   code_hash: string | null;
   gtin14: string | null;
   serial: string | null;
+  box_id: string | null;
+  operator_id: string | null;
 }
 
 function outboxRow(id: number): OutboxSeedRow {
@@ -228,6 +230,8 @@ function outboxRow(id: number): OutboxSeedRow {
     code_hash: `hash${id}`,
     gtin14: "04600000000017",
     serial: `S${id}`,
+    box_id: null,
+    operator_id: null,
   };
 }
 
@@ -3654,7 +3658,7 @@ describe("App", () => {
     }
   });
 
-  it("re-reads a delayed fresh bundle and remounts the work screen after entering from a stale mirror", async () => {
+  it("keeps periodic sync alive when a fresh bundle revision updates the work screen", async () => {
     lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
     lockdownMock.subscribe.mockImplementation((listener) => {
       lockdownMock.listeners.add(listener);
@@ -3665,6 +3669,8 @@ describe("App", () => {
     let fresh = false;
     let freshPlainMirrorReads = 0;
     let openBoxInsertCount = 0;
+    const outbox: OutboxSeedRow[] = [];
+    let scanPosts = 0;
     let resolveBundle!: (response: Response) => void;
     const delayedBundle = new Promise<Response>((resolve) => {
       resolveBundle = resolve;
@@ -3681,16 +3687,30 @@ describe("App", () => {
       }
       if (cmd === "plugin:sql|load") return Promise.resolve("sqlite:station-mirror.db");
       if (cmd === "plugin:sql|execute") {
-        const { query } = (payload ?? {}) as { query: string };
+        const { query, values = [] } = (payload ?? {}) as {
+          query: string;
+          values?: unknown[];
+        };
         if (query.includes("INSERT INTO shift_mirror")) fresh = true;
         if (query.includes("INSERT INTO boxes_mirror")) openBoxInsertCount += 1;
+        if (query.includes("DELETE FROM outbox")) {
+          const maxId = values[0] as number;
+          for (let index = outbox.length - 1; index >= 0; index -= 1) {
+            if (outbox[index]!.id <= maxId) outbox.splice(index, 1);
+          }
+        }
         return Promise.resolve([0, 0]);
       }
       if (cmd === "plugin:sql|select") {
         const { query, values } = (payload ?? {}) as { query: string; values?: unknown[] };
         if (query.includes("FROM outbox")) {
-          if (query.startsWith("SELECT COUNT(*)")) return Promise.resolve([{ n: 0 }]);
-          return Promise.resolve([]);
+          if (query.startsWith("SELECT COUNT(*)")) {
+            return Promise.resolve([{ n: outbox.length }]);
+          }
+          if (query.startsWith("SELECT scanned_at")) {
+            return Promise.resolve(outbox.length ? [{ scanned_at: outbox[0]!.scanned_at }] : []);
+          }
+          return Promise.resolve(outbox);
         }
         if (/FROM operators_mirror\b/.test(query)) {
           return Promise.resolve([operatorMirrorRow(pinHash)]);
@@ -3765,7 +3785,13 @@ describe("App", () => {
             { status: 200 },
           );
         }
-        if (path === "/shifts/s9/bundle") return delayedBundle;
+        if (path === "/shifts/s9/bundle") return (await delayedBundle).clone();
+        if (path === "/station/scans" && method === "POST") {
+          scanPosts += 1;
+          return new Response(JSON.stringify({ applied: 1, alreadyApplied: false }), {
+            status: 200,
+          });
+        }
         return new Response(JSON.stringify({ items: [] }), { status: 200 });
       }),
     );
@@ -3836,7 +3862,27 @@ describe("App", () => {
     // spec in place for the new bundle revision without recreating work state.
     expect(freshPlainMirrorReads).toBeGreaterThanOrEqual(2);
     expect(openBoxInsertCount).toBe(openBoxInsertsBeforeRefresh);
-  });
+
+    outbox.push({
+      id: 1,
+      shift_id: "s9",
+      terminal_id: "device-1",
+      raw: FIRST_KM,
+      verdict: "ok",
+      scanned_at: "2026-08-15T13:57:23.692Z",
+      code_hash: "a".repeat(64),
+      gtin14: "04600000000015",
+      serial: "5Ab1",
+      box_id: null,
+      operator_id: "op1",
+    });
+
+    // No scan callback or online event nudges the engine here. The normal
+    // 15-second heartbeat must discover this durable row by itself after the
+    // bundle revision, proving that recovery did not leave sync paused.
+    await waitFor(() => expect(scanPosts).toBe(1), { timeout: 17_000 });
+    expect(outbox).toEqual([]);
+  }, 20_000);
 
   // Task 13 review, Finding 1: App.tsx used to hardcode `issuerPrefix={null}`
   // and `boxCapacity={null}` into WorkScreen unconditionally, so the box UI
