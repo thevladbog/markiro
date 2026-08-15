@@ -1747,9 +1747,15 @@ body,
 
 .work-scan-result__verdict strong {
   display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+  padding-inline: var(--sp-1);
   gap: var(--sp-2);
   align-items: center;
+  justify-content: center;
   font: var(--floor-counter-sm);
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .work-scan-result__verdict[data-compact-success="true"] {
@@ -2335,10 +2341,27 @@ body,
 
 .station-status-toggle {
   min-width: 0;
-  padding: var(--sp-1) var(--sp-2);
+  padding: var(--sp-1) var(--sp-2) !important;
+  gap: var(--sp-2) !important;
   overflow: hidden;
   text-align: center;
   white-space: nowrap;
+}
+
+.station-status-toggle__chevron {
+  display: block;
+  width: 18px;
+  height: 18px;
+  overflow: visible;
+  flex: 0 0 18px;
+}
+
+.station-status-toggle__chevron path {
+  fill: none;
+  stroke: currentcolor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .station-update-indicator {
@@ -2604,6 +2627,10 @@ body,
 
   .work-scan-result__verdict[data-compact-success="true"] {
     padding: var(--sp-2);
+  }
+
+  .work-scan-result__verdict[data-tone="neutral"] strong {
+    font: var(--floor-lg);
   }
 
   .work-scan-result__normalized {

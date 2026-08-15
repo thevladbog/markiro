@@ -119,7 +119,11 @@ export function StatusBar({
       aria-label={t(collapsed ? "shell.expandStatusBar" : "shell.collapseStatusBar")}
       aria-expanded={!collapsed}
       onClick={onToggleCollapsed}
-      icon={<span aria-hidden="true">{collapsed ? "⌄" : "⌃"}</span>}
+      icon={
+        <svg aria-hidden="true" className="station-status-toggle__chevron" viewBox="0 0 18 18">
+          <path d={collapsed ? "M4 7l5 5 5-5" : "M4 11l5-5 5 5"} />
+        </svg>
+      }
     >
       {t(collapsed ? "shell.expandStatusBarShort" : "shell.collapseStatusBarShort")}
     </Button>
