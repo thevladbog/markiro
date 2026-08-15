@@ -101,10 +101,10 @@ describe("renderPickupSlipHtml", () => {
     }));
 
     const html = renderPickupSlipHtml(fixture({ items }));
-    expect(html.match(/data-slip-page="\d+"/g)).toHaveLength(3);
-    expect(html.match(/class="slip-table-head"/g)).toHaveLength(3);
-    expect(html.match(/class="code128-box"/g)).toHaveLength(3);
-    expect(html.match(/стр\. \d+ из \d+/g)).toEqual(["стр. 1 из 3", "стр. 2 из 3", "стр. 3 из 3"]);
+    expect(html.match(/data-slip-page="\d+"/g)).toHaveLength(2);
+    expect(html.match(/class="slip-table-head"/g)).toHaveLength(2);
+    expect(html.match(/class="code128-box"/g)).toHaveLength(2);
+    expect(html.match(/стр\. \d+ из \d+/g)).toEqual(["стр. 1 из 2", "стр. 2 из 2"]);
     expect(html.match(/class="slip-final-blocks"/g)).toHaveLength(1);
   });
 

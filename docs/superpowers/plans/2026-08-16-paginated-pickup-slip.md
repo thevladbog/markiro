@@ -26,6 +26,7 @@
 ### Task 1: Persist and expose the kiosk print setting
 
 **Files:**
+
 - Modify: `packages/db/src/schema/pickup.ts`
 - Create: `packages/db/migrations/0035_kiosk_slip_qr_setting.sql`
 - Modify: `packages/db/migrations/meta/_journal.json`
@@ -42,6 +43,7 @@
 - Modify: `apps/api/test/openapi-docs.test.ts`
 
 **Interfaces:**
+
 - Produces: `schema.kiosks.printEmployeeQrOnSlip: boolean`, DB column `print_employee_qr_on_slip boolean not null default false`.
 - Produces: `CreateKioskDto`, `UpdateKioskDto`, and `KioskDto` field `printEmployeeQrOnSlip`.
 - Produces: `KioskBootstrapDto.config.printEmployeeQrOnSlip: boolean`.
@@ -130,6 +132,7 @@ git commit -m "feat(kiosk): configure employee QR on slips"
 ### Task 2: Add the print setting to the admin kiosk form
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/kiosks/api.ts`
 - Modify: `apps/admin/src/pages/kiosks/KioskProfileForm.tsx`
 - Modify: `apps/admin/src/pages/kiosks/KioskPanelRoute.tsx`
@@ -139,6 +142,7 @@ git commit -m "feat(kiosk): configure employee QR on slips"
 - Update fixture DTOs in other failing admin tests only where strict typing requires the new required response field.
 
 **Interfaces:**
+
 - Consumes: `KioskDto.printEmployeeQrOnSlip` from Task 1.
 - Produces: form value and create/update payload field `printEmployeeQrOnSlip: boolean`.
 
@@ -199,12 +203,14 @@ git commit -m "feat(admin): configure kiosk slip QR block"
 ### Task 3: Enrich slip data with branding and the print decision
 
 **Files:**
+
 - Modify: `apps/api/src/pickup/slip.ts`
 - Modify: `apps/api/src/modules/pickup-orders/pickup-orders.service.ts`
 - Modify: `apps/api/test/pickup-slip.e2e.test.ts`
 - Modify: `apps/api/test/slip.test.ts`
 
 **Interfaces:**
+
 - Consumes: `schema.organization.logo` and `schema.kiosks.printEmployeeQrOnSlip`.
 - Produces: `PickupSlipData.org: { name: string; inn: string | null; logo: string | null } | null`.
 - Produces: `PickupSlipData.printEmployeeQrOnSlip: boolean`.
@@ -258,22 +264,24 @@ git commit -m "feat(api): provide pickup slip branding settings"
 ### Task 4: Render a numbered explicit-page A4 document
 
 **Files:**
+
 - Modify: `packages/domain/src/barcodes/svg.ts`
 - Modify: `packages/domain/test/barcodes.test.ts`
 - Modify: `apps/api/src/pickup/slip.ts`
 - Modify: `apps/api/test/slip.test.ts`
 
 **Interfaces:**
+
 - Produces: unchanged public function `renderPickupSlipHtml(data: PickupSlipData): string`.
 - Produces: backward-compatible `renderCode128Svg(text: string, options?: { includeText?: boolean }): string`; omitted option preserves the current human-readable caption.
-- Internal helper: `paginatePickupSlipItems(items: PickupSlipItem[]): PickupSlipItem[][]`, with regular-page capacity 10 and final-page capacity 6.
+- Internal helper: `paginatePickupSlipItems(items: PickupSlipItem[]): PickupSlipItem[][]`, with regular-page capacity 10 and final-page capacity 8, validated against the rendered A4 geometry.
 
 - [ ] **Step 1: Write failing pagination and content tests**
 
-Build 17 literal item fixtures and assert the rendered HTML has three `data-slip-page` sections and exactly these footer labels:
+Build 17 literal item fixtures and assert the rendered HTML has two `data-slip-page` sections and exactly these footer labels:
 
 ```ts
-expect(pageLabels).toEqual(["стр. 1 из 3", "стр. 2 из 3", "стр. 3 из 3"]);
+expect(pageLabels).toEqual(["стр. 1 из 2", "стр. 2 из 2"]);
 ```
 
 Add behavior assertions for:
@@ -305,7 +313,7 @@ Expected: FAIL on missing explicit pages, numbering, copy, and corrected price r
 
 - [ ] **Step 3: Implement deterministic pagination**
 
-Compute total page count so every non-final page contains at most 10 rows and the final page at most 6 rows. Balance rows across the known page count to avoid a one-row first page while preserving both capacity limits. Return `[[]]` for an empty item list.
+Compute total page count so every non-final page contains at most 10 rows and the final page at most 8 rows. Balance rows across the known page count to avoid a one-row first page while preserving both capacity limits. Return `[[]]` for an empty item list.
 
 Render each page as:
 
@@ -352,9 +360,11 @@ git commit -m "feat(api): render paginated pickup slips"
 ### Task 5: Verify packages and rendered PDF behavior
 
 **Files:**
+
 - Modify only files required to fix failures caused by Tasks 1–4.
 
 **Interfaces:**
+
 - Consumes: final schema, API, admin, and renderer contracts from prior tasks.
 - Produces: verification evidence and a visually inspectable temporary PDF/image outside Git.
 
@@ -386,7 +396,7 @@ build that consumers require.
 
 - [ ] **Step 3: Render a 17-item fixture through headless Chromium**
 
-Generate a temporary HTML file from `renderPickupSlipHtml`, print it to PDF with the repository Playwright/Chromium runtime, and inspect page count with `pdfinfo`. Expected: exactly 3 A4 pages. Render the PDF pages to PNG and visually inspect page boundaries, repeated header/footer, DataMatrix cells, final blocks, signatures, and `стр. N из 3`.
+Generate a temporary HTML file from `renderPickupSlipHtml`, print it to PDF with Chromium, and inspect page count with `pdfinfo`. Expected: exactly 2 A4 pages. Render the PDF pages to PNG and visually inspect page boundaries, repeated header/footer, DataMatrix cells, final blocks, signatures, and `стр. N из 2`.
 
 - [ ] **Step 4: Run repository hygiene checks**
 

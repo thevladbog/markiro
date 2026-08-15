@@ -84,7 +84,7 @@ function money(value: string | null): string {
 }
 
 const REGULAR_PAGE_ITEM_CAPACITY = 10;
-const FINAL_PAGE_ITEM_CAPACITY = 6;
+const FINAL_PAGE_ITEM_CAPACITY = 8;
 
 function paginatePickupSlipItems(items: PickupSlipItem[]): PickupSlipItem[][] {
   if (items.length === 0) return [[]];
