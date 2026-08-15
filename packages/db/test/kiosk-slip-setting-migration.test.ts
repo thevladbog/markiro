@@ -1,10 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const migrationUrl = new URL(
-  "../migrations/0035_kiosk_slip_qr_setting.sql",
-  import.meta.url,
-);
+const migrationUrl = new URL("../migrations/0045_flawless_overlord.sql", import.meta.url);
 
 describe("kiosk slip QR setting migration", () => {
   it("adds a default-off non-null print setting for existing kiosks", () => {

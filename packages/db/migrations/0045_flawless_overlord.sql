@@ -1,0 +1,1 @@
+ALTER TABLE "kiosks" ADD COLUMN "print_employee_qr_on_slip" boolean DEFAULT false NOT NULL;
