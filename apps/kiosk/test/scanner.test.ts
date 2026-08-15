@@ -177,6 +177,22 @@ describe("keyboard wedge", () => {
     expect(seen).toEqual([`010460068200001321ABC${GS}91EE06${GS}92F8C3`]);
   });
 
+  it("reconstructs a raw ASCII 29 separator when the browser leaves its key unidentified", () => {
+    const target = new FakeTarget();
+    const seen: string[] = [];
+    createKeyboardWedgeSource({ target }).start((raw) => seen.push(raw));
+
+    target.type("0104680089900017215b?8jFY");
+    // Some keyboard-capture drivers expose the raw GS byte through the
+    // deprecated keyboard fields instead of a Ctrl+] event. `key` carries no
+    // character in that browser path, so falling back to it loses the GS.
+    target.key({ code: "", key: "Unidentified", keyCode: 29, which: 29 });
+    target.type("93xW49");
+    target.key({ code: "Enter", key: "Enter" });
+
+    expect(seen).toEqual([`0104680089900017215b?8jFY${GS}93xW49`]);
+  });
+
   it("preserves an 18-digit SSCC exactly while normalising keyboard events", () => {
     const target = new FakeTarget();
     const seen: string[] = [];
