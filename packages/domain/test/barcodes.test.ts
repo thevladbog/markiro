@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import bwipjs from "bwip-js";
 import { DomainError } from "../src/errors.js";
+import { renderLiteralDataMatrixSvg } from "../src/artifacts.js";
 import { renderCode128Svg, renderDataMatrixSvg, renderQrSvg } from "../src/barcodes/svg.js";
 
 const GS = String.fromCharCode(0x1d); // ASCII 0x1D separator
 const GTIN14 = "04006381333931"; // valid GS1 mod-10 check digit
 const SERIAL = "KYC9X7MQ";
 const GTIN14_2 = "04600682000013"; // valid GS1 mod-10 check digit
+const PRODUCTION_LIKE_KM = `01${GTIN14_2}21${SERIAL}${GS}93Z`;
+const LITERAL_URL = "https://markiro.app/d/MKR-PD-01/2026.08.01/2026-08-15";
 
 describe("barcode SVG renderers", () => {
   it("renders a DataMatrix SVG containing a crypto-tail KM with a GS byte", () => {
@@ -62,5 +65,33 @@ describe("barcode SVG renderers", () => {
   });
   it("renders a Code128 SVG for an order number", () => {
     expect(renderCode128Svg("ORD-26-0037").startsWith("<svg")).toBe(true);
+  });
+
+  it("renders a literal Data Matrix exactly as bwip-js without GS1 transformation", () => {
+    expect(renderLiteralDataMatrixSvg(LITERAL_URL)).toBe(
+      bwipjs.toSVG({ bcid: "datamatrix", text: LITERAL_URL, scale: 3 }),
+    );
+    expect(renderLiteralDataMatrixSvg(LITERAL_URL)).not.toBe(
+      renderDataMatrixSvg(PRODUCTION_LIKE_KM),
+    );
+  });
+
+  it("encodes the exact URL as a literal Data Matrix symbol without FNC1 or AIM normalization", () => {
+    const literalSymbol = bwipjs.raw({ bcid: "datamatrix", text: LITERAL_URL });
+    const renderedSymbol = bwipjs.raw({
+      bcid: "datamatrix",
+      text: LITERAL_URL,
+      scale: 3,
+    });
+
+    expect(renderedSymbol).toEqual(literalSymbol);
+    expect(LITERAL_URL).not.toContain("]d2");
+    expect(LITERAL_URL).not.toContain("\u001d");
+    expect(LITERAL_URL).not.toContain("^FNC1");
+  });
+
+  it("rejects literal Data Matrix input outside its UTF-8 byte limit", () => {
+    expect(() => renderLiteralDataMatrixSvg("")).toThrow(DomainError);
+    expect(() => renderLiteralDataMatrixSvg("я".repeat(257))).toThrow(DomainError);
   });
 });
