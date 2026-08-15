@@ -80,12 +80,15 @@ function formLocale(form: HTMLFormElement): Locale {
   return form.dataset.locale === "en" ? "en" : "ru";
 }
 
-function formInput(form: HTMLFormElement, name: InputName): HTMLInputElement {
+function optionalFormInput(form: HTMLFormElement, name: InputName): HTMLInputElement | null {
   const element = form.elements.namedItem(name);
-  if (!(element instanceof HTMLInputElement)) {
-    throw new Error(`Demo form is missing the ${name} input`);
-  }
-  return element;
+  return element instanceof HTMLInputElement ? element : null;
+}
+
+function formInput(form: HTMLFormElement, name: InputName): HTMLInputElement {
+  const input = optionalFormInput(form, name);
+  if (input === null) throw new Error(`Demo form is missing the ${name} input`);
+  return input;
 }
 
 function consentInput(form: HTMLFormElement): HTMLInputElement {
@@ -232,9 +235,9 @@ export function initDemoForm(form: HTMLFormElement, runtime: DemoFormRuntime): (
       return;
     }
 
-    const captchaTokenInput = formInput(form, "smart-token");
-    const captchaToken = captchaTokenInput.value.trim();
-    if (captchaToken.length === 0) {
+    const captchaTokenInput = optionalFormInput(form, "smart-token");
+    const captchaToken = captchaTokenInput?.value.trim() ?? "";
+    if (captchaTokenInput === null || captchaToken.length === 0) {
       showCaptchaError(form, copy.captcha);
       setFormStatus(form, copy.checking, "error");
       runtime.track("landing_form_error", { errorClass: "validation" });

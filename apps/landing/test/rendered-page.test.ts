@@ -220,6 +220,7 @@ describe("rendered landing page", () => {
       expect(form?.querySelector(".smart-captcha")?.getAttribute("data-sitekey")).toBe(
         "ysc1_render-test-key",
       );
+      expect(form?.querySelector(".smart-captcha")?.getAttribute("data-hl")).toBe(expectedLocale);
       expect(form?.querySelector("[data-captcha-error]")).not.toBeNull();
       expect(
         enabledDocument.querySelector(

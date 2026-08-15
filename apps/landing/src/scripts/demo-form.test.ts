@@ -277,6 +277,24 @@ describe("initDemoForm", () => {
     },
   );
 
+  it("treats an absent captcha token input as an incomplete challenge", async () => {
+    const form = renderForm("/api/demo-requests", "en");
+    (form.elements.namedItem("phone") as HTMLInputElement).value = "";
+    const tokenInput = form.elements.namedItem("smart-token");
+    if (!(tokenInput instanceof HTMLInputElement)) throw new Error("Token fixture is missing");
+    tokenInput.remove();
+    const captchaError = form.querySelector<HTMLElement>("[data-captcha-error]");
+    const currentRuntime = runtime();
+    initDemoForm(form, { ...currentRuntime, currentPath: () => "/en/" });
+
+    await submit(form);
+
+    expect(currentRuntime.request).not.toHaveBeenCalled();
+    expect(currentRuntime.resetCaptcha).not.toHaveBeenCalled();
+    expect(captchaError?.textContent).toContain("Complete the captcha again");
+    expect(document.activeElement).toBe(captchaError);
+  });
+
   it("keeps analytics properties free of form values and request metadata", async () => {
     const form = renderForm();
     const currentRuntime = runtime([{ code: "submission_unavailable", ok: false, status: 503 }]);

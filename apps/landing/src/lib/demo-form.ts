@@ -22,8 +22,9 @@ export type DemoLeadValidation =
   | { readonly errors: DemoErrors; readonly ok: false };
 
 const EMAIL_MAX_LENGTH = 254;
+// Mirrors the default `z.email()` expression used by the Task 4 API schema.
 const EMAIL_PATTERN =
-  /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/i;
+  /^(?!\.)(?!.*\.\.)([A-Za-z0-9_'+.-]*)[A-Za-z0-9_+-]@([A-Za-z0-9][A-Za-z0-9-]*\.)+[A-Za-z]{2,}$/;
 const PHONE_INPUT_MAX_LENGTH = 30;
 const PHONE_PUNCTUATION = /^\+?[\d\s().-]+$/;
 

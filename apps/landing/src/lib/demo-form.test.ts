@@ -61,6 +61,38 @@ describe("validateDemoLead", () => {
     });
   });
 
+  it.each([".ada@example.test", "ada..lovelace@example.test", "ada@example.c"])(
+    "rejects email syntax rejected by the Task 4 Zod contract: %s",
+    (email) => {
+      expect(validateDemoLead({ company: "Factory", email, name: "Ada", phone: "" }, "en")).toEqual(
+        {
+          errors: { email: "Enter a valid email address" },
+          ok: false,
+        },
+      );
+    },
+  );
+
+  it("matches the Task 4 email length boundary", () => {
+    const acceptedEmail = `${"a".repeat(241)}@example.test`;
+    const rejectedEmail = `${"a".repeat(242)}@example.test`;
+    expect(acceptedEmail).toHaveLength(254);
+    expect(rejectedEmail).toHaveLength(255);
+
+    expect(
+      validateDemoLead({ company: "Factory", email: acceptedEmail, name: "Ada", phone: "" }, "en"),
+    ).toEqual({
+      ok: true,
+      value: { company: "Factory", email: acceptedEmail, name: "Ada" },
+    });
+    expect(
+      validateDemoLead({ company: "Factory", email: rejectedEmail, name: "Ada", phone: "" }, "en"),
+    ).toEqual({
+      errors: { email: "Email must be shorter than 255 characters" },
+      ok: false,
+    });
+  });
+
   it("returns one field error for every missing required value", () => {
     expect(validateDemoLead({ company: " ", email: "", name: "", phone: "" })).toEqual({
       errors: {
@@ -121,7 +153,7 @@ describe("validateDemoLead", () => {
     expect(
       validateDemoLead({
         company: "К".repeat(121),
-        email: `${"a".repeat(243)}@example.test`,
+        email: `${"a".repeat(242)}@example.test`,
         name: "А".repeat(81),
         phone: "+7 999 123-45-67",
       }),
