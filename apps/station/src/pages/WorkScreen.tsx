@@ -171,6 +171,9 @@ export function WorkScreen({
   const [closeReason, setCloseReason] = useState<string>("production_defect");
   const [closeError, setCloseError] = useState<string | null>(null);
   const [closeSummary, setCloseSummary] = useState<OfflineShiftCloseSummary | null>(null);
+  const [planReachedPrompt, setPlanReachedPrompt] = useState<number | null>(null);
+  const planReachedPromptRef = useRef(false);
+  const planReachedAcknowledgedRef = useRef(false);
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
@@ -501,6 +504,7 @@ export function WorkScreen({
     showExceptions ||
     closeReasonPicker ||
     closeSummary !== null ||
+    planReachedPrompt !== null ||
     noSerials,
   );
 
@@ -516,6 +520,21 @@ export function WorkScreen({
     try {
       const summary = await onCloseShift(reasonCode ?? null);
       setCloseReasonPicker(false);
+      setCloseSummary(summary);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("reason")) setCloseReasonPicker(true);
+      else setCloseError(message.includes("open box") ? t("work.closeOpenBox") : message);
+    }
+  }
+
+  async function confirmPlanClose(): Promise<void> {
+    if (!onCloseShift) return;
+    planReachedPromptRef.current = false;
+    setPlanReachedPrompt(null);
+    setCloseError(null);
+    try {
+      const summary = await onCloseShift(null);
       setCloseSummary(summary);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1000,6 +1019,7 @@ export function WorkScreen({
     refreshBox: refreshBoxAndMaybeClose,
     refreshRecentOperations,
     refreshLatestAcceptedOperation,
+    plannedQty,
   });
   useEffect(() => {
     live.current = {
@@ -1012,6 +1032,7 @@ export function WorkScreen({
       refreshBox: refreshBoxAndMaybeClose,
       refreshRecentOperations,
       refreshLatestAcceptedOperation,
+      plannedQty,
     };
   });
 
@@ -1093,7 +1114,19 @@ export function WorkScreen({
               setLastScanned({ boxId, codeHash, scannedAt });
               await live.current.refreshBox(boxId);
             }
-            return { raw, verdict, firstSeen: null };
+            const plannedQty = live.current.plannedQty;
+            const planReached =
+              plannedQty !== null &&
+              plannedQty !== undefined &&
+              !planReachedAcknowledgedRef.current &&
+              (
+                await exec.all<{ actualQty: number }>(
+                  "SELECT COUNT(*) AS actualQty FROM codes_mirror WHERE shift_id = ?",
+                  [shiftId],
+                )
+              )[0]?.actualQty === plannedQty;
+            if (planReached) planReachedPromptRef.current = true;
+            return { raw, verdict, firstSeen: null, ...(planReached ? { planReached } : {}) };
           }
 
           await recordScan(exec, event, null);
@@ -1138,6 +1171,7 @@ export function WorkScreen({
           void live.current.refreshRecentOperations();
           if (outcome.verdict.status === "ok") {
             void live.current.refreshLatestAcceptedOperation();
+            if (outcome.planReached) setPlanReachedPrompt(live.current.plannedQty ?? null);
           }
         },
         onError() {
@@ -1300,6 +1334,7 @@ export function WorkScreen({
         return;
       }
       if (ordinaryScanBlockedRef.current) return;
+      if (planReachedPromptRef.current) return;
       queue.enqueue(raw);
     });
   }, [
@@ -1534,6 +1569,25 @@ export function WorkScreen({
             </Button>
             <Button size="floor" variant="secondary" onClick={() => setCloseReasonPicker(false)}>
               {t("work.stay")}
+            </Button>
+          </Alert>
+        ) : null}
+        {planReachedPrompt !== null ? (
+          <Alert tone="ok" title={t("work.planReachedTitle")}>
+            <p>{t("work.planReachedDetail", { count: planReachedPrompt })}</p>
+            <Button size="floor" onClick={() => void confirmPlanClose()}>
+              {t("work.closeShift")}
+            </Button>
+            <Button
+              size="floor"
+              variant="secondary"
+              onClick={() => {
+                planReachedPromptRef.current = false;
+                planReachedAcknowledgedRef.current = true;
+                setPlanReachedPrompt(null);
+              }}
+            >
+              {t("work.continue")}
             </Button>
           </Alert>
         ) : null}
