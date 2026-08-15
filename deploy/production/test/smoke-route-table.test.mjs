@@ -305,6 +305,12 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           body: "not found",
           headers: { "content-type": "text/plain" },
         });
+      if (path === "/api/demo-requests")
+        return response({
+          status: 404,
+          body: "not found",
+          headers: { "content-type": "text/plain" },
+        });
       if (path === "/" || path === "/team/deep-link")
         return response({
           body: shell,
@@ -374,6 +380,35 @@ test("runner public smoke exercises the external route contract without local Do
   );
 });
 
+test("public smoke rejects demo-request proxy leakage on the admin authority", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = (url, init) => {
+    if (
+      new URL(url).hostname === "app.markiro.example" &&
+      new URL(url).pathname === "/api/demo-requests" &&
+      init?.method === "POST"
+    )
+      return response({
+        body: '{"status":"proxied"}',
+        headers: { "content-type": "application/json" },
+      });
+    return original(url, init);
+  };
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+      },
+      client,
+    ),
+    /non-HTML 404/,
+  );
+});
+
 test("landing smoke exercises the approved enabled API state without captcha or mail", async () => {
   const client = smokeClient(undefined, "enabled");
 
@@ -388,7 +423,10 @@ test("landing smoke exercises the approved enabled API state without captcha or 
   );
 
   const submission = client.requests.find(
-    ({ url, init }) => new URL(url).pathname === "/api/demo-requests" && init?.method === "POST",
+    ({ url, init }) =>
+      new URL(url).hostname === "markiro.example" &&
+      new URL(url).pathname === "/api/demo-requests" &&
+      init?.method === "POST",
   );
   assert.equal(submission.init.body, "{}");
   assert.equal(submission.init.headers["content-type"], "application/json");
@@ -711,6 +749,8 @@ test("defines the complete immutable public-route smoke contract", () => {
       ["GET", "/health/ready", "ready-json", "200 JSON ok or degraded"],
       ["GET", "/openapi.json", "json", "200 JSON"],
       ["GET", "/docs", "docs", "same-origin executable documentation shell"],
+      ["GET", "/api/demo-requests", "not-found", "404, not HTML on admin authority"],
+      ["POST", "/api/demo-requests", "not-found", "404, not HTML on admin authority"],
       ["POST", "/unknown", "not-found", "404, not HTML"],
     ],
   );

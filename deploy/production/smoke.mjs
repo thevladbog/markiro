@@ -97,6 +97,18 @@ export const ROUTE_CHECKS = Object.freeze([
     kind: "docs",
     expected: "same-origin executable documentation shell",
   }),
+  Object.freeze({
+    method: "GET",
+    path: "/api/demo-requests",
+    kind: "not-found",
+    expected: "404, not HTML on admin authority",
+  }),
+  Object.freeze({
+    method: "POST",
+    path: "/api/demo-requests",
+    kind: "not-found",
+    expected: "404, not HTML on admin authority",
+  }),
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
 

@@ -52,6 +52,11 @@
 (admin_routes) {
 	root * /srv/admin
 	route {
+		@adminDemo path /api/demo-requests
+		handle @adminDemo {
+			respond 404
+		}
+
 		@apiAuth path /api/auth/*
 		handle @apiAuth {
 			reverse_proxy api:3000 {

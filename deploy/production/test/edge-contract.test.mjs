@@ -49,6 +49,7 @@ const kioskForbiddenPaths = Object.freeze([
   "/api",
   "/api/auth/session",
   "/api/admin/tenants",
+  "/api/demo-requests",
   "/1c_exchange",
   "/station",
   "/station/bootstrap",
@@ -473,6 +474,31 @@ function assertAuthorityContract(adapted, { alb }) {
     expectedAdminPaths,
   );
   assert.ok(adminProxies.every(({ proxies }) => proxies.length === 1));
+  const adminRoutes = applicationOrderedRouteTable(admin);
+  for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    const request = { method, path: "/api/demo-requests" };
+    const selected = selectedAdaptedRoute(adminRoutes, request);
+    assert.deepEqual(
+      selected.match,
+      [{ path: ["/api/demo-requests"] }],
+      "admin demo-request denial must match the exact path for every method",
+    );
+    assertOnlyPlain404(selected, request);
+  }
+  for (const path of ["/api/demo-request", "/api/demo-requests/", "/api/demo-requests/extra"]) {
+    const request = { method: "POST", path };
+    const selected = selectedAdaptedRoute(adminRoutes, request);
+    assert.equal(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "reverse_proxy").length,
+      1,
+      `adjacent admin path ${path} must retain the generic API proxy`,
+    );
+    assert.deepEqual(
+      nestedObjects(selected).filter((candidate) => candidate.handler === "rewrite"),
+      [{ handler: "rewrite", strip_path_prefix: "/api" }],
+      `adjacent admin path ${path} must retain the generic API rewrite`,
+    );
+  }
 
   const kioskProxies = proxyRoutes(kiosk);
   const kioskReverseProxies = nestedObjects(kiosk).filter(
