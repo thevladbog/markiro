@@ -27,6 +27,16 @@ const routes = [
   "/en/1c-integration/",
   "/en/offline-production/",
   "/en/faq/",
+  "/legal/",
+  "/privacy/",
+  "/personal-data-consent/",
+  "/legal/tenant-data-processing/",
+  "/legal/brand-letterhead/",
+  "/en/legal/",
+  "/en/privacy/",
+  "/en/personal-data-consent/",
+  "/en/legal/tenant-data-processing/",
+  "/en/legal/brand-letterhead/",
 ];
 const MARKIRO_MODULE_LAYOUT = [
   { position: "0-0", row: "1", column: "1", color: "rgb(250, 250, 248)" },
@@ -46,7 +56,7 @@ const demoCases = [
     expectedPayload: {
       captchaToken: "ru-captcha-token",
       company: "Завод Север",
-      consentVersion: "2026-08-14",
+      consentVersion: "MKR-PD-02/2026.08.01",
       email: "anna@example.test",
       locale: "ru",
       name: "Анна",
@@ -67,7 +77,7 @@ const demoCases = [
     expectedPayload: {
       captchaToken: "en-captcha-token",
       company: "Factory",
-      consentVersion: "2026-08-14",
+      consentVersion: "MKR-PD-02/2026.08.01",
       email: "ada@example.test",
       locale: "en",
       name: "Ada",
@@ -206,6 +216,38 @@ test("language switch connects exact page counterparts", async ({ page }) => {
   await expect(page.locator('a[hreflang="en"]')).toHaveAttribute("aria-current", "page");
 });
 
+for (const [route, counterpart, registry] of [
+  ["/privacy/", "/en/privacy/", "/legal/"],
+  ["/en/privacy/", "/privacy/", "/en/legal/"],
+] as const) {
+  test(`${route} exposes legal navigation, anchors, and no captcha runtime`, async ({ page }) => {
+    await page.goto(route);
+    const menuTrigger = page.locator("[data-menu-trigger]");
+    if (await menuTrigger.isVisible()) await menuTrigger.click();
+
+    await expect(page.locator(`header .language-switch a[href="${counterpart}"]`)).toBeVisible();
+    await expect(page.locator(`a.legal-backlink[href="${registry}"]`)).toBeVisible();
+    await page.locator('.legal-toc a[href="#general"]').click();
+    await expect(page.locator("#general")).toBeInViewport();
+    await expect(
+      page.locator('script[src="https://smartcaptcha.cloud.yandex.ru/captcha.js"]'),
+    ).toHaveCount(0);
+
+    await page.keyboard.press("Tab");
+    await page.locator("a.legal-backlink").focus();
+    await expect(page.locator("a.legal-backlink")).toBeFocused();
+    expect(
+      await page.locator("a.legal-backlink").evaluate((element) => {
+        const style = getComputedStyle(element);
+        return (
+          element.matches(":focus-visible") &&
+          (style.outlineStyle !== "none" || style.boxShadow !== "none")
+        );
+      }),
+    ).toBe(true);
+  });
+}
+
 test("crawler policy endpoints expose the approved search boundary", async ({ request }) => {
   const robots = await request.get("/robots.txt");
   expect(robots.status()).toBe(200);
@@ -218,6 +260,9 @@ test("crawler policy endpoints expose the approved search boundary", async ({ re
   );
   await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
     "https://markiro.app/en/faq/",
+  );
+  await expect((await request.get("/sitemap.xml")).text()).resolves.toContain(
+    "https://markiro.app/privacy/",
   );
   await expect((await request.get("/llms.txt")).text()).resolves.toContain("https://markiro.app/");
 });

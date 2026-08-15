@@ -1,0 +1,105 @@
+---
+import {
+  OPERATOR_PROFILES,
+  findLegalDocument,
+  findLegalRelease,
+  type LegalBlock,
+} from "@markiro/legal-documents";
+
+import type { LegalDocumentPageDefinition } from "../content/legal-pages";
+import { buildLegalPageGraph } from "../lib/seo";
+import { readPublicSiteConfig } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+
+interface Props {
+  page: LegalDocumentPageDefinition;
+}
+
+const { page } = Astro.props;
+const release = findLegalRelease(page.code);
+const documentSource = findLegalDocument(page.code);
+const content = documentSource.content[page.locale];
+const operator = OPERATOR_PROFILES[release.operatorProfileId];
+const registryPath = page.locale === "ru" ? "/legal/" : "/en/legal/";
+const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
+const graph = buildLegalPageGraph(page.metadata, {
+  published: release.effectiveDate,
+  modified: release.effectiveDate,
+  ...(page.locale === "en" ? { basedOn: release.routes.ru } : {}),
+});
+
+const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }>) => block.items;
+---
+
+<BaseLayout metadata={page.metadata} graph={graph}>
+  <LandingHeader page={page.metadata} phone={siteConfig.phone} />
+  <main id="main" class="legal-page">
+    <header class="legal-hero">
+      <div class="container legal-hero__inner">
+        <a class="legal-backlink" href={registryPath}>
+          {page.locale === "ru" ? "← Реестр документов" : "← Document registry"}
+        </a>
+        <p class="section-index">{page.code}</p>
+        <h1>{content.title}</h1>
+        <p class="legal-hero__summary">{content.summary}</p>
+        {page.locale === "en" && (
+          <p class="legal-authority-notice" data-authoritative-language>
+            The matching <a href={release.routes.ru} hreflang="ru">Russian revision</a> is authoritative.
+            This page is an informational translation.
+          </p>
+        )}
+      </div>
+    </header>
+
+    <div class="container legal-layout">
+      <aside class="legal-sidebar">
+        <div class="legal-release-card" data-legal-status={release.status}>
+          <span>{page.locale === "ru" ? "Действует" : "Active"}</span>
+          <dl>
+            <div><dt>{page.locale === "ru" ? "Код" : "Code"}</dt><dd data-legal-code>{release.code}</dd></div>
+            <div><dt>{page.locale === "ru" ? "Редакция" : "Revision"}</dt><dd data-legal-revision>{release.revision}</dd></div>
+            <div><dt>{page.locale === "ru" ? "Действует с" : "Effective"}</dt><dd data-legal-effective-date>{release.effectiveDate}</dd></div>
+          </dl>
+        </div>
+        <nav class="legal-toc" aria-label={page.locale === "ru" ? "Содержание" : "Contents"}>
+          <p>{page.locale === "ru" ? "Содержание" : "Contents"}</p>
+          {content.sections.map((section) => <a href={`#${section.id}`}>{section.heading}</a>)}
+        </nav>
+      </aside>
+
+      <article class="legal-document" data-legal-document data-legal-kind="document">
+        {content.sections.map((section) => (
+          <section id={section.id} aria-labelledby={`${section.id}-heading`}>
+            <h2 id={`${section.id}-heading`}>{section.heading}</h2>
+            {section.blocks.map((block) => (
+              <>
+                {block.kind === "paragraph" && <p>{block.text}</p>}
+                {block.kind === "ordered-list" && <ol>{block.items.map((item) => <li>{item}</li>)}</ol>}
+                {block.kind === "unordered-list" && <ul>{block.items.map((item) => <li>{item}</li>)}</ul>}
+                {block.kind === "definition-list" && (
+                  <dl class="legal-definitions">
+                    {renderDefinition(block).map(({ term, detail }) => <><dt>{term}</dt><dd>{detail}</dd></>)}
+                  </dl>
+                )}
+              </>
+            ))}
+          </section>
+        ))}
+
+        <aside class="legal-contact" aria-label={page.locale === "ru" ? "Контакты оператора" : "Controller contacts"}>
+          <h2>{page.locale === "ru" ? "Контакты оператора" : "Controller contacts"}</h2>
+          <p>{operator.name}<br />{operator.address}</p>
+          <p><a href={`mailto:${operator.email}`}>{operator.email}</a><br /><a href="tel:+79343551490">{operator.phone}</a></p>
+        </aside>
+      </article>
+    </div>
+  </main>
+  <LandingFooter page={page.metadata} />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>

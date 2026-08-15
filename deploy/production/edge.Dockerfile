@@ -8,6 +8,7 @@ COPY apps/kiosk/package.json ./apps/kiosk/package.json
 COPY apps/landing/package.json ./apps/landing/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/legal-documents/package.json ./packages/legal-documents/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/admin ./apps/admin
@@ -15,6 +16,7 @@ COPY apps/kiosk ./apps/kiosk
 COPY apps/landing ./apps/landing
 COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
+COPY packages/legal-documents ./packages/legal-documents
 COPY packages/ui ./packages/ui
 
 FROM build-base AS application-build
@@ -22,16 +24,10 @@ RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...
 
 FROM build-base AS landing-build
 ARG PUBLIC_DEMO_SUBMISSION_ENABLED=false
-ARG PUBLIC_PRIVACY_POLICY_PATH=
-ARG PUBLIC_PERSONAL_DATA_CONSENT_PATH=
 ARG PUBLIC_SMARTCAPTCHA_CLIENT_KEY=
-ARG PUBLIC_DEMO_CONSENT_VERSION=
 ARG PUBLIC_PHONE=
 ENV PUBLIC_DEMO_SUBMISSION_ENABLED=${PUBLIC_DEMO_SUBMISSION_ENABLED}
-ENV PUBLIC_PRIVACY_POLICY_PATH=${PUBLIC_PRIVACY_POLICY_PATH}
-ENV PUBLIC_PERSONAL_DATA_CONSENT_PATH=${PUBLIC_PERSONAL_DATA_CONSENT_PATH}
 ENV PUBLIC_SMARTCAPTCHA_CLIENT_KEY=${PUBLIC_SMARTCAPTCHA_CLIENT_KEY}
-ENV PUBLIC_DEMO_CONSENT_VERSION=${PUBLIC_DEMO_CONSENT_VERSION}
 ENV PUBLIC_PHONE=${PUBLIC_PHONE}
 RUN pnpm turbo build --filter @markiro/landing...
 

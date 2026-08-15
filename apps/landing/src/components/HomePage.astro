@@ -5,6 +5,7 @@ import factoryImage from "../assets/factory-line.jpg";
 import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
 import { readPublicSiteConfig } from "../lib/site-config";
+import { buildPageGraph } from "../lib/seo";
 import BaseLayout from "../layouts/BaseLayout.astro";
 import DemoSection from "./DemoSection.astro";
 import ImplementationSteps from "./ImplementationSteps.astro";
@@ -19,17 +20,17 @@ import TraceLog from "./TraceLog.astro";
 interface Props { page: SeoPageDefinition }
 const { page } = Astro.props;
 const copy = getUiCopy(page.locale);
-const siteConfig = readPublicSiteConfig({
-  PUBLIC_DEMO_CONSENT_VERSION: import.meta.env.PUBLIC_DEMO_CONSENT_VERSION,
-  PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
-  PUBLIC_PERSONAL_DATA_CONSENT_PATH: import.meta.env.PUBLIC_PERSONAL_DATA_CONSENT_PATH,
-  PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
-  PUBLIC_PRIVACY_POLICY_PATH: import.meta.env.PUBLIC_PRIVACY_POLICY_PATH,
-  PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
-});
+const siteConfig = readPublicSiteConfig(
+  {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
+  },
+  page.locale,
+);
 ---
 
-<BaseLayout page={page}>
+<BaseLayout metadata={page} graph={buildPageGraph(page)}>
   <LandingHeader page={page} phone={siteConfig.phone} />
 
   <main id="main">

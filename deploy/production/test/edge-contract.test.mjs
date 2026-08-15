@@ -12,10 +12,7 @@ const expectedLandingCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_DEMO_SUBMISSION_ENABLED",
-  "PUBLIC_PRIVACY_POLICY_PATH",
-  "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
-  "PUBLIC_DEMO_CONSENT_VERSION",
   "PUBLIC_PHONE",
 ]);
 
@@ -651,9 +648,11 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "apps/admin/package.json ./apps/admin/package.json",
     "apps/kiosk/package.json ./apps/kiosk/package.json",
     "apps/landing/package.json ./apps/landing/package.json",
+    "packages/legal-documents/package.json ./packages/legal-documents/package.json",
     "apps/admin ./apps/admin",
     "apps/kiosk ./apps/kiosk",
     "apps/landing ./apps/landing",
+    "packages/legal-documents ./packages/legal-documents",
   ]) {
     assert.match(base, new RegExp(`COPY ${escapeRegExp(input)}`));
   }
@@ -741,6 +740,8 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "!packages/",
     "!packages/ui/",
     "!packages/ui/**",
+    "!packages/legal-documents/",
+    "!packages/legal-documents/**",
     "!deploy/",
     "!deploy/production/",
     "!deploy/production/Caddyfile",

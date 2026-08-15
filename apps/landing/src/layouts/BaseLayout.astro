@@ -2,22 +2,22 @@
 import "@markiro/ui/styles.css";
 import "../styles/landing.css";
 
-import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
-import { buildPageGraph, serializeJsonLd } from "../lib/seo";
+import { serializeJsonLd, type PageGraph, type PageMetadata } from "../lib/seo";
 
 interface Props {
-  page: SeoPageDefinition;
+  metadata: PageMetadata;
+  graph: PageGraph;
 }
 
-const { page } = Astro.props;
+const { metadata: page, graph } = Astro.props;
 const canonicalUrl = new URL(page.path, Astro.site);
 const socialImageUrl = new URL(page.socialImage, Astro.site);
 const alternateUrl = new URL(page.alternatePath, Astro.site);
 const ruUrl = page.locale === "ru" ? canonicalUrl : alternateUrl;
 const enUrl = page.locale === "en" ? canonicalUrl : alternateUrl;
 const copy = getUiCopy(page.locale).common;
-const jsonLd = serializeJsonLd(buildPageGraph(page));
+const jsonLd = serializeJsonLd(graph);
 ---
 
 <!doctype html>

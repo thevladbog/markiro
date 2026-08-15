@@ -74,7 +74,6 @@ export class DemoRequestsModule {
             new DemoRequestService(
               {
                 enabled: env.LANDING_DEMO_SUBMISSION_ENABLED,
-                consentVersion: env.LANDING_DEMO_CONSENT_VERSION,
               },
               limiter,
               captcha,

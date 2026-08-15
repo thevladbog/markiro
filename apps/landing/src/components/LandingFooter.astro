@@ -1,9 +1,9 @@
 ---
-import type { SeoPageDefinition } from "../content/pages";
 import { getUiCopy } from "../content/ui";
+import type { PageMetadata } from "../lib/seo";
 import BrandMark from "./BrandMark.astro";
 
-interface Props { page: SeoPageDefinition }
+interface Props { page: Pick<PageMetadata, "locale"> }
 const { page } = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
@@ -20,6 +20,17 @@ const paths = page.locale === "ru"
       ["/en/1c-integration/", "1C integration"],
       ["/en/faq/", "Questions"],
     ];
+const legalPaths = page.locale === "ru"
+  ? [
+      ["/legal/", "Документы"],
+      ["/privacy/", "Политика обработки данных"],
+      ["/personal-data-consent/", "Согласие"],
+    ]
+  : [
+      ["/en/legal/", "Legal documents"],
+      ["/en/privacy/", "Processing policy"],
+      ["/en/personal-data-consent/", "Consent"],
+    ];
 ---
 
 <footer class="landing-footer">
@@ -27,6 +38,9 @@ const paths = page.locale === "ru"
     <a href={homePath} aria-label={copy.homeLabel}><BrandMark locale={page.locale} /></a>
     <nav aria-label={copy.footerLabel}>
       {paths.map(([path, label]) => <a href={path}>{label}</a>)}
+    </nav>
+    <nav class="landing-footer__legal" aria-label={page.locale === "ru" ? "Юридические документы" : "Legal documents"}>
+      {legalPaths.map(([path, label]) => <a href={path}>{label}</a>)}
     </nav>
     <span>© 2026</span>
   </div>

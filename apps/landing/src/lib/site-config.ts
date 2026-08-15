@@ -1,3 +1,6 @@
+import { CURRENT_DEMO_CONSENT_ID } from "@markiro/legal-documents";
+import type { Locale } from "../content/pages";
+
 export interface PublicPhone {
   display: string;
   href: `tel:+7${string}`;
@@ -47,21 +50,10 @@ function readEnabled(value: string | undefined): boolean {
   throw new Error("PUBLIC_DEMO_SUBMISSION_ENABLED must be true or false");
 }
 
-function readSameOriginPath(value: string | undefined, variable: string): string | null {
-  const path = readOptionalValue(value);
-  if (path === null) return null;
-  if (!path.startsWith("/") || path.startsWith("//")) {
-    throw new Error(`${variable} must be a same-origin absolute path`);
-  }
-
-  const url = new URL(path, "https://markiro.app");
-  if (url.origin !== "https://markiro.app" || url.search.length > 0 || url.hash.length > 0) {
-    throw new Error(`${variable} must be a same-origin absolute path`);
-  }
-  return url.pathname;
-}
-
-export function readPublicSiteConfig(env: PublicEnvironment): PublicSiteConfig {
+export function readPublicSiteConfig(
+  env: PublicEnvironment,
+  locale: Locale = "ru",
+): PublicSiteConfig {
   const submissionEnabled = readEnabled(env.PUBLIC_DEMO_SUBMISSION_ENABLED);
   if (!submissionEnabled) {
     return {
@@ -73,36 +65,22 @@ export function readPublicSiteConfig(env: PublicEnvironment): PublicSiteConfig {
     };
   }
 
-  const privacy = readSameOriginPath(env.PUBLIC_PRIVACY_POLICY_PATH, "PUBLIC_PRIVACY_POLICY_PATH");
-  const consent = readSameOriginPath(
-    env.PUBLIC_PERSONAL_DATA_CONSENT_PATH,
-    "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
-  );
   const captchaClientKey = readOptionalValue(env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY);
-  const consentVersion = readOptionalValue(env.PUBLIC_DEMO_CONSENT_VERSION);
 
-  if (
-    privacy === null ||
-    consent === null ||
-    captchaClientKey === null ||
-    consentVersion === null
-  ) {
-    throw new Error(
-      "demo submission requires privacy and personal-data consent paths, a captcha client key, and a consent version",
-    );
+  if (captchaClientKey === null) {
+    throw new Error("demo submission requires a captcha client key");
   }
   if (!captchaClientKey.startsWith("ysc1_") || captchaClientKey.length === "ysc1_".length) {
     throw new Error("PUBLIC_SMARTCAPTCHA_CLIENT_KEY must begin with ysc1_");
   }
-  if (consentVersion.length > 64) {
-    throw new Error("PUBLIC_DEMO_CONSENT_VERSION must be shorter than 65 characters");
-  }
-
   return {
     captchaClientKey,
-    consentVersion,
+    consentVersion: CURRENT_DEMO_CONSENT_ID,
     demoEndpoint: "/api/demo-requests",
-    legalLinks: { consent, privacy },
+    legalLinks:
+      locale === "en"
+        ? { consent: "/en/personal-data-consent/", privacy: "/en/privacy/" }
+        : { consent: "/personal-data-consent/", privacy: "/privacy/" },
     phone: readPhone(env.PUBLIC_PHONE),
   };
 }

@@ -4,12 +4,18 @@ import test from "node:test";
 import {
   assertLighthouseReport,
   lighthouseArguments,
+  LIGHTHOUSE_RUN_COUNT,
   LIGHTHOUSE_THRESHOLDS,
   lighthouseScoreSummary,
+  representativeLighthouseReport,
 } from "../scripts/lighthouse-landing.mjs";
 
-function report(overrides = {}) {
+function report(overrides = {}, metrics = { fcp: 1000, interactive: 3000 }) {
   return {
+    audits: {
+      "first-contentful-paint": { numericValue: metrics.fcp },
+      interactive: { numericValue: metrics.interactive },
+    },
     categories: Object.fromEntries(
       Object.entries({ ...LIGHTHOUSE_THRESHOLDS, ...overrides }).map(([category, score]) => [
         category,
@@ -18,6 +24,17 @@ function report(overrides = {}) {
     ),
   };
 }
+
+test("uses three sequential runs and the representative Lighthouse median", () => {
+  assert.equal(LIGHTHOUSE_RUN_COUNT, 3);
+  const slowOutlier = report({ performance: 0.72 }, { fcp: 4000, interactive: 8000 });
+  const representative = report({ performance: 0.93 }, { fcp: 1000, interactive: 3000 });
+  const fastOutlier = report({ performance: 1 }, { fcp: 500, interactive: 1000 });
+  assert.equal(
+    representativeLighthouseReport([slowOutlier, representative, fastOutlier]),
+    representative,
+  );
+});
 
 test("accepts exact Lighthouse score thresholds", () => {
   assert.doesNotThrow(() => assertLighthouseReport(report(), "mobile"));

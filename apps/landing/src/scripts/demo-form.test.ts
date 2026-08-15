@@ -18,7 +18,7 @@ function renderForm(endpoint = "/api/demo-requests", locale: "ru" | "en" = "ru")
     <form
       data-demo-form
       data-locale="${locale}"
-      data-consent-version="2026-08-14"
+      data-consent-version="MKR-PD-02/2026.08.01"
       data-source-path="${locale === "en" ? "/en/" : "/"}"
       ${endpoint.length > 0 ? `data-endpoint="${endpoint}"` : ""}
     >
@@ -138,7 +138,7 @@ describe("initDemoForm", () => {
     expect(currentRuntime.request).toHaveBeenCalledWith("/api/demo-requests", {
       captchaToken: "captcha-token",
       company: "Завод Север",
-      consentVersion: "2026-08-14",
+      consentVersion: "MKR-PD-02/2026.08.01",
       email: "anna@example.test",
       locale: "ru",
       name: "Анна",
@@ -347,7 +347,7 @@ describe("browserDemoFormRuntime", () => {
     const payload: DemoRequestPayload = {
       captchaToken: "captcha-token",
       company: "Factory",
-      consentVersion: "2026-08-14",
+      consentVersion: "MKR-PD-02/2026.08.01",
       email: "ada@example.test",
       locale: "en",
       name: "Ada",

@@ -37,14 +37,14 @@
 
 1. Создать production client/server pair SmartCaptcha для утверждённого hostname. Публичный client key предназначен только для edge build; server key помещается только в secret store API.
 2. Утвердить privacy policy, текст согласия на обработку персональных данных, cookie/vendor disclosure о SmartCaptcha и неизменяемую версию согласия.
-3. Проверить canonical same-origin paths для privacy и consent документов и согласовать одно значение версии между `PUBLIC_DEMO_CONSENT_VERSION` и `LANDING_DEMO_CONSENT_VERSION`.
+3. Проверить canonical same-origin paths для privacy и consent документов. Убедиться, что landing и API собраны из одного release `@markiro/legal-documents` и используют его `CURRENT_DEMO_CONSENT_ID`; environment overrides для путей и версии согласия не применяются.
 4. Настроить server key, но оставить оба feature flags false до фиксации юридического одобрения и production-конфигурации captcha.
 
 **Критерий выхода:** юридические документы и consent version одобрены, production SmartCaptcha настроена, секреты не раскрыты, форма не опубликована.
 
 ### Гейт 4. Включить только API и выполнить контролируемую доставку
 
-1. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`. Задать API `LANDING_DEMO_SUBMISSION_ENABLED=true`, утверждённый `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT=hello@v-b.tech`, публичный Reply-To, consent version и SmartCaptcha server key; перезапустить API тем же immutable release.
+1. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`. Задать API `LANDING_DEMO_SUBMISSION_ENABLED=true`, утверждённый `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT=hello@v-b.tech`, публичный Reply-To и SmartCaptcha server key; перезапустить API тем же immutable release. Версия согласия берётся из того же release `@markiro/legal-documents`.
 2. Убедиться, что публичная HTML-форма всё ещё отсутствует, а контролируемый `POST /api/demo-requests` теперь проходит только с валидным production captcha token.
 3. Из контролируемых почтовых ящиков отправить контролируемую RU/EN пару: ровно одну RU- и одну EN-заявку. Не фиксировать в evidence значения полей формы, captcha tokens или адреса посетителей.
 4. Для каждой заявки создать отдельный обезличенный request UUID и убедиться, что один и тот же request UUID связывает заявку, ровно две durable mail delivery rows и ровно две durable outbox rows. Обе доставки должны пройти из `queued` (или наблюдаемого `retrying`) в `sent`; состояние `failed` блокирует переход дальше.
@@ -54,7 +54,7 @@
 
 ### Гейт 5. Собрать и опубликовать форму
 
-1. Указать только публичные build values: `PUBLIC_DEMO_SUBMISSION_ENABLED=true`, `PUBLIC_SMARTCAPTCHA_CLIENT_KEY`, `PUBLIC_PRIVACY_POLICY_PATH`, `PUBLIC_PERSONAL_DATA_CONSENT_PATH` и согласованный `PUBLIC_DEMO_CONSENT_VERSION`.
+1. Указать только публичные build values: `PUBLIC_DEMO_SUBMISSION_ENABLED=true`, `PUBLIC_SMARTCAPTCHA_CLIENT_KEY` и `PUBLIC_PHONE`. Legal paths и consent ID в image берутся из release `@markiro/legal-documents`, а не из environment.
 2. Собрать новый immutable edge image и развернуть его после проверки, что server flag остаётся true. Запустить **Deploy production** с `landing_demo_submission_state=enabled`: smoke отправляет только пустой JSON и требует `400 + invalid_request`, поэтому не вызывает SmartCaptcha и не создаёт письмо. Не передавать SmartCaptcha server key в build arguments или image layers.
 3. Проверить RU и EN формы на desktop и mobile: тексты, ссылки на документы, consent, keyboard/focus flow, captcha fallback и отсутствие других публичных API routes. Зафиксировать точные стабильные пары: невалидный captcha даёт `400 + captcha_invalid`, недоступный/просроченный captcha provider даёт `503 + captcha_unavailable`, превышение лимита даёт `429 + rate_limited`; проверка только HTTP status без public error code не проходит гейт.
 4. Проверить landing-only CSP и Caddy ordering: только exact `POST /api/demo-requests` проксируется; GET/HEAD/PUT, соседние и вложенные пути остаются 404.

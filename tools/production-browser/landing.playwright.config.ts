@@ -20,10 +20,7 @@ export default defineConfig({
     timeout: 120_000,
     env: {
       ASTRO_TELEMETRY_DISABLED: "1",
-      PUBLIC_DEMO_CONSENT_VERSION: "2026-08-14",
       PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
-      PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
-      PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
       PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_playwright-test-key",
     },
   },

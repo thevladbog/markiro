@@ -132,7 +132,6 @@ describe("landing demo environment", () => {
       "LANDING_ORIGIN",
       "LANDING_DEMO_RECIPIENT",
       "LANDING_DEMO_REPLY_TO",
-      "LANDING_DEMO_CONSENT_VERSION",
       "SMARTCAPTCHA_SERVER_KEY",
     ]) {
       expect(message).toContain(name);
@@ -145,7 +144,6 @@ describe("landing demo environment", () => {
         LANDING_ORIGIN: "https://markiro.app",
         LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
         LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
-        LANDING_DEMO_CONSENT_VERSION: "2026-08-14",
         SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
       }),
     ).toMatchObject({ LANDING_DEMO_SUBMISSION_ENABLED: true });
@@ -155,7 +153,6 @@ describe("landing demo environment", () => {
     ["LANDING_ORIGIN", "https://markiro.app/demo"],
     ["LANDING_DEMO_RECIPIENT", "not-an-email"],
     ["LANDING_DEMO_REPLY_TO", "not-an-email"],
-    ["LANDING_DEMO_CONSENT_VERSION", "   "],
     ["SMARTCAPTCHA_SERVER_KEY", "test-secret-without-prefix"],
   ] as const)("rejects invalid %s without echoing its value", (name, value) => {
     const source = {
@@ -164,7 +161,6 @@ describe("landing demo environment", () => {
       LANDING_ORIGIN: "https://markiro.app",
       LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
       LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
-      LANDING_DEMO_CONSENT_VERSION: "2026-08-14",
       SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
       [name]: value,
     };
@@ -203,39 +199,13 @@ describe("landing demo environment", () => {
     ).toThrow(/LANDING_DEMO_GLOBAL_LIMIT/);
   });
 
-  it("accepts a 64-character consent version and rejects 65 without echoing it", () => {
-    const enabledEnv = {
-      ...productionMailEnv,
-      LANDING_DEMO_SUBMISSION_ENABLED: "true",
-      LANDING_ORIGIN: "https://markiro.app",
-      LANDING_DEMO_RECIPIENT: "hello@v-b.tech",
-      LANDING_DEMO_REPLY_TO: "hello@v-b.tech",
-      SMARTCAPTCHA_SERVER_KEY: "ysc2_test-secret",
-    };
-    const acceptedVersion = "a".repeat(64);
-    const rejectedVersion = "b".repeat(65);
-
+  it("does not expose an environment override for the compiled consent revision", () => {
     expect(
       loadEnv({
-        ...enabledEnv,
-        LANDING_DEMO_CONSENT_VERSION: acceptedVersion,
-      }).LANDING_DEMO_CONSENT_VERSION,
-    ).toBe(acceptedVersion);
-
-    let thrown: unknown;
-    try {
-      loadEnv({
-        ...enabledEnv,
-        LANDING_DEMO_CONSENT_VERSION: rejectedVersion,
-      });
-    } catch (error) {
-      thrown = error;
-    }
-
-    expect(thrown).toBeDefined();
-    const message = String(thrown);
-    expect(message).toContain("LANDING_DEMO_CONSENT_VERSION");
-    expect(message).not.toContain(rejectedVersion);
+        ...productionMailEnv,
+        LANDING_DEMO_CONSENT_VERSION: "stray-version",
+      }),
+    ).not.toHaveProperty("LANDING_DEMO_CONSENT_VERSION");
   });
 
   it("treats blank disabled feature settings as unset", () => {
@@ -246,7 +216,6 @@ describe("landing demo environment", () => {
         LANDING_ORIGIN: "",
         LANDING_DEMO_RECIPIENT: "",
         LANDING_DEMO_REPLY_TO: "",
-        LANDING_DEMO_CONSENT_VERSION: "",
         SMARTCAPTCHA_SERVER_KEY: "",
         LANDING_DEMO_RATE_WINDOW_SECONDS: "",
         LANDING_DEMO_SOURCE_LIMIT: "",

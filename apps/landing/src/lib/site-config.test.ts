@@ -3,10 +3,7 @@ import { describe, expect, it } from "vitest";
 import { readPublicSiteConfig } from "./site-config";
 
 const ENABLED_ENV = {
-  PUBLIC_DEMO_CONSENT_VERSION: "2026-08-14",
   PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
-  PUBLIC_PERSONAL_DATA_CONSENT_PATH: "/personal-data-consent/",
-  PUBLIC_PRIVACY_POLICY_PATH: "/privacy/",
   PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_test-client-key",
 } as const;
 
@@ -43,7 +40,7 @@ describe("readPublicSiteConfig", () => {
   it("enables only the fixed same-origin route after the complete public config passes", () => {
     expect(readPublicSiteConfig(ENABLED_ENV)).toEqual({
       captchaClientKey: "ysc1_test-client-key",
-      consentVersion: "2026-08-14",
+      consentVersion: "MKR-PD-02/2026.08.01",
       demoEndpoint: "/api/demo-requests",
       legalLinks: {
         consent: "/personal-data-consent/",
@@ -53,15 +50,17 @@ describe("readPublicSiteConfig", () => {
     });
   });
 
-  it.each([
-    "PUBLIC_DEMO_CONSENT_VERSION",
-    "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
-    "PUBLIC_PRIVACY_POLICY_PATH",
-    "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
-  ] as const)("rejects enabled mode without %s", (missing) => {
-    const env: Record<string, string | undefined> = { ...ENABLED_ENV };
-    delete env[missing];
-    expect(() => readPublicSiteConfig(env)).toThrow("demo submission requires");
+  it("uses the localized legal routes for an enabled English page", () => {
+    expect(readPublicSiteConfig(ENABLED_ENV, "en").legalLinks).toEqual({
+      consent: "/en/personal-data-consent/",
+      privacy: "/en/privacy/",
+    });
+  });
+
+  it("rejects enabled mode without the public captcha key", () => {
+    expect(() => readPublicSiteConfig({ PUBLIC_DEMO_SUBMISSION_ENABLED: "true" })).toThrow(
+      "demo submission requires",
+    );
   });
 
   it.each(["captcha-key", "ysc2_wrong-prefix", " ysc1_ "])(
@@ -73,13 +72,21 @@ describe("readPublicSiteConfig", () => {
     },
   );
 
-  it("rejects unsafe legal paths in enabled mode", () => {
-    expect(() =>
+  it("does not allow environment values to override the released legal contract", () => {
+    expect(
       readPublicSiteConfig({
         ...ENABLED_ENV,
+        PUBLIC_DEMO_CONSENT_VERSION: "stray-version",
+        PUBLIC_PERSONAL_DATA_CONSENT_PATH: "https://other.example/consent",
         PUBLIC_PRIVACY_POLICY_PATH: "https://other.example/privacy",
       }),
-    ).toThrow("PUBLIC_PRIVACY_POLICY_PATH must be a same-origin absolute path");
+    ).toMatchObject({
+      consentVersion: "MKR-PD-02/2026.08.01",
+      legalLinks: {
+        consent: "/personal-data-consent/",
+        privacy: "/privacy/",
+      },
+    });
   });
 
   it("ignores all stray demo values while disabled", () => {

@@ -17,7 +17,12 @@ export type AuditFindingCode =
   | "INVALID_JSON_LD"
   | "SITEMAP_ROUTE_MISMATCH"
   | "INVALID_MANIFEST"
-  | "INVALID_FAVICON";
+  | "INVALID_FAVICON"
+  | "MISSING_LEGAL_CODE"
+  | "MISSING_LEGAL_REVISION"
+  | "MISSING_LEGAL_EFFECTIVE_DATE"
+  | "MISSING_AUTHORITATIVE_LANGUAGE_LINK"
+  | "MISSING_LEGAL_REGISTRY_LINK";
 
 export interface AuditFinding {
   code: AuditFindingCode;
@@ -294,6 +299,48 @@ export async function auditBuiltSite(root: string): Promise<AuditFinding[]> {
       findings.push(finding("INVALID_H1", route, "page must contain exactly one H1"));
     if (canonical !== pageUrl.href)
       findings.push(finding("INVALID_CANONICAL", route, "canonical does not match the route"));
+
+    const legalDocument = document.querySelector(
+      'article[data-legal-document][data-legal-kind="document"]',
+    );
+    if (legalDocument !== null) {
+      if (document.querySelector("[data-legal-code]") === null) {
+        findings.push(finding("MISSING_LEGAL_CODE", route, "legal document code is absent"));
+      }
+      if (document.querySelector("[data-legal-revision]") === null) {
+        findings.push(
+          finding("MISSING_LEGAL_REVISION", route, "legal document revision is absent"),
+        );
+      }
+      if (document.querySelector("[data-legal-effective-date]") === null) {
+        findings.push(
+          finding("MISSING_LEGAL_EFFECTIVE_DATE", route, "legal document effective date is absent"),
+        );
+      }
+
+      const registryPath = route.startsWith("/en/") ? "/en/legal/" : "/legal/";
+      if (document.querySelector(`a[href="${registryPath}"]`) === null) {
+        findings.push(
+          finding(
+            "MISSING_LEGAL_REGISTRY_LINK",
+            route,
+            "legal document must link back to the localized registry",
+          ),
+        );
+      }
+      if (
+        route.startsWith("/en/") &&
+        document.querySelector('[data-authoritative-language] a[hreflang="ru"]') === null
+      ) {
+        findings.push(
+          finding(
+            "MISSING_AUTHORITATIVE_LANGUAGE_LINK",
+            route,
+            "English legal document must link to its authoritative Russian revision",
+          ),
+        );
+      }
+    }
 
     for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
       try {

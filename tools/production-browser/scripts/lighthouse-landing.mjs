@@ -5,14 +5,23 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 import { chromium } from "@playwright/test";
+import { computeMedianRun } from "lighthouse/core/lib/median-run.js";
 
 const execFileAsync = promisify(execFile);
+export const LIGHTHOUSE_RUN_COUNT = 3;
 export const LIGHTHOUSE_THRESHOLDS = Object.freeze({
   seo: 1,
   accessibility: 1,
   "best-practices": 0.95,
   performance: 0.9,
 });
+
+export function representativeLighthouseReport(reports) {
+  if (reports.length !== LIGHTHOUSE_RUN_COUNT) {
+    throw new Error(`expected ${LIGHTHOUSE_RUN_COUNT} Lighthouse reports`);
+  }
+  return computeMedianRun(reports);
+}
 
 export function assertLighthouseReport(report, profile) {
   if (report === null || typeof report !== "object" || Array.isArray(report))
@@ -95,20 +104,26 @@ export async function runLandingLighthouse() {
   try {
     await waitForServer("http://127.0.0.1:5473/", preview);
     for (const profile of ["mobile", "desktop"]) {
-      const output = path.join(outputRoot, `${profile}.json`);
-      const arguments_ = lighthouseArguments({
-        chromePath: chromium.executablePath(),
-        isCI: Boolean(process.env.CI),
-        output,
-        profile,
-        url: "http://127.0.0.1:5473/",
-      });
-      await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
-        cwd: toolRoot,
-      });
-      const report = JSON.parse(await readFile(output, "utf8"));
+      const reports = [];
+      for (let attempt = 1; attempt <= LIGHTHOUSE_RUN_COUNT; attempt += 1) {
+        const output = path.join(outputRoot, `${profile}-${attempt}.json`);
+        const arguments_ = lighthouseArguments({
+          chromePath: chromium.executablePath(),
+          isCI: Boolean(process.env.CI),
+          output,
+          profile,
+          url: "http://127.0.0.1:5473/",
+        });
+        await execFileAsync(path.join(toolRoot, "node_modules/.bin/lighthouse"), arguments_, {
+          cwd: toolRoot,
+        });
+        const report = JSON.parse(await readFile(output, "utf8"));
+        reports.push(report);
+        console.log(lighthouseScoreSummary(report, `${profile} attempt ${attempt}`));
+      }
+      const report = representativeLighthouseReport(reports);
       assertLighthouseReport(report, profile);
-      console.log(lighthouseScoreSummary(report, profile));
+      console.log(lighthouseScoreSummary(report, `${profile} representative`));
     }
   } finally {
     preview.kill("SIGTERM");

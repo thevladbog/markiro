@@ -106,6 +106,19 @@ test("landing publication runbook keeps demo email release gates observable", as
     );
 });
 
+test("landing publication runbook derives legal release metadata from the legal package", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  assert.match(runbook, /@markiro\/legal-documents/);
+  assert.match(runbook, /CURRENT_DEMO_CONSENT_ID/);
+  for (const obsolete of [
+    "PUBLIC_DEMO_CONSENT_VERSION",
+    "LANDING_DEMO_CONSENT_VERSION",
+    "PUBLIC_PRIVACY_POLICY_PATH",
+    "PUBLIC_PERSONAL_DATA_CONSENT_PATH",
+  ])
+    assert.doesNotMatch(runbook, new RegExp(escapeRegExp(obsolete)));
+});
+
 test("landing publication runbook keeps enablement, monitoring, and rollback fail-closed", async () => {
   const runbook = await read("docs/runbooks/landing-publication.md");
   const disabledFirst = runbook.indexOf("Гейт 1. Развернуть код с двумя выключенными флагами");
