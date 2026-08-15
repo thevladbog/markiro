@@ -166,6 +166,7 @@ describe("renderEmail", () => {
       requestId: "11111111-1111-4111-8111-111111111111",
       receivedAt: new Date("2026-08-14T12:00:00Z"),
       sourcePath: "/en/",
+      consentVersion: '<approved & "v1">',
       recipientName: "<Ada>",
       company: "Factory & Co",
       email: "ada@example.test",
@@ -180,12 +181,17 @@ describe("renderEmail", () => {
     expect(output.html).toContain("маркиро");
     expect(output.html).toContain("&lt;Ada&gt;");
     expect(output.html).toContain("Factory &amp; Co");
+    expect(output.html).toContain("&lt;approved &amp; &quot;v1&quot;&gt;");
+    expect(output.html).not.toMatch(
+      /(?:aria-label|class|data-[\w-]+|href|src|style)=["'][^"']*approved/i,
+    );
     expect(output.html).not.toMatch(/href=["'][^"']*(?:Ada|Factory|ada%40)/i);
     expect(output.text).toContain(
       [
         "ID заявки: 11111111-1111-4111-8111-111111111111",
         "Получена: 14.08.2026, 12:00 UTC",
         "Страница: /en/",
+        'Версия согласия: <approved & "v1">',
       ].join("\n"),
     );
     expect(output.text).toContain("Язык посетителя: English (en)");

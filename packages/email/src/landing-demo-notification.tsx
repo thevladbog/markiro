@@ -9,6 +9,7 @@ export interface LandingDemoNotificationEmailProps {
   requestId: string;
   receivedAt: Date;
   sourcePath: string;
+  consentVersion: string;
   recipientName: string;
   company: string;
   email: string;
@@ -49,6 +50,7 @@ export function LandingDemoNotificationEmail({
   requestId,
   receivedAt,
   sourcePath,
+  consentVersion,
   recipientName,
   company,
   email,
@@ -71,6 +73,7 @@ export function LandingDemoNotificationEmail({
             <SummaryRow label="ID заявки">{requestId}</SummaryRow>
             <SummaryRow label="Получена">{formatReceivedAt(receivedAt)}</SummaryRow>
             <SummaryRow label="Страница">{sourcePath}</SummaryRow>
+            <SummaryRow label="Версия согласия">{consentVersion}</SummaryRow>
             <SummaryRow label="Язык посетителя">
               {locale === "ru" ? "Русский (ru)" : "English (en)"}
             </SummaryRow>

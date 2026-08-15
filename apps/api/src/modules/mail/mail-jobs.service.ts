@@ -136,6 +136,7 @@ const emailTemplateSchema = z.discriminatedUnion("kind", [
       requestId: z.uuid(),
       receivedAt: z.coerce.date(),
       sourcePath: z.string().min(1),
+      consentVersion: z.string().trim().min(1).max(64),
       recipientName: z.string().min(1),
       company: z.string().min(1),
       email: z.email(),

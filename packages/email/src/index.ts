@@ -118,6 +118,7 @@ function resolveTemplate(input: EmailTemplateInput): {
           requestId: input.requestId,
           receivedAt: input.receivedAt,
           sourcePath: input.sourcePath,
+          consentVersion: input.consentVersion,
           recipientName: input.recipientName,
           company: input.company,
           email: input.email,
