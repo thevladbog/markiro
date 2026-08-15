@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 export interface KioskLayoutProps {
   status?: ReactNode;
   children: ReactNode;
+  onActivity?: () => void;
 }
 
 export interface KioskViewport {
@@ -19,7 +20,7 @@ function currentViewport(): KioskViewport {
   return { width: window.innerWidth, height: window.innerHeight };
 }
 
-export function KioskLayout({ status, children }: KioskLayoutProps): React.JSX.Element {
+export function KioskLayout({ status, children, onActivity }: KioskLayoutProps): React.JSX.Element {
   const { t } = useTranslation();
   const [viewport, setViewport] = useState(currentViewport);
 
@@ -44,7 +45,7 @@ export function KioskLayout({ status, children }: KioskLayoutProps): React.JSX.E
   }
 
   return (
-    <div className="kiosk-shell">
+    <div className="kiosk-shell" onPointerDown={onActivity} onKeyDown={onActivity}>
       {status}
       <div className="kiosk-screen-slot">{children}</div>
     </div>

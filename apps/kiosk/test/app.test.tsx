@@ -824,6 +824,89 @@ describe("KioskShell", () => {
     expect(screen.getAllByText("Через кассу")).toHaveLength(1);
   });
 
+  it("warns an inactive worker after ten seconds and ends their session five seconds later", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(screen.getByRole("dialog", { name: "Сеанс скоро завершится" })).toBeDefined();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+  });
+
+  it("treats a scan during the warning as activity and keeps the worker signed in", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(screen.getByRole("dialog", { name: "Сеанс скоро завершится" })).toBeDefined();
+
+    scan(KM);
+    await settle(() => expect(screen.getByText(MILK)).toBeDefined());
+    expect(screen.queryByRole("dialog", { name: "Сеанс скоро завершится" })).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.getByText(CART_TITLE)).toBeDefined();
+  });
+
+  it("treats a touch in the inactivity warning as activity", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    const warning = screen.getByRole("dialog", { name: "Сеанс скоро завершится" });
+
+    fireEvent.pointerDown(warning);
+    expect(screen.queryByRole("dialog", { name: "Сеанс скоро завершится" })).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.getByText(CART_TITLE)).toBeDefined();
+  });
+
+  it("treats keyboard input in the inactivity warning as activity", async () => {
+    await pair();
+    render(<App />);
+    await settle(() => expect(screen.getByText(IDLE_TITLE)).toBeDefined());
+
+    scan(BADGE);
+    await settle(() => expect(screen.getByText(CART_TITLE)).toBeDefined());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    const warning = screen.getByRole("dialog", { name: "Сеанс скоро завершится" });
+
+    fireEvent.keyDown(warning, { key: "Tab" });
+    expect(screen.queryByRole("dialog", { name: "Сеанс скоро завершится" })).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.getByText(CART_TITLE)).toBeDefined();
+  });
+
   /**
    * The day limit across sessions, which is the only place it means anything:
    * within one cart the reducer's own arithmetic covers it, and a limit that
