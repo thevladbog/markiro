@@ -6,9 +6,16 @@ export interface WorkFooterProps {
   onExceptions: () => void;
   onPause: () => void;
   onClose: () => void;
+  closeDisabled?: boolean;
 }
 
-export function WorkFooter({ labels, onExceptions, onPause, onClose }: WorkFooterProps) {
+export function WorkFooter({
+  labels,
+  onExceptions,
+  onPause,
+  onClose,
+  closeDisabled = false,
+}: WorkFooterProps) {
   return (
     <FloorFooter
       className="work-footer"
@@ -41,6 +48,7 @@ export function WorkFooter({ labels, onExceptions, onPause, onClose }: WorkFoote
       <Button
         size="floor"
         variant="destructive-outline"
+        disabled={closeDisabled}
         className="work-footer__action"
         style={{ width: "220px", maxWidth: "100%" }}
         onClick={(event) => {

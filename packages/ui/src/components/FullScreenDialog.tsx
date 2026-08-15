@@ -18,6 +18,8 @@ export interface FullScreenDialogProps {
   onClose: () => void;
   backLabel?: string;
   backDisabled?: boolean;
+  /** Places the back action beside footer actions for focused two-choice flows. */
+  backPlacement?: "header" | "footer";
   /**
    * Focus the inert dialog container when opening flows where the first
    * action must not be triggerable by the key event that opened the dialog.
@@ -122,6 +124,7 @@ export function FullScreenDialog({
   onClose,
   backLabel = "Back",
   backDisabled = false,
+  backPlacement = "header",
   initialFocus = "first",
   className,
   style,
@@ -209,7 +212,7 @@ export function FullScreenDialog({
         style={{
           display: "flex",
           alignItems: "center",
-          justifyContent: "space-between",
+          justifyContent: backPlacement === "footer" ? "center" : "space-between",
           gap: 24,
           padding: "16px 24px",
           borderBottom: "1px solid var(--line)",
@@ -218,15 +221,17 @@ export function FullScreenDialog({
         <h2 id={titleId} style={{ margin: 0, color: "var(--fg-1)", font: "var(--floor-title)" }}>
           {title}
         </h2>
-        <Button
-          size="floor"
-          variant="secondary"
-          disabled={backDisabled}
-          style={{ width: "auto", minWidth: "var(--control-floor)", flexShrink: 0 }}
-          onClick={onClose}
-        >
-          {backLabel}
-        </Button>
+        {backPlacement === "header" ? (
+          <Button
+            size="floor"
+            variant="secondary"
+            disabled={backDisabled}
+            style={{ width: "auto", minWidth: "var(--control-floor)", flexShrink: 0 }}
+            onClick={onClose}
+          >
+            {backLabel}
+          </Button>
+        ) : null}
       </header>
       <div
         className="mk-full-screen-dialog__body"
@@ -234,16 +239,27 @@ export function FullScreenDialog({
       >
         {children}
       </div>
-      {footer ? (
+      {footer || backPlacement === "footer" ? (
         <footer
           style={{
             display: "flex",
-            justifyContent: "flex-end",
+            justifyContent: backPlacement === "footer" ? "center" : "flex-end",
             gap: 12,
             padding: "12px 24px",
             borderTop: "1px solid var(--line)",
           }}
         >
+          {backPlacement === "footer" ? (
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={backDisabled}
+              style={{ width: "auto", minWidth: "var(--control-floor)", flexShrink: 0 }}
+              onClick={onClose}
+            >
+              {backLabel}
+            </Button>
+          ) : null}
           {footer}
         </footer>
       ) : null}

@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@markiro/ui";
 import type { ServerReachability } from "../lib/api-client.js";
@@ -52,12 +52,19 @@ export function FloorShell({
   children,
 }: FloorShellProps) {
   const { t } = useTranslation();
-  const [statusBarCollapsed, setStatusBarCollapsed] = useState(false);
   const canCollapseStatusBar = statusBarCollapsible && shiftLabel !== null;
+  const [statusBarCollapsed, setStatusBarCollapsed] = useState(canCollapseStatusBar);
+  const previousShiftLabel = useRef(shiftLabel);
+  const previousCanCollapseStatusBar = useRef(canCollapseStatusBar);
 
   useEffect(() => {
     if (!canCollapseStatusBar) setStatusBarCollapsed(false);
-  }, [canCollapseStatusBar]);
+    else if (!previousCanCollapseStatusBar.current || previousShiftLabel.current !== shiftLabel) {
+      setStatusBarCollapsed(true);
+    }
+    previousShiftLabel.current = shiftLabel;
+    previousCanCollapseStatusBar.current = canCollapseStatusBar;
+  }, [canCollapseStatusBar, shiftLabel]);
 
   const collapsed = canCollapseStatusBar && statusBarCollapsed;
   return (

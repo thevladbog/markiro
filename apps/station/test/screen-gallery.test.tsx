@@ -151,10 +151,15 @@ describe("development screen gallery", () => {
     expect(within(view.container).getByText("Короб № 1")).toBeDefined();
   });
 
-  it("renders active work with the production header controls before collapse", async () => {
+  it("renders active work collapsed first and restores the production header controls", async () => {
     render(<StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />);
 
     const header = screen.getByRole("banner", { name: "Состояние станции" });
+    expect(header.getAttribute("data-collapsed")).toBe("true");
+    const initialExpand = within(header).getByRole("button", {
+      name: "Развернуть панель состояния",
+    });
+    fireEvent.click(initialExpand);
     const update = within(header).getByRole("button", {
       name: "! Доступно критическое обновление 0.1.0-beta.123",
     });

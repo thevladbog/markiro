@@ -403,6 +403,13 @@ async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
 }
 
+function expandStatusPanelIfCollapsed(language: "en" | "ru" = "en") {
+  const button = screen.queryByRole("button", {
+    name: language === "ru" ? "Развернуть панель состояния" : "Expand status panel",
+  });
+  if (button) fireEvent.click(button);
+}
+
 async function mockBackfilledActiveShiftRecovery(pinHash: string) {
   const db = new DatabaseSync(":memory:");
   const exec = {
@@ -791,6 +798,7 @@ async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
   await signInAsOperator();
   fireEvent.click(await screen.findByRole("button", { name: "Open" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
+  expandStatusPanelIfCollapsed();
   if (pendingBoxPrint) {
     await screen.findByText("Printer is not configured");
   } else {
@@ -1016,6 +1024,7 @@ describe("App", () => {
       await waitFor(() => expect(screen.getByText("Preparing the shift…")).toBeDefined());
       lockdownMock.exit.mockClear();
 
+      fireEvent.click(await screen.findByRole("button", { name: "Expand status panel" }));
       fireEvent.click(screen.getByRole("button", { name: "Exit fullscreen" }));
       expect(lockdownMock.exit).not.toHaveBeenCalled();
       expect(screen.getByRole("dialog", { name: "Exit fullscreen?" })).toBeDefined();
@@ -1109,6 +1118,7 @@ describe("App", () => {
 
       await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
       expect(await screen.findByRole("button", { name: "Pause" })).toBeDefined();
+      expandStatusPanelIfCollapsed();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
       const counters = within(screen.getByRole("region", { name: "Accepted, Rejected" }));
@@ -1158,6 +1168,7 @@ describe("App", () => {
       vi.useRealTimers();
       await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
       expect(await screen.findByRole("button", { name: "Pause" })).toBeDefined();
+      expandStatusPanelIfCollapsed();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
 
@@ -1370,6 +1381,7 @@ describe("App", () => {
       await signInAsOperator();
       await act(async () => i18n.changeLanguage("ru"));
       fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
+      expandStatusPanelIfCollapsed("ru");
 
       // The normal sync request is held in the network phase. Recovery may
       // neither inspect the mirror nor start either bundle path until the
@@ -1387,6 +1399,7 @@ describe("App", () => {
         );
       });
       const retry = await screen.findByRole("button", { name: "Повторить восстановление" });
+      expandStatusPanelIfCollapsed("ru");
       expect(referenceBundleAttempts).toBe(0);
       expect(normalBundleAttempts).toBe(0);
       expect(

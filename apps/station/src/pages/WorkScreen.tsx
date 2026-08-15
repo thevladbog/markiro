@@ -170,7 +170,8 @@ export function WorkScreen({
   const [closeReasonPicker, setCloseReasonPicker] = useState(false);
   const [closeReason, setCloseReason] = useState<string>("production_defect");
   const [closeError, setCloseError] = useState<string | null>(null);
-  const [closeSummary, setCloseSummary] = useState<OfflineShiftCloseSummary | null>(null);
+  const closeRequestRef = useRef(false);
+  const [closeRequestPending, setCloseRequestPending] = useState(false);
   const [planReachedPrompt, setPlanReachedPrompt] = useState<number | null>(null);
   const planReachedPromptRef = useRef(false);
   const planReachedAcknowledgedRef = useRef(false);
@@ -503,7 +504,7 @@ export function WorkScreen({
     boxActionPending ||
     showExceptions ||
     closeReasonPicker ||
-    closeSummary !== null ||
+    closeRequestPending ||
     planReachedPrompt !== null ||
     noSerials,
   );
@@ -514,33 +515,47 @@ export function WorkScreen({
     else onExit();
   }
 
-  async function requestClose(reasonCode?: string | null): Promise<void> {
-    if (!onCloseShift || ordinaryScanBlockedRef.current) return;
+  async function performClose(reasonCode?: string | null): Promise<void> {
+    if (!onCloseShift || closeRequestRef.current) return;
+    closeRequestRef.current = true;
+    ordinaryScanBlockedRef.current = true;
+    setCloseRequestPending(true);
     setCloseError(null);
     try {
-      const summary = await onCloseShift(reasonCode ?? null);
+      await new Promise<void>((resolve, reject) => {
+        const accepted = queue.enqueueJob(async () => {
+          try {
+            await onCloseShift(reasonCode ?? null);
+            resolve();
+          } catch (error) {
+            reject(error instanceof Error ? error : new Error(String(error)));
+          }
+        });
+        if (!accepted) reject(new Error("station scan queue is closed"));
+      });
       setCloseReasonPicker(false);
-      setCloseSummary(summary);
+      onExit();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("reason")) setCloseReasonPicker(true);
+      if (message.includes("already closed")) onExit();
+      else if (message.includes("reason")) setCloseReasonPicker(true);
       else setCloseError(message.includes("open box") ? t("work.closeOpenBox") : message);
+    } finally {
+      closeRequestRef.current = false;
+      setCloseRequestPending(false);
     }
+  }
+
+  async function requestClose(reasonCode?: string | null): Promise<void> {
+    if (ordinaryScanBlockedRef.current) return;
+    await performClose(reasonCode);
   }
 
   async function confirmPlanClose(): Promise<void> {
     if (!onCloseShift) return;
     planReachedPromptRef.current = false;
     setPlanReachedPrompt(null);
-    setCloseError(null);
-    try {
-      const summary = await onCloseShift(null);
-      setCloseSummary(summary);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("reason")) setCloseReasonPicker(true);
-      else setCloseError(message.includes("open box") ? t("work.closeOpenBox") : message);
-    }
+    await performClose(null);
   }
 
   // The domain's isDuplicate(key) is synchronous, so the device's accepted keys
@@ -1522,6 +1537,7 @@ export function WorkScreen({
         onExceptions={() => setShowExceptions(true)}
         onPause={requestExit}
         onClose={() => void requestClose()}
+        closeDisabled={closeRequestPending}
       />
 
       <div className="work-screen__overlays">
@@ -1564,7 +1580,11 @@ export function WorkScreen({
                 {t("work.closeReasons.other_production_deviation")}
               </option>
             </select>
-            <Button size="floor" onClick={() => void requestClose(closeReason)}>
+            <Button
+              size="floor"
+              disabled={closeRequestPending}
+              onClick={() => void performClose(closeReason)}
+            >
               {t("work.closeReasonConfirm")}
             </Button>
             <Button size="floor" variant="secondary" onClick={() => setCloseReasonPicker(false)}>
@@ -1575,7 +1595,11 @@ export function WorkScreen({
         {planReachedPrompt !== null ? (
           <Alert tone="ok" title={t("work.planReachedTitle")}>
             <p>{t("work.planReachedDetail", { count: planReachedPrompt })}</p>
-            <Button size="floor" onClick={() => void confirmPlanClose()}>
+            <Button
+              size="floor"
+              disabled={closeRequestPending}
+              onClick={() => void confirmPlanClose()}
+            >
               {t("work.closeShift")}
             </Button>
             <Button
@@ -1596,22 +1620,6 @@ export function WorkScreen({
             <p>{closeError}</p>
             <Button size="floor" onClick={() => setCloseError(null)}>
               {t("work.stay")}
-            </Button>
-          </Alert>
-        ) : null}
-        {closeSummary ? (
-          <Alert tone="warn" title={t("work.closeSummaryTitle")}>
-            <p>{closeSummary.productName}</p>
-            <p>{t("work.closeSummaryPieces", { count: closeSummary.actualQty })}</p>
-            <p>{t("work.closeSummaryBoxes", { count: closeSummary.closedBoxCount })}</p>
-            <p>
-              {t("work.closeSummaryPlan", {
-                planned: closeSummary.plannedQtySnapshot ?? t("work.noPlan"),
-                actual: closeSummary.actualQty,
-              })}
-            </p>
-            <Button size="floor" onClick={onExit}>
-              {t("work.backToShifts")}
             </Button>
           </Alert>
         ) : null}

@@ -1,7 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { getTableConfig, type AnyPgTable } from "drizzle-orm/pg-core";
+import { getTableConfig as getSqliteTableConfig } from "drizzle-orm/sqlite-core";
 import { describe, expect, it } from "vitest";
-import { schema, STATION_MIGRATIONS } from "../src/index.js";
+import { schema, sqliteSchema, STATION_MIGRATIONS } from "../src/index.js";
 
 function applyMigrations(db: DatabaseSync): void {
   for (const statement of STATION_MIGRATIONS) {
@@ -29,6 +30,9 @@ describe("station shift close schema", () => {
     expect(getTableConfig(events).uniqueConstraints.map((item) => item.getName())).toContain(
       "station_shift_close_events_payload_uq",
     );
+    expect(
+      getSqliteTableConfig(sqliteSchema.shiftCloseOutbox).indexes.map((item) => item.config.name),
+    ).toContain("shift_close_outbox_shift_id_uq");
     expect(Object.keys(schema.shifts)).toEqual(
       expect.arrayContaining(["stationClosePolicy", "stationCloseOwnerDeviceId"]),
     );
@@ -59,5 +63,45 @@ describe("station shift close schema", () => {
         "last_checked_at",
       ]),
     );
+    const indexes = db.prepare("PRAGMA index_list(shift_close_outbox)").all() as Array<{
+      name: string;
+      unique: number;
+    }>;
+    expect(indexes).toContainEqual(
+      expect.objectContaining({ name: "shift_close_outbox_shift_id_uq", unique: 1 }),
+    );
+  });
+
+  it("keeps one legacy close fact before adding the unique shift index", () => {
+    const db = new DatabaseSync(":memory:");
+    db.exec(`CREATE TABLE shift_close_outbox (
+      event_id TEXT PRIMARY KEY,
+      shift_id TEXT NOT NULL
+    )`);
+    db.prepare("INSERT INTO shift_close_outbox (event_id, shift_id) VALUES (?, ?)").run(
+      "event-first",
+      "shift-1",
+    );
+    db.prepare("INSERT INTO shift_close_outbox (event_id, shift_id) VALUES (?, ?)").run(
+      "event-second",
+      "shift-1",
+    );
+
+    for (const statement of STATION_MIGRATIONS.filter(
+      (candidate) =>
+        candidate.includes("DELETE FROM shift_close_outbox") ||
+        candidate.includes("shift_close_outbox_shift_id_uq"),
+    )) {
+      db.exec(statement);
+    }
+
+    expect(db.prepare("SELECT event_id FROM shift_close_outbox").all()).toEqual([
+      { event_id: "event-first" },
+    ]);
+    expect(() =>
+      db
+        .prepare("INSERT INTO shift_close_outbox (event_id, shift_id) VALUES (?, ?)")
+        .run("event-third", "shift-1"),
+    ).toThrow(/unique constraint failed/i);
   });
 });

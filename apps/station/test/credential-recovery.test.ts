@@ -344,12 +344,17 @@ describe("credential rejection recovery", () => {
   it("clears only explicit reproducible caches after the durable credential boundary", async () => {
     const deletes: { sql: string; params: unknown[] }[] = [];
     let credentialCleared = false;
-    const exec = await migratedExec((sql, params) => {
-      if (/^DELETE\s/i.test(sql.trim())) {
-        expect(credentialCleared).toBe(true);
-        deletes.push({ sql: sql.replace(/\s+/g, " ").trim(), params });
-      }
-    });
+    const migrated = await migratedExec();
+    const exec: SqlExecutor = {
+      all: migrated.all,
+      run: async (sql, params = []) => {
+        if (/^DELETE\s/i.test(sql.trim())) {
+          expect(credentialCleared).toBe(true);
+          deletes.push({ sql: sql.replace(/\s+/g, " ").trim(), params });
+        }
+        await migrated.run(sql, params);
+      },
+    };
     await seedRecoveryFixture(exec);
 
     const preservedTables = [

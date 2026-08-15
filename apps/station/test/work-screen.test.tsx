@@ -183,6 +183,17 @@ interface RenderWorkScreenOverrides {
   onScanRecorded?: () => void;
   onScanQueueRegister?: (queue: ScanQueue) => () => void;
   onExit?: () => void;
+  onCloseShift?: (reasonCode?: string | null) => Promise<{
+    eventId: string;
+    shiftId: string;
+    productId: string;
+    productName: string;
+    plannedQtySnapshot: number | null;
+    actualQty: number;
+    closedBoxCount: number;
+    reasonCode: null;
+    closedAt: string;
+  }>;
   pendingSync?: number;
 }
 
@@ -201,6 +212,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
     onScanRecorded,
     onScanQueueRegister,
     onExit = () => {},
+    onCloseShift,
     pendingSync = 0,
   } = overrides;
 
@@ -219,6 +231,7 @@ function renderWorkScreen(overrides: RenderWorkScreenOverrides = {}) {
       {...(onScanRecorded ? { onScanRecorded } : {})}
       {...(onScanQueueRegister ? { onScanQueueRegister } : {})}
       onExit={onExit}
+      {...(onCloseShift ? { onCloseShift } : {})}
       pendingSync={pendingSync}
       // None of the tests in this file's outer `describe` care about boxes:
       // `issuerPrefix: null` keeps the whole box section off, exactly like a
@@ -462,6 +475,121 @@ describe("WorkScreen", () => {
     }
     expect(within(prompt).getByRole("button", { name: "Close shift" })).toBeDefined();
     expect(within(prompt).getByRole("button", { name: "Continue" })).toBeDefined();
+  });
+
+  it("returns to shift selection as soon as local shift closing succeeds", async () => {
+    const onExit = vi.fn();
+    const onCloseShift = vi.fn().mockResolvedValue({
+      eventId: "close-1",
+      shiftId: "s1",
+      productId: "product-1",
+      productName: "Water 0.5",
+      plannedQtySnapshot: null,
+      actualQty: 10,
+      closedBoxCount: 2,
+      reasonCode: null,
+      closedAt: "2026-08-15T20:00:00.000Z",
+    });
+    renderWorkScreen({ onExit, onCloseShift });
+
+    fireEvent.click(screen.getByRole("button", { name: "Close shift" }));
+
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("submits shift closing only once when the close control is double-tapped", async () => {
+    let finishClose!: (summary: {
+      eventId: string;
+      shiftId: string;
+      productId: string;
+      productName: string;
+      plannedQtySnapshot: null;
+      actualQty: number;
+      closedBoxCount: number;
+      reasonCode: null;
+      closedAt: string;
+    }) => void;
+    const onCloseShift = vi.fn(
+      () =>
+        new Promise<{
+          eventId: string;
+          shiftId: string;
+          productId: string;
+          productName: string;
+          plannedQtySnapshot: null;
+          actualQty: number;
+          closedBoxCount: number;
+          reasonCode: null;
+          closedAt: string;
+        }>((resolve) => {
+          finishClose = resolve;
+        }),
+    );
+    const onExit = vi.fn();
+    renderWorkScreen({ onCloseShift, onExit });
+    const close = screen.getByRole("button", { name: "Close shift" });
+
+    fireEvent.click(close);
+    fireEvent.click(close);
+
+    expect(onCloseShift).toHaveBeenCalledOnce();
+    finishClose({
+      eventId: "close-1",
+      shiftId: "s1",
+      productId: "product-1",
+      productName: "Water 0.5",
+      plannedQtySnapshot: null,
+      actualQty: 10,
+      closedBoxCount: 2,
+      reasonCode: null,
+      closedAt: "2026-08-15T20:00:00.000Z",
+    });
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+
+  it("closes only after an already accepted scan finishes committing", async () => {
+    const base = makeExec();
+    let releaseScan!: () => void;
+    const scanBlocked = new Promise<void>((resolve) => {
+      releaseScan = resolve;
+    });
+    let reportScanWriteStarted!: () => void;
+    const scanWriteStarted = new Promise<void>((resolve) => {
+      reportScanWriteStarted = resolve;
+    });
+    const exec: SqlExecutor = {
+      all: base.all,
+      run: async (sql, params = []) => {
+        if (sql.includes("INSERT INTO scan_events_mirror")) {
+          reportScanWriteStarted();
+          await scanBlocked;
+        }
+        await base.run(sql, params);
+      },
+    };
+    const source = manualSource();
+    const onCloseShift = vi.fn().mockResolvedValue({
+      eventId: "close-after-scan",
+      shiftId: "s1",
+      productId: "product-1",
+      productName: "Water 0.5",
+      plannedQtySnapshot: null,
+      actualQty: 1,
+      closedBoxCount: 0,
+      reasonCode: null,
+      closedAt: "2026-08-15T20:00:00.000Z",
+    });
+    renderWorkScreen({ exec, source, onCloseShift });
+
+    act(() => source.emit(KM));
+    await scanWriteStarted;
+    fireEvent.click(screen.getByRole("button", { name: "Close shift" }));
+    await act(async () => Promise.resolve());
+    expect(onCloseShift).not.toHaveBeenCalled();
+
+    releaseScan();
+    await waitFor(() => expect(onCloseShift).toHaveBeenCalledOnce());
+    expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
   });
 
   it("presents accepted scans locally while retaining their success sound", async () => {
@@ -2408,7 +2536,9 @@ describe("WorkScreen box progress, closing and printing", () => {
     // the screen rather than assuming which box's prompt this is -- the
     // point here is that the box id `printAndMaybeVerify` was given must
     // match the SAME box this sscc actually belongs to.
-    const promptSscc = (await screen.findByText(/^\d{18}$/)).textContent;
+    const promptSscc = (
+      await screen.findByTestId("print-verification-sscc")
+    ).textContent?.replaceAll(" ", "");
     fireEvent.click(screen.getByRole("button", { name: "Пропустить" }));
 
     await waitFor(async () => {

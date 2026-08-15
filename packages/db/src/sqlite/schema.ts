@@ -1,5 +1,12 @@
 import { sql } from "drizzle-orm";
-import { check, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  check,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 /** Station-local key/value metadata (e.g. current terminal id, last sync). */
 export const stationMeta = sqliteTable("station_meta", {
@@ -110,22 +117,26 @@ export const stationProductImages = sqliteTable("station_product_images", {
 });
 
 /** Durable local close facts awaiting the station close endpoint. */
-export const shiftCloseOutbox = sqliteTable("shift_close_outbox", {
-  eventId: text("event_id").primaryKey(),
-  shiftId: text("shift_id").notNull(),
-  deviceId: text("device_id").notNull(),
-  operatorId: text("operator_id"),
-  productId: text("product_id").notNull(),
-  productName: text("product_name").notNull(),
-  plannedQtySnapshot: integer("planned_qty_snapshot"),
-  actualQty: integer("actual_qty").notNull(),
-  closedBoxCount: integer("closed_box_count").notNull(),
-  reasonCode: text("reason_code"),
-  closedAt: text("closed_at").notNull(),
-  state: text("state").notNull().default("pending"),
-  conflictCode: text("conflict_code"),
-  lastCheckedAt: text("last_checked_at"),
-});
+export const shiftCloseOutbox = sqliteTable(
+  "shift_close_outbox",
+  {
+    eventId: text("event_id").primaryKey(),
+    shiftId: text("shift_id").notNull(),
+    deviceId: text("device_id").notNull(),
+    operatorId: text("operator_id"),
+    productId: text("product_id").notNull(),
+    productName: text("product_name").notNull(),
+    plannedQtySnapshot: integer("planned_qty_snapshot"),
+    actualQty: integer("actual_qty").notNull(),
+    closedBoxCount: integer("closed_box_count").notNull(),
+    reasonCode: text("reason_code"),
+    closedAt: text("closed_at").notNull(),
+    state: text("state").notNull().default("pending"),
+    conflictCode: text("conflict_code"),
+    lastCheckedAt: text("last_checked_at"),
+  },
+  (table) => [uniqueIndex("shift_close_outbox_shift_id_uq").on(table.shiftId)],
+);
 
 /**
  * Local journal mirror of server `codes` (05b writes here; 05a only defines
