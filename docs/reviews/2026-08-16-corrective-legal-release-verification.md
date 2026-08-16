@@ -137,3 +137,9 @@ Before calling the public deployment externally accepted, perform or explicitly 
 - live DNS, TLS certificate, all three production authorities, redirects, CSP, artifact downloads/hashes, the required disabled-form response (`404 submission_disabled`), and monitoring after deployment.
 
 Independent controller/code review remains the next workflow gate; it should focus on release-identity agreement, route confinement, artifact immutability, CSP behavior, responsive layout, and absence of accidental legal-semantic changes.
+
+## Production activation evidence
+
+The merged release `a2ff20fd3847db6612a0d9ca3dd226cc3e971d90` was published and deployed first with both demo-submission flags disabled. The protected deployment completed successfully. An external HTTPS check observed the exact release SHA, HTTP 200 for the RU/EN privacy and consent pages, 12 published legal artifacts, a bounded HTTP 404 for an unknown route, and the required `404 + submission_disabled` response from the exact demo-request endpoint without creating a request.
+
+Before building the public form, production configuration was prepared with a hostname-bound SmartCaptcha for `markiro.app`, the public contact phone, and a new active Lockbox version containing the matching server key and enabled API flag. No key value or form payload was copied into repository, workflow, or review output. This evidence-only commit creates a new immutable release identity so the enabled edge image is not substituted under the already published SHA.
