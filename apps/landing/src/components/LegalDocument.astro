@@ -85,7 +85,12 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
                 {block.kind === "unordered-list" && <ul>{block.items.map((item) => <li>{item}</li>)}</ul>}
                 {block.kind === "definition-list" && (
                   <dl class="legal-definitions">
-                    {renderDefinition(block).map(({ term, detail }) => <><dt>{term}</dt><dd>{detail}</dd></>)}
+                    {renderDefinition(block).map(({ term, detail }) => (
+                      <div>
+                        <dt>{term} <span aria-hidden="true">—&nbsp;</span></dt>
+                        <dd>{detail}</dd>
+                      </div>
+                    ))}
                   </dl>
                 )}
               </>

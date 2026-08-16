@@ -54,17 +54,17 @@ All final commands below passed unless a limit is explicitly recorded:
 
 - `@markiro/domain`: 17 files and 228/228 tests, typecheck, lint, build;
 - `@markiro/legal-documents`: 4 files and 113/113 tests, typecheck, lint, build;
-- `@markiro/landing`: 12 files and 134/134 tests, typecheck, lint, 31-page build, built-site audit;
+- `@markiro/landing`: 12 files and 136/136 tests, typecheck, lint, 31-page build, built-site audit;
 - `@markiro/api`: 151 files passed, 1 skipped; 1,558 tests passed, 2 skipped; typecheck, lint, build;
 - focused Caddy/route-table contracts: 98/98;
 - final production bundle contracts: 311/311;
-- landing browser regression: 100/100 across Desktop Chrome and Pixel 7;
+- landing browser regression: 100/100 across Desktop Chrome and Pixel 7, plus 4/4 focused definition-layout checks after final review;
 - production-Caddy legal regression: 18/18 across Desktop Chrome and Pixel 7;
 - production-browser TypeScript check;
 - `corepack pnpm format:check`;
 - `git diff --check`.
 
-The API suite used the unique scratch database `markiro_task6_20260816_0323`. Its absence was proved before creation, all 45 migrations were applied, and it was dropped afterward with a final absence count of zero. The shared development database was not modified. The three API skips are the existing local-infrastructure smoke class and were not represented as database coverage.
+The API suite used the unique scratch database `markiro_task6_20260816_0323`. Its absence was proved before creation, all 45 migrations were applied, and it was dropped afterward with a final absence count of zero. The shared development database was not modified. One API file and two tests were skipped by the existing local-infrastructure smoke class and were not represented as database coverage.
 
 The branch contained one Task 1 formatting drift in `packages/legal-documents/src/registry.ts`. Prettier changed only the wrapping of a type-only import; the legal 113/113 suite and all legal static gates passed afterward.
 
@@ -86,7 +86,7 @@ Physical phone, handheld/industrial scanner, and printed-page decoding were not 
 
 ## Browser and Caddy verification
 
-The 100-case landing suite covered every RU/EN legal page, both registries, all four verification pages, downloads, canonical/hreflang metadata, responsive alignment, and bounded malformed verification pages at Desktop Chrome and Pixel 7.
+The 100-case landing suite covered every RU/EN legal page, both registries, all four verification pages, downloads, canonical/hreflang metadata, responsive alignment, and bounded malformed verification pages at Desktop Chrome and Pixel 7. After final review, 4/4 focused Desktop Chrome and Pixel 7 checks additionally proved that RU and EN definition terms, em dashes, and details share an aligned row.
 
 The additional real-Caddy suite used the production Caddyfile and a case-sensitive Docker volume containing the built landing. On both viewports it proved:
 
@@ -124,6 +124,6 @@ Before calling the public deployment externally accepted, perform or explicitly 
 - Windows desktop Word open/print of all four DOCX templates;
 - physical A4 print inspection;
 - phone and target industrial-scanner Data Matrix scans from PDFs, DOCX prints, and downloaded public files;
-- live DNS, TLS certificate, all three production authorities, redirects, CSP, artifact downloads/hashes, form delivery, and monitoring after deployment.
+- live DNS, TLS certificate, all three production authorities, redirects, CSP, artifact downloads/hashes, the required disabled-form response (`404 submission_disabled`), and monitoring after deployment.
 
 Independent controller/code review remains the next workflow gate; it should focus on release-identity agreement, route confinement, artifact immutability, CSP behavior, responsive layout, and absence of accidental legal-semantic changes.

@@ -269,6 +269,27 @@ for (const [route, counterpart, registry] of [
   });
 }
 
+for (const [route, terms] of [
+  ["/privacy/", ["Персональные данные", "Обработка", "Тенант"]],
+  ["/en/privacy/", ["Personal data", "Processing", "Tenant"]],
+] as const) {
+  test(`${route} keeps definition terms and em dashes on one aligned row`, async ({ page }) => {
+    await page.goto(route);
+    const rows = page.locator(".legal-definitions > div");
+    await expect(rows).toHaveCount(terms.length);
+    for (const [index, term] of terms.entries()) {
+      await expect(rows.nth(index).locator("dt")).toHaveText(`${term} —`);
+      const definitionBox = await rows.nth(index).locator("dd").boundingBox();
+      const termBox = await rows.nth(index).locator("dt").boundingBox();
+      expect(definitionBox).not.toBeNull();
+      expect(termBox).not.toBeNull();
+      expect(definitionBox!.x).toBeGreaterThanOrEqual(termBox!.x + termBox!.width - 1);
+      expect(definitionBox!.y).toBeLessThan(termBox!.y + termBox!.height);
+      expect(termBox!.y).toBeLessThan(definitionBox!.y + definitionBox!.height);
+    }
+  });
+}
+
 test("crawler policy endpoints expose the approved search boundary", async ({ request }) => {
   const robots = await request.get("/robots.txt");
   expect(robots.status()).toBe(200);

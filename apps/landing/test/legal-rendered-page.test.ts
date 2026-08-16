@@ -111,6 +111,20 @@ describe("rendered legal pages", () => {
     }
   });
 
+  it.each([
+    ["/privacy/", ["Персональные данные", "Обработка", "Тенант"]],
+    ["/en/privacy/", ["Personal data", "Processing", "Tenant"]],
+  ] as const)("renders every definition as term — detail at %s", (route, terms) => {
+    const rows = documents.get(route)?.querySelectorAll(".legal-definitions > div") ?? [];
+    expect(rows).toHaveLength(terms.length);
+    rows.forEach((row, index) => {
+      const term = terms[index];
+      expect(row.querySelector("dt")?.textContent?.trim()).toBe(`${term} —`);
+      expect(row.querySelector("dd")?.textContent?.trim().length).toBeGreaterThan(0);
+      expect(row.textContent?.replaceAll(/\s+/g, " ").trim()).toMatch(new RegExp(`^${term} — `));
+    });
+  });
+
   it("publishes the verified PDF/A download, digest, and Data Matrix on document results", () => {
     for (const route of [
       ...LEGAL_ROUTES.filter((candidate) => !candidate.endsWith("/legal/")),
