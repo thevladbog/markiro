@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -106,9 +107,9 @@ test("direct deploy workflow rejects automatic, unpinned and credential-unsafe m
 });
 
 test("remote deploy executable emits one bounded configuration diagnostic", () => {
-  const executable = new URL("../remote-deploy.mjs", import.meta.url);
+  const executable = fileURLToPath(new URL("../remote-deploy.mjs", import.meta.url));
   const privateValue = "should-never-appear-from-hosted-runner";
-  const result = spawnSync(process.execPath, [executable.pathname, "run"], {
+  const result = spawnSync(process.execPath, [executable, "run"], {
     encoding: "utf8",
     env: {
       RELEASE_MANIFEST_PATH: `/runner/${privateValue}.json`,

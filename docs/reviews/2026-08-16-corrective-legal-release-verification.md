@@ -9,6 +9,16 @@ The corrected legal release candidate is internally consistent and passed the au
 
 The release is not evidence of live DNS/TLS, production deployment, Windows Word, physical printing, or phone/industrial-scanner acceptance. No deployment, push, merge, DNS change, shared-database mutation, or artifact regeneration was performed.
 
+## Changed behavior
+
+- Legal-page controls now execute from same-origin external modules under the unchanged production CSP instead of being blocked as inline scripts.
+- Exactly four approved legacy legal-document URLs redirect to their corrected identities; lowercase and other malformed variants remain branded 404 responses.
+
+## Changed files and areas
+
+- Landing script emission and its browser contract: `apps/landing/astro.config.mjs` and `tools/production-browser/tests/landing-caddy-csp.spec.ts`.
+- Production legal routing and its Caddy/smoke contracts: `deploy/production/Caddyfile`, `deploy/production/test/edge-contract.test.mjs`, and `deploy/production/test/smoke-route-table.test.mjs`.
+
 ## Immutable release evidence
 
 The artifact tree was hashed before verification and again after the corrective browser/routing work. Every byte remained unchanged.

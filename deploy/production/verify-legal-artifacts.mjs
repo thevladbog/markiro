@@ -86,18 +86,24 @@ function assertManifestMatchesAttestation(manifest, attestation) {
     throw new Error("legal artifact manifest PDF inventory does not match the trusted attestation");
 }
 
-async function runFreshVeraPdf(binary, args) {
+async function runFreshVeraPdf(binary, args, execute) {
   try {
-    return await execFile(binary, args, {
+    return await execute(binary, args, {
       encoding: "utf8",
       maxBuffer: 20 * 1024 * 1024,
+      timeout: 60_000,
     });
-  } catch {
-    throw new Error("fresh pinned veraPDF validation failed");
+  } catch (cause) {
+    throw new Error("fresh pinned veraPDF validation failed", { cause });
   }
 }
 
-function createFreshPdfAValidator({ parseVeraPdfValidationResult, image, version }) {
+export function createFreshPdfAValidator({
+  execute = execFile,
+  parseVeraPdfValidationResult,
+  image,
+  version,
+}) {
   const runtime = process.env.VERAPDF_CONTAINER_RUNTIME;
   const binary = process.env.VERAPDF_BIN;
   const hasRuntime = typeof runtime === "string" && runtime.length > 0;
@@ -117,7 +123,7 @@ function createFreshPdfAValidator({ parseVeraPdfValidationResult, image, version
       const args = hasRuntime
         ? ["run", "--rm", "--network", "none", image, "--version"]
         : ["--version"];
-      const result = await runFreshVeraPdf(command, args);
+      const result = await runFreshVeraPdf(command, args, execute);
       const exactVersion = new RegExp(`(?:^|\\D)${version.replaceAll(".", "\\.")}(?:\\D|$)`);
       if (!exactVersion.test(result.stdout)) {
         throw new Error("fresh pinned veraPDF validation failed");
@@ -144,7 +150,7 @@ function createFreshPdfAValidator({ parseVeraPdfValidationResult, image, version
           `/data/${path.basename(pdfPath)}`,
         ]
       : ["--format", "json", "--flavour", "2b", pdfPath];
-    const result = await runFreshVeraPdf(command, args);
+    const result = await runFreshVeraPdf(command, args, execute);
     try {
       parseVeraPdfValidationResult(result.stdout);
     } catch {

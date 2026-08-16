@@ -865,6 +865,17 @@ test("edge build obtains fresh PDF/A evidence from the pinned veraPDF image", as
   );
   const verification = dockerfileStageInstructions(dockerfile, "legal-artifact-verification");
   assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "WORKDIR"),
+    [{ name: "WORKDIR", arguments: "/workspace" }],
+  );
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "ENV"),
+    [
+      { name: "ENV", arguments: "JAVA_HOME=/opt/java/openjdk" },
+      { name: "ENV", arguments: "PATH=/opt/java/openjdk/bin:${PATH}" },
+    ],
+  );
+  assert.deepEqual(
     verification.filter((instruction) => instruction.name === "COPY"),
     [
       {

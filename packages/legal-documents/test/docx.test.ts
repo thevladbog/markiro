@@ -73,7 +73,7 @@ function xmlElements(value: string, qualifiedName: string): readonly string[] {
 }
 
 function visibleXmlText(value: string): string {
-  return value.replace(/<[^>]+>/g, "");
+  return [...value.matchAll(/>([^<]*)/g)].map(([, text]) => text).join("");
 }
 
 function expectCenteredPaddedCells(value: string): void {

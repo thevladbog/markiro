@@ -283,9 +283,10 @@ for (const [route, terms] of [
       const termBox = await rows.nth(index).locator("dt").boundingBox();
       expect(definitionBox).not.toBeNull();
       expect(termBox).not.toBeNull();
-      expect(definitionBox!.x).toBeGreaterThanOrEqual(termBox!.x + termBox!.width - 1);
-      expect(definitionBox!.y).toBeLessThan(termBox!.y + termBox!.height);
-      expect(termBox!.y).toBeLessThan(definitionBox!.y + definitionBox!.height);
+      if (!definitionBox || !termBox) throw new Error(`Missing definition geometry for ${term}`);
+      expect(definitionBox.x).toBeGreaterThanOrEqual(termBox.x + termBox.width - 1);
+      expect(definitionBox.y).toBeLessThan(termBox.y + termBox.height);
+      expect(termBox.y).toBeLessThan(definitionBox.y + definitionBox.height);
     }
   });
 }

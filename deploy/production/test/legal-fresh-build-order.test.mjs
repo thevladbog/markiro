@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 
 import { load } from "js-yaml";
 
+import { assertLegalVerifierBuildsImmediatelyBeforeProductionContracts } from "./helpers/workflow-contract.mjs";
+
 const root = fileURLToPath(new URL("../../../", import.meta.url));
 
 async function linkDependencies(sourceDir, targetDir, overrides = {}) {
@@ -107,13 +109,21 @@ function runProductionVerifier(directory) {
   });
 }
 
-function runWorkflowBuild(directory, command) {
-  const expected = {
-    "pnpm --filter @markiro/domain build": "packages/domain/tsconfig.json",
-    "pnpm --filter @markiro/legal-documents build": "packages/legal-documents/tsconfig.json",
+async function runWorkflowBuild(directory, command) {
+  const packageDirectory = {
+    "pnpm --filter @markiro/domain build": "packages/domain",
+    "pnpm --filter @markiro/legal-documents build": "packages/legal-documents",
   }[command];
-  assert.ok(expected, `unsupported legal verifier build command: ${command}`);
-  return tsc(path.join(directory, expected));
+  assert.ok(packageDirectory, `unsupported legal verifier build command: ${command}`);
+  const manifest = JSON.parse(
+    await readFile(path.join(root, packageDirectory, "package.json"), "utf8"),
+  );
+  assert.equal(
+    manifest.scripts.build,
+    "tsc -p tsconfig.json",
+    `${packageDirectory} build script no longer matches the direct tsc fixture`,
+  );
+  return tsc(path.join(directory, packageDirectory, "tsconfig.json"));
 }
 
 test("fresh dist-less legal build fails before domain and passes after domain", async (context) => {
@@ -167,19 +177,9 @@ for (const [label, workflowPath] of [
     assert.match(beforeBuild.stderr, /ERR_MODULE_NOT_FOUND/);
 
     const workflow = load(await readFile(path.join(root, workflowPath), "utf8"));
-    const steps = workflow.jobs["production-bundle"].steps;
-    const contractIndex = steps.findIndex(
-      (step) => step.name === "Verify production bundle contracts",
-    );
-    assert.notEqual(contractIndex, -1);
-    const buildStep = steps[contractIndex - 1];
-    assert.equal(buildStep.name, "Build legal verifier dependencies");
-    assert.equal(
-      buildStep.run,
-      "pnpm --filter @markiro/domain build\npnpm --filter @markiro/legal-documents build\n",
-    );
+    const buildStep = assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(workflow);
     for (const command of buildStep.run.trim().split("\n")) {
-      const build = runWorkflowBuild(directory, command);
+      const build = await runWorkflowBuild(directory, command);
       assert.equal(build.status, 0, build.stderr || build.stdout);
     }
 

@@ -4,6 +4,8 @@ import test from "node:test";
 
 import { load } from "js-yaml";
 
+import { assertLegalVerifierBuildsImmediatelyBeforeProductionContracts } from "./helpers/workflow-contract.mjs";
+
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const parse = async (path) => load(await read(path));
@@ -35,18 +37,6 @@ function namedStep(workflow, job, name) {
   const step = workflow.jobs[job].steps.find((candidate) => candidate.name === name);
   assert.ok(step, `${job} must contain ${name}`);
   return step;
-}
-
-function assertLegalVerifierBuildsImmediatelyBeforeProductionContracts(workflow) {
-  const steps = workflow.jobs["production-bundle"].steps;
-  const contractIndex = steps.findIndex(
-    (step) => step.name === "Verify production bundle contracts",
-  );
-  assert.notEqual(contractIndex, -1, "production bundle contract step must exist");
-  assert.deepEqual(steps[contractIndex - 1], {
-    name: "Build legal verifier dependencies",
-    run: "pnpm --filter @markiro/domain build\npnpm --filter @markiro/legal-documents build\n",
-  });
 }
 
 function assertEdgeBuildStep(step, expectedEnvironment) {
@@ -103,18 +93,21 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   );
 });
 
-test("CI builds the workspace legal dependency before landing browser gates", async () => {
+test("CI validates the edge image before landing browser gates", async () => {
   const workflow = await parse(".github/workflows/ci.yml");
+  const steps = workflow.jobs["production-bundle"].steps;
   const step = namedStep(
     workflow,
     "production-bundle",
     "Verify landing browser and Lighthouse release gates",
   );
-  assert.match(
-    step.run,
-    /^pnpm --filter @markiro\/domain build\npnpm --filter @markiro\/legal-documents build\nnode deploy\/production\/verify-legal-artifacts\.mjs apps\/landing\/public\/legal deploy\/production\/legal-artifacts-attestation\.json\npnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/,
+  const stepIndex = steps.indexOf(step);
+  const imageBuildIndex = steps.indexOf(
+    namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
   );
-  assert.equal(step.env.VERAPDF_CONTAINER_RUNTIME, "docker");
+  assert.ok(imageBuildIndex < stepIndex, "the PDF/A-validating edge build must precede browsers");
+  assert.match(step.run, /^pnpm test:landing:browser\npnpm test:landing:lighthouse\n?$/);
+  assert.equal(step.env, undefined);
 });
 
 test("CI builds legal verifier dependencies immediately before production contracts", async () => {

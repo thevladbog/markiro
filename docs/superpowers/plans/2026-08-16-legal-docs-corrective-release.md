@@ -150,7 +150,7 @@ interface LegalDocumentDisplay {
 - [ ] Add XML-level failing tests for a two-column compact header with one no-wrap identity paragraph containing class, code, and revision; assert the wordmark/title geometry does not use newline positioning.
 - [ ] Add failing tests that the metadata table contains localized revision/effective date plus `Проверка редакции` / `Revision verification` and the full URL.
 - [ ] In footer XML, assert exact presence of Data Matrix, code, revision, localized effective date, page field, and exact absence of the human-readable URL.
-- [ ] Add failing tests that definition runs contain `—` after the bold term and never `${term}. `.
+- [ ] Add failing tests that definition runs contain `—` after the bold term and never use a period followed by a space after `${term}`.
 - [ ] Add geometry assertions for compact maximum header/footer row heights, vertical centering, explicit cell padding, and no exact-height metadata rows.
 - [ ] Run RED:
 

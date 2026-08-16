@@ -250,7 +250,7 @@ test("inventory verifier maps dependency and payload details to one fixed error"
   );
 });
 
-test("inventory CLI reads an absolute candidate inventory and performs no filesystem mutation", async (t) => {
+test("inventory CLI reads only the absolute candidate inventory before read-only verification", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "markiro candidate inventory "));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const inventoryPath = join(directory, ".env.production.example");
@@ -259,20 +259,14 @@ test("inventory CLI reads an absolute candidate inventory and performs no filesy
   const calls = [];
   const stderr = [];
   const stdout = [];
-  const mutationFs = Object.fromEntries(
-    ["chmod", "mkdir", "open", "rename", "unlink", "writeFile"].map((name) => [
-      name,
-      async () => {
-        calls.push(name);
-        throw new Error(`mutation ${name} must not run`);
-      },
-    ]),
-  );
 
   const exitCode = await runInventoryCli({
     environment: { MARKIRO_RUNTIME_SECRET_ID: "runtime-secret-id" },
     inventoryPath,
-    fs: mutationFs,
+    readInventory: async (candidatePath, encoding) => {
+      calls.push(["read", candidatePath, encoding]);
+      return readFile(candidatePath, encoding);
+    },
     fetchIamToken: async () => {
       calls.push("metadata");
       return "iam-token";
@@ -288,7 +282,7 @@ test("inventory CLI reads an absolute candidate inventory and performs no filesy
   assert.equal(exitCode, 0);
   assert.deepEqual(stderr, []);
   assert.deepEqual(stdout, []);
-  assert.deepEqual(calls, ["metadata", "lockbox"]);
+  assert.deepEqual(calls, [["read", inventoryPath, "utf8"], "metadata", "lockbox"]);
 });
 
 test("inventory CLI rejects invalid argv and non-absolute paths before network access", async () => {

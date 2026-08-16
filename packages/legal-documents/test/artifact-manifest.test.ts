@@ -1163,20 +1163,22 @@ describe("legal artifact release generation", () => {
     expect(dependencies.converted).toHaveLength(8);
     expect(dependencies.requests).toHaveLength(12);
     expect(
-      dependencies.requests.map(({ code, verificationUrl }) => `${code}|${verificationUrl}`),
+      dependencies.requests.map(
+        ({ code, locale, kind, verificationUrl }) => `${code}|${locale}|${kind}|${verificationUrl}`,
+      ),
     ).toEqual([
-      "MKR-PD-01|https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
-      "MKR-PD-01|https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
-      "MKR-PD-02|https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
-      "MKR-PD-02|https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
-      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
-      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
-      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
-      "MKR-DPA-01|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
-      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
-      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
-      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
-      "MKR-BRD-01|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-PD-01|ru|legal-pdf|https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
+      "MKR-PD-01|en|legal-pdf|https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
+      "MKR-PD-02|ru|legal-pdf|https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
+      "MKR-PD-02|en|legal-pdf|https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
+      "MKR-DPA-01|ru|legal-pdf|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-DPA-01|ru|template-docx|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-DPA-01|en|legal-pdf|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-DPA-01|en|template-docx|https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|ru|legal-pdf|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|ru|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|en|legal-pdf|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-BRD-01|en|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(new Set(["2026.08/01"]));
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(

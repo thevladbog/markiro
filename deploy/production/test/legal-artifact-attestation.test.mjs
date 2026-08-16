@@ -5,7 +5,10 @@ import test from "node:test";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { verifyPublishedLegalArtifacts } from "../verify-legal-artifacts.mjs";
+import {
+  createFreshPdfAValidator,
+  verifyPublishedLegalArtifacts,
+} from "../verify-legal-artifacts.mjs";
 
 const root = new URL("../../../", import.meta.url);
 const releasedRoot = new URL("apps/landing/public/legal/", root);
@@ -154,16 +157,62 @@ test("coordinated PDF, manifest, and attestation tampering cannot self-attest", 
   attestation.pdfs.find((entry) => entry.fileName === pdf.fileName).sha256 = pdf.sha256;
   await writeJson(work.attestationPath, attestation);
 
+  let validationCalls = 0;
+  await assert.rejects(
+    verifyPublishedLegalArtifacts(
+      work.artifactRoot,
+      work.attestationPath,
+      verifierSpy().verify,
+      async (pdfPath) => {
+        validationCalls += 1;
+        assert.equal(
+          (await readFile(pdfPath)).includes(Buffer.from("not PDF/A")),
+          true,
+          "the validator must receive the privately copied tampered PDF bytes",
+        );
+        throw new Error("synthetic non-conformant PDF/A result");
+      },
+    ),
+    { message: "synthetic non-conformant PDF/A result" },
+  );
+  assert.equal(validationCalls, 1);
+});
+
+test("fresh veraPDF commands are time-bounded and retain their private failure cause", async (context) => {
+  const previousBinary = process.env.VERAPDF_BIN;
   const previousRuntime = process.env.VERAPDF_CONTAINER_RUNTIME;
-  process.env.VERAPDF_CONTAINER_RUNTIME = "docker";
+  process.env.VERAPDF_BIN = "/opt/verapdf/verapdf";
+  delete process.env.VERAPDF_CONTAINER_RUNTIME;
   context.after(() => {
+    if (previousBinary === undefined) delete process.env.VERAPDF_BIN;
+    else process.env.VERAPDF_BIN = previousBinary;
     if (previousRuntime === undefined) delete process.env.VERAPDF_CONTAINER_RUNTIME;
     else process.env.VERAPDF_CONTAINER_RUNTIME = previousRuntime;
   });
 
-  await assert.rejects(verifyPublishedLegalArtifacts(work.artifactRoot, work.attestationPath), {
-    message: "fresh pinned veraPDF validation failed",
+  const privateCause = new Error("private validator process detail");
+  const calls = [];
+  const validate = createFreshPdfAValidator({
+    execute: async (binary, args, options) => {
+      calls.push({ binary, args, options });
+      if (args[0] === "--version") return { stdout: "veraPDF 1.30.2\n", stderr: "" };
+      throw privateCause;
+    },
+    parseVeraPdfValidationResult: () => undefined,
+    image: "unused-with-direct-binary",
+    version: "1.30.2",
   });
+
+  await assert.rejects(validate("/private/document.pdf"), (error) => {
+    assert.equal(error.message, "fresh pinned veraPDF validation failed");
+    assert.equal(error.cause, privateCause);
+    return true;
+  });
+  assert.equal(calls.length, 2);
+  assert.deepEqual(
+    calls.map(({ options }) => options.timeout),
+    [60_000, 60_000],
+  );
 });
 
 for (const mutation of ["extra", "missing", "duplicate", "wrong hash", "unsafe path"]) {

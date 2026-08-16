@@ -62,7 +62,9 @@ export function formatLegalEffectiveDate(value: string, locale: LegalLocale): st
   }
 
   if (locale === "ru") return `${match[3]}.${match[2]}.${match[1]}`;
-  return `${day} ${ENGLISH_MONTH_NAMES[month - 1]!} ${year}`;
+  const englishMonth = ENGLISH_MONTH_NAMES[month - 1];
+  if (!englishMonth) throw new Error(`Invalid legal effective date: ${value}`);
+  return `${day} ${englishMonth} ${year}`;
 }
 
 export function legalVerificationPath(
