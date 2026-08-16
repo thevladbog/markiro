@@ -216,7 +216,7 @@
 
 		@legacyLegalPd01 {
 			method GET HEAD
-			path /d/MKR-PD-01/2026.08.01/2026-08-15
+			path_regexp legacyLegalPd01 ^/d/MKR-PD-01/2026\.08\.01/2026-08-15$
 		}
 		handle @legacyLegalPd01 {
 			redir * /d/MKR-PD-01/2026.08/01/15.08.2026 308
@@ -224,7 +224,7 @@
 
 		@legacyLegalPd02 {
 			method GET HEAD
-			path /d/MKR-PD-02/2026.08.01/2026-08-15
+			path_regexp legacyLegalPd02 ^/d/MKR-PD-02/2026\.08\.01/2026-08-15$
 		}
 		handle @legacyLegalPd02 {
 			redir * /d/MKR-PD-02/2026.08/01/15.08.2026 308
@@ -232,7 +232,7 @@
 
 		@legacyLegalDpa01 {
 			method GET HEAD
-			path /d/MKR-DPA-01/2026.08.01/2026-08-15
+			path_regexp legacyLegalDpa01 ^/d/MKR-DPA-01/2026\.08\.01/2026-08-15$
 		}
 		handle @legacyLegalDpa01 {
 			redir * /d/MKR-DPA-01/2026.08/01/15.08.2026 308
@@ -240,7 +240,7 @@
 
 		@legacyLegalBrd01 {
 			method GET HEAD
-			path /d/MKR-BRD-01/2026.08.01/2026-08-15
+			path_regexp legacyLegalBrd01 ^/d/MKR-BRD-01/2026\.08\.01/2026-08-15$
 		}
 		handle @legacyLegalBrd01 {
 			redir * /d/MKR-BRD-01/2026.08/01/15.08.2026 308

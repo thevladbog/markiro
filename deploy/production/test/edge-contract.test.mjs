@@ -64,7 +64,11 @@ const kioskForbiddenPaths = Object.freeze([
 ]);
 
 function caddyPathMatches(pattern, path) {
-  return pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
+  const normalizedPattern = pattern.toLowerCase();
+  const normalizedPath = path.toLowerCase();
+  return normalizedPattern.endsWith("*")
+    ? normalizedPath.startsWith(normalizedPattern.slice(0, -1))
+    : normalizedPath === normalizedPattern;
 }
 
 function caddyHeaderMatches(pattern, value) {
