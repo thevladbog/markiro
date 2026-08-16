@@ -17,6 +17,48 @@ import { registryCredentials } from "./registry-auth.mjs";
 const API_PREFIX = "ghcr.io/thevladbog/markiro-api@";
 const EDGE_PREFIX = "ghcr.io/thevladbog/markiro-edge@";
 
+export const DEPLOYMENT_STAGES = Object.freeze([
+  "configuration",
+  "transfer",
+  "reconcile-host",
+  "runtime-inventory",
+  "runtime-env",
+  "prepare",
+  "smoke",
+  "finalize",
+  "rollback",
+]);
+
+const deploymentStageSet = new Set(DEPLOYMENT_STAGES);
+
+function assertDeploymentStage(stage) {
+  if (typeof stage !== "string" || !deploymentStageSet.has(stage))
+    throw new Error("deployment stage is invalid");
+  return stage;
+}
+
+export class DeploymentStageError extends Error {
+  constructor(stage, options = {}) {
+    super("remote deployment failed", options);
+    this.name = "DeploymentStageError";
+    Object.defineProperty(this, "stage", {
+      configurable: false,
+      enumerable: true,
+      value: assertDeploymentStage(stage),
+      writable: false,
+    });
+  }
+}
+
+export async function atDeploymentStage(stage, operation) {
+  const boundedStage = assertDeploymentStage(stage);
+  try {
+    return await operation();
+  } catch (cause) {
+    throw new DeploymentStageError(boundedStage, { cause });
+  }
+}
+
 function requireFunction(dependencies, name) {
   if (typeof dependencies[name] !== "function")
     throw new Error(`missing deployment dependency: ${name}`);
@@ -148,7 +190,6 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
   await new Promise((resolve, reject) => {
     const spawnChild = options.spawn ?? spawn;
     const timeoutMs = options.timeoutMs ?? 120_000;
-    const writeDiagnostic = options.writeDiagnostic ?? ((value) => process.stderr.write(value));
     let archive;
     let remote;
     let archiveCode;
@@ -168,8 +209,14 @@ export async function streamArchive(tarArguments, sshArguments, options = {}) {
       remote?.stdin.destroy();
       stop(archive);
       stop(remote);
-      writeDiagnostic(`MARKIRO_DEPLOY_FAILURE ${cause}\n`);
-      reject(new Error("private release transfer failed"));
+      const privateCause = new Error("private release transfer cause");
+      Object.defineProperty(privateCause, "code", {
+        configurable: false,
+        enumerable: false,
+        value: cause,
+        writable: false,
+      });
+      reject(new Error("private release transfer failed", { cause: privateCause }));
     };
     const finish = () => {
       if (settled || archiveCode === undefined || remoteCode === undefined) return;
@@ -251,33 +298,36 @@ function parseCandidate(output) {
 }
 
 export async function deployRelease(dependencies, manifestText) {
-  for (const name of [
-    "transferBundle",
-    "reconcileHost",
-    "refreshRuntime",
-    "prepare",
-    "smoke",
-    "finalize",
-    "rollback",
-  ])
-    requireFunction(dependencies, name);
-  const manifest = parseReleaseManifest(manifestText, dependencies.expectedWorkflowRunId);
-  if (manifest.commit !== dependencies.expectedCommit) throw new Error("invalid release manifest");
-  await dependencies.transferBundle(manifest);
-  await dependencies.reconcileHost(manifest);
-  await dependencies.refreshRuntime(manifest);
+  const manifest = await atDeploymentStage("configuration", async () => {
+    for (const name of [
+      "transferBundle",
+      "reconcileHost",
+      "refreshRuntime",
+      "prepare",
+      "smoke",
+      "finalize",
+      "rollback",
+    ])
+      requireFunction(dependencies, name);
+    const parsed = parseReleaseManifest(manifestText, dependencies.expectedWorkflowRunId);
+    if (parsed.commit !== dependencies.expectedCommit) throw new Error("invalid release manifest");
+    return parsed;
+  });
+  await atDeploymentStage("transfer", () => dependencies.transferBundle(manifest));
+  await atDeploymentStage("reconcile-host", () => dependencies.reconcileHost(manifest));
+  await atDeploymentStage("runtime-env", () => dependencies.refreshRuntime(manifest));
   let candidate;
   try {
-    candidate = await dependencies.prepare(manifest);
-    await dependencies.smoke(candidate);
-    return await dependencies.finalize(candidate);
+    candidate = await atDeploymentStage("prepare", () => dependencies.prepare(manifest));
+    await atDeploymentStage("smoke", () => dependencies.smoke(candidate));
+    return await atDeploymentStage("finalize", () => dependencies.finalize(candidate));
   } catch (error) {
-    if (candidate) await dependencies.rollback(candidate);
+    if (candidate) await atDeploymentStage("rollback", () => dependencies.rollback(candidate));
     throw error;
   }
 }
 
-export async function runRemoteDeployment(environment = process.env, supplied = {}) {
+async function runRemoteDeploymentInternal(environment, supplied) {
   const system = {
     readFile,
     stat,
@@ -507,13 +557,33 @@ export async function runRemoteDeployment(environment = process.env, supplied = 
   }
 }
 
+export async function runRemoteDeployment(environment = process.env, supplied = {}) {
+  try {
+    return await runRemoteDeploymentInternal(environment, supplied);
+  } catch (cause) {
+    if (cause instanceof DeploymentStageError) throw cause;
+    throw new DeploymentStageError("configuration", { cause });
+  }
+}
+
+export async function runRemoteDeployCli(options = {}) {
+  const argv = options.argv ?? process.argv.slice(2);
+  const stderr = options.stderr ?? process.stderr;
+  const runDeployment = options.runDeployment ?? runRemoteDeployment;
+  try {
+    if (argv.length !== 1 || argv[0] !== "run") throw new DeploymentStageError("configuration");
+    await runDeployment(options.environment ?? process.env, options.supplied ?? {});
+    return 0;
+  } catch (cause) {
+    const failure =
+      cause instanceof DeploymentStageError
+        ? cause
+        : new DeploymentStageError("configuration", { cause });
+    stderr.write(`MARKIRO_DEPLOY_FAILURE ${failure.stage}\n`);
+    return 1;
+  }
+}
+
 if (isMainModule(import.meta.url)) {
-  if (process.argv[2] !== "run") {
-    process.stderr.write("remote deployment failed\n");
-    process.exitCode = 1;
-  } else
-    runRemoteDeployment().catch(() => {
-      process.stderr.write("remote deployment failed\n");
-      process.exitCode = 1;
-    });
+  process.exitCode = await runRemoteDeployCli();
 }

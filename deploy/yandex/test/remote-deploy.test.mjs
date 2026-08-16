@@ -5,7 +5,15 @@ import path from "node:path";
 import { PassThrough } from "node:stream";
 import test from "node:test";
 
-import { deployRelease, runRemoteDeployment, streamArchive } from "../remote-deploy.mjs";
+import {
+  DEPLOYMENT_STAGES,
+  DeploymentStageError,
+  atDeploymentStage,
+  deployRelease,
+  runRemoteDeployCli,
+  runRemoteDeployment,
+  streamArchive,
+} from "../remote-deploy.mjs";
 
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
 const RUN_ID = "987654321";
@@ -36,6 +44,99 @@ const CANDIDATE = {
   createdAt: "2026-08-09T10:20:30.000Z",
 };
 
+test("deployment diagnostics accept only the closed stage vocabulary", () => {
+  assert.deepEqual(DEPLOYMENT_STAGES, [
+    "configuration",
+    "transfer",
+    "reconcile-host",
+    "runtime-inventory",
+    "runtime-env",
+    "prepare",
+    "smoke",
+    "finalize",
+    "rollback",
+  ]);
+  assert.equal(Object.isFrozen(DEPLOYMENT_STAGES), true);
+  for (const stage of DEPLOYMENT_STAGES) {
+    const error = new DeploymentStageError(stage);
+    assert.equal(error.stage, stage);
+    assert.equal(error.message, "remote deployment failed");
+  }
+  for (const stage of [
+    "",
+    "unknown",
+    " transfer",
+    "transfer ",
+    "transfer\nGHCR_TOKEN=leaked",
+    "LOCKBOX_SECRET_ID=secret-shaped",
+    "x".repeat(1_024),
+  ]) {
+    assert.throws(() => new DeploymentStageError(stage), /deployment stage is invalid/);
+  }
+});
+
+test("deployment stage errors retain their original cause only in memory", async () => {
+  const cause = new Error("remote said token=should-stay-private");
+  await assert.rejects(
+    atDeploymentStage("transfer", async () => {
+      throw cause;
+    }),
+    (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, "transfer");
+      assert.equal(error.message, "remote deployment failed");
+      assert.equal(error.cause, cause);
+      assert.equal(JSON.stringify(error).includes("should-stay-private"), false);
+      return true;
+    },
+  );
+});
+
+test("deploy CLI emits exactly one bounded line and never serializes private causes", async () => {
+  const privateFragments = [
+    "registry-token-value",
+    "/runner/private-identity",
+    "lockbox-id-value",
+    "DATABASE_URL=private-value",
+    '{"candidate":"private-json"}',
+    "remote command said private message",
+  ];
+  const cause = new Error(privateFragments.join(" | "));
+  for (const stage of DEPLOYMENT_STAGES) {
+    let stderr = "";
+    let calls = 0;
+    const exitCode = await runRemoteDeployCli({
+      argv: ["run"],
+      stderr: { write: (value) => (stderr += value) },
+      runDeployment: async () => {
+        calls += 1;
+        throw new DeploymentStageError(stage, { cause });
+      },
+    });
+    assert.equal(calls, 1);
+    assert.equal(exitCode, 1);
+    assert.equal(stderr, `MARKIRO_DEPLOY_FAILURE ${stage}\n`);
+    for (const fragment of privateFragments) assert.equal(stderr.includes(fragment), false);
+  }
+});
+
+test("deploy CLI maps invalid invocation and untyped failures to configuration", async () => {
+  for (const scenario of [
+    { argv: [], runDeployment: async () => assert.fail("must not run") },
+    { argv: ["wrong"], runDeployment: async () => assert.fail("must not run") },
+    { argv: ["run"], runDeployment: async () => Promise.reject(new Error("private")) },
+  ]) {
+    let stderr = "";
+    const exitCode = await runRemoteDeployCli({
+      ...scenario,
+      stderr: { write: (value) => (stderr += value) },
+    });
+    assert.equal(exitCode, 1);
+    assert.equal(stderr, "MARKIRO_DEPLOY_FAILURE configuration\n");
+    assert.equal(stderr.includes("private"), false);
+  }
+});
+
 test("release transfer terminates tar when SSH exits before consuming the archive", async () => {
   const archive = Object.assign(new EventEmitter(), {
     exitCode: null,
@@ -56,14 +157,20 @@ test("release transfer terminates tar when SSH exits before consuming the archiv
     },
   });
   const children = [archive, remote];
+  const diagnostics = [];
   const transfer = streamArchive(["-cf", "-"], ["host", "tar"], {
     spawn: () => children.shift(),
     timeoutMs: 1_000,
-    writeDiagnostic: () => undefined,
+    writeDiagnostic: (value) => diagnostics.push(value),
   });
   remote.exitCode = 255;
   remote.emit("close", 255);
-  await assert.rejects(transfer, /private release transfer failed/);
+  await assert.rejects(transfer, (error) => {
+    assert.equal(error.message, "private release transfer failed");
+    assert.equal(error.cause?.code, "ssh-exit");
+    return true;
+  });
+  assert.deepEqual(diagnostics, []);
   assert.equal(archive.killCalled, true);
   assert.equal(archive.stdout.destroyed, true);
 });
@@ -151,9 +258,82 @@ test("direct deployment rolls back once after a post-prepare failure", async () 
       },
       MANIFEST,
     ),
-    /smoke failed/,
+    (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, "smoke");
+      assert.equal(error.message, "remote deployment failed");
+      assert.equal(error.cause?.message, "smoke failed");
+      return true;
+    },
   );
   assert.deepEqual(events, ["transfer", "host-assets", "runtime", "smoke", "rollback"]);
+});
+
+test("direct deployment preserves the exact failing boundary as a typed stage", async () => {
+  const cases = [
+    ["transferBundle", "transfer"],
+    ["reconcileHost", "reconcile-host"],
+    ["refreshRuntime", "runtime-env"],
+    ["prepare", "prepare"],
+    ["smoke", "smoke"],
+    ["finalize", "finalize"],
+  ];
+  for (const [failingOperation, expectedStage] of cases) {
+    const secretCause = new Error(`private-${expectedStage}-detail`);
+    const dependencies = {
+      expectedWorkflowRunId: RUN_ID,
+      expectedCommit: COMMIT,
+      transferBundle: async () => undefined,
+      reconcileHost: async () => undefined,
+      refreshRuntime: async () => undefined,
+      prepare: async () => CANDIDATE,
+      smoke: async () => undefined,
+      finalize: async () => ({ ...CANDIDATE, state: "healthy" }),
+      rollback: async () => undefined,
+    };
+    dependencies[failingOperation] = async () => {
+      throw secretCause;
+    };
+    await assert.rejects(deployRelease(dependencies, MANIFEST), (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, expectedStage);
+      assert.equal(error.cause, secretCause);
+      assert.equal(error.message, "remote deployment failed");
+      return true;
+    });
+  }
+});
+
+test("rollback failure is reported as rollback without exposing either private failure", async () => {
+  const smokeCause = new Error("private-smoke-detail");
+  const rollbackCause = new Error("private-rollback-detail");
+  await assert.rejects(
+    deployRelease(
+      {
+        expectedWorkflowRunId: RUN_ID,
+        expectedCommit: COMMIT,
+        transferBundle: async () => undefined,
+        reconcileHost: async () => undefined,
+        refreshRuntime: async () => undefined,
+        prepare: async () => CANDIDATE,
+        smoke: async () => {
+          throw smokeCause;
+        },
+        finalize: async () => undefined,
+        rollback: async () => {
+          throw rollbackCause;
+        },
+      },
+      MANIFEST,
+    ),
+    (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, "rollback");
+      assert.equal(error.cause, rollbackCause);
+      assert.equal(String(error).includes("private"), false);
+      return true;
+    },
+  );
 });
 
 function environment(overrides = {}) {
@@ -298,7 +478,12 @@ for (const [name, overrides] of [
 ]) {
   test(`direct adapter rejects invalid ${name} configuration before transfer`, async () => {
     const fixture = systemFixture();
-    await assert.rejects(runRemoteDeployment(environment(overrides), fixture.system));
+    await assert.rejects(runRemoteDeployment(environment(overrides), fixture.system), (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, "configuration");
+      assert.equal(error.message, "remote deployment failed");
+      return true;
+    });
     assert.equal(fixture.events.includes("transfer"), false);
   });
 }

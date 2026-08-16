@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
@@ -102,4 +103,19 @@ test("direct deploy workflow rejects automatic, unpinned and credential-unsafe m
     assert.notEqual(mutation, source, `${name} mutation must change the workflow`);
     assert.throws(() => assertDirectDeployWorkflow(mutation), undefined, name);
   }
+});
+
+test("remote deploy executable emits one bounded configuration diagnostic", () => {
+  const executable = new URL("../remote-deploy.mjs", import.meta.url);
+  const privateValue = "should-never-appear-from-hosted-runner";
+  const result = spawnSync(process.execPath, [executable.pathname, "run"], {
+    encoding: "utf8",
+    env: {
+      RELEASE_MANIFEST_PATH: `/runner/${privateValue}.json`,
+    },
+  });
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "MARKIRO_DEPLOY_FAILURE configuration\n");
+  assert.equal(`${result.stdout}${result.stderr}`.includes(privateValue), false);
 });
