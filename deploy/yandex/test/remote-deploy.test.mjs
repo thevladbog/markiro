@@ -219,6 +219,7 @@ test("direct deployment transfers, prepares, smokes and finalizes without a clou
       expectedWorkflowRunId: RUN_ID,
       expectedCommit: COMMIT,
       transferBundle: async () => events.push("transfer"),
+      verifyRuntimeInventory: async () => events.push("runtime-inventory"),
       reconcileHost: async () => events.push("host-assets"),
       refreshRuntime: async () => events.push("runtime"),
       prepare: async () => {
@@ -234,7 +235,15 @@ test("direct deployment transfers, prepares, smokes and finalizes without a clou
     },
     MANIFEST,
   );
-  assert.deepEqual(events, ["transfer", "host-assets", "runtime", "prepare", "smoke", "finalize"]);
+  assert.deepEqual(events, [
+    "transfer",
+    "runtime-inventory",
+    "host-assets",
+    "runtime",
+    "prepare",
+    "smoke",
+    "finalize",
+  ]);
   assert.equal(result.state, "healthy");
 });
 
@@ -246,6 +255,7 @@ test("direct deployment rolls back once after a post-prepare failure", async () 
         expectedWorkflowRunId: RUN_ID,
         expectedCommit: COMMIT,
         transferBundle: async () => events.push("transfer"),
+        verifyRuntimeInventory: async () => events.push("runtime-inventory"),
         reconcileHost: async () => events.push("host-assets"),
         refreshRuntime: async () => events.push("runtime"),
         prepare: async () => CANDIDATE,
@@ -266,32 +276,130 @@ test("direct deployment rolls back once after a post-prepare failure", async () 
       return true;
     },
   );
-  assert.deepEqual(events, ["transfer", "host-assets", "runtime", "smoke", "rollback"]);
+  assert.deepEqual(events, [
+    "transfer",
+    "runtime-inventory",
+    "host-assets",
+    "runtime",
+    "smoke",
+    "rollback",
+  ]);
+});
+
+test("runtime inventory mismatch stops before every remote mutation", async () => {
+  const events = [];
+  const inventoryCause = new Error("private-lockbox-inventory-detail");
+  const mutations = [
+    "reconcile-host",
+    "runtime-env",
+    "prepare",
+    "smoke",
+    "finalize",
+    "rollback",
+    "active-release",
+    "service-command",
+  ];
+  const mutation = (name) => async () => events.push(name);
+
+  await assert.rejects(
+    deployRelease(
+      {
+        expectedWorkflowRunId: RUN_ID,
+        expectedCommit: COMMIT,
+        transferBundle: async () => events.push("transfer"),
+        verifyRuntimeInventory: async () => {
+          events.push("runtime-inventory");
+          throw inventoryCause;
+        },
+        reconcileHost: mutation("reconcile-host"),
+        refreshRuntime: mutation("runtime-env"),
+        prepare: mutation("prepare"),
+        smoke: mutation("smoke"),
+        finalize: mutation("finalize"),
+        rollback: mutation("rollback"),
+      },
+      MANIFEST,
+    ),
+    (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, "runtime-inventory");
+      assert.equal(error.cause, inventoryCause);
+      return true;
+    },
+  );
+  assert.deepEqual(events, ["transfer", "runtime-inventory"]);
+  assert.equal(
+    events.some((event) => mutations.includes(event)),
+    false,
+  );
 });
 
 test("direct deployment preserves the exact failing boundary as a typed stage", async () => {
   const cases = [
-    ["transferBundle", "transfer"],
-    ["reconcileHost", "reconcile-host"],
-    ["refreshRuntime", "runtime-env"],
-    ["prepare", "prepare"],
-    ["smoke", "smoke"],
-    ["finalize", "finalize"],
+    ["transferBundle", "transfer", ["transfer"]],
+    ["verifyRuntimeInventory", "runtime-inventory", ["transfer", "runtime-inventory"]],
+    ["reconcileHost", "reconcile-host", ["transfer", "runtime-inventory", "reconcile-host"]],
+    [
+      "refreshRuntime",
+      "runtime-env",
+      ["transfer", "runtime-inventory", "reconcile-host", "runtime-env"],
+    ],
+    [
+      "prepare",
+      "prepare",
+      ["transfer", "runtime-inventory", "reconcile-host", "runtime-env", "prepare"],
+    ],
+    [
+      "smoke",
+      "smoke",
+      [
+        "transfer",
+        "runtime-inventory",
+        "reconcile-host",
+        "runtime-env",
+        "prepare",
+        "smoke",
+        "rollback",
+      ],
+    ],
+    [
+      "finalize",
+      "finalize",
+      [
+        "transfer",
+        "runtime-inventory",
+        "reconcile-host",
+        "runtime-env",
+        "prepare",
+        "smoke",
+        "finalize",
+        "rollback",
+      ],
+    ],
   ];
-  for (const [failingOperation, expectedStage] of cases) {
+  for (const [failingOperation, expectedStage, expectedEvents] of cases) {
+    const events = [];
     const secretCause = new Error(`private-${expectedStage}-detail`);
     const dependencies = {
       expectedWorkflowRunId: RUN_ID,
       expectedCommit: COMMIT,
-      transferBundle: async () => undefined,
-      reconcileHost: async () => undefined,
-      refreshRuntime: async () => undefined,
-      prepare: async () => CANDIDATE,
-      smoke: async () => undefined,
-      finalize: async () => ({ ...CANDIDATE, state: "healthy" }),
-      rollback: async () => undefined,
+      transferBundle: async () => events.push("transfer"),
+      verifyRuntimeInventory: async () => events.push("runtime-inventory"),
+      reconcileHost: async () => events.push("reconcile-host"),
+      refreshRuntime: async () => events.push("runtime-env"),
+      prepare: async () => {
+        events.push("prepare");
+        return CANDIDATE;
+      },
+      smoke: async () => events.push("smoke"),
+      finalize: async () => {
+        events.push("finalize");
+        return { ...CANDIDATE, state: "healthy" };
+      },
+      rollback: async () => events.push("rollback"),
     };
     dependencies[failingOperation] = async () => {
+      events.push(expectedStage);
       throw secretCause;
     };
     await assert.rejects(deployRelease(dependencies, MANIFEST), (error) => {
@@ -301,6 +409,7 @@ test("direct deployment preserves the exact failing boundary as a typed stage", 
       assert.equal(error.message, "remote deployment failed");
       return true;
     });
+    assert.deepEqual(events, expectedEvents, failingOperation);
   }
 });
 
@@ -313,6 +422,7 @@ test("rollback failure is reported as rollback without exposing either private f
         expectedWorkflowRunId: RUN_ID,
         expectedCommit: COMMIT,
         transferBundle: async () => undefined,
+        verifyRuntimeInventory: async () => undefined,
         reconcileHost: async () => undefined,
         refreshRuntime: async () => undefined,
         prepare: async () => CANDIDATE,
@@ -329,7 +439,13 @@ test("rollback failure is reported as rollback without exposing either private f
     (error) => {
       assert.ok(error instanceof DeploymentStageError);
       assert.equal(error.stage, "rollback");
-      assert.equal(error.cause, rollbackCause);
+      assert.equal(error.cause?.rollbackCause, rollbackCause);
+      assert.ok(error.cause?.rollbackFailure instanceof DeploymentStageError);
+      assert.equal(error.cause.rollbackFailure.stage, "rollback");
+      assert.ok(error.cause?.originalFailure instanceof DeploymentStageError);
+      assert.equal(error.cause.originalFailure.stage, "smoke");
+      assert.equal(error.cause.originalFailure.cause, smokeCause);
+      assert.equal(JSON.stringify(error).includes("private"), false);
       assert.equal(String(error).includes("private"), false);
       return true;
     },
@@ -399,6 +515,23 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   assert.ok(ssh.args.includes("markiro-deploy@203.0.113.44"));
   assert.ok(ssh.args.includes("StrictHostKeyChecking=yes"));
   assert.ok(ssh.args.includes("/runner/markiro-deploy-key"));
+  const inventory = fixture.commands.find(({ args }) => args.includes("verify-inventory"));
+  assert.ok(inventory, "candidate runtime inventory must be verified");
+  assert.deepEqual(inventory.args.slice(-4), [
+    "/usr/bin/node",
+    "deploy/yandex/runtime-env.mjs",
+    "verify-inventory",
+    `/opt/markiro/releases/${COMMIT}/.env.production.example`,
+  ]);
+  assert.ok(inventory.args.includes("--property=EnvironmentFile=/etc/markiro/runtime-secret-id"));
+  assert.ok(inventory.args.includes(`--working-directory=/opt/markiro/releases/${COMMIT}`));
+  assert.equal(inventory.args.includes("/usr/bin/bash"), false);
+  assert.equal(inventory.args.includes("-c"), false);
+  assert.equal(
+    inventory.args.some((arg) => arg.includes("production.env")),
+    false,
+  );
+  assert.equal(inventory.input, undefined);
   const prepare = fixture.commands.find(({ args }) => args.includes("prepare"));
   assert.match(prepare.input, /GHCR_USERNAME/);
   assert.match(prepare.input, /GHCR_TOKEN/);
@@ -430,6 +563,10 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   );
   assert.match(reconcileScript, /systemd-tmpfiles --create/);
   assert.ok(
+    fixture.commands.indexOf(inventory) < fixture.commands.indexOf(hostAssets),
+    "runtime inventory must be verified before host reconciliation",
+  );
+  assert.ok(
     fixture.commands.indexOf(hostAssets) < fixture.commands.indexOf(prepare),
     "host assets must be reconciled before the first deploy stage",
   );
@@ -444,8 +581,13 @@ test("direct stages use fresh transient units with explicit runtime environment 
   await runRemoteDeployment(environment(), fixture.system);
 
   const stages = fixture.commands.filter(({ args }) => args.includes("/usr/bin/systemd-run"));
-  assert.equal(stages.length, 2);
-  for (const { args } of stages) {
+  assert.equal(stages.length, 3);
+  const inventory = stages.find(({ args }) => args.includes("verify-inventory"));
+  assert.ok(inventory);
+  assert.ok(inventory.args.includes("--property=EnvironmentFile=/etc/markiro/runtime-secret-id"));
+  assert.equal(inventory.args.includes("--property=Requires=markiro-runtime-env.service"), false);
+  assert.equal(inventory.args.includes("--property=After=markiro-runtime-env.service"), false);
+  for (const { args } of stages.filter(({ args }) => !args.includes("verify-inventory"))) {
     assert.equal(
       args.some((argument) => argument.startsWith("--unit=")),
       false,
@@ -453,6 +595,34 @@ test("direct stages use fresh transient units with explicit runtime environment 
     assert.ok(args.includes("--property=Requires=markiro-runtime-env.service"));
     assert.ok(args.includes("--property=After=markiro-runtime-env.service"));
   }
+});
+
+test("real adapter inventory mismatch executes no reconciliation, service, deploy, or activation command", async () => {
+  const fixture = systemFixture();
+  const originalRun = fixture.system.run;
+  let inventoryCalls = 0;
+  fixture.system.run = async (command, args, options) => {
+    if (args.includes("verify-inventory")) {
+      inventoryCalls += 1;
+      throw new Error("private-inventory-mismatch");
+    }
+    return originalRun(command, args, options);
+  };
+
+  await assert.rejects(runRemoteDeployment(environment(), fixture.system), (error) => {
+    assert.ok(error instanceof DeploymentStageError);
+    assert.equal(error.stage, "runtime-inventory");
+    return true;
+  });
+  assert.equal(inventoryCalls, 1);
+  const remoteArgs = fixture.commands.flatMap(({ args }) => args);
+  assert.equal(remoteArgs.includes("markiro-host-assets"), false);
+  assert.equal(remoteArgs.includes("restart"), false);
+  assert.equal(remoteArgs.includes("prepare"), false);
+  assert.equal(remoteArgs.includes("finalize"), false);
+  assert.equal(remoteArgs.includes("rollback"), false);
+  assert.equal(remoteArgs.includes("/opt/markiro/active-release"), false);
+  assert.equal(fixture.events.includes("smoke"), false);
 });
 
 test("direct deployment passes the approved landing submission state to public smoke", async () => {

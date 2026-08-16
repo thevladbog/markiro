@@ -301,6 +301,7 @@ export async function deployRelease(dependencies, manifestText) {
   const manifest = await atDeploymentStage("configuration", async () => {
     for (const name of [
       "transferBundle",
+      "verifyRuntimeInventory",
       "reconcileHost",
       "refreshRuntime",
       "prepare",
@@ -314,6 +315,7 @@ export async function deployRelease(dependencies, manifestText) {
     return parsed;
   });
   await atDeploymentStage("transfer", () => dependencies.transferBundle(manifest));
+  await atDeploymentStage("runtime-inventory", () => dependencies.verifyRuntimeInventory(manifest));
   await atDeploymentStage("reconcile-host", () => dependencies.reconcileHost(manifest));
   await atDeploymentStage("runtime-env", () => dependencies.refreshRuntime(manifest));
   let candidate;
@@ -322,7 +324,34 @@ export async function deployRelease(dependencies, manifestText) {
     await atDeploymentStage("smoke", () => dependencies.smoke(candidate));
     return await atDeploymentStage("finalize", () => dependencies.finalize(candidate));
   } catch (error) {
-    if (candidate) await atDeploymentStage("rollback", () => dependencies.rollback(candidate));
+    if (candidate) {
+      try {
+        await atDeploymentStage("rollback", () => dependencies.rollback(candidate));
+      } catch (rollbackFailure) {
+        const privateCause = new Error("private rollback failure context");
+        Object.defineProperties(privateCause, {
+          originalFailure: {
+            configurable: false,
+            enumerable: false,
+            value: error,
+            writable: false,
+          },
+          rollbackCause: {
+            configurable: false,
+            enumerable: false,
+            value: rollbackFailure.cause,
+            writable: false,
+          },
+          rollbackFailure: {
+            configurable: false,
+            enumerable: false,
+            value: rollbackFailure,
+            writable: false,
+          },
+        });
+        throw new DeploymentStageError("rollback", { cause: privateCause });
+      }
+    }
     throw error;
   }
 }
@@ -506,6 +535,22 @@ async function runRemoteDeploymentInternal(environment, supplied) {
             [...sshBase, "sudo", "tar", "-xf", "-", "-C", "/opt/markiro", "--no-same-owner"],
           );
         },
+        verifyRuntimeInventory: () =>
+          system.run("ssh", [
+            ...sshBase,
+            "sudo",
+            "/usr/bin/systemd-run",
+            "--quiet",
+            "--wait",
+            "--pipe",
+            "--collect",
+            "--property=EnvironmentFile=/etc/markiro/runtime-secret-id",
+            `--working-directory=${releaseDirectory}`,
+            "/usr/bin/node",
+            "deploy/yandex/runtime-env.mjs",
+            "verify-inventory",
+            `${releaseDirectory}/.env.production.example`,
+          ]),
         reconcileHost: () =>
           system.run("ssh", [
             ...sshBase,
