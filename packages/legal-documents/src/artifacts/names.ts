@@ -1,11 +1,12 @@
 import { findLegalRelease } from "../registry.js";
+import { legalRevisionFileToken, legalVerificationUrl, type LegalRevision } from "../identity.js";
 import type { LegalDocumentCode, LegalLocale } from "../types.js";
 
 export type LegalArtifactKind = "legal-pdf" | "template-docx";
 
 export interface LegalArtifactRequest {
   readonly code: LegalDocumentCode;
-  readonly revision: string;
+  readonly revision: LegalRevision;
   readonly effectiveDate: string;
   readonly locale: LegalLocale;
   readonly kind: LegalArtifactKind;
@@ -41,7 +42,7 @@ export function assertLegalArtifactRequest(input: LegalArtifactRequest): void {
     throw new Error(`Legal artifact is not a downloadable template: ${input.code}`);
   }
 
-  const expectedUrl = `https://markiro.app/d/${input.code}/${input.revision}/${input.effectiveDate}`;
+  const expectedUrl = legalVerificationUrl(release);
   if (input.verificationUrl !== expectedUrl) {
     throw new Error(`Invalid legal artifact verification URL: ${input.verificationUrl}`);
   }
@@ -50,5 +51,5 @@ export function assertLegalArtifactRequest(input: LegalArtifactRequest): void {
 export function artifactFileName(input: LegalArtifactRequest): string {
   assertLegalArtifactRequest(input);
   const extension = input.kind === "template-docx" ? "docx" : "pdf";
-  return `markiro_${input.code.toLowerCase()}_${input.revision}_${input.locale}.${extension}`;
+  return `markiro_${input.code.toLowerCase()}_${legalRevisionFileToken(input.revision)}_${input.locale}.${extension}`;
 }

@@ -11,6 +11,32 @@
 5. Эта возможность не подключает внешнюю CRM; любое CRM forwarding требует отдельного контракта, privacy review и release gate.
 6. Сохранить release SHA, время и обезличенный результат каждого гейта. Code deploy, юридическое одобрение, Postbox/DNS, SmartCaptcha, контролируемая доставка, публичное включение, monitoring и rollback остаются отдельными наблюдаемыми решениями.
 
+## Ограниченная диагностика Deploy production
+
+При остановке workflow доверять только последней строке вида `MARKIRO_DEPLOY_FAILURE <stage>`. В публичном контракте допустимы ровно девять stage; сообщение не содержит причину, имена файлов, идентификаторы секретов, значения окружения или удалённый вывод. Значения секретов нельзя добавлять в команды, логи, issue, комментарии workflow или отчёты даже при ручном разборе.
+
+Порядок стадий и ограниченное действие оператора:
+
+1. `MARKIRO_DEPLOY_FAILURE configuration` — проверить наличие требуемых **имён** GitHub environment values, точный release SHA и настроенный pinned SSH host key. Не ослаблять host-key verification и не выводить значения; после исправления повторно запустить тот же failed deployment.
+2. `MARKIRO_DEPLOY_FAILURE transfer` — проверить доступность VM, свободное место и совпадение pinned host key с отдельным доверенным источником. Не заменять immutable bundle и не создавать новый release; повторно запустить тот же failed deployment.
+3. `MARKIRO_DEPLOY_FAILURE runtime-inventory` — кандидат уже передан, но read-only probe сравнил только имена ключей. Эта проверка выполняется до `reconcile-host` и до изменений unit-файлов, runtime environment, базы данных, контейнеров, сервисов или active release. Выполнить процедуру раздела «Восстановление после `runtime-inventory`» ниже.
+4. `MARKIRO_DEPLOY_FAILURE reconcile-host` — проверить утверждённый host contract и состояние reconciliation unit, не обходя его ad-hoc командами. После восстановления контракта повторно запустить тот же failed deployment.
+5. `MARKIRO_DEPLOY_FAILURE runtime-env` — проверить доступ VM service account к metadata и Lockbox и состояние штатного materialization unit. Не читать и не печатать payload; после восстановления доступа повторно запустить тот же failed deployment.
+6. `MARKIRO_DEPLOY_FAILURE prepare` — проверить наличие образов для того же release SHA, job-scoped registry access и обезличенный результат preparation/migration. Не переносить registry credentials в issue или постоянные файлы; повторно запустить тот же failed deployment.
+7. `MARKIRO_DEPLOY_FAILURE smoke` — сохранить предыдущий active release, проверить readiness и точные публичные routes по production smoke runbook. После устранения причины повторно запустить тот же failed deployment; новый образ без отдельного решения не собирать.
+8. `MARKIRO_DEPLOY_FAILURE finalize` — сверить candidate и active release по точному SHA и проверить штатный finalize contract. Не редактировать release record вручную; повторно запустить тот же failed deployment.
+9. `MARKIRO_DEPLOY_FAILURE rollback` — автоматическое восстановление не подтверждено. Остановить повторные запуски, сохранить предыдущий active release и запросить отдельное одобрение на ручное восстановление; не удалять candidate, release records или durable data.
+
+### Восстановление после `runtime-inventory`
+
+1. Из committed `.env.production.example` получить отсортированный список: только имена ключей, без `=` и значений.
+2. Для активной версии Lockbox получить тем же безопасным способом только имена ключей. Не выгружать payload в terminal, CI output или временный файл и не копировать значения секретов в логи, issue, чат или evidence.
+3. Сравнить два набора имён: каждый ключ должен встречаться ровно один раз, лишних и пропущенных имён быть не должно. Значения не сравнивать и не записывать.
+4. При расхождении создать новую версию Lockbox с исправленным набором имён штатным защищённым процессом. Предыдущую версию не удалять: сохранить возможность восстановить её отдельным одобренным действием. В операционном evidence фиксировать только release SHA, время, результат сравнения имён и непривилегированный идентификатор версии, если он разрешён принятой политикой.
+5. После подтверждения набора имён повторно запустить тот же failed deployment для того же immutable release SHA. Не запускать reconcile, materialization, migration или service commands вручную и не подменять этот повтор новым deploy-кандидатом.
+
+`runtime-inventory` доказывает только совпадение набора имён. `runtime-inventory` не доказывает SMTP delivery. `runtime-inventory` не доказывает captcha validity. `runtime-inventory` не доказывает database connectivity. `runtime-inventory` не доказывает application health. Эти проверки остаются отдельными release gates.
+
 ## Внешняя приёмка юридических документов и файлов
 
 До включения формы завести датированную карточку evidence, не содержащую персональные данные посетителей и секреты. В ней должны быть отдельные результаты следующих гейтов:

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import * as legalDocuments from "../src/index.js";
 import {
   artifactFileName,
-  describeLegalArtifact,
   renderLegalDocx,
   type LegalArtifactRequest,
 } from "../src/artifacts/index.js";
@@ -13,38 +12,38 @@ import { normalizeCorePropertyTimestamps, normalizeZipDates } from "../src/artif
 
 const PRIVACY_REQUEST = {
   code: "MKR-PD-01",
-  revision: "2026.08.01",
+  revision: "2026.08/01",
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "legal-pdf",
-  verificationUrl: "https://markiro.app/d/MKR-PD-01/2026.08.01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-PD-01/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const LETTERHEAD_REQUEST = {
   code: "MKR-BRD-01",
-  revision: "2026.08.01",
+  revision: "2026.08/01",
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "template-docx",
-  verificationUrl: "https://markiro.app/d/MKR-BRD-01/2026.08.01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const DPA_REQUEST = {
   code: "MKR-DPA-01",
-  revision: "2026.08.01",
+  revision: "2026.08/01",
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "template-docx",
-  verificationUrl: "https://markiro.app/d/MKR-DPA-01/2026.08.01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-DPA-01/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const CONSENT_REQUEST = {
   code: "MKR-PD-02",
-  revision: "2026.08.01",
+  revision: "2026.08/01",
   effectiveDate: "2026-08-15",
   locale: "ru",
   kind: "legal-pdf",
-  verificationUrl: "https://markiro.app/d/MKR-PD-02/2026.08.01/2026-08-15",
+  verificationUrl: "https://markiro.app/d/MKR-PD-02/2026.08/01/15.08.2026",
 } as const satisfies LegalArtifactRequest;
 
 const decoder = new TextDecoder();
@@ -59,11 +58,33 @@ function xml(entries: Record<string, Uint8Array>, name: string): string {
   return decoder.decode(value);
 }
 
-function joinedXml(entries: Record<string, Uint8Array>, prefix: string): string {
+function xmlParts(entries: Record<string, Uint8Array>, prefix: string): readonly string[] {
   return Object.entries(entries)
     .filter(([name]) => name.startsWith(prefix) && name.endsWith(".xml"))
-    .map(([, value]) => decoder.decode(value))
-    .join("\n");
+    .map(([, value]) => decoder.decode(value));
+}
+
+function xmlElements(value: string, qualifiedName: string): readonly string[] {
+  return [
+    ...value.matchAll(
+      new RegExp(`<${qualifiedName}(?: [^>]*)?>[\\s\\S]*?</${qualifiedName}>`, "g"),
+    ),
+  ].map(([element]) => element);
+}
+
+function visibleXmlText(value: string): string {
+  return [...value.matchAll(/>([^<]*)/g)].map(([, text]) => text).join("");
+}
+
+function expectCenteredPaddedCells(value: string): void {
+  const cells = xmlElements(value, "w:tc");
+  expect(cells).not.toHaveLength(0);
+  for (const cell of cells) {
+    expect(cell).toContain('<w:vAlign w:val="center"/>');
+    expect(cell).toMatch(
+      /<w:tcMar><w:top w:type="dxa" w:w="\d+"\/><w:left w:type="dxa" w:w="\d+"\/><w:bottom w:type="dxa" w:w="\d+"\/><w:right w:type="dxa" w:w="\d+"\/><\/w:tcMar>/,
+    );
+  }
 }
 
 interface TestCentralRecord {
@@ -145,15 +166,17 @@ function svgPath(svg: string): string {
 }
 
 describe("legal artifact descriptors", () => {
-  it("derives stable lowercase release file names", () => {
-    expect(artifactFileName(PRIVACY_REQUEST)).toBe("markiro_mkr-pd-01_2026.08.01_ru.pdf");
-    expect(artifactFileName(LETTERHEAD_REQUEST)).toBe("markiro_mkr-brd-01_2026.08.01_ru.docx");
-    expect(artifactFileName(DPA_REQUEST)).toBe("markiro_mkr-dpa-01_2026.08.01_ru.docx");
-    expect(describeLegalArtifact(LETTERHEAD_REQUEST)).toEqual({
-      ...LETTERHEAD_REQUEST,
-      fileName: "markiro_mkr-brd-01_2026.08.01_ru.docx",
-    });
+  it("uses the canonical revision file token in PDF and DOCX names", () => {
+    expect(artifactFileName(PRIVACY_REQUEST)).toBe("markiro_mkr-pd-01_2026.08-01_ru.pdf");
+    expect(artifactFileName(LETTERHEAD_REQUEST)).toBe("markiro_mkr-brd-01_2026.08-01_ru.docx");
   });
+
+  it.each([PRIVACY_REQUEST, LETTERHEAD_REQUEST, DPA_REQUEST, CONSENT_REQUEST])(
+    "never exposes the $code revision slash in an artifact file name",
+    (request) => {
+      expect(artifactFileName(request)).not.toContain("/");
+    },
+  );
 
   it.each([
     [{ ...PRIVACY_REQUEST, locale: "RU" }, "locale"],
@@ -198,8 +221,10 @@ describe("deterministic branded DOCX", () => {
     const bytes = await renderLegalDocx(PRIVACY_REQUEST);
     const entries = docxEntries(bytes);
     const documentXml = xml(entries, "word/document.xml");
-    const headerXml = joinedXml(entries, "word/header");
-    const footerXml = joinedXml(entries, "word/footer");
+    const headerXmls = xmlParts(entries, "word/header");
+    const footerXmls = xmlParts(entries, "word/footer");
+    const headerXml = headerXmls.join("\n");
+    const footerXml = footerXmls.join("\n");
     const relationshipsXml = Object.entries(entries)
       .filter(([name]) => name.includes("_rels/") && name.endsWith(".rels"))
       .map(([, value]) => decoder.decode(value))
@@ -220,11 +245,38 @@ describe("deterministic branded DOCX", () => {
     const dataMatrixSvg = mediaSvgs.find((value) => value.includes('fill="#FFFFFF"'));
 
     expect(documentXml).toContain("Политика обработки персональных данных");
-    expect(headerXml).toContain("маркиро");
-    expect(footerXml).toContain("MKR-PD-01");
-    expect(footerXml).toContain("2026.08.01");
-    expect(footerXml).toContain("PAGE");
-    expect(footerXml).toContain(PRIVACY_REQUEST.verificationUrl);
+    const identity = "ПУБЛИЧНЫЙ ДОКУМЕНТ · MKR-PD-01 · 2026.08/01";
+    expect(headerXmls).toHaveLength(2);
+    for (const part of headerXmls) {
+      expect(part).toContain("маркиро");
+      expect(xmlElements(part, "w:p").map(visibleXmlText)).toContain(identity);
+      expect(part).toContain(
+        '<w:tblGrid><w:gridCol w:w="5103"/><w:gridCol w:w="4535"/></w:tblGrid>',
+      );
+      const cells = xmlElements(part, "w:tc");
+      expect(cells).toHaveLength(2);
+      expect(cells[0]).not.toContain("<w:noWrap/>");
+      expect(cells[1]).toContain("<w:noWrap/>");
+      expect(part.match(/<w:noWrap\/>/g)).toHaveLength(1);
+      expect(part).not.toContain("<w:br");
+      expect(part).not.toContain("<w:wordWrap");
+      expect(part).not.toContain(PRIVACY_REQUEST.verificationUrl);
+      expectCenteredPaddedCells(part);
+    }
+    expect(footerXmls).toHaveLength(2);
+    for (const part of footerXmls) {
+      expect(part).toContain("MKR-PD-01 · 2026.08/01 · 15.08.2026 · Страница ");
+      expect(part).toContain("PAGE");
+      expect(part).toContain('descr="Verification Data Matrix"');
+      expect(part).not.toContain(PRIVACY_REQUEST.verificationUrl);
+      const cells = xmlElements(part, "w:tc");
+      expect(cells).toHaveLength(2);
+      expect(cells[0]).not.toContain("<w:noWrap/>");
+      expect(cells[1]).toContain("<w:noWrap/>");
+      expect(part.match(/<w:noWrap\/>/g)).toHaveLength(1);
+      expect(part).not.toContain("<w:wordWrap");
+      expectCenteredPaddedCells(part);
+    }
     expect(mediaNames).not.toMatch(/signature|seal|stamp/i);
     expect(allXml).not.toMatch(/Роскомнадзор.*уведомлени[ея] подан/i);
     expect(allXml).not.toContain("ШАБЛОН — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ");
@@ -248,10 +300,16 @@ describe("deterministic branded DOCX", () => {
     expect(documentXml).toMatch(
       /<w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="284" w:footer="284"[^>]*\/>/,
     );
-    expect(headerXml).toContain('<w:trHeight w:val="680" w:hRule="exact"/>');
-    expect(headerXml).toContain('<w:trHeight w:val="510" w:hRule="exact"/>');
-    expect(footerXml).toContain('<w:trHeight w:val="907" w:hRule="exact"/>');
-    expect(footerXml).toContain('<w:trHeight w:val="794" w:hRule="exact"/>');
+    const headerHeights = [
+      ...headerXml.matchAll(/<w:trHeight w:val="(\d+)" w:hRule="atLeast"\/>/g),
+    ].map(([, value]) => Number(value));
+    const footerHeights = [
+      ...footerXml.matchAll(/<w:trHeight w:val="(\d+)" w:hRule="atLeast"\/>/g),
+    ].map(([, value]) => Number(value));
+    expect(headerHeights).toHaveLength(2);
+    expect(Math.max(...headerHeights)).toBeLessThanOrEqual(520);
+    expect(footerHeights).toHaveLength(2);
+    expect(Math.max(...footerHeights)).toBeLessThanOrEqual(620);
     expect(footerXml).toMatch(/<w:spacing(?=[^>]*w:before="0")(?=[^>]*w:after="0")[^>]*\/>/);
 
     expect(stylesXml).toContain('w:ascii="IBM Plex Sans"');
@@ -262,6 +320,22 @@ describe("deterministic branded DOCX", () => {
     expect(documentXml).toMatch(
       /<w:tblGrid><w:gridCol w:w="2835"\/><w:gridCol w:w="6803"\/><\/w:tblGrid>/,
     );
+    const metadataTable = xmlElements(documentXml, "w:tbl").find((table) =>
+      table.includes(PRIVACY_REQUEST.verificationUrl),
+    );
+    if (!metadataTable) throw new Error("Missing first-page verification metadata table");
+    expect(metadataTable).toContain("Редакция");
+    expect(metadataTable).toContain("2026.08/01");
+    expect(metadataTable).toContain("Действует с");
+    expect(metadataTable).toContain("15.08.2026");
+    expect(metadataTable).toContain("Проверка редакции");
+    expect(metadataTable).toContain(PRIVACY_REQUEST.verificationUrl);
+    expect(metadataTable).not.toContain("<w:trHeight");
+    expect(documentXml.match(new RegExp(PRIVACY_REQUEST.verificationUrl, "g"))).toHaveLength(1);
+    expect(documentXml).toMatch(
+      /<w:r><w:rPr><w:b\/><w:bCs\/><\/w:rPr><w:t xml:space="preserve">Персональные данные<\/w:t><\/w:r><w:r><w:t xml:space="preserve"> — <\/w:t><\/w:r>/,
+    );
+    expect(documentXml).not.toContain("Персональные данные. ");
     expect(allXml).toContain('descr="Markiro symbol"');
     expect(allXml).toContain('descr="Verification Data Matrix"');
     expect(markSvg?.match(/<rect /g)).toHaveLength(9);
@@ -285,6 +359,30 @@ describe("deterministic branded DOCX", () => {
 
     expect(coreXml).toContain("2026-08-15T00:00:00Z");
     expect(coreXml.match(/2026-08-15T00:00:00Z/g)).toHaveLength(2);
+  });
+
+  it("localizes English metadata and footer identity without exposing the URL in furniture", async () => {
+    const request = { ...PRIVACY_REQUEST, locale: "en" } as const satisfies LegalArtifactRequest;
+    const entries = docxEntries(await renderLegalDocx(request));
+    const documentXml = xml(entries, "word/document.xml");
+    const footerXmls = xmlParts(entries, "word/footer");
+    const metadataTable = xmlElements(documentXml, "w:tbl").find((table) =>
+      table.includes(request.verificationUrl),
+    );
+
+    if (!metadataTable) throw new Error("Missing English verification metadata table");
+    expect(metadataTable).toContain("Revision");
+    expect(metadataTable).toContain("2026.08/01");
+    expect(metadataTable).toContain("Effective from");
+    expect(metadataTable).toContain("15 August 2026");
+    expect(metadataTable).toContain("Revision verification");
+    expect(metadataTable).toContain(request.verificationUrl);
+    expect(footerXmls).toHaveLength(2);
+    for (const footerXml of footerXmls) {
+      expect(footerXml).toContain("MKR-PD-01 · 2026.08/01 · 15 August 2026 · Page ");
+      expect(footerXml).toContain("PAGE");
+      expect(footerXml).not.toContain(request.verificationUrl);
+    }
   });
 
   it("omits template warnings from privacy and consent internal source renders", async () => {

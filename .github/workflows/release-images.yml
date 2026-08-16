@@ -50,6 +50,10 @@ jobs:
           pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
       - name: Verify Yandex runtime contracts
         run: pnpm test:yandex-runtime
+      - name: Build legal verifier dependencies
+        run: |
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/legal-documents build
       - name: Verify production bundle contracts
         run: pnpm test:production-bundle:contract
       - name: Generate masked test-only environment

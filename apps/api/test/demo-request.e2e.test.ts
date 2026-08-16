@@ -23,7 +23,7 @@ function body(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     requestId: REQUEST_ID,
     locale: "en",
     sourcePath: "/en/packing-workstation/",
-    consentVersion: "MKR-PD-02/2026.08.01",
+    consentVersion: "MKR-PD-02/2026.08/01",
     name: " Ada ",
     company: " Factory ",
     email: " ADA@EXAMPLE.TEST ",

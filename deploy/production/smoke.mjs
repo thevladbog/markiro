@@ -145,7 +145,7 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/legal/", "landing-page"]),
   Object.freeze(["GET", "/privacy/", "landing-page"]),
   Object.freeze(["GET", "/personal-data-consent/", "landing-page"]),
-  Object.freeze(["GET", "/d/MKR-PD-01/2026.08.01/2026-08-15", "landing-page"]),
+  Object.freeze(["GET", "/d/MKR-PD-01/2026.08/01/15.08.2026", "landing-page"]),
   Object.freeze(["GET", "/robots.txt", "robots"]),
   Object.freeze(["GET", "/sitemap.xml", "sitemap"]),
   Object.freeze(["GET", "/llms.txt", "llms"]),

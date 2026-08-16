@@ -46,6 +46,8 @@ describe("loadLegalArtifacts", () => {
     expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(8);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
+    expect(artifacts.every(({ fileName }) => /_2026\.08-01_(?:ru|en)\./.test(fileName))).toBe(true);
+    expect(artifacts.every(({ fileName }) => !fileName.includes("2026.08.01"))).toBe(true);
   });
 
   it.each([
@@ -116,7 +118,7 @@ describe("loadLegalArtifacts", () => {
       const extra = path.join(filesRoot, `unlisted-${entryKind}`);
       if (entryKind === "file") await writeFile(extra, "unlisted");
       else if (entryKind === "directory") await mkdir(extra);
-      else await symlink("markiro_mkr-pd-01_2026.08.01_ru.pdf", extra);
+      else await symlink("markiro_mkr-pd-01_2026.08-01_ru.pdf", extra);
 
       await expect(loadLegalArtifacts(root)).rejects.toThrow(/unlisted|entry|manifest/i);
     },

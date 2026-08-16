@@ -150,15 +150,12 @@ jobs:
           pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
       - name: Verify Yandex runtime contracts
         run: pnpm test:yandex-runtime
-      - name: Verify production bundle contracts
-        run: pnpm test:production-bundle:contract
-      - name: Verify landing browser and Lighthouse release gates
+      - name: Build legal verifier dependencies
         run: |
           pnpm --filter @markiro/domain build
           pnpm --filter @markiro/legal-documents build
-          node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json
-          pnpm test:landing:browser
-          pnpm test:landing:lighthouse
+      - name: Verify production bundle contracts
+        run: pnpm test:production-bundle:contract
       - name: Generate masked test-only environment
         run: |
           set -euo pipefail
@@ -230,6 +227,10 @@ jobs:
             --file deploy/production/edge.Dockerfile \
             --tag "ghcr.io/thevladbog/markiro-edge:${{ github.sha }}" \
             .
+      - name: Verify landing browser and Lighthouse release gates
+        run: |
+          pnpm test:landing:browser
+          pnpm test:landing:lighthouse
       - name: Validate the production bundle
         run: node deploy/production/preflight.mjs
       - name: Start production-bundle dependencies

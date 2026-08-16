@@ -11,7 +11,7 @@ const INPUT: DemoRequestDto = {
   requestId: "11111111-1111-4111-8111-111111111111",
   locale: "en",
   sourcePath: "/en/packing-workstation/",
-  consentVersion: "MKR-PD-02/2026.08.01",
+  consentVersion: "MKR-PD-02/2026.08/01",
   name: "Ada",
   company: "Factory",
   email: "ada@example.test",

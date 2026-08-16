@@ -4,10 +4,14 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { LEGAL_RELEASES } from "../registry.js";
+import { legalVerificationUrl } from "../identity.js";
 import type { LegalDocumentCode, LegalLocale } from "../types.js";
 import { artifactFileName } from "../artifacts/names.js";
 
 export const MAX_LEGAL_PDF_BYTES = 5 * 1024 * 1024;
+export const VERAPDF_VERSION = "1.30.2";
+export const VERAPDF_RELEASE_IMAGE =
+  "docker.io/verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";
 
 const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
@@ -15,7 +19,7 @@ const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-0
 const LEGAL_LOCALES = ["ru", "en"] as const;
 const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01)_\d{4}\.\d{2}\.\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01)_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface PublishedLegalArtifact {
@@ -65,6 +69,74 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
   const keys = Object.keys(value).sort();
   return keys.length === expected.length && keys.every((key, index) => key === expected[index]);
+}
+
+export function parseVeraPdfValidationResult(output: string): void {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    throw new Error("veraPDF did not return a machine-readable JSON result");
+  }
+  if (!isRecord(parsed) || !("report" in parsed)) {
+    throw new Error("veraPDF machine-readable result is missing its report");
+  }
+  const report = parsed.report;
+  if (!isRecord(report)) {
+    throw new Error("veraPDF machine-readable result has an invalid report");
+  }
+  const jobsValue: unknown = report.jobs;
+  const jobs: readonly unknown[] = Array.isArray(jobsValue)
+    ? (jobsValue as readonly unknown[])
+    : [];
+  const summary: unknown = report.batchSummary;
+  const firstJob: unknown = jobs[0];
+  const validationResults: readonly unknown[] =
+    isRecord(firstJob) && Array.isArray(firstJob.validationResult)
+      ? (firstJob.validationResult as readonly unknown[])
+      : [];
+  const validationResult: unknown = validationResults[0];
+  const validationDetails: unknown = isRecord(validationResult)
+    ? validationResult.details
+    : undefined;
+  const validationSummary: unknown = isRecord(summary) ? summary.validationSummary : undefined;
+  const featuresSummary: unknown = isRecord(summary) ? summary.featuresSummary : undefined;
+  const repairSummary: unknown = isRecord(summary) ? summary.repairSummary : undefined;
+  const conformant =
+    jobs.length === 1 &&
+    validationResults.length === 1 &&
+    isRecord(validationResult) &&
+    validationResult.compliant === true &&
+    validationResult.jobEndStatus === "normal" &&
+    validationResult.profileName === "PDF/A-2b validation profile" &&
+    isRecord(validationDetails) &&
+    validationDetails.failedRules === 0 &&
+    validationDetails.failedChecks === 0;
+  const summaryConformant =
+    isRecord(summary) &&
+    summary.totalJobs === 1 &&
+    summary.outOfMemory === 0 &&
+    summary.veraExceptions === 0 &&
+    summary.multiJob === false &&
+    summary.failedEncryptedJobs === 0 &&
+    summary.failedParsingJobs === 0 &&
+    isRecord(featuresSummary) &&
+    featuresSummary.failedJobCount === 0 &&
+    featuresSummary.totalJobCount === 0 &&
+    featuresSummary.successfulJobCount === 0 &&
+    isRecord(repairSummary) &&
+    repairSummary.failedJobCount === 0 &&
+    repairSummary.totalJobCount === 0 &&
+    repairSummary.successfulJobCount === 0 &&
+    isRecord(validationSummary) &&
+    validationSummary.totalJobCount === 1 &&
+    validationSummary.successfulJobCount === 1 &&
+    validationSummary.failedJobCount === 0 &&
+    validationSummary.compliantPdfaCount === 1 &&
+    validationSummary.nonCompliantPdfaCount === 0;
+  if (!conformant || !summaryConformant) {
+    throw new Error("Generated PDF is not conformant with PDF/A-2b according to veraPDF");
+  }
 }
 
 function assertInsideRoot(rootDir: string, candidatePath: string): void {
@@ -167,11 +239,11 @@ function parseArtifact(value: unknown, index: number): PublishedLegalArtifact {
 
   const expectedFileName = artifactFileName({
     code,
-    revision: value.revision,
-    effectiveDate: value.effectiveDate,
+    revision: release.revision,
+    effectiveDate: release.effectiveDate,
     locale,
     kind: kind === "pdfa-2b" ? "legal-pdf" : "template-docx",
-    verificationUrl: `https://markiro.app/d/${code}/${value.revision}/${value.effectiveDate}`,
+    verificationUrl: legalVerificationUrl(release),
   });
   if (value.fileName !== expectedFileName) {
     throw new Error(`Artifact file name does not match its descriptor: ${value.fileName}`);

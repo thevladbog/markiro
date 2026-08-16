@@ -1,5 +1,5 @@
 ---
-import { findLegalDocument } from "@markiro/legal-documents";
+import { findLegalDocument, formatLegalEffectiveDate } from "@markiro/legal-documents";
 
 import { ACTIVE_LEGAL_RELEASES } from "../content/legal-pages";
 import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
@@ -29,7 +29,7 @@ const publishedArtifacts = await loadLegalArtifacts();
         <h1>{metadata.locale === "ru" ? "Юридические документы" : "Legal documents"}</h1>
         <p class="legal-hero__summary">
           {metadata.locale === "ru"
-            ? "Действующие редакции политик, согласий и шаблонов Markiro. Новая редакция получает собственную дату и не перезаписывает опубликованную историю."
+            ? "Действующие редакции политик, согласий и шаблонов Маркиро. Новая редакция получает собственную дату и не перезаписывает опубликованную историю."
             : "Active Markiro policy, consent, and template revisions. A new revision receives its own date and does not overwrite published history."}
         </p>
         {metadata.locale === "en" && (
@@ -57,7 +57,7 @@ const publishedArtifacts = await loadLegalArtifacts();
                 <span class="legal-registry__meta">
                   <span data-legal-revision>{release.revision}</span>
                   <span aria-hidden="true">·</span>
-                  <time datetime={release.effectiveDate} data-legal-effective-date>{release.effectiveDate}</time>
+                  <time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, metadata.locale)}</time>
                 </span>
                 <span class="legal-registry__arrow" aria-hidden="true">→</span>
               </a>

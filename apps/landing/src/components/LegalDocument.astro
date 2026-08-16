@@ -1,6 +1,7 @@
 ---
 import {
   OPERATOR_PROFILES,
+  formatLegalEffectiveDate,
   findLegalDocument,
   findLegalRelease,
   type LegalBlock,
@@ -63,7 +64,7 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
           <dl>
             <div><dt>{page.locale === "ru" ? "Код" : "Code"}</dt><dd data-legal-code>{release.code}</dd></div>
             <div><dt>{page.locale === "ru" ? "Редакция" : "Revision"}</dt><dd data-legal-revision>{release.revision}</dd></div>
-            <div><dt>{page.locale === "ru" ? "Действует с" : "Effective"}</dt><dd data-legal-effective-date>{release.effectiveDate}</dd></div>
+            <div><dt>{page.locale === "ru" ? "Действует с" : "Effective"}</dt><dd><time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, page.locale)}</time></dd></div>
           </dl>
         </div>
         <nav class="legal-toc" aria-label={page.locale === "ru" ? "Содержание" : "Contents"}>
@@ -84,7 +85,12 @@ const renderDefinition = (block: Extract<LegalBlock, { kind: "definition-list" }
                 {block.kind === "unordered-list" && <ul>{block.items.map((item) => <li>{item}</li>)}</ul>}
                 {block.kind === "definition-list" && (
                   <dl class="legal-definitions">
-                    {renderDefinition(block).map(({ term, detail }) => <><dt>{term}</dt><dd>{detail}</dd></>)}
+                    {renderDefinition(block).map(({ term, detail }) => (
+                      <div>
+                        <dt>{term} <span aria-hidden="true">—&nbsp;</span></dt>
+                        <dd>{detail}</dd>
+                      </div>
+                    ))}
                   </dl>
                 )}
               </>

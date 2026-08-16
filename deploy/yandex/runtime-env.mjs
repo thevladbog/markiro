@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { chmod, mkdir, open, readFile, rename, unlink } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, isAbsolute, join } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
@@ -36,7 +36,7 @@ export function environmentKeysFromExample(source) {
   const keys = [];
   const seen = new Set();
   for (const line of source.split(/\r?\n/u)) {
-    if (line.length === 0 || /^\s*#/u.test(line)) continue;
+    if (/^\s*$/u.test(line) || /^\s*#/u.test(line)) continue;
     const match = /^([A-Z][A-Z0-9_]*)=$/u.exec(line);
     if (!match || seen.has(match[1])) throw invalidInventory();
     seen.add(match[1]);
@@ -46,28 +46,49 @@ export function environmentKeysFromExample(source) {
   return keys;
 }
 
-export function renderRuntimeEnvironment(keys, entries) {
-  if (!Array.isArray(keys) || !Array.isArray(entries)) throw invalidPayload();
-  const expected = new Set(keys);
-  if (expected.size !== keys.length || expected.size === 0) throw invalidPayload();
+export function runtimeInventoryKeyNames(keys, entries) {
+  if (!Array.isArray(keys) || !Array.isArray(entries)) throw invalidInventory();
+  const expected = new Set();
+  for (const key of keys) {
+    if (typeof key !== "string" || !/^[A-Z][A-Z0-9_]*$/u.test(key) || expected.has(key))
+      throw invalidInventory();
+    expected.add(key);
+  }
+  if (expected.size === 0) throw invalidInventory();
 
-  const values = new Map();
+  const received = new Set();
   for (const entry of entries) {
     if (
       !entry ||
       typeof entry.key !== "string" ||
+      !/^[A-Z][A-Z0-9_]*$/u.test(entry.key) ||
       typeof entry.textValue !== "string" ||
       !expected.has(entry.key) ||
-      values.has(entry.key) ||
-      /[\r\n]/u.test(entry.textValue)
+      received.has(entry.key)
     )
-      throw invalidPayload();
+      throw invalidInventory();
+    received.add(entry.key);
+  }
+  if (received.size !== expected.size) throw invalidInventory();
+
+  return Object.freeze([...expected].sort());
+}
+
+export function renderRuntimeEnvironment(keys, entries) {
+  let keyNames;
+  try {
+    keyNames = runtimeInventoryKeyNames(keys, entries);
+  } catch {
+    throw invalidPayload();
+  }
+
+  const values = new Map();
+  for (const entry of entries) {
+    if (/[\r\n]/u.test(entry.textValue)) throw invalidPayload();
     values.set(entry.key, entry.textValue);
   }
-  if (values.size !== expected.size) throw invalidPayload();
 
-  return [...expected]
-    .sort()
+  return keyNames
     .map((key) => `${key}=${values.get(key)}`)
     .join("\n")
     .concat("\n");
@@ -111,6 +132,25 @@ export async function fetchSecretPayload(
   const payload = await response.json();
   if (!payload || !Array.isArray(payload.entries)) throw invalidPayload();
   return payload.entries;
+}
+
+export async function verifyRuntimeInventory({
+  clock = { timeout: AbortSignal.timeout },
+  fetch = globalThis.fetch,
+  fetchIamToken: loadIamToken = fetchIamToken,
+  fetchSecretPayload: loadSecretPayload = fetchSecretPayload,
+  inventoryText,
+  secretId,
+} = {}) {
+  try {
+    if (typeof secretId !== "string" || secretId.length === 0) throw invalidInventory();
+    const keys = environmentKeysFromExample(inventoryText);
+    const iamToken = await loadIamToken(fetch, clock);
+    const entries = await loadSecretPayload(secretId, iamToken, fetch, clock);
+    return runtimeInventoryKeyNames(keys, entries);
+  } catch {
+    throw invalidInventory();
+  }
 }
 
 async function closeQuietly(handle) {
@@ -173,6 +213,7 @@ function asMaterializationFailure() {
 
 const CLI_FAILURE = "runtime environment materialization failed";
 const CLI_DURABILITY_WARNING = "runtime environment durability is indeterminate";
+const INVENTORY_CLI_FAILURE = "runtime environment inventory is invalid";
 
 function writeSanitizedLine(stderr, line) {
   try {
@@ -214,12 +255,54 @@ export async function materializeRuntimeEnv({
   }
 }
 
-export async function runCli({
+export async function runInventoryCli({
   environment = process.env,
+  inventoryPath,
+  readInventory = readFile,
+  stderr = process.stderr,
+  verify = verifyRuntimeInventory,
+  ...dependencies
+} = {}) {
+  try {
+    if (typeof inventoryPath !== "string" || !isAbsolute(inventoryPath)) throw invalidInventory();
+    const inventoryText = await readInventory(inventoryPath, "utf8");
+    await verify({
+      ...dependencies,
+      inventoryText,
+      secretId: environment.MARKIRO_RUNTIME_SECRET_ID,
+    });
+    return 0;
+  } catch {
+    writeSanitizedLine(stderr, INVENTORY_CLI_FAILURE);
+    return 1;
+  }
+}
+
+export async function runCli({
+  argv = [],
+  environment = process.env,
+  inventoryCli = runInventoryCli,
   materialize = materializeRuntimeEnv,
   stderr = process.stderr,
   ...dependencies
 } = {}) {
+  if (argv.length !== 0) {
+    if (
+      argv.length !== 2 ||
+      argv[0] !== "verify-inventory" ||
+      typeof argv[1] !== "string" ||
+      !isAbsolute(argv[1])
+    ) {
+      writeSanitizedLine(stderr, INVENTORY_CLI_FAILURE);
+      return 1;
+    }
+    return inventoryCli({
+      ...dependencies,
+      environment,
+      inventoryPath: argv[1],
+      stderr,
+    });
+  }
   try {
     await materialize({
       ...dependencies,
@@ -234,5 +317,5 @@ export async function runCli({
 }
 
 if (isMainModule(import.meta.url)) {
-  process.exitCode = await runCli();
+  process.exitCode = await runCli({ argv: process.argv.slice(2) });
 }

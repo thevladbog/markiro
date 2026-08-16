@@ -174,3 +174,57 @@ test("landing publication records every external legal and artifact acceptance g
   assert.match(runbook, /тесты репозитория не доказывают[^\n]*Microsoft Word/i);
   assert.match(runbook, /тесты репозитория не доказывают[^\n]*физическ/i);
 });
+
+test("landing publication runbook maps every bounded deployment failure stage", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  const stages = [
+    "configuration",
+    "transfer",
+    "reconcile-host",
+    "runtime-inventory",
+    "runtime-env",
+    "prepare",
+    "smoke",
+    "finalize",
+    "rollback",
+  ];
+
+  for (const stage of stages)
+    assert.match(runbook, new RegExp(`MARKIRO_DEPLOY_FAILURE ${escapeRegExp(stage)}(?:\\s|\`)`));
+});
+
+test("landing publication runbook places runtime inventory before remote mutation", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  const transfer = runbook.indexOf("`MARKIRO_DEPLOY_FAILURE transfer` —");
+  const inventory = runbook.indexOf("`MARKIRO_DEPLOY_FAILURE runtime-inventory` —");
+  const reconcile = runbook.indexOf("`MARKIRO_DEPLOY_FAILURE reconcile-host` —");
+  assert.ok(transfer >= 0 && inventory > transfer && reconcile > inventory);
+  assert.match(runbook, /runtime-inventory[^\n]*только[^\n]*имен/i);
+  assert.match(runbook, /до[^\n]*(?:reconcile|изменен)/i);
+});
+
+test("landing publication runbook gives bounded and recoverable inventory actions", async () => {
+  const runbook = await read("docs/runbooks/landing-publication.md");
+  for (const required of [
+    ".env.production.example",
+    "активной версии Lockbox",
+    "только имена ключей",
+    "новую версию Lockbox",
+    "повторно запустить тот же failed deployment",
+    "значения секретов",
+    "логи",
+    "issue",
+  ])
+    assert.match(runbook, new RegExp(escapeRegExp(required), "i"));
+
+  for (const unproved of [
+    "SMTP delivery",
+    "captcha validity",
+    "database connectivity",
+    "application health",
+  ])
+    assert.match(
+      runbook,
+      new RegExp(`runtime-inventory[^\\n]*не доказывает[^\\n]*${escapeRegExp(unproved)}`, "i"),
+    );
+});

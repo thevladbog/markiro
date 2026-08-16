@@ -1,0 +1,35 @@
+---
+import {
+  LEGAL_RELEASES,
+  formatLegalEffectiveDate,
+  parseLegalRevision,
+  type LegalDocumentRelease,
+} from "@markiro/legal-documents";
+
+import LegalVerification from "../../../../../components/LegalVerification.astro";
+
+export function getStaticPaths() {
+  return (LEGAL_RELEASES as readonly LegalDocumentRelease[])
+    .filter(({ status }) => status !== "draft")
+    .map((release) => {
+      const { yearMonth, sequence } = parseLegalRevision(release.revision);
+      return {
+        params: {
+          code: release.code,
+          yearMonth,
+          sequence,
+          date: formatLegalEffectiveDate(release.effectiveDate, "ru"),
+        },
+        props: { release },
+      };
+    });
+}
+
+interface Props {
+  release: LegalDocumentRelease;
+}
+
+const { release } = Astro.props;
+---
+
+<LegalVerification release={release} />

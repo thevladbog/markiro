@@ -1265,16 +1265,26 @@ input:focus-visible {
 
 .landing-footer__inner {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  align-items: center;
-  gap: var(--sp-8);
-  min-height: 8rem;
-  padding-block: var(--sp-6);
+  grid-template-columns: minmax(10rem, 1fr) auto auto;
+  align-items: start;
+  gap: var(--sp-7) var(--sp-8);
+  padding-block: var(--sp-7);
 }
 
-.landing-footer__inner > a {
+.landing-footer__meta {
+  display: grid;
+  gap: var(--sp-5);
+  justify-items: start;
+}
+
+.landing-footer__meta > a {
   width: fit-content;
   text-decoration: none;
+}
+
+.landing-footer__meta > span {
+  color: var(--fg-3);
+  font: 500 0.6875rem / 1 var(--font-mono);
 }
 
 .landing-footer nav {
@@ -1287,12 +1297,10 @@ input:focus-visible {
 }
 
 .landing-footer__legal {
-  grid-column: 2 / 4;
-  justify-self: end;
+  justify-self: start;
 }
 
-.landing-footer nav a,
-.landing-footer__inner > span {
+.landing-footer nav a {
   color: var(--fg-3);
   font: 500 0.6875rem / 1 var(--font-mono);
   text-decoration: none;
@@ -1717,14 +1725,13 @@ input:focus-visible {
   }
 
   .landing-footer__inner {
-    grid-template-columns: 1fr auto;
-    min-height: 11rem;
+    grid-template-columns: 1fr;
     padding-block: var(--sp-6);
   }
 
   .landing-footer nav {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    grid-column: 1;
+    grid-row: auto;
     flex-wrap: wrap;
   }
 }
@@ -2099,7 +2106,7 @@ input:focus-visible {
   display: grid;
   gap: 1.25rem;
   margin: 0 0 4rem;
-  padding: 1.25rem;
+  padding: 1.5rem;
   border: 1px solid var(--line);
   background: var(--bg-0);
 }
@@ -2141,8 +2148,11 @@ input:focus-visible {
 }
 
 .legal-artifact-file {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
   min-width: 0;
-  padding: 1rem;
+  padding: 1.25rem;
   border: 1px solid var(--line);
   background: var(--surface-raised);
 }
@@ -2159,14 +2169,14 @@ input:focus-visible {
 
 .legal-artifact-file__download {
   display: inline-flex;
-  margin-top: 1rem;
+  justify-self: start;
   color: var(--accent);
   font-weight: 600;
   text-underline-offset: 0.2rem;
 }
 
 .legal-artifact-file__warning {
-  margin: 0.75rem 0 0 !important;
+  margin: 0 !important;
   color: var(--fg-2) !important;
   font: 600 0.6875rem / 1.45 var(--font-mono) !important;
 }
@@ -2174,8 +2184,9 @@ input:focus-visible {
 .legal-artifact-file__digest {
   display: grid;
   grid-template-columns: 1fr auto;
+  align-items: start;
   gap: 0.5rem;
-  margin-top: 1rem;
+  margin-top: 0;
 }
 
 .legal-artifact-file__digest > span {
@@ -2192,6 +2203,7 @@ input:focus-visible {
 }
 
 .legal-artifact-file__digest button {
+  align-self: start;
   padding: 0;
   border: 0;
   background: transparent;
@@ -2201,6 +2213,8 @@ input:focus-visible {
 }
 
 .legal-artifacts__verification {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   justify-content: flex-start;
   min-width: 0;
   padding-top: 0.25rem;
@@ -2247,7 +2261,7 @@ input:focus-visible {
 
 .legal-artifacts--compact {
   margin: 0;
-  padding: 1rem 0 1.25rem 8rem;
+  padding: 1.25rem;
   border: 0;
   border-bottom: 1px solid var(--line);
   background: transparent;
@@ -2292,14 +2306,26 @@ input:focus-visible {
   margin: 0 0 1.5rem;
 }
 
-.legal-definitions dt {
+.legal-definitions > div {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0;
+  align-items: baseline;
+}
+
+.legal-definitions > div + div {
   margin-top: 1rem;
+}
+
+.legal-definitions dt {
+  margin: 0;
   color: var(--fg-1);
   font-weight: 600;
 }
 
 .legal-definitions dd {
-  margin: 0.25rem 0 0;
+  min-width: 0;
+  margin: 0;
 }
 
 .legal-contact {
@@ -2347,6 +2373,7 @@ input:focus-visible {
   gap: 1.5rem;
   align-items: center;
   min-height: 7.5rem;
+  padding-inline: 1.25rem;
   border-bottom: 1px solid var(--line);
   color: var(--fg-1);
   text-decoration: none;
@@ -2464,7 +2491,7 @@ input:focus-visible {
 
   .legal-artifacts {
     margin-bottom: 3rem;
-    padding: 1rem;
+    padding: 1.25rem;
   }
 
   .legal-artifacts__heading {
@@ -2478,7 +2505,7 @@ input:focus-visible {
 
   .legal-artifacts--compact {
     margin: 0;
-    padding: 1rem 0 1.5rem;
+    padding: 1rem;
   }
 
   .legal-verification {
@@ -2525,13 +2552,20 @@ input:focus-visible {
   }
 
   .landing-footer__inner {
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr;
+    gap: var(--sp-6);
+    padding-block: var(--sp-6);
   }
 
   .landing-footer nav:first-of-type,
   .landing-footer__legal {
-    grid-column: 1 / -1;
+    grid-column: 1;
     grid-row: auto;
     justify-self: start;
+  }
+
+  .landing-footer nav {
+    flex-wrap: wrap;
+    gap: var(--sp-4) var(--sp-6);
   }
 }

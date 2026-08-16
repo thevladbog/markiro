@@ -5,6 +5,7 @@ import path from "node:path";
 
 import {
   LEGAL_RELEASES,
+  legalRevisionFileToken,
   type LegalDocumentCode,
   type LegalDocumentRelease,
   type LegalLocale,
@@ -33,7 +34,7 @@ export interface PublishedLegalArtifact {
 
 const DEFAULT_PUBLIC_ROOT = path.resolve(process.cwd(), "public");
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-0[12]|dpa-01|brd-01)_\d{4}\.\d{2}\.\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-0[12]|dpa-01|brd-01)_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const PUBLISHED_RELEASES = (LEGAL_RELEASES as readonly LegalDocumentRelease[]).filter(
@@ -193,11 +194,11 @@ function assertExactKeys(
 
 function expectedFileName(
   code: LegalDocumentCode,
-  revision: string,
+  revision: LegalDocumentRelease["revision"],
   locale: LegalLocale,
   kind: PublishedLegalArtifactKind,
 ): string {
-  return `markiro_${code.toLowerCase()}_${revision}_${locale}.${kind === "pdfa-2b" ? "pdf" : "docx"}`;
+  return `markiro_${code.toLowerCase()}_${legalRevisionFileToken(revision)}_${locale}.${kind === "pdfa-2b" ? "pdf" : "docx"}`;
 }
 
 function descriptorKey(
@@ -360,16 +361,4 @@ export function artifactsForRelease(
       artifact.revision === revision &&
       (locale === undefined || artifact.locale === locale),
   );
-}
-
-export function legalVerificationPath(
-  release: Pick<LegalDocumentRelease, "code" | "revision" | "effectiveDate">,
-): `/d/${string}/${string}/${string}` {
-  return `/d/${release.code}/${release.revision}/${release.effectiveDate}`;
-}
-
-export function legalVerificationUrl(
-  release: Pick<LegalDocumentRelease, "code" | "revision" | "effectiveDate">,
-): `https://markiro.app/d/${string}/${string}/${string}` {
-  return `https://markiro.app/d/${release.code}/${release.revision}/${release.effectiveDate}`;
 }

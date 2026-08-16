@@ -10,6 +10,9 @@ import {
   materializeRuntimeEnv,
   renderRuntimeEnvironment,
   runCli,
+  runInventoryCli,
+  runtimeInventoryKeyNames,
+  verifyRuntimeInventory,
 } from "../runtime-env.mjs";
 
 const INVENTORY = `# runtime inventory\nDATABASE_URL=\nSMTP_PASSWORD=\nS3_ENDPOINT=\n`;
@@ -18,6 +21,8 @@ const VALUES = {
   SMTP_PASSWORD: "mail-password",
   S3_ENDPOINT: "https://storage.example.test",
 };
+
+const INVENTORY_FAILURE = "runtime environment inventory is invalid";
 
 function response(payload, ok = true) {
   return { ok, json: async () => payload };
@@ -158,10 +163,193 @@ test("rejects duplicate and malformed environment inventory keys", () => {
     () => environmentKeysFromExample("DATABASE_URL=value\n"),
     /runtime environment inventory is invalid/,
   );
+  assert.deepEqual(
+    environmentKeysFromExample("  # comment\n\t\nDATABASE_URL=\n\nSMTP_PASSWORD=\n"),
+    ["DATABASE_URL", "SMTP_PASSWORD"],
+  );
+});
+
+test("runtime inventory returns only sorted exact key names", () => {
+  const keys = environmentKeysFromExample(INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+
+  const result = runtimeInventoryKeyNames(keys, entries);
+
+  assert.deepEqual(result, ["DATABASE_URL", "S3_ENDPOINT", "SMTP_PASSWORD"]);
+  assert.doesNotMatch(JSON.stringify(result), /password|storage\.example|postgres:/u);
+});
+
+test("runtime inventory rejects missing, extra, duplicate, malformed, and valueless entries uniformly", () => {
+  const keys = environmentKeysFromExample(INVENTORY);
+  const entries = Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+  const invalidCases = [
+    { keys: keys.slice(0, -1), entries },
+    { keys: [...keys, "UNEXPECTED"], entries },
+    { keys: [...keys, keys[0]], entries },
+    { keys: [...keys, "bad-key"], entries },
+    { keys, entries: entries.slice(0, -1) },
+    { keys, entries: [...entries, { key: "UNEXPECTED", textValue: "private" }] },
+    { keys, entries: [...entries, entries[0]] },
+    {
+      keys,
+      entries: entries.map((entry, index) => (index === 0 ? { ...entry, key: "bad-key" } : entry)),
+    },
+    {
+      keys,
+      entries: entries.map((entry, index) =>
+        index === 0 ? { key: entry.key, textValue: undefined } : entry,
+      ),
+    },
+    { keys, entries: entries.map((entry, index) => (index === 0 ? null : entry)) },
+    { keys: [], entries: [] },
+  ];
+
+  for (const invalid of invalidCases)
+    assert.throws(
+      () => runtimeInventoryKeyNames(invalid.keys, invalid.entries),
+      (error) => error.message === INVENTORY_FAILURE,
+    );
+});
+
+test("inventory verifier fetches metadata and Lockbox once without exposing payload values", async () => {
+  const calls = [];
+  const result = await verifyRuntimeInventory({
+    inventoryText: INVENTORY,
+    secretId: "runtime-secret-id",
+    fetchIamToken: async () => {
+      calls.push("metadata");
+      return "iam-token";
+    },
+    fetchSecretPayload: async (secretId, token) => {
+      calls.push(["lockbox", secretId, token]);
+      return Object.entries(VALUES).map(([key, textValue]) => ({ key, textValue }));
+    },
+  });
+
+  assert.deepEqual(result, ["DATABASE_URL", "S3_ENDPOINT", "SMTP_PASSWORD"]);
+  assert.deepEqual(calls, ["metadata", ["lockbox", "runtime-secret-id", "iam-token"]]);
+  assert.doesNotMatch(JSON.stringify(result), /mail-password|storage\.example|postgres:/u);
+});
+
+test("inventory verifier maps dependency and payload details to one fixed error", async () => {
+  const secretValue = "private-runtime-value";
+  await assert.rejects(
+    verifyRuntimeInventory({
+      inventoryText: INVENTORY,
+      secretId: "runtime-secret-id",
+      fetchIamToken: async () => "iam-token",
+      fetchSecretPayload: async () => {
+        throw new Error(secretValue);
+      },
+    }),
+    (error) => {
+      assert.equal(error.message, INVENTORY_FAILURE);
+      assert.doesNotMatch(error.message, new RegExp(secretValue));
+      return true;
+    },
+  );
+});
+
+test("inventory CLI reads only the absolute candidate inventory before read-only verification", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "markiro candidate inventory "));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const inventoryPath = join(directory, ".env.production.example");
+  await copyFile(resolve(".env.production.example"), inventoryPath);
+  const inventory = environmentKeysFromExample(await readFile(inventoryPath, "utf8"));
+  const calls = [];
+  const stderr = [];
+  const stdout = [];
+
+  const exitCode = await runInventoryCli({
+    environment: { MARKIRO_RUNTIME_SECRET_ID: "runtime-secret-id" },
+    inventoryPath,
+    readInventory: async (candidatePath, encoding) => {
+      calls.push(["read", candidatePath, encoding]);
+      return readFile(candidatePath, encoding);
+    },
+    fetchIamToken: async () => {
+      calls.push("metadata");
+      return "iam-token";
+    },
+    fetchSecretPayload: async () => {
+      calls.push("lockbox");
+      return inventory.map((key) => ({ key, textValue: `private-${key}` }));
+    },
+    stderr: { write: (line) => stderr.push(line) },
+    stdout: { write: (line) => stdout.push(line) },
+  });
+
+  assert.equal(exitCode, 0);
+  assert.deepEqual(stderr, []);
+  assert.deepEqual(stdout, []);
+  assert.deepEqual(calls, [["read", inventoryPath, "utf8"], "metadata", "lockbox"]);
+});
+
+test("inventory CLI rejects invalid argv and non-absolute paths before network access", async () => {
+  for (const argv of [
+    ["verify-inventory"],
+    ["verify-inventory", "relative.env"],
+    ["verify-inventory", "/candidate/.env.production.example", "extra"],
+    ["unknown", "/candidate/.env.production.example"],
+  ]) {
+    const calls = [];
+    const stderr = [];
+    const exitCode = await runCli({
+      argv,
+      environment: { MARKIRO_RUNTIME_SECRET_ID: "runtime-secret-id" },
+      fetchIamToken: async () => {
+        calls.push("metadata");
+        return "iam-token";
+      },
+      fetchSecretPayload: async () => {
+        calls.push("lockbox");
+        return [];
+      },
+      readInventory: async () => {
+        calls.push("read");
+        return INVENTORY;
+      },
+      stderr: { write: (line) => stderr.push(line) },
+    });
+
+    assert.equal(exitCode, 1);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(stderr, [`${INVENTORY_FAILURE}\n`]);
+  }
+});
+
+test("inventory CLI emits only its fixed failure line and never mutates a destination", async () => {
+  const secretValue = "private-lockbox-payload";
+  const stderr = [];
+  const calls = [];
+  const exitCode = await runInventoryCli({
+    environment: { MARKIRO_RUNTIME_SECRET_ID: "runtime-secret-id" },
+    inventoryPath: "/candidate/.env.production.example",
+    readInventory: async () => INVENTORY,
+    fetchIamToken: async () => "iam-token",
+    fetchSecretPayload: async () => {
+      throw new Error(secretValue);
+    },
+    fs: {
+      async rename() {
+        calls.push("rename");
+      },
+      async writeFile() {
+        calls.push("writeFile");
+      },
+    },
+    stderr: { write: (line) => stderr.push(line) },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(stderr, [`${INVENTORY_FAILURE}\n`]);
+  assert.doesNotMatch(stderr.join(""), new RegExp(secretValue));
 });
 
 test("uses every and only the production environment example keys", async () => {
-  const inventory = environmentKeysFromExample(await readFile(".env.production.example", "utf8"));
+  const inventoryText = await readFile(".env.production.example", "utf8");
+  const inventory = environmentKeysFromExample(inventoryText);
   assert.deepEqual(inventory, [
     "DATABASE_URL",
     "BETTER_AUTH_SECRET",
@@ -199,6 +387,14 @@ test("uses every and only the production environment example keys", async () => 
     "S3_SECRET_ACCESS_KEY",
     "S3_FORCE_PATH_STYLE",
   ]);
+  assert.equal(inventory.length, 35);
+  assert.deepEqual(
+    runtimeInventoryKeyNames(
+      inventory,
+      inventory.map((key) => ({ key, textValue: `private-${key}` })),
+    ),
+    [...inventory].sort(),
+  );
 });
 
 test("a failed refresh preserves the prior environment and cleans its temporary file", async () => {

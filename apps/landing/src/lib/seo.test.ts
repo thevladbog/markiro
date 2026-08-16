@@ -87,7 +87,7 @@ describe("SEO generators", () => {
     for (const code of ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"]) {
       expect(
         sitemap.match(
-          new RegExp(`<loc>https://markiro\\.app/d/${code}/2026\\.08\\.01/2026-08-15</loc>`, "g"),
+          new RegExp(`<loc>https://markiro\\.app/d/${code}/2026\\.08/01/15\\.08\\.2026</loc>`, "g"),
         ),
       ).toHaveLength(1);
     }

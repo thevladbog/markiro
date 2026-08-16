@@ -15,6 +15,8 @@ const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
   "PUBLIC_PHONE",
 ]);
+const pinnedVeraPdfImage =
+  "docker.io/verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";
 
 const standardProxyTimeouts = Object.freeze({
   response_header_timeout: "30s",
@@ -62,7 +64,11 @@ const kioskForbiddenPaths = Object.freeze([
 ]);
 
 function caddyPathMatches(pattern, path) {
-  return pattern.endsWith("*") ? path.startsWith(pattern.slice(0, -1)) : path === pattern;
+  const normalizedPattern = pattern.toLowerCase();
+  const normalizedPath = path.toLowerCase();
+  return normalizedPattern.endsWith("*")
+    ? normalizedPath.startsWith(normalizedPattern.slice(0, -1))
+    : normalizedPath === normalizedPattern;
 }
 
 function caddyHeaderMatches(pattern, value) {
@@ -445,7 +451,17 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost
           ? [["GET", "HEAD"]]
-          : [["POST"], ["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"]],
+          : [
+              ["POST"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+            ],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -559,7 +575,7 @@ function assertAuthorityContract(adapted, { alb }) {
   for (const path of [
     "/",
     "/faq/",
-    "/d/MKR-PD-01/2026.08.01/2026-08-15",
+    "/d/MKR-PD-01/2026.08/01/15.08.2026",
     "/robots.txt",
     "/sitemap.xml",
     "/llms.txt",
@@ -718,14 +734,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(
     landingInstructions.filter((instruction) => instruction.name === "RUN"),
     [
-      { name: "RUN", arguments: "pnpm --filter @markiro/domain build" },
       { name: "RUN", arguments: "pnpm --filter @markiro/ui build" },
-      { name: "RUN", arguments: "pnpm --filter @markiro/legal-documents build" },
-      {
-        name: "RUN",
-        arguments:
-          "node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json",
-      },
       { name: "RUN", arguments: "pnpm --filter @markiro/landing build" },
     ],
   );
@@ -837,6 +846,92 @@ test("edge build validates every tracked legal artifact before copying landing o
   assert.match(
     dockerfile,
     /COPY --from=landing-build \/workspace\/apps\/landing\/dist \/srv\/landing/,
+  );
+});
+
+test("edge build obtains fresh PDF/A evidence from the pinned veraPDF image", async () => {
+  const dockerfile = await readFile("deploy/production/edge.Dockerfile", "utf8");
+  assert.match(dockerfile, /^ARG LEGAL_PDFA_PLATFORM=linux\/amd64$/m);
+  assert.match(
+    dockerfile,
+    new RegExp(
+      `^FROM --platform=\\\${LEGAL_PDFA_PLATFORM} ${escapeRegExp(pinnedVeraPdfImage)} AS legal-pdfa-runtime$`,
+      "m",
+    ),
+  );
+  assert.match(
+    dockerfile,
+    /^FROM --platform=\$\{LEGAL_PDFA_PLATFORM\} node:24\.19\.0-alpine AS legal-artifact-verification$/m,
+  );
+  const verification = dockerfileStageInstructions(dockerfile, "legal-artifact-verification");
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "WORKDIR"),
+    [{ name: "WORKDIR", arguments: "/workspace" }],
+  );
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "ENV"),
+    [
+      { name: "ENV", arguments: "JAVA_HOME=/opt/java/openjdk" },
+      { name: "ENV", arguments: "PATH=/opt/java/openjdk/bin:${PATH}" },
+    ],
+  );
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "COPY"),
+    [
+      {
+        name: "COPY",
+        arguments: "--from=legal-pdfa-runtime /opt/java/openjdk /opt/java/openjdk",
+      },
+      {
+        name: "COPY",
+        arguments: "--from=legal-pdfa-runtime /opt/verapdf /opt/verapdf",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/packages/legal-documents/dist ./packages/legal-documents/dist",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/apps/landing/public/legal ./apps/landing/public/legal",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/deploy/production/cli-main.mjs ./deploy/production/cli-main.mjs",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/deploy/production/verify-legal-artifacts.mjs ./deploy/production/verify-legal-artifacts.mjs",
+      },
+      {
+        name: "COPY",
+        arguments:
+          "--from=legal-documents-build /workspace/deploy/production/legal-artifacts-attestation.json ./deploy/production/legal-artifacts-attestation.json",
+      },
+    ],
+  );
+  assert.deepEqual(
+    verification.filter((instruction) => instruction.name === "RUN"),
+    [
+      {
+        name: "RUN",
+        arguments:
+          "--network=none VERAPDF_BIN=/opt/verapdf/verapdf node deploy/production/verify-legal-artifacts.mjs apps/landing/public/legal deploy/production/legal-artifacts-attestation.json && touch /tmp/legal-artifacts.verified",
+      },
+    ],
+  );
+
+  const landing = dockerfileStageInstructions(dockerfile, "landing-build");
+  assert.ok(
+    landing.some(
+      (instruction) =>
+        instruction.name === "COPY" &&
+        instruction.arguments ===
+          "--from=legal-artifact-verification /tmp/legal-artifacts.verified /tmp/legal-artifacts.verified",
+    ),
   );
 });
 
@@ -973,6 +1068,47 @@ test("direct Caddy adapter isolates the admin, kiosk and landing authorities", a
       write_timeout: 60_000_000_000,
     },
   ]);
+});
+
+test("direct Caddy adapter exposes only the four exact legacy legal redirects", async () => {
+  const adapted = await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8"));
+  const landing = applicationRoute(adapted, landingHost);
+  const routeTable = applicationOrderedRouteTable(landing);
+  const expected = new Map([
+    ["/d/MKR-PD-01/2026.08.01/2026-08-15", "/d/MKR-PD-01/2026.08/01/15.08.2026"],
+    ["/d/MKR-PD-02/2026.08.01/2026-08-15", "/d/MKR-PD-02/2026.08/01/15.08.2026"],
+    ["/d/MKR-DPA-01/2026.08.01/2026-08-15", "/d/MKR-DPA-01/2026.08/01/15.08.2026"],
+    ["/d/MKR-BRD-01/2026.08.01/2026-08-15", "/d/MKR-BRD-01/2026.08/01/15.08.2026"],
+  ]);
+  const redirects = routeTable.filter((route) =>
+    nestedObjects(route).some(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 308,
+    ),
+  );
+  assert.equal(redirects.length, expected.size);
+  for (const [legacyPath, target] of expected) {
+    const matching = redirects.filter((route) =>
+      adaptedRouteMatches(route, { method: "GET", path: legacyPath }),
+    );
+    assert.equal(matching.length, 1, `${legacyPath} must select one exact redirect`);
+    const response = nestedObjects(matching[0]).find(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 308,
+    );
+    assert.deepEqual(response.headers?.Location, [target]);
+  }
+
+  for (const malformed of [
+    "/d/MKR-PD-01/2026.08.01",
+    "/d/mkr-pd-01/2026.08.01/2026-08-15",
+    "/d/MKR-PD-01/2026.08.01/2026-08-15/extra",
+    "/d/MKR-PD-99/2026.08.01/2026-08-15",
+  ]) {
+    assert.equal(
+      redirects.some((route) => adaptedRouteMatches(route, { method: "GET", path: malformed })),
+      false,
+      `${malformed} must not match a legacy redirect`,
+    );
+  }
 });
 
 test("direct Caddy adapter keeps bare admin routes static and routes exact Station requests", async () => {

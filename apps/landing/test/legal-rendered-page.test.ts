@@ -24,10 +24,10 @@ const LEGAL_ROUTES = [
 ] as const;
 
 const VERIFICATION_ROUTES = [
-  "/d/MKR-PD-01/2026.08.01/2026-08-15",
-  "/d/MKR-PD-02/2026.08.01/2026-08-15",
-  "/d/MKR-DPA-01/2026.08.01/2026-08-15",
-  "/d/MKR-BRD-01/2026.08.01/2026-08-15",
+  "/d/MKR-PD-01/2026.08/01/15.08.2026",
+  "/d/MKR-PD-02/2026.08/01/15.08.2026",
+  "/d/MKR-DPA-01/2026.08/01/15.08.2026",
+  "/d/MKR-BRD-01/2026.08/01/15.08.2026",
 ] as const;
 
 const documents = new Map<string, Document>();
@@ -62,10 +62,15 @@ describe("rendered legal pages", () => {
     expect(document?.querySelectorAll("h1")).toHaveLength(1);
     expect(document?.querySelector("main#main article[data-legal-document]")).not.toBeNull();
     expect(document?.querySelector("[data-legal-code]")?.textContent).toContain("MKR-");
-    expect(document?.querySelector("[data-legal-revision]")?.textContent).toContain("2026.08.01");
+    expect(document?.querySelector("[data-legal-revision]")?.textContent).toContain("2026.08/01");
+    const visibleDate = route.startsWith("/en/") ? "15 August 2026" : "15.08.2026";
     expect(document?.querySelector("[data-legal-effective-date]")?.textContent).toContain(
+      visibleDate,
+    );
+    expect(document?.querySelector("[data-legal-effective-date]")?.getAttribute("datetime")).toBe(
       "2026-08-15",
     );
+    if (!route.startsWith("/en/")) expect(document?.body.textContent).not.toContain("2026-08-15");
     expect(document?.querySelector('link[rel="alternate"][hreflang="ru"]')).not.toBeNull();
     expect(document?.querySelector('link[rel="alternate"][hreflang="en"]')).not.toBeNull();
     expect(document?.querySelector('a[hreflang="ru"]')).not.toBeNull();
@@ -106,6 +111,20 @@ describe("rendered legal pages", () => {
     }
   });
 
+  it.each([
+    ["/privacy/", ["Персональные данные", "Обработка", "Тенант"]],
+    ["/en/privacy/", ["Personal data", "Processing", "Tenant"]],
+  ] as const)("renders every definition as term — detail at %s", (route, terms) => {
+    const rows = documents.get(route)?.querySelectorAll(".legal-definitions > div") ?? [];
+    expect(rows).toHaveLength(terms.length);
+    rows.forEach((row, index) => {
+      const term = terms[index];
+      expect(row.querySelector("dt")?.textContent?.trim()).toBe(`${term} —`);
+      expect(row.querySelector("dd")?.textContent?.trim().length).toBeGreaterThan(0);
+      expect(row.textContent?.replaceAll(/\s+/g, " ").trim()).toMatch(new RegExp(`^${term} — `));
+    });
+  });
+
   it("publishes the verified PDF/A download, digest, and Data Matrix on document results", () => {
     for (const route of [
       ...LEGAL_ROUTES.filter((candidate) => !candidate.endsWith("/legal/")),
@@ -137,6 +156,28 @@ describe("rendered legal pages", () => {
       expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(4);
       expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
       expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(6);
+    }
+  });
+
+  it("keeps footer metadata and legal artifact rows in bounded layout groups", () => {
+    for (const route of ["/privacy/", "/legal/", VERIFICATION_ROUTES[0]] as const) {
+      const document = documents.get(route)!;
+      const footerMeta = document.querySelector("[data-footer-meta]");
+      expect(footerMeta?.querySelector(".brand-mark")).not.toBeNull();
+      expect(footerMeta?.querySelector("[data-footer-year]")?.textContent).toContain("2026");
+      for (const card of document.querySelectorAll("[data-legal-artifact-card]")) {
+        expect(card.querySelector("[data-artifact-format-row]")).not.toBeNull();
+        expect(card.querySelector("[data-artifact-action-row]")).not.toBeNull();
+        expect(card.querySelector("[data-artifact-digest-row]")).not.toBeNull();
+      }
+      for (const digest of document.querySelectorAll("[data-artifact-digest-row]")) {
+        expect(digest.querySelector("code[data-artifact-sha256]")).not.toBeNull();
+        expect(digest.querySelector("button[data-copy-artifact]")).not.toBeNull();
+      }
+      for (const address of document.querySelectorAll("[data-verification-address]")) {
+        expect(address.querySelector("[data-document-datamatrix]")).not.toBeNull();
+        expect(address.querySelector("a[href^='/d/']")).not.toBeNull();
+      }
     }
   });
 

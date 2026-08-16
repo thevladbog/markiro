@@ -2,6 +2,8 @@ import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
 import { CONSENT_CONTENT } from "./documents/consent.js";
 import { PRIVACY_CONTENT } from "./documents/privacy.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
+import { formatLegalEffectiveDate, parseLegalRevision } from "./identity.js";
+import type { LegalRevision } from "./identity.js";
 import type {
   LegalDocumentCode,
   LegalDocumentRelease,
@@ -9,17 +11,15 @@ import type {
   LegalLocale,
 } from "./types.js";
 
-export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08.01" as const;
+export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08/01" as const;
 
 const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
-const REVISION_PATTERN = /^(\d{4})\.(0[1-9]|1[0-2])\.(0[1-9]|[1-9]\d)$/;
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 export const LEGAL_RELEASES = [
   {
     code: "MKR-PD-01",
-    revision: "2026.08.01",
+    revision: "2026.08/01",
     effectiveDate: "2026-08-15",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
@@ -27,7 +27,7 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-PD-02",
-    revision: "2026.08.01",
+    revision: "2026.08/01",
     effectiveDate: "2026-08-15",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
@@ -35,7 +35,7 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-DPA-01",
-    revision: "2026.08.01",
+    revision: "2026.08/01",
     effectiveDate: "2026-08-15",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
@@ -46,7 +46,7 @@ export const LEGAL_RELEASES = [
   },
   {
     code: "MKR-BRD-01",
-    revision: "2026.08.01",
+    revision: "2026.08/01",
     effectiveDate: "2026-08-15",
     status: "active",
     operatorProfileId: "operator-2026-08-15",
@@ -55,22 +55,25 @@ export const LEGAL_RELEASES = [
 ] as const satisfies readonly LegalDocumentRelease[];
 
 export const LEGAL_DOCUMENTS = [
-  { releaseKey: "MKR-PD-01/2026.08.01", content: PRIVACY_CONTENT },
-  { releaseKey: "MKR-PD-02/2026.08.01", content: CONSENT_CONTENT },
-  { releaseKey: "MKR-DPA-01/2026.08.01", content: TENANT_PROCESSING_CONTENT },
-  { releaseKey: "MKR-BRD-01/2026.08.01", content: BRAND_LETTERHEAD_CONTENT },
+  { releaseKey: "MKR-PD-01/2026.08/01", content: PRIVACY_CONTENT },
+  { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
+  { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
+  { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
 ] as const satisfies readonly LegalDocumentSource[];
 
-function isCalendarDate(value: string): boolean {
-  if (!DATE_PATTERN.test(value)) return false;
-  const parsed = new Date(`${value}T00:00:00.000Z`);
-  return !Number.isNaN(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
-}
+function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {
+  const leftParts = parseLegalRevision(left);
+  const rightParts = parseLegalRevision(right);
+  const leftYear = Number(leftParts.yearMonth.slice(0, 4));
+  const leftMonth = Number(leftParts.yearMonth.slice(5));
+  const rightYear = Number(rightParts.yearMonth.slice(0, 4));
+  const rightMonth = Number(rightParts.yearMonth.slice(5));
 
-function isCalendarRevision(value: string): boolean {
-  const match = REVISION_PATTERN.exec(value);
-  if (!match) return false;
-  return isCalendarDate(`${match[1]}-${match[2]}-${match[3]}`);
+  return (
+    leftYear - rightYear ||
+    leftMonth - rightMonth ||
+    Number(leftParts.sequence) - Number(rightParts.sequence)
+  );
 }
 
 function assertLocaleRoutes(routes: LegalDocumentRelease["routes"]): void {
@@ -104,10 +107,14 @@ export function validateLegalRegistry(releases: readonly LegalDocumentRelease[])
     if (!(LEGAL_DOCUMENT_STATUSES as readonly string[]).includes(release.status)) {
       throw new Error(`Invalid legal document status: ${String(release.status)}`);
     }
-    if (!isCalendarRevision(release.revision)) {
+    try {
+      parseLegalRevision(release.revision);
+    } catch {
       throw new Error(`Invalid legal document revision: ${release.revision}`);
     }
-    if (!isCalendarDate(release.effectiveDate)) {
+    try {
+      formatLegalEffectiveDate(release.effectiveDate, "ru");
+    } catch {
       throw new Error(`Invalid legal document effective date: ${release.effectiveDate}`);
     }
     if (release.operatorProfileId !== "operator-2026-08-15") {
@@ -137,9 +144,9 @@ export function validateLegalRegistry(releases: readonly LegalDocumentRelease[])
     if (!releaseKeys.has(release.supersedes)) {
       throw new Error(`Unknown supersedes reference: ${release.supersedes}`);
     }
-    const separator = release.supersedes.lastIndexOf("/");
-    const supersededRevision = release.supersedes.slice(separator + 1);
-    if (supersededRevision >= release.revision) {
+    const separator = release.supersedes.indexOf("/");
+    const supersededRevision = release.supersedes.slice(separator + 1) as LegalRevision;
+    if (compareLegalRevisions(supersededRevision, release.revision) >= 0) {
       throw new Error(`Supersedes must reference an older release: ${release.supersedes}`);
     }
   }

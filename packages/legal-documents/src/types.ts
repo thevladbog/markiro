@@ -1,3 +1,7 @@
+import type { LegalIdentity, LegalRevision } from "./identity.js";
+
+export type { LegalIdentity, LegalRevision } from "./identity.js";
+
 export type LegalLocale = "ru" | "en";
 
 export type LegalDocumentCode = "MKR-PD-01" | "MKR-PD-02" | "MKR-DPA-01" | "MKR-BRD-01";
@@ -25,18 +29,17 @@ export interface LegalDocumentLocaleContent {
   }[];
 }
 
-export interface LegalDocumentRelease {
+export interface LegalDocumentRelease extends LegalIdentity {
   readonly code: LegalDocumentCode;
-  readonly revision: `${number}.${number}.${number}`;
-  readonly effectiveDate: `${number}-${number}-${number}`;
+  readonly revision: LegalRevision;
   readonly status: LegalDocumentStatus;
   readonly operatorProfileId: LegalOperatorProfileId;
   readonly routes: Readonly<Record<LegalLocale, `/${string}/`>>;
-  readonly supersedes?: `${LegalDocumentCode}/${number}.${number}.${number}`;
+  readonly supersedes?: `${LegalDocumentCode}/${LegalRevision}`;
 }
 
 export interface LegalDocumentSource {
-  readonly releaseKey: `${LegalDocumentCode}/${number}.${number}.${number}`;
+  readonly releaseKey: `${LegalDocumentCode}/${LegalRevision}`;
   readonly content: Readonly<Record<LegalLocale, LegalDocumentLocaleContent>>;
 }
 
