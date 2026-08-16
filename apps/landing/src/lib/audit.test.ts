@@ -251,7 +251,7 @@ describe("auditBuiltSite", () => {
       ...brandAssets(),
       "en/privacy/index.html": html({
         route: "/en/privacy/",
-        body: '<main><h1>Policy</h1><a href="/en/legal/">Registry</a><article data-legal-document data-legal-kind="document"><span data-legal-code>MKR-PD-01</span><span data-legal-revision>2026.08.01</span><time data-legal-effective-date>2026-08-15</time></article></main>',
+        body: '<main><h1>Policy</h1><a href="/en/legal/">Registry</a><article data-legal-document data-legal-kind="document"><span data-legal-code>MKR-PD-01</span><span data-legal-revision>2026.08/01</span><time datetime="2026-08-15" data-legal-effective-date>15 August 2026</time></article></main>',
       }),
       "en/legal/index.html": html({
         route: "/en/legal/",
@@ -271,7 +271,7 @@ describe("auditBuiltSite", () => {
   });
 
   it("rejects a linked legal artifact whose built bytes drift from the manifest", async () => {
-    const fileName = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+    const fileName = "markiro_mkr-pd-01_2026.08-01_ru.pdf";
     const root = await fixture({
       ...brandAssets(),
       "privacy/index.html": html({

@@ -1,10 +1,12 @@
 ---
 import {
   findLegalDocument,
+  formatLegalEffectiveDate,
+  legalVerificationPath,
   type LegalDocumentRelease,
 } from "@markiro/legal-documents";
 
-import { artifactsForRelease, loadLegalArtifacts, legalVerificationPath } from "../lib/legal-artifacts";
+import { artifactsForRelease, loadLegalArtifacts } from "../lib/legal-artifacts";
 import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
 import { readPublicSiteConfig } from "../lib/site-config";
 import BaseLayout from "../layouts/BaseLayout.astro";
@@ -27,7 +29,7 @@ const metadata: PageMetadata = {
   title: `${release.code} ${release.revision} — проверка документа / document verification`,
   description: `Проверка опубликованной редакции ${release.code} ${release.revision}, файлов и SHA-256. Verification of the published revision and artifacts.`,
   socialImage: "/og-markiro.jpg",
-  socialImageAlt: "Markiro document verification",
+  socialImageAlt: "Маркиро — проверка документа / Markiro document verification",
 };
 const graph = buildLegalPageGraph(metadata, {
   published: release.effectiveDate,
@@ -45,7 +47,7 @@ const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_P
         <p class="section-index">MKR / VERIFY</p>
         <h1>Проверка документа<br /><span lang="en">Document verification</span></h1>
         <p class="legal-hero__summary" data-document-id>
-          {release.code} · {release.revision} · {release.effectiveDate}
+          {release.code} · {release.revision} · <time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, "ru")}</time>
         </p>
       </div>
     </header>
@@ -55,7 +57,7 @@ const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_P
         <div class="legal-verification__copy">
           <p class="section-index">RU / ОПУБЛИКОВАНО</p>
           <h2 id="verification-ru">{source.content.ru.title}</h2>
-          <p>Код, редакция, дата и контрольные суммы совпадают с публичным реестром Markiro. Русская редакция является основной.</p>
+          <p>Код, редакция, дата и контрольные суммы совпадают с публичным реестром Маркиро. Русская редакция является основной.</p>
           <a href={release.routes.ru}>Читать русскую редакцию →</a>
         </div>
         <LegalArtifactControls

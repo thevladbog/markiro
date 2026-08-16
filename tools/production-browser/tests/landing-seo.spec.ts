@@ -14,10 +14,10 @@ const legalArtifacts = JSON.parse(
   readFileSync(path.join(repositoryRoot, "apps/landing/public/legal/artifacts.json"), "utf8"),
 ) as LegalArtifactManifestEntry[];
 const verificationRoutes = [
-  "/d/MKR-PD-01/2026.08.01/2026-08-15",
-  "/d/MKR-PD-02/2026.08.01/2026-08-15",
-  "/d/MKR-DPA-01/2026.08.01/2026-08-15",
-  "/d/MKR-BRD-01/2026.08.01/2026-08-15",
+  "/d/MKR-PD-01/2026.08/01/15.08.2026",
+  "/d/MKR-PD-02/2026.08/01/15.08.2026",
+  "/d/MKR-DPA-01/2026.08/01/15.08.2026",
+  "/d/MKR-BRD-01/2026.08/01/15.08.2026",
 ] as const;
 
 test.beforeEach(async ({ page }) => {
@@ -77,7 +77,7 @@ const demoCases = [
     expectedPayload: {
       captchaToken: "ru-captcha-token",
       company: "Завод Север",
-      consentVersion: "MKR-PD-02/2026.08.01",
+      consentVersion: "MKR-PD-02/2026.08/01",
       email: "anna@example.test",
       locale: "ru",
       name: "Анна",
@@ -98,7 +98,7 @@ const demoCases = [
     expectedPayload: {
       captchaToken: "en-captcha-token",
       company: "Factory",
-      consentVersion: "MKR-PD-02/2026.08.01",
+      consentVersion: "MKR-PD-02/2026.08/01",
       email: "ada@example.test",
       locale: "en",
       name: "Ada",
@@ -380,7 +380,33 @@ for (const route of verificationRoutes) {
   });
 }
 
-for (const route of ["/d/mkr-pd-01/2026.08.01/2026-08-15", "/d/MKR-PD-01/2026.08.01/not-a-date"]) {
+for (const viewport of [
+  { name: "desktop", width: 1440, height: 1000 },
+  { name: "Pixel 7", width: 412, height: 915 },
+] as const) {
+  test(`${viewport.name} keeps legal cards and footer aligned`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.goto("/legal/");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    const footerMeta = page.locator("[data-footer-meta]");
+    await expect(footerMeta.locator("[data-footer-year]")).toBeVisible();
+    const metaBox = await footerMeta.boundingBox();
+    const yearBox = await footerMeta.locator("[data-footer-year]").boundingBox();
+    expect(metaBox).not.toBeNull();
+    expect(yearBox).not.toBeNull();
+    expect(yearBox!.x).toBeGreaterThanOrEqual(metaBox!.x);
+    expect(yearBox!.x + yearBox!.width).toBeLessThanOrEqual(metaBox!.x + metaBox!.width + 1);
+
+    const firstCard = page.locator("[data-legal-artifact-card]").first();
+    await expect(firstCard.locator("[data-artifact-digest-row] button")).toBeVisible();
+    await firstCard.locator("[data-artifact-digest-row] button").focus();
+    await expect(firstCard.locator("[data-artifact-digest-row] button")).toBeFocused();
+  });
+}
+
+for (const route of ["/d/mkr-pd-01/2026.08/01/15.08.2026", "/d/MKR-PD-01/2026.08/01/not-a-date"]) {
   test(`${route} returns the bounded branded verification 404`, async ({ page }) => {
     const response = await page.goto(route);
     expect(response?.status()).toBe(404);

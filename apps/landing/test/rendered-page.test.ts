@@ -116,11 +116,11 @@ describe("rendered landing page", () => {
     const enDocument = documents.get("/en/");
     const ruBrandLinks = [
       ruDocument?.querySelector("header .landing-header__brand"),
-      ruDocument?.querySelector("footer .landing-footer__inner > a"),
+      ruDocument?.querySelector("footer .landing-footer__meta > a"),
     ];
     const enBrandLinks = [
       enDocument?.querySelector("header .landing-header__brand"),
-      enDocument?.querySelector("footer .landing-footer__inner > a"),
+      enDocument?.querySelector("footer .landing-footer__meta > a"),
     ];
 
     for (const brandLink of ruBrandLinks) {
@@ -217,7 +217,7 @@ describe("rendered landing page", () => {
       const form = enabledDocument.querySelector<HTMLFormElement>("form[data-demo-form]");
       const fieldset = form?.querySelector<HTMLFieldSetElement>("fieldset[data-demo-fields]");
       expect(form?.dataset.endpoint).toBe("/api/demo-requests");
-      expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.08.01");
+      expect(form?.dataset.consentVersion).toBe("MKR-PD-02/2026.08/01");
       expect(form?.dataset.locale).toBe(expectedLocale);
       expect(form?.dataset.sourcePath).toBe(route);
       expect(fieldset?.disabled).toBe(false);

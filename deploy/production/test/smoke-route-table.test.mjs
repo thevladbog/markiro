@@ -56,11 +56,11 @@ const landingLlms =
   "# Markiro\n\n- [Главная](https://markiro.app/)\n- [Вопросы и ответы](https://markiro.app/faq/)\n- [Home](https://markiro.app/en/)\n- [Questions](https://markiro.app/en/faq/)\n";
 const legalPdf = "%PDF-1.7\nvalidated-pdfa-2b-test-fixture\n%%EOF\n";
 const legalPdfSha256 = createHash("sha256").update(legalPdf).digest("hex");
-const legalPdfFileName = "markiro_mkr-pd-01_2026.08.01_ru.pdf";
+const legalPdfFileName = "markiro_mkr-pd-01_2026.08-01_ru.pdf";
 const legalArtifacts = JSON.stringify([
   {
     code: "MKR-PD-01",
-    revision: "2026.08.01",
+    revision: "2026.08/01",
     effectiveDate: "2026-08-15",
     locale: "ru",
     kind: "pdfa-2b",
@@ -239,7 +239,7 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
           "/legal/",
           "/privacy/",
           "/personal-data-consent/",
-          "/d/MKR-PD-01/2026.08.01/2026-08-15",
+          "/d/MKR-PD-01/2026.08/01/15.08.2026",
         ].includes(path)
       )
         return landingResponse({
@@ -840,7 +840,7 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/legal/", "landing-page"],
     ["GET", "/privacy/", "landing-page"],
     ["GET", "/personal-data-consent/", "landing-page"],
-    ["GET", "/d/MKR-PD-01/2026.08.01/2026-08-15", "landing-page"],
+    ["GET", "/d/MKR-PD-01/2026.08/01/15.08.2026", "landing-page"],
     ["GET", "/robots.txt", "robots"],
     ["GET", "/sitemap.xml", "sitemap"],
     ["GET", "/llms.txt", "llms"],
@@ -895,9 +895,9 @@ test("smokes public routing, headers, and unprivileged runtime without accepting
   assert.equal(commerceMl.init.body, "type=catalog&mode=checkauth");
   assert.equal(commerceMl.init.headers["content-type"], "application/x-www-form-urlencoded");
   const verification = client.requests.find(
-    ({ url }) => new URL(url).pathname === "/d/MKR-PD-01/2026.08.01/2026-08-15",
+    ({ url }) => new URL(url).pathname === "/d/MKR-PD-01/2026.08/01/15.08.2026",
   );
-  assert.equal(verification.url.href, "https://markiro.example/d/MKR-PD-01/2026.08.01/2026-08-15");
+  assert.equal(verification.url.href, "https://markiro.example/d/MKR-PD-01/2026.08/01/15.08.2026");
   assert.equal(verification.init.redirect, "manual");
   const pdf = client.requests.find(
     ({ url }) => new URL(url).pathname === `/legal/files/${legalPdfFileName}`,

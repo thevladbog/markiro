@@ -447,7 +447,17 @@ function assertAuthorityContract(adapted, { alb }) {
         ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
         : host === kioskHost
           ? [["GET", "HEAD"]]
-          : [["POST"], ["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"], ["GET", "HEAD"]],
+          : [
+              ["POST"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+              ["GET", "HEAD"],
+            ],
       `${host} must reserve mutations for API handlers instead of the SPA`,
     );
     assertPlainFallback(route, host);
@@ -561,7 +571,7 @@ function assertAuthorityContract(adapted, { alb }) {
   for (const path of [
     "/",
     "/faq/",
-    "/d/MKR-PD-01/2026.08.01/2026-08-15",
+    "/d/MKR-PD-01/2026.08/01/15.08.2026",
     "/robots.txt",
     "/sitemap.xml",
     "/llms.txt",
@@ -1043,6 +1053,47 @@ test("direct Caddy adapter isolates the admin, kiosk and landing authorities", a
       write_timeout: 60_000_000_000,
     },
   ]);
+});
+
+test("direct Caddy adapter exposes only the four exact legacy legal redirects", async () => {
+  const adapted = await adaptCaddy(await readFile("deploy/production/Caddyfile", "utf8"));
+  const landing = applicationRoute(adapted, landingHost);
+  const routeTable = applicationOrderedRouteTable(landing);
+  const expected = new Map([
+    ["/d/MKR-PD-01/2026.08.01/2026-08-15", "/d/MKR-PD-01/2026.08/01/15.08.2026"],
+    ["/d/MKR-PD-02/2026.08.01/2026-08-15", "/d/MKR-PD-02/2026.08/01/15.08.2026"],
+    ["/d/MKR-DPA-01/2026.08.01/2026-08-15", "/d/MKR-DPA-01/2026.08/01/15.08.2026"],
+    ["/d/MKR-BRD-01/2026.08.01/2026-08-15", "/d/MKR-BRD-01/2026.08/01/15.08.2026"],
+  ]);
+  const redirects = routeTable.filter((route) =>
+    nestedObjects(route).some(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 308,
+    ),
+  );
+  assert.equal(redirects.length, expected.size);
+  for (const [legacyPath, target] of expected) {
+    const matching = redirects.filter((route) =>
+      adaptedRouteMatches(route, { method: "GET", path: legacyPath }),
+    );
+    assert.equal(matching.length, 1, `${legacyPath} must select one exact redirect`);
+    const response = nestedObjects(matching[0]).find(
+      (candidate) => candidate.handler === "static_response" && candidate.status_code === 308,
+    );
+    assert.deepEqual(response.headers?.Location, [target]);
+  }
+
+  for (const malformed of [
+    "/d/MKR-PD-01/2026.08.01",
+    "/d/mkr-pd-01/2026.08.01/2026-08-15",
+    "/d/MKR-PD-01/2026.08.01/2026-08-15/extra",
+    "/d/MKR-PD-99/2026.08.01/2026-08-15",
+  ]) {
+    assert.equal(
+      redirects.some((route) => adaptedRouteMatches(route, { method: "GET", path: malformed })),
+      false,
+      `${malformed} must not match a legacy redirect`,
+    );
+  }
 });
 
 test("direct Caddy adapter keeps bare admin routes static and routes exact Station requests", async () => {

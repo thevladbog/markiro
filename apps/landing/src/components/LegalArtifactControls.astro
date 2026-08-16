@@ -4,9 +4,13 @@ import type {
   LegalDocumentRelease,
   LegalLocale,
 } from "@markiro/legal-documents";
+import {
+  formatLegalEffectiveDate,
+  legalVerificationPath,
+  legalVerificationUrl,
+} from "@markiro/legal-documents";
 
 import type { PublishedLegalArtifact } from "../lib/legal-artifacts";
-import { legalVerificationPath, legalVerificationUrl } from "../lib/legal-artifacts";
 
 interface Props {
   release: LegalDocumentRelease;
@@ -37,7 +41,7 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
   <div class="legal-artifacts__heading">
     <div>
       <span class="legal-artifacts__status" data-legal-status={release.status}>{status}</span>
-      <p class="legal-artifacts__identity"><strong>{release.code}</strong> · {release.revision} · {release.effectiveDate}</p>
+      <p class="legal-artifacts__identity"><strong>{release.code}</strong> · {release.revision} · <time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, locale)}</time></p>
     </div>
     {showVerificationLink && (
       <a class="legal-artifacts__verify-link" href={verificationPath}>
@@ -47,15 +51,15 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
   </div>
 
   <div class="legal-artifacts__files">
-    <article class="legal-artifact-file">
-      <div class="legal-artifact-file__topline">
+    <article class="legal-artifact-file" data-legal-artifact-card>
+      <div class="legal-artifact-file__topline" data-artifact-format-row>
         <strong>PDF/A-2b</strong>
         <span>{formatBytes(pdf.bytes)}</span>
       </div>
-      <a class="legal-artifact-file__download" href={pdf.href} download={pdf.fileName} type={pdf.mediaType}>
+      <a class="legal-artifact-file__download" data-artifact-action-row href={pdf.href} download={pdf.fileName} type={pdf.mediaType}>
         {locale === "ru" ? "Скачать PDF/A" : "Download PDF/A"}
       </a>
-      <div class="legal-artifact-file__digest">
+      <div class="legal-artifact-file__digest" data-artifact-digest-row>
         <span>SHA-256</span>
         <code data-artifact-sha256>{pdf.sha256}</code>
         <button type="button" data-copy-artifact={pdf.sha256} aria-live="polite" aria-label={locale === "ru" ? "Скопировать SHA-256 PDF" : "Copy PDF SHA-256"}>
@@ -65,8 +69,8 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
     </article>
 
     {docx && (
-      <article class="legal-artifact-file legal-artifact-file--template">
-        <div class="legal-artifact-file__topline">
+      <article class="legal-artifact-file legal-artifact-file--template" data-legal-artifact-card>
+        <div class="legal-artifact-file__topline" data-artifact-format-row>
           <strong>DOCX</strong>
           <span>{formatBytes(docx.bytes)}</span>
         </div>
@@ -75,10 +79,10 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
             ? "ШАБЛОН / TEMPLATE — НЕ ЯВЛЯЕТСЯ ДЕЙСТВУЮЩИМ ДОКУМЕНТОМ"
             : "TEMPLATE / ШАБЛОН — NOT AN EFFECTIVE DOCUMENT"}
         </p>
-        <a class="legal-artifact-file__download" href={docx.href} download={docx.fileName} type={docx.mediaType}>
+        <a class="legal-artifact-file__download" data-artifact-action-row href={docx.href} download={docx.fileName} type={docx.mediaType}>
           {locale === "ru" ? "Скачать шаблон DOCX" : "Download DOCX template"}
         </a>
-        <div class="legal-artifact-file__digest">
+        <div class="legal-artifact-file__digest" data-artifact-digest-row>
           <span>SHA-256</span>
           <code data-artifact-sha256>{docx.sha256}</code>
         <button type="button" data-copy-artifact={docx.sha256} aria-live="polite" aria-label={locale === "ru" ? "Скопировать SHA-256 DOCX" : "Copy DOCX SHA-256"}>
@@ -90,7 +94,7 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
   </div>
 
   {!compact && (
-    <div class="legal-artifacts__verification">
+    <div class="legal-artifacts__verification" data-verification-address>
       <div class="legal-artifacts__datamatrix" data-document-datamatrix={verificationUrl} set:html={dataMatrixSvg} />
       <p>
         <span>{locale === "ru" ? "Адрес проверки" : "Verification address"}</span>
