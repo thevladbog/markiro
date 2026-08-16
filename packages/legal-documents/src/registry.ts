@@ -4,7 +4,12 @@ import { PRIVACY_CONTENT } from "./documents/privacy.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
 import { formatLegalEffectiveDate, parseLegalRevision } from "./identity.js";
 import type { LegalRevision } from "./identity.js";
-import type { LegalDocumentCode, LegalDocumentRelease, LegalDocumentSource, LegalLocale } from "./types.js";
+import type {
+  LegalDocumentCode,
+  LegalDocumentRelease,
+  LegalDocumentSource,
+  LegalLocale,
+} from "./types.js";
 
 export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08/01" as const;
 
