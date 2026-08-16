@@ -53,11 +53,11 @@ function assertEdgeBuildStep(step, expectedEnvironment) {
   assert.doesNotMatch(step.run, /set\s+-x/);
 }
 
-function assertProtectedDemoRuntimeInventory(step) {
+function assertProtectedDemoRuntimeInventory(step, submissionEnabled = "false") {
   assert.match(step.run, /captcha_server_key="ysc2_\$\(openssl rand -hex 24\)"/);
   assert.ok(step.run.includes('"$captcha_server_key"'));
   for (const [variable, value] of Object.entries({
-    LANDING_DEMO_SUBMISSION_ENABLED: "false",
+    LANDING_DEMO_SUBMISSION_ENABLED: submissionEnabled,
     LANDING_ORIGIN: "https://landing.localhost:18443",
     LANDING_DEMO_RECIPIENT: "demo-recipient@markiro.local",
     LANDING_DEMO_REPLY_TO: "demo-reply-to@markiro.local",
@@ -132,8 +132,20 @@ test("release publication is main-only, digest-bound and writes the immutable ma
     assert.match(source, new RegExp(variable));
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
   assertNoRetiredLegalEnvironmentVariables(source);
-  assertProtectedDemoRuntimeInventory(
-    namedStep(workflow, "production-bundle", "Generate masked test-only environment"),
+  const runtimeStep = namedStep(
+    workflow,
+    "production-bundle",
+    "Generate masked test-only environment",
+  );
+  assert.deepEqual(runtimeStep.env, {
+    LANDING_DEMO_SUBMISSION_ENABLED:
+      "${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED == 'true' && 'true' || 'false' }}",
+  });
+  assertProtectedDemoRuntimeInventory(runtimeStep, "$LANDING_DEMO_SUBMISSION_ENABLED");
+  const smokeStep = namedStep(workflow, "production-bundle", "Smoke the production bundle");
+  assert.equal(
+    smokeStep.env.MARKIRO_LANDING_DEMO_SUBMISSION_STATE,
+    "${{ vars.PUBLIC_DEMO_SUBMISSION_ENABLED == 'true' && 'enabled' || 'disabled' }}",
   );
   assertEdgeBuildStep(
     namedStep(workflow, "production-bundle", "Build local SHA-tagged production images"),
