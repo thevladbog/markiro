@@ -10,6 +10,7 @@ import {
   DeploymentStageError,
   atDeploymentStage,
   deployRelease,
+  runCommand,
   runRemoteDeployCli,
   runRemoteDeployment,
   streamArchive,
@@ -135,6 +136,73 @@ test("deploy CLI maps invalid invocation and untyped failures to configuration",
     assert.equal(stderr, "MARKIRO_DEPLOY_FAILURE configuration\n");
     assert.equal(stderr.includes("private"), false);
   }
+});
+
+function commandChild() {
+  return Object.assign(new EventEmitter(), {
+    exitCode: null,
+    killCalls: 0,
+    stdin: new PassThrough(),
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    kill() {
+      this.killCalls += 1;
+      return true;
+    },
+  });
+}
+
+test("remote command stdin failure settles once with one fixed private rejection", async () => {
+  const child = commandChild();
+  const secret = "registry-token-and-/runner/private-key-path";
+  let settlements = 0;
+  const command = runCommand("ssh", ["private-host"], {
+    input: secret,
+    spawn: () => child,
+  }).then(
+    () => {
+      settlements += 1;
+      assert.fail("stdin failure must reject");
+    },
+    (error) => {
+      settlements += 1;
+      assert.equal(error.message, "private remote command failed");
+      assert.equal(String(error).includes(secret), false);
+    },
+  );
+
+  child.stdin.emit("error", new Error(`write EPIPE ${secret}`));
+  child.emit("close", 255);
+  child.emit("error", new Error(`late child error ${secret}`));
+  await command;
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settlements, 1);
+  assert.equal(child.killCalls, 1);
+});
+
+test("stdin error and close race reaches the deploy CLI as one bounded stage line", async () => {
+  const child = commandChild();
+  const secret = "EPIPE-/runner/private-identity-registry-token";
+  let stderr = "";
+  const exit = runRemoteDeployCli({
+    argv: ["run"],
+    stderr: { write: (value) => (stderr += value) },
+    runDeployment: () =>
+      atDeploymentStage("prepare", () =>
+        runCommand("ssh", ["private-host"], {
+          input: secret,
+          spawn: () => child,
+        }),
+      ),
+  });
+
+  child.stdin.emit("error", new Error(`write EPIPE ${secret}`));
+  child.emit("close", 255);
+  assert.equal(await exit, 1);
+  assert.equal(stderr, "MARKIRO_DEPLOY_FAILURE prepare\n");
+  assert.equal(stderr.includes(secret), false);
+  assert.equal(stderr.includes("EPIPE"), false);
+  assert.equal(stderr.includes("remote-deploy.mjs"), false);
 });
 
 test("release transfer terminates tar when SSH exits before consuming the archive", async () => {

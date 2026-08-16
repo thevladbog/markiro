@@ -65,3 +65,23 @@ Result: 314 passed, 0 failed, 0 skipped. The wrapper reached the repository prod
 ## Review focus and remaining external evidence
 
 Independent review should verify secret non-disclosure, inventory-before-mutation ordering, single-line diagnostics, rollback precedence, direct argv without shell interpolation, and the existing narrow VM service-account scope. Automated tests do not establish SMTP delivery, captcha validity, database connectivity, live application health, provider state, or a successful production deployment.
+
+## Final review fix: command stdin lifecycle
+
+Whole-plan review identified one additional local disclosure path: the SSH
+command adapter wrote the registry envelope to child stdin without handling a
+possible asynchronous `EPIPE`. If SSH or the transient unit closed early, Node
+could emit an uncaught stack and runner path outside the single bounded
+diagnostic contract.
+
+The corrected adapter handles stdin errors before writing, uses one fixed
+private rejection for spawn, stream, child, and nonzero-close failures,
+terminates a child still running after the broken write, and settles once across
+error/close races. Exercised-behavior tests inject secret- and path-shaped
+details and prove the top-level CLI still emits exactly one allowlisted stage
+line without EPIPE text, stack, path, or secret material.
+
+After this fix, the focused remote/workflow suite passed 29/29 and the combined
+Yandex plus production workflow/runbook suite passed 77/77. No live deploy,
+provider request, Lockbox access or mutation, service command, push, or merge
+was performed.

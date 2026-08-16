@@ -160,14 +160,27 @@ async function validateHostedPrivateKey(path, system) {
   }
 }
 
-function run(command, args, options = {}) {
+export function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
-      cwd: options.cwd,
-      env: options.env || process.env,
-      shell: false,
-      stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
-    });
+    let child;
+    let settled = false;
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      if (child?.exitCode === null) child.kill?.("SIGTERM");
+      reject(new Error("private remote command failed"));
+    };
+    try {
+      child = (options.spawn ?? spawn)(command, args, {
+        cwd: options.cwd,
+        env: options.env || process.env,
+        shell: false,
+        stdio: [options.input ? "pipe" : "ignore", "pipe", "pipe"],
+      });
+    } catch {
+      fail();
+      return;
+    }
     const stdout = [];
     let stdoutBytes = 0;
     child.stdout.on("data", (chunk) => {
@@ -177,12 +190,21 @@ function run(command, args, options = {}) {
       stdoutBytes += bounded.length;
     });
     child.stderr.on("data", () => undefined);
-    child.once("error", () => reject(new Error(`${command} failed`)));
+    child.once("error", fail);
     child.once("close", (code) => {
+      if (settled) return;
+      settled = true;
       if (code === 0) resolve(Buffer.concat(stdout).toString("utf8"));
-      else reject(new Error(`${command} failed`));
+      else reject(new Error("private remote command failed"));
     });
-    if (options.input) child.stdin.end(options.input);
+    if (options.input) {
+      child.stdin.on("error", fail);
+      try {
+        child.stdin.end(options.input);
+      } catch {
+        fail();
+      }
+    }
   });
 }
 
@@ -365,7 +387,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
     writeFile,
     rm,
     streamArchive,
-    run,
+    run: runCommand,
     smoke: ({
       adminBaseUrl,
       kioskBaseUrl,
