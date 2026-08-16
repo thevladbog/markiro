@@ -469,6 +469,74 @@ test("direct deployment passes the approved landing submission state to public s
   assert.equal(calls[0].landingDemoSubmissionState, "enabled");
 });
 
+for (const failingCleanupCalls of [[1], [1, 2]]) {
+  test(`cleanup attempts both directories and preserves a transfer failure when removals ${failingCleanupCalls.join(
+    " and ",
+  )} fail`, async () => {
+    const fixture = systemFixture();
+    const transferCause = new Error("private-transfer-value");
+    fixture.system.streamArchive = async () => {
+      throw transferCause;
+    };
+    const cleanupCalls = [];
+    fixture.system.rm = async (path) => {
+      cleanupCalls.push(path);
+      if (failingCleanupCalls.includes(cleanupCalls.length))
+        throw new Error(`private-cleanup-value-${cleanupCalls.length}`);
+    };
+
+    await assert.rejects(runRemoteDeployment(environment(), fixture.system), (error) => {
+      assert.ok(error instanceof DeploymentStageError);
+      assert.equal(error.stage, "transfer");
+      assert.equal(error.message, "remote deployment failed");
+      assert.equal(error.cause, transferCause);
+      return true;
+    });
+    assert.deepEqual(cleanupCalls, ["/tmp/ssh", "/tmp/manifest"]);
+  });
+}
+
+test("cleanup attempts the second directory when the first removal throws synchronously", async () => {
+  const fixture = systemFixture();
+  fixture.system.streamArchive = async () => {
+    throw new Error("private-transfer-value");
+  };
+  const cleanupCalls = [];
+  fixture.system.rm = (path) => {
+    cleanupCalls.push(path);
+    if (cleanupCalls.length === 1) throw new Error("private-synchronous-cleanup-value");
+    return Promise.resolve();
+  };
+
+  await assert.rejects(runRemoteDeployment(environment(), fixture.system), (error) => {
+    assert.ok(error instanceof DeploymentStageError);
+    assert.equal(error.stage, "transfer");
+    return true;
+  });
+  assert.deepEqual(cleanupCalls, ["/tmp/ssh", "/tmp/manifest"]);
+});
+
+test("cleanup-only failure emits one bounded configuration diagnostic after both attempts", async () => {
+  const fixture = systemFixture();
+  const cleanupCalls = [];
+  fixture.system.rm = async (path) => {
+    cleanupCalls.push(path);
+    throw new Error(`private-cleanup-value-${cleanupCalls.length}`);
+  };
+  let stderr = "";
+
+  const exitCode = await runRemoteDeployCli({
+    argv: ["run"],
+    stderr: { write: (value) => (stderr += value) },
+    runDeployment: () => runRemoteDeployment(environment(), fixture.system),
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(stderr, "MARKIRO_DEPLOY_FAILURE configuration\n");
+  assert.equal(stderr.includes("private-cleanup-value"), false);
+  assert.deepEqual(cleanupCalls, ["/tmp/ssh", "/tmp/manifest"]);
+});
+
 for (const [name, overrides] of [
   ["Yandex IAM", { YC_IAM_TOKEN: "must-not-be-required", GHCR_TOKEN: "" }],
   ["dedicated login", { YC_APP_DEPLOY_LOGIN: "root" }],

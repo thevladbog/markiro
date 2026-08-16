@@ -389,6 +389,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
 
   const credentialDirectory = await system.mkdtemp(join(tmpdir(), "markiro-direct-ssh-"));
   const manifestDirectory = await system.mkdtemp(join(tmpdir(), "markiro-release-manifest-"));
+  let deploymentFailure;
   try {
     const knownHosts = join(credentialDirectory, "known_hosts");
     await system.writeFile(knownHosts, knownHostsContents, { encoding: "utf8", mode: 0o600 });
@@ -551,9 +552,20 @@ async function runRemoteDeploymentInternal(environment, supplied) {
       },
       manifestText,
     );
+  } catch (cause) {
+    deploymentFailure = cause;
+    throw cause;
   } finally {
-    await system.rm(credentialDirectory, { recursive: true, force: true });
-    await system.rm(manifestDirectory, { recursive: true, force: true });
+    const cleanupResults = await Promise.allSettled(
+      [credentialDirectory, manifestDirectory].map((directory) =>
+        Promise.resolve().then(() => system.rm(directory, { recursive: true, force: true })),
+      ),
+    );
+    const cleanupFailures = cleanupResults.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+    if (!deploymentFailure && cleanupFailures.length > 0)
+      throw new AggregateError(cleanupFailures, "remote deployment cleanup failed");
   }
 }
 
