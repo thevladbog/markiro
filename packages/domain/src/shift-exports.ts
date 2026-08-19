@@ -1,3 +1,4 @@
+import { DomainError } from "./errors.js";
 import { formatSsccWithAi } from "./gs1/sscc.js";
 
 export type ShiftExportFormatId =
@@ -42,7 +43,8 @@ export type ShiftExportDomainErrorCode =
   | "FORMAT_SOURCE_MISMATCH"
   | "EMPTY_SOURCE"
   | "INVALID_LINE_LIMIT"
-  | "BOX_EXCEEDS_LINE_LIMIT";
+  | "BOX_EXCEEDS_LINE_LIMIT"
+  | "INVALID_BOX_SSCC";
 
 export class ShiftExportDomainError extends Error {
   constructor(readonly code: ShiftExportDomainErrorCode) {
@@ -220,7 +222,7 @@ function createBlocks(
   }
 
   return source.boxes.map((box) => {
-    const ssccOut = descriptor.version >= 2 ? formatSsccWithAi(box.sscc) : box.sscc;
+    const ssccOut = descriptor.version >= 2 ? formatBoxSscc(box.sscc) : box.sscc;
     const lines =
       descriptor.extension === "txt"
         ? [ssccOut, ...box.codes, ""]
@@ -312,6 +314,24 @@ function createFilename(input: {
   const partSegment = input.hasMultipleParts ? `_часть_${input.partNumber}` : "";
 
   return `${input.productName}_${input.codeCount}${boxCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;
+}
+
+/**
+ * Wraps `formatSsccWithAi` so a malformed v2 box SSCC surfaces through this
+ * module's own error taxonomy (`ShiftExportDomainError`) instead of the
+ * `gs1/sscc.js` module's plain `DomainError` — every failure mode of
+ * `renderShiftExport`/`createBlocks` is a `ShiftExportDomainError`, and
+ * callers (e.g. the export runner) pattern-match on `ShiftExportDomainErrorCode`.
+ */
+function formatBoxSscc(sscc: string): string {
+  try {
+    return formatSsccWithAi(sscc);
+  } catch (error) {
+    if (error instanceof DomainError) {
+      throw new ShiftExportDomainError("INVALID_BOX_SSCC");
+    }
+    throw error;
+  }
 }
 
 function csvField(value: string): string {

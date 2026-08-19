@@ -377,4 +377,49 @@ describe("boxes format version 2 (00-prefixed SSCC)", () => {
     });
     expect(new TextDecoder().decode(parts[0]!.bytes)).toBe("001234567890123456\nKM-1\n\n");
   });
+
+  it("rejects a malformed box SSCC in v2 as ShiftExportDomainError, not a plain DomainError", () => {
+    expect(() =>
+      renderShiftExport({
+        formatId: "shift_txt_boxes",
+        formatVersion: 2,
+        productName: "Товар",
+        shiftDate: "2026-08-19",
+        maxLines: null,
+        source: {
+          mode: "boxes",
+          boxes: [{ sscc: "0012345678901234", codes: ["KM-1"] }], // 16 digits, not 18
+        },
+      }),
+    ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
+
+    expect(() =>
+      renderShiftExport({
+        formatId: "shift_csv_boxes",
+        formatVersion: 2,
+        productName: "Товар",
+        shiftDate: "2026-08-19",
+        maxLines: null,
+        source: {
+          mode: "boxes",
+          boxes: [{ sscc: "not-a-number-18c", codes: ["KM-1"] }],
+        },
+      }),
+    ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
+  });
+
+  it("does not validate box SSCC shape in frozen v1 rendering", () => {
+    const parts = renderShiftExport({
+      formatId: "shift_txt_boxes",
+      formatVersion: 1,
+      productName: "Товар",
+      shiftDate: "2026-08-19",
+      maxLines: null,
+      source: {
+        mode: "boxes",
+        boxes: [{ sscc: "0012345678901234", codes: ["KM-1"] }], // malformed, but v1 never validates
+      },
+    });
+    expect(new TextDecoder().decode(parts[0]!.bytes)).toBe("0012345678901234\nKM-1\n\n");
+  });
 });
