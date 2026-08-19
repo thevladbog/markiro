@@ -21,6 +21,7 @@ export { validateShiftScan } from "./scan/validate.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
   LABEL_FIELDS,
+  labelFieldDisplayValue,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
