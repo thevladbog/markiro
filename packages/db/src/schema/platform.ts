@@ -73,6 +73,9 @@ export const products = pgTable(
     defaultLabelTemplateId: uuid("default_label_template_id"),
     unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
     egaisCode: text("egais_code"),
+    // Product shelf life in days; the station computes the box label's
+    // «Годен до» as production date + this. Null = the label field prints empty.
+    shelfLifeDays: integer("shelf_life_days"),
     externalRef: text("external_ref"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
