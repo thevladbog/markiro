@@ -32,6 +32,7 @@ export type ListBoxesQueryDto = z.infer<typeof listBoxesQuerySchema>;
  */
 export interface BoxDto {
   id: string;
+  /** 20-значный код с GS1 AI "00" (требование Честного знака); в БД хранится голый 18-значный SSCC. */
   sscc: string | null;
   terminalId: string | null;
   /** Assigned production line of the station that reported this box. */
