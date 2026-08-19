@@ -1034,9 +1034,7 @@ describe("WorkstationSetup", () => {
   };
 
   it("sends a test print to the selected USB printer", async () => {
-    const print = vi.fn<(target: PrintTarget, bytes: Uint8Array) => Promise<void>>(
-      async () => {},
-    );
+    const print = vi.fn<(target: PrintTarget, bytes: Uint8Array) => Promise<void>>(async () => {});
     const hw = hardware({
       listUsbPrinters: async () => [
         { name: "Zebra ZD421", port: "USB001" },
@@ -1101,9 +1099,7 @@ describe("WorkstationSetup", () => {
     const hw = hardware({
       listUsbPrinters: async () => [{ name: "TSC TE200", port: "USB002" }],
     });
-    render(
-      <WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />,
-    );
+    render(<WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
     fireEvent.click(screen.getByRole("radio", { name: "USB" }));
@@ -1122,9 +1118,7 @@ describe("WorkstationSetup", () => {
     await selectSetupTab("Printer");
     fireEvent.click(screen.getByRole("radio", { name: "USB" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(
-      await screen.findByText(/Enter the required printer connection details/),
-    ).toBeDefined();
+    expect(await screen.findByText(/Enter the required printer connection details/)).toBeDefined();
   });
 
   it("keeps the test result and exit controls in fixed layout regions", async () => {

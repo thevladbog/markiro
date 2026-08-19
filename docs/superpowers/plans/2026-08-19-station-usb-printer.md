@@ -28,9 +28,11 @@
 ### Task 1: Branch, worktree, and baseline
 
 **Files:**
+
 - Create: `.worktrees/station-usb-printer/` (git worktree)
 
 **Interfaces:**
+
 - Produces: a clean worktree on branch `feature/station-usb-printer` where all later tasks run, with workspace deps installed and `@markiro/domain` / `@markiro/ui` / `@markiro/db` built so station tests resolve compiled output.
 
 - [ ] **Step 1: Create the worktree and branch**
@@ -69,11 +71,13 @@ Expected: PASS. If the baseline fails, stop and report — do not diagnose it as
 ### Task 2: Rust — USB printer enumeration command
 
 **Files:**
+
 - Modify: `apps/station/src-tauri/Cargo.toml` (windows-sys features)
 - Modify: `apps/station/src-tauri/src/printer.rs`
 - Modify: `apps/station/src-tauri/src/lib.rs:43-54` (register the command)
 
 **Interfaces:**
+
 - Produces: Tauri command `list_usb_printers() -> Result<Vec<UsbPrinter>, String>` where `UsbPrinter` serializes as `{ "name": string, "port": string }` (camelCase); pure fn `filter_usb_printers(Vec<(String, String)>) -> Vec<UsbPrinter>`.
 - Consumed by: Task 4's `invoke("list_usb_printers")`.
 
@@ -278,9 +282,11 @@ git commit -m "feat(station): enumerate USB printers via the Windows spooler"
 ### Task 3: Rust — `PrintTarget::Usb` and spooler RAW printing
 
 **Files:**
+
 - Modify: `apps/station/src-tauri/src/printer.rs`
 
 **Interfaces:**
+
 - Consumes: `spooler::wide`, `spooler::last_error` from Task 2.
 - Produces: `PrintTarget::Usb { printer: String }` (serde tag `"usb"`, field `printer`); `fn print_to_target(target: PrintTarget, bytes: &[u8]) -> Result<(), String>` used by `print_bytes`. Task 4's TS `{ kind: "usb"; printer: string }` must match this serde shape exactly.
 
@@ -484,6 +490,7 @@ git commit -m "feat(station): print raw label bytes to USB printers via spooler 
 ### Task 4: TS contract and hardware config
 
 **Files:**
+
 - Modify: `apps/station/src/lib/hardware.ts`
 - Modify: `apps/station/src/lib/hardware-config.ts`
 - Modify: `apps/station/test/hardware-config.test.ts`
@@ -492,6 +499,7 @@ git commit -m "feat(station): print raw label bytes to USB printers via spooler 
 - Modify: `apps/station/test/App.test.tsx` (`hardwareMock`)
 
 **Interfaces:**
+
 - Consumes: Rust command `list_usb_printers` (Task 2) returning `{ name, port }[]`; serde shape `{"kind":"usb","printer":...}` (Task 3).
 - Produces: `PrintTarget` union member `{ kind: "usb"; printer: string }`; `interface UsbPrinterInfo { name: string; port: string }`; `HardwareContract.listUsbPrinters(): Promise<UsbPrinterInfo[]>`; `parsePrinter` accepting the usb shape. Tasks 5–6 rely on these exact names.
 
@@ -500,31 +508,31 @@ git commit -m "feat(station): print raw label bytes to USB printers via spooler 
 Append to `apps/station/test/hardware-config.test.ts` inside `describe("hardware config", ...)`:
 
 ```ts
-  it("round-trips a USB printer target", async () => {
-    const exec = await makeExec();
-    const usb: HardwareConfig = {
-      scanner: null,
-      printer: { kind: "usb", printer: "Zebra ZD421" },
-      printerLanguage: "tspl",
-      verifyPrintedLabel: false,
-    };
-    await saveHardwareConfig(exec, usb);
-    expect(await loadHardwareConfig(exec)).toEqual(usb);
-  });
+it("round-trips a USB printer target", async () => {
+  const exec = await makeExec();
+  const usb: HardwareConfig = {
+    scanner: null,
+    printer: { kind: "usb", printer: "Zebra ZD421" },
+    printerLanguage: "tspl",
+    verifyPrintedLabel: false,
+  };
+  await saveHardwareConfig(exec, usb);
+  expect(await loadHardwareConfig(exec)).toEqual(usb);
+});
 
-  it("drops a stored USB printer with an empty queue name", async () => {
-    const exec = await makeExec();
-    await exec.run("INSERT INTO station_meta (key, value) VALUES (?,?)", [
-      "hardware_config",
-      JSON.stringify({
-        scanner: null,
-        printer: { kind: "usb", printer: "" },
-        printerLanguage: "zpl",
-        verifyPrintedLabel: false,
-      }),
-    ]);
-    expect((await loadHardwareConfig(exec)).printer).toBeNull();
-  });
+it("drops a stored USB printer with an empty queue name", async () => {
+  const exec = await makeExec();
+  await exec.run("INSERT INTO station_meta (key, value) VALUES (?,?)", [
+    "hardware_config",
+    JSON.stringify({
+      scanner: null,
+      printer: { kind: "usb", printer: "" },
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    }),
+  ]);
+  expect((await loadHardwareConfig(exec)).printer).toBeNull();
+});
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -615,12 +623,14 @@ git commit -m "feat(station): add the USB print target to the hardware contract 
 ### Task 5: USB transport in the printer setup panel
 
 **Files:**
+
 - Modify: `apps/station/src/ui/setup/PrinterSetupPanel.tsx`
 - Modify: `apps/station/src/i18n/en.json` (`setup` section)
 - Modify: `apps/station/src/i18n/ru.json` (`setup` section)
 - Test: `apps/station/test/workstation-setup.test.tsx` (compile-level only in this task; behavior tests come with the wiring in Task 6)
 
 **Interfaces:**
+
 - Consumes: `UsbPrinterInfo` from Task 4.
 - Produces: new `PrinterSetupPanelProps` members — `usbPrinters: readonly UsbPrinterInfo[]`, `usbPrinter: string`, `onUsbPrinterChange: (name: string) => void`, `onUsbRefresh: () => void`. Task 6 passes these from `WorkstationSetup`.
 
@@ -689,12 +699,12 @@ Add the transport choice after the `serial` entry in `transportChoices`:
 Inside the component, before `return`, build the choices (a selected printer missing from a fresh scan stays visible so refresh cannot silently drop the stored configuration):
 
 ```ts
-  const usbChoices = [
-    ...(usbPrinter !== "" && !usbPrinters.some((p) => p.name === usbPrinter)
-      ? [{ value: usbPrinter, label: t("setup.usbMissingSaved", { name: usbPrinter }) }]
-      : []),
-    ...usbPrinters.map((p) => ({ value: p.name, label: `${p.name} · ${p.port}` })),
-  ];
+const usbChoices = [
+  ...(usbPrinter !== "" && !usbPrinters.some((p) => p.name === usbPrinter)
+    ? [{ value: usbPrinter, label: t("setup.usbMissingSaved", { name: usbPrinter }) }]
+    : []),
+  ...usbPrinters.map((p) => ({ value: p.name, label: `${p.name} · ${p.port}` })),
+];
 ```
 
 In the `setup-panel__fields` block, add a `usb` branch between the `serial` branch and the final `noPrinterHint` fallback:
@@ -768,10 +778,12 @@ git commit -m "feat(station): add the USB transport option to the printer setup 
 ### Task 6: Wire USB into WorkstationSetup
 
 **Files:**
+
 - Modify: `apps/station/src/pages/WorkstationSetup.tsx`
 - Test: `apps/station/test/workstation-setup.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `HardwareContract.listUsbPrinters` (Task 4), `PrinterSetupPanel` props (Task 5).
 - Produces: end-to-end USB flow — detection list, refresh, selection, test print with `{ kind: "usb", printer }`, persistence through `buildConfig`/`saveHardwareConfig`.
 
@@ -780,107 +792,101 @@ git commit -m "feat(station): add the USB transport option to the printer setup 
 Append to `apps/station/test/workstation-setup.test.tsx` inside `describe("WorkstationSetup", ...)`. The `hardware()` helper already defaults `listUsbPrinters: async () => []` (Task 4).
 
 ```tsx
-  const defaultProps = {
-    exec: noopExec,
-    sound: { muted: false, volume: 1 },
-    onSoundChange: () => {},
-    onConfigChange: () => {},
-    onDone: () => {},
+const defaultProps = {
+  exec: noopExec,
+  sound: { muted: false, volume: 1 },
+  onSoundChange: () => {},
+  onConfigChange: () => {},
+  onDone: () => {},
+};
+
+it("sends a test print to the selected USB printer", async () => {
+  const print = vi.fn<(target: PrintTarget, bytes: Uint8Array) => Promise<void>>(async () => {});
+  const hw = hardware({
+    listUsbPrinters: async () => [
+      { name: "Zebra ZD421", port: "USB001" },
+      { name: "TSC TE200", port: "USB002" },
+    ],
+    print,
+  });
+  render(<WorkstationSetup hw={hw} {...defaultProps} />);
+  await screen.findByText("COM3");
+  await selectSetupTab("Printer");
+  fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" }));
+  fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+  await waitFor(() =>
+    expect(print).toHaveBeenCalledWith(
+      { kind: "usb", printer: "Zebra ZD421" },
+      expect.any(Uint8Array),
+    ),
+  );
+});
+
+it("shows the empty hint and refreshes the USB list on demand", async () => {
+  const listUsbPrinters = vi
+    .fn<() => Promise<{ name: string; port: string }[]>>()
+    .mockResolvedValueOnce([])
+    .mockResolvedValueOnce([{ name: "Zebra ZD421", port: "USB001" }]);
+  render(<WorkstationSetup hw={hardware({ listUsbPrinters })} {...defaultProps} />);
+  await screen.findByText("COM3");
+  await selectSetupTab("Printer");
+  fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+  expect(await screen.findByText(/No USB printers found/)).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
+  expect(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" })).toBeDefined();
+});
+
+it("keeps a configured USB printer selectable when detection no longer lists it", async () => {
+  const storedExec: SqlExecutor = {
+    run: async () => {},
+    all: async <T,>() =>
+      [
+        {
+          value: JSON.stringify({
+            scanner: null,
+            printer: { kind: "usb", printer: "Zebra ZD421" },
+            printerLanguage: "tspl",
+            verifyPrintedLabel: false,
+          }),
+        },
+      ] as T[],
   };
-
-  it("sends a test print to the selected USB printer", async () => {
-    const print = vi.fn<(target: PrintTarget, bytes: Uint8Array) => Promise<void>>(
-      async () => {},
-    );
-    const hw = hardware({
-      listUsbPrinters: async () => [
-        { name: "Zebra ZD421", port: "USB001" },
-        { name: "TSC TE200", port: "USB002" },
-      ],
-      print,
-    });
-    render(<WorkstationSetup hw={hw} {...defaultProps} />);
-    await screen.findByText("COM3");
-    await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" }));
-    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
-    await waitFor(() =>
-      expect(print).toHaveBeenCalledWith(
-        { kind: "usb", printer: "Zebra ZD421" },
-        expect.any(Uint8Array),
-      ),
-    );
+  render(<WorkstationSetup hw={hardware()} {...defaultProps} exec={storedExec} />);
+  await screen.findByText("COM3");
+  await selectSetupTab("Printer");
+  const missing = await screen.findByRole("radio", {
+    name: "Zebra ZD421 (configured, not detected)",
   });
+  expect((missing as HTMLInputElement).checked).toBe(true);
+});
 
-  it("shows the empty hint and refreshes the USB list on demand", async () => {
-    const listUsbPrinters = vi
-      .fn<() => Promise<{ name: string; port: string }[]>>()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([{ name: "Zebra ZD421", port: "USB001" }]);
-    render(<WorkstationSetup hw={hardware({ listUsbPrinters })} {...defaultProps} />);
-    await screen.findByText("COM3");
-    await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    expect(await screen.findByText(/No USB printers found/)).toBeDefined();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
-    expect(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" })).toBeDefined();
+it("saves the USB printer into the hardware config", async () => {
+  const onConfigChange = vi.fn();
+  const hw = hardware({
+    listUsbPrinters: async () => [{ name: "TSC TE200", port: "USB002" }],
   });
+  render(<WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />);
+  await screen.findByText("COM3");
+  await selectSetupTab("Printer");
+  fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "TSC TE200 · USB002" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  await waitFor(() =>
+    expect(onConfigChange).toHaveBeenCalledWith(
+      expect.objectContaining({ printer: { kind: "usb", printer: "TSC TE200" } }),
+    ),
+  );
+});
 
-  it("keeps a configured USB printer selectable when detection no longer lists it", async () => {
-    const storedExec: SqlExecutor = {
-      run: async () => {},
-      all: async <T,>() =>
-        [
-          {
-            value: JSON.stringify({
-              scanner: null,
-              printer: { kind: "usb", printer: "Zebra ZD421" },
-              printerLanguage: "tspl",
-              verifyPrintedLabel: false,
-            }),
-          },
-        ] as T[],
-    };
-    render(<WorkstationSetup hw={hardware()} {...defaultProps} exec={storedExec} />);
-    await screen.findByText("COM3");
-    await selectSetupTab("Printer");
-    const missing = await screen.findByRole("radio", {
-      name: "Zebra ZD421 (configured, not detected)",
-    });
-    expect((missing as HTMLInputElement).checked).toBe(true);
-  });
-
-  it("saves the USB printer into the hardware config", async () => {
-    const onConfigChange = vi.fn();
-    const hw = hardware({
-      listUsbPrinters: async () => [{ name: "TSC TE200", port: "USB002" }],
-    });
-    render(
-      <WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />,
-    );
-    await screen.findByText("COM3");
-    await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "TSC TE200 · USB002" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    await waitFor(() =>
-      expect(onConfigChange).toHaveBeenCalledWith(
-        expect.objectContaining({ printer: { kind: "usb", printer: "TSC TE200" } }),
-      ),
-    );
-  });
-
-  it("rejects finishing with the USB transport and no printer chosen", async () => {
-    render(<WorkstationSetup hw={hardware()} {...defaultProps} />);
-    await screen.findByText("COM3");
-    await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    expect(
-      await screen.findByText(/Enter the required printer connection details/),
-    ).toBeDefined();
-  });
+it("rejects finishing with the USB transport and no printer chosen", async () => {
+  render(<WorkstationSetup hw={hardware()} {...defaultProps} />);
+  await screen.findByText("COM3");
+  await selectSetupTab("Printer");
+  fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  expect(await screen.findByText(/Enter the required printer connection details/)).toBeDefined();
+});
 ```
 
 If a `defaultProps`-style helper already exists in the file, reuse it instead of adding a duplicate.
@@ -906,21 +912,21 @@ import type { HardwareContract, PrintTarget, UsbPrinterInfo } from "../lib/hardw
 Add state after `printerBaud`:
 
 ```ts
-  const [usbPrinters, setUsbPrinters] = useState<UsbPrinterInfo[]>([]);
-  const [usbPrinter, setUsbPrinter] = useState("");
+const [usbPrinters, setUsbPrinters] = useState<UsbPrinterInfo[]>([]);
+const [usbPrinter, setUsbPrinter] = useState("");
 ```
 
 Add a detection effect next to the scanner-port effect:
 
 ```ts
-  useEffect(() => {
-    void hw
-      .listUsbPrinters()
-      .then(setUsbPrinters)
-      .catch((caught: unknown) =>
-        setError(caught instanceof Error ? caught.message : t("setup.failed")),
-      );
-  }, [hw, t]);
+useEffect(() => {
+  void hw
+    .listUsbPrinters()
+    .then(setUsbPrinters)
+    .catch((caught: unknown) =>
+      setError(caught instanceof Error ? caught.message : t("setup.failed")),
+    );
+}, [hw, t]);
 ```
 
 In the config-load effect, add a branch before the `else` that sets `"none"`:
@@ -935,17 +941,17 @@ In the config-load effect, add a branch before the `else` that sets `"none"`:
 Add the refresh handler next to `openScanner`:
 
 ```ts
-  async function refreshUsbPrinters() {
-    setBusy(true);
-    setError(null);
-    try {
-      setUsbPrinters(await hw.listUsbPrinters());
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("setup.failed"));
-    } finally {
-      setBusy(false);
-    }
+async function refreshUsbPrinters() {
+  setBusy(true);
+  setError(null);
+  try {
+    setUsbPrinters(await hw.listUsbPrinters());
+  } catch (caught) {
+    setError(caught instanceof Error ? caught.message : t("setup.failed"));
+  } finally {
+    setBusy(false);
   }
+}
 ```
 
 In `buildConfig`, add a branch after the `serial` branch:
@@ -960,8 +966,8 @@ In `buildConfig`, add a branch after the `serial` branch:
 Pass the new props to `PrinterSetupPanel` (after `serialBaud={printerBaud}`):
 
 ```tsx
-          usbPrinters={usbPrinters}
-          usbPrinter={usbPrinter}
+usbPrinters = { usbPrinters };
+usbPrinter = { usbPrinter };
 ```
 
 and after `onSerialBaudChange={setPrinterBaud}`:
@@ -991,9 +997,11 @@ git commit -m "feat(station): wire USB printer detection and selection into setu
 ### Task 7: Acceptance checklist, final gates, and report
 
 **Files:**
+
 - Modify: `docs/hardware-acceptance-checklist.md`
 
 **Interfaces:**
+
 - Consumes: everything above.
 - Produces: a documented physical-acceptance section and a green full station gate.
 
