@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { formatSsccHri } from "@markiro/domain";
 import { Alert, Badge, EmptyState, PageHeader, Select, Spinner, Table } from "@markiro/ui";
 import type { SelectOption, TableColumn } from "@markiro/ui";
 
@@ -67,7 +68,7 @@ export function BoxesPage() {
         key: "sscc",
         title: t("pages.boxes.table.sscc"),
         mono: true,
-        render: (row) => row.sscc ?? "—",
+        render: (row) => (row.sscc ? formatSsccHri(row.sscc) : "—"),
       },
       {
         key: "lineName",
