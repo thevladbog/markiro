@@ -5,6 +5,8 @@ export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1
 export type { ParsedKm } from "./gs1/km.js";
 export {
   buildSscc,
+  formatSsccHri,
+  formatSsccWithAi,
   isValidSscc,
   parseScannedSscc,
   parseSscc,
