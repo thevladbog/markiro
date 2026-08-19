@@ -244,16 +244,16 @@ and the browser gallery do not satisfy these checks.
       `renderLabelBytes`/`hw.print`, so confirm any later per-shift printing
       renders through the same path rather than a divergent one.
 
-## USB printer (plan `2026-08-19-station-usb-printer`)
+## USB printer (plan 2026-08-19)
 
-- [ ] USB-подключённый Zebra (ZPL) обнаруживается в списке настройки;
-      тестовая печать выходит корректно.
-- [ ] USB-подключённый TSC (TSPL) обнаруживается в списке настройки;
-      тестовая печать выходит корректно.
-- [ ] Печать этикетки короба по USB: кириллица и DataMatrix идентичны
-      выводу того же шаблона по TCP.
-- [ ] Выдёргивание USB-кабеля во время смены: печать даёт видимую ошибку,
-      линия не блокируется; после переподключения печать восстанавливается
-      без повторной настройки.
-- [ ] Обнаружение фильтрует не-USB очереди (сетевые, PDF и т. п.) — они не
-      появляются в списке доступных принтеров.
+- [ ] A USB-connected Zebra (ZPL) is detected in the setup list; test print
+      comes out correctly.
+- [ ] A USB-connected TSC (TSPL) is detected in the setup list; test print
+      comes out correctly.
+- [ ] Printing a box label over USB: Cyrillic and DataMatrix output are
+      identical to the same template printed over TCP.
+- [ ] Unplugging the USB cable mid-shift: printing shows a visible error,
+      the line is not blocked; printing recovers after reconnecting without
+      reconfiguration.
+- [ ] Detection filters out non-USB queues (network, PDF, etc.) — they do
+      not appear in the list of available printers.
