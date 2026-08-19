@@ -677,10 +677,12 @@
         "fields": {
           "product.name": "Product name",
           "product.gtin": "Product GTIN",
+          "product.egais": "EGAIS code",
           "km.code": "Marking code",
           "sscc": "SSCC",
           "shift.no": "Shift no.",
           "date": "Date",
+          "expiry": "Best before",
           "qty": "Quantity",
           "operator": "Operator",
           "counterparty.name": "Counterparty"

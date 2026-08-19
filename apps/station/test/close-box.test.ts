@@ -179,7 +179,7 @@ describe("closeCurrentBox", () => {
 });
 
 describe("boxLabelFields", () => {
-  it("maps every input to its own labelled slot, leaving km.code and shift.no blank", () => {
+  it("maps every input to its own labelled slot, leaving product.egais, km.code, shift.no, and expiry blank", () => {
     const fields = boxLabelFields({
       sscc: SSCC,
       itemCount: 12,
@@ -192,10 +192,12 @@ describe("boxLabelFields", () => {
     expect(fields).toEqual({
       "product.name": "Кола",
       "product.gtin": GTIN,
+      "product.egais": "",
       "km.code": "",
       sscc: SSCC,
       "shift.no": "",
       date: "2026-07-29",
+      expiry: "",
       qty: "12",
       operator: "Иванов",
       "counterparty.name": "Клиент",

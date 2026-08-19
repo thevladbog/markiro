@@ -677,10 +677,12 @@
         "fields": {
           "product.name": "Название товара",
           "product.gtin": "GTIN товара",
+          "product.egais": "Код ЕГАИС",
           "km.code": "Код маркировки",
           "sscc": "SSCC",
           "shift.no": "№ смены",
           "date": "Дата",
+          "expiry": "Годен до",
           "qty": "Количество",
           "operator": "Оператор",
           "counterparty.name": "Контрагент"

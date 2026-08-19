@@ -21,10 +21,12 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
   return {
     "product.name": input.productName,
     "product.gtin": input.gtin14,
+    "product.egais": "",
     "km.code": "",
     sscc: input.sscc,
     "shift.no": "",
     date: input.closedAt.slice(0, 10),
+    expiry: "",
     qty: String(input.itemCount),
     operator: input.operatorName ?? "",
     "counterparty.name": input.counterpartyName ?? "",
