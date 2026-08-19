@@ -42,12 +42,21 @@ function parseScanner(value: unknown): HardwareConfig["scanner"] {
 
 function parsePrinter(value: unknown): PrintTarget | null {
   if (typeof value !== "object" || value === null) return null;
-  const t = value as { kind?: unknown; port?: unknown; baud?: unknown; host?: unknown };
+  const t = value as {
+    kind?: unknown;
+    port?: unknown;
+    baud?: unknown;
+    host?: unknown;
+    printer?: unknown;
+  };
   if (t.kind === "serial" && typeof t.port === "string" && t.port.length > 0) {
     return { kind: "serial", port: t.port, baud: typeof t.baud === "number" ? t.baud : 9600 };
   }
   if (t.kind === "tcp" && typeof t.host === "string" && t.host.length > 0) {
     return { kind: "tcp", host: t.host, port: typeof t.port === "number" ? t.port : 9100 };
+  }
+  if (t.kind === "usb" && typeof t.printer === "string" && t.printer.trim().length > 0) {
+    return { kind: "usb", printer: t.printer };
   }
   return null;
 }

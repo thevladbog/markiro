@@ -51,6 +51,7 @@ pub fn run() {
             scanner::open_scanner,
             scanner::close_scanner,
             printer::print_bytes,
+            printer::list_usb_printers,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Markiro station");

@@ -21,6 +21,7 @@ describe("hardware scan source", () => {
     let emit: (raw: string) => void = () => {};
     const hw: HardwareContract = {
       listScannerPorts: async () => [],
+      listUsbPrinters: async () => [],
       openScanner: async () => {},
       closeScanner: async () => {},
       onScan: async (listener) => {
@@ -49,6 +50,7 @@ describe("scanner status subscription", () => {
     let emit: (s: "connected" | "disconnected") => void = () => {};
     const hw: HardwareContract = {
       listScannerPorts: async () => [],
+      listUsbPrinters: async () => [],
       openScanner: async () => {},
       closeScanner: async () => {},
       onScan: async () => () => {},

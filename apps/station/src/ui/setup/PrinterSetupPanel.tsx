@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Button, Input } from "@markiro/ui";
-import type { PrintTarget } from "../../lib/hardware.js";
+import type { PrintTarget, UsbPrinterInfo } from "../../lib/hardware.js";
 import type { PrinterLanguage } from "../../lib/hardware-config.js";
 
 type PrinterTransport = PrintTarget["kind"] | "none";
@@ -11,6 +11,8 @@ export interface PrinterSetupPanelProps {
   tcpPort: string;
   serialPort: string;
   serialBaud: string;
+  usbPrinters: readonly UsbPrinterInfo[];
+  usbPrinter: string;
   language: PrinterLanguage;
   verifyPrintedLabel: boolean;
   disabled: boolean;
@@ -20,6 +22,8 @@ export interface PrinterSetupPanelProps {
   onTcpPortChange: (port: string) => void;
   onSerialPortChange: (port: string) => void;
   onSerialBaudChange: (baud: string) => void;
+  onUsbPrinterChange: (name: string) => void;
+  onUsbRefresh: () => void;
   onLanguageChange: (language: PrinterLanguage) => void;
   onVerifyPrintedLabelChange: (verify: boolean) => void;
   onTestPrint: () => void;
@@ -31,6 +35,8 @@ export function PrinterSetupPanel({
   tcpPort,
   serialPort,
   serialBaud,
+  usbPrinters,
+  usbPrinter,
   language,
   verifyPrintedLabel,
   disabled,
@@ -40,6 +46,8 @@ export function PrinterSetupPanel({
   onTcpPortChange,
   onSerialPortChange,
   onSerialBaudChange,
+  onUsbPrinterChange,
+  onUsbRefresh,
   onLanguageChange,
   onVerifyPrintedLabelChange,
   onTestPrint,
@@ -49,6 +57,14 @@ export function PrinterSetupPanel({
     { value: "none", label: t("setup.transportNone") },
     { value: "tcp", label: t("setup.transportTcp") },
     { value: "serial", label: t("setup.transportSerial") },
+    { value: "usb", label: t("setup.transportUsb") },
+  ];
+
+  const usbChoices = [
+    ...(usbPrinter !== "" && !usbPrinters.some((p) => p.name === usbPrinter)
+      ? [{ value: usbPrinter, label: t("setup.usbMissingSaved", { name: usbPrinter }) }]
+      : []),
+    ...usbPrinters.map((p) => ({ value: p.name, label: `${p.name} · ${p.port}` })),
   ];
 
   return (
@@ -110,6 +126,38 @@ export function PrinterSetupPanel({
               onChange={(event) => onSerialBaudChange(event.target.value)}
             />
           </>
+        ) : transport === "usb" ? (
+          <>
+            {usbChoices.length > 0 ? (
+              <fieldset className="setup-choice-group">
+                <legend>{t("setup.usbPrinterList")}</legend>
+                <div className="setup-choice-group__options">
+                  {usbChoices.map((choice) => (
+                    <label className="setup-touch-choice" key={choice.value}>
+                      <input
+                        type="radio"
+                        name="usb-printer"
+                        checked={usbPrinter === choice.value}
+                        disabled={disabled}
+                        onChange={() => onUsbPrinterChange(choice.value)}
+                      />
+                      <span>{choice.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            ) : (
+              <p className="setup-panel__empty">{t("setup.usbNotFound")}</p>
+            )}
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={disabled || busy}
+              onClick={onUsbRefresh}
+            >
+              {t("setup.usbRefresh")}
+            </Button>
+          </>
         ) : (
           <p className="setup-panel__empty">{t("setup.noPrinterHint")}</p>
         )}
@@ -149,7 +197,11 @@ export function PrinterSetupPanel({
             busy ||
             disabled ||
             transport === "none" ||
-            (transport === "tcp" ? host.length === 0 : serialPort.length === 0)
+            (transport === "tcp"
+              ? host.length === 0
+              : transport === "serial"
+                ? serialPort.length === 0
+                : usbPrinter.length === 0)
           }
           onClick={onTestPrint}
         >

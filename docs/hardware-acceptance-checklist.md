@@ -234,7 +234,7 @@ and the browser gallery do not satisfy these checks.
 - [ ] Close and immediately reopen the same port (the setup screen's
       close-before-open): the reopen succeeds without restarting the app.
 - [ ] Printer over TCP 9100 and over serial; test print from the setup screen.
-- [ ] USB/spooler printing — out of the 05b-2 transport scope; decide whether it is needed.
+- [ ] USB/spooler printing — see the "USB printer" section below.
 - [ ] A ZPL template prints correctly on a TSPL printer and vice versa (the
       configured language wins): `renderLabelBytes` picks the emitter from
       `hardware_config.printerLanguage`, not the template's own `language`
@@ -243,3 +243,20 @@ and the browser gallery do not satisfy these checks.
       label print: today `WorkstationSetup` is the only call site for
       `renderLabelBytes`/`hw.print`, so confirm any later per-shift printing
       renders through the same path rather than a divergent one.
+
+## USB printer (plan 2026-08-19)
+
+- [ ] A USB-connected Zebra (ZPL) is detected in the setup list; test print
+      comes out correctly.
+- [ ] A USB-connected TSC (TSPL) is detected in the setup list; test print
+      comes out correctly.
+- [ ] Printing a box label over USB: Cyrillic and DataMatrix output are
+      identical to the same template printed over TCP.
+- [ ] Unplug the USB cable mid-print and record what actually happens:
+      spooler RAW printing is fire-and-forget, so the driver's spool setting
+      may surface a visible error or may swallow the failure silently in the
+      print queue — either way, the line must not block, and printing must
+      recover after reconnecting without reconfiguration. If failures turn
+      out silent, add a pre-flight `GetPrinterW` status check.
+- [ ] Detection filters out non-USB queues (network, PDF, etc.) — they do
+      not appear in the list of available printers.

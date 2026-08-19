@@ -100,4 +100,44 @@ describe("hardware config", () => {
     };
     await expect(loadHardwareConfig(failing)).resolves.toEqual(DEFAULT_HARDWARE_CONFIG);
   });
+
+  it("round-trips a USB printer target", async () => {
+    const exec = await makeExec();
+    const usb: HardwareConfig = {
+      scanner: null,
+      printer: { kind: "usb", printer: "Zebra ZD421" },
+      printerLanguage: "tspl",
+      verifyPrintedLabel: false,
+    };
+    await saveHardwareConfig(exec, usb);
+    expect(await loadHardwareConfig(exec)).toEqual(usb);
+  });
+
+  it("drops a stored USB printer with an empty queue name", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({
+        scanner: null,
+        printer: { kind: "usb", printer: "" },
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      }),
+    ]);
+    expect((await loadHardwareConfig(exec)).printer).toBeNull();
+  });
+
+  it("drops a stored USB printer with a whitespace-only queue name", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({
+        scanner: null,
+        printer: { kind: "usb", printer: "   " },
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      }),
+    ]);
+    expect((await loadHardwareConfig(exec)).printer).toBeNull();
+  });
 });

@@ -1,9 +1,10 @@
+import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
-import type { HardwareConfig } from "../src/lib/hardware-config.js";
+import { saveHardwareConfig, type HardwareConfig } from "../src/lib/hardware-config.js";
 import type { HardwareContract, PrintTarget } from "../src/lib/hardware.js";
-import type { SqlExecutor } from "../src/lib/mirror.js";
+import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { WorkstationSetup } from "../src/pages/WorkstationSetup.js";
 
 beforeAll(async () => {
@@ -12,9 +13,28 @@ beforeAll(async () => {
 
 const noopExec: SqlExecutor = { run: async () => {}, all: async () => [] };
 
+// Same shape as hardware-config.test.ts's `nodeExecutor`: a real migrated
+// in-memory SQLite instance, seeded through the actual `saveHardwareConfig`
+// write path rather than a hand-crafted row shape.
+async function storedHardwareExec(config: HardwareConfig): Promise<SqlExecutor> {
+  const db = new DatabaseSync(":memory:");
+  const exec: SqlExecutor = {
+    async run(sql, params = []) {
+      db.prepare(sql).run(...(params as never[]));
+    },
+    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(params as never[])) as T[];
+    },
+  };
+  await applyMigrations(exec);
+  await saveHardwareConfig(exec, config);
+  return exec;
+}
+
 function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
   return {
     listScannerPorts: async () => ["COM3", "COM4"],
+    listUsbPrinters: async () => [],
     openScanner: async () => {},
     closeScanner: async () => {},
     onScan: async () => () => {},
@@ -1022,6 +1042,94 @@ describe("WorkstationSetup", () => {
     expect(screen.getByRole("tabpanel", { name: "Sound" })).toBeDefined();
     expect(screen.getByLabelText("Mute")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
+  });
+
+  const defaultProps = {
+    exec: noopExec,
+    sound: { muted: false, volume: 1 },
+    onSoundChange: () => {},
+    onConfigChange: () => {},
+    onDone: () => {},
+  };
+
+  it("sends a test print to the selected USB printer", async () => {
+    const print = vi.fn<(target: PrintTarget, bytes: Uint8Array) => Promise<void>>(async () => {});
+    const hw = hardware({
+      listUsbPrinters: async () => [
+        { name: "Zebra ZD421", port: "USB001" },
+        { name: "TSC TE200", port: "USB002" },
+      ],
+      print,
+    });
+    render(<WorkstationSetup hw={hw} {...defaultProps} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+    await waitFor(() =>
+      expect(print).toHaveBeenCalledWith(
+        { kind: "usb", printer: "Zebra ZD421" },
+        expect.any(Uint8Array),
+      ),
+    );
+  });
+
+  it("shows the empty hint and refreshes the USB list on demand", async () => {
+    const listUsbPrinters = vi
+      .fn<() => Promise<{ name: string; port: string }[]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ name: "Zebra ZD421", port: "USB001" }]);
+    render(<WorkstationSetup hw={hardware({ listUsbPrinters })} {...defaultProps} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    expect(await screen.findByText(/No USB printers found/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
+    expect(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" })).toBeDefined();
+  });
+
+  it("keeps a configured USB printer selectable when detection no longer lists it", async () => {
+    const storedExec = await storedHardwareExec({
+      scanner: null,
+      printer: { kind: "usb", printer: "Zebra ZD421" },
+      printerLanguage: "tspl",
+      verifyPrintedLabel: false,
+    });
+    render(<WorkstationSetup hw={hardware()} {...defaultProps} exec={storedExec} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    const missing = await screen.findByRole("radio", {
+      name: "Zebra ZD421 (configured, not detected)",
+    });
+    expect((missing as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("saves the USB printer into the hardware config", async () => {
+    const onConfigChange = vi.fn();
+    const hw = hardware({
+      listUsbPrinters: async () => [{ name: "TSC TE200", port: "USB002" }],
+    });
+    render(<WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "TSC TE200 · USB002" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(onConfigChange).toHaveBeenCalledWith(
+        expect.objectContaining({ printer: { kind: "usb", printer: "TSC TE200" } }),
+      ),
+    );
+  });
+
+  it("rejects finishing with the USB transport and no printer chosen", async () => {
+    render(<WorkstationSetup hw={hardware()} {...defaultProps} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(await screen.findByText(/Enter the required printer connection details/)).toBeDefined();
   });
 
   it("keeps the test result and exit controls in fixed layout regions", async () => {

@@ -65,6 +65,7 @@ vi.mock("@tauri-apps/plugin-sql", () => {
 // that closes over it, leaving `hardwareMock` in the temporal dead zone.
 const hardwareMock = vi.hoisted(() => ({
   listScannerPorts: vi.fn<() => Promise<string[]>>(async () => []),
+  listUsbPrinters: vi.fn<() => Promise<{ name: string; port: string }[]>>(async () => []),
   openScanner: vi.fn<(port: string, baud: number) => Promise<void>>(async () => {}),
   closeScanner: vi.fn<() => Promise<void>>(async () => {}),
   onScan: vi.fn<(listener: (raw: string) => void) => Promise<() => void>>(async () => () => {}),
@@ -130,6 +131,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
   hardwareMock.listScannerPorts.mockReset().mockResolvedValue([]);
+  hardwareMock.listUsbPrinters.mockReset().mockResolvedValue([]);
   hardwareMock.openScanner.mockReset().mockResolvedValue(undefined);
   hardwareMock.closeScanner.mockReset().mockResolvedValue(undefined);
   hardwareMock.onScan.mockReset().mockResolvedValue(() => {});
