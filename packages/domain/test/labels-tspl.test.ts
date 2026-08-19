@@ -301,9 +301,7 @@ describe("generateTspl - barcode formats", () => {
       heightMm: 60,
       dpi: 203,
       language: "tspl",
-      elements: [
-        { kind: "field", id: "f", field: "sscc", xMm: 5, yMm: 5, fontSizePt: 10 },
-      ],
+      elements: [{ kind: "field", id: "f", field: "sscc", xMm: 5, yMm: 5, fontSizePt: 10 }],
     };
     const tspl = await generateTspl(spec, { ...sampleLabelData(), sscc: "004601234560000017" });
     expect(tspl).toContain("(00)004601234560000017");
@@ -316,9 +314,7 @@ describe("generateTspl - barcode formats", () => {
       heightMm: 60,
       dpi: 203,
       language: "tspl",
-      elements: [
-        { kind: "field", id: "f", field: "product.gtin", xMm: 5, yMm: 5, fontSizePt: 10 },
-      ],
+      elements: [{ kind: "field", id: "f", field: "product.gtin", xMm: 5, yMm: 5, fontSizePt: 10 }],
     };
     const tspl = await generateTspl(spec, sampleLabelData());
     expect(tspl).not.toContain("(00)");

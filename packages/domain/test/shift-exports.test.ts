@@ -342,9 +342,7 @@ describe("boxes format version 2 (00-prefixed SSCC)", () => {
         boxes: [{ sscc: "001234567890123456", codes: ["KM-1", "KM-2"] }],
       },
     });
-    expect(new TextDecoder().decode(parts[0]!.bytes)).toBe(
-      "00001234567890123456\nKM-1\nKM-2\n\n",
-    );
+    expect(new TextDecoder().decode(parts[0]!.bytes)).toBe("00001234567890123456\nKM-1\nKM-2\n\n");
   });
 
   it("renders CSV v2 box_sscc column as 20-digit 00-prefixed SSCC", () => {

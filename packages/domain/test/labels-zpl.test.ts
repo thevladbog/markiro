@@ -243,9 +243,7 @@ describe("generateZpl - barcode formats", () => {
       heightMm: 60,
       dpi: 203,
       language: "zpl",
-      elements: [
-        { kind: "field", id: "f", field: "sscc", xMm: 5, yMm: 5, fontSizePt: 10 },
-      ],
+      elements: [{ kind: "field", id: "f", field: "sscc", xMm: 5, yMm: 5, fontSizePt: 10 }],
     };
     const zpl = await generateZpl(spec, { ...sampleLabelData(), sscc: "004601234560000017" });
     expect(zpl).toContain("(00)004601234560000017");
@@ -258,9 +256,7 @@ describe("generateZpl - barcode formats", () => {
       heightMm: 60,
       dpi: 203,
       language: "zpl",
-      elements: [
-        { kind: "field", id: "f", field: "product.gtin", xMm: 5, yMm: 5, fontSizePt: 10 },
-      ],
+      elements: [{ kind: "field", id: "f", field: "product.gtin", xMm: 5, yMm: 5, fontSizePt: 10 }],
     };
     const zpl = await generateZpl(spec, sampleLabelData());
     expect(zpl).not.toContain("(00)");

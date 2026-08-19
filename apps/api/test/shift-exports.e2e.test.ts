@@ -185,27 +185,23 @@ describe.skipIf(!ready)("shift exports e2e", () => {
 
   it("rejects creating a boxes export with the superseded format version 1", async () => {
     const { agent, shiftId } = await fixture();
-    const response = await agent
-      .post(`/shifts/${shiftId}/exports`)
-      .send({
-        formatId: "shift_txt_boxes",
-        formatVersion: 1,
-        maxLines: null,
-        idempotencyKey: randomUUID(),
-      });
+    const response = await agent.post(`/shifts/${shiftId}/exports`).send({
+      formatId: "shift_txt_boxes",
+      formatVersion: 1,
+      maxLines: null,
+      idempotencyKey: randomUUID(),
+    });
     expect(response.status).toBe(400);
   });
 
   it("creates a boxes export at format version 2", async () => {
     const { agent, shiftId } = await fixture();
-    const response = await agent
-      .post(`/shifts/${shiftId}/exports`)
-      .send({
-        formatId: "shift_txt_boxes",
-        formatVersion: 2,
-        maxLines: null,
-        idempotencyKey: randomUUID(),
-      });
+    const response = await agent.post(`/shifts/${shiftId}/exports`).send({
+      formatId: "shift_txt_boxes",
+      formatVersion: 2,
+      maxLines: null,
+      idempotencyKey: randomUUID(),
+    });
     expect(response.status).toBe(201);
     expect(response.body.formatVersion).toBe(2);
   });
