@@ -22,6 +22,7 @@ export const createProductSchema = z.object({
     .nullable()
     .optional(),
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
+  shelfLifeDays: z.number().int().min(1).max(3650).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type CreateProductDto = z.infer<typeof createProductSchema>;
@@ -40,6 +41,7 @@ export const updateProductSchema = z.object({
     .nullable()
     .optional(),
   egaisCode: z.string().trim().min(1).max(64).nullable().optional(),
+  shelfLifeDays: z.number().int().min(1).max(3650).nullable().optional(),
   externalRef: z.string().trim().min(1).max(200).nullable().optional(),
 });
 export type UpdateProductDto = z.infer<typeof updateProductSchema>;
@@ -77,6 +79,7 @@ export interface ProductDto {
   defaultCounterpartyId: string | null;
   unitPrice: string | null;
   egaisCode: string | null;
+  shelfLifeDays: number | null;
   externalRef: string | null;
   createdAt: Date;
   /** Optional only for rolling compatibility; current server mappings always emit it. */
