@@ -168,6 +168,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       palletCapacity: 48,
       defaultCounterpartyId: counterpartyId,
       defaultLabelTemplateId: templateId,
+      shelfLifeDays: 184,
     });
     const employee = await agent
       .post("/employees")
@@ -199,6 +200,8 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       gtin14: expect.any(String),
       defaultLabelTemplateId: null,
     });
+    expect(bundle.body.product.shelfLifeDays).toBe(184);
+    expect(bundle.body.product.egaisCode).not.toBeUndefined();
     expect(bundle.body.labelTemplate).toBeNull();
     expect(bundle.body.boxLabelTemplate).toMatchObject({
       id: boxTemplateId,
