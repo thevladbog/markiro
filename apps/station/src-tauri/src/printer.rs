@@ -14,13 +14,14 @@ use serde::{Deserialize, Serialize};
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Where the label bytes go. Industrial ZPL/TSPL printers accept raw payloads
-/// over a serial port or TCP 9100; USB/spooler printing is platform-specific
-/// and is on the hardware acceptance checklist instead.
+/// over a serial port or TCP 9100; USB printers go through the Windows print
+/// spooler (`spooler::print_raw`) and are Windows-only.
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum PrintTarget {
     Serial { port: String, baud: u32 },
     Tcp { host: String, port: u16 },
+    Usb { printer: String },
 }
 
 /// Tauri's IPC is JSON, so the label bytes arrive base64-encoded — that is
@@ -69,17 +70,16 @@ pub async fn list_usb_printers() -> Result<Vec<UsbPrinter>, String> {
     .map_err(|e| e.to_string())?
 }
 
-/// Windows print-spooler access: enumeration here, RAW printing added by the
-/// next task. Everything unsafe stays inside this module.
+/// Windows print-spooler access: enumeration and RAW printing. Everything
+/// unsafe stays inside this module.
 #[cfg(windows)]
 mod spooler {
     use windows_sys::Win32::Graphics::Printing::{
-        EnumPrintersW, PRINTER_ENUM_LOCAL, PRINTER_INFO_2W,
+        ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinterW,
+        StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_ENUM_LOCAL,
+        PRINTER_HANDLE, PRINTER_INFO_2W,
     };
 
-    /// Unused by enumeration; kept for the RAW-printing task that follows
-    /// this one, which needs it to call `OpenPrinterW`/`StartDocPrinterW`.
-    #[allow(dead_code)]
     pub(super) fn wide(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
     }
@@ -140,6 +140,68 @@ mod spooler {
                 .collect())
         }
     }
+
+    /// Sends raw ZPL/TSPL bytes through the spooler with datatype RAW, so the
+    /// driver renders nothing and the printer firmware interprets its native
+    /// language. Handles are closed on every path.
+    pub fn print_raw(printer: &str, bytes: &[u8]) -> Result<(), String> {
+        let printer_w = wide(printer);
+        let doc_name = wide("Markiro label");
+        let datatype = wide("RAW");
+        unsafe {
+            let mut handle = PRINTER_HANDLE::default();
+            if OpenPrinterW(printer_w.as_ptr(), &mut handle, std::ptr::null_mut()) == 0 {
+                return Err(format!(
+                    "printer \"{printer}\": {}",
+                    last_error("OpenPrinterW")
+                ));
+            }
+            let result = print_document(handle, printer, &doc_name, &datatype, bytes);
+            ClosePrinter(handle);
+            result
+        }
+    }
+
+    unsafe fn print_document(
+        handle: PRINTER_HANDLE,
+        printer: &str,
+        doc_name: &[u16],
+        datatype: &[u16],
+        bytes: &[u8],
+    ) -> Result<(), String> {
+        let doc = DOC_INFO_1W {
+            pDocName: doc_name.as_ptr() as *mut u16,
+            pOutputFile: std::ptr::null_mut(),
+            pDatatype: datatype.as_ptr() as *mut u16,
+        };
+        if StartDocPrinterW(handle, 1, &doc) == 0 {
+            return Err(format!(
+                "printer \"{printer}\": {}",
+                last_error("StartDocPrinterW")
+            ));
+        }
+        let page_result = (|| {
+            if StartPagePrinter(handle) == 0 {
+                return Err(format!(
+                    "printer \"{printer}\": {}",
+                    last_error("StartPagePrinter")
+                ));
+            }
+            let mut written = 0u32;
+            let write_ok = WritePrinter(
+                handle,
+                bytes.as_ptr() as *const core::ffi::c_void,
+                bytes.len() as u32,
+                &mut written,
+            );
+            let write_err = (write_ok == 0 || written != bytes.len() as u32)
+                .then(|| format!("printer \"{printer}\": {}", last_error("WritePrinter")));
+            EndPagePrinter(handle);
+            write_err.map_or(Ok(()), Err)
+        })();
+        EndDocPrinter(handle);
+        page_result
+    }
 }
 
 /// Resolves `host:port` to a single socket address, failing with a clear
@@ -154,28 +216,16 @@ fn resolve_socket_addr(host: &str, port: u16) -> Result<SocketAddr, String> {
         .ok_or_else(|| format!("printer host \"{host}\" did not resolve to any address"))
 }
 
-/// `async` so the Tauri IPC layer runs this off the UI thread: `print_bytes`
-/// does blocking I/O (serial and TCP), and a mistyped printer address —
-/// exactly what the setup screen's test print exists to catch — must not
-/// freeze the whole station while the OS gives up on the connection.
-///
-/// Being an `async fn` alone is not enough: the body below still does
-/// blocking serial open/write/flush and blocking DNS resolution
-/// (`to_socket_addrs`), which would run straight on whichever async worker
-/// thread Tauri picked for this command and starve every other async task
-/// scheduled on it for as long as the OS takes. `spawn_blocking` moves the
-/// entire match onto a thread dedicated to blocking work, and this command
-/// just awaits the result.
-#[tauri::command]
-pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<(), String> {
-    let bytes = decode_payload(&payload_base64)?;
-    let result = tauri::async_runtime::spawn_blocking(move || match target {
+/// Synchronous dispatch to one transport. Split out of `print_bytes` so the
+/// non-Windows USB error is unit-testable without the Tauri runtime.
+fn print_to_target(target: PrintTarget, bytes: &[u8]) -> Result<(), String> {
+    match target {
         PrintTarget::Serial { port, baud } => {
             let mut handle = serialport::new(&port, baud)
                 .timeout(Duration::from_secs(5))
                 .open()
                 .map_err(|e| e.to_string())?;
-            handle.write_all(&bytes).map_err(|e| e.to_string())?;
+            handle.write_all(bytes).map_err(|e| e.to_string())?;
             handle.flush().map_err(|e| e.to_string())
         }
         PrintTarget::Tcp { host, port } => {
@@ -185,13 +235,42 @@ pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<
             stream
                 .set_write_timeout(Some(Duration::from_secs(5)))
                 .map_err(|e| e.to_string())?;
-            stream.write_all(&bytes).map_err(|e| e.to_string())?;
+            stream.write_all(bytes).map_err(|e| e.to_string())?;
             stream.flush().map_err(|e| e.to_string())
         }
-    })
-    .await
-    .map_err(|e| e.to_string())?;
-    result
+        PrintTarget::Usb { printer } => {
+            #[cfg(windows)]
+            {
+                spooler::print_raw(&printer, bytes)
+            }
+            #[cfg(not(windows))]
+            {
+                let _ = printer;
+                Err("USB printing is only available on Windows".to_string())
+            }
+        }
+    }
+}
+
+/// `async` so the Tauri IPC layer runs this off the UI thread: `print_bytes`
+/// does blocking I/O (serial, TCP, and the USB spooler), and a mistyped
+/// printer address — exactly what the setup screen's test print exists to
+/// catch — must not freeze the whole station while the OS gives up on the
+/// connection.
+///
+/// Being an `async fn` alone is not enough: `print_to_target` still does
+/// blocking serial open/write/flush, blocking DNS resolution
+/// (`to_socket_addrs`), and blocking spooler RPCs, which would run straight
+/// on whichever async worker thread Tauri picked for this command and starve
+/// every other async task scheduled on it for as long as the OS takes.
+/// `spawn_blocking` moves the entire dispatch onto a thread dedicated to
+/// blocking work, and this command just awaits the result.
+#[tauri::command]
+pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<(), String> {
+    let bytes = decode_payload(&payload_base64)?;
+    tauri::async_runtime::spawn_blocking(move || print_to_target(target, &bytes))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -256,5 +335,28 @@ mod tests {
     #[test]
     fn filter_usb_printers_returns_empty_for_no_printers() {
         assert!(super::filter_usb_printers(Vec::new()).is_empty());
+    }
+
+    #[test]
+    fn deserializes_a_usb_print_target() {
+        let target: super::PrintTarget =
+            serde_json::from_str(r#"{"kind":"usb","printer":"Zebra ZD421"}"#).unwrap();
+        match target {
+            super::PrintTarget::Usb { printer } => assert_eq!(printer, "Zebra ZD421"),
+            _ => panic!("expected the usb variant"),
+        }
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn usb_printing_reports_windows_only_off_windows() {
+        let err = super::print_to_target(
+            super::PrintTarget::Usb {
+                printer: "Zebra ZD421".to_string(),
+            },
+            b"^XA^XZ",
+        )
+        .unwrap_err();
+        assert!(err.contains("Windows"), "error should say Windows-only: {err}");
     }
 }
