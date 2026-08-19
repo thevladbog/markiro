@@ -69,7 +69,7 @@ describe("shift export formats", () => {
       },
       {
         id: "shift_txt_boxes",
-        version: 1,
+        version: 2,
         label: "[TXT][С коробами] Отчет смены",
         extension: "txt",
         mimeType: "text/plain; charset=utf-8",
@@ -85,7 +85,7 @@ describe("shift export formats", () => {
       },
       {
         id: "shift_csv_boxes",
-        version: 1,
+        version: 2,
         label: "[CSV][С коробами] Отчет смены",
         extension: "csv",
         mimeType: "text/csv; charset=utf-8",
@@ -313,5 +313,68 @@ describe("shift export filenames", () => {
       "Вода_1_1_2026-08-13_часть_2.csv",
     ]);
     expect(render("shift_csv_flat", flat).filename).toBe("Вода_2_2026-08-13.csv");
+  });
+});
+
+describe("boxes format version 2 (00-prefixed SSCC)", () => {
+  it("advertises version 2 for boxes formats and version 1 for flat", () => {
+    const byId = new Map(SHIFT_EXPORT_FORMATS.map((f) => [f.id, f.version]));
+    expect(byId.get("shift_txt_boxes")).toBe(2);
+    expect(byId.get("shift_csv_boxes")).toBe(2);
+    expect(byId.get("shift_txt_flat")).toBe(1);
+    expect(byId.get("shift_csv_flat")).toBe(1);
+  });
+
+  it("still resolves the frozen v1 boxes formats for old artifacts/retries", () => {
+    expect(getShiftExportFormat("shift_txt_boxes", 1).version).toBe(1);
+    expect(getShiftExportFormat("shift_csv_boxes", 1).version).toBe(1);
+  });
+
+  it("renders TXT v2 box headers as 20-digit 00-prefixed SSCC", () => {
+    const parts = renderShiftExport({
+      formatId: "shift_txt_boxes",
+      formatVersion: 2,
+      productName: "Товар",
+      shiftDate: "2026-08-19",
+      maxLines: null,
+      source: {
+        mode: "boxes",
+        boxes: [{ sscc: "001234567890123456", codes: ["KM-1", "KM-2"] }],
+      },
+    });
+    expect(new TextDecoder().decode(parts[0]!.bytes)).toBe(
+      "00001234567890123456\nKM-1\nKM-2\n\n",
+    );
+  });
+
+  it("renders CSV v2 box_sscc column as 20-digit 00-prefixed SSCC", () => {
+    const parts = renderShiftExport({
+      formatId: "shift_csv_boxes",
+      formatVersion: 2,
+      productName: "Товар",
+      shiftDate: "2026-08-19",
+      maxLines: null,
+      source: {
+        mode: "boxes",
+        boxes: [{ sscc: "001234567890123456", codes: ["KM-1"] }],
+      },
+    });
+    const body = new TextDecoder().decode(parts[0]!.bytes.slice(3)); // strip BOM
+    expect(body).toBe("box_sscc;code\r\n00001234567890123456;KM-1\r\n");
+  });
+
+  it("keeps v1 boxes rendering frozen at bare 18 digits", () => {
+    const parts = renderShiftExport({
+      formatId: "shift_txt_boxes",
+      formatVersion: 1,
+      productName: "Товар",
+      shiftDate: "2026-08-19",
+      maxLines: null,
+      source: {
+        mode: "boxes",
+        boxes: [{ sscc: "001234567890123456", codes: ["KM-1"] }],
+      },
+    });
+    expect(new TextDecoder().decode(parts[0]!.bytes)).toBe("001234567890123456\nKM-1\n\n");
   });
 });

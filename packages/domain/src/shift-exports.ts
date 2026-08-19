@@ -1,3 +1,5 @@
+import { formatSsccWithAi } from "./gs1/sscc.js";
+
 export type ShiftExportFormatId =
   "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes";
 
@@ -5,7 +7,7 @@ export type ShiftExportBoxMode = "flat" | "boxes";
 
 export interface ShiftExportFormatDescriptor {
   id: ShiftExportFormatId;
-  version: 1;
+  version: 1 | 2;
   label: string;
   extension: "txt" | "csv";
   mimeType: "text/plain; charset=utf-8" | "text/csv; charset=utf-8";
@@ -18,7 +20,7 @@ export type ShiftExportSource =
 
 export interface RenderShiftExportInput {
   formatId: ShiftExportFormatId;
-  formatVersion: 1;
+  formatVersion: number;
   productName: string;
   shiftDate: string;
   maxLines: number | null;
@@ -60,7 +62,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   } as const),
   Object.freeze({
     id: "shift_txt_boxes",
-    version: 1,
+    version: 2,
     label: "[TXT][С коробами] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
@@ -73,6 +75,31 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
     boxMode: "flat",
+  } as const),
+  Object.freeze({
+    id: "shift_csv_boxes",
+    version: 2,
+    label: "[CSV][С коробами] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "boxes",
+  } as const),
+] as const satisfies readonly ShiftExportFormatDescriptor[]);
+
+/**
+ * Frozen v1 descriptors for the boxes formats: version 2 switched the SSCC
+ * to the 20-digit 00-prefixed form, but already-created v1 exports must keep
+ * re-rendering (retry) and re-downloading byte-identically. Not advertised —
+ * `SHIFT_EXPORT_FORMATS` is what the UI offers for NEW exports.
+ */
+const LEGACY_SHIFT_EXPORT_FORMATS = Object.freeze([
+  Object.freeze({
+    id: "shift_txt_boxes",
+    version: 1,
+    label: "[TXT][С коробами] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "boxes",
   } as const),
   Object.freeze({
     id: "shift_csv_boxes",
@@ -100,7 +127,7 @@ interface ShiftExportPartBlocks {
 }
 
 export function getShiftExportFormat(id: string, version: number): ShiftExportFormatDescriptor {
-  const descriptor = SHIFT_EXPORT_FORMATS.find(
+  const descriptor = [...SHIFT_EXPORT_FORMATS, ...LEGACY_SHIFT_EXPORT_FORMATS].find(
     (candidate) => candidate.id === id && candidate.version === version,
   );
 
@@ -193,10 +220,11 @@ function createBlocks(
   }
 
   return source.boxes.map((box) => {
+    const ssccOut = descriptor.version >= 2 ? formatSsccWithAi(box.sscc) : box.sscc;
     const lines =
       descriptor.extension === "txt"
-        ? [box.sscc, ...box.codes, ""]
-        : box.codes.map((code) => `${csvField(box.sscc)};${csvField(code)}`);
+        ? [ssccOut, ...box.codes, ""]
+        : box.codes.map((code) => `${csvField(ssccOut)};${csvField(code)}`);
 
     return {
       lines,
