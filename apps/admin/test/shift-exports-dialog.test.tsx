@@ -42,7 +42,7 @@ const FORMATS = [
   },
   {
     id: "shift_txt_boxes",
-    version: 1,
+    version: 2,
     label: "[TXT][С коробами] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
@@ -58,7 +58,7 @@ const FORMATS = [
   },
   {
     id: "shift_csv_boxes",
-    version: 1,
+    version: 2,
     label: "[CSV][С коробами] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
@@ -70,7 +70,7 @@ const READY_EXPORT = {
   id: "22222222-2222-4222-8222-222222222222",
   shiftId: SHIFT.id,
   formatId: "shift_txt_boxes",
-  formatVersion: 1,
+  formatVersion: 2,
   maxLines: 2000,
   status: "ready",
   errorCode: null,
@@ -216,6 +216,7 @@ describe("ShiftExportsDialog", () => {
       ...READY_EXPORT,
       id: "33333333-3333-4333-8333-333333333333",
       formatId: "shift_csv_flat",
+      formatVersion: 1,
       status: "failed",
       errorCode: "GENERATION_FAILED",
       artifacts: [],
@@ -227,6 +228,7 @@ describe("ShiftExportsDialog", () => {
       ...READY_EXPORT,
       id: "44444444-4444-4444-8444-444444444444",
       formatId: "shift_txt_flat",
+      formatVersion: 1,
       status: "processing",
       artifacts: [],
       totalBoxCount: 0,
@@ -237,6 +239,7 @@ describe("ShiftExportsDialog", () => {
       ...READY_EXPORT,
       id: "55555555-5555-4555-8555-555555555555",
       formatId: "shift_csv_flat",
+      formatVersion: 1,
       status: "queued",
       artifacts: [],
       totalBoxCount: 0,
@@ -330,6 +333,35 @@ describe("ShiftExportsDialog", () => {
     fireEvent.click(createButton);
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[0]).toBe(requests[1]);
+  });
+
+  it("sends the selected format's actual advertised version, not a hardcoded one", async () => {
+    let capturedBody: { formatId?: string; formatVersion?: number } | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/formats")) return response(FORMATS);
+        if (String(url).includes("/shifts/") && init?.method === "POST") {
+          capturedBody = JSON.parse(String(init.body)) as {
+            formatId: string;
+            formatVersion: number;
+          };
+          return response({ ...READY_EXPORT, status: "queued", artifacts: [] });
+        }
+        return response([]);
+      }),
+    );
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
+    const boxesFormat = FORMATS.find((format) => format.id === "shift_txt_boxes");
+    if (!boxesFormat) throw new Error("shift_txt_boxes format is missing from fixture");
+    fireEvent.click(await within(dialog).findByRole("radio", { name: boxesFormat.label }));
+    const createButton = within(dialog).getByRole("button", { name: "Сформировать отчет" });
+    await waitFor(() => expect((createButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(createButton);
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody?.formatId).toBe("shift_txt_boxes");
+    expect(capturedBody?.formatVersion).toBe(2);
   });
 
   it("rejects empty, fractional, and out-of-range split limits", async () => {

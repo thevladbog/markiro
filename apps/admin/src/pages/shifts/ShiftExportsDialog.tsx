@@ -324,6 +324,8 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit || !formatId) return;
+    const selectedFormat = (formats.data ?? []).find((format) => format.id === formatId);
+    if (!selectedFormat) return;
     // A new deliberate submission after a failed request starts a new idempotency scope.
     const requestIdempotencyKey = idempotencyKey.current ?? crypto.randomUUID();
     idempotencyKey.current = requestIdempotencyKey;
@@ -333,7 +335,7 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
         shiftId: shift.id,
         input: {
           formatId,
-          formatVersion: 1,
+          formatVersion: selectedFormat.version,
           maxLines: parsedLineLimit,
           idempotencyKey: requestIdempotencyKey,
         },

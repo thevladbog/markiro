@@ -22,7 +22,7 @@ export interface ShiftExportDto {
   id: string;
   shiftId: string;
   formatId: ShiftExportFormatId;
-  formatVersion: 1;
+  formatVersion: number;
   maxLines: number | null;
   status: ShiftExportStatus;
   errorCode: string | null;
@@ -42,7 +42,7 @@ export interface ShiftExportDto {
 
 export interface CreateShiftExportInput {
   formatId: ShiftExportFormatId;
-  formatVersion: 1;
+  formatVersion: number;
   maxLines: number | null;
   idempotencyKey: string;
 }
