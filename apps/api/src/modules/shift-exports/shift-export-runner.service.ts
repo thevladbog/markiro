@@ -21,6 +21,8 @@ export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
   "FORMAT_NOT_FOUND",
   "INVALID_LINE_LIMIT",
   "BOX_EXCEEDS_LINE_LIMIT",
+  "INVALID_BOX_SSCC",
+  "INVALID_CIS",
   "GENERATION_FAILED",
   "STORAGE_FAILED",
   "QUEUE_FAILED",
@@ -334,6 +336,8 @@ function safeDomainErrorCode(error: unknown): ShiftExportSafeErrorCode | null {
     case "FORMAT_NOT_FOUND":
     case "INVALID_LINE_LIMIT":
     case "BOX_EXCEEDS_LINE_LIMIT":
+    case "INVALID_BOX_SSCC":
+    case "INVALID_CIS":
     case "ORG_INN_MISSING":
       return error.code;
     case "FORMAT_SOURCE_MISMATCH":

@@ -571,4 +571,16 @@ describe("GISMT aggregation XML format", () => {
       new ShiftExportDomainError("FORMAT_SOURCE_MISMATCH"),
     );
   });
+
+  it.each([
+    ["U+0000", "A\u0000B"],
+    ["line feed", "A\nB"],
+    ["carriage return", "A\rB"],
+    ["DEL", "A\u007fB"],
+    ["lone surrogate", "A\ud800B"],
+  ])("rejects a cis serial carrying %s as INVALID_CIS", (_case, serial) => {
+    expect(() =>
+      renderXml({ mode: "boxes", boxes: [{ sscc: "046800899000256001", codes: [km(serial)] }] }),
+    ).toThrow(new ShiftExportDomainError("INVALID_CIS"));
+  });
 });

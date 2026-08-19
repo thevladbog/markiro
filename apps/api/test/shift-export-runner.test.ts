@@ -587,6 +587,8 @@ describe("ShiftExportRunnerService", () => {
       "FORMAT_NOT_FOUND",
       "INVALID_LINE_LIMIT",
       "BOX_EXCEEDS_LINE_LIMIT",
+      "INVALID_BOX_SSCC",
+      "INVALID_CIS",
       "GENERATION_FAILED",
       "STORAGE_FAILED",
       "QUEUE_FAILED",

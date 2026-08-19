@@ -405,16 +405,30 @@ function formatBoxSscc(sscc: string): string {
  * and everything behind it) dropped. XML 1.0 cannot carry the GS separator
  * that delimits trailing AIs, so only the fixed-position КИ survives.
  */
+/**
+ * Characters a `<cis>` value must never carry: XML 1.0-illegal code points
+ * (C0 controls, lone surrogates, U+FFFE/U+FFFF) plus tab/LF/CR — those three
+ * are XML-legal but would corrupt this renderer's line-oriented output.
+ */
+const XML_PROHIBITED_CIS_CHARACTERS =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
 function stripKmCryptoTail(code: string): string {
+  let cis: string;
   try {
     const segments = parseKmSegments(code);
-    return `01${segments.gtin14}21${segments.serial}`;
+    cis = `01${segments.gtin14}21${segments.serial}`;
   } catch (error) {
     if (error instanceof DomainError) {
       throw new ShiftExportDomainError("INVALID_CIS");
     }
     throw error;
   }
+  if (XML_PROHIBITED_CIS_CHARACTERS.test(cis)) {
+    throw new ShiftExportDomainError("INVALID_CIS");
+  }
+  return cis;
 }
 
 function xmlText(value: string): string {
