@@ -1,6 +1,7 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import type { BoxDto, ListBoxesQueryDto, ListBoxesResponseDto } from "./dto";
 
@@ -117,7 +118,7 @@ export class BoxesService {
   private toDto(row: BoxRow): BoxDto {
     return {
       id: row.id,
-      sscc: row.sscc,
+      sscc: row.sscc === null ? null : formatSsccWithAi(row.sscc),
       terminalId: row.terminalId,
       lineName: row.lineName,
       operatorId: row.operatorId,

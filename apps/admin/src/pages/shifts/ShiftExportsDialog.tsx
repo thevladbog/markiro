@@ -314,6 +314,15 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
       ),
     [formats.data],
   );
+  // The label text is version-independent (frozen legacy descriptors carry the
+  // byte-identical label as the currently-advertised one), so a history row from
+  // a version no longer advertised (e.g. old v1 boxes exports after the v2 bump)
+  // can still resolve to a friendly label via id alone, instead of falling back
+  // to the raw formatId.
+  const formatLabelsById = useMemo(
+    () => new Map((formats.data ?? []).map((format) => [format.id, format.label])),
+    [formats.data],
+  );
 
   const close = () => {
     if (create.isPending) return;
@@ -324,6 +333,8 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canSubmit || !formatId) return;
+    const selectedFormat = (formats.data ?? []).find((format) => format.id === formatId);
+    if (!selectedFormat) return;
     // A new deliberate submission after a failed request starts a new idempotency scope.
     const requestIdempotencyKey = idempotencyKey.current ?? crypto.randomUUID();
     idempotencyKey.current = requestIdempotencyKey;
@@ -333,7 +344,7 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
         shiftId: shift.id,
         input: {
           formatId,
-          formatVersion: 1,
+          formatVersion: selectedFormat.version,
           maxLines: parsedLineLimit,
           idempotencyKey: requestIdempotencyKey,
         },
@@ -442,7 +453,10 @@ export function ShiftExportsDialog({ shift, open, onClose }: ShiftExportsDialogP
             key={item.id}
             item={item}
             language={i18n.language}
-            formatLabel={formatLabels.get(`${item.formatId}@${item.formatVersion}`)}
+            formatLabel={
+              formatLabels.get(`${item.formatId}@${item.formatVersion}`) ??
+              formatLabelsById.get(item.formatId)
+            }
             onError={(caught) => setError(errorMessage(caught, t))}
           />
         ))}

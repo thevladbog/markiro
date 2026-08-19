@@ -31,6 +31,7 @@
  * based on whether a real 2D context is available) by `LabelCanvas.tsx`.
  */
 import {
+  labelFieldDisplayValue,
   type LabelBarcodeElement,
   type LabelBoxElement,
   type LabelElement,
@@ -127,7 +128,7 @@ function resolveTextForBounds(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : (data[element.field] ?? "");
+  return element.kind === "text" ? element.text : labelFieldDisplayValue(element.field, data);
 }
 
 /** Same requirement as `resolveTextForBounds`: callers pass the data used by `draw`. */
@@ -409,7 +410,7 @@ export function draw(
         drawTextElement(ctx, element, element.text, scale);
         break;
       case "field":
-        drawTextElement(ctx, element, data[element.field] ?? "", scale);
+        drawTextElement(ctx, element, labelFieldDisplayValue(element.field, data), scale);
         break;
       case "barcode":
         drawBarcodeElement(ctx, element, data, scale);

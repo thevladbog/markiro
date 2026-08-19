@@ -295,6 +295,31 @@ describe("generateTspl - barcode formats", () => {
     expect(tspl).not.toContain("!1");
   });
 
+  it("renders a field element bound to sscc as GS1 HRI (00)…", async () => {
+    const spec: LabelTemplateSpec = {
+      widthMm: 100,
+      heightMm: 60,
+      dpi: 203,
+      language: "tspl",
+      elements: [{ kind: "field", id: "f", field: "sscc", xMm: 5, yMm: 5, fontSizePt: 10 }],
+    };
+    const tspl = await generateTspl(spec, { ...sampleLabelData(), sscc: "004601234560000017" });
+    expect(tspl).toContain("(00)004601234560000017");
+    expect(tspl).not.toContain('"004601234560000017"');
+  });
+
+  it("leaves a non-sscc field element's text untouched", async () => {
+    const spec: LabelTemplateSpec = {
+      widthMm: 100,
+      heightMm: 60,
+      dpi: 203,
+      language: "tspl",
+      elements: [{ kind: "field", id: "f", field: "product.gtin", xMm: 5, yMm: 5, fontSizePt: 10 }],
+    };
+    const tspl = await generateTspl(spec, sampleLabelData());
+    expect(tspl).not.toContain("(00)");
+  });
+
   it("renders a qr code with a clamped cell width", async () => {
     const spec: LabelTemplateSpec = {
       widthMm: 58,

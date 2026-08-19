@@ -72,3 +72,33 @@ export function parseSscc(sscc: string, prefixLength: number): ParsedSscc | null
     serial: Number(sscc.slice(1 + prefixLength, 17)),
   };
 }
+
+const BARE_SSCC_SHAPE = /^\d{18}$/;
+
+/**
+ * The 20-character machine form Chestny ZNAK exchanges expect: GS1
+ * application identifier `00` + the bare 18 digits. Validates SHAPE only
+ * (exactly 18 digits), not the check digit: ingest guarantees length, and a
+ * single corrupt row must not fail a whole export. Rejecting non-18-digit
+ * input is what prevents double-prefixing.
+ */
+export function formatSsccWithAi(sscc: string): string {
+  if (!BARE_SSCC_SHAPE.test(sscc)) {
+    throw new DomainError("SSCC_FORMAT", `not a bare 18-digit SSCC: "${sscc}"`);
+  }
+  return `00${sscc}`;
+}
+
+/**
+ * The human-readable GS1 HRI form `(00)…` for labels and admin screens.
+ * Accepts either the bare 18 digits or the 20-character `00…` machine form
+ * (what `/boxes` responses now carry), so display code never has to know
+ * which one it holds.
+ */
+export function formatSsccHri(value: string): string {
+  const bare = value.length === 20 && value.startsWith("00") ? value.slice(2) : value;
+  if (!BARE_SSCC_SHAPE.test(bare)) {
+    throw new DomainError("SSCC_FORMAT", `not an SSCC: "${value}"`);
+  }
+  return `(00)${bare}`;
+}
