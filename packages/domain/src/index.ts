@@ -24,6 +24,11 @@ export {
   ptToDots,
   sampleLabelData,
 } from "./labels/model.js";
+export {
+  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  buildDefaultLabelTemplates,
+} from "./labels/defaults.js";
+export type { DefaultLabelTemplate } from "./labels/defaults.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
