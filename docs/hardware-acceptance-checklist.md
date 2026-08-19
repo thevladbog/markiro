@@ -252,8 +252,11 @@ and the browser gallery do not satisfy these checks.
       comes out correctly.
 - [ ] Printing a box label over USB: Cyrillic and DataMatrix output are
       identical to the same template printed over TCP.
-- [ ] Unplugging the USB cable mid-shift: printing shows a visible error,
-      the line is not blocked; printing recovers after reconnecting without
-      reconfiguration.
+- [ ] Unplug the USB cable mid-print and record what actually happens:
+      spooler RAW printing is fire-and-forget, so the driver's spool setting
+      may surface a visible error or may swallow the failure silently in the
+      print queue — either way, the line must not block, and printing must
+      recover after reconnecting without reconfiguration. If failures turn
+      out silent, add a pre-flight `GetPrinterW` status check.
 - [ ] Detection filters out non-USB queues (network, PDF, etc.) — they do
       not appear in the list of available printers.

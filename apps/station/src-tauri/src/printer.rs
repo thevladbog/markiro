@@ -105,7 +105,7 @@ mod spooler {
         unsafe {
             let mut needed = 0u32;
             let mut returned = 0u32;
-            EnumPrintersW(
+            let first_call_ok = EnumPrintersW(
                 PRINTER_ENUM_LOCAL,
                 std::ptr::null(),
                 2,
@@ -113,7 +113,22 @@ mod spooler {
                 0,
                 &mut needed,
                 &mut returned,
-            );
+            ) != 0;
+            if !first_call_ok {
+                // ERROR_INSUFFICIENT_BUFFER (122) is the expected failure mode
+                // of this sizing idiom: `needed` now holds the real buffer
+                // size and we fall through to the real call below. Any other
+                // failure (e.g. the Print Spooler service being stopped,
+                // RPC_S_SERVER_UNAVAILABLE) must not be reported as "no
+                // printers found" -- that sends an operator chasing a USB
+                // cable for a service outage instead of restarting the
+                // spooler.
+                const ERROR_INSUFFICIENT_BUFFER: i32 = 122;
+                if std::io::Error::last_os_error().raw_os_error() != Some(ERROR_INSUFFICIENT_BUFFER)
+                {
+                    return Err(last_error("EnumPrintersW"));
+                }
+            }
             if needed == 0 {
                 return Ok(Vec::new());
             }
