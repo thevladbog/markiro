@@ -3,7 +3,7 @@ import type { ShiftExportFormatDescriptor, ShiftExportFormatId } from "@markiro/
 
 export const createShiftExportSchema = z.strictObject({
   formatId: z.enum(["shift_txt_flat", "shift_txt_boxes", "shift_csv_flat", "shift_csv_boxes"]),
-  formatVersion: z.literal(1),
+  formatVersion: z.number().int().min(1),
   maxLines: z.number().int().min(2).max(1_000_000).nullable(),
   idempotencyKey: z.uuid(),
 });
@@ -27,7 +27,7 @@ export interface ShiftExportDto {
   id: string;
   shiftId: string;
   formatId: ShiftExportFormatId;
-  formatVersion: 1;
+  formatVersion: number;
   maxLines: number | null;
   status: "queued" | "processing" | "ready" | "failed";
   errorCode: string | null;
@@ -60,7 +60,7 @@ export const shiftExportFormatOpenApiSchema = {
       type: "string",
       enum: ["shift_txt_flat", "shift_txt_boxes", "shift_csv_flat", "shift_csv_boxes"],
     },
-    version: { type: "integer", enum: [1] },
+    version: { type: "integer", enum: [1, 2] },
     label: { type: "string" },
     extension: { type: "string", enum: ["txt", "csv"] },
     mimeType: { type: "string" },
@@ -74,7 +74,7 @@ export const createShiftExportOpenApiSchema = {
   required: ["formatId", "formatVersion", "maxLines", "idempotencyKey"],
   properties: {
     formatId: shiftExportFormatOpenApiSchema.properties.id,
-    formatVersion: { type: "integer", enum: [1] },
+    formatVersion: { type: "integer", minimum: 1 },
     maxLines: { type: "integer", nullable: true, minimum: 2, maximum: 1_000_000 },
     idempotencyKey: { type: "string", format: "uuid" },
   },
@@ -135,7 +135,7 @@ export const shiftExportOpenApiSchema = {
     id: { type: "string", format: "uuid" },
     shiftId: { type: "string", format: "uuid" },
     formatId: shiftExportFormatOpenApiSchema.properties.id,
-    formatVersion: { type: "integer", enum: [1] },
+    formatVersion: { type: "integer", minimum: 1 },
     maxLines: { type: "integer", nullable: true, minimum: 2, maximum: 1_000_000 },
     status: { type: "string", enum: ["queued", "processing", "ready", "failed"] },
     errorCode: { type: "string", nullable: true },
