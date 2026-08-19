@@ -920,6 +920,7 @@
           "SHIFT_HAS_NO_CODES": "The shift has no codes to include in a report.",
           "SHIFT_DATE_MISSING": "The shift has no date.",
           "BOX_COVERAGE_INCOMPLETE": "Not every shift code is assigned to a box.",
+          "ORG_INN_MISSING": "Set the organization INN in the profile to generate the GIS MT report.",
           "FORMAT_NOT_FOUND": "The selected report format is no longer available.",
           "INVALID_LINE_LIMIT": "The lines-per-part limit is invalid.",
           "BOX_EXCEEDS_LINE_LIMIT": "A box does not fit within the lines-per-part limit.",

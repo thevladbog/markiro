@@ -1,11 +1,15 @@
 import { Inject, Injectable } from "@nestjs/common";
-import type { ShiftExportBoxMode, ShiftExportSource } from "@markiro/domain";
+import type { ShiftExportFormatDescriptor, ShiftExportSource } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { and, eq, sql } from "drizzle-orm";
 import { DB } from "../../auth/auth.module";
 
 export type ShiftExportSourceErrorCode =
-  "SHIFT_NOT_CLOSED" | "SHIFT_HAS_NO_CODES" | "SHIFT_DATE_MISSING" | "BOX_COVERAGE_INCOMPLETE";
+  | "SHIFT_NOT_CLOSED"
+  | "SHIFT_HAS_NO_CODES"
+  | "SHIFT_DATE_MISSING"
+  | "BOX_COVERAGE_INCOMPLETE"
+  | "ORG_INN_MISSING";
 
 export class ShiftExportSourceError extends Error {
   constructor(readonly code: ShiftExportSourceErrorCode) {
@@ -18,8 +22,12 @@ export interface ShiftExportSnapshot {
   sourceSnapshotStartedAt: Date;
   productName: string;
   shiftDate: string;
+  /** Tenant's ИНН; loaded only for formats that embed it (GISMT XML). */
+  organizationInn: string | null;
   source: ShiftExportSource;
 }
+
+type ShiftExportSourceFormat = Pick<ShiftExportFormatDescriptor, "boxMode" | "extension">;
 
 interface AuthoritativeCodeRow {
   tenantId: string;
@@ -50,10 +58,10 @@ export class ShiftExportSourceService {
   load(
     tenantId: string,
     shiftId: string,
-    boxMode: ShiftExportBoxMode,
+    format: ShiftExportSourceFormat,
   ): Promise<ShiftExportSnapshot> {
     return this.db.transaction(
-      async (tx) => this.loadFromTransaction(tx, tenantId, shiftId, boxMode),
+      async (tx) => this.loadFromTransaction(tx, tenantId, shiftId, format),
       {
         isolationLevel: "repeatable read",
         accessMode: "read only",
@@ -65,7 +73,7 @@ export class ShiftExportSourceService {
     tx: ShiftExportTransaction,
     tenantId: string,
     shiftId: string,
-    boxMode: ShiftExportBoxMode,
+    format: ShiftExportSourceFormat,
   ): Promise<ShiftExportSnapshot> {
     const snapshotResult = await tx.execute(
       sql<{
@@ -114,6 +122,19 @@ export class ShiftExportSourceService {
       throw new ShiftExportSourceError("SHIFT_DATE_MISSING");
     }
 
+    let organizationInn: string | null = null;
+    if (format.extension === "xml") {
+      const [profile] = await tx
+        .select({ inn: schema.orgProfiles.inn })
+        .from(schema.orgProfiles)
+        .where(eq(schema.orgProfiles.tenantId, tenantId))
+        .limit(1);
+      organizationInn = profile?.inn?.trim() || null;
+      if (organizationInn === null) {
+        throw new ShiftExportSourceError("ORG_INN_MISSING");
+      }
+    }
+
     const authoritativeRows: AuthoritativeCodeRow[] = await tx
       .select({
         tenantId: schema.codeRegistry.tenantId,
@@ -144,7 +165,7 @@ export class ShiftExportSourceService {
     }
 
     const source =
-      boxMode === "flat"
+      format.boxMode === "flat"
         ? ({ mode: "flat", codes: authoritative.map((row) => row.canonicalRaw) } as const)
         : await this.loadBoxes(tx, tenantId, shiftId, authoritative);
 
@@ -152,6 +173,7 @@ export class ShiftExportSourceService {
       sourceSnapshotStartedAt,
       productName: shift.productName ?? "Продукция",
       shiftDate: shift.plannedDate,
+      organizationInn,
       source,
     };
   }

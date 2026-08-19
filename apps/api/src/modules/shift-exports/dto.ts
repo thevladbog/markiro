@@ -2,7 +2,13 @@ import { z } from "zod";
 import type { ShiftExportFormatDescriptor, ShiftExportFormatId } from "@markiro/domain";
 
 export const createShiftExportSchema = z.strictObject({
-  formatId: z.enum(["shift_txt_flat", "shift_txt_boxes", "shift_csv_flat", "shift_csv_boxes"]),
+  formatId: z.enum([
+    "shift_txt_flat",
+    "shift_txt_boxes",
+    "shift_csv_flat",
+    "shift_csv_boxes",
+    "shift_xml_gismt_aggregation",
+  ]),
   formatVersion: z.number().int().min(1),
   maxLines: z.number().int().min(2).max(1_000_000).nullable(),
   idempotencyKey: z.uuid(),
@@ -58,11 +64,17 @@ export const shiftExportFormatOpenApiSchema = {
   properties: {
     id: {
       type: "string",
-      enum: ["shift_txt_flat", "shift_txt_boxes", "shift_csv_flat", "shift_csv_boxes"],
+      enum: [
+        "shift_txt_flat",
+        "shift_txt_boxes",
+        "shift_csv_flat",
+        "shift_csv_boxes",
+        "shift_xml_gismt_aggregation",
+      ],
     },
     version: { type: "integer", enum: [1, 2] },
     label: { type: "string" },
-    extension: { type: "string", enum: ["txt", "csv"] },
+    extension: { type: "string", enum: ["txt", "csv", "xml"] },
     mimeType: { type: "string" },
     boxMode: { type: "string", enum: ["flat", "boxes"] },
   },
