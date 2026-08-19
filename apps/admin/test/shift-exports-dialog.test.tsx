@@ -193,10 +193,12 @@ describe("ShiftExportsDialog", () => {
     ).toBeDefined();
     expect(within(dialog).getByText("Иванов Иван")).toBeDefined();
     // READY_EXPORT is a legacy shift_txt_boxes@1 export; the live formats list only
-    // advertises shift_txt_boxes@2, so the label lookup misses and the history row
-    // falls back to the raw formatId (see ShiftExportsDialog.tsx's `formatLabel ?? item.formatId`).
-    expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(1);
-    expect(within(dialog).getByText("shift_txt_boxes")).toBeDefined();
+    // advertises shift_txt_boxes@2, so the exact id@version lookup misses. The label
+    // text itself is version-independent, so the id-only fallback still resolves it
+    // to the friendly label (once for the radio button, once for the history row)
+    // instead of falling back to the raw formatId (see ShiftExportsDialog.tsx).
+    expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(2);
+    expect(within(dialog).queryByText("shift_txt_boxes")).toBeNull();
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
     expect(within(dialog).getByText("2 коробов")).toBeDefined();
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
