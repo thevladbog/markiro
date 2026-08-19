@@ -1,9 +1,10 @@
+import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import i18n from "../src/i18n/index.js";
-import type { HardwareConfig } from "../src/lib/hardware-config.js";
+import { saveHardwareConfig, type HardwareConfig } from "../src/lib/hardware-config.js";
 import type { HardwareContract, PrintTarget } from "../src/lib/hardware.js";
-import type { SqlExecutor } from "../src/lib/mirror.js";
+import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { WorkstationSetup } from "../src/pages/WorkstationSetup.js";
 
 beforeAll(async () => {
@@ -11,6 +12,24 @@ beforeAll(async () => {
 });
 
 const noopExec: SqlExecutor = { run: async () => {}, all: async () => [] };
+
+// Same shape as hardware-config.test.ts's `nodeExecutor`: a real migrated
+// in-memory SQLite instance, seeded through the actual `saveHardwareConfig`
+// write path rather than a hand-crafted row shape.
+async function storedHardwareExec(config: HardwareConfig): Promise<SqlExecutor> {
+  const db = new DatabaseSync(":memory:");
+  const exec: SqlExecutor = {
+    async run(sql, params = []) {
+      db.prepare(sql).run(...(params as never[]));
+    },
+    async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+      return db.prepare(sql).all(...(params as never[])) as T[];
+    },
+  };
+  await applyMigrations(exec);
+  await saveHardwareConfig(exec, config);
+  return exec;
+}
 
 function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
   return {
@@ -1071,20 +1090,12 @@ describe("WorkstationSetup", () => {
   });
 
   it("keeps a configured USB printer selectable when detection no longer lists it", async () => {
-    const storedExec: SqlExecutor = {
-      run: async () => {},
-      all: async <T,>() =>
-        [
-          {
-            value: JSON.stringify({
-              scanner: null,
-              printer: { kind: "usb", printer: "Zebra ZD421" },
-              printerLanguage: "tspl",
-              verifyPrintedLabel: false,
-            }),
-          },
-        ] as T[],
-    };
+    const storedExec = await storedHardwareExec({
+      scanner: null,
+      printer: { kind: "usb", printer: "Zebra ZD421" },
+      printerLanguage: "tspl",
+      verifyPrintedLabel: false,
+    });
     render(<WorkstationSetup hw={hardware()} {...defaultProps} exec={storedExec} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");

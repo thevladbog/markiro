@@ -132,12 +132,17 @@ mod spooler {
             if needed == 0 {
                 return Ok(Vec::new());
             }
-            let mut buffer = vec![0u8; needed as usize];
+            // `u64`-backed storage instead of `Vec<u8>`: `PRINTER_INFO_2W`
+            // contains pointer fields and needs 8-byte alignment on x64, but
+            // a `Vec<u8>` only guarantees 1-byte alignment. Reinterpreting a
+            // `Vec<u8>` buffer as `&[PRINTER_INFO_2W]` is UB even though it
+            // works in practice on this allocator.
+            let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
             if EnumPrintersW(
                 PRINTER_ENUM_LOCAL,
                 std::ptr::null(),
                 2,
-                buffer.as_mut_ptr(),
+                buffer.as_mut_ptr() as *mut u8,
                 needed,
                 &mut needed,
                 &mut returned,

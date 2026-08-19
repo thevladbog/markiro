@@ -55,7 +55,7 @@ function parsePrinter(value: unknown): PrintTarget | null {
   if (t.kind === "tcp" && typeof t.host === "string" && t.host.length > 0) {
     return { kind: "tcp", host: t.host, port: typeof t.port === "number" ? t.port : 9100 };
   }
-  if (t.kind === "usb" && typeof t.printer === "string" && t.printer.length > 0) {
+  if (t.kind === "usb" && typeof t.printer === "string" && t.printer.trim().length > 0) {
     return { kind: "usb", printer: t.printer };
   }
   return null;

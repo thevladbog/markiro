@@ -126,4 +126,18 @@ describe("hardware config", () => {
     ]);
     expect((await loadHardwareConfig(exec)).printer).toBeNull();
   });
+
+  it("drops a stored USB printer with a whitespace-only queue name", async () => {
+    const exec = await makeExec();
+    await exec.run("INSERT INTO station_meta (key, value) VALUES (?,?)", [
+      "hardware_config",
+      JSON.stringify({
+        scanner: null,
+        printer: { kind: "usb", printer: "   " },
+        printerLanguage: "zpl",
+        verifyPrintedLabel: false,
+      }),
+    ]);
+    expect((await loadHardwareConfig(exec)).printer).toBeNull();
+  });
 });
