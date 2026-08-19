@@ -15,6 +15,7 @@ const noopExec: SqlExecutor = { run: async () => {}, all: async () => [] };
 function hardware(overrides: Partial<HardwareContract> = {}): HardwareContract {
   return {
     listScannerPorts: async () => ["COM3", "COM4"],
+    listUsbPrinters: async () => [],
     openScanner: async () => {},
     closeScanner: async () => {},
     onScan: async () => () => {},

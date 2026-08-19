@@ -3,7 +3,15 @@ import { listen } from "@tauri-apps/api/event";
 import type { ScanSource } from "./scan-source.js";
 
 export type PrintTarget =
-  { kind: "serial"; port: string; baud: number } | { kind: "tcp"; host: string; port: number };
+  | { kind: "serial"; port: string; baud: number }
+  | { kind: "tcp"; host: string; port: number }
+  | { kind: "usb"; printer: string };
+
+/** One installed Windows printer queue on a USB port. */
+export interface UsbPrinterInfo {
+  name: string;
+  port: string;
+}
 
 /** Whether a configured serial scanner is currently open. */
 export type ScannerStatus = "connected" | "disconnected";
@@ -15,6 +23,8 @@ export type ScannerStatus = "connected" | "disconnected";
  */
 export interface HardwareContract {
   listScannerPorts(): Promise<string[]>;
+  /** Installed USB label printers; empty on non-Windows platforms. */
+  listUsbPrinters(): Promise<UsbPrinterInfo[]>;
   openScanner(port: string, baud: number): Promise<void>;
   closeScanner(): Promise<void>;
   /** Subscribes to decoded scans; resolves to the unsubscribe function. */
@@ -33,6 +43,7 @@ export function bytesToBase64(bytes: Uint8Array): string {
 
 export const tauriHardware: HardwareContract = {
   listScannerPorts: () => invoke<string[]>("list_serial_ports"),
+  listUsbPrinters: () => invoke<UsbPrinterInfo[]>("list_usb_printers"),
   openScanner: (port, baud) => invoke<void>("open_scanner", { port, baud }),
   closeScanner: () => invoke<void>("close_scanner"),
   async onScan(listener) {
