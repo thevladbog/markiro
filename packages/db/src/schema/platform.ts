@@ -311,6 +311,16 @@ export const boxExceptions = pgTable(
     terminalId: text("terminal_id"),
     operatorId: uuid("operator_id"),
     reason: text("reason"),
+    /**
+     * Set when this disassemble was performed by an admin Disaggregation
+     * document rather than a station operator. Deliberately no FK: the
+     * documents table lives in disaggregation.ts, which imports boxes FROM
+     * this file — a composite FK here would create a hard import cycle.
+     * Same precedent as shifts.stationCloseOwnerDeviceId above; the
+     * disaggregation service is the only writer and always supplies its own
+     * document id inside the same transaction.
+     */
+    disaggregationDocumentId: uuid("disaggregation_document_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
     recordedAt: timestamp("recorded_at", { withTimezone: true }).notNull().defaultNow(),
   },
