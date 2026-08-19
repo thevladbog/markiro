@@ -70,7 +70,7 @@ const READY_EXPORT = {
   id: "22222222-2222-4222-8222-222222222222",
   shiftId: SHIFT.id,
   formatId: "shift_txt_boxes",
-  formatVersion: 2,
+  formatVersion: 1,
   maxLines: 2000,
   status: "ready",
   errorCode: null,
@@ -192,7 +192,11 @@ describe("ShiftExportsDialog", () => {
       within(dialog).getByText("Данные смены изменились — сформируйте новый отчет."),
     ).toBeDefined();
     expect(within(dialog).getByText("Иванов Иван")).toBeDefined();
-    expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(2);
+    // READY_EXPORT is a legacy shift_txt_boxes@1 export; the live formats list only
+    // advertises shift_txt_boxes@2, so the label lookup misses and the history row
+    // falls back to the raw formatId (see ShiftExportsDialog.tsx's `formatLabel ?? item.formatId`).
+    expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(1);
+    expect(within(dialog).getByText("shift_txt_boxes")).toBeDefined();
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
     expect(within(dialog).getByText("2 коробов")).toBeDefined();
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
