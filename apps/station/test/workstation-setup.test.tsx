@@ -1025,6 +1025,108 @@ describe("WorkstationSetup", () => {
     expect(screen.queryByRole("button", { name: "Next" })).toBeNull();
   });
 
+  const defaultProps = {
+    exec: noopExec,
+    sound: { muted: false, volume: 1 },
+    onSoundChange: () => {},
+    onConfigChange: () => {},
+    onDone: () => {},
+  };
+
+  it("sends a test print to the selected USB printer", async () => {
+    const print = vi.fn<(target: PrintTarget, bytes: Uint8Array) => Promise<void>>(
+      async () => {},
+    );
+    const hw = hardware({
+      listUsbPrinters: async () => [
+        { name: "Zebra ZD421", port: "USB001" },
+        { name: "TSC TE200", port: "USB002" },
+      ],
+      print,
+    });
+    render(<WorkstationSetup hw={hw} {...defaultProps} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" }));
+    fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+    await waitFor(() =>
+      expect(print).toHaveBeenCalledWith(
+        { kind: "usb", printer: "Zebra ZD421" },
+        expect.any(Uint8Array),
+      ),
+    );
+  });
+
+  it("shows the empty hint and refreshes the USB list on demand", async () => {
+    const listUsbPrinters = vi
+      .fn<() => Promise<{ name: string; port: string }[]>>()
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{ name: "Zebra ZD421", port: "USB001" }]);
+    render(<WorkstationSetup hw={hardware({ listUsbPrinters })} {...defaultProps} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    expect(await screen.findByText(/No USB printers found/)).toBeDefined();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
+    expect(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" })).toBeDefined();
+  });
+
+  it("keeps a configured USB printer selectable when detection no longer lists it", async () => {
+    const storedExec: SqlExecutor = {
+      run: async () => {},
+      all: async <T,>() =>
+        [
+          {
+            value: JSON.stringify({
+              scanner: null,
+              printer: { kind: "usb", printer: "Zebra ZD421" },
+              printerLanguage: "tspl",
+              verifyPrintedLabel: false,
+            }),
+          },
+        ] as T[],
+    };
+    render(<WorkstationSetup hw={hardware()} {...defaultProps} exec={storedExec} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    const missing = await screen.findByRole("radio", {
+      name: "Zebra ZD421 (configured, not detected)",
+    });
+    expect((missing as HTMLInputElement).checked).toBe(true);
+  });
+
+  it("saves the USB printer into the hardware config", async () => {
+    const onConfigChange = vi.fn();
+    const hw = hardware({
+      listUsbPrinters: async () => [{ name: "TSC TE200", port: "USB002" }],
+    });
+    render(
+      <WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />,
+    );
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(await screen.findByRole("radio", { name: "TSC TE200 · USB002" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() =>
+      expect(onConfigChange).toHaveBeenCalledWith(
+        expect.objectContaining({ printer: { kind: "usb", printer: "TSC TE200" } }),
+      ),
+    );
+  });
+
+  it("rejects finishing with the USB transport and no printer chosen", async () => {
+    render(<WorkstationSetup hw={hardware()} {...defaultProps} />);
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(
+      await screen.findByText(/Enter the required printer connection details/),
+    ).toBeDefined();
+  });
+
   it("keeps the test result and exit controls in fixed layout regions", async () => {
     render(
       <WorkstationSetup

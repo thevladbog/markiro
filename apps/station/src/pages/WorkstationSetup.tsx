@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
 import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
 import { playSignalTone, saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
-import type { HardwareContract, PrintTarget } from "../lib/hardware.js";
+import type { HardwareContract, PrintTarget, UsbPrinterInfo } from "../lib/hardware.js";
 import {
   loadHardwareConfig,
   saveHardwareConfig,
@@ -74,6 +74,8 @@ export function WorkstationSetup({
   const [printerTcpPort, setPrinterTcpPort] = useState(String(DEFAULT_PRINTER_PORT));
   const [printerPort, setPrinterPort] = useState("");
   const [printerBaud, setPrinterBaud] = useState(String(DEFAULT_BAUD));
+  const [usbPrinters, setUsbPrinters] = useState<UsbPrinterInfo[]>([]);
+  const [usbPrinter, setUsbPrinter] = useState("");
   const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
   const [verifyPrintedLabel, setVerifyPrintedLabel] = useState(false);
@@ -87,6 +89,15 @@ export function WorkstationSetup({
     void hw
       .listScannerPorts()
       .then(setPorts)
+      .catch((caught: unknown) =>
+        setError(caught instanceof Error ? caught.message : t("setup.failed")),
+      );
+  }, [hw, t]);
+
+  useEffect(() => {
+    void hw
+      .listUsbPrinters()
+      .then(setUsbPrinters)
       .catch((caught: unknown) =>
         setError(caught instanceof Error ? caught.message : t("setup.failed")),
       );
@@ -108,6 +119,9 @@ export function WorkstationSetup({
           setPrinterTransport("serial");
           setPrinterPort(config.printer.port);
           setPrinterBaud(String(config.printer.baud));
+        } else if (config.printer?.kind === "usb") {
+          setPrinterTransport("usb");
+          setUsbPrinter(config.printer.printer);
         } else {
           setPrinterTransport("none");
         }
@@ -167,6 +181,18 @@ export function WorkstationSetup({
     }
   }
 
+  async function refreshUsbPrinters() {
+    setBusy(true);
+    setError(null);
+    try {
+      setUsbPrinters(await hw.listUsbPrinters());
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : t("setup.failed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function buildConfig(): ConfigResult {
     let scanner: HardwareConfig["scanner"] = null;
     if (port !== "") {
@@ -186,6 +212,9 @@ export function WorkstationSetup({
       const serialBaud = parseBaud(printerBaud);
       if (serialBaud === null) return { ok: false, error: t("setup.invalidNumber") };
       printer = { kind: "serial", port: printerPort, baud: serialBaud };
+    } else if (printerTransport === "usb") {
+      if (usbPrinter === "") return { ok: false, error: t("setup.printerFieldRequired") };
+      printer = { kind: "usb", printer: usbPrinter };
     }
 
     return {
@@ -317,6 +346,8 @@ export function WorkstationSetup({
           tcpPort={printerTcpPort}
           serialPort={printerPort}
           serialBaud={printerBaud}
+          usbPrinters={usbPrinters}
+          usbPrinter={usbPrinter}
           language={printerLanguage}
           verifyPrintedLabel={verifyPrintedLabel}
           disabled={loading}
@@ -326,6 +357,8 @@ export function WorkstationSetup({
           onTcpPortChange={setPrinterTcpPort}
           onSerialPortChange={setPrinterPort}
           onSerialBaudChange={setPrinterBaud}
+          onUsbPrinterChange={setUsbPrinter}
+          onUsbRefresh={() => void refreshUsbPrinters()}
           onLanguageChange={setPrinterLanguage}
           onVerifyPrintedLabelChange={setVerifyPrintedLabel}
           onTestPrint={() => void testPrint()}
