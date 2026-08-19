@@ -234,7 +234,7 @@ and the browser gallery do not satisfy these checks.
 - [ ] Close and immediately reopen the same port (the setup screen's
       close-before-open): the reopen succeeds without restarting the app.
 - [ ] Printer over TCP 9100 and over serial; test print from the setup screen.
-- [ ] USB/spooler printing — out of the 05b-2 transport scope; decide whether it is needed.
+- [ ] USB/spooler printing — see the "USB printer" section below.
 - [ ] A ZPL template prints correctly on a TSPL printer and vice versa (the
       configured language wins): `renderLabelBytes` picks the emitter from
       `hardware_config.printerLanguage`, not the template's own `language`
@@ -243,3 +243,17 @@ and the browser gallery do not satisfy these checks.
       label print: today `WorkstationSetup` is the only call site for
       `renderLabelBytes`/`hw.print`, so confirm any later per-shift printing
       renders through the same path rather than a divergent one.
+
+## USB printer (plan `2026-08-19-station-usb-printer`)
+
+- [ ] USB-подключённый Zebra (ZPL) обнаруживается в списке настройки;
+      тестовая печать выходит корректно.
+- [ ] USB-подключённый TSC (TSPL) обнаруживается в списке настройки;
+      тестовая печать выходит корректно.
+- [ ] Печать этикетки короба по USB: кириллица и DataMatrix идентичны
+      выводу того же шаблона по TCP.
+- [ ] Выдёргивание USB-кабеля во время смены: печать даёт видимую ошибку,
+      линия не блокируется; после переподключения печать восстанавливается
+      без повторной настройки.
+- [ ] Обнаружение фильтрует не-USB очереди (сетевые, PDF и т. п.) — они не
+      появляются в списке доступных принтеров.
