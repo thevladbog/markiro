@@ -29,3 +29,12 @@ backend.tf
 
 # Pencil stores a cloud-scoped file token in this local design container.
 docs/design-briefs/landing.pen
+
+# Local pnpm content-addressable store when the repo is installed with --store-dir here.
+.pnpm-store/
+
+# Browser-automation scratch output and local UI screenshots; committed design
+# assets live under docs/design-briefs/ with explicit names.
+.playwright-mcp/
+/*.png
+docs/design-briefs/screenshot-*.png

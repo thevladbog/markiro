@@ -114,6 +114,30 @@ describe("ShiftSelection", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Open" })).toBeDefined());
   });
 
+  it("keeps the empty screen static across a background poll", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [] }), { status: 200 }),
+    );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+    await act(async () => {});
+
+    const refresh = () => screen.getByRole("button", { name: "Refresh shifts" });
+    // The centred empty state carries no control the poll could toggle, and the
+    // footer control never reacts to a refresh the operator did not ask for.
+    expect(screen.getByText("No open shifts")).toBeDefined();
+    expect(refresh().closest(".shift-selection__state")).toBeNull();
+    expect((refresh() as HTMLButtonElement).disabled).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+
+    expect((refresh() as HTMLButtonElement).disabled).toBe(false);
+    vi.useRealTimers();
+  });
+
   it("keeps a loaded shift selectable after a background refresh fails", async () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, "fetch")

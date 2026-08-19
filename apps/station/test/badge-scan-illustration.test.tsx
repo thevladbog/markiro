@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { BadgeScanIllustration } from "../src/ui/BadgeScanIllustration.js";
 
 describe("BadgeScanIllustration", () => {
-  it("renders an offline decorative badge, barcode, scanner, and scan beam", () => {
+  it("renders an offline decorative badge, barcode, reader, and animated scan beam", () => {
     const { container } = render(<BadgeScanIllustration />);
 
     const illustration = screen.getByTestId("badge-scan-illustration");
@@ -14,6 +14,8 @@ describe("BadgeScanIllustration", () => {
     expect(container.querySelector(".badge-scan-illustration__barcode")).not.toBeNull();
     expect(container.querySelector(".badge-scan-illustration__scanner")).not.toBeNull();
     expect(container.querySelector(".badge-scan-illustration__beam")).not.toBeNull();
+    expect(container.querySelectorAll(".badge-scan-illustration__wave")).toHaveLength(3);
+    expect(container.querySelector(".badge-scan-illustration__sweep")).not.toBeNull();
     expect(container.querySelector("image")).toBeNull();
     expect(container.innerHTML).not.toMatch(/https?:|data:/i);
   });

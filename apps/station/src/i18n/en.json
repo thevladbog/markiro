@@ -123,6 +123,7 @@
     "title": "Shifts",
     "loading": "Loading shifts…",
     "empty": "No open shifts",
+    "emptyHint": "The list refreshes automatically. Create a shift or wait for one planned in the admin panel.",
     "retry": "Retry",
     "refresh": "Refresh shifts",
     "pagination": "Shift pages",

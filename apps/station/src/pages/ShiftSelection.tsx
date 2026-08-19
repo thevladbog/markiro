@@ -91,7 +91,11 @@ export function ShiftSelection({
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(true);
+  /**
+   * Only operator-initiated refreshes gate the control. The 30 s poll used to
+   * drive it too, so the empty screen blinked its button every interval tick.
+   */
+  const [manualRefreshing, setManualRefreshing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
   const [requestedPage, setRequestedPage] = useState(1);
@@ -112,60 +116,69 @@ export function ShiftSelection({
     };
   }, []);
 
-  const refreshShifts = useCallback(() => {
-    if (listRequest.current?.client === client) return;
+  const refreshShifts = useCallback(
+    (options?: { manual?: boolean }) => {
+      const manual = options?.manual === true;
+      if (listRequest.current?.client === client) {
+        // A press during a background poll folds into it rather than being
+        // dropped silently, so the control still reflects the operator's ask.
+        if (manual) setManualRefreshing(true);
+        return;
+      }
 
-    const id = ++listRequestId.current;
-    listRequest.current = { client, id };
-    const initialForClient = loadedClient.current !== client;
-    if (initialForClient) setLoading(true);
-    setRefreshing(true);
-    setLoadFailed(false);
-    setError(null);
-    void client
-      .get<{ items: ShiftListItem[] }>("/shifts")
-      .then(async (response) => {
-        let visibleItems = response.items;
-        try {
-          visibleItems = await excludeLocallyClosedShifts(exec, response.items);
-        } catch (err) {
-          console.error("station: locally closed shift reconciliation failed", err);
-        }
-        if (!mounted.current || listRequest.current?.id !== id) return;
-        setItems(visibleItems);
-        loadedClient.current = client;
-        for (const shift of visibleItems) {
-          const currentCheck = isCurrentRef.current;
-          const prefetch = prefetchStationProductImage(
-            client,
-            {
-              id: shift.productId,
-              ...(shift.image === undefined ? {} : { image: shift.image }),
-            },
-            currentCheck ? () => !currentCheck() : undefined,
-            exec,
-          );
-          trackStationProductImageSync(prefetch);
-          void prefetch.then(() => {
-            if (mounted.current) setImageRefreshKey((key) => key + 1);
-          });
-        }
-        setLoading(false);
-      })
-      .catch((err: unknown) => {
-        if (!mounted.current || listRequest.current?.id !== id) return;
-        setError(err instanceof StationApiError ? err.message : t("shifts.serverUnavailable"));
-        if (initialForClient) {
-          setLoadFailed(true);
+      const id = ++listRequestId.current;
+      listRequest.current = { client, id };
+      const initialForClient = loadedClient.current !== client;
+      if (initialForClient) setLoading(true);
+      if (manual) setManualRefreshing(true);
+      setLoadFailed(false);
+      setError(null);
+      void client
+        .get<{ items: ShiftListItem[] }>("/shifts")
+        .then(async (response) => {
+          let visibleItems = response.items;
+          try {
+            visibleItems = await excludeLocallyClosedShifts(exec, response.items);
+          } catch (err) {
+            console.error("station: locally closed shift reconciliation failed", err);
+          }
+          if (!mounted.current || listRequest.current?.id !== id) return;
+          setItems(visibleItems);
+          loadedClient.current = client;
+          for (const shift of visibleItems) {
+            const currentCheck = isCurrentRef.current;
+            const prefetch = prefetchStationProductImage(
+              client,
+              {
+                id: shift.productId,
+                ...(shift.image === undefined ? {} : { image: shift.image }),
+              },
+              currentCheck ? () => !currentCheck() : undefined,
+              exec,
+            );
+            trackStationProductImageSync(prefetch);
+            void prefetch.then(() => {
+              if (mounted.current) setImageRefreshKey((key) => key + 1);
+            });
+          }
           setLoading(false);
-        }
-      })
-      .finally(() => {
-        if (!mounted.current || listRequest.current?.id !== id) return;
-        listRequest.current = null;
-        setRefreshing(false);
-      });
-  }, [client, exec, t]);
+        })
+        .catch((err: unknown) => {
+          if (!mounted.current || listRequest.current?.id !== id) return;
+          setError(err instanceof StationApiError ? err.message : t("shifts.serverUnavailable"));
+          if (initialForClient) {
+            setLoadFailed(true);
+            setLoading(false);
+          }
+        })
+        .finally(() => {
+          if (!mounted.current || listRequest.current?.id !== id) return;
+          listRequest.current = null;
+          setManualRefreshing(false);
+        });
+    },
+    [client, exec, t],
+  );
 
   useEffect(() => {
     refreshShifts();
@@ -226,6 +239,14 @@ export function ShiftSelection({
             {t("shifts.new")}
           </Button>
           <div className="shift-selection__secondary-actions">
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={manualRefreshing}
+              onClick={() => refreshShifts({ manual: true })}
+            >
+              {t("shifts.refresh")}
+            </Button>
             {onSetup ? (
               <Button size="floor" variant="secondary" onClick={onSetup}>
                 {t("shell.setup")}
@@ -251,23 +272,18 @@ export function ShiftSelection({
               <Button
                 size="floor"
                 variant="secondary"
-                disabled={refreshing}
-                onClick={refreshShifts}
+                disabled={manualRefreshing}
+                onClick={() => refreshShifts({ manual: true })}
               >
                 {t("shifts.retry")}
               </Button>
             </div>
           ) : persistentState === "empty" ? (
-            <div className="shift-selection__state">
+            /* Static by design: the poll must never animate anything centred here. */
+            <div className="shift-selection__state shift-selection__state--empty">
+              <span className="shift-selection__empty-mark" aria-hidden="true" />
               <p>{t("shifts.empty")}</p>
-              <Button
-                size="floor"
-                variant="secondary"
-                disabled={refreshing}
-                onClick={refreshShifts}
-              >
-                {t("shifts.refresh")}
-              </Button>
+              <p className="shift-selection__state-hint">{t("shifts.emptyHint")}</p>
             </div>
           ) : (
             <div className="shift-selection__grid">
