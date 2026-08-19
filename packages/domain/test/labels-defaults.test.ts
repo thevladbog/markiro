@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -74,5 +75,19 @@ describe("buildDefaultLabelTemplates", () => {
 
   it("is deterministic (two calls produce deep-equal output)", () => {
     expect(buildDefaultLabelTemplates()).toEqual(buildDefaultLabelTemplates());
+  });
+
+  it("matches the jsonb inlined into db migration 0047 (drift guard)", async () => {
+    const sql = await readFile(
+      new URL("../../db/migrations/0047_default_label_templates.sql", import.meta.url),
+      "utf8",
+    );
+    const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({
+      name: m[1]!,
+      spec: JSON.parse(m[2]!) as unknown,
+    }));
+    expect(rows).toEqual(
+      buildDefaultLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+    );
   });
 });
