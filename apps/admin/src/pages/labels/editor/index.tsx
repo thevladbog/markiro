@@ -407,6 +407,9 @@ function LabelEditorContent({
                 step={0.1}
                 mono
                 value={widthDraft ?? spec.widthMm.toFixed(1)}
+                {...(invalidSizeAxes.width
+                  ? { error: t("pages.labels.editor.invalidSizeError") }
+                  : {})}
                 onChange={(event) => {
                   setWidthDraft(event.target.value);
                   // Retyping answers the complaint; keeping the message up
@@ -428,6 +431,9 @@ function LabelEditorContent({
                 step={0.1}
                 mono
                 value={heightDraft ?? spec.heightMm.toFixed(1)}
+                {...(invalidSizeAxes.height
+                  ? { error: t("pages.labels.editor.invalidSizeError") }
+                  : {})}
                 onChange={(event) => {
                   setHeightDraft(event.target.value);
                   setAxisInvalid("height", false);

@@ -344,12 +344,15 @@ describe("Settings form", () => {
     await chooseOption(user, "Размер", "Свой размер");
     const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
 
-    // Below the model's 10mm minimum.
+    // Below the model's 10mm minimum. The message now appears twice -- once
+    // next to the field itself (Fix 4: per-field `error`), once in the
+    // summary Alert -- so multi-element queries are used throughout this
+    // describe block instead of the single-match `getByText`.
     fireEvent.change(width, { target: { value: "5" } });
     fireEvent.blur(width);
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
     expect(
       screen.queryByText(
         "Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново.",
@@ -361,8 +364,8 @@ describe("Settings form", () => {
     fireEvent.change(width, { target: { value: "" } });
     fireEvent.blur(width);
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
     expect(
       screen.queryByText(
         "Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново.",
@@ -370,6 +373,29 @@ describe("Settings form", () => {
     ).toBeNull();
     // The typed text stays put to be corrected.
     expect(width.value).toBe("");
+  });
+
+  it("marks the invalid field itself with aria-invalid and links it to the error text (a screen-reader user focused on the field must hear the reason, not just a summary alert elsewhere on the page)", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+    const height = screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement;
+
+    expect(width.getAttribute("aria-invalid")).toBeNull();
+
+    fireEvent.change(width, { target: { value: "5" } });
+    fireEvent.blur(width);
+
+    expect(width.getAttribute("aria-invalid")).toBe("true");
+    const describedBy = width.getAttribute("aria-describedby");
+    expect(describedBy).toBeTruthy();
+    expect(document.getElementById(describedBy!)?.textContent).toBe(
+      "Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах.",
+    );
+
+    // The other axis was never touched, so it must not be flagged.
+    expect(height.getAttribute("aria-invalid")).toBeNull();
   });
 
   it("does not POST when Save is pressed while a size axis is flagged invalid", async () => {
@@ -386,8 +412,8 @@ describe("Settings form", () => {
     fireEvent.change(width, { target: { value: "5" } });
     fireEvent.blur(width);
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
 
     const save = screen.getByRole("button", { name: "Сохранить" });
     expect(save.hasAttribute("disabled")).toBe(true);
@@ -405,15 +431,15 @@ describe("Settings form", () => {
     fireEvent.change(width, { target: { value: "900" } });
     fireEvent.blur(width);
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
 
     fireEvent.change(width, { target: { value: "90" } });
     fireEvent.blur(width);
 
     expect(
-      screen.queryByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeNull();
+      screen.queryAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(0);
     expect(width.value).toBe("90.0");
   });
 
@@ -427,18 +453,20 @@ describe("Settings form", () => {
     fireEvent.change(width, { target: { value: "5" } });
     fireEvent.blur(width);
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
 
     // A valid commit on the height must not speak for the width: the rejected
-    // "5" is still sitting in the width field, so its error has to stay.
+    // "5" is still sitting in the width field, so its error has to stay --
+    // and the height field itself must not pick up the flag either.
     fireEvent.change(height, { target: { value: "120" } });
     fireEvent.blur(height);
 
     expect(height.value).toBe("120.0");
+    expect(height.getAttribute("aria-invalid")).toBeNull();
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
     expect(width.value).toBe("5");
   });
 
@@ -467,14 +495,14 @@ describe("Settings form", () => {
     fireEvent.change(width, { target: { value: "5" } });
     fireEvent.blur(width);
     expect(
-      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeDefined();
+      screen.getAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(2);
 
     await chooseOption(user, "Размер", "75×120");
 
     expect(
-      screen.queryByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
-    ).toBeNull();
+      screen.queryAllByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toHaveLength(0);
     // Back to custom: the draft is gone, the inputs mirror the preset's spec.
     await chooseOption(user, "Размер", "Свой размер");
     expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("75.0");
