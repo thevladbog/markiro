@@ -181,6 +181,9 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "0052_center_sscc_and_fit_label_templates.sql"), {
       force: true,
     });
+    await rm(join(legacyMigrationsFolder, "0053_date_free_label_templates.sql"), {
+      force: true,
+    });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0044_snapshot.json"), { force: true });
@@ -192,6 +195,7 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "meta", "0050_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0051_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0052_snapshot.json"), { force: true });
+    await rm(join(legacyMigrationsFolder, "meta", "0053_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -208,7 +212,8 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
         entry.tag !== "0049_default_label_templates" &&
         entry.tag !== "0050_reseed_default_label_templates" &&
         entry.tag !== "0051_glorious_hydra" &&
-        entry.tag !== "0052_center_sscc_and_fit_label_templates",
+        entry.tag !== "0052_center_sscc_and_fit_label_templates" &&
+        entry.tag !== "0053_date_free_label_templates",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
     await writeFile(journalPath, JSON.stringify(journal));

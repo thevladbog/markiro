@@ -37,7 +37,12 @@ export {
   EAN13_MODULES,
   GS1_128_QUIET_ZONE_MODULES,
 } from "./labels/code128.js";
-export { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "./labels/defaults.js";
+export {
+  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  buildDateFreeBoxLabelTemplates,
+  buildDatedBoxLabelTemplates,
+  buildDefaultLabelTemplates,
+} from "./labels/defaults.js";
 export type { DefaultLabelTemplate } from "./labels/defaults.js";
 export type {
   LabelBarcodeElement,

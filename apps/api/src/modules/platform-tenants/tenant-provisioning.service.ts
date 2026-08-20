@@ -109,6 +109,10 @@ export class TenantProvisioningService {
         .values({ tenantId: tenant.id, limitsEnabled: true, updatedAt: operationAt });
 
       // Stock box-label templates (spec: 2026-08-20 label editor simplification).
+      // Both families — the dated five and the date-free five — come from the
+      // single `buildDefaultLabelTemplates()` list, so a family added there is
+      // seeded here without touching this loop. The tenant's DEFAULT stays the
+      // dated 58×40 @203 (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) regardless.
       // Seeded only on tenant CREATION — re-provisioning an existing tenant
       // (idempotent retry) must not duplicate them.
       let defaultBoxLabelTemplateId: string | null = null;

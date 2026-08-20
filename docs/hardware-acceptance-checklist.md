@@ -41,6 +41,11 @@ beside each item.
       only a few millimetres tall, well below the GS1 recommendation for
       logistics labels. Verify the read rate at normal warehouse scanner
       distance and angle, not just square-on and close.
+- [ ] **Date-free family.** Print "Коробка 58×40 без дат (203 dpi)" alongside
+      the dated 58×40 and confirm: no production or expiry date appears
+      anywhere on it; the quantity caption and value read as one row; and its
+      taller bars (7.6 mm against 4.8 mm) scan at a distance and angle where
+      the dated label's do not.
 - [ ] **Human-readable SSCC line.** On both 58×40 templates (203 and 300 dpi),
       on both printer languages, confirm the readable SSCC digits beneath the
       barcode actually print and are not clipped at the label's bottom edge.

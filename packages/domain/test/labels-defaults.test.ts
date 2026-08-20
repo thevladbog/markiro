@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  buildDateFreeBoxLabelTemplates,
+  buildDatedBoxLabelTemplates,
   buildDefaultLabelTemplates,
   elementBoundsMm,
   estimatedTextWidthMm,
@@ -59,24 +61,50 @@ function boundedRasterizer(): RasterizeTextFn {
   });
 }
 
+/** The five sizes, in the order both families are built in. */
+const SIZES: Array<[number, number, number]> = [
+  [58, 40, 203],
+  [58, 40, 300],
+  [75, 120, 203],
+  [100, 100, 203],
+  [100, 150, 203],
+];
+
 describe("buildDefaultLabelTemplates", () => {
-  it("returns the five stock box labels with the exact seed names", () => {
+  it("returns BOTH stock families with the exact seed names", () => {
     const templates = buildDefaultLabelTemplates();
+    // The names are the `(tenant_id, name)` idempotency key of provisioning
+    // and of every seed migration, so they are pinned literally here.
     expect(templates.map((t) => t.name)).toEqual([
       "Коробка 58×40 (203 dpi)",
       "Коробка 58×40 (300 dpi)",
       "Коробка 75×120 (203 dpi)",
       "Коробка 100×100 (203 dpi)",
       "Коробка 100×150 (203 dpi)",
+      "Коробка 58×40 без дат (203 dpi)",
+      "Коробка 58×40 без дат (300 dpi)",
+      "Коробка 75×120 без дат (203 dpi)",
+      "Коробка 100×100 без дат (203 dpi)",
+      "Коробка 100×150 без дат (203 dpi)",
     ]);
+    // ...and the whole list is exactly the two families, in that order, so
+    // provisioning (which consumes this one function) seeds all ten.
+    expect(templates).toEqual([
+      ...buildDatedBoxLabelTemplates(),
+      ...buildDateFreeBoxLabelTemplates(),
+    ]);
+    // The tenant default is still the DATED 58×40 @203 — adding a family must
+    // not move it.
     expect(DEFAULT_BOX_LABEL_TEMPLATE_NAME).toBe("Коробка 58×40 (203 dpi)");
-    expect(templates.map((t) => [t.spec.widthMm, t.spec.heightMm, t.spec.dpi])).toEqual([
-      [58, 40, 203],
-      [58, 40, 300],
-      [75, 120, 203],
-      [100, 100, 203],
-      [100, 150, 203],
-    ]);
+    expect(buildDatedBoxLabelTemplates()[0]!.name).toBe(DEFAULT_BOX_LABEL_TEMPLATE_NAME);
+    expect(
+      templates.filter((t) => t.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME),
+      "the default name must identify exactly one seeded template",
+    ).toHaveLength(1);
+    // Both families are cut in the same five sizes.
+    for (const family of [buildDatedBoxLabelTemplates(), buildDateFreeBoxLabelTemplates()]) {
+      expect(family.map((t) => [t.spec.widthMm, t.spec.heightMm, t.spec.dpi])).toEqual(SIZES);
+    }
   });
 
   it("every spec validates and mirrors the approved mock-up layout", () => {
@@ -85,7 +113,7 @@ describe("buildDefaultLabelTemplates", () => {
       const kindsByField = new Map(
         spec.elements.filter((el) => el.kind === "field").map((el) => [el.field, el] as const),
       );
-      for (const field of ["product.name", "date", "expiry", "qty", "product.egais"] as const) {
+      for (const field of ["product.name", "qty", "product.egais"] as const) {
         expect(kindsByField.has(field), `missing field ${field}`).toBe(true);
       }
       const barcode = spec.elements.find((el) => el.kind === "barcode");
@@ -97,6 +125,133 @@ describe("buildDefaultLabelTemplates", () => {
         expect(el.xMm).toBeLessThanOrEqual(spec.widthMm);
         expect(el.yMm).toBeLessThanOrEqual(spec.heightMm);
       }
+    }
+    // The dated family — and only it — carries the two date fields.
+    for (const { name, spec } of buildDatedBoxLabelTemplates()) {
+      for (const field of ["date", "expiry"] as const) {
+        expect(
+          spec.elements.some((el) => el.kind === "field" && el.field === field),
+          `${name}: missing field ${field}`,
+        ).toBe(true);
+      }
+    }
+  });
+
+  /**
+   * THE DATE-FREE FAMILY'S DEFINING PROPERTY. Not just "the two value fields
+   * are gone" — the captions have to go with them, or the label prints two
+   * empty column headings.
+   */
+  it("omits both dates — captions, values and printed output — from the date-free family", async () => {
+    const data = sampleLabelData();
+    for (const { name, spec } of buildDateFreeBoxLabelTemplates()) {
+      expect(name, `${name}: seed name`).toContain("без дат");
+      for (const el of spec.elements) {
+        expect(el.id, `${name}: ${el.id} survived`).not.toBe("cap-date");
+        expect(el.id, `${name}: ${el.id} survived`).not.toBe("cap-expiry");
+        expect(el.id, `${name}: ${el.id} survived`).not.toBe("val-date");
+        expect(el.id, `${name}: ${el.id} survived`).not.toBe("val-expiry");
+        if (el.kind === "field") {
+          expect(el.field, `${name}: ${el.id} is a date field`).not.toBe("date");
+          expect(el.field, `${name}: ${el.id} is an expiry field`).not.toBe("expiry");
+        }
+        if (el.kind === "text") {
+          expect(el.text, `${name}: ${el.id} caption`).not.toContain("Дата");
+          expect(el.text, `${name}: ${el.id} caption`).not.toContain("Годен");
+        }
+      }
+      // ...and nothing date-shaped reaches the printer either. Both dates are
+      // ASCII `дд.мм.гггг`, so both emitters take their native-text path and
+      // the values would appear verbatim in the document.
+      const zpl = await generateZpl(spec, data, { rasterizeText: boundedRasterizer() });
+      const tspl = await generateTspl(spec, data, { rasterizeText: boundedRasterizer() });
+      for (const [language, document] of [
+        ["ZPL", zpl],
+        ["TSPL", tspl],
+      ] as const) {
+        expect(document, `${name}: ${language} production date leaked`).not.toContain(data.date);
+        expect(document, `${name}: ${language} expiry date leaked`).not.toContain(data.expiry);
+        expect(document, `${name}: ${language} date-like text`).not.toMatch(/\d{2}\.\d{2}\.\d{4}/);
+      }
+    }
+  });
+
+  /**
+   * The quantity row of the date-free family is built the SAME way the ЕГАИС
+   * row already is: caption in the first column, value in everything right of
+   * it, both on one line. That is what frees the caption row's line box, and
+   * it is what keeps the two rows looking like one block.
+   */
+  it("pairs the quantity caption and value on one row in the date-free family", () => {
+    for (const { name, spec } of buildDateFreeBoxLabelTemplates()) {
+      const capQty = spec.elements.find((el) => el.id === "cap-qty");
+      const valQty = spec.elements.find((el) => el.id === "val-qty");
+      const capEgais = spec.elements.find((el) => el.id === "cap-egais");
+      const valEgais = spec.elements.find((el) => el.id === "val-egais");
+      if (capQty?.kind !== "text" || valQty?.kind !== "field") {
+        throw new Error(`${name}: missing quantity row`);
+      }
+      if (capEgais?.kind !== "text" || valEgais?.kind !== "field") {
+        throw new Error(`${name}: missing ЕГАИС row`);
+      }
+      expect(capQty.text, `${name}: quantity caption`).toBe("Кол-во в упаковке:");
+      // One row.
+      expect(valQty.yMm, `${name}: quantity caption/value share a row`).toBe(capQty.yMm);
+      // Caption left, value right — geometrically identical to ЕГАИС's row.
+      expect(capQty.xMm, `${name}: caption x`).toBe(capEgais.xMm);
+      expect(capQty.maxWidthMm, `${name}: caption box`).toBe(capEgais.maxWidthMm);
+      expect(valQty.xMm, `${name}: value x`).toBe(valEgais.xMm);
+      expect(valQty.maxWidthMm, `${name}: value box`).toBe(valEgais.maxWidthMm);
+      // Narrowed rather than asserted non-null: `maxWidthMm` is optional on the
+      // element schema, and the arithmetic below is meaningless without it, so
+      // an absent box must fail as its own named problem instead of silently
+      // becoming NaN (which `toBeGreaterThan` would report as a bogus mismatch).
+      const capQtyBox = capQty.maxWidthMm;
+      if (capQtyBox === undefined) {
+        throw new Error(`${name}: quantity caption has no maxWidthMm to sit left of`);
+      }
+      expect(valQty.xMm, `${name}: value sits right of its caption`).toBeGreaterThan(
+        capQty.xMm + capQtyBox - 1e-9,
+      );
+    }
+  });
+
+  /**
+   * WHERE THE FREED SPACE WENT. The product owner chose taller bars over a
+   * fourth name line: 4.8 mm on the dated 58×40 is well below GS1's guidance
+   * for a logistics label. The numbers are produced by the layout's own
+   * budget cursor, not hard-coded into it — but they are pinned here, because
+   * "the bars got taller" is the entire reason this family exists.
+   */
+  it("spends the freed row on the barcode, not on a fourth name line", () => {
+    const dated = buildDatedBoxLabelTemplates();
+    const dateFree = buildDateFreeBoxLabelTemplates();
+    const expectedBars: Record<string, number> = {
+      "Коробка 58×40 без дат (203 dpi)": 7.6,
+      "Коробка 58×40 без дат (300 dpi)": 7.6,
+      "Коробка 75×120 без дат (203 dpi)": 10.3,
+      "Коробка 100×100 без дат (203 dpi)": 13.5,
+      "Коробка 100×150 без дат (203 dpi)": 13.5,
+    };
+
+    for (const [index, { name, spec }] of dateFree.entries()) {
+      const bars = spec.elements.find((el) => el.kind === "barcode");
+      const datedBars = dated[index]!.spec.elements.find((el) => el.kind === "barcode");
+      if (bars?.kind !== "barcode" || datedBars?.kind !== "barcode") {
+        throw new Error(`${name}: no barcode`);
+      }
+      expect(bars.sizeMm, `${name}: bar height`).toBe(expectedBars[name]);
+      expect(bars.sizeMm, `${name}: taller than the dated label's bars`).toBeGreaterThan(
+        datedBars.sizeMm,
+      );
+      // The name did NOT get a fourth line in exchange.
+      const nameEl = spec.elements.find((el) => el.id === "name");
+      if (nameEl?.kind !== "field") throw new Error(`${name}: no product name`);
+      expect(nameEl.maxLines, `${name}: name maxLines`).toBe(3);
+      // ...and nothing else on the label moved sideways or changed size:
+      // the two families differ only in the date row.
+      const datedName = dated[index]!.spec.elements.find((el) => el.id === "name");
+      expect(nameEl, `${name}: product name differs from the dated label's`).toEqual(datedName);
     }
   });
 
@@ -246,6 +401,14 @@ describe("buildDefaultLabelTemplates", () => {
       "Коробка 75×120 (203 dpi)": { moduleWidthMm: 0.3754, xMm: 8.2 },
       "Коробка 100×100 (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
       "Коробка 100×150 (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
+      // The date-free family changes the label's vertical budget only, so at
+      // each size its symbol is the same WIDTH in the same place — only
+      // taller.
+      "Коробка 58×40 без дат (203 dpi)": { moduleWidthMm: 0.2502, xMm: 9.5 },
+      "Коробка 58×40 без дат (300 dpi)": { moduleWidthMm: 0.254, xMm: 9.2 },
+      "Коробка 75×120 без дат (203 dpi)": { moduleWidthMm: 0.3754, xMm: 8.2 },
+      "Коробка 100×100 без дат (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
+      "Коробка 100×150 без дат (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
     };
 
     for (const { name, spec } of buildDefaultLabelTemplates()) {
@@ -549,7 +712,9 @@ describe("buildDefaultLabelTemplates", () => {
     expect(data.date).toBe("23.07.2026");
     expect(data.expiry).toBe("19.01.2027");
 
-    for (const { name, spec } of buildDefaultLabelTemplates()) {
+    // The DATED family only — the other five print no dates at all, which is
+    // asserted separately above.
+    for (const { name, spec } of buildDatedBoxLabelTemplates()) {
       const zpl = await generateZpl(spec, data, { rasterizeText: boundedRasterizer() });
       const tspl = await generateTspl(spec, data, { rasterizeText: boundedRasterizer() });
       for (const [language, document] of [
@@ -590,15 +755,29 @@ describe("buildDefaultLabelTemplates", () => {
    * one that has to stay in step with this module — and this test must be repointed again by whoever adds
    * the next reseed.
    */
-  it("matches the jsonb inlined into db migration 0052 (drift guard)", async () => {
-    const sql = await readFile(
-      new URL("../../db/migrations/0052_center_sscc_and_fit_label_templates.sql", import.meta.url),
-      "utf8",
-    );
-    const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({
+  async function inlinedRows(file: string): Promise<Array<{ name: string; spec: unknown }>> {
+    const sql = await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), "utf8");
+    return [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({
       name: m[1]!,
       spec: JSON.parse(m[2]!) as unknown,
     }));
-    expect(rows).toEqual(buildDefaultLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })));
+  }
+
+  it("matches the jsonb inlined into db migration 0052 (drift guard)", async () => {
+    expect(await inlinedRows("0052_center_sscc_and_fit_label_templates.sql")).toEqual(
+      buildDatedBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+    );
+  });
+
+  /**
+   * The DATE-FREE family's own drift guard. Its migration is an
+   * insert-if-absent (these names have never existed, so nothing needs
+   * overwriting), and like 0052's it must stay in step with this module —
+   * whoever changes the layout has to regenerate the SQL.
+   */
+  it("matches the jsonb inlined into db migration 0053 (drift guard)", async () => {
+    expect(await inlinedRows("0053_date_free_label_templates.sql")).toEqual(
+      buildDateFreeBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+    );
   });
 });
