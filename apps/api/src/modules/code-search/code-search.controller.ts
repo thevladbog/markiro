@@ -1,4 +1,4 @@
-import { Controller, Get, Query, Req, UseGuards } from "@nestjs/common";
+import { Controller, Get, NotFoundException, Param, ParseUUIDPipe, Query, Req, UseGuards } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
@@ -9,9 +9,12 @@ import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard"
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   classifyQuerySchema,
+  codeHashParamSchema,
   listCodesQuerySchema,
+  type BoxCardDto,
   type ClassifyQueryDto,
   type ClassifySearchResponseDto,
+  type CodeCardDto,
   type ListCodesQueryDto,
   type ListCodesResponseDto,
 } from "./dto";
@@ -48,5 +51,32 @@ export class CodeSearchController {
     @Query(new ZodValidationPipe(listCodesQuerySchema)) query: ListCodesQueryDto,
   ): Promise<ListCodesResponseDto> {
     return this.codeSearchService.listCodes(req.tenantId!, query);
+  }
+
+  /**
+   * `codeHash` isn't a UUID, so it can't reuse `ParseUUIDPipe` -- a malformed
+   * value (wrong length/charset) is treated the same as "not in this
+   * tenant's registry" (404), not a 400: from the caller's perspective both
+   * mean "nothing to show for this input".
+   */
+  @Get("codes/:codeHash")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async getCodeCard(
+    @Req() req: RequestWithTenant,
+    @Param("codeHash") codeHash: string,
+  ): Promise<CodeCardDto> {
+    if (!codeHashParamSchema.safeParse(codeHash).success) {
+      throw new NotFoundException();
+    }
+    return this.codeSearchService.getCodeCard(req.tenantId!, codeHash);
+  }
+
+  @Get("boxes/:boxId")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async getBoxCard(
+    @Req() req: RequestWithTenant,
+    @Param("boxId", new ParseUUIDPipe()) boxId: string,
+  ): Promise<BoxCardDto> {
+    return this.codeSearchService.getBoxCard(req.tenantId!, boxId);
   }
 }

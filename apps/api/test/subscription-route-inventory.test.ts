@@ -54,6 +54,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "GET /code-search (CodeSearchController.classify)",
       "GET /code-search/codes (CodeSearchController.listCodes)",
+      "GET /code-search/codes/:codeHash (CodeSearchController.getCodeCard)",
+      "GET /code-search/boxes/:boxId (CodeSearchController.getBoxCard)",
       "GET /conflicts (ConflictsController.listConflicts)",
       "GET /counterparties (CounterpartiesController.listCounterparties)",
       "GET /counterparties/:id (CounterpartiesController.getCounterparty)",

@@ -176,4 +176,46 @@ describe.skipIf(!ready)("code-search e2e", () => {
       codeHashFor("aa"),
     );
   });
+
+  it("code card: derived status, current box, ordered history", async () => {
+    const res = await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200);
+    const card = res.body as { status: string; currentBox: { sscc: string } | null; history: { type: string }[] };
+    expect(card.status).toBe("aggregated");
+    expect(card.currentBox?.sscc).toContain(SSCC1);
+    expect(card.history[0]!.type).toBe("scanned");
+    expect(card.history.map((h) => h.type)).toContain("box_added");
+  });
+
+  it("404s the code card for a malformed or unknown codeHash", async () => {
+    await agent.get(`/code-search/codes/not-a-hash`).expect(404);
+    await agent.get(`/code-search/codes/${"0".repeat(64)}`).expect(404);
+  });
+
+  it("box card: composition with dimmed removed rows + exceptions", async () => {
+    const box = (await agent.get(`/code-search?q=${SSCC1}`).expect(200)).body as { boxId: string };
+    const res = await agent.get(`/code-search/boxes/${box.boxId}`).expect(200);
+    const card = res.body as { status: string; items: { codeHash: string }[] };
+    expect(card.status).toBe("closed");
+    expect(card.items).toHaveLength(2);
+  });
+
+  it("404s the box card for an unknown boxId", async () => {
+    await agent.get(`/code-search/boxes/${randomUUID()}`).expect(404);
+  });
+
+  it("history shows disaggregation after a document applies", async () => {
+    const reason = await agent.post("/disaggregation-reasons").send({ name: "Порча" }).expect(201);
+    const reasonId = (reason.body as { id: string }).id;
+    const doc = await agent.post("/disaggregation").send({}).expect(201);
+    const docId = (doc.body as { id: string }).id;
+    await agent.patch(`/disaggregation/${docId}`).send({ reasonId }).expect(200);
+    await agent.post(`/disaggregation/${docId}/lines`).send({ ssccs: [SSCC1] }).expect(201);
+    await agent.post(`/disaggregation/${docId}/apply`).expect(200);
+
+    const res = await agent.get(`/code-search/codes/${codeHashFor("aa")}`).expect(200);
+    const card = res.body as { status: string; history: { type: string; disaggregationDocNo?: string }[] };
+    expect(card.status).toBe("free");
+    const dis = card.history.find((h) => h.type === "box_disassembled");
+    expect(dis?.disaggregationDocNo).toMatch(/^DSG-/);
+  });
 });

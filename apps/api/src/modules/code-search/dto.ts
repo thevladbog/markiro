@@ -53,3 +53,78 @@ export interface ListCodesResponseDto {
   pageCount: number;
   total: number;
 }
+
+/** `codeHash` path param for `GET /code-search/codes/:codeHash`. */
+export const codeHashParamSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
+/**
+ * A code's full movement history, assembled from several small queries and
+ * merged/sorted ascending by `at` -- see `CodeSearchService.getCodeCard`.
+ */
+export type CodeHistoryEvent =
+  | { type: "scanned"; at: Date; verdict: string; shiftId: string; terminalId: string | null; operatorId: string | null }
+  | { type: "box_added"; at: Date; boxId: string; boxSscc: string | null }
+  | { type: "box_displaced"; at: Date; boxId: string; boxSscc: string | null }
+  | { type: "box_removed"; at: Date; boxId: string; boxSscc: string | null }
+  | {
+      type: "box_disassembled";
+      at: Date;
+      boxId: string;
+      boxSscc: string | null;
+      reason: string | null;
+      disaggregationDocumentId: string | null;
+      disaggregationDocNo: string | null;
+    }
+  | { type: "pickup_locked"; at: Date; orderId: string; orderNo: string }
+  | {
+      type: "pickup_resolved";
+      at: Date;
+      orderId: string;
+      orderNo: string;
+      orderStatus: "punched" | "writtenoff" | "cancelled";
+    };
+
+export interface CodeCardDto {
+  codeHash: string;
+  gtin14: string;
+  serial: string;
+  productId: string | null;
+  productName: string | null;
+  status: CodeStatus;
+  currentBox: { id: string; sscc: string | null } | null;
+  /** Ascending by `at`. */
+  history: CodeHistoryEvent[];
+}
+
+export interface BoxCardItemDto {
+  codeHash: string;
+  gtin14: string | null;
+  serial: string | null;
+  addedAt: Date;
+  displacedAt: Date | null;
+  removedAt: Date | null;
+}
+
+export interface BoxCardDto {
+  id: string;
+  sscc: string | null;
+  status: "open" | "closed" | "disassembled";
+  shiftId: string;
+  productId: string | null;
+  productName: string | null;
+  terminalId: string | null;
+  operatorId: string | null;
+  openedAt: Date;
+  closedAt: Date | null;
+  disassembledAt: Date | null;
+  items: BoxCardItemDto[];
+  exceptions: {
+    kind: string;
+    reason: string | null;
+    occurredAt: Date;
+    operatorId: string | null;
+    disaggregationDocumentId: string | null;
+    disaggregationDocNo: string | null;
+  }[];
+  pickupOrders: { orderId: string; orderNo: string; status: string }[];
+}

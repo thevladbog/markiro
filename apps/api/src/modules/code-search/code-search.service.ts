@@ -1,12 +1,16 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { classifySearchInput } from "./input-classifier";
 import type {
+  BoxCardDto,
   ClassifySearchResponseDto,
+  CodeCardDto,
+  CodeHistoryEvent,
   CodeListItemDto,
+  CodeStatus,
   ListCodesQueryDto,
   ListCodesResponseDto,
 } from "./dto";
@@ -218,6 +222,381 @@ export class CodeSearchService {
       page: query.page,
       pageCount: Math.max(1, Math.ceil(total / PAGE_SIZE)),
       total,
+    };
+  }
+
+  /**
+   * `GET /code-search/codes/:codeHash`. Reuses `aggregatedSql`/`writtenOffSql`
+   * as a single-row variant of `listCodes`' derived status, then assembles
+   * the full movement history from several small queries merged and sorted
+   * in TS (readable beats one SQL union at card scale -- see the task brief).
+   */
+  async getCodeCard(tenantId: string, codeHash: string): Promise<CodeCardDto> {
+    const statusSql = sql<string>`case
+      when ${this.writtenOffSql} then 'written_off'
+      when ${this.aggregatedSql} then 'aggregated'
+      else 'free' end`;
+
+    const [row] = await this.db
+      .select({
+        codeHash: schema.codeRegistry.codeHash,
+        gtin14: schema.codes.gtin14,
+        serial: schema.codes.serial,
+        productId: schema.products.id,
+        productName: schema.products.name,
+        status: statusSql,
+      })
+      .from(schema.codeRegistry)
+      .innerJoin(
+        schema.codes,
+        and(
+          eq(schema.codes.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.codes.codeHash, schema.codeRegistry.codeHash),
+          eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
+        ),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.products.gtin14, schema.codes.gtin14),
+        ),
+      )
+      .where(
+        and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.codeHash, codeHash)),
+      );
+
+    if (!row) throw new NotFoundException();
+
+    const [currentBoxRow] = await this.db
+      .select({ boxId: schema.boxItems.boxId, boxSscc: schema.boxes.sscc })
+      .from(schema.boxItems)
+      .innerJoin(
+        schema.boxes,
+        and(
+          eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+          eq(schema.boxes.id, schema.boxItems.boxId),
+        ),
+      )
+      .where(
+        and(
+          eq(schema.boxItems.tenantId, tenantId),
+          eq(schema.boxItems.codeHash, codeHash),
+          sql`${schema.boxItems.displacedAt} is null`,
+          sql`${schema.boxItems.removedAt} is null`,
+          sql`${schema.boxes.disassembledAt} is null`,
+        ),
+      )
+      .orderBy(desc(schema.boxItems.addedAt))
+      .limit(1);
+
+    const history = await this.buildCodeHistory(tenantId, codeHash);
+
+    return {
+      codeHash: row.codeHash,
+      gtin14: row.gtin14,
+      serial: row.serial,
+      productId: row.productId,
+      productName: row.productName,
+      status: row.status as CodeStatus,
+      currentBox: currentBoxRow
+        ? {
+            id: currentBoxRow.boxId,
+            sscc: currentBoxRow.boxSscc === null ? null : formatSsccWithAi(currentBoxRow.boxSscc),
+          }
+        : null,
+      history,
+    };
+  }
+
+  /**
+   * History assembly, brief Step 2: several small queries merged and sorted
+   * ascending by `at` in TS.
+   */
+  private async buildCodeHistory(tenantId: string, codeHash: string): Promise<CodeHistoryEvent[]> {
+    const events: CodeHistoryEvent[] = [];
+
+    // 1. `scanned` events -- via `codes`' distinct canonicalRaw values (scan_events
+    // stores raw text, not hashes).
+    const codeRows = await this.db
+      .select({
+        canonicalRaw: schema.codes.canonicalRaw,
+        gtin14: schema.codes.gtin14,
+        serial: schema.codes.serial,
+      })
+      .from(schema.codes)
+      .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, codeHash)));
+
+    const raws = [...new Set(codeRows.map((r) => r.canonicalRaw))];
+    if (raws.length > 0) {
+      const scanRows = await this.db
+        .select({
+          verdict: schema.scanEvents.verdict,
+          shiftId: schema.scanEvents.shiftId,
+          terminalId: schema.scanEvents.terminalId,
+          operatorId: schema.scanEvents.operatorId,
+          scannedAt: schema.scanEvents.scannedAt,
+        })
+        .from(schema.scanEvents)
+        .where(and(eq(schema.scanEvents.tenantId, tenantId), inArray(schema.scanEvents.raw, raws)));
+      for (const r of scanRows) {
+        events.push({
+          type: "scanned",
+          at: r.scannedAt,
+          verdict: r.verdict,
+          shiftId: r.shiftId,
+          terminalId: r.terminalId,
+          operatorId: r.operatorId,
+        });
+      }
+    }
+
+    // 2. box_added/box_displaced/box_removed -- all box_items rows for the
+    // hash (every box, including displaced/removed ones), joined to boxes.
+    const itemRows = await this.db
+      .select({
+        boxId: schema.boxItems.boxId,
+        boxSscc: schema.boxes.sscc,
+        addedAt: schema.boxItems.addedAt,
+        displacedAt: schema.boxItems.displacedAt,
+        removedAt: schema.boxItems.removedAt,
+      })
+      .from(schema.boxItems)
+      .innerJoin(
+        schema.boxes,
+        and(
+          eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+          eq(schema.boxes.id, schema.boxItems.boxId),
+        ),
+      )
+      .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.codeHash, codeHash)));
+
+    const boxSsccById = new Map<string, string | null>();
+    for (const r of itemRows) {
+      const boxSscc = r.boxSscc === null ? null : formatSsccWithAi(r.boxSscc);
+      boxSsccById.set(r.boxId, boxSscc);
+      events.push({ type: "box_added", at: r.addedAt, boxId: r.boxId, boxSscc });
+      if (r.displacedAt) events.push({ type: "box_displaced", at: r.displacedAt, boxId: r.boxId, boxSscc });
+      if (r.removedAt) events.push({ type: "box_removed", at: r.removedAt, boxId: r.boxId, boxSscc });
+    }
+
+    // 3. box_disassembled -- box_exceptions (kind='disassemble') for those
+    // boxIds, LEFT JOINed to disaggregationDocuments for docNo.
+    const boxIds = [...boxSsccById.keys()];
+    if (boxIds.length > 0) {
+      const excRows = await this.db
+        .select({
+          boxId: schema.boxExceptions.boxId,
+          reason: schema.boxExceptions.reason,
+          occurredAt: schema.boxExceptions.occurredAt,
+          disaggregationDocumentId: schema.boxExceptions.disaggregationDocumentId,
+          disaggregationDocNo: schema.disaggregationDocuments.docNo,
+        })
+        .from(schema.boxExceptions)
+        .leftJoin(
+          schema.disaggregationDocuments,
+          and(
+            eq(schema.disaggregationDocuments.tenantId, schema.boxExceptions.tenantId),
+            eq(schema.disaggregationDocuments.id, schema.boxExceptions.disaggregationDocumentId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.boxExceptions.tenantId, tenantId),
+            eq(schema.boxExceptions.kind, "disassemble"),
+            inArray(schema.boxExceptions.boxId, boxIds),
+          ),
+        );
+      for (const r of excRows) {
+        events.push({
+          type: "box_disassembled",
+          at: r.occurredAt,
+          boxId: r.boxId,
+          boxSscc: boxSsccById.get(r.boxId) ?? null,
+          reason: r.reason,
+          disaggregationDocumentId: r.disaggregationDocumentId,
+          disaggregationDocNo: r.disaggregationDocNo,
+        });
+      }
+    }
+
+    // 4. pickup_locked/pickup_resolved -- pickup_order_items on the
+    // reconstructed kmKey for each distinct gtin/serial of the code.
+    const kmKeys = [
+      ...new Set(codeRows.map((r) => `01${r.gtin14}21${r.serial}`)),
+    ];
+    if (kmKeys.length > 0) {
+      const pickupRows = await this.db
+        .select({
+          orderId: schema.pickupOrderItems.orderId,
+          scannedAt: schema.pickupOrderItems.scannedAt,
+          orderNo: schema.pickupOrders.orderNo,
+          orderStatus: schema.pickupOrders.status,
+          resolvedAt: schema.pickupOrders.resolvedAt,
+          createdAt: schema.pickupOrders.createdAt,
+        })
+        .from(schema.pickupOrderItems)
+        .innerJoin(
+          schema.pickupOrders,
+          and(
+            eq(schema.pickupOrders.tenantId, schema.pickupOrderItems.tenantId),
+            eq(schema.pickupOrders.id, schema.pickupOrderItems.orderId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.pickupOrderItems.tenantId, tenantId),
+            inArray(schema.pickupOrderItems.kmKey, kmKeys),
+          ),
+        );
+      for (const r of pickupRows) {
+        events.push({ type: "pickup_locked", at: r.scannedAt, orderId: r.orderId, orderNo: r.orderNo });
+        if (r.resolvedAt || r.orderStatus === "cancelled") {
+          events.push({
+            type: "pickup_resolved",
+            at: r.resolvedAt ?? r.createdAt,
+            orderId: r.orderId,
+            orderNo: r.orderNo,
+            orderStatus: r.orderStatus as "punched" | "writtenoff" | "cancelled",
+          });
+        }
+      }
+    }
+
+    events.sort((a, b) => a.at.getTime() - b.at.getTime());
+    return events;
+  }
+
+  /**
+   * `GET /code-search/boxes/:boxId`. Box (+shift join for productId,
+   * products for name), items (LEFT JOIN codes for gtin/serial via a
+   * DISTINCT ON dedupe -- `codes` may hold multiple rows per hash), all
+   * exceptions (LEFT JOIN disaggregationDocuments), and pickup orders via
+   * `pickup_order_boxes` ⋈ `pickup_orders`.
+   */
+  async getBoxCard(tenantId: string, boxId: string): Promise<BoxCardDto> {
+    const [box] = await this.db
+      .select({
+        id: schema.boxes.id,
+        sscc: schema.boxes.sscc,
+        shiftId: schema.boxes.shiftId,
+        terminalId: schema.boxes.terminalId,
+        operatorId: schema.boxes.operatorId,
+        openedAt: schema.boxes.openedAt,
+        closedAt: schema.boxes.closedAt,
+        disassembledAt: schema.boxes.disassembledAt,
+        productId: schema.products.id,
+        productName: schema.products.name,
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.shifts,
+        and(eq(schema.shifts.tenantId, schema.boxes.tenantId), eq(schema.shifts.id, schema.boxes.shiftId)),
+      )
+      .leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.shifts.tenantId),
+          eq(schema.products.id, schema.shifts.productId),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.id, boxId)));
+
+    if (!box) throw new NotFoundException();
+
+    const itemRows = await this.db
+      .select({
+        codeHash: schema.boxItems.codeHash,
+        addedAt: schema.boxItems.addedAt,
+        displacedAt: schema.boxItems.displacedAt,
+        removedAt: schema.boxItems.removedAt,
+      })
+      .from(schema.boxItems)
+      .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+
+    const codeHashes = [...new Set(itemRows.map((r) => r.codeHash))];
+    const codeDetailsByHash = new Map<string, { gtin14: string; serial: string }>();
+    if (codeHashes.length > 0) {
+      const codeRows = await this.db
+        .selectDistinctOn([schema.codes.codeHash], {
+          codeHash: schema.codes.codeHash,
+          gtin14: schema.codes.gtin14,
+          serial: schema.codes.serial,
+        })
+        .from(schema.codes)
+        .where(and(eq(schema.codes.tenantId, tenantId), inArray(schema.codes.codeHash, codeHashes)))
+        .orderBy(schema.codes.codeHash, desc(schema.codes.scannedAt));
+      for (const r of codeRows) codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial });
+    }
+
+    const items = itemRows.map((r) => {
+      const detail = codeDetailsByHash.get(r.codeHash);
+      return {
+        codeHash: r.codeHash,
+        gtin14: detail?.gtin14 ?? null,
+        serial: detail?.serial ?? null,
+        addedAt: r.addedAt,
+        displacedAt: r.displacedAt,
+        removedAt: r.removedAt,
+      };
+    });
+
+    const exceptionRows = await this.db
+      .select({
+        kind: schema.boxExceptions.kind,
+        reason: schema.boxExceptions.reason,
+        occurredAt: schema.boxExceptions.occurredAt,
+        operatorId: schema.boxExceptions.operatorId,
+        disaggregationDocumentId: schema.boxExceptions.disaggregationDocumentId,
+        disaggregationDocNo: schema.disaggregationDocuments.docNo,
+      })
+      .from(schema.boxExceptions)
+      .leftJoin(
+        schema.disaggregationDocuments,
+        and(
+          eq(schema.disaggregationDocuments.tenantId, schema.boxExceptions.tenantId),
+          eq(schema.disaggregationDocuments.id, schema.boxExceptions.disaggregationDocumentId),
+        ),
+      )
+      .where(and(eq(schema.boxExceptions.tenantId, tenantId), eq(schema.boxExceptions.boxId, boxId)));
+
+    const pickupOrderRows = await this.db
+      .select({
+        orderId: schema.pickupOrderBoxes.orderId,
+        orderNo: schema.pickupOrders.orderNo,
+        status: schema.pickupOrders.status,
+      })
+      .from(schema.pickupOrderBoxes)
+      .innerJoin(
+        schema.pickupOrders,
+        and(
+          eq(schema.pickupOrders.tenantId, schema.pickupOrderBoxes.tenantId),
+          eq(schema.pickupOrders.id, schema.pickupOrderBoxes.orderId),
+        ),
+      )
+      .where(and(eq(schema.pickupOrderBoxes.tenantId, tenantId), eq(schema.pickupOrderBoxes.boxId, boxId)));
+
+    const status: BoxCardDto["status"] = box.disassembledAt
+      ? "disassembled"
+      : box.closedAt
+        ? "closed"
+        : "open";
+
+    return {
+      id: box.id,
+      sscc: box.sscc === null ? null : formatSsccWithAi(box.sscc),
+      status,
+      shiftId: box.shiftId,
+      productId: box.productId,
+      productName: box.productName,
+      terminalId: box.terminalId,
+      operatorId: box.operatorId,
+      openedAt: box.openedAt,
+      closedAt: box.closedAt,
+      disassembledAt: box.disassembledAt,
+      items,
+      exceptions: exceptionRows,
+      pickupOrders: pickupOrderRows,
     };
   }
 
