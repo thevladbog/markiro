@@ -1345,7 +1345,7 @@ pnpm --filter @markiro/admin test test/org-profile.test.tsx
 
 ```json
     "sscc": {
-      "nextLabelHint": "Следующая этикетка получит номер {{serial}}. Минимально допустимо {{min}}.",
+      "nextLabelHint": "Уже напечатано до {{printed}}. Сохранённый номер получит первая этикетка следующей смены; минимально допустимо {{min}}.",
       "blocked": {
         "activeShift": "Пока открыта смена {{number}}, счётчик менять нельзя: станция может печатать прямо сейчас. Закройте смену и повторите.",
         "deviceOutOfSync": "Станция «{{device}}» не выходила на связь после закрытия последней смены. Дождитесь синхронизации: иначе её короба получат номера, уже выданные заново."
@@ -1363,7 +1363,7 @@ pnpm --filter @markiro/admin test test/org-profile.test.tsx
 
 ```json
     "sscc": {
-      "nextLabelHint": "The next label will carry serial {{serial}}. The lowest allowed value is {{min}}.",
+      "nextLabelHint": "Printed through {{printed}}. The value you save is what the next shift's first label will carry; the lowest allowed value is {{min}}.",
       "blocked": {
         "activeShift": "Shift {{number}} is open, so a station may be printing right now. Close it before changing the counter.",
         "deviceOutOfSync": "Station \"{{device}}\" has not checked in since the last shift closed. Wait for it to sync, or its boxes will take serials that were handed out again."
@@ -1464,10 +1464,7 @@ export interface SsccCounterDto {
             <Alert tone="warning">{blocked}</Alert>
           ) : (
             <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
-              {t("common.sscc.nextLabelHint", {
-                serial: ssccQuery.data?.nextSerial ?? minSerial,
-                min: minSerial,
-              })}
+              {t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial })}
             </p>
           )}
   ```
