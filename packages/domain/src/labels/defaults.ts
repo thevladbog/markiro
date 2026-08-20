@@ -1,5 +1,5 @@
 import { code128ModuleCount, GS1_128_QUIET_ZONE_MODULES } from "./code128.js";
-import type { LabelTemplateSpec } from "./model.js";
+import type { LabelElement, LabelTemplateSpec } from "./model.js";
 import { estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm } from "./wrap.js";
 
 /** One stock template: seed name (the idempotency key) + its spec. */
@@ -212,10 +212,29 @@ function ssccModuleWidthMm(contentWMm: number, dpi: 203 | 300): number {
 }
 
 /**
+ * WHICH FAMILY a spec belongs to. There are two, and they differ in exactly
+ * one thing: whether «Дата производства» and «Годен до» are printed.
+ *
+ * Spelled as a two-valued string rather than a boolean so the call sites in
+ * `buildDatedBoxLabelTemplates` / `buildDateFreeBoxLabelTemplates` read as
+ * what they mean instead of as a bare `true`/`false` at the end of an
+ * argument list of numbers.
+ */
+type DateFields = "with-dates" | "without-dates";
+
+/**
  * The approved mock-up layout (58×40 base), scaled uniformly to the target
  * size and anchored top-left. Separator lines and the three-column block use
  * the label's ACTUAL width, so wide labels don't leave a dead right margin.
  * Larger sizes keep the same structure with proportionally larger type.
+ *
+ * ONE BUILDER, TWO FAMILIES. `dates` selects between the dated stock labels
+ * and the date-free ones. Everything the two families share — the margins,
+ * the column arithmetic, the fit-driven type sizing, the rules, the ЕГАИС
+ * row, the centred barcode and its digits — is written once here, so the
+ * families cannot drift apart; `withDates` appears in exactly three places
+ * below (the fit constraints, one line of the y-cursor, and which elements
+ * are emitted), and the product name keeps its three lines in both.
  *
  * VERTICAL BUDGET. It is COMPUTED, not tabulated: a running cursor starts at
  * the top margin and each block advances it by its own 1.5em line box (the
@@ -235,6 +254,25 @@ function ssccModuleWidthMm(contentWMm: number, dpi: 203 | 300): number {
  * | separator 3         | 31.4  | 31.70  |
  * | SSCC barcode        | 32.0  | 36.80  |
  * | SSCC digits         | 37.0  | 39.65  |
+ *
+ * ...and for the DATE-FREE 58×40, where the quantity's caption and value
+ * share one row exactly as ЕГАИС's do, to:
+ *
+ * | block               | y     | extent |
+ * | ------------------- | ----- | ------ |
+ * | product name ×3     |  2.0  | 17.88  |
+ * | separator 1         | 18.2  | 18.50  |
+ * | Кол-во caption+val  | 18.8  | 23.03  |
+ * | separator 2         | 23.4  | 23.70  |
+ * | ЕГАИС caption+value | 24.0  | 28.23  |
+ * | separator 3         | 28.6  | 28.90  |
+ * | SSCC barcode        | 29.2  | 36.80  |
+ * | SSCC digits         | 37.0  | 39.65  |
+ *
+ * THE FREED SPACE GOES TO THE BARS, not to a fourth name line. 4.8 mm of
+ * bars is well under GS1's guidance for a logistics label, and the owner
+ * chose height over a fourth line of a name that already gets three: the
+ * date-free 58×40 prints 7.6 mm of bars.
  *
  * THREE NAME LINES cost 5.29 mm over the two the first print shipped with,
  * and only 2.65 mm of that came from dropping the «SSCC:» caption (the
@@ -261,14 +299,27 @@ function ssccModuleWidthMm(contentWMm: number, dpi: 203 | 300): number {
  * prints them identically in both languages, in a position this layout has
  * actually reserved space for.
  */
-function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): LabelTemplateSpec {
+function buildBoxLabelSpec(
+  widthMm: number,
+  heightMm: number,
+  dpi: 203 | 300,
+  dates: DateFields,
+): LabelTemplateSpec {
+  const withDates = dates === "with-dates";
   const s = Math.min(widthMm / BASE_WIDTH_MM, heightMm / BASE_HEIGHT_MM);
   const m = round1(2 * s);
   const right = round1(widthMm - m);
   const contentW = round1(widthMm - 2 * m);
   const colW = round1(contentW / 3);
   const cols: [number, number, number] = [m, round1(m + colW), round1(m + 2 * colW)];
-  const egaisValueW = round1(contentW - colW);
+  /**
+   * The box a value gets when it shares its row with its own caption: the
+   * caption takes the first of the three columns the block overhead already
+   * defines, the value everything right of it. The ЕГАИС row has always been
+   * built this way; the date-free family's quantity row is built the same way,
+   * which is the whole of the difference between the two families' geometry.
+   */
+  const pairedValueW = round1(contentW - colW);
   const thickness = round1(Math.max(0.2, 0.3 * s));
 
   // TYPE IS FIT-DRIVEN, not merely scaled — see `fitPt`. Captions are one
@@ -279,8 +330,18 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
   // rather than shrinking the label's headline to fit a customer's longest
   // SKU. Sizing it by fit would drive it to 4 pt on the first long name.
   const captionPt = fitPt(5, s, [
-    { text: CAPTION_DATE, boxMm: colW },
-    { text: CAPTION_EXPIRY, boxMm: colW },
+    // Present only in the dated family. As it happens this changes no size
+    // today — «Дата производства:» and «Кол-во в упаковке:» are both 18
+    // characters, and `estimatedTextWidthMm` counts characters, so the
+    // remaining caption binds identically — but the constraint list has to
+    // describe what the template ACTUALLY prints, or a future reworded
+    // caption would be fitted against a string that is not on the label.
+    ...(withDates
+      ? [
+          { text: CAPTION_DATE, boxMm: colW },
+          { text: CAPTION_EXPIRY, boxMm: colW },
+        ]
+      : []),
     { text: CAPTION_QTY, boxMm: colW },
     { text: CAPTION_EGAIS, boxMm: colW },
     // The SSCC digit line rides on the caption size (it did before this
@@ -288,9 +349,12 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
     { text: SSCC_HRI_SPECIMEN, boxMm: contentW },
   ]);
   const valuePt = fitPt(8, s, [
-    { text: DATE_SPECIMEN, boxMm: colW },
-    { text: QTY_SPECIMEN, boxMm: colW },
-    { text: EGAIS_SPECIMEN, boxMm: egaisValueW },
+    ...(withDates ? [{ text: DATE_SPECIMEN, boxMm: colW }] : []),
+    // The quantity's box is a third of the content width while it shares a
+    // three-column row with the dates, and everything right of the caption
+    // once it does not.
+    { text: QTY_SPECIMEN, boxMm: withDates ? colW : pairedValueW },
+    { text: EGAIS_SPECIMEN, boxMm: pairedValueW },
   ]);
   const namePt = pt(10, s);
 
@@ -306,7 +370,15 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
   const nameY = m;
   const sep1Y = ceil1(nameY + lineHeightMm(namePt) * NAME_LINES + blockGap);
   const capRowY = ceil1(sep1Y + thickness + blockGap);
-  const valRowY = ceil1(capRowY + lineHeightMm(captionPt) + captionGap);
+  // THE ONE VERTICAL DIFFERENCE BETWEEN THE TWO FAMILIES. With dates the
+  // quantity block is a caption ROW above a value ROW; without them the
+  // quantity's caption and value share one row, so `valRowY` collapses onto
+  // `capRowY` and a whole caption line box plus its gap fall out of the
+  // budget. Nothing below is rewritten to spend that space: the cursor simply
+  // reaches the last rule earlier, and the barcode — which is defined as the
+  // remainder between that rule and the digit line — grows by exactly what
+  // the caption row gave back (58×40: 4.8 mm of bars becomes 7.6 mm).
+  const valRowY = withDates ? ceil1(capRowY + lineHeightMm(captionPt) + captionGap) : capRowY;
   const sep2Y = ceil1(valRowY + lineHeightMm(valuePt) + blockGap);
   const egaisY = ceil1(sep2Y + thickness + blockGap);
   const sep3Y = ceil1(egaisY + lineHeightMm(valuePt) + blockGap);
@@ -320,176 +392,222 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
   const moduleWidthMm = ssccModuleWidthMm(contentW, dpi);
   const barcodeX = round1((widthMm - SSCC_BARCODE_MODULES * moduleWidthMm) / 2);
 
-  return {
-    widthMm,
-    heightMm,
-    dpi,
-    language: "zpl",
-    elements: [
-      {
-        kind: "field",
-        id: "name",
-        xMm: m,
-        yMm: nameY,
-        field: "product.name",
-        fontSizePt: namePt,
-        bold: true,
-        maxWidthMm: contentW,
-        maxLines: NAME_LINES,
-      },
-      {
-        kind: "line",
-        id: "sep1",
-        xMm: m,
-        yMm: sep1Y,
-        x2Mm: right,
-        y2Mm: sep1Y,
-        thicknessMm: thickness,
-      },
-      {
-        kind: "text",
-        id: "cap-date",
-        xMm: cols[0],
-        yMm: capRowY,
-        text: CAPTION_DATE,
-        fontSizePt: captionPt,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "text",
-        id: "cap-expiry",
-        xMm: cols[1],
-        yMm: capRowY,
-        text: CAPTION_EXPIRY,
-        fontSizePt: captionPt,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "text",
-        id: "cap-qty",
-        xMm: cols[2],
-        yMm: capRowY,
-        text: CAPTION_QTY,
-        fontSizePt: captionPt,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "field",
-        id: "val-date",
-        xMm: cols[0],
-        yMm: valRowY,
-        field: "date",
-        fontSizePt: valuePt,
-        bold: true,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "field",
-        id: "val-expiry",
-        xMm: cols[1],
-        yMm: valRowY,
-        field: "expiry",
-        fontSizePt: valuePt,
-        bold: true,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "field",
-        id: "val-qty",
-        xMm: cols[2],
-        yMm: valRowY,
-        field: "qty",
-        fontSizePt: valuePt,
-        bold: true,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "line",
-        id: "sep2",
-        xMm: m,
-        yMm: sep2Y,
-        x2Mm: right,
-        y2Mm: sep2Y,
-        thicknessMm: thickness,
-      },
-      {
-        // Caption and value share one row (see the budget above): the caption
-        // takes the first of the three columns the block overhead already
-        // defines, the value everything right of it.
-        kind: "text",
-        id: "cap-egais",
-        xMm: cols[0],
-        yMm: egaisY,
-        text: CAPTION_EGAIS,
-        fontSizePt: captionPt,
-        maxWidthMm: colW,
-      },
-      {
-        kind: "field",
-        id: "val-egais",
-        xMm: cols[1],
-        yMm: egaisY,
-        field: "product.egais",
-        fontSizePt: valuePt,
-        bold: true,
-        maxWidthMm: egaisValueW,
-      },
-      {
-        kind: "line",
-        id: "sep3",
-        xMm: m,
-        yMm: sep3Y,
-        x2Mm: right,
-        y2Mm: sep3Y,
-        thicknessMm: thickness,
-      },
-      {
-        kind: "barcode",
-        id: "bc-sscc",
-        xMm: barcodeX,
-        yMm: barcodeY,
-        format: "code128",
-        data: "sscc",
-        sizeMm: barcodeH,
-        moduleWidthMm,
-      },
-      {
-        // The barcode's human-readable digits, as a real element rather than
-        // the printer's own interpretation line — see this function's doc
-        // comment. Not bold: it is a manual-fallback reading aid, not a
-        // headline, and the bare 18 digits are what a warehouse types in.
-        //
-        // CENTRED, because the bars above it are. The second physical print
-        // came back with the SSCC block reading skewed, and the barcode was
-        // not the culprit: `barcodeX` above centres it to within 0.03 mm.
-        // This line was the one out of place — a left-flush `field` at the
-        // content margin, so its digits started 7.5 mm left of the bars they
-        // belong to. `align` centres it inside the SAME full-width content
-        // box the barcode is centred in (`m` … `m + contentW`, whose centre
-        // IS the label's centre), so the two share a centre line by
-        // construction at every one of the five sizes rather than by a
-        // hand-tuned x. All three renderers honour it identically — see
-        // `rasterAlignOffsetDots`.
-        kind: "field",
-        id: "val-sscc",
-        xMm: m,
-        yMm: digitsY,
-        field: "sscc",
-        fontSizePt: captionPt,
-        align: "center",
-        maxWidthMm: contentW,
-      },
-    ],
-  };
+  // Where the quantity's caption and value sit. Third column of the
+  // three-column row in the dated family; first column (caption) plus
+  // everything right of it (value) in the date-free one.
+  const qtyCaptionX = withDates ? cols[2] : cols[0];
+  const qtyValueX = withDates ? cols[2] : cols[1];
+  const qtyValueW = withDates ? colW : pairedValueW;
+
+  const elements: LabelElement[] = [
+    {
+      kind: "field",
+      id: "name",
+      xMm: m,
+      yMm: nameY,
+      field: "product.name",
+      fontSizePt: namePt,
+      bold: true,
+      maxWidthMm: contentW,
+      maxLines: NAME_LINES,
+    },
+    {
+      kind: "line",
+      id: "sep1",
+      xMm: m,
+      yMm: sep1Y,
+      x2Mm: right,
+      y2Mm: sep1Y,
+      thicknessMm: thickness,
+    },
+    ...(withDates
+      ? ([
+          {
+            kind: "text",
+            id: "cap-date",
+            xMm: cols[0],
+            yMm: capRowY,
+            text: CAPTION_DATE,
+            fontSizePt: captionPt,
+            maxWidthMm: colW,
+          },
+          {
+            kind: "text",
+            id: "cap-expiry",
+            xMm: cols[1],
+            yMm: capRowY,
+            text: CAPTION_EXPIRY,
+            fontSizePt: captionPt,
+            maxWidthMm: colW,
+          },
+        ] satisfies LabelElement[])
+      : []),
+    {
+      kind: "text",
+      id: "cap-qty",
+      xMm: qtyCaptionX,
+      yMm: capRowY,
+      text: CAPTION_QTY,
+      fontSizePt: captionPt,
+      maxWidthMm: colW,
+    },
+    ...(withDates
+      ? ([
+          {
+            kind: "field",
+            id: "val-date",
+            xMm: cols[0],
+            yMm: valRowY,
+            field: "date",
+            fontSizePt: valuePt,
+            bold: true,
+            maxWidthMm: colW,
+          },
+          {
+            kind: "field",
+            id: "val-expiry",
+            xMm: cols[1],
+            yMm: valRowY,
+            field: "expiry",
+            fontSizePt: valuePt,
+            bold: true,
+            maxWidthMm: colW,
+          },
+        ] satisfies LabelElement[])
+      : []),
+    {
+      kind: "field",
+      id: "val-qty",
+      xMm: qtyValueX,
+      yMm: valRowY,
+      field: "qty",
+      fontSizePt: valuePt,
+      bold: true,
+      maxWidthMm: qtyValueW,
+    },
+    {
+      kind: "line",
+      id: "sep2",
+      xMm: m,
+      yMm: sep2Y,
+      x2Mm: right,
+      y2Mm: sep2Y,
+      thicknessMm: thickness,
+    },
+    {
+      // Caption and value share one row (see the budget above): the caption
+      // takes the first of the three columns the block overhead already
+      // defines, the value everything right of it.
+      kind: "text",
+      id: "cap-egais",
+      xMm: cols[0],
+      yMm: egaisY,
+      text: CAPTION_EGAIS,
+      fontSizePt: captionPt,
+      maxWidthMm: colW,
+    },
+    {
+      kind: "field",
+      id: "val-egais",
+      xMm: cols[1],
+      yMm: egaisY,
+      field: "product.egais",
+      fontSizePt: valuePt,
+      bold: true,
+      maxWidthMm: pairedValueW,
+    },
+    {
+      kind: "line",
+      id: "sep3",
+      xMm: m,
+      yMm: sep3Y,
+      x2Mm: right,
+      y2Mm: sep3Y,
+      thicknessMm: thickness,
+    },
+    {
+      kind: "barcode",
+      id: "bc-sscc",
+      xMm: barcodeX,
+      yMm: barcodeY,
+      format: "code128",
+      data: "sscc",
+      sizeMm: barcodeH,
+      moduleWidthMm,
+    },
+    {
+      // The barcode's human-readable digits, as a real element rather than
+      // the printer's own interpretation line — see this function's doc
+      // comment. Not bold: it is a manual-fallback reading aid, not a
+      // headline, and the bare 18 digits are what a warehouse types in.
+      //
+      // CENTRED, because the bars above it are. The second physical print
+      // came back with the SSCC block reading skewed, and the barcode was
+      // not the culprit: `barcodeX` above centres it to within 0.03 mm.
+      // This line was the one out of place — a left-flush `field` at the
+      // content margin, so its digits started 7.5 mm left of the bars they
+      // belong to. `align` centres it inside the SAME full-width content
+      // box the barcode is centred in (`m` … `m + contentW`, whose centre
+      // IS the label's centre), so the two share a centre line by
+      // construction at every one of the five sizes rather than by a
+      // hand-tuned x. All three renderers honour it identically — see
+      // `rasterAlignOffsetDots`.
+      kind: "field",
+      id: "val-sscc",
+      xMm: m,
+      yMm: digitsY,
+      field: "sscc",
+      fontSizePt: captionPt,
+      align: "center",
+      maxWidthMm: contentW,
+    },
+  ];
+
+  return { widthMm, heightMm, dpi, language: "zpl", elements };
 }
 
-/** The five stock box labels seeded to tenants. Pure and deterministic. */
+/** The five stock sizes both families are cut in. */
+const BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number; dpi: 203 | 300 }> = [
+  { w: 58, h: 40, dpi: 203 },
+  { w: 58, h: 40, dpi: 300 },
+  { w: 75, h: 120, dpi: 203 },
+  { w: 100, h: 100, dpi: 203 },
+  { w: 100, h: 150, dpi: 203 },
+];
+
+/**
+ * The five DATED stock box labels — the original family, and the one
+ * `DEFAULT_BOX_LABEL_TEMPLATE_NAME` points into. Pure and deterministic.
+ */
+export function buildDatedBoxLabelTemplates(): DefaultLabelTemplate[] {
+  return BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
+    name: `Коробка ${w}×${h} (${dpi} dpi)`,
+    spec: buildBoxLabelSpec(w, h, dpi, "with-dates"),
+  }));
+}
+
+/**
+ * The five DATE-FREE stock box labels: same five sizes, same design, minus
+ * «Дата производства» and «Годен до». For goods whose packaging already
+ * carries the dates (or has none to carry) — and, because the space the two
+ * columns used to take goes to the SSCC symbol, with materially taller bars.
+ *
+ * THE NAMES ARE THE SEED IDENTITY. They are the `(tenant_id, name)`
+ * idempotency key of the backfill migration and of tenant provisioning;
+ * renaming one here re-seeds it as a second row rather than updating the
+ * first.
+ */
+export function buildDateFreeBoxLabelTemplates(): DefaultLabelTemplate[] {
+  return BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
+    name: `Коробка ${w}×${h} без дат (${dpi} dpi)`,
+    spec: buildBoxLabelSpec(w, h, dpi, "without-dates"),
+  }));
+}
+
+/**
+ * Every stock box label a tenant is seeded with: the dated five followed by
+ * the date-free five. Provisioning inserts exactly this list.
+ */
 export function buildDefaultLabelTemplates(): DefaultLabelTemplate[] {
-  return [
-    { name: "Коробка 58×40 (203 dpi)", spec: buildBoxLabelSpec(58, 40, 203) },
-    { name: "Коробка 58×40 (300 dpi)", spec: buildBoxLabelSpec(58, 40, 300) },
-    { name: "Коробка 75×120 (203 dpi)", spec: buildBoxLabelSpec(75, 120, 203) },
-    { name: "Коробка 100×100 (203 dpi)", spec: buildBoxLabelSpec(100, 100, 203) },
-    { name: "Коробка 100×150 (203 dpi)", spec: buildBoxLabelSpec(100, 150, 203) },
-  ];
+  return [...buildDatedBoxLabelTemplates(), ...buildDateFreeBoxLabelTemplates()];
 }

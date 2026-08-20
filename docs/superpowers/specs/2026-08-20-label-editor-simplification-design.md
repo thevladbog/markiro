@@ -37,10 +37,12 @@ printerLanguage`), ignoring `spec.language`. One template entity therefore
    per-product "shelf life, days" attribute; when the product has no shelf
    life the field prints empty, matching the existing behaviour of
    `km.code` / `shift.no` on box labels.
-4. **Defaults are tenant-owned copies.** Five stock templates are created for
-   new tenants during provisioning and backfilled to existing tenants by a
-   data migration (pattern of `0042_default_box_label_template.sql`).
-   Tenants may edit or delete them like any other template.
+4. **Defaults are tenant-owned copies.** Ten stock templates — two families
+   of five sizes, one printing both dates and one printing neither — are
+   created for new tenants during provisioning and backfilled to existing
+   tenants by data migrations (pattern of
+   `0042_default_box_label_template.sql`). Tenants may edit or delete them
+   like any other template.
 
 ## 1. Admin app (`apps/admin`)
 
@@ -115,21 +117,36 @@ through the same function so the admin preview cannot drift from print.
 
 New `packages/domain/src/labels/defaults.ts` exporting
 `buildDefaultLabelTemplates(): Array<{name: string, spec: LabelTemplateSpec}>`
-— pure, deterministic, no I/O — used by tenant provisioning and by tests.
-The layout reproduces the approved mock-up, scaled per size:
+— pure, deterministic, no I/O — used by tenant provisioning and by tests. It
+returns BOTH stock families: `buildDatedBoxLabelTemplates()` followed by
+`buildDateFreeBoxLabelTemplates()`, five sizes each. The layout reproduces
+the approved mock-up, scaled per size:
 
 - product name — `field product.name`, bold, wrapped to **three** lines via
-  `maxWidthMm` + `maxLines: 3`
+  `maxWidthMm` + `maxLines: 3`, in BOTH families (the date-free family does
+  not get a fourth line)
 - horizontal separator lines (`line` elements)
-- three-column block: "Дата производства:" / "Годен до:" / "Кол-во в
-  упаковке:" as `text` captions with `field date` / `field expiry` /
+- **dated family** — three-column block: "Дата производства:" / "Годен до:" /
+  "Кол-во в упаковке:" as `text` captions with `field date` / `field expiry` /
   `field qty` values beneath
+- **date-free family** — that block collapses to ONE row carrying only the
+  quantity: the "Кол-во в упаковке:" caption in the first of the three
+  columns, `field qty` to its right, i.e. the pairing the ЕГАИС row already
+  uses. Neither date caption nor either date field is emitted at all.
 - "Код ЕГАИС:" caption and `field product.egais` on ONE row — the caption in
   the first of the block's three columns, the value to its right
 - `barcode code128` bound to `sscc` (the emitter adds the `(00)` AI),
   **centred** and with an explicit `moduleWidthMm`, with the human-readable
   digits as an explicit `field sscc` element beneath it — and no caption
   above it
+
+ONE BUILDER, TWO FAMILIES. `buildBoxLabelSpec` takes a `DateFields`
+argument (`"with-dates"` / `"without-dates"`); everything the families share
+— margins, column arithmetic, fit-driven type sizing, rules, the ЕГАИС row,
+the centred barcode and digits — is written once, so the two cannot drift.
+The flag is consulted in exactly three places: the `fitPt` constraint list,
+one line of the vertical cursor (`valRowY` collapses onto `capRowY`), and
+which elements are emitted.
 
 `maxWidthMm` is a hard CONSTRAINT, not an alignment hint (it was one
 originally, which is how a long Russian product name came to print off the
@@ -179,31 +196,69 @@ not reserved space. TSPL now passes `0` for that parameter, and templates
 that want digits place a `text`/`field` element under the barcode, which is
 WYSIWYG in the admin preview and identical in both languages.
 
-Five templates (one entity covers both languages; `spec.language` is set to
-`"zpl"` nominally):
+**Two families, ten templates** (one entity covers both languages;
+`spec.language` is set to `"zpl"` nominally). Both are cut in the same five
+sizes and built by the same function — `buildBoxLabelSpec` in
+`defaults.ts` takes a `DateFields` argument, so the families cannot drift
+apart — and both are returned by `buildDefaultLabelTemplates()`, which is
+what tenant provisioning consumes.
 
-| Name                      | Size       | DPI |
-| ------------------------- | ---------- | --- |
-| Коробка 58×40 (203 dpi)   | 58×40 mm   | 203 |
-| Коробка 58×40 (300 dpi)   | 58×40 mm   | 300 |
-| Коробка 75×120 (203 dpi)  | 75×120 mm  | 203 |
-| Коробка 100×100 (203 dpi) | 100×100 mm | 203 |
-| Коробка 100×150 (203 dpi) | 100×150 mm | 203 |
+| Family                                       | Name                              | Size       | DPI |
+| -------------------------------------------- | --------------------------------- | ---------- | --- |
+| dated (`buildDatedBoxLabelTemplates`)        | Коробка 58×40 (203 dpi)           | 58×40 mm   | 203 |
+|                                              | Коробка 58×40 (300 dpi)           | 58×40 mm   | 300 |
+|                                              | Коробка 75×120 (203 dpi)          | 75×120 mm  | 203 |
+|                                              | Коробка 100×100 (203 dpi)         | 100×100 mm | 203 |
+|                                              | Коробка 100×150 (203 dpi)         | 100×150 mm | 203 |
+| date-free (`buildDateFreeBoxLabelTemplates`) | Коробка 58×40 без дат (203 dpi)   | 58×40 mm   | 203 |
+|                                              | Коробка 58×40 без дат (300 dpi)   | 58×40 mm   | 300 |
+|                                              | Коробка 75×120 без дат (203 dpi)  | 75×120 mm  | 203 |
+|                                              | Коробка 100×100 без дат (203 dpi) | 100×100 mm | 203 |
+|                                              | Коробка 100×150 без дат (203 dpi) | 100×150 mm | 203 |
+
+**Dated layout**, top to bottom: product name (up to 3 wrapped lines) → rule
+→ a three-column row «Дата производства: | Годен до: | Кол-во в упаковке:»
+with captions above values → rule → «Код ЕГАИС:» caption and value sharing
+one row → rule → centred SSCC Code128 symbol → centred human-readable
+digits.
+
+**Date-free layout** is identical except that the three-column block
+collapses to a single row carrying only the quantity — caption
+«Кол-во в упаковке:» on the left, value to its right, exactly the pairing
+the ЕГАИС row already uses. The product name keeps its three lines; the
+freed vertical space goes to the BARS, which is the point of the family:
+4.8 mm of bars on a dated 58×40 is well below GS1's guidance for a
+logistics label. The budget cursor produces the heights, they are not
+tabulated:
+
+| Size             | dated bars | date-free bars |
+| ---------------- | ---------- | -------------- |
+| 58×40 @203 dpi   | 4.8 mm     | 7.6 mm         |
+| 58×40 @300 dpi   | 4.8 mm     | 7.6 mm         |
+| 75×120 @203 dpi  | 6.9 mm     | 10.3 mm        |
+| 100×100 @203 dpi | 9.0 mm     | 13.5 mm        |
+| 100×150 @203 dpi | 9.0 mm     | 13.5 mm        |
 
 Every generated spec must pass `parseLabelTemplate` and emit non-throwing
-ZPL and TSPL with `sampleLabelData()` (unit-tested).
+ZPL and TSPL with `sampleLabelData()` (unit-tested), and both families are
+held to the same invariants: no element's estimated content may exceed its
+own box, stacked bands may not overlap, and every rendered extent must stay
+on the label.
 
 ## 3. Data model (`packages/db`)
 
 - `products.shelf_life_days` — `integer`, nullable. New Drizzle migration.
-- Backfill data migration inserting the five default templates for every
-  existing tenant. Idempotent: a template is inserted only when the tenant
-  has no template with the same name. The spec jsonb is inlined into the
-  migration SQL (generated from `defaults.ts` at authoring time; a test
-  asserts the inlined jsonb equals the module output so they cannot drift).
-  The migration does **not** touch `org_profiles.default_box_label_template_id`
-  for existing tenants — tenants that already print have a working default,
-  and choosing one for the rest is a UI action.
+- Backfill data migrations inserting the stock templates for every existing
+  tenant: `0049_default_label_templates.sql` for the dated five and
+  `0053_date_free_label_templates.sql` for the date-free five. Both are
+  idempotent — a template is inserted only when the tenant has no template
+  with the same name — and neither modifies an existing row. The spec jsonb
+  is inlined into the migration SQL (generated from `defaults.ts` at
+  authoring time; drift tests re-parse each file and deep-compare it against
+  the corresponding builder, so they cannot diverge). Neither migration
+  touches `org_profiles.default_box_label_template_id` for existing tenants —
+  tenants that already print have a working default, and choosing one for the
+  rest is a UI action.
 - Station SQLite mirror (`packages/db/src/sqlite/schema.ts` +
   `migrations.ts`): `product_mirror` gains `egais_code` (text, null)
   and `shelf_life_days` (integer, null).
@@ -215,10 +270,11 @@ ZPL and TSPL with `sampleLabelData()` (unit-tested).
   exists.
 - **Shift reference bundle** (`shifts.service.ts getReferenceBundle`): the
   bundle's product payload gains `egaisCode` and `shelfLifeDays`.
-- **Tenant provisioning** (`tenant-provisioning.service.ts`): insert the
-  five templates from `buildDefaultLabelTemplates()` for the new tenant and
-  set `org_profiles.default_box_label_template_id` to the created
-  "Коробка 58×40 (203 dpi)" template (new tenants only).
+- **Tenant provisioning** (`tenant-provisioning.service.ts`): insert all ten
+  templates from `buildDefaultLabelTemplates()` for the new tenant and set
+  `org_profiles.default_box_label_template_id` to the created
+  "Коробка 58×40 (203 dpi)" template — the DATED 58×40 @203, unchanged by
+  the date-free family's arrival (new tenants only).
 - `/label-templates` CRUD, permissions, and the `labelEditor` entitlement
   gate are unchanged. Seeded templates are ordinary tenant rows: readable
   (and printable) on any plan, editable only where the entitlement allows —

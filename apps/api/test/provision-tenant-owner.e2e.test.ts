@@ -258,7 +258,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
     ]);
   });
 
-  it("seeds five default label templates and the default box label for a new tenant", async () => {
+  it("seeds both stock label template families and the default box label for a new tenant", async () => {
     await useDemo();
     const suffix = crypto.randomUUID();
     const email = `first-owner-${suffix}@example.com`;
@@ -285,6 +285,11 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         "Коробка 75×120 (203 dpi)",
         "Коробка 100×100 (203 dpi)",
         "Коробка 100×150 (203 dpi)",
+        "Коробка 58×40 без дат (203 dpi)",
+        "Коробка 58×40 без дат (300 dpi)",
+        "Коробка 75×120 без дат (203 dpi)",
+        "Коробка 100×100 без дат (203 dpi)",
+        "Коробка 100×150 без дат (203 dpi)",
       ].sort(),
     );
 
@@ -292,6 +297,8 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ defaultId: schema.orgProfiles.defaultBoxLabelTemplateId })
       .from(schema.orgProfiles)
       .where(eq(schema.orgProfiles.tenantId, result.tenantId));
+    // The tenant default is the DATED 58×40 @203 — the date-free family added
+    // alongside it must not become anybody's default.
     const expected = templates.find((t) => t.name === "Коробка 58×40 (203 dpi)");
     expect(profile?.defaultId).toBe(expected?.id);
 
@@ -306,7 +313,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(5);
+    expect(after).toHaveLength(10);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {
