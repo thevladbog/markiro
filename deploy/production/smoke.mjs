@@ -298,7 +298,9 @@ function kioskShellSignature(html, baseUrl) {
   };
 }
 
-function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl) {
+function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl, allowedExternalOrigins = []) {
+  const baseOrigin = new URL(baseUrl).origin;
+  const allowedOriginSet = new Set(allowedExternalOrigins.map((value) => new URL(value).origin));
   let runtimeHtml = html;
   if (allowedCanonicalUrl) {
     const allowedMetadataOrigin = new URL(allowedCanonicalUrl).origin;
@@ -323,8 +325,9 @@ function assertNoExternalOrigins(html, baseUrl, allowedCanonicalUrl) {
     });
   }
   const assertUrl = (value) => {
-    if (value.startsWith("//")) throw new Error("built index contains an external origin");
-    if (/^https?:\/\//i.test(value) && new URL(value).origin !== new URL(baseUrl).origin)
+    if (!value.startsWith("//") && !/^https?:\/\//i.test(value)) return;
+    const origin = new URL(value, baseUrl).origin;
+    if (origin !== baseOrigin && !allowedOriginSet.has(origin))
       throw new Error("built index contains an external origin");
   };
   for (const match of runtimeHtml.matchAll(
@@ -349,7 +352,7 @@ function landingPageSignature(html, expectedUrl) {
   return { title, canonical };
 }
 
-function assertLandingRoute(check, response, body, baseUrl) {
+function assertLandingRoute(check, response, body, baseUrl, landingDemoSubmissionState) {
   const [, path, kind] = check;
   const contentType = response.headers.get("content-type") || "";
   if (kind === "not-found") {
@@ -379,7 +382,9 @@ function assertLandingRoute(check, response, body, baseUrl) {
       throw new Error(`landing ${path} has an invalid title, canonical, or H1`);
     if (response.headers.get("cache-control") !== "no-cache")
       throw new Error(`landing ${path} is not revalidation-only`);
-    assertNoExternalOrigins(body, baseUrl, expectedUrl);
+    const allowedExternalOrigins =
+      landingDemoSubmissionState === "enabled" ? ["https://smartcaptcha.cloud.yandex.ru"] : [];
+    assertNoExternalOrigins(body, baseUrl, expectedUrl, allowedExternalOrigins);
     return;
   }
 
@@ -1060,7 +1065,7 @@ async function runLandingSmoke(options, client) {
       path === "/" ? root : await publicRequest(client, new URL(path, baseUrl), requestOptions);
     const body = path === "/" ? rootBody : await getText(response);
     assertHeaders(response, new URL(baseUrl).protocol === "https:", `landing ${path}`, LANDING_CSP);
-    assertLandingRoute(check, response, body, baseUrl);
+    assertLandingRoute(check, response, body, baseUrl, options.landingDemoSubmissionState);
   }
   const manifestResponse = await publicRequest(client, new URL("/legal/artifacts.json", baseUrl), {
     method: "GET",

@@ -102,6 +102,8 @@ describe.skipIf(!ready)("shift exports e2e", () => {
       mode: "validation",
       status,
       plannedDate: "2026-08-13",
+      numberMonthKey: "AUG26",
+      numberSeq: 1,
       ...(status === "closed" ? { closedAt: new Date(), closeReason: "test close" } : {}),
     });
     return { agent, tenantId, userId: member.userId, productId, shiftId };
@@ -318,6 +320,8 @@ describe.skipIf(!ready)("shift exports e2e", () => {
       status: "closed",
       closedAt: new Date(),
       closeReason: "test close",
+      numberMonthKey: "AUG26",
+      numberSeq: 2,
     });
     await db.insert(schema.shiftExports).values({
       tenantId,

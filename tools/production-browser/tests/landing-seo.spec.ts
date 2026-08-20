@@ -227,6 +227,23 @@ for (const [route, wordmark] of [
   });
 }
 
+for (const route of ["/", "/en/"] as const) {
+  test(`${route} renders the public contact phone`, async ({ page }) => {
+    await page.goto(route);
+    const expectedPhone = "+7 934 355-14-90";
+    const expectedHref = "tel:+79343551490";
+
+    await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(3);
+    for (const phone of [
+      page.locator("#hero").getByRole("link", { name: expectedPhone, exact: true }),
+      page.locator("#demo").getByRole("link", { name: expectedPhone, exact: true }),
+    ]) {
+      await expect(phone).toBeVisible();
+      await expect(phone).toHaveAttribute("href", expectedHref);
+    }
+  });
+}
+
 test("language switch connects exact page counterparts", async ({ page }) => {
   await page.goto("/en/offline-production/");
   const menuTrigger = page.locator("[data-menu-trigger]");

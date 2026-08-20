@@ -127,11 +127,13 @@ function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
         title={t("pages.shifts.deleteConfirmTitle")}
         description={
           <>
-            <p>{t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? "" })}</p>
+            <p>
+              {t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? shift.number })}
+            </p>
             {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
           </>
         }
-        entity={shift.productName ?? shift.id}
+        entity={shift.productName ? `${shift.number} · ${shift.productName}` : shift.number}
         cancelLabel={t("pages.shifts.cancel")}
         confirmLabel={t("pages.shifts.deleteConfirmAction")}
         tone="destructive"
@@ -205,7 +207,7 @@ function AuthorizedCloseShiftAction({ shift }: { shift: ShiftDto }) {
             {closeError ? <Alert tone="error">{closeError}</Alert> : null}
           </>
         }
-        entity={shift.productName ?? shift.id}
+        entity={shift.productName ? `${shift.number} · ${shift.productName}` : shift.number}
         cancelLabel={t("pages.shifts.closeModal.cancel")}
         confirmLabel={t("pages.shifts.closeModal.submit")}
         tone="destructive"
@@ -275,6 +277,12 @@ export function ShiftsPage() {
 
   const columns: TableColumn<ShiftDto>[] = useMemo(
     () => [
+      {
+        key: "number",
+        title: t("pages.shifts.table.number"),
+        mono: true,
+        render: (row) => row.number,
+      },
       {
         key: "plannedDate",
         title: t("pages.shifts.table.plannedDate"),

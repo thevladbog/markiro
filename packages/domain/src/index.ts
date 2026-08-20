@@ -80,6 +80,7 @@ export {
   shiftCloseReasonRequired,
 } from "./shift-close.js";
 export type { ShiftCloseReasonCode } from "./shift-close.js";
+export { formatShiftNumber, shiftMonthKey } from "./shift-number.js";
 export {
   CABINET_CAPABILITY,
   hasCabinetCapabilities,

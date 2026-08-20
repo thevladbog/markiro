@@ -74,6 +74,8 @@ export interface ShiftFormContext {
 export interface ShiftFormProps {
   mode: "create" | "edit";
   editStatus?: ShiftStatus;
+  /** Overrides the default create/edit title, e.g. to append the shift's number in edit mode. */
+  title?: string;
   initialValues?: ShiftFormValues;
   /** All products (both draft and active) -- draft ones render disabled with a hint. */
   products: ProductDto[];
@@ -116,6 +118,7 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
 export function ShiftForm({
   mode: formMode,
   editStatus,
+  title: titleOverride,
   initialValues,
   products,
   lines,
@@ -335,9 +338,10 @@ export function ShiftForm({
       onClose={onClose}
       closeLabel={t("common.close")}
       title={
-        formMode === "create"
+        titleOverride ??
+        (formMode === "create"
           ? t("pages.shifts.form.createTitle")
-          : t("pages.shifts.form.editTitle")
+          : t("pages.shifts.form.editTitle"))
       }
       footer={
         <>

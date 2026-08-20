@@ -1,5 +1,5 @@
 {
-  "id": "37bec233-7b4b-4b86-bd9a-0f5960534862",
+  "id": "9b3aef85-eec9-4001-abf6-535aff464127",
   "prevId": "ef8480b5-1216-4e19-a1d1-f00c429f9ecf",
   "version": "7",
   "dialect": "postgresql",
@@ -938,12 +938,6 @@
         "reason": {
           "name": "reason",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "disaggregation_document_id": {
-          "name": "disaggregation_document_id",
-          "type": "uuid",
           "primaryKey": false,
           "notNull": false
         },
@@ -2254,6 +2248,60 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.shift_number_counters": {
+      "name": "shift_number_counters",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "month_key": {
+          "name": "month_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seq": {
+          "name": "last_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "shift_number_counters_tenant_id_organization_id_fk": {
+          "name": "shift_number_counters_tenant_id_organization_id_fk",
+          "tableFrom": "shift_number_counters",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "shift_number_counters_tenant_id_month_key_pk": {
+          "name": "shift_number_counters_tenant_id_month_key_pk",
+          "columns": [
+            "tenant_id",
+            "month_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.shifts": {
       "name": "shifts",
       "schema": "",
@@ -2355,6 +2403,18 @@
           "notNull": true,
           "default": "'admin'"
         },
+        "number_month_key": {
+          "name": "number_month_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number_seq": {
+          "name": "number_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "station_close_policy": {
           "name": "station_close_policy",
           "type": "station_close_policy",
@@ -2407,7 +2467,35 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "shifts_tenant_month_seq_uq": {
+          "name": "shifts_tenant_month_seq_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "number_month_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "number_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "shifts_tenant_id_organization_id_fk": {
           "name": "shifts_tenant_id_organization_id_fk",
@@ -12345,468 +12433,6 @@
         }
       },
       "isRLSEnabled": false
-    },
-    "public.disaggregation_doc_counters": {
-      "name": "disaggregation_doc_counters",
-      "schema": "",
-      "columns": {
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true
-        },
-        "seq": {
-          "name": "seq",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "disaggregation_doc_counters_tenant_id_organization_id_fk": {
-          "name": "disaggregation_doc_counters_tenant_id_organization_id_fk",
-          "tableFrom": "disaggregation_doc_counters",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.disaggregation_document_lines": {
-      "name": "disaggregation_document_lines",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "document_id": {
-          "name": "document_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sscc_input": {
-          "name": "sscc_input",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sscc": {
-          "name": "sscc",
-          "type": "char(18)",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "box_id": {
-          "name": "box_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "status": {
-          "name": "status",
-          "type": "disaggregation_line_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "code_count": {
-          "name": "code_count",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "validated_at": {
-          "name": "validated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "disaggregation_document_lines_tenant_doc_idx": {
-          "name": "disaggregation_document_lines_tenant_doc_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "document_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "disaggregation_document_lines_tenant_id_organization_id_fk": {
-          "name": "disaggregation_document_lines_tenant_id_organization_id_fk",
-          "tableFrom": "disaggregation_document_lines",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "disaggregation_document_lines_tenant_document_fk": {
-          "name": "disaggregation_document_lines_tenant_document_fk",
-          "tableFrom": "disaggregation_document_lines",
-          "tableTo": "disaggregation_documents",
-          "columnsFrom": [
-            "tenant_id",
-            "document_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "disaggregation_document_lines_tenant_box_fk": {
-          "name": "disaggregation_document_lines_tenant_box_fk",
-          "tableFrom": "disaggregation_document_lines",
-          "tableTo": "boxes",
-          "columnsFrom": [
-            "tenant_id",
-            "box_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "disaggregation_document_lines_tenant_product_fk": {
-          "name": "disaggregation_document_lines_tenant_product_fk",
-          "tableFrom": "disaggregation_document_lines",
-          "tableTo": "products",
-          "columnsFrom": [
-            "tenant_id",
-            "product_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "disaggregation_document_lines_doc_sscc_uq": {
-          "name": "disaggregation_document_lines_doc_sscc_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "document_id",
-            "sscc"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
-    },
-    "public.disaggregation_documents": {
-      "name": "disaggregation_documents",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "doc_no": {
-          "name": "doc_no",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "status": {
-          "name": "status",
-          "type": "disaggregation_document_status",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'draft'"
-        },
-        "reason_id": {
-          "name": "reason_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "comment": {
-          "name": "comment",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "source": {
-          "name": "source",
-          "type": "disaggregation_source",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'manual'"
-        },
-        "created_by_user_id": {
-          "name": "created_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        },
-        "applied_at": {
-          "name": "applied_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "applied_by_user_id": {
-          "name": "applied_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "cancelled_at": {
-          "name": "cancelled_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {
-        "disaggregation_documents_tenant_created_idx": {
-          "name": "disaggregation_documents_tenant_created_idx",
-          "columns": [
-            {
-              "expression": "tenant_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "created_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
-      "foreignKeys": {
-        "disaggregation_documents_tenant_id_organization_id_fk": {
-          "name": "disaggregation_documents_tenant_id_organization_id_fk",
-          "tableFrom": "disaggregation_documents",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "disaggregation_documents_tenant_reason_fk": {
-          "name": "disaggregation_documents_tenant_reason_fk",
-          "tableFrom": "disaggregation_documents",
-          "tableTo": "disaggregation_reasons",
-          "columnsFrom": [
-            "tenant_id",
-            "reason_id"
-          ],
-          "columnsTo": [
-            "tenant_id",
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "disaggregation_documents_tenant_id_uq": {
-          "name": "disaggregation_documents_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        },
-        "disaggregation_documents_tenant_doc_no_uq": {
-          "name": "disaggregation_documents_tenant_doc_no_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "doc_no"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {
-        "disaggregation_documents_applied_fields_check": {
-          "name": "disaggregation_documents_applied_fields_check",
-          "value": "(\"disaggregation_documents\".\"status\" = 'applied') = (\"disaggregation_documents\".\"applied_at\" IS NOT NULL)"
-        }
-      },
-      "isRLSEnabled": false
-    },
-    "public.disaggregation_reasons": {
-      "name": "disaggregation_reasons",
-      "schema": "",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "uuid",
-          "primaryKey": true,
-          "notNull": true,
-          "default": "gen_random_uuid()"
-        },
-        "tenant_id": {
-          "name": "tenant_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "name": {
-          "name": "name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "sort_order": {
-          "name": "sort_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
-        },
-        "archived": {
-          "name": "archived",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "now()"
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {
-        "disaggregation_reasons_tenant_id_organization_id_fk": {
-          "name": "disaggregation_reasons_tenant_id_organization_id_fk",
-          "tableFrom": "disaggregation_reasons",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "tenant_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {
-        "disaggregation_reasons_tenant_id_uq": {
-          "name": "disaggregation_reasons_tenant_id_uq",
-          "nullsNotDistinct": false,
-          "columns": [
-            "tenant_id",
-            "id"
-          ]
-        }
-      },
-      "policies": {},
-      "checkConstraints": {},
-      "isRLSEnabled": false
     }
   },
   "enums": {
@@ -13160,36 +12786,6 @@
         "processing",
         "ready",
         "failed"
-      ]
-    },
-    "public.disaggregation_document_status": {
-      "name": "disaggregation_document_status",
-      "schema": "public",
-      "values": [
-        "draft",
-        "applied",
-        "cancelled"
-      ]
-    },
-    "public.disaggregation_line_status": {
-      "name": "disaggregation_line_status",
-      "schema": "public",
-      "values": [
-        "ok",
-        "not_found",
-        "not_closed",
-        "shift_open",
-        "already_disassembled",
-        "written_off",
-        "duplicate"
-      ]
-    },
-    "public.disaggregation_source": {
-      "name": "disaggregation_source",
-      "schema": "public",
-      "values": [
-        "manual",
-        "import"
       ]
     }
   },

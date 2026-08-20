@@ -8,8 +8,9 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, eq, gte, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { formatShiftNumber, shiftMonthKey } from "@markiro/domain";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { OperatorsService } from "../operators/operators.service";
@@ -39,7 +40,9 @@ import { SubscriptionReadOnlyException } from "../../subscriptions/subscription-
 type ShiftRow = typeof schema.shifts.$inferSelect;
 type CurrentShiftRow = Omit<ShiftRow, "labelTemplateId">;
 type ProductRow = Omit<typeof schema.products.$inferSelect, "defaultLabelTemplateId">;
-type JoinedShiftRow = Omit<ShiftDto, "image"> & {
+type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
+  numberMonthKey: string;
+  numberSeq: number;
   imageChecksum: string | null;
   imageByteSize: number | null;
   imageWidth: number | null;
@@ -72,6 +75,8 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   closeReason: schema.shifts.closeReason,
   lateDataAt: schema.shifts.lateDataAt,
   createdAt: schema.shifts.createdAt,
+  numberMonthKey: schema.shifts.numberMonthKey,
+  numberSeq: schema.shifts.numberSeq,
 };
 
 const CURRENT_PRODUCT_SELECTION = {
@@ -147,7 +152,10 @@ export class ShiftsService {
       .leftJoin(schema.lines, eq(schema.shifts.lineId, schema.lines.id))
       .leftJoin(schema.counterparties, eq(schema.shifts.counterpartyId, schema.counterparties.id))
       .where(and(...conditions))
-      .orderBy(schema.shifts.createdAt);
+      .orderBy(
+        sql`coalesce(${schema.shifts.plannedDate}, ${schema.shifts.createdAt}::date) desc`,
+        desc(schema.shifts.createdAt),
+      );
 
     return { items: rows.map((row) => this.mapShiftRow(row)) };
   }
@@ -223,28 +231,45 @@ export class ShiftsService {
     this.assertCapacityRules(data.mode, boxCapacity, palletsEnabled, palletCapacity);
     this.assertBoxTemplateRule(data.mode, boxLabelTemplateId);
 
+    const monthKey = shiftMonthKey(data.plannedDate ?? new Date().toISOString().slice(0, 10));
+
     try {
-      const [row] = await this.db
-        .insert(schema.shifts)
-        .values({
-          tenantId,
-          productId: data.productId,
-          lineId: data.lineId ?? null,
-          counterpartyId: counterpartyId ?? null,
-          // The issuer is always explicit (unlike the org-defaulted box
-          // template resolved above), so an omitted value is null ("our
-          // organisation").
-          ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
-          boxLabelTemplateId,
-          mode: data.mode,
-          plannedQty: data.plannedQty ?? null,
-          plannedDate: data.plannedDate ?? null,
-          boxCapacity: boxCapacity ?? null,
-          palletCapacity: palletCapacity ?? null,
-          palletsEnabled,
-          createdFrom,
-        })
-        .returning({ id: schema.shifts.id });
+      const [row] = await this.db.transaction(async (tx) => {
+        const [counter] = await tx
+          .insert(schema.shiftNumberCounters)
+          .values({ tenantId, monthKey, lastSeq: 1 })
+          .onConflictDoUpdate({
+            target: [schema.shiftNumberCounters.tenantId, schema.shiftNumberCounters.monthKey],
+            set: { lastSeq: sql`${schema.shiftNumberCounters.lastSeq} + 1` },
+          })
+          .returning({ lastSeq: schema.shiftNumberCounters.lastSeq });
+        if (!counter) {
+          throw new InternalServerErrorException("Failed to allocate a shift number");
+        }
+        return tx
+          .insert(schema.shifts)
+          .values({
+            tenantId,
+            productId: data.productId,
+            lineId: data.lineId ?? null,
+            counterpartyId: counterpartyId ?? null,
+            // The issuer is always explicit (unlike the org-defaulted box
+            // template resolved above), so an omitted value is null ("our
+            // organisation").
+            ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
+            boxLabelTemplateId,
+            mode: data.mode,
+            plannedQty: data.plannedQty ?? null,
+            plannedDate: data.plannedDate ?? null,
+            boxCapacity: boxCapacity ?? null,
+            palletCapacity: palletCapacity ?? null,
+            palletsEnabled,
+            createdFrom,
+            numberMonthKey: monthKey,
+            numberSeq: counter.lastSeq,
+          })
+          .returning({ id: schema.shifts.id });
+      });
 
       if (!row) {
         throw new InternalServerErrorException("Failed to create shift");
@@ -587,6 +612,7 @@ export class ShiftsService {
 
     const bundleShift: ShiftBundleDto["shift"] = {
       id: shift.id,
+      number: shift.number,
       status: shift.status,
       mode: shift.mode,
       productId: shift.productId,
@@ -882,11 +908,15 @@ export class ShiftsService {
       createdAt: schema.shifts.createdAt,
       stationClosePolicy: schema.shifts.stationClosePolicy,
       stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
+      numberMonthKey: schema.shifts.numberMonthKey,
+      numberSeq: schema.shifts.numberSeq,
     };
   }
 
   private mapShiftRow(row: JoinedShiftRow): ShiftDto {
     const {
+      numberMonthKey,
+      numberSeq,
       imageChecksum,
       imageByteSize,
       imageWidth,
@@ -903,6 +933,11 @@ export class ShiftsService {
           : undefined;
     return {
       ...shift,
+      number: formatShiftNumber({
+        monthKey: numberMonthKey,
+        seq: numberSeq,
+        createdFrom: shift.createdFrom,
+      }),
       ...(access ? { stationCloseAccess: access } : {}),
       image: imageChecksum
         ? {

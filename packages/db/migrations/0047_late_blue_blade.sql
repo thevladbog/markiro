@@ -61,4 +61,5 @@ ALTER TABLE "disaggregation_documents" ADD CONSTRAINT "disaggregation_documents_
 ALTER TABLE "disaggregation_reasons" ADD CONSTRAINT "disaggregation_reasons_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "disaggregation_document_lines_tenant_doc_idx" ON "disaggregation_document_lines" USING btree ("tenant_id","document_id");--> statement-breakpoint
 CREATE INDEX "disaggregation_documents_tenant_created_idx" ON "disaggregation_documents" USING btree ("tenant_id","created_at");--> statement-breakpoint
+CREATE INDEX "code_registry_tenant_scanned_idx" ON "code_registry" USING btree ("tenant_id","scanned_at");--> statement-breakpoint
 ALTER TABLE "box_exceptions" ADD CONSTRAINT "box_exceptions_tenant_disaggregation_document_fk" FOREIGN KEY ("tenant_id","disaggregation_document_id") REFERENCES "disaggregation_documents"("tenant_id","id");

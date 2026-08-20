@@ -3,6 +3,7 @@ import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.j
 import { ProductImage } from "./ProductImage.js";
 
 export interface ShiftCardProps {
+  number?: string | null;
   plannedDate?: string | null;
   plannedQty?: number | null;
   mode?: "validation" | "aggregation";
@@ -26,6 +27,7 @@ export interface ShiftCardProps {
 
 /** A fixed-height floor card; the parent supplies a bounded page of at most two. */
 export function ShiftCard({
+  number,
   productName,
   plannedDate,
   plannedQty,
@@ -58,7 +60,10 @@ export function ShiftCard({
             refreshKey={imageRefreshKey}
           />
         ) : null}
-        <div className="shift-card__product">{productName ?? "—"}</div>
+        <div className="shift-card__product">
+          {number ? `${number} · ` : ""}
+          {productName ?? "—"}
+        </div>
         <div className="shift-card__meta">
           {plannedDate ? `${plannedDate} · ` : ""}
           {modeLabel ?? mode}

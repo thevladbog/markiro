@@ -292,6 +292,8 @@ describe.skipIf(!ready)("counterparties e2e", () => {
       productId,
       counterpartyId: counterpartyId,
       mode: "validation",
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
 
     // DELETE should return 409
