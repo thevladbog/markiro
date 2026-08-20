@@ -187,10 +187,12 @@
     "shifts": "Shifts",
     "lines": "Lines",
     "boxes": "Boxes",
+    "codes": "Code search",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
     "pickup": "Self-pickup",
+    "disaggregation": "Disaggregation",
     "employees": "Operators and employees",
     "kiosks": "Kiosks",
     "devices": "Devices",
@@ -921,6 +923,92 @@
         "status": "Status"
       }
     },
+    "codeSearch": {
+      "title": "Code search",
+      "searchPlaceholder": "Enter an SSCC or marking code",
+      "searchButton": "Search",
+      "empty": "No codes found",
+      "errors": {
+        "unrecognized": "Code not recognized",
+        "not_found": "Nothing found for this query"
+      },
+      "status": {
+        "free": "Free",
+        "aggregated": "In box",
+        "written_off": "Written off"
+      },
+      "filters": {
+        "fromLabel": "From",
+        "toLabel": "To",
+        "productLabel": "Product",
+        "productSearchPlaceholder": "Search products",
+        "productEmpty": "No products found",
+        "statusLabel": "Status",
+        "status": {
+          "all": "All statuses"
+        },
+        "product": {
+          "all": "All products"
+        }
+      },
+      "table": {
+        "code": "Code",
+        "product": "Product",
+        "status": "Status",
+        "box": "Box",
+        "scannedAt": "Scanned"
+      },
+      "codeCard": {
+        "title": "Code card",
+        "productLabel": "Product",
+        "gtinLabel": "GTIN",
+        "serialLabel": "Serial",
+        "statusLabel": "Status",
+        "currentBoxLabel": "Current box",
+        "historyTitle": "History"
+      },
+      "boxCard": {
+        "noSscc": "No SSCC",
+        "status": {
+          "open": "Open",
+          "closed": "Closed",
+          "disassembled": "Disassembled"
+        },
+        "productLabel": "Product",
+        "shiftLabel": "Shift",
+        "openedAtLabel": "Opened",
+        "closedAtLabel": "Closed",
+        "disassembledAtLabel": "Disassembled",
+        "itemsTitle": "Composition",
+        "itemsEmpty": "Box is empty",
+        "table": {
+          "code": "Code",
+          "addedAt": "Added",
+          "state": "State"
+        },
+        "displaced": "Displaced",
+        "removed": "Removed",
+        "exceptionsTitle": "Exceptions",
+        "exceptionsEmpty": "No exceptions",
+        "exceptionKind": {
+          "undo": "Undo",
+          "clear": "Clear",
+          "disassemble": "Disassembled",
+          "reprint": "Reprint"
+        },
+        "pickupOrdersTitle": "Pickup orders",
+        "pickupOrdersEmpty": "No orders"
+      },
+      "history": {
+        "scanned": "Scanned",
+        "box_added": "Added to box",
+        "box_displaced": "Moved to another box",
+        "box_removed": "Removed from box",
+        "box_disassembled": "Box disassembled",
+        "pickup_locked": "Locked in a pickup order",
+        "pickup_resolved": "Pickup order resolved"
+      }
+    },
     "conflicts": {
       "title": "Conflicts",
       "empty": "No conflicts",
@@ -1135,6 +1223,128 @@
         "exportError": "Could not export the codes"
       }
     },
+    "disaggregation": {
+      "title": "Disaggregation",
+      "create": "Create document",
+      "createError": "Could not create the document. Please try again.",
+      "reasonsLink": "Disaggregation reasons",
+      "empty": "No documents found",
+      "filters": {
+        "statusLabel": "Status",
+        "reasonLabel": "Reason",
+        "status": {
+          "all": "All statuses"
+        },
+        "reason": {
+          "all": "All reasons"
+        },
+        "docNoLabel": "Document number",
+        "docNoPlaceholder": "Search by document number",
+        "fromLabel": "From",
+        "toLabel": "To"
+      },
+      "status": {
+        "draft": "Draft",
+        "applied": "Applied",
+        "cancelled": "Cancelled"
+      },
+      "table": {
+        "docNo": "Document No.",
+        "createdAt": "Created",
+        "status": "Status",
+        "reason": "Reason",
+        "lineCount": "Boxes",
+        "codeCount": "Codes",
+        "author": "Author"
+      },
+      "reasons": {
+        "title": "Disaggregation reasons",
+        "backLink": "← Disaggregation",
+        "emptyTitle": "No reasons added",
+        "emptyHint": "No disaggregation reasons have been added",
+        "refetchError": "Could not refresh the reasons. Showing the last loaded data.",
+        "retry": "Retry",
+        "addAction": "Add reason",
+        "createAction": "Create",
+        "cancelAction": "Cancel",
+        "nameLabel": "Name",
+        "sortOrderLabel": "Order",
+        "saveAction": "Save",
+        "edit": "Edit",
+        "actions": "Actions",
+        "archiveAction": "Delete",
+        "archiveConfirmTitle": "Delete this reason?",
+        "archiveConfirmBody": "The reason \"{{name}}\" will be deleted.",
+        "archiveConfirmAction": "Delete",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "sortOrderInvalid": "Enter a whole number for order",
+          "createFailed": "Could not create the reason. Please try again.",
+          "updateFailed": "Could not save the reason. Please try again.",
+          "archiveFailed": "Could not delete the reason. Please try again."
+        },
+        "toasts": {
+          "createSuccess": "Reason added",
+          "updateSuccess": "Reason updated",
+          "archiveSuccess": "Reason deleted"
+        }
+      },
+      "detail": {
+        "backAction": "← Disaggregation",
+        "loadError": "Could not load the document",
+        "reasonLabel": "Reason",
+        "reasonPlaceholder": "Not selected",
+        "commentLabel": "Comment",
+        "createdAtLabel": "Created",
+        "appliedAtLabel": "Applied",
+        "cancelledAtLabel": "Cancelled",
+        "noReason": "—",
+        "noComment": "—",
+        "addPanelTitle": "Add lines",
+        "addLinesInputLabel": "Box SSCCs",
+        "addLinesPlaceholder": "Paste or scan SSCCs — one per line",
+        "addLines": "Add lines",
+        "importAction": "Import from file",
+        "addLinesError": "Could not add the lines. Please try again.",
+        "importError": "Could not import the file. Please try again.",
+        "linesTitle": "Boxes",
+        "linesEmpty": "No lines added",
+        "table": {
+          "sscc": "SSCC",
+          "productName": "Product",
+          "codeCount": "Codes",
+          "status": "Status",
+          "actions": "Actions"
+        },
+        "deleteLine": "Delete",
+        "deleteLineNamed": "Delete line {{sscc}}",
+        "deleteLineError": "Could not delete the line. Please try again.",
+        "applyAction": "Apply",
+        "applyConfirmTitle": "Apply this document?",
+        "applyConfirm": "This will disassemble {{boxes}} box(es), {{codes}} code(s).",
+        "applyConfirmAction": "Apply",
+        "applyBlocked": "Some lines changed status and are not ready to apply. Check the table below.",
+        "applyError": "Could not apply the document. Please try again.",
+        "applySuccess": "Document applied",
+        "cancelDocumentAction": "Cancel document",
+        "cancelConfirmTitle": "Cancel this document?",
+        "cancelConfirmBody": "The document will be cancelled. This action cannot be undone.",
+        "cancelConfirmAction": "Cancel document",
+        "cancelError": "Could not cancel the document. Please try again.",
+        "cancelSuccess": "Document cancelled",
+        "updateError": "Could not save the changes. Please try again.",
+        "dismissAction": "Cancel"
+      },
+      "lineStatus": {
+        "ok": "Ready",
+        "not_found": "Box not found",
+        "not_closed": "Box not closed",
+        "shift_open": "Shift still open — available after shift close",
+        "already_disassembled": "Already disassembled",
+        "written_off": "Written off via kiosk",
+        "duplicate": "Duplicate in document"
+      }
+    },
     "employees": {
       "title": "Employees",
       "emptyTitle": "No employees yet",
@@ -1216,7 +1426,10 @@
         "canWriteoffLabel": "Allow writeoff",
         "canWriteoffHint": "Writeoff permission changes independently from the limit.",
         "save": "Save pickup policy",
-        "toasts": { "success": "Pickup policy saved", "error": "Could not save the pickup policy" }
+        "toasts": {
+          "success": "Pickup policy saved",
+          "error": "Could not save the pickup policy"
+        }
       },
       "bulk": {
         "title": "Bulk pickup policy update",
@@ -1320,7 +1533,10 @@
       "allStatuses": "All statuses",
       "emptyTitle": "No devices yet",
       "emptyHint": "Add a station or kiosk to get started.",
-      "type": { "station": "Station", "kiosk": "Kiosk" },
+      "type": {
+        "station": "Station",
+        "kiosk": "Kiosk"
+      },
       "status": {
         "awaiting_pairing": "Awaiting pairing",
         "online": "Online",
@@ -1335,7 +1551,11 @@
         "actions": "Actions"
       },
       "kioskSettings": "Kiosk settings",
-      "pager": { "label": "Device pages", "previous": "Previous page", "next": "Next page" },
+      "pager": {
+        "label": "Device pages",
+        "previous": "Previous page",
+        "next": "Next page"
+      },
       "drawer": {
         "title": "New device",
         "codeTitle": "Pair device",

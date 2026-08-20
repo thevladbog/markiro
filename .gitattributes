@@ -1,0 +1,4 @@
+# Drizzle-kit's cumulative schema snapshots and migration journal are
+# machine-generated (required for `db:generate` diffing — never hand-edited),
+# so collapse them in PR diffs and exclude them from language stats.
+packages/db/migrations/meta/*.json linguist-generated=true

@@ -1,1 +1,0 @@
-ALTER TABLE "products" ADD COLUMN "shelf_life_days" integer;
