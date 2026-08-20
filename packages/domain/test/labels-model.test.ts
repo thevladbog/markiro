@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  labelFieldDisplayValue,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
+  QTY_UNIT_SUFFIX,
   sampleLabelData,
+  type LabelField,
   type LabelTemplateSpec,
 } from "../src/labels/model.js";
 
@@ -277,5 +280,65 @@ describe("sampleLabelData", () => {
       operator: "Смирнов А.",
       "counterparty.name": "Завод Партнер",
     });
+  });
+});
+
+describe("labelFieldDisplayValue", () => {
+  function withQty(qty: string): Record<LabelField, string> {
+    return { ...sampleLabelData(), qty };
+  }
+
+  it("renders an 18-digit SSCC in GS1 HRI form", () => {
+    expect(labelFieldDisplayValue("sscc", sampleLabelData())).toBe("(00)346006820000000014");
+  });
+
+  it("passes a non-18-digit SSCC through untouched", () => {
+    expect(labelFieldDisplayValue("sscc", { ...sampleLabelData(), sscc: "" })).toBe("");
+    expect(labelFieldDisplayValue("sscc", { ...sampleLabelData(), sscc: "123" })).toBe("123");
+  });
+
+  /**
+   * QUANTITY UNIT. The first physical print read a bare `5` where the
+   * customer-approved mock-up says «5 шт.». The unit lives in this one
+   * display-formatting layer — the emitters AND `bounds.ts` (hence the admin
+   * preview and every containment check) all resolve field text through it,
+   * so the longer string is accounted for everywhere without a second rule.
+   */
+  it("appends the «шт.» unit to a plain numeric quantity", () => {
+    expect(QTY_UNIT_SUFFIX).toBe("шт.");
+    expect(labelFieldDisplayValue("qty", withQty("5"))).toBe("5 шт.");
+    expect(labelFieldDisplayValue("qty", withQty("24"))).toBe("24 шт.");
+    expect(labelFieldDisplayValue("qty", withQty("0"))).toBe("0 шт.");
+    expect(labelFieldDisplayValue("qty", withQty("1000"))).toBe("1000 шт.");
+    // Surrounding whitespace is not a different quantity.
+    expect(labelFieldDisplayValue("qty", withQty("  7  "))).toBe("7 шт.");
+  });
+
+  it("never doubles the unit on a value that already carries it", () => {
+    expect(labelFieldDisplayValue("qty", withQty("5 шт."))).toBe("5 шт.");
+    expect(labelFieldDisplayValue("qty", withQty("5 шт"))).toBe("5 шт");
+  });
+
+  it("passes an empty or non-numeric quantity through untouched", () => {
+    for (const raw of ["", "   ", "—", "n/a", "12 кг", "~5", "5.5", "5,5", "1e3", "-3", "+3"]) {
+      expect(labelFieldDisplayValue("qty", withQty(raw)), `qty=${JSON.stringify(raw)}`).toBe(raw);
+    }
+  });
+
+  it("leaves every other field alone", () => {
+    const data = sampleLabelData();
+    for (const field of [
+      "product.name",
+      "product.gtin",
+      "product.egais",
+      "km.code",
+      "shift.no",
+      "date",
+      "expiry",
+      "operator",
+      "counterparty.name",
+    ] as const) {
+      expect(labelFieldDisplayValue(field, data), field).toBe(data[field]);
+    }
   });
 });

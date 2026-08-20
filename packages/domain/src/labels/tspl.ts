@@ -80,18 +80,54 @@ function escapeTsplString(text: string): string {
 }
 
 /**
- * Maps the domain model's `align` to TSPL `TEXT`'s optional alignment
- * parameter (added in firmware V6.73 EZ): 1 = Left, 2 = Center, 3 = Right.
- * Returns `undefined` for an unset `align` so the caller can omit the
- * parameter entirely and fall back to TSPL's own default (left).
+ * The x-offset (in dots) that centres/right-aligns ONE already-wrapped native
+ * line inside its element's `maxWidthMm` box — the native-text counterpart of
+ * the raster branch's identical call, sharing the exact same
+ * `rasterAlignOffsetDots` arithmetic so a template's `align` lands in the same
+ * place whether the text was rasterized or not.
+ *
+ * WHY TSPL COMPUTES THIS ITSELF, rather than passing `align` to `TEXT`'s own
+ * alignment parameter (1 = Left, 2 = Center, 3 = Right, firmware V6.73 EZ+),
+ * which is what this module used to do: that parameter carries NO WIDTH. It
+ * aligns the string about the `TEXT` command's own `x` — so `align: "center"`
+ * on an element at `xMm: 2` centres the string ON 2 mm, i.e. half of it hangs
+ * off the left edge of the label. Every other renderer in this repo means
+ * something different by `align`: ZPL puts it in an `^FB<width>,…,C,…` field
+ * block (centred INSIDE the `maxWidthMm` box that starts at `x`), the admin
+ * preview (`apps/admin/src/pages/labels/renderer.ts`) draws at
+ * `x + boxWidth/2`, and both emitters' raster branches shift the bitmap by
+ * `rasterAlignOffsetDots`. A `LabelTemplateSpec` is language-neutral — the
+ * same template is emitted as ZPL or TSPL depending on which printer the
+ * station has (`hardware-config.ts`'s `printerLanguage`) — so a per-language
+ * reading of `align` is a defect by construction, exactly like the HRI
+ * parameter this module already documents. TSPL now agrees with everyone
+ * else, and the alignment parameter is no longer emitted at all.
+ *
+ * WITHOUT `maxWidthMm` the offset is 0 and `align` is a documented no-op, for
+ * the same reason it is one in ZPL's native branch and in the preview: there
+ * is no box to align within. That is also what `rasterAlignOffsetDots`
+ * already returns for `maxWidthDots === undefined`.
+ *
+ * The line's width is the DOM-free `estimatedTextWidthMm` estimate (0.55em
+ * per glyph), not a measurement — this package cannot measure the printer's
+ * internal font, and it is the same estimate `wrapNativeText` below and
+ * `bounds.ts` use, so the wrap, the bounds and the offset can never disagree
+ * with each other. Font `"0"` is Triumvirate Bold CONDENSED, narrower than
+ * 0.55em, so the estimate errs slightly wide and a centred line lands a
+ * fraction of a millimetre left of true centre — a far smaller error than the
+ * half-a-string displacement the alignment parameter produced.
  */
-function alignToTsplAlignment(
-  align: "left" | "center" | "right" | undefined,
-): 1 | 2 | 3 | undefined {
-  if (align === "left") return 1;
-  if (align === "center") return 2;
-  if (align === "right") return 3;
-  return undefined;
+function nativeAlignOffsetDots(
+  element: LabelTextElement | LabelFieldElement,
+  line: string,
+  maxWidthDots: number | undefined,
+  dpi: LabelTemplateSpec["dpi"],
+): number {
+  return rasterAlignOffsetDots(
+    element.align,
+    maxWidthDots,
+    mmToDots(estimatedTextWidthMm(line, element.fontSizePt), dpi),
+  );
 }
 
 /**
@@ -161,16 +197,19 @@ function wrapNativeText(
  * `bold` has no native effect here (font `"0"` has no separate weight
  * parameter, matching ZPL's `^A0` built-in font) — it is fully honored on
  * the raster branch below (passed to `rasterizeText`) only, exactly like
- * `zpl.ts`. `maxWidthMm` has no NATIVE TSPL equivalent either: unlike ZPL's
- * `^FB` (a field-block command that takes an explicit width to wrap/justify
- * text within), TSPL's `TEXT` alignment parameter has no accompanying
- * width — it aligns relative to the given `x`/`y` alone, so the NATIVE
- * branch below accepts but ignores `maxWidthMm` (a deliberate, documented
- * no-op rather than inventing an unsupported wrapping behavior). The
- * RASTER branch is different: since it emits a plain positioned `BITMAP`
- * (not a native alignment-aware command), it honors `align`/`maxWidthMm`
- * itself by shifting the bitmap's x via `rasterAlignOffsetDots` — see that
- * function's doc comment.
+ * `zpl.ts`.
+ *
+ * `align`/`maxWidthMm` have NO usable native TSPL equivalent: unlike ZPL's
+ * `^FB` (a field-block command taking an explicit width to wrap and justify
+ * text within), TSPL's `TEXT` alignment parameter carries no width and
+ * aligns about the command's own `x`. BOTH branches therefore do the work
+ * themselves and in exactly the same way — the native one wraps against the
+ * width estimate (`wrapNativeText`) and shifts each line by
+ * `nativeAlignOffsetDots`, the raster one bounds the bitmap through
+ * `maxWidthPx`/`maxLines` and shifts it by `rasterAlignOffsetDots`. Both
+ * offsets are the same `rasterAlignOffsetDots` arithmetic, so a centred
+ * Cyrillic line and a centred ASCII line land in the same place, and both
+ * land where ZPL's `^FB` and the admin preview put them.
  *
  * VERTICAL-BASELINE HEURISTIC (rasterized branch only, documented trade-off
  * not a bug — identical to `zpl.ts`'s own note on its raster branch, see
@@ -222,22 +261,24 @@ async function renderTextLikeElement(
     return buildBitmapCommand(x + offsetXDots, y, raster);
   }
 
-  const alignment = alignToTsplAlignment(element.align);
-  const alignmentParam = alignment !== undefined ? `${alignment},` : "";
   const size = element.fontSizePt;
-  const lines = wrapNativeText(element, text);
-  if (lines === null) {
-    return `TEXT ${x},${y},"0",0,${size},${size},${alignmentParam}"${escapeTsplString(text)}"`;
-  }
+  const maxWidthDots =
+    element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
+  // `null` means "emit the string untouched, on one line" — the alignment
+  // offset below is computed per LINE either way, so a single unwrapped line
+  // is just the one-element case and produces the identical command.
+  const lines = wrapNativeText(element, text) ?? [text];
   // One `TEXT` per wrapped line, stepped by the same 1.5em line box the
   // rasterizers use, so a wrapped native line and a wrapped rasterized one
   // occupy the same vertical footprint.
   const lineStepDots = mmToDots(ptToMm(element.fontSizePt) * LINE_HEIGHT_EM, spec.dpi);
   return lines
-    .map(
-      (line, i) =>
-        `TEXT ${x},${y + i * lineStepDots},"0",0,${size},${size},${alignmentParam}"${escapeTsplString(line)}"`,
-    )
+    .map((line, i) => {
+      // Per-line, matching ZPL's `^FB` (which centres each line of a field
+      // block individually) rather than aligning the block as a whole.
+      const offsetXDots = nativeAlignOffsetDots(element, line, maxWidthDots, spec.dpi);
+      return `TEXT ${x + offsetXDots},${y + i * lineStepDots},"0",0,${size},${size},"${escapeTsplString(line)}"`;
+    })
     .join("\n");
 }
 

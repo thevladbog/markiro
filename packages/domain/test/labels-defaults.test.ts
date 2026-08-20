@@ -8,10 +8,12 @@ import {
   estimatedTextWidthMm,
   generateTspl,
   generateZpl,
+  labelFieldDisplayValue,
   mmToDots,
   parseLabelTemplate,
   sampleLabelData,
   wrapTextToWidth,
+  WRAP_ELLIPSIS,
   type LabelField,
   type RasterResult,
   type RasterizeTextFn,
@@ -264,6 +266,268 @@ describe("buildDefaultLabelTemplates", () => {
     }
   });
 
+  /**
+   * SSCC BLOCK CENTRING, the second physical print's first correction.
+   *
+   * The barcode was already centred — `defaults.ts` computes its `xMm` by
+   * arithmetic. What was skewed was the human-readable digit line beneath it:
+   * a left-flush `field` at the content margin, so on the 58×40 its digits
+   * started at 2 mm against the bars' 9.5 mm. It now carries
+   * `align: "center"` inside the same full-width content box the barcode is
+   * centred in, so the two share a centre line at every size.
+   */
+  it("centres the SSCC digit line on the same axis as the bars, at every size", () => {
+    const data = sampleLabelData();
+    const digits = labelFieldDisplayValue("sscc", data);
+    expect(digits).toBe("(00)346006820000000014");
+
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const digitEl = spec.elements.find((el) => el.id === "val-sscc");
+      const barcode = spec.elements.find((el) => el.id === "bc-sscc");
+      if (digitEl?.kind !== "field" || barcode?.kind !== "barcode") {
+        throw new Error(`${name}: missing SSCC block`);
+      }
+      expect(digitEl.align, `${name}: digit-line align`).toBe("center");
+      expect(digitEl.maxWidthMm, `${name}: digit line needs a box to centre in`).toBeGreaterThan(0);
+
+      // Where the digits actually get DRAWN, using the same estimate every
+      // renderer's alignment offset is built on.
+      const textW = estimatedTextWidthMm(digits, digitEl.fontSizePt);
+      const digitsX = digitEl.xMm + (digitEl.maxWidthMm! - textW) / 2;
+      const barsW = 156 * barcode.moduleWidthMm!;
+
+      const digitsCentre = digitsX + textW / 2;
+      const barsCentre = barcode.xMm + barsW / 2;
+      // Half a printer dot at 300 dpi is 0.042 mm; the two centre lines agree
+      // to well inside that, i.e. to the same column of ink.
+      expect(Math.abs(digitsCentre - barsCentre), `${name}: centre offset`).toBeLessThan(0.05);
+      // The digits sit UNDER the bars, not beside them.
+      expect(digitsX, `${name}: digits start right of the bars' left edge`).toBeGreaterThan(
+        barcode.xMm,
+      );
+      expect(digitsX + textW, `${name}: digits end left of the bars' right edge`).toBeLessThan(
+        barcode.xMm + barsW,
+      );
+      // The regression itself: flush-left would put them at the margin.
+      expect(digitsX, `${name}: digits are no longer flush left`).toBeGreaterThan(digitEl.xMm + 1);
+    }
+  });
+
+  /**
+   * ...and the centring must be honoured by ALL THREE renderers, or the same
+   * template prints differently depending on which printer the station has.
+   * ZPL delegates to `^FB`'s justification parameter; TSPL has no equivalent
+   * (its `TEXT` alignment parameter carries no width) and computes the x
+   * offset itself; the admin preview draws at `x + boxWidth/2`. This asserts
+   * the two EMITTERS agree with each other and with the arithmetic the
+   * preview uses.
+   */
+  it("emits the centred digit line as centred ZPL and centred TSPL alike", async () => {
+    const data = sampleLabelData();
+    const digits = labelFieldDisplayValue("sscc", data);
+
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const digitEl = spec.elements.find((el) => el.id === "val-sscc");
+      const barcode = spec.elements.find((el) => el.id === "bc-sscc");
+      if (digitEl?.kind !== "field" || barcode?.kind !== "barcode") {
+        throw new Error(`${name}: missing SSCC block`);
+      }
+      const barsLeftDots = mmToDots(barcode.xMm, spec.dpi);
+      const barsCentreDots = barsLeftDots + (156 * mmToDots(barcode.moduleWidthMm!, spec.dpi)) / 2;
+
+      const zpl = await generateZpl(spec, data, { rasterizeText: boundedRasterizer() });
+      const tspl = await generateTspl(spec, data, { rasterizeText: boundedRasterizer() });
+
+      // ZPL: a field block of the element's full width, justified CENTRE,
+      // anchored at the element's own x — the printer does the centring.
+      const boxDots = mmToDots(digitEl.maxWidthMm!, spec.dpi);
+      const elementXDots = mmToDots(digitEl.xMm, spec.dpi);
+      const zplLine = new RegExp(
+        `\\^FO${elementXDots},\\d+\\^A0N,\\d+,\\d+\\^FB${boxDots},1,0,C,0\\^FD${digits.replace(
+          /[()]/g,
+          (c) => `\\${c}`,
+        )}\\^FS`,
+      );
+      expect(zpl, `${name}: ZPL centred field block`).toMatch(zplLine);
+      // The block's midpoint IS the bars' midpoint (to the dot).
+      expect(
+        Math.abs(elementXDots + boxDots / 2 - barsCentreDots),
+        `${name}: ZPL block centre vs bars centre`,
+      ).toBeLessThanOrEqual(1);
+
+      // TSPL: no alignment parameter at all — the x is already shifted.
+      const tsplMatch = tspl.match(
+        new RegExp(`^TEXT (\\d+),\\d+,"0",0,\\d+,\\d+,"${digits.replace(/[()]/g, "\\$&")}"$`, "m"),
+      );
+      expect(tsplMatch, `${name}: TSPL digit line`).not.toBeNull();
+      const tsplX = Number(tsplMatch![1]);
+      const tsplWidthDots = mmToDots(estimatedTextWidthMm(digits, digitEl.fontSizePt), spec.dpi);
+      expect(
+        Math.abs(tsplX + tsplWidthDots / 2 - barsCentreDots),
+        `${name}: TSPL digit centre vs bars centre`,
+      ).toBeLessThanOrEqual(1);
+      // And it is genuinely shifted off the element's own x — the bug was
+      // that it printed there.
+      expect(tsplX, `${name}: TSPL digit line was not shifted`).toBeGreaterThan(elementXDots);
+    }
+  });
+
+  /**
+   * QUANTITY UNIT, the second physical print's other correction: the value
+   * printed as a bare `5` where the approved mock-up reads «5 шт.». The unit
+   * comes from `labelFieldDisplayValue`, so both emitters AND the bounds
+   * heuristic (hence the admin preview) get it from one place.
+   */
+  it("prints the quantity with its «шт.» unit in both languages", async () => {
+    for (const qty of ["5", "24"]) {
+      const data = { ...sampleLabelData(), qty };
+      for (const { name, spec } of buildDefaultLabelTemplates()) {
+        const zpl = await generateZpl(spec, data, { rasterizeText: boundedRasterizer() });
+        const tspl = await generateTspl(spec, data, { rasterizeText: boundedRasterizer() });
+        // «шт.» is Cyrillic, so both emitters take their RASTER path for it;
+        // assert through the rasterizer's own call log rather than the
+        // document, which carries a bitmap rather than the string.
+        for (const [language, rasterize] of [
+          ["ZPL", generateZpl],
+          ["TSPL", generateTspl],
+        ] as const) {
+          const rasterizeText = boundedRasterizer();
+          await rasterize(spec, data, { rasterizeText });
+          const texts = vi.mocked(rasterizeText).mock.calls.map(([t]) => t);
+          expect(texts, `${name}: ${language} qty`).toContain(`${qty} шт.`);
+          expect(texts, `${name}: ${language} bare qty leaked`).not.toContain(qty);
+        }
+        expect(zpl.length, `${name}: ZPL emitted`).toBeGreaterThan(0);
+        expect(tspl.length, `${name}: TSPL emitted`).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  /**
+   * The unit makes the value string longer, and «Кол-во в упаковке:» is the
+   * tightest column on the label. `labelFieldDisplayValue` feeds `bounds.ts`,
+   * so this is measured through the SAME heuristic the containment check and
+   * the preview use, at every size.
+   */
+  it("fits the quantity value, unit included, inside its column at every size", () => {
+    for (const qty of ["5", "24", "100", "1000"]) {
+      const data = { ...sampleLabelData(), qty };
+      for (const { name, spec } of buildDefaultLabelTemplates()) {
+        const valQty = spec.elements.find((el) => el.id === "val-qty");
+        if (valQty?.kind !== "field") throw new Error(`${name}: no val-qty`);
+        const rendered = estimatedTextWidthMm(`${qty} шт.`, valQty.fontSizePt);
+        expect(rendered, `${name}: "${qty} шт." vs column`).toBeLessThanOrEqual(valQty.maxWidthMm!);
+        // ...and it neither wraps nor gets clipped: one line, un-ellipsized.
+        const b = elementBoundsMm(valQty, data);
+        expect(b.w, `${name}: bounds width`).toBeCloseTo(rendered, 6);
+        expect(b.x + b.w, `${name}: right edge`).toBeLessThanOrEqual(spec.widthMm);
+      }
+    }
+  });
+
+  /**
+   * THE GENERAL INVARIANT: nothing on any stock template is wider than the box
+   * it was given. This is the class-level guard for the defect the two 100 mm
+   * templates shipped with — «Дата производства:» and «Кол-во в упаковке:»
+   * both measured 31.43 mm in a 31.10 mm column and printed ellipsized —
+   * whose cause was NOT the wording but `pt()`'s whole-point rounding: at
+   * scale 100/58 a 5 pt caption wants 8.62 pt, `Math.round` gave it 9, and the
+   * column it lives in does not round up with it.
+   *
+   * Sizes are now derived from the fit (`fitPt` in `defaults.ts`), so this
+   * holds by construction — but only for as long as nobody replaces that with
+   * bare proportional scaling again, or adds a size where the arithmetic
+   * happens to be kind. Measured through `estimatedTextWidthMm`, the same
+   * predicate `wrap.ts` uses to decide whether to ellipsize, so "passes here"
+   * means "is not clipped there".
+   */
+  it("fits every element's estimated content inside its own box, at every size", () => {
+    // Sample data, plus the widest realistic value each field can carry: a
+    // five-digit pack count with its «шт.» unit and a full 19-digit alcocode.
+    const datasets: Array<[string, Record<LabelField, string>]> = [
+      ["sample", sampleLabelData()],
+      [
+        "widest",
+        { ...sampleLabelData(), qty: "10000", "product.egais": "0".repeat(19) } as Record<
+          LabelField,
+          string
+        >,
+      ],
+    ];
+
+    for (const [label, data] of datasets) {
+      for (const { name, spec } of buildDefaultLabelTemplates()) {
+        for (const el of spec.elements) {
+          if (el.kind !== "text" && el.kind !== "field") continue;
+          const text = el.kind === "text" ? el.text : labelFieldDisplayValue(el.field, data);
+          const box = el.maxWidthMm;
+          expect(box, `${name}/${el.id}: every element needs a width budget`).toBeGreaterThan(0);
+
+          const measure = (s: string) => estimatedTextWidthMm(s, el.fontSizePt);
+          const lines = wrapTextToWidth(text, measure, box!, el.maxLines ?? 1);
+          for (const line of lines) {
+            expect(measure(line), `${label} ${name}/${el.id}: "${line}"`).toBeLessThanOrEqual(box!);
+          }
+          // The product name is the ONE string with unbounded content: it is
+          // width-safe by wrapping to `maxLines` and, for a name longer than
+          // three lines, by a VISIBLE ellipsis. Everything else — every
+          // caption, every value — must print in full.
+          if (el.id === "name") continue;
+          expect(lines.length, `${label} ${name}/${el.id}: line count`).toBe(1);
+          expect(lines.join(""), `${label} ${name}/${el.id}: clipped`).not.toContain(WRAP_ELLIPSIS);
+          expect(measure(text), `${label} ${name}/${el.id}: "${text}" vs box`).toBeLessThanOrEqual(
+            box!,
+          );
+        }
+      }
+    }
+  });
+
+  /**
+   * ...and the fit must not be bought with illegibility. The five templates
+   * are one design at five sizes, so the type has to stay essentially
+   * proportional to the 58×40 base; the fit rule may only ever give back the
+   * one point `pt()`'s rounding took. A future caption long enough to need
+   * more than that is a wording problem, and this test says so out loud
+   * rather than letting the label shrink to 4 pt in silence.
+   */
+  it("keeps the fitted type within one point of the proportional size", () => {
+    const base: Record<string, number> = {
+      name: 10,
+      "cap-date": 5,
+      "cap-expiry": 5,
+      "cap-qty": 5,
+      "cap-egais": 5,
+      "val-sscc": 5,
+      "val-date": 8,
+      "val-expiry": 8,
+      "val-qty": 8,
+      "val-egais": 8,
+    };
+
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const scale = Math.min(spec.widthMm / 58, spec.heightMm / 40);
+      for (const el of spec.elements) {
+        if (el.kind !== "text" && el.kind !== "field") continue;
+        const proportional = Math.round(base[el.id]! * scale);
+        expect(el.fontSizePt, `${name}/${el.id}: above proportional`).toBeLessThanOrEqual(
+          proportional,
+        );
+        expect(el.fontSizePt, `${name}/${el.id}: shrunk to illegibility`).toBeGreaterThanOrEqual(
+          proportional - 1,
+        );
+        expect(el.fontSizePt, `${name}/${el.id}: model range`).toBeGreaterThanOrEqual(4);
+      }
+      // The three column captions are one row and must read as one row.
+      const captionSizes = new Set(
+        spec.elements
+          .filter((el) => ["cap-date", "cap-expiry", "cap-qty"].includes(el.id))
+          .map((el) => (el.kind === "text" ? el.fontSizePt : NaN)),
+      );
+      expect(captionSizes.size, `${name}: caption row has mixed sizes`).toBe(1);
+    }
+  });
+
   /** The bars got taller — the whole point of reclaiming the caption's row. */
   it("prints a taller barcode than the 3.5 mm the first physical label used", () => {
     for (const { name, spec } of buildDefaultLabelTemplates()) {
@@ -316,16 +580,19 @@ describe("buildDefaultLabelTemplates", () => {
   /**
    * DRIFT GUARD, pointed at the CURRENT migration.
    *
-   * It used to read `0049_default_label_templates.sql`, the INSERT that first
-   * seeded these five templates. That file's inlined JSON is now HISTORICAL —
-   * it is what already-migrated databases received, and rewriting it would
-   * rewrite history without changing a single production row. `0050` is the
-   * migration that force-overwrites those rows with the current specs, so it
-   * is the one that has to stay in step with this module.
+   * It has walked forward twice now — `0049_default_label_templates.sql` (the
+   * INSERT that first seeded these five templates), then
+   * `0050_reseed_default_label_templates.sql`. Both files' inlined JSON is
+   * HISTORICAL: it is what already-migrated databases received, and rewriting
+   * it would rewrite history without changing a single production row. `0051`
+   * is the migration that force-overwrites those rows with the current specs
+   * (the centred SSCC digit line and the fit-driven type sizes), so it is the
+   * one that has to stay in step with this module — and this test must be repointed again by whoever adds
+   * the next reseed.
    */
-  it("matches the jsonb inlined into db migration 0050 (drift guard)", async () => {
+  it("matches the jsonb inlined into db migration 0052 (drift guard)", async () => {
     const sql = await readFile(
-      new URL("../../db/migrations/0050_reseed_default_label_templates.sql", import.meta.url),
+      new URL("../../db/migrations/0052_center_sscc_and_fit_label_templates.sql", import.meta.url),
       "utf8",
     );
     const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({
