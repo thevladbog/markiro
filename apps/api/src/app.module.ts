@@ -30,6 +30,7 @@ import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejec
 import { SsccModule } from "./modules/sscc/sscc.module";
 import { BoxesModule } from "./modules/boxes/boxes.module";
 import { BoxExceptionsModule } from "./modules/box-exceptions/box-exceptions.module";
+import { CodeSearchModule } from "./modules/code-search/code-search.module";
 import { AuthorizationModule } from "./authorization/authorization.module";
 import { loadEnv, type Env } from "./env";
 import { TeamModule } from "./modules/team/team.module";
@@ -120,6 +121,7 @@ export class AppModule {
         SsccModule,
         BoxesModule,
         BoxExceptionsModule,
+        CodeSearchModule,
         StorageModule.forRoot(env),
         TeamModule.forRoot(env.ADMIN_ORIGIN),
         InvitationsModule.forRoot(setup.databaseUrl),

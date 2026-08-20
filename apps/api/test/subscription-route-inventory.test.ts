@@ -52,6 +52,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
   {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
+      "GET /code-search (CodeSearchController.classify)",
+      "GET /code-search/codes (CodeSearchController.listCodes)",
       "GET /conflicts (ConflictsController.listConflicts)",
       "GET /counterparties (CounterpartiesController.listCounterparties)",
       "GET /counterparties/:id (CounterpartiesController.getCounterparty)",
