@@ -80,7 +80,7 @@ function deploymentEmail(value) {
   return value;
 }
 
-function publicIpv4(value) {
+export function publicIpv4(value) {
   const octets = typeof value === "string" ? value.split(".") : [];
   if (
     octets.length !== 4 ||
@@ -107,7 +107,7 @@ function digest(image, prefix) {
   return image.slice(prefix.length);
 }
 
-function authenticatedKnownHosts(encodedKeys, address) {
+export function authenticatedKnownHosts(encodedKeys, address) {
   let text;
   try {
     const payload = Buffer.from(encodedKeys, "base64");
@@ -136,7 +136,7 @@ function authenticatedKnownHosts(encodedKeys, address) {
   return `${lines.map((line) => `${address} ${line}`).join("\n")}\n`;
 }
 
-async function validateHostedPrivateKey(path, system) {
+export async function validateHostedPrivateKey(path, system) {
   try {
     const details = await system.stat(path);
     if (
