@@ -5,7 +5,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, lte, max, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, lte, max, sql } from "drizzle-orm";
 import { parseSscc, ssccSerialCapacity } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -424,6 +424,11 @@ export class SsccService {
             eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
             eq(schema.ssccBlocks.extensionDigit, extensionDigit),
             eq(schema.ssccBlocks.deviceId, deviceId),
+            // A revoked block is not this device's block any more: the admin
+            // reseeded the counter and the device is being told (via the
+            // bundle's `ssccRevokedFrom`) to drop this range entirely. Handing
+            // it back here would make the whole reseed a no-op.
+            isNull(schema.ssccBlocks.revokedAt),
           ),
         )
         .orderBy(desc(schema.ssccBlocks.issuedAt))

@@ -142,6 +142,15 @@ describe.skipIf(!ready)("sscc e2e", () => {
     return shiftId;
   }
 
+  // A 9-digit issuer prefix unused by any other test in this file: these
+  // tests cut REAL sscc_blocks rows, and sharing a prefix would make one
+  // test's blocks shift another's expected serials.
+  let prefixCounter = 0;
+  function freshPrefix(): string {
+    prefixCounter += 1;
+    return `47${String(prefixCounter).padStart(7, "0")}`;
+  }
+
   it("allocates non-overlapping blocks under concurrency", async () => {
     const svc = app!.get(SsccService);
     const prefix = "111111111";
@@ -267,6 +276,33 @@ describe.skipIf(!ready)("sscc e2e", () => {
     // ext-0's own counter must be exactly where block0First left it --
     // undisturbed by the ext-1 allocation in between.
     expect(block0Second.fromSerial).toBe(block0First.toSerial + 1);
+  });
+
+  it("cuts a fresh block instead of handing back a revoked one", async () => {
+    const service = app!.get(SsccService);
+    const deviceId = await registerDevice("Revoked block device");
+    const prefix = freshPrefix();
+
+    const first = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
+    // A repeat fetch must still hand back the SAME block -- that invariant is
+    // what keeps a station from burning through the number space on every
+    // shift entry, and this test must not silently relax it.
+    const repeat = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
+    expect(repeat.fromSerial).toBe(first.fromSerial);
+
+    await db
+      .update(schema.ssccBlocks)
+      .set({ revokedAt: new Date() })
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, prefix),
+          eq(schema.ssccBlocks.extensionDigit, 0),
+        ),
+      );
+
+    const afterRevoke = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
+    expect(afterRevoke.fromSerial).toBe(first.toSerial + 1);
   });
 
   describe("recordConsumedSerial (Task 7 correction)", () => {
