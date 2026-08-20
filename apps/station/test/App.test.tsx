@@ -405,10 +405,71 @@ async function signInAsOperator(login = OPERATOR_LOGIN, pin = OPERATOR_PIN) {
   await waitFor(() => expect(screen.getByTestId("scanner-status")).toBeDefined());
 }
 
-function expandStatusPanelIfCollapsed(language: "en" | "ru" = "en") {
-  const button = screen.queryByRole("button", {
-    name: language === "ru" ? "Развернуть панель состояния" : "Expand status panel",
+/**
+ * Opens the re-pair confirmation from an already-visible Workstation setup.
+ *
+ * `findByRole` alone is not enough here, and the difference is not cosmetic:
+ * WorkstationSetup renders the footer's «Re-pair this station» button on its
+ * very first commit but holds it `disabled={busy || loading}`, and `loading`
+ * starts `true` and only clears when the screen's own `loadHardwareConfig(exec)`
+ * read resolves -- a mirror read that goes through the invoke mock, i.e. at
+ * least one full turn after the button appears. React does not dispatch click
+ * events to a disabled form control, so a click fired inside that window is not
+ * delayed, it is DROPPED: `resetConfirmationOpen` never flips, the
+ * confirmation dialog never mounts, and the synchronous query for its
+ * «Remove credentials and re-pair» button fails outright. Nothing re-delivers
+ * the click, so waiting afterwards cannot recover it.
+ *
+ * On an idle machine the config read has almost always settled by the time
+ * `findByRole`'s first poll runs, which is why this only ever failed on a
+ * loaded runner. Waiting for the control to be ENABLED asserts the same thing
+ * the click assumed, just awaited instead of assumed.
+ */
+async function openResetCredentialConfirmation() {
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Re-pair this station" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Re-pair this station" }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+}
+
+/**
+ * Expands the floor status panel, waiting for the auto-collapse to settle first.
+ *
+ * `FloorShell` only offers the collapse toggle once the panel is collapsible at
+ * all (`statusBarCollapsible && shiftLabel !== null`), and it drives the
+ * automatic collapse from a PASSIVE EFFECT that fires the first time
+ * `shiftLabel` turns non-null. The rest of the floor -- the «Pause» button, box
+ * progress -- commits BEFORE that, so having awaited one of those proves
+ * nothing about this.
+ *
+ * The old synchronous `queryByRole` therefore raced the effect twice over: it
+ * could run before the toggle existed at all, or on the one commit where the
+ * toggle is present but the panel has not collapsed yet. Either way it matched
+ * nothing and returned having done nothing -- and the panel then collapsed a
+ * moment later, taking the operator name and the «Change operator» control with
+ * it (`StatusBar` renders both only while expanded), so the caller's very next
+ * query failed. Nothing re-expands it, so waiting afterwards cannot recover.
+ *
+ * `findByRole` waits for the toggle to exist; `await act(async () => {})` then
+ * closes the second window by construction. React flushes passive effects
+ * through the scheduler's `setImmediate` (check phase) while RTL's async
+ * wrapper hands control back after a `setTimeout(..., 0)` (timers phase), and
+ * timers run first -- so on a loaded runner `findByRole` can resume with the
+ * collapse still pending. `act` is resumed via `setImmediate` too, so it is
+ * queued strictly BEHIND that flush and cannot overtake it. The expand click
+ * itself is unchanged, and still conditional.
+ */
+async function expandStatusPanelIfCollapsed(language: "en" | "ru" = "en") {
+  const expandLabel = language === "ru" ? "Развернуть панель состояния" : "Expand status panel";
+  const collapseLabel = language === "ru" ? "Свернуть панель состояния" : "Collapse status panel";
+  await screen.findByRole("button", {
+    name: (name: string) => name === expandLabel || name === collapseLabel,
   });
+  await act(async () => {});
+  const button = screen.queryByRole("button", { name: expandLabel });
   if (button) fireEvent.click(button);
 }
 
@@ -800,7 +861,7 @@ async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
   await signInAsOperator();
   fireEvent.click(await screen.findByRole("button", { name: "Open" }));
   await waitFor(() => expect(screen.getByRole("button", { name: "Pause" })).toBeDefined());
-  expandStatusPanelIfCollapsed();
+  await expandStatusPanelIfCollapsed();
   if (pendingBoxPrint) {
     await screen.findByText("Printer is not configured");
   } else {
@@ -1120,7 +1181,7 @@ describe("App", () => {
 
       await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
       expect(await screen.findByRole("button", { name: "Pause" })).toBeDefined();
-      expandStatusPanelIfCollapsed();
+      await expandStatusPanelIfCollapsed();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
       const counters = within(screen.getByRole("region", { name: "Accepted, Rejected" }));
@@ -1170,7 +1231,7 @@ describe("App", () => {
       vi.useRealTimers();
       await signInAsOperator(SECOND_OPERATOR_LOGIN, SECOND_OPERATOR_PIN);
       expect(await screen.findByRole("button", { name: "Pause" })).toBeDefined();
-      expandStatusPanelIfCollapsed();
+      await expandStatusPanelIfCollapsed();
       expect(screen.getByText("Maria")).toBeDefined();
       await waitFor(() => expect(screen.getByTestId("box-progress").textContent).toBe("4 / 10"));
 
@@ -1383,7 +1444,7 @@ describe("App", () => {
       await signInAsOperator();
       await act(async () => i18n.changeLanguage("ru"));
       fireEvent.click(await screen.findByRole("button", { name: "Присоединиться" }));
-      expandStatusPanelIfCollapsed("ru");
+      await expandStatusPanelIfCollapsed("ru");
 
       // The normal sync request is held in the network phase. Recovery may
       // neither inspect the mirror nor start either bundle path until the
@@ -1401,7 +1462,7 @@ describe("App", () => {
         );
       });
       const retry = await screen.findByRole("button", { name: "Повторить восстановление" });
-      expandStatusPanelIfCollapsed("ru");
+      await expandStatusPanelIfCollapsed("ru");
       expect(referenceBundleAttempts).toBe(0);
       expect(normalBundleAttempts).toBe(0);
       expect(
@@ -1478,8 +1539,7 @@ describe("App", () => {
       expect(await screen.findByText("Printer is not configured")).toBeDefined();
 
       fireEvent.click(screen.getByRole("button", { name: "Set up printer" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
-      fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+      await openResetCredentialConfirmation();
 
       await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
       expect(screen.getByRole("button", { name: /fullscreen/ })).toHaveProperty("disabled", false);
@@ -1858,11 +1918,15 @@ describe("App", () => {
     render(<App />);
     await signInAsOperator();
     await waitFor(() => expect(shiftRequests).toBe(2));
-    expect(screen.getByTestId("server-status").textContent).toBe("Available");
+    // `shiftRequests` counts requests ISSUED. "Available" is published from the
+    // client's `onReachabilityChange` when the second one SETTLES -- a React
+    // state change a further turn later -- so the count proving the request went
+    // out says nothing about the status bar yet. Same assertion as before, just
+    // awaited, exactly like its twin further down.
+    await waitFor(() => expect(screen.getByTestId("server-status").textContent).toBe("Available"));
 
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+    await openResetCredentialConfirmation();
     await screen.findByText("Connect station");
     fireEvent.change(screen.getByLabelText("Pairing code"), { target: { value: "12345678" } });
     fireEvent.click(screen.getByRole("button", { name: "Pair station" }));
@@ -2611,8 +2675,7 @@ describe("App", () => {
     render(<App />);
     await signInAsOperator();
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+    await openResetCredentialConfirmation();
 
     await waitFor(() => expect(screen.getByText("Connect station")).toBeDefined());
     expect(invokeMock).toHaveBeenCalledWith("clear_credential");
@@ -3076,8 +3139,7 @@ describe("App", () => {
     render(<App />);
     await signInAsOperator();
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Re-pair this station" }));
-    fireEvent.click(screen.getByRole("button", { name: "Remove credentials and re-pair" }));
+    await openResetCredentialConfirmation();
 
     expect(
       await screen.findByText("Could not reset station credentials. Try again or contact support."),
