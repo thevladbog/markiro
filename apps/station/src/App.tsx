@@ -1297,7 +1297,15 @@ export function App() {
       stationName={config.deviceName ?? config.deviceId ?? config.machineId}
       lineName={config.lineName ?? null}
       operatorName={operator.name}
-      shiftLabel={shift ? (shiftContext?.productName ?? shift.id) : null}
+      shiftLabel={
+        shift
+          ? shiftContext
+            ? shiftContext.number
+              ? `${shiftContext.number} · ${shiftContext.productName}`
+              : shiftContext.productName
+            : shift.id
+          : null
+      }
       serverReachability={serverReachability}
       scanner={scannerIndicator(hardwareConfig, scannerStatus)}
       printerConfigured={hardwareConfig.printer !== null}
@@ -1395,6 +1403,7 @@ export function App() {
             productId={shiftContext.productId}
             productImage={shiftContext.image}
             counterpartyName={shiftContext.counterpartyName}
+            shiftNumber={shiftContext.number}
             plannedQty={shiftContext.plannedQty}
             source={scanSource}
             sound={sound}

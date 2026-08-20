@@ -97,6 +97,7 @@ describe("ShiftSelection", () => {
                 status: "planned",
                 mode: "validation",
                 productName: "Available now",
+                number: "AUG26-001",
                 plannedQty: 100,
                 productId: "product-available-now",
               },
@@ -112,6 +113,7 @@ describe("ShiftSelection", () => {
     fireEvent.click(screen.getByRole("button", { name: "Refresh shifts" }));
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Open" })).toBeDefined());
+    expect(await screen.findByText(/AUG26-001/)).toBeDefined();
   });
 
   it("keeps the empty screen static across a background poll", async () => {

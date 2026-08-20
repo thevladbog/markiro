@@ -18,6 +18,7 @@ const SHIFT_REFRESH_MS = 30_000;
 
 interface ShiftListItem {
   id: string;
+  number?: string | null;
   status: "planned" | "active" | "closed";
   mode: "validation" | "aggregation";
   productName: string | null;
@@ -290,6 +291,7 @@ export function ShiftSelection({
               {currentPage.items.map((shift) => (
                 <ShiftCard
                   key={shift.id}
+                  number={shift.number ?? null}
                   productName={shift.productName}
                   plannedDate={shift.plannedDate}
                   plannedQty={shift.plannedQty}
