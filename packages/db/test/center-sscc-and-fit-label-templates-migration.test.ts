@@ -22,16 +22,20 @@ function quoteIdentifier(identifier: string): string {
 
 /**
  * 0051 is the third and current force-overwrite of the five stock templates
- * (0049 seeded them, 0050 reseeded them). Its one change over 0050 is
- * `val-sscc` gaining `"align":"center"` — the second physical print's finding
- * that the barcode was centred but its human-readable digit line was not.
+ * (0049 seeded them, 0050 reseeded them). It carries the second physical
+ * print's two layout findings: `val-sscc` gains `"align":"center"` (the
+ * barcode was centred, its human-readable digit line was not), and the type
+ * on the two 100 mm templates is now FIT-DRIVEN rather than merely scaled —
+ * `pt()`'s whole-point rounding had pushed the caption row to 9 pt in a
+ * column that only fits 8, so «Дата производства:» and «Кол-во в упаковке:»
+ * printed ellipsized.
  *
  * The force-overwrite semantics are unchanged and re-asserted here rather than
  * inherited from 0050's test: a migration that stopped reaching hand-edited
  * rows, or started touching a tenant's own template, would be a production
  * behaviour change nobody asked for.
  */
-describe.skipIf(!databaseUrl)("center SSCC digits label templates migration", () => {
+describe.skipIf(!databaseUrl)("center SSCC and fit label templates migration", () => {
   const databaseName = `markiro_center_sscc_digits_${randomUUID().replaceAll("-", "_")}`;
   const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
   scratchUrl.pathname = `/${databaseName}`;
@@ -46,7 +50,7 @@ describe.skipIf(!databaseUrl)("center SSCC digits label templates migration", ()
   // do.
   async function runReseed(): Promise<void> {
     const sql = await readFile(
-      join(migrationsFolder, "0051_center_sscc_digits_label_templates.sql"),
+      join(migrationsFolder, "0051_center_sscc_and_fit_label_templates.sql"),
       "utf8",
     );
     for (const stmt of sql.split("--> statement-breakpoint")) {
@@ -68,7 +72,7 @@ describe.skipIf(!databaseUrl)("center SSCC digits label templates migration", ()
     await maintenancePool.end();
   });
 
-  it("centres the SSCC digit line in every tenant's seed-named templates, and nothing else", async () => {
+  it("centres the SSCC digit line and fits the captions, in every tenant's seed-named templates and nothing else", async () => {
     await pool.query(
       "INSERT INTO organization (id, name, slug, created_at) VALUES ('cs-a','A','cs-a',now()), ('cs-b','B','cs-b',now())",
     );
@@ -143,6 +147,13 @@ describe.skipIf(!databaseUrl)("center SSCC digits label templates migration", ()
     };
     expect(other.widthMm).toBe(100);
     expect(other.elements.find((el) => el.id === "val-sscc")?.align).toBe("center");
+    // ...and the 100 mm caption row now carries the FITTED 8 pt rather than
+    // the 9 pt proportional rounding gave it — the overflow this reseed
+    // exists to clear. 8 pt measures 27.94 mm in the 31.10 mm column; 9 pt
+    // measured 31.43 mm and was ellipsized by the emitters.
+    for (const id of ["cap-date", "cap-qty", "cap-expiry", "cap-egais"]) {
+      expect(other.elements.find((el) => el.id === id)?.fontSizePt, `${id} size`).toBe(8);
+    }
 
     // ...but a tenant's own template is not touched at all.
     expect(specs.get("904")).toEqual({ mine: true });

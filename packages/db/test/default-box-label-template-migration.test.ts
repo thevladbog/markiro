@@ -175,7 +175,7 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "0050_reseed_default_label_templates.sql"), {
       force: true,
     });
-    await rm(join(legacyMigrationsFolder, "0051_center_sscc_digits_label_templates.sql"), {
+    await rm(join(legacyMigrationsFolder, "0051_center_sscc_and_fit_label_templates.sql"), {
       force: true,
     });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
@@ -203,7 +203,7 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
         entry.tag !== "0048_product_shelf_life_days" &&
         entry.tag !== "0049_default_label_templates" &&
         entry.tag !== "0050_reseed_default_label_templates" &&
-        entry.tag !== "0051_center_sscc_digits_label_templates",
+        entry.tag !== "0051_center_sscc_and_fit_label_templates",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
     await writeFile(journalPath, JSON.stringify(journal));

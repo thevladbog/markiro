@@ -13,6 +13,7 @@ import {
   parseLabelTemplate,
   sampleLabelData,
   wrapTextToWidth,
+  WRAP_ELLIPSIS,
   type LabelField,
   type RasterResult,
   type RasterizeTextFn,
@@ -424,6 +425,109 @@ describe("buildDefaultLabelTemplates", () => {
     }
   });
 
+  /**
+   * THE GENERAL INVARIANT: nothing on any stock template is wider than the box
+   * it was given. This is the class-level guard for the defect the two 100 mm
+   * templates shipped with — «Дата производства:» and «Кол-во в упаковке:»
+   * both measured 31.43 mm in a 31.10 mm column and printed ellipsized —
+   * whose cause was NOT the wording but `pt()`'s whole-point rounding: at
+   * scale 100/58 a 5 pt caption wants 8.62 pt, `Math.round` gave it 9, and the
+   * column it lives in does not round up with it.
+   *
+   * Sizes are now derived from the fit (`fitPt` in `defaults.ts`), so this
+   * holds by construction — but only for as long as nobody replaces that with
+   * bare proportional scaling again, or adds a size where the arithmetic
+   * happens to be kind. Measured through `estimatedTextWidthMm`, the same
+   * predicate `wrap.ts` uses to decide whether to ellipsize, so "passes here"
+   * means "is not clipped there".
+   */
+  it("fits every element's estimated content inside its own box, at every size", () => {
+    // Sample data, plus the widest realistic value each field can carry: a
+    // five-digit pack count with its «шт.» unit and a full 19-digit alcocode.
+    const datasets: Array<[string, Record<LabelField, string>]> = [
+      ["sample", sampleLabelData()],
+      [
+        "widest",
+        { ...sampleLabelData(), qty: "10000", "product.egais": "0".repeat(19) } as Record<
+          LabelField,
+          string
+        >,
+      ],
+    ];
+
+    for (const [label, data] of datasets) {
+      for (const { name, spec } of buildDefaultLabelTemplates()) {
+        for (const el of spec.elements) {
+          if (el.kind !== "text" && el.kind !== "field") continue;
+          const text = el.kind === "text" ? el.text : labelFieldDisplayValue(el.field, data);
+          const box = el.maxWidthMm;
+          expect(box, `${name}/${el.id}: every element needs a width budget`).toBeGreaterThan(0);
+
+          const measure = (s: string) => estimatedTextWidthMm(s, el.fontSizePt);
+          const lines = wrapTextToWidth(text, measure, box!, el.maxLines ?? 1);
+          for (const line of lines) {
+            expect(measure(line), `${label} ${name}/${el.id}: "${line}"`).toBeLessThanOrEqual(box!);
+          }
+          // The product name is the ONE string with unbounded content: it is
+          // width-safe by wrapping to `maxLines` and, for a name longer than
+          // three lines, by a VISIBLE ellipsis. Everything else — every
+          // caption, every value — must print in full.
+          if (el.id === "name") continue;
+          expect(lines.length, `${label} ${name}/${el.id}: line count`).toBe(1);
+          expect(lines.join(""), `${label} ${name}/${el.id}: clipped`).not.toContain(WRAP_ELLIPSIS);
+          expect(measure(text), `${label} ${name}/${el.id}: "${text}" vs box`).toBeLessThanOrEqual(
+            box!,
+          );
+        }
+      }
+    }
+  });
+
+  /**
+   * ...and the fit must not be bought with illegibility. The five templates
+   * are one design at five sizes, so the type has to stay essentially
+   * proportional to the 58×40 base; the fit rule may only ever give back the
+   * one point `pt()`'s rounding took. A future caption long enough to need
+   * more than that is a wording problem, and this test says so out loud
+   * rather than letting the label shrink to 4 pt in silence.
+   */
+  it("keeps the fitted type within one point of the proportional size", () => {
+    const base: Record<string, number> = {
+      name: 10,
+      "cap-date": 5,
+      "cap-expiry": 5,
+      "cap-qty": 5,
+      "cap-egais": 5,
+      "val-sscc": 5,
+      "val-date": 8,
+      "val-expiry": 8,
+      "val-qty": 8,
+      "val-egais": 8,
+    };
+
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const scale = Math.min(spec.widthMm / 58, spec.heightMm / 40);
+      for (const el of spec.elements) {
+        if (el.kind !== "text" && el.kind !== "field") continue;
+        const proportional = Math.round(base[el.id]! * scale);
+        expect(el.fontSizePt, `${name}/${el.id}: above proportional`).toBeLessThanOrEqual(
+          proportional,
+        );
+        expect(el.fontSizePt, `${name}/${el.id}: shrunk to illegibility`).toBeGreaterThanOrEqual(
+          proportional - 1,
+        );
+        expect(el.fontSizePt, `${name}/${el.id}: model range`).toBeGreaterThanOrEqual(4);
+      }
+      // The three column captions are one row and must read as one row.
+      const captionSizes = new Set(
+        spec.elements
+          .filter((el) => ["cap-date", "cap-expiry", "cap-qty"].includes(el.id))
+          .map((el) => (el.kind === "text" ? el.fontSizePt : NaN)),
+      );
+      expect(captionSizes.size, `${name}: caption row has mixed sizes`).toBe(1);
+    }
+  });
+
   /** The bars got taller — the whole point of reclaiming the caption's row. */
   it("prints a taller barcode than the 3.5 mm the first physical label used", () => {
     for (const { name, spec } of buildDefaultLabelTemplates()) {
@@ -482,13 +586,13 @@ describe("buildDefaultLabelTemplates", () => {
    * HISTORICAL: it is what already-migrated databases received, and rewriting
    * it would rewrite history without changing a single production row. `0051`
    * is the migration that force-overwrites those rows with the current specs
-   * (the centred SSCC digit line), so it is the one that has to stay in step
-   * with this module — and this test must be repointed again by whoever adds
+   * (the centred SSCC digit line and the fit-driven type sizes), so it is the
+   * one that has to stay in step with this module — and this test must be repointed again by whoever adds
    * the next reseed.
    */
   it("matches the jsonb inlined into db migration 0051 (drift guard)", async () => {
     const sql = await readFile(
-      new URL("../../db/migrations/0051_center_sscc_digits_label_templates.sql", import.meta.url),
+      new URL("../../db/migrations/0051_center_sscc_and_fit_label_templates.sql", import.meta.url),
       "utf8",
     );
     const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({

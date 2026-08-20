@@ -57,7 +57,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0048_product_shelf_life_days.sql"));
     await rm(join(legacyMigrations, "0049_default_label_templates.sql"));
     await rm(join(legacyMigrations, "0050_reseed_default_label_templates.sql"));
-    await rm(join(legacyMigrations, "0051_center_sscc_digits_label_templates.sql"));
+    await rm(join(legacyMigrations, "0051_center_sscc_and_fit_label_templates.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -107,7 +107,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0048_product_shelf_life_days" &&
         entry.tag !== "0049_default_label_templates" &&
         entry.tag !== "0050_reseed_default_label_templates" &&
-        entry.tag !== "0051_center_sscc_digits_label_templates",
+        entry.tag !== "0051_center_sscc_and_fit_label_templates",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));
