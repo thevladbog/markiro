@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-20
 
-**Status:** Approved — pending implementation plan
+**Status:** Implemented — automated gates complete; hardware print acceptance pending
 
 **Scope:** Remove the visual (canvas) label editor from the admin app, keep a
 settings-form + code-import workflow; add `product.egais` and `expiry` label
