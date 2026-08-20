@@ -89,7 +89,7 @@ export class DisaggregationController {
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   cancel(@Req() req: RequestWithTenant, @Param("id", new ParseUUIDPipe()) id: string) {
-    return this.service.cancelDocument(req.tenantId!, id);
+    return this.service.cancelDocument(req.tenantId!, id, req.userId!);
   }
 
   @Post(":id/apply")

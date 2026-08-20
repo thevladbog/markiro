@@ -42,6 +42,7 @@ export interface DocumentDto {
   lineCount: number;
   codeCount: number;
   createdByUserId: string;
+  createdByName: string | null;
   createdAt: string;
   appliedAt: string | null;
   appliedByUserId: string | null;
@@ -60,6 +61,9 @@ export interface UpdateDocumentInput {
 export interface ListDocumentsFilters {
   status?: string;
   reasonId?: string;
+  docNo?: string;
+  from?: string;
+  to?: string;
   page: number;
 }
 
@@ -102,6 +106,9 @@ function buildListPath(filters: ListDocumentsFilters): string {
   const query = new URLSearchParams();
   if (filters.status) query.set("status", filters.status);
   if (filters.reasonId) query.set("reasonId", filters.reasonId);
+  if (filters.docNo) query.set("docNo", filters.docNo);
+  if (filters.from) query.set("from", filters.from);
+  if (filters.to) query.set("to", filters.to);
   query.set("page", String(filters.page));
   return `/disaggregation?${query.toString()}`;
 }

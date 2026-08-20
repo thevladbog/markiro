@@ -1,8 +1,9 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import { isDateOnly, toExclusiveEnd } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
 import type {
   BoxCardDto,
@@ -59,6 +60,36 @@ export class CodeSearchService {
     where poi.tenant_id = ${schema.codes.tenantId}
       and poi.voided = false
       and poi.km_key = '01' || ${schema.codes.gtin14} || '21' || ${schema.codes.serial})`;
+
+  /**
+   * Per-row correlated scalar subselects for the code's current box (Task
+   * "Registry listing performance", item b): each probes
+   * `box_items_tenant_code_idx` (`tenant_id, code_hash`) directly instead of
+   * joining a `DISTINCT ON` derived table built over ALL active `box_items`
+   * rows for the tenant. Same "at most one row, newest `added_at` wins"
+   * semantics and the same non-disassembled/active-row filters as the old
+   * derived table. Two separate subqueries (boxId, boxSscc) rather than one
+   * LATERAL join -- drizzle-orm has no first-class LATERAL join builder, and
+   * a pair of index-driven scalar subselects costs the planner the same one
+   * index probe per row either way.
+   */
+  private readonly currentBoxIdSql = sql<string | null>`(
+    select bi.box_id from ${schema.boxItems} bi
+    join ${schema.boxes} b on b.tenant_id = bi.tenant_id and b.id = bi.box_id
+    where bi.tenant_id = ${schema.codeRegistry.tenantId}
+      and bi.code_hash = ${schema.codeRegistry.codeHash}
+      and bi.displaced_at is null and bi.removed_at is null
+      and b.disassembled_at is null
+    order by bi.added_at desc limit 1)`;
+
+  private readonly currentBoxSsccSql = sql<string | null>`(
+    select b.sscc from ${schema.boxItems} bi
+    join ${schema.boxes} b on b.tenant_id = bi.tenant_id and b.id = bi.box_id
+    where bi.tenant_id = ${schema.codeRegistry.tenantId}
+      and bi.code_hash = ${schema.codeRegistry.codeHash}
+      and bi.displaced_at is null and bi.removed_at is null
+      and b.disassembled_at is null
+    order by bi.added_at desc limit 1)`;
 
   /**
    * `classifySearchInput` is pure (SSCC-vs-KM shape only); this is the one
@@ -124,36 +155,22 @@ export class CodeSearchService {
       when ${this.aggregatedSql} then 'aggregated'
       else 'free' end`;
 
-    const currentBox = this.db
-      .selectDistinctOn([schema.boxItems.codeHash], {
-        codeHash: schema.boxItems.codeHash,
-        boxId: schema.boxItems.boxId,
-        boxSscc: schema.boxes.sscc,
-      })
-      .from(schema.boxItems)
-      .innerJoin(
-        schema.boxes,
-        and(
-          eq(schema.boxes.tenantId, schema.boxItems.tenantId),
-          eq(schema.boxes.id, schema.boxItems.boxId),
-        ),
-      )
-      .where(
-        and(
-          eq(schema.boxItems.tenantId, tenantId),
-          sql`${schema.boxItems.displacedAt} is null`,
-          sql`${schema.boxItems.removedAt} is null`,
-          sql`${schema.boxes.disassembledAt} is null`,
-        ),
-      )
-      .orderBy(schema.boxItems.codeHash, desc(schema.boxItems.addedAt))
-      .as("current_box");
+    // A date-only `to` (the admin sends `YYYY-MM-DD`) coerces to midnight
+    // UTC via zod's `z.coerce.date()`, so a plain `lte` would exclude the
+    // whole day it names -- switch to an exclusive `lt` against the START OF
+    // THE NEXT DAY for that shape only; a `to` that already carries a real
+    // time-of-day keeps the inclusive `lte` it always had.
+    const toCondition = query.to
+      ? isDateOnly(query.to)
+        ? lt(schema.codeRegistry.scannedAt, toExclusiveEnd(query.to))
+        : lte(schema.codeRegistry.scannedAt, query.to)
+      : undefined;
 
     const where = and(
       eq(schema.codeRegistry.tenantId, tenantId),
       query.shiftId ? eq(schema.codeRegistry.shiftId, query.shiftId) : undefined,
       query.from ? gte(schema.codeRegistry.scannedAt, query.from) : undefined,
-      query.to ? lte(schema.codeRegistry.scannedAt, query.to) : undefined,
+      toCondition,
       query.productId ? eq(schema.products.id, query.productId) : undefined,
       query.status ? sql`(${statusSql}) = ${query.status}` : undefined,
     );
@@ -167,8 +184,8 @@ export class CodeSearchService {
         productName: schema.products.name,
         status: statusSql,
         scannedAt: schema.codeRegistry.scannedAt,
-        boxId: currentBox.boxId,
-        boxSscc: currentBox.boxSscc,
+        boxId: this.currentBoxIdSql,
+        boxSscc: this.currentBoxSsccSql,
       })
       .from(schema.codeRegistry)
       .innerJoin(
@@ -186,34 +203,43 @@ export class CodeSearchService {
           eq(schema.products.gtin14, schema.codes.gtin14),
         ),
       )
-      .leftJoin(currentBox, eq(currentBox.codeHash, schema.codeRegistry.codeHash))
       .where(where);
+
+    // The count only needs `codes` (status derives from it) -- `products`
+    // is pulled in only when a filter actually references it (either
+    // directly via `productId`, or because `status` is unfiltered and we
+    // still don't need `products` for that -- so really: only `productId`
+    // ever needs it). Neither `products` nor the old `current_box` derived
+    // table are needed here at all otherwise, since `total` never reads
+    // their columns.
+    let countQuery = this.db
+      .select({ total: sql<number>`count(*)`.mapWith(Number) })
+      .from(schema.codeRegistry)
+      .innerJoin(
+        schema.codes,
+        and(
+          eq(schema.codes.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.codes.codeHash, schema.codeRegistry.codeHash),
+          eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
+        ),
+      )
+      .$dynamic();
+    if (query.productId) {
+      countQuery = countQuery.leftJoin(
+        schema.products,
+        and(
+          eq(schema.products.tenantId, schema.codeRegistry.tenantId),
+          eq(schema.products.gtin14, schema.codes.gtin14),
+        ),
+      );
+    }
 
     const [rows, countRows] = await Promise.all([
       baseQuery
         .orderBy(sql`${schema.codeRegistry.scannedAt} desc, ${schema.codeRegistry.codeHash}`)
         .limit(PAGE_SIZE)
         .offset((query.page - 1) * PAGE_SIZE) as Promise<CodeListRow[]>,
-      this.db
-        .select({ total: sql<number>`count(*)`.mapWith(Number) })
-        .from(schema.codeRegistry)
-        .innerJoin(
-          schema.codes,
-          and(
-            eq(schema.codes.tenantId, schema.codeRegistry.tenantId),
-            eq(schema.codes.codeHash, schema.codeRegistry.codeHash),
-            eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
-          ),
-        )
-        .leftJoin(
-          schema.products,
-          and(
-            eq(schema.products.tenantId, schema.codeRegistry.tenantId),
-            eq(schema.products.gtin14, schema.codes.gtin14),
-          ),
-        )
-        .leftJoin(currentBox, eq(currentBox.codeHash, schema.codeRegistry.codeHash))
-        .where(where),
+      countQuery.where(where) as Promise<{ total: number }[]>,
     ]);
     const total = countRows[0]?.total ?? 0;
 
@@ -323,12 +349,14 @@ export class CodeSearchService {
         canonicalRaw: schema.codes.canonicalRaw,
         gtin14: schema.codes.gtin14,
         serial: schema.codes.serial,
+        shiftId: schema.codes.shiftId,
       })
       .from(schema.codes)
       .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, codeHash)));
 
     const raws = [...new Set(codeRows.map((r) => r.canonicalRaw))];
-    if (raws.length > 0) {
+    const shiftIds = [...new Set(codeRows.map((r) => r.shiftId))];
+    if (raws.length > 0 && shiftIds.length > 0) {
       // `scan_events.raw` is the ORIGINAL wire text (whatever the scanner
       // sent), while `codes.canonicalRaw` is `canonicalizeKm`'s output --
       // edge whitespace (space/tab) trimmed, then a leading `]d2` AIM
@@ -348,7 +376,13 @@ export class CodeSearchService {
           scannedAt: schema.scanEvents.scannedAt,
         })
         .from(schema.scanEvents)
-        .where(and(eq(schema.scanEvents.tenantId, tenantId), inArray(normalizedRaw, raws)));
+        .where(
+          and(
+            eq(schema.scanEvents.tenantId, tenantId),
+            inArray(schema.scanEvents.shiftId, shiftIds),
+            inArray(normalizedRaw, raws),
+          ),
+        );
       for (const r of scanRows) {
         events.push({
           type: "scanned",

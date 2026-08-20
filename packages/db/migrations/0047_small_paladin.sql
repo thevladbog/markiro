@@ -1,0 +1,1 @@
+CREATE INDEX "code_registry_tenant_scanned_idx" ON "code_registry" USING btree ("tenant_id","scanned_at");

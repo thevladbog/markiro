@@ -242,6 +242,7 @@ export const codeRegistry = pgTable(
   },
   (t) => [
     primaryKey({ columns: [t.tenantId, t.codeHash] }),
+    index("code_registry_tenant_scanned_idx").on(t.tenantId, t.scannedAt),
     check("code_registry_hash_check", sql`${t.codeHash} ~ '^[0-9a-f]{64}$'`),
     // Composite FK: shift_id must belong to the same tenant as the
     // registry row referencing it — same shape as shifts' own FKs to

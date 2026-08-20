@@ -20,6 +20,7 @@ export const listDocumentsQuerySchema = z.object({
   reasonId: z.string().uuid().optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
+  docNo: z.string().trim().min(1).max(40).optional(),
   page: z.coerce.number().int().min(1).default(1),
 });
 export type ListDocumentsQueryDto = z.infer<typeof listDocumentsQuerySchema>;
@@ -62,6 +63,7 @@ export interface DocumentDto {
   lineCount: number;
   codeCount: number;
   createdByUserId: string;
+  createdByName: string | null;
   createdAt: Date;
   appliedAt: Date | null;
   appliedByUserId: string | null;

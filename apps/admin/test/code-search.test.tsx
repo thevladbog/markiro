@@ -143,6 +143,21 @@ describe("CodeSearchPage", () => {
     expect(await screen.findByText("Код не распознан")).toBeTruthy();
   });
 
+  it("shows an inline alert for a well-formed but unknown code", async () => {
+    stubFetch({
+      list: { items: [], page: 1, pageCount: 1, total: 0 },
+      classify: { status: 404, body: { code: "not_found" } },
+    });
+    const { user } = renderPage();
+
+    await screen.findByText("Поиск кодов");
+    const input = screen.getByPlaceholderText("Введите SSCC или код маркировки");
+    await user.type(input, "000000000000000001");
+    await user.click(screen.getByRole("button", { name: "Найти" }));
+
+    expect(await screen.findByText("Ничего не найдено по этому запросу")).toBeTruthy();
+  });
+
   it("shows the generic failure alert for a server error, not the notFound copy", async () => {
     stubFetch({
       list: { items: [], page: 1, pageCount: 1, total: 0 },

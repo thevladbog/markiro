@@ -968,7 +968,7 @@
       "empty": "No codes found",
       "errors": {
         "unrecognized": "Code not recognized",
-        "notFound": "Nothing found for this query"
+        "not_found": "Nothing found for this query"
       },
       "status": {
         "free": "Free",
@@ -1274,7 +1274,11 @@
         },
         "reason": {
           "all": "All reasons"
-        }
+        },
+        "docNoLabel": "Document number",
+        "docNoPlaceholder": "Search by document number",
+        "fromLabel": "From",
+        "toLabel": "To"
       },
       "status": {
         "draft": "Draft",
@@ -1287,7 +1291,8 @@
         "status": "Status",
         "reason": "Reason",
         "lineCount": "Boxes",
-        "codeCount": "Codes"
+        "codeCount": "Codes",
+        "author": "Author"
       },
       "reasons": {
         "title": "Disaggregation reasons",

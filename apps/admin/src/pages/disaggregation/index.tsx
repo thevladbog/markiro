@@ -1,8 +1,19 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 
-import { Alert, Button, EmptyState, PageHeader, Select, Spinner, StatusChip, Table } from "@markiro/ui";
+import {
+  Alert,
+  Button,
+  DatePicker,
+  EmptyState,
+  Input,
+  PageHeader,
+  Select,
+  Spinner,
+  StatusChip,
+  Table,
+} from "@markiro/ui";
 import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
@@ -27,6 +38,9 @@ const STATUS_TO_CHIP: Record<Exclude<StatusFilter, "all">, StatusChipStatus> = {
   cancelled: "warn",
 };
 
+/** Debounce delay (ms) between the last keystroke in the docNo search box and the refetch -- mirrors `pages/catalog/index.tsx`'s pattern. */
+const SEARCH_DEBOUNCE_MS = 300;
+
 /**
  * Admin disaggregation document list (Task 9). Filterable summary table of
  * every disaggregation document (status/reason), mirroring
@@ -43,11 +57,24 @@ export function DisaggregationPage() {
 
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [reasonFilter, setReasonFilter] = useState<string>("all");
+  const [docNoInput, setDocNoInput] = useState("");
+  const [debouncedDocNo, setDebouncedDocNo] = useState("");
+  const [from, setFrom] = useState<string | undefined>(undefined);
+  const [to, setTo] = useState<string | undefined>(undefined);
   const [page, setPage] = useState(1);
+
+  // Debounce the free-text docNo search so typing doesn't refetch on every keystroke.
+  useEffect(() => {
+    const handle = setTimeout(() => setDebouncedDocNo(docNoInput.trim()), SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(handle);
+  }, [docNoInput]);
 
   const { data, isPending, isError } = useDocuments({
     ...(statusFilter !== "all" ? { status: statusFilter } : {}),
     ...(reasonFilter !== "all" ? { reasonId: reasonFilter } : {}),
+    ...(debouncedDocNo ? { docNo: debouncedDocNo } : {}),
+    ...(from ? { from } : {}),
+    ...(to ? { to } : {}),
     page,
   });
   const { data: reasonsData } = useDisaggregationReasons();
@@ -93,6 +120,11 @@ export function DisaggregationPage() {
     },
     { key: "lineCount", title: t("pages.disaggregation.table.lineCount"), align: "right" },
     { key: "codeCount", title: t("pages.disaggregation.table.codeCount"), align: "right" },
+    {
+      key: "createdByName",
+      title: t("pages.disaggregation.table.author"),
+      render: (row) => row.createdByName ?? "—",
+    },
   ];
 
   const handleCreate = () => {
@@ -138,6 +170,37 @@ export function DisaggregationPage() {
             value={reasonFilter}
             onValueChange={(value) => {
               setReasonFilter(value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div style={{ width: 220 }}>
+          <Input
+            label={t("pages.disaggregation.filters.docNoLabel")}
+            placeholder={t("pages.disaggregation.filters.docNoPlaceholder")}
+            value={docNoInput}
+            onChange={(event) => {
+              setDocNoInput(event.target.value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div style={{ width: 180 }}>
+          <DatePicker
+            label={t("pages.disaggregation.filters.fromLabel")}
+            {...(from !== undefined ? { value: from } : {})}
+            onValueChange={(value) => {
+              setFrom(value);
+              setPage(1);
+            }}
+          />
+        </div>
+        <div style={{ width: 180 }}>
+          <DatePicker
+            label={t("pages.disaggregation.filters.toLabel")}
+            {...(to !== undefined ? { value: to } : {})}
+            onValueChange={(value) => {
+              setTo(value);
               setPage(1);
             }}
           />
