@@ -43,6 +43,9 @@ export const session = pgTable(
   (table) => [index("session_userId_idx").on(table.userId)],
 );
 
+// PINS better-auth and @better-auth/api-key to 1.6.23: 1.7 expects an `issuer`
+// column on this table, which is not declared below. Adding the column plus its
+// migration is the prerequisite for moving those pins.
 export const account = pgTable(
   "account",
   {

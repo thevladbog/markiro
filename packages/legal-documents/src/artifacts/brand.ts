@@ -48,6 +48,10 @@ export function prepareDataMatrixMedia(svg: string): {
   readonly png: Uint8Array;
 } {
   const viewBox = /viewBox="0 0 (\d+) (\d+)"/.exec(svg);
+  // PINS bwip-js to 4.11.2: this regex requires `fill="#000000"` on the
+  // generated path, and 4.11.4 stopped emitting it. Upgrading without relaxing
+  // the match produces a subtly wrong barcode rather than a test failure, so
+  // re-verify a scanned Data Matrix before moving the pin.
   const path = /<path d="([^"]+)"[^>]*fill="#000000"[^>]*\/>/.exec(svg);
   if (!viewBox || !path) throw new Error("Literal Data Matrix SVG has unsupported geometry");
   const pathData = path[1];
