@@ -9,13 +9,14 @@ import {
   Alert,
   Button,
   Checkbox,
+  Combobox,
   DatePicker,
   Input,
   RadioGroup,
   Select,
   SidePanel,
 } from "@markiro/ui";
-import type { SelectOption } from "@markiro/ui";
+import type { ComboboxOption, SelectOption } from "@markiro/ui";
 
 import { errorProp } from "../../lib/form-error.js";
 import type { CounterpartyDto } from "../counterparties/api.js";
@@ -140,6 +141,8 @@ export function ShiftForm({
   const counterpartyTouchedRef = useRef(false);
   // Same contract as `counterpartyTouchedRef`, for the SSCC issuer select.
   const ssccIssuerTouchedRef = useRef(false);
+  // Same contract, for the line select -- gates the single-line auto-select.
+  const lineTouchedRef = useRef(false);
 
   const {
     control,
@@ -181,6 +184,7 @@ export function ShiftForm({
     lastPrefilledProductRef.current = formMode === "create" ? null : seeded.productId || null;
     counterpartyTouchedRef.current = false;
     ssccIssuerTouchedRef.current = false;
+    lineTouchedRef.current = false;
   }, [initialValues, reset, formMode]);
 
   // Product-change prefill (create mode only -- the product can't change once
@@ -223,6 +227,19 @@ export function ShiftForm({
     }
   }, [formMode, productId, products, counterparties, setValue]);
 
+  // With a single production line there is nothing to choose -- preselect it
+  // on create so the operator doesn't have to open the select at all. Guarded
+  // by the touched ref (not `dirtyFields`, same reasoning as the counterparty
+  // refs above) so an operator who explicitly cleared the line back to "none"
+  // isn't overridden by a background lines refetch.
+  useEffect(() => {
+    if (formMode !== "create" || lines.length !== 1) return;
+    if (lineTouchedRef.current) return;
+    const onlyLine = lines[0];
+    if (!onlyLine) return;
+    setValue("lineId", onlyLine.id);
+  }, [formMode, lines, setValue]);
+
   const submit = handleSubmit(async (values) => {
     const resolvedBoxLabelTemplateId = resolveBoxLabelTemplateId(
       values.boxLabelTemplateSelection,
@@ -256,24 +273,21 @@ export function ShiftForm({
     );
   });
 
-  const productOptions: SelectOption[] = [
-    { value: "", label: t("pages.shifts.form.productPlaceholder"), disabled: true },
-    ...products.map((product) => ({
-      value: product.id,
-      label:
-        product.status === "draft"
-          ? `${product.name} (${t("pages.shifts.form.draftHint")})`
-          : product.name,
-      disabled: product.status === "draft",
-    })),
-  ];
+  const productOptions: ComboboxOption[] = products.map((product) => ({
+    value: product.id,
+    label:
+      product.status === "draft"
+        ? `${product.name} (${t("pages.shifts.form.draftHint")})`
+        : product.name,
+    disabled: product.status === "draft",
+  }));
 
   const lineOptions: SelectOption[] = [
     { value: "", label: t("pages.shifts.form.noLine") },
     ...lines.map((line) => ({ value: line.id, label: line.name })),
   ];
 
-  const counterpartyOptions: SelectOption[] = [
+  const counterpartyOptions: ComboboxOption[] = [
     { value: "", label: t("pages.shifts.form.noCounterparty") },
     ...counterparties.map((counterparty) => ({
       value: counterparty.id,
@@ -366,11 +380,15 @@ export function ShiftForm({
         <section className="mk-shift-form__section">
           <h3>{t("pages.shifts.sections.product")}</h3>
           <div className="mk-shift-form__grid">
-            <Select
+            <Combobox
               label={t("pages.shifts.form.productLabel")}
               options={productOptions}
               value={productId}
               disabled={formMode === "edit"}
+              placeholder={t("pages.shifts.form.productPlaceholder")}
+              searchPlaceholder={t("pages.shifts.form.productSearchPlaceholder")}
+              emptyText={t("pages.shifts.form.productEmpty")}
+              loadingText={t("common.loading")}
               {...errorProp(translateFieldError(t, errors.productId?.message))}
               onValueChange={(value) =>
                 setValue("productId", value, { shouldDirty: true, shouldValidate: true })
@@ -436,13 +454,20 @@ export function ShiftForm({
               options={lineOptions}
               value={lineId ?? ""}
               {...(lines.length === 0 ? { hint: t("pages.shifts.form.noLinesHint") } : {})}
-              onValueChange={(value) => setValue("lineId", value, { shouldDirty: true })}
+              onValueChange={(value) => {
+                lineTouchedRef.current = true;
+                setValue("lineId", value, { shouldDirty: true });
+              }}
             />
-            <Select
+            <Combobox
               label={t("pages.shifts.form.counterpartyLabel")}
               options={counterpartyOptions}
               value={counterpartyId ?? ""}
               disabled={activeEdit}
+              placeholder={t("pages.shifts.form.noCounterparty")}
+              searchPlaceholder={t("pages.shifts.form.counterpartySearchPlaceholder")}
+              emptyText={t("pages.shifts.form.counterpartyEmpty")}
+              loadingText={t("common.loading")}
               onValueChange={(value) => {
                 counterpartyTouchedRef.current = true;
                 setValue("counterpartyId", value, { shouldDirty: true, shouldValidate: true });

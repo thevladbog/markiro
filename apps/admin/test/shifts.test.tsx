@@ -99,15 +99,21 @@ async function chooseOption(
   option: string,
 ) {
   const trigger = screen.getByRole("combobox", { name: label });
-  fireEvent.pointerDown(trigger, {
-    button: 0,
-    ctrlKey: false,
-    pageX: 0,
-    pageY: 0,
-    pointerId: 1,
-    pointerType: "mouse",
-  });
-  const optionElement = screen.getByRole("option", { name: option });
+  // The searchable Combobox (product / tolling counterparty) opens a popover
+  // on click; the Radix Select opens on pointerdown.
+  if (trigger.classList.contains("mk-combobox__trigger")) {
+    fireEvent.click(trigger);
+  } else {
+    fireEvent.pointerDown(trigger, {
+      button: 0,
+      ctrlKey: false,
+      pageX: 0,
+      pageY: 0,
+      pointerId: 1,
+      pointerType: "mouse",
+    });
+  }
+  const optionElement = await screen.findByRole("option", { name: option });
   fireEvent.click(optionElement);
   expect(trigger.textContent).toContain(option);
 }
@@ -692,10 +698,10 @@ describe("ShiftsPage", () => {
     const draftOption = screen.getByRole("option", {
       name: `${DRAFT_PRODUCT.name} (черновик — недоступно)`,
     });
-    expect(draftOption.getAttribute("data-disabled")).toBe("");
+    expect((draftOption as HTMLButtonElement).disabled).toBe(true);
 
     const activeOption = screen.getByRole("option", { name: PRODUCT_A.name });
-    expect(activeOption.getAttribute("data-disabled")).toBeNull();
+    expect((activeOption as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("prefills capacity inputs and preselects the counterparty when the product changes (aggregation mode)", async () => {

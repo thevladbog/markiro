@@ -159,6 +159,12 @@
   color: var(--fg-disabled);
 }
 
+.mk-date-picker__day[data-today="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
 .mk-date-picker__day[data-selected="true"] {
   background: var(--surface-inverse);
   color: var(--fg-on-inverse);
