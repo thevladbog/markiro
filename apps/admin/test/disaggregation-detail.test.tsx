@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import { createMemoryRouter, createRoutesFromElements, Route, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +106,42 @@ function stubFetch(doc: unknown) {
   return fetchMock;
 }
 
+/**
+ * Like `stubFetch`, but also wires up `POST /api/disaggregation/d1/apply`
+ * (using `applyResponse` verbatim -- pass a non-2xx `status` to exercise the
+ * 409 `invalid_lines` path) and lets the GET response change on refetch
+ * (`docAfter`, returned starting from the 2nd `GET /api/disaggregation/d1`)
+ * so a post-apply query invalidation can be observed picking up fresh line
+ * statuses.
+ */
+function stubFetchWithApply(options: {
+  doc: unknown;
+  applyResponse: { status: number; body: unknown };
+  docAfter?: unknown;
+}) {
+  let getCount = 0;
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    const path = String(url);
+    if (path.startsWith("/api/disaggregation-reasons")) {
+      return jsonResponse(200, REASONS);
+    }
+    if (path === "/api/disaggregation/d1/apply" && init?.method === "POST") {
+      return jsonResponse(options.applyResponse.status, options.applyResponse.body);
+    }
+    if (/^\/api\/disaggregation\/d1\/lines\/[^/]+$/.test(path) && init?.method === "DELETE") {
+      return jsonResponse(204, undefined);
+    }
+    if (path === "/api/disaggregation/d1") {
+      getCount += 1;
+      const body = getCount === 1 ? options.doc : (options.docAfter ?? options.doc);
+      return jsonResponse(200, body);
+    }
+    return jsonResponse(200, { items: [] });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return { fetchMock, getCount: () => getCount };
+}
+
 function renderPage(doc: unknown, access: AccessDocument = ACCESS_WRITE) {
   const fetchMock = stubFetch(doc);
   const router = createMemoryRouter(
@@ -128,6 +164,33 @@ function renderPage(doc: unknown, access: AccessDocument = ACCESS_WRITE) {
     </QueryClientProvider>,
   );
   return { router, user: userEvent.setup(), fetchMock };
+}
+
+function renderPageWithApply(
+  options: { doc: unknown; applyResponse: { status: number; body: unknown }; docAfter?: unknown },
+  access: AccessDocument = ACCESS_WRITE,
+) {
+  const { fetchMock, getCount } = stubFetchWithApply(options);
+  const router = createMemoryRouter(
+    createRoutesFromElements(
+      <Route path="/disaggregation/:id" element={<DisaggregationDocumentPage />} />,
+    ),
+    { initialEntries: ["/disaggregation/d1"] },
+  );
+  render(
+    <QueryClientProvider
+      client={
+        new QueryClient({
+          defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+        })
+      }
+    >
+      <AccessProvider value={access}>
+        <RouterProvider router={router} />
+      </AccessProvider>
+    </QueryClientProvider>,
+  );
+  return { router, user: userEvent.setup(), fetchMock, getCount };
 }
 
 afterEach(() => {
@@ -184,5 +247,59 @@ describe("DisaggregationDocumentPage", () => {
     expect(screen.queryByRole("button", { name: "Провести" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Добавить строки" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+  });
+
+  it("applies the document: confirming posts /apply and closes the dialog", async () => {
+    const { fetchMock, user } = renderPageWithApply({
+      doc: DOC_DRAFT_READY,
+      applyResponse: { status: 200, body: { ...DOC_DRAFT_READY, status: "applied" } },
+    });
+
+    await screen.findByText("DSG-26-0001");
+    await user.click(screen.getByRole("button", { name: "Провести" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/24/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "Провести" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/disaggregation/d1/apply",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+
+    expect(await screen.findByText("Документ проведён")).toBeTruthy();
+  });
+
+  it("shows applyBlocked on a 409 invalid_lines response and refetches the document", async () => {
+    const docAfter = { ...DOC_DRAFT_READY, lines: [LINE_OK_1, LINE_WRITTEN_OFF] };
+    const { fetchMock, user, getCount } = renderPageWithApply({
+      doc: DOC_DRAFT_READY,
+      applyResponse: { status: 409, body: { code: "invalid_lines", message: "Invalid lines" } },
+      docAfter,
+    });
+
+    await screen.findByText("DSG-26-0001");
+    await user.click(screen.getByRole("button", { name: "Провести" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    await user.click(within(dialog).getByRole("button", { name: "Провести" }));
+
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/disaggregation/d1/apply",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+
+    expect(
+      await screen.findByText("Часть строк изменила статус и не готова к проведению. Проверьте таблицу ниже."),
+    ).toBeTruthy();
+
+    await waitFor(() => expect(getCount()).toBeGreaterThanOrEqual(2));
+    expect(await screen.findByText("Списан/выдан через киоск")).toBeTruthy();
   });
 });
