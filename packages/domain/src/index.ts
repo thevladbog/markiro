@@ -25,6 +25,7 @@ export {
   mmToDots,
   parseLabelTemplate,
   ptToDots,
+  QTY_UNIT_SUFFIX,
   sampleLabelData,
 } from "./labels/model.js";
 export { formatLabelDate, LABEL_DATE_FORMAT } from "./labels/date.js";

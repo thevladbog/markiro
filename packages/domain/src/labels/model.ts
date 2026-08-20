@@ -222,17 +222,47 @@ export function sampleLabelData(): Record<LabelField, string> {
 }
 
 /**
- * Resolves a `field` element's display text. The one field-specific rule
- * lives here: `sscc` renders in GS1 HRI form `(00)…` — the barcode emitters
- * already add the AI to the encoded data, and Chestny ZNAK requires the
- * human-readable form to show it too. Tolerant by design: preview/generation
- * may run with empty or arbitrary data, so a value that isn't 18 digits is
- * returned unchanged rather than throwing.
+ * The unit appended to a plain numeric `qty` — «шт.», Russian for "pieces".
+ * The customer-approved paper mock-up reads «5 шт.», and the first physical
+ * print shipped a bare `5`.
+ */
+export const QTY_UNIT_SUFFIX = "шт.";
+
+/**
+ * Resolves a `field` element's display text — the ONE display-formatting
+ * layer, shared by `zpl.ts`, `tspl.ts`, `bounds.ts` and (through
+ * `bounds.ts`/`renderer.ts`) the admin preview, so a formatting rule added
+ * here is automatically accounted for by the width heuristic and stays
+ * WYSIWYG instead of having to be re-implemented per consumer.
+ *
+ * Two field-specific rules live here:
+ *
+ * - `sscc` renders in GS1 HRI form `(00)…` — the barcode emitters already add
+ *   the AI to the encoded data, and Chestny ZNAK requires the human-readable
+ *   form to show it too.
+ * - `qty` gains the unit «шт.» — a box label's quantity is a count of pieces
+ *   and the approved mock-up prints the unit; a bare `5` is what the first
+ *   physical print got wrong.
+ *
+ * Both are TOLERANT by design: preview/generation may run with empty or
+ * arbitrary data, so anything that does not match the expected shape is
+ * returned unchanged rather than throwing. For `qty` that guard is what makes
+ * the suffix non-doubling and non-destructive: only a value that is ENTIRELY
+ * decimal digits (modulo surrounding whitespace) is suffixed, so `""` stays
+ * empty, `"5 шт."` — already carrying the unit — is passed through as-is
+ * rather than becoming `"5 шт. шт."`, and a free-form value such as
+ * `"12 кг"` or `"~5"` keeps whatever the operator/integration actually put
+ * there.
  */
 export function labelFieldDisplayValue(
   field: LabelField,
   data: Record<LabelField, string>,
 ): string {
   const value = data[field] ?? "";
-  return field === "sscc" && /^\d{18}$/.test(value) ? formatSsccHri(value) : value;
+  if (field === "sscc" && /^\d{18}$/.test(value)) return formatSsccHri(value);
+  if (field === "qty") {
+    const digits = value.trim();
+    if (/^\d+$/.test(digits)) return `${digits} ${QTY_UNIT_SUFFIX}`;
+  }
+  return value;
 }
