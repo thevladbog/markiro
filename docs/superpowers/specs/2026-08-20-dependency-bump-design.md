@@ -43,8 +43,9 @@ and "Failure handling" below for why).
    from `pnpm-workspace.yaml`. Activating them is overdue but deliberately NOT
    done here: the quarantine changes what a range resolves to, so folding it in
    would leave two candidate causes for any breakage. Separate branch.
-5. **One pull request.** With no majors involved and a full CI gate, bisecting
-   the lockfile on failure is cheaper than carrying several branches.
+5. **One pull request.** With the guard holding every major in place and a full
+   CI gate behind it, bisecting the lockfile on failure is cheaper than
+   carrying several branches.
 
 ## What changes
 
