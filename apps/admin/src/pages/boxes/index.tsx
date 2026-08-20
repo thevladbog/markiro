@@ -144,6 +144,9 @@ export function BoxesPage() {
 /** Short, human-identifiable label for a shift filter option -- mirrors conflicts/index.tsx's. */
 function shiftLabel(shift: ShiftDto, language: string): string {
   const date = shift.plannedDate ? formatDate(shift.plannedDate, language) : null;
-  if (date && shift.productName) return `${date} — ${shift.productName}`;
-  return shift.productName ?? date ?? shift.id;
+  const dateAndProduct =
+    date && shift.productName
+      ? `${date} — ${shift.productName}`
+      : (shift.productName ?? date ?? shift.id);
+  return `${shift.number} · ${dateAndProduct}`;
 }

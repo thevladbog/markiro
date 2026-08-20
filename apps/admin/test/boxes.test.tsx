@@ -67,6 +67,7 @@ const EMPLOYEE = { id: "emp1", fullName: "Иван Иванов", role: null, st
 // actually read) -- mirrors conflicts.test.tsx's SHIFT_S1/SHIFT_S2.
 const SHIFT_S1 = {
   id: "s1",
+  number: "JUL26-001",
   status: "active",
   mode: "validation",
   productId: "p1",
@@ -97,6 +98,7 @@ const SHIFT_S1 = {
 const SHIFT_S2 = {
   ...SHIFT_S1,
   id: "s2",
+  number: "JUL26-002",
   productName: "Sprite",
   plannedDate: "2026-07-29",
   createdAt: "2026-07-29T09:00:00.000Z",
@@ -240,7 +242,7 @@ describe("BoxesPage", () => {
     });
 
     await user.click(screen.getByRole("combobox", { name: "Смена" }));
-    await user.click(await screen.findByRole("option", { name: "28.07.2026 — Cola" }));
+    await user.click(await screen.findByRole("option", { name: "JUL26-001 · 28.07.2026 — Cola" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith("/api/boxes?shiftId=s1", expect.any(Object));
@@ -255,8 +257,8 @@ describe("BoxesPage", () => {
     await user.click(screen.getByRole("combobox", { name: "Смена" }));
     await user.type(screen.getByRole("searchbox", { name: "Поиск смены" }), "29.07.2026");
 
-    expect(screen.getByRole("option", { name: "29.07.2026 — Sprite" })).toBeDefined();
-    expect(screen.queryByRole("option", { name: "28.07.2026 — Cola" })).toBeNull();
+    expect(screen.getByRole("option", { name: "JUL26-002 · 29.07.2026 — Sprite" })).toBeDefined();
+    expect(screen.queryByRole("option", { name: "JUL26-001 · 28.07.2026 — Cola" })).toBeNull();
     expect(formatDate(SHIFT_S1.plannedDate!, "ru")).toBe("28.07.2026");
   });
 });
