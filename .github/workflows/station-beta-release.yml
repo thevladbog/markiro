@@ -14,7 +14,7 @@ on:
         required: true
         type: choice
         default: next-beta
-        options: [next-beta, next-patch-beta, next-minor-beta]
+        options: [next-beta, next-patch-beta, next-minor-beta, next-major-beta]
 
 permissions:
   contents: read
@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "${{ inputs.bump }}" = "next-beta" -o "${{ inputs.bump }}" = "next-patch-beta" -o "${{ inputs.bump }}" = "next-minor-beta"
+          test "${{ inputs.bump }}" = "next-beta" -o "${{ inputs.bump }}" = "next-patch-beta" -o "${{ inputs.bump }}" = "next-minor-beta" -o "${{ inputs.bump }}" = "next-major-beta"
           tag="$(gh release list --repo "$GITHUB_REPOSITORY" --prerelease --limit 100 --json tagName,isDraft --jq '[.[] | select(.isDraft == false) | select(.tagName | test("^station-v[0-9]+\\.[0-9]+\\.[0-9]+-beta\\.[0-9]+$"))] | sort_by(.tagName | capture("^station-v(?<major>[0-9]+)\\.(?<minor>[0-9]+)\\.(?<patch>[0-9]+)-beta\\.(?<beta>[0-9]+)$") | [.major|tonumber, .minor|tonumber, .patch|tonumber, .beta|tonumber]) | last | .tagName')"
           test -n "$tag"
           version="${tag#station-v}"

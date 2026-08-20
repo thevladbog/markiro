@@ -117,8 +117,8 @@ Windows.
 
 ## Публикация и повторное продвижение
 
-Для новой версии выберите `mode=publish` и `next-beta`, `next-patch-beta` или
-`next-minor-beta`. Workflow собирает подписанный NSIS-пакет, проверяет
+Для новой версии выберите `mode=publish` и `next-beta`, `next-patch-beta`,
+`next-minor-beta` или `next-major-beta`. Workflow собирает подписанный NSIS-пакет, проверяет
 `latest.json`, SHA-256, подпись и commit digest, затем публикует immutable
 `station-v…-beta.N` и обновляет mutable `station-beta-channel/latest.json`.
 

@@ -9,7 +9,7 @@ const execFile = promisify(execFileCallback);
 export const STATION_TAG_PREFIX = "station-v";
 const STATION_BETA_TAG = /^station-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.([1-9]\d*)$/;
 const STATION_BETA_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-beta\.([1-9]\d*)$/;
-const BUMPS = new Set(["next-beta", "next-patch-beta", "next-minor-beta"]);
+const BUMPS = new Set(["next-beta", "next-patch-beta", "next-minor-beta", "next-major-beta"]);
 
 function invalid(message = "invalid station beta version") {
   throw new Error(message);
@@ -62,6 +62,10 @@ export function nextStationBetaVersion(tags, bump) {
     patch = ensureSafeIncrement(patch);
   } else if (bump === "next-minor-beta") {
     minor = ensureSafeIncrement(minor);
+    patch = 0;
+  } else if (bump === "next-major-beta") {
+    major = ensureSafeIncrement(major);
+    minor = 0;
     patch = 0;
   }
   const beta = bump === "next-beta" ? ensureSafeIncrement(highest.beta) : 1;

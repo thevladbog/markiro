@@ -31,6 +31,7 @@ test("applies every approved beta bump and ignores unrelated tags", () => {
   assert.equal(nextStationBetaVersion(tags, "next-beta"), "0.1.0-beta.3");
   assert.equal(nextStationBetaVersion(tags, "next-patch-beta"), "0.1.1-beta.1");
   assert.equal(nextStationBetaVersion(tags, "next-minor-beta"), "0.2.0-beta.1");
+  assert.equal(nextStationBetaVersion(tags, "next-major-beta"), "1.0.0-beta.1");
   assert.throws(() => nextStationBetaVersion(tags, "major"), /invalid station beta bump/);
 });
 
