@@ -19,6 +19,7 @@ import { OperatorsModule } from "./modules/operators/operators.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
 import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
 import { DisaggregationReasonsModule } from "./modules/disaggregation-reasons/disaggregation-reasons.module";
+import { DisaggregationModule } from "./modules/disaggregation/disaggregation.module";
 import { IntegrationsModule } from "./modules/integrations/integrations.module";
 import { ApiKeysModule } from "./modules/api-keys/api-keys.module";
 import { ExchangeModule } from "./modules/exchange/exchange.module";
@@ -108,6 +109,7 @@ export class AppModule {
         KiosksModule,
         PickupReasonsModule,
         DisaggregationReasonsModule,
+        DisaggregationModule,
         IntegrationsModule,
         ApiKeysModule,
         ExchangeModule,
