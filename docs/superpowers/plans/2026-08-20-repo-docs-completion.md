@@ -4,7 +4,7 @@
 
 **Goal:** Close the documentation gaps around the finished bilingual README: community files (SECURITY/CONTRIBUTING/SUPPORT), GitHub templates, CODEOWNERS, and license metadata in all 12 package manifests.
 
-**Architecture:** Pure documentation/metadata change. New Markdown files at the repo root and under `.github/`, targeted edits to both READMEs, and a `license` field added to all 13 `package.json` files. No runtime code changes.
+**Architecture:** Pure documentation/metadata change. New Markdown files at the repo root and under `.github/`, targeted edits to both READMEs, and a `license` field added to all 12 `package.json` files. No runtime code changes.
 
 **Tech Stack:** Markdown, GitHub issue forms (YAML), npm package.json metadata, prettier for formatting checks.
 
@@ -431,12 +431,11 @@ const files = ["package.json",
   ...["db","domain","email","legal-documents","ui"].map(p => `packages/${p}/package.json`)];
 for (const f of files) {
   const j = JSON.parse(fs.readFileSync(f, "utf8"));
-  if (!j.license) {
-    const entries = Object.entries(j);
-    const idx = entries.findIndex(([k]) => k === "private");
-    entries.splice(idx + 1, 0, ["license", "SEE LICENSE IN LICENSE"]);
-    fs.writeFileSync(f, JSON.stringify(Object.fromEntries(entries), null, 2) + "\n");
-  }
+  if (j.license === "SEE LICENSE IN LICENSE") continue;
+  const entries = Object.entries(j).filter(([k]) => k !== "license");
+  const idx = entries.findIndex(([k]) => k === "private");
+  entries.splice(idx + 1, 0, ["license", "SEE LICENSE IN LICENSE"]);
+  fs.writeFileSync(f, JSON.stringify(Object.fromEntries(entries), null, 2) + "\n");
 }
 '
 ```
@@ -477,5 +476,15 @@ Expected: all eight paths listed, no errors.
 
 - [ ] **Step 3: Confirm README links resolve**
 
-Run: `grep -o '(\./[A-Z][A-Z_]*\.md)' README.md README.ru.md | sort -u`
-Expected: `(./CONTRIBUTING.md)`, `(./SECURITY.md)`, `(./SUPPORT.md)` present for both files, and each target exists.
+Run:
+
+```bash
+for f in README.md README.ru.md; do
+  for t in CONTRIBUTING.md SECURITY.md SUPPORT.md; do
+    grep -q "(\./$t)" "$f" || { echo "missing link to $t in $f"; exit 1; }
+    [ -f "$t" ] || { echo "missing target $t"; exit 1; }
+  done
+done && echo LINKS_OK
+```
+
+Expected: `LINKS_OK` (the loop exits non-zero naming the first missing per-file link or missing target).
