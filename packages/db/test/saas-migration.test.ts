@@ -52,6 +52,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0043_station_shift_close_presence.sql"));
     await rm(join(legacyMigrations, "0044_landing_demo_email.sql"));
     await rm(join(legacyMigrations, "0045_flawless_overlord.sql"));
+    await rm(join(legacyMigrations, "0046_yummy_morph.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -68,6 +69,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "meta", "0043_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0044_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0045_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0046_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -89,7 +91,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0042_default_box_label_template" &&
         entry.tag !== "0043_station_shift_close_presence" &&
         entry.tag !== "0044_landing_demo_email" &&
-        entry.tag !== "0045_flawless_overlord",
+        entry.tag !== "0045_flawless_overlord" &&
+        entry.tag !== "0046_yummy_morph",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));
