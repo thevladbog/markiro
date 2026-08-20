@@ -4,6 +4,7 @@ import i18n from "../src/i18n/index.js";
 import { createStationClient } from "../src/lib/api-client.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { NewShift } from "../src/pages/NewShift.js";
+import { useTimeZone } from "./support/timezone.js";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -300,7 +301,16 @@ describe("NewShift", () => {
     expect(messageSlot.textContent).toContain("Invalid GTIN");
   });
 
+  // The clock is frozen on a UTC/local straddle: 21:30 UTC on the 14th is
+  // already the 15th in Moscow. That pins the semantics -- a `currentLocalDate`
+  // that reached for the UTC day would send "2026-08-14" and fail here -- and
+  // it retires the old relative derivation, which recomputed "today" after the
+  // interaction and so disagreed with the request whenever a run crossed local
+  // midnight.
   it("resolves a known GTIN, creates + opens a validation shift", async () => {
+    useTimeZone("Europe/Moscow");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T21:30:00.000Z"));
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       // POST /products/gtin-check
@@ -347,18 +357,12 @@ describe("NewShift", () => {
       ),
     );
 
-    const now = new Date();
-    const expectedLocalDate = [
-      now.getFullYear(),
-      String(now.getMonth() + 1).padStart(2, "0"),
-      String(now.getDate()).padStart(2, "0"),
-    ].join("-");
     const createRequest = fetchSpy.mock.calls[2];
     expect(createRequest?.[0]).toBe("http://localhost:3000/shifts");
     expect(JSON.parse(createRequest?.[1]?.body as string)).toEqual({
       productId: "p1",
       mode: "validation",
-      plannedDate: expectedLocalDate,
+      plannedDate: "2026-08-15",
     });
   });
 
@@ -440,7 +444,12 @@ describe("NewShift", () => {
     expect(onStarted).not.toHaveBeenCalled();
   });
 
+  // `plannedDate` is the station's LOCAL calendar day, so freezing the clock is
+  // only half the job: 12:00 UTC is still the 14th in Moscow but already the
+  // 15th in Kiritimati (UTC+14), which would fail the body assertion below.
+  // Pinning the zone makes the literal date mean one thing everywhere.
   it("keeps aggregation on the found product, explains missing box labels in English, and retries after configuration", async () => {
+    useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
     const fetchMock = vi
