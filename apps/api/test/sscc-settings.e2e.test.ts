@@ -5,7 +5,7 @@ import request from "supertest";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildSscc, gs1CheckDigit } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
@@ -636,6 +636,163 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
           .set({ revokedAt: null })
           .where(eq(schema.stationDevices.id, deviceId));
       }
+    });
+  });
+
+  // Task 4 review, Finding 1: `seedCounter`'s pre-write read of the current
+  // counter value used to take no row lock, while the lock on
+  // `sscc_counters` was only taken a few lines later, inside
+  // `atomicSeedSscc`. A concurrent `allocate()` could commit in that window:
+  // the read would still see the PRE-allocation value, `atomicSeedSscc`
+  // would accept the write anyway (its own re-validation floor is
+  // PRINTED-only, by design, and nothing had been printed), and the revoke
+  // check (`current.nextSerial === dto.nextSerial`) would then compare two
+  // copies of the same stale number and conclude "no change" -- skipping
+  // revocation of the live block `allocate()` had just handed a device. The
+  // fix adds `.for("update")` to that read.
+  //
+  // Reproducing this deterministically (no `setTimeout`/sleep race) requires
+  // a REAL held Postgres transaction, because the bug is specifically about
+  // whether a read blocks on another transaction's row lock -- something a
+  // purely sequential test cannot exercise: run the statements in any fixed
+  // order and there is no window left for the race to fall into. So this
+  // holds a genuine `allocate()` transaction open across an `await`, and
+  // uses `pg_locks` (not a timer) to confirm `seedCounter`'s own locked read
+  // has actually queued behind it before releasing -- the DB's own lock
+  // state is the synchronization signal, not wall-clock timing.
+  describe("seedCounter locked read vs a concurrent allocate (final review, finding 1)", () => {
+    let counter = 0;
+    function freshGln(): string {
+      counter += 1;
+      const body = `50${String(counter).padStart(7, "0")}000`;
+      return body + String(gs1CheckDigit(body));
+    }
+
+    beforeEach(async () => {
+      await db
+        .update(schema.stationDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(schema.stationDevices.id, deviceId));
+    });
+
+    /**
+     * Polls `pg_stat_activity` for a backend whose current query names
+     * `queryFragment` and is waiting on `wait_event_type = 'Lock'` -- i.e.
+     * some other session is genuinely queued behind a lock while running
+     * that query. `pg_locks` alone does NOT surface this: a session blocked
+     * on `SELECT ... FOR UPDATE` waits on a `transactionid`-type lock (the
+     * blocker's own transaction ID), not a `relation`-type one, so joining
+     * `pg_locks` to `pg_class` on the target table -- the obvious first
+     * approach -- silently finds nothing and this poll would never resolve.
+     * `pg_stat_activity`'s `wait_event_type` reports the wait regardless of
+     * lock type, which is why it's used here instead. The 20ms polling
+     * interval only affects how quickly the poll notices the state change;
+     * the assertion itself waits on that DB-visible state, not on a fixed
+     * delay, so it does not flake under CI scheduling jitter the way a
+     * "sleep N ms and hope" approach would.
+     */
+    async function waitForBlockedLockRequest(
+      queryFragment: string,
+      timeoutMs = 5000,
+    ): Promise<void> {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const res = await db.execute<{ count: string }>(sql`
+          SELECT count(*)::text AS count
+          FROM pg_stat_activity
+          WHERE wait_event_type = 'Lock'
+            AND query ILIKE ${`%${queryFragment}%`}
+            AND pid <> pg_backend_pid()
+        `);
+        if (Number(res.rows[0]?.count ?? "0") > 0) return;
+        if (Date.now() > deadline) {
+          throw new Error(`Timed out waiting for a blocked query mentioning "${queryFragment}"`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+
+    it("revokes the device's block instead of silently skipping it when a concurrent allocate advances the counter first", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+
+      // Seed once so `sscc_counters` already has a row -- `FOR UPDATE` locks
+      // nothing on a row that doesn't exist yet (see this test's sibling
+      // "seeds freely" case for that path; it needs no lock because the
+      // `current == null` branch already revokes unconditionally).
+      const preAllocationValue = 500;
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: preAllocationValue })
+        .expect(200);
+
+      // Hold a REAL allocate() transaction open on this counter's row: its
+      // own upsert acquires the row lock immediately, `lockAcquired` fires
+      // the instant that statement returns (guaranteeing the lock is held
+      // by the time we proceed), and the transaction then parks on `held`
+      // -- keeping the lock in place -- until this test releases it below.
+      let lockAcquired!: () => void;
+      const lockAcquiredPromise = new Promise<void>((resolve) => {
+        lockAcquired = resolve;
+      });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const allocatePromise = db.transaction(async (tx) => {
+        const block = await service.allocate(tenantId, prefix, 0, deviceId, 2000, tx);
+        lockAcquired();
+        await held;
+        return block;
+      });
+
+      await lockAcquiredPromise;
+
+      // seedCounter submits the value the counter held BEFORE the concurrent
+      // allocate above -- exactly the stale value an unlocked read would
+      // have produced. Its `findSeedBlocker`/`seedFloor` reads don't touch
+      // `sscc_counters`, so its own locked read is the first thing it does
+      // that can collide with the lock `allocate()` is holding; started but
+      // deliberately not awaited yet, so it can queue behind that lock.
+      const seedPromise = service.seedCounter(tenantId, prefix, {
+        extensionDigit: 0,
+        nextSerial: preAllocationValue,
+      });
+
+      // Confirms seedCounter's locked read is now genuinely queued behind
+      // allocate()'s held lock, before we let that lock go -- proving the
+      // fix's `.for("update")` is what's blocking it, not coincidence.
+      await waitForBlockedLockRequest("sscc_counters");
+
+      release();
+      const block = await allocatePromise;
+      const result = await seedPromise;
+
+      // The write itself is allowed to land (by design -- `seedFloor` only
+      // tracks PRINTED serials, and nothing was printed here), but with the
+      // locked read now seeing the POST-allocation counter value (not the
+      // stale pre-allocation one this admin submitted), `current.nextSerial
+      // !== dto.nextSerial` holds and the block allocate() just handed the
+      // device must be revoked -- closing exactly the hole Finding 1
+      // describes, instead of silently leaving a live block over a range
+      // the counter can now hand out again.
+      expect(result.nextSerial).toBe(preAllocationValue);
+
+      const liveBlocks = await db
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, prefix),
+            eq(schema.ssccBlocks.extensionDigit, 0),
+            isNull(schema.ssccBlocks.revokedAt),
+          ),
+        );
+      expect(liveBlocks).toHaveLength(0);
+      expect(block.fromSerial).toBe(preAllocationValue);
     });
   });
 });

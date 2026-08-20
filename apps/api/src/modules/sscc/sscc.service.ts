@@ -213,6 +213,12 @@ export async function findSeedBlocker(
     })
     .from(schema.shifts)
     .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.status, "active")))
+    // Deterministic order: with two active shifts (shouldn't normally
+    // happen, but nothing here prevents it), an unordered `.limit(1)` can
+    // return a different row on each call, and the admin UI's "close shift
+    // N" message would then flip between page refreshes. Ordering by
+    // `numberSeq` pins the answer to the same shift every time.
+    .orderBy(schema.shifts.numberSeq)
     .limit(1);
   if (active) {
     return {
@@ -383,6 +389,26 @@ export class SsccService {
         throw new BadRequestException({ code: "sscc_seed_below_floor", minSerial: floor });
       }
 
+      // Locked (`FOR UPDATE`), not a plain read: without the lock, a
+      // concurrent `allocate()` can commit between this read and
+      // `atomicSeedSscc` below. `allocate()`'s own row lock (inside its
+      // upsert) would then block until we commit, but OUR read here takes no
+      // lock, so it is the one that can be beaten -- we'd read the
+      // pre-allocation value, `atomicSeedSscc` would re-validate only
+      // against `MAX(consumed_through_serial) + 1` (printed serials, by
+      // design -- allocated-but-unprinted ranges don't move that floor) and
+      // accept a write that re-issues a range `allocate()` just handed out
+      // live to a device, and the `current.nextSerial !== dto.nextSerial`
+      // check below would then see no apparent change and skip revoking that
+      // device's block -- leaving a live block over the very range we just
+      // silently reused. Locking this read closes the window: it blocks
+      // until any in-flight `allocate()` on this counter commits, so we
+      // always compare against the post-allocation value.
+      //
+      // When no counter row exists yet, `FOR UPDATE` locks nothing (there is
+      // no row to lock), but that is fine: the `current == null` arm of the
+      // check below already takes the revoke branch unconditionally in that
+      // case, so the outcome stays safe either way.
       const [current] = await tx
         .select({ nextSerial: schema.ssccCounters.nextSerial })
         .from(schema.ssccCounters)
@@ -392,8 +418,8 @@ export class SsccService {
             eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
             eq(schema.ssccCounters.extensionDigit, dto.extensionDigit),
           ),
-        );
-
+        )
+        .for("update");
       const applied = await atomicSeedSscc(
         tx,
         tenantId,
