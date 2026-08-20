@@ -489,4 +489,35 @@ describe("mirrorShiftBundle", () => {
     await mirrorShiftBundle({ get }, exec, "s1");
     expect(await burnSerial(exec, "460123456", 0)).toBe(11);
   });
+
+  it("never drops the range the same bundle is telling it to use (final review, finding 1)", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+
+    // The server can legitimately name one from_serial in BOTH fields: a
+    // revoked block and the live replacement can share it once an admin
+    // reseeds the counter back to a value they seeded before. Deleting the
+    // pool row would throw away the local cursor and let `addRange` rebuild
+    // it from the server's (still null) consumedThroughSerial -- reissuing
+    // serials that are already on printed boxes.
+    const get = vi.fn().mockResolvedValue({
+      ...bundle,
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 2000,
+        toSerial: 3999,
+        consumedThroughSerial: null,
+      },
+      ssccRevokedFrom: [2000],
+    });
+
+    await mirrorShiftBundle({ get }, exec, "s1");
+    expect(await burnSerial(exec, "460123456", 0)).toBe(2000);
+
+    // The operator restarts the app / re-enters the shift before the boxes
+    // reach ingest, so the server still reports nothing consumed.
+    await mirrorShiftBundle({ get }, exec, "s1");
+    expect(await burnSerial(exec, "460123456", 0)).toBe(2001);
+  });
 });

@@ -282,6 +282,35 @@ describe("sscc pool", () => {
     expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(9);
   });
 
+  // Characterization test for the load-bearing drop-then-add ordering when
+  // both name the SAME from_serial. `dropRanges` deletes by that primary
+  // key, so the row `addRange` then re-inserts is a brand new one: the
+  // local cursor is gone and is rebuilt from the server's
+  // `consumedThroughSerial`, which lags whatever the device has burned but
+  // not yet uploaded. This is precisely why `mirrorShiftBundleBody` filters
+  // the bundle's own `sscc.fromSerial` out of the drop list -- see the
+  // shift-bundle test of the same finding.
+  it("loses the local cursor when a dropped from_serial is re-added", async () => {
+    const full = {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 2000,
+      toSerial: 3999,
+      consumedThroughSerial: null,
+    };
+    await addRange(exec, full);
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2000);
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2001);
+
+    await dropRanges(exec, ISSUER_PREFIX, 0, [full.fromSerial]);
+    await addRange(exec, full);
+
+    // Back to the start of the block: the MAX(next_serial) upsert guard in
+    // `addRange` cannot protect a row that no longer exists.
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2000);
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(1999);
+  });
+
   it("does not drop the same from_serial under another extension digit", async () => {
     await addRange(exec, {
       issuerPrefix: ISSUER_PREFIX,

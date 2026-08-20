@@ -5,7 +5,21 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, isNotNull, isNull, lt, lte, max, or, sql } from "drizzle-orm";
+import {
+  and,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  max,
+  notExists,
+  or,
+  sql,
+} from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { formatShiftNumber, parseSscc, ssccSerialCapacity } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -35,6 +49,12 @@ export interface SsccBlock {
    */
   consumedThroughSerial: number | null;
 }
+
+/**
+ * A second name for `sscc_blocks`, so `revokedFromSerials` can correlate a
+ * revoked row against the SAME device's live rows in one query.
+ */
+const liveBlocks = alias(schema.ssccBlocks, "live_sscc_blocks");
 
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9. */
 const GLN_PATTERN = /^\d{13}$/;
@@ -434,6 +454,36 @@ export class SsccService {
       );
       if (!applied) throw new ConflictException({ code: "sscc_seed_floor_moved" });
 
+      // Re-run the active-shift check, now that the write has happened
+      // (final review, finding 2). The check at the top of this transaction
+      // read `shifts` WITHOUT a lock, and nothing has held that result since:
+      // a shift could have opened, and a bundle allocation for it could have
+      // committed, entirely inside the window between that read and this
+      // write -- so the revoke below would strip a block off a device that
+      // has already been handed it, over a range this very statement just
+      // reseeded the counter to.
+      //
+      // The recheck looks redundant, and is not: under READ COMMITTED, any
+      // `allocate` that could have committed in that window implies its
+      // shift-open transaction committed EARLIER (the allocation is done for
+      // an already-open shift), so by the time we get here that shift row is
+      // committed and this fresh read is guaranteed to see it. Catching the
+      // shift is therefore enough to catch every allocation that could have
+      // slipped past; we do not need to look at `sscc_blocks` at all.
+      //
+      // Reuses `findSeedBlocker` rather than a second copy of its
+      // active-shift query, so the 409's `blockedBy` payload is identical to
+      // the one the pre-check produces. A `device_out_of_sync` verdict is
+      // deliberately ignored here: it can newly appear simply because a
+      // shift CLOSED during this transaction (it is keyed off
+      // `MAX(closed_at)`), which is not a reason to fail a reseed that was
+      // legal when it started, and it says nothing about a block being
+      // handed out under us.
+      const raced = await findSeedBlocker(tx, tenantId, issuerPrefix, dto.extensionDigit);
+      if (raced?.kind === "active_shift") {
+        throw new ConflictException({ code: "sscc_seed_active_shift", blockedBy: raced });
+      }
+
       if (current == null || Number(current.nextSerial) !== dto.nextSerial) {
         await tx
           .update(schema.ssccBlocks)
@@ -703,6 +753,23 @@ export class SsccService {
    * Sent on every bundle, not just the first after a revocation: the station
    * may miss any single fetch, and re-sending is idempotent -- the rows are
    * already gone.
+   *
+   * Excludes any `from_serial` that a LIVE (non-revoked) block of this same
+   * (tenant, issuer prefix, extension digit, device) ALSO starts at (final
+   * review, finding 1). Nothing stops two rows sharing one `from_serial`:
+   * `sscc_blocks` has no uniqueness on that key, and an admin who reseeds
+   * the counter back to a value they already seeded once -- entirely legal
+   * while nothing was printed from the first block, so the floor permits it
+   * -- gets a revoked block and its replacement starting at the very same
+   * serial. Naming it here would tell the station to DELETE the pool row the
+   * same bundle is handing it: `dropRanges` removes the row carrying the
+   * local cursor, so `addRange`'s `next_serial = MAX(...)` regression guard
+   * has no row left to protect and rebuilds the cursor from the server's
+   * `consumed_through_serial` -- which is still null while the printed boxes
+   * sit in the outbox. `burnSerial` then reissues serials already on
+   * physical boxes: a duplicate SSCC, the one failure this system cannot
+   * repair. (It also stops the list growing without bound into an
+   * ever-larger no-op DELETE.)
    */
   async revokedFromSerials(
     tenantId: string,
@@ -721,6 +788,21 @@ export class SsccService {
           eq(schema.ssccBlocks.extensionDigit, extensionDigit),
           eq(schema.ssccBlocks.deviceId, deviceId),
           isNotNull(schema.ssccBlocks.revokedAt),
+          notExists(
+            executor
+              .select({ one: sql`1` })
+              .from(liveBlocks)
+              .where(
+                and(
+                  eq(liveBlocks.tenantId, schema.ssccBlocks.tenantId),
+                  eq(liveBlocks.issuerPrefix, schema.ssccBlocks.issuerPrefix),
+                  eq(liveBlocks.extensionDigit, schema.ssccBlocks.extensionDigit),
+                  eq(liveBlocks.deviceId, schema.ssccBlocks.deviceId),
+                  eq(liveBlocks.fromSerial, schema.ssccBlocks.fromSerial),
+                  isNull(liveBlocks.revokedAt),
+                ),
+              ),
+          ),
         ),
       )
       .orderBy(schema.ssccBlocks.fromSerial);
