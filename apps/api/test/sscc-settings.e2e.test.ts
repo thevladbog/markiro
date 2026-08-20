@@ -676,37 +676,54 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     });
 
     /**
-     * Polls `pg_stat_activity` for a backend whose current query names
-     * `queryFragment` and is waiting on `wait_event_type = 'Lock'` -- i.e.
-     * some other session is genuinely queued behind a lock while running
-     * that query. `pg_locks` alone does NOT surface this: a session blocked
-     * on `SELECT ... FOR UPDATE` waits on a `transactionid`-type lock (the
-     * blocker's own transaction ID), not a `relation`-type one, so joining
-     * `pg_locks` to `pg_class` on the target table -- the obvious first
-     * approach -- silently finds nothing and this poll would never resolve.
-     * `pg_stat_activity`'s `wait_event_type` reports the wait regardless of
-     * lock type, which is why it's used here instead. The 20ms polling
-     * interval only affects how quickly the poll notices the state change;
-     * the assertion itself waits on that DB-visible state, not on a fixed
-     * delay, so it does not flake under CI scheduling jitter the way a
-     * "sleep N ms and hope" approach would.
+     * Polls for a backend that Postgres itself reports as blocked BY
+     * `holderPid` (`pg_blocking_pids(pid) @> ARRAY[holderPid]`) -- i.e. some
+     * OTHER session is genuinely queued behind a lock the holder transaction
+     * is holding. `pg_locks` alone does NOT surface this directly: a session
+     * blocked on `SELECT ... FOR UPDATE` waits on a `transactionid`-type
+     * lock (the blocker's own transaction ID), not a `relation`-type one, so
+     * joining `pg_locks` to `pg_class` on the target table -- the obvious
+     * first approach -- silently finds nothing and this poll would never
+     * resolve. `pg_blocking_pids()` (backed by `pg_stat_activity` under the
+     * hood) reports the wait regardless of lock type, which is why it's used
+     * here instead.
+     *
+     * Keyed on the holder's own backend pid (captured from
+     * `pg_backend_pid()` inside the holder's own transaction, see below)
+     * rather than on query text: `pg_stat_activity`/`pg_locks` are
+     * CLUSTER-wide, and this repo genuinely shares one dev Postgres across
+     * worktrees (Task 4 review, finding 2), so an unrelated backend --
+     * another worktree, another developer, another test that happens to
+     * mention `sscc_counters` -- could satisfy a loose query-text predicate
+     * and release this poll before THIS test's own statement has actually
+     * queued, silently degrading the synchronization back into a plain
+     * race. Asking "is anyone blocked specifically by MY transaction" is
+     * exact regardless of database noise, and it also survives which
+     * *statement* ends up doing the actual waiting: with the fix in place
+     * that's `seedCounter`'s locked `SELECT ... FOR UPDATE`, but with the
+     * fix reverted (see the finding-1 verification below) it's
+     * `atomicSeedSscc`'s `INSERT ... ON CONFLICT DO UPDATE` instead -- a
+     * query-text fragment tied to one specific statement would silently stop
+     * matching in that second case and turn a real bug into a timeout
+     * instead of the intended assertion failure. The 20ms polling interval
+     * only affects how quickly the poll notices the state change; the
+     * assertion itself waits on that DB-visible state, not on a fixed delay,
+     * so it does not flake under CI scheduling jitter the way a "sleep N ms
+     * and hope" approach would.
      */
-    async function waitForBlockedLockRequest(
-      queryFragment: string,
-      timeoutMs = 5000,
-    ): Promise<void> {
+    async function waitForBlockedByBackend(holderPid: number, timeoutMs = 5000): Promise<void> {
       const deadline = Date.now() + timeoutMs;
       for (;;) {
         const res = await db.execute<{ count: string }>(sql`
           SELECT count(*)::text AS count
           FROM pg_stat_activity
-          WHERE wait_event_type = 'Lock'
-            AND query ILIKE ${`%${queryFragment}%`}
+          WHERE datname = current_database()
             AND pid <> pg_backend_pid()
+            AND ${holderPid} = ANY(pg_blocking_pids(pid))
         `);
         if (Number(res.rows[0]?.count ?? "0") > 0) return;
         if (Date.now() > deadline) {
-          throw new Error(`Timed out waiting for a blocked query mentioning "${queryFragment}"`);
+          throw new Error(`Timed out waiting for a session blocked by backend pid ${holderPid}`);
         }
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
@@ -733,8 +750,8 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       // the instant that statement returns (guaranteeing the lock is held
       // by the time we proceed), and the transaction then parks on `held`
       // -- keeping the lock in place -- until this test releases it below.
-      let lockAcquired!: () => void;
-      const lockAcquiredPromise = new Promise<void>((resolve) => {
+      let lockAcquired!: (holderPid: number) => void;
+      const lockAcquiredPromise = new Promise<number>((resolve) => {
         lockAcquired = resolve;
       });
       let release!: () => void;
@@ -743,32 +760,55 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       });
       const allocatePromise = db.transaction(async (tx) => {
         const block = await service.allocate(tenantId, prefix, 0, deviceId, 2000, tx);
-        lockAcquired();
+        // This transaction's own backend pid -- read on the SAME `tx` handle
+        // so it names the connection actually holding the row lock, for
+        // `waitForBlockedByBackend` below to key its poll on.
+        const pidRes = await tx.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`);
+        lockAcquired(Number(pidRes.rows[0]?.pid));
         await held;
         return block;
       });
+      // `db` here is `setup.db` -- the SAME pool the Nest app (and this
+      // file's `afterAll` -> `app.close()` -> `AuthPoolCloser.onModuleDestroy`
+      // -> `pool.end()`) share. `allocatePromise`'s transaction holds a
+      // checked-out client parked on `held` until `release()` runs; if
+      // anything between here and `release()` throws (a `waitForBlockedLockRequest`
+      // timeout, or `seedPromise` rejecting), `release()` would never run,
+      // the held callback would never return, the client would never go back
+      // to the pool, and `afterAll`'s `pool.end()` would then hang forever --
+      // with the row lock on `sscc_counters` sitting against the SHARED dev
+      // Postgres for the rest of the process. Attach the no-op catch on
+      // `seedPromise` at creation (not later) so it is never even briefly an
+      // unhandled rejection, and guarantee `release()` always runs via `finally`.
+      let seedPromise: ReturnType<typeof service.seedCounter> | undefined;
+      try {
+        const holderPid = await lockAcquiredPromise;
 
-      await lockAcquiredPromise;
+        // seedCounter submits the value the counter held BEFORE the
+        // concurrent allocate above -- exactly the stale value an unlocked
+        // read would have produced. Its `findSeedBlocker`/`seedFloor` reads
+        // don't touch `sscc_counters`, so its own locked read is the first
+        // thing it does that can collide with the lock `allocate()` is
+        // holding; started but deliberately not awaited yet, so it can queue
+        // behind that lock.
+        seedPromise = service.seedCounter(tenantId, prefix, {
+          extensionDigit: 0,
+          nextSerial: preAllocationValue,
+        });
+        seedPromise.catch(() => {});
 
-      // seedCounter submits the value the counter held BEFORE the concurrent
-      // allocate above -- exactly the stale value an unlocked read would
-      // have produced. Its `findSeedBlocker`/`seedFloor` reads don't touch
-      // `sscc_counters`, so its own locked read is the first thing it does
-      // that can collide with the lock `allocate()` is holding; started but
-      // deliberately not awaited yet, so it can queue behind that lock.
-      const seedPromise = service.seedCounter(tenantId, prefix, {
-        extensionDigit: 0,
-        nextSerial: preAllocationValue,
-      });
+        // Confirms seedCounter's locked read is now genuinely queued behind
+        // allocate()'s held lock, before we let that lock go -- proving the
+        // fix's `.for("update")` is what's blocking it, not coincidence.
+        await waitForBlockedByBackend(holderPid);
+      } finally {
+        release();
+        await allocatePromise.catch(() => {});
+        await seedPromise?.catch(() => {});
+      }
 
-      // Confirms seedCounter's locked read is now genuinely queued behind
-      // allocate()'s held lock, before we let that lock go -- proving the
-      // fix's `.for("update")` is what's blocking it, not coincidence.
-      await waitForBlockedLockRequest("sscc_counters");
-
-      release();
       const block = await allocatePromise;
-      const result = await seedPromise;
+      const result = await seedPromise!;
 
       // The write itself is allowed to land (by design -- `seedFloor` only
       // tracks PRINTED serials, and nothing was printed here), but with the

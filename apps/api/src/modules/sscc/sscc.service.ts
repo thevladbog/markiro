@@ -216,9 +216,14 @@ export async function findSeedBlocker(
     // Deterministic order: with two active shifts (shouldn't normally
     // happen, but nothing here prevents it), an unordered `.limit(1)` can
     // return a different row on each call, and the admin UI's "close shift
-    // N" message would then flip between page refreshes. Ordering by
-    // `numberSeq` pins the answer to the same shift every time.
-    .orderBy(schema.shifts.numberSeq)
+    // N" message would then flip between page refreshes. `numberSeq` alone
+    // is only deterministic WITHIN one `numberMonthKey` -- two active shifts
+    // numbered in different months can share a `numberSeq`, leaving that tie
+    // unordered again. Ordering by `(numberMonthKey, numberSeq)` first,
+    // then `id` as a total-order tiebreaker (numberSeq can theoretically
+    // repeat within a month too), pins the answer to the same shift every
+    // time, full stop.
+    .orderBy(schema.shifts.numberMonthKey, schema.shifts.numberSeq, schema.shifts.id)
     .limit(1);
   if (active) {
     return {
