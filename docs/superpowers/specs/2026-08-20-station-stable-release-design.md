@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-20
 
-**Status:** design discussion approved; written review pending
+**Status:** approved for implementation planning
 
 **Scope:** Windows x64 stable releases for Markiro Station, promotion from an
 accepted beta, a dedicated stable updater channel, release changelogs, manual
