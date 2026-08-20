@@ -37,13 +37,27 @@ const palette = {
 const fontSans = '"IBM Plex Sans", Arial, Helvetica, sans-serif';
 const fontMono = '"IBM Plex Mono", "Courier New", monospace';
 
-const logoRows = [
-  ["ink", null, "ink"],
-  [null, "ink", null],
-  ["ink", null, "ink"],
-  ["ink", null, "ink"],
-  [null, "accent", null],
+const logoModules = [
+  { x: 0, y: 0, tone: "ink" },
+  { x: 6, y: 0, tone: "ink" },
+  { x: 3, y: 2, tone: "ink" },
+  { x: 0, y: 3, tone: "ink" },
+  { x: 6, y: 3, tone: "ink" },
+  { x: 0, y: 6, tone: "ink" },
+  { x: 6, y: 6, tone: "ink" },
+  { x: 3, y: 7, tone: "accent" },
 ] as const;
+
+const logoGrid = Array.from({ length: 9 }, (_, y) =>
+  Array.from({ length: 8 }, (_, x) => {
+    const module = logoModules.find(
+      (candidate) =>
+        x >= candidate.x && x < candidate.x + 2 && y >= candidate.y && y < candidate.y + 2,
+    );
+    const origin = logoModules.find((candidate) => x === candidate.x && y === candidate.y);
+    return { module, origin };
+  }),
+);
 
 const responsiveStyles = `
   @media (max-width: 480px) {
@@ -64,7 +78,7 @@ const localizedShell = {
   },
   en: {
     brandLabel: "Markiro",
-    wordmark: "MARKIRO",
+    wordmark: "маркиро",
     eyebrow: "Markiro",
     footer:
       "This is an automated email from Markiro. If you did not request this action, you can delete this message.",
@@ -79,25 +93,32 @@ function EmailBrand({ locale }: { locale: EmailLocale }) {
       <tbody>
         <tr>
           <td style={styles.markCell}>
-            <table role="presentation" cellPadding="0" cellSpacing="2">
+            <table role="presentation" cellPadding="0" cellSpacing="0" style={styles.markGrid}>
               <tbody>
-                {logoRows.map((row, rowIndex) => (
+                {logoGrid.map((row, rowIndex) => (
                   <tr key={rowIndex}>
-                    {row.map((module, columnIndex) => (
+                    {row.map(({ module, origin }, columnIndex) => (
                       <td
                         key={columnIndex}
-                        {...(module ? { "data-markiro-module": "true" } : {})}
+                        {...(origin
+                          ? {
+                              "data-markiro-module": "true",
+                              "data-markiro-position": `${origin.x}-${origin.y}`,
+                            }
+                          : {})}
                         style={{
                           backgroundColor:
-                            module === "accent"
+                            module?.tone === "accent"
                               ? palette.accentModule
-                              : module === "ink"
+                              : module?.tone === "ink"
                                 ? palette.ink
                                 : "transparent",
+                          border: 0,
                           fontSize: "0",
-                          height: "5px",
-                          lineHeight: "5px",
-                          width: "5px",
+                          height: "3px",
+                          lineHeight: "3px",
+                          padding: 0,
+                          width: "3px",
                         }}
                       >
                         &nbsp;
@@ -285,13 +306,19 @@ const styles = {
   markCell: {
     backgroundColor: palette.paper,
     height: "40px",
-    padding: "5px",
+    padding: 0,
+    textAlign: "center" as const,
+    verticalAlign: "middle",
     width: "40px",
+  },
+  markGrid: {
+    borderCollapse: "collapse" as const,
+    margin: "0 auto",
   },
   wordmark: {
     color: palette.paper,
     fontFamily: fontMono,
-    fontSize: "22px",
+    fontSize: "24px",
     fontWeight: "600",
     letterSpacing: "-0.4px",
     paddingLeft: "14px",
