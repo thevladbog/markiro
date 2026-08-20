@@ -3,8 +3,10 @@
  * removal (spec 2026-08-20). What is left to cover, and what these tests
  * therefore assert:
  *
- *  - the settings form (size preset / custom size / dpi / language) really
- *    round-trips into the spec the "Сохранить" button POSTs;
+ *  - the settings form (size preset / custom size / dpi) really round-trips
+ *    into the spec the "Сохранить" button POSTs, and offers NO language
+ *    control: a spec is language-neutral, so the panel must not present one
+ *    (the station picks its own printer's language at print time);
  *  - IMPORT IS THE ONLY CONTENT PATH: pasted ZPL replaces the whole spec, and
  *    the deleted palette/properties chrome is provably absent;
  *  - shrinking the label re-fits imported elements, and an impossible shrink
@@ -16,9 +18,11 @@
  *    both clear once a later valid resize or import succeeds, and the
  *    invalid-dimension message is tracked PER AXIS, so a valid commit on one
  *    axis never leaves the other axis' rejected text on screen unexplained;
- *  - "Скачать ZPL"/"Скачать TSPL" produce a real, byte-safe download -- ZPL's
- *    Blob text contains `^XA`; TSPL's Blob bytes preserve an injected raster
- *    byte > 0x7F intact (never UTF-8-mangled into two bytes);
+ *  - BOTH downloads are always available from the same spec, with no setting
+ *    to flip: "Скачать ZPL" and "Скачать TSPL (TSC)" each produce a real,
+ *    byte-safe download -- ZPL's Blob text contains `^XA`; TSPL's Blob bytes
+ *    preserve an injected raster byte > 0x7F intact (never UTF-8-mangled
+ *    into two bytes);
  *  - Save POSTs a `parseLabelTemplate`-valid spec and navigates (create flow)
  *    / PATCHes an existing template (edit flow);
  *  - the dirty-guard confirm modal blocks "back" until confirmed;
@@ -241,22 +245,38 @@ describe("Settings form", () => {
     ).toBeNull();
   });
 
-  it("a dpi/language change round-trips into the spec Save POSTs", async () => {
+  it("a dpi change round-trips into the spec Save POSTs", async () => {
     const user = userEvent.setup();
     const fetchMock = stubCreateFetch("new-1");
 
     renderCreateFlow();
 
     await chooseOption(user, "DPI", "300");
-    await chooseOption(user, "Язык", "TSPL (TSC)");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const spec = postedSpec<{ dpi: number; language: string }>(fetchMock);
+    const spec = postedSpec<{ dpi: number }>(fetchMock);
     expect(spec.dpi).toBe(300);
-    expect(spec.language).toBe("tspl");
     expect(() => parseLabelTemplate(spec)).not.toThrow();
     expect(await screen.findByText("Editor route: new-1")).toBeDefined();
+  });
+
+  /** A `LabelTemplateSpec` is language-neutral -- the station generates
+   * whichever language ITS printer speaks. Offering a per-template «Язык»
+   * setting told users the opposite (and had them creating one template per
+   * printer brand), so the control must stay gone: the panel states the fact
+   * instead, and both downloads are offered unconditionally. */
+  it("offers no language setting -- it states that one template covers both printer languages", () => {
+    renderCreateFlow();
+
+    expect(screen.queryByRole("combobox", { name: "Язык" })).toBeNull();
+    expect(
+      screen.getByText(
+        "Один шаблон печатается и на Zebra, и на TSC: станция выбирает язык по своему принтеру.",
+      ),
+    ).toBeDefined();
+    expect(screen.getByRole("button", { name: "Скачать ZPL" })).toBeDefined();
+    expect(screen.getByRole("button", { name: "Скачать TSPL (TSC)" })).toBeDefined();
   });
 
   it("a size preset round-trips and re-fits imported elements inside the smaller label", async () => {
@@ -763,8 +783,7 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     expect(text).toContain("^GFA");
   });
 
-  it("Скачать TSPL preserves an injected raster byte > 0x7F intact in the downloaded Blob", async () => {
-    const user = userEvent.setup();
+  it("Скачать TSPL (TSC) preserves an injected raster byte > 0x7F intact in the downloaded Blob", async () => {
     let capturedBlob: Blob | undefined;
     vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
       capturedBlob = blob as Blob;
@@ -774,9 +793,10 @@ describe("Download (ZPL/TSPL byte safety)", () => {
 
     renderCreateFlow();
     importZpl(CYRILLIC_FIELD_ZPL);
-    await chooseOption(user, "Язык", "TSPL (TSC)");
 
-    fireEvent.click(screen.getByRole("button", { name: "Скачать TSPL" }));
+    // No language setting is touched first -- the TSPL button generates from
+    // the very same spec the ZPL button does.
+    fireEvent.click(screen.getByRole("button", { name: "Скачать TSPL (TSC)" }));
 
     await waitFor(() => expect(capturedBlob).toBeDefined());
     const bytes = new Uint8Array(await capturedBlob!.arrayBuffer());
