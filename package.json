@@ -2,7 +2,7 @@
   "name": "markiro",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=24"
   },
