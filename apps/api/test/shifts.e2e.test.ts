@@ -5,6 +5,7 @@ import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { shiftMonthKey } from "@markiro/domain";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -227,6 +228,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       productId,
       lineId,
       mode: "validation",
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
 
     const deleteRes = await agent.delete(`/lines/${lineId}`).expect(409);
@@ -1232,6 +1235,110 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       lineId: assignedLine.body.id,
       createdFrom: "station",
       plannedDate: null,
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // Shift numbers (Task 3): immutable AUG26-003-style numbers, per-tenant
+  // per-month sequences, /S suffix for station-created shifts.
+  // ---------------------------------------------------------------------
+
+  describe("shift numbers", () => {
+    let agent: ReturnType<typeof request.agent>;
+    let productId: string;
+    let apiKey: string;
+
+    // Fresh organization for this whole describe block so its per-month
+    // counters start at 001 deterministically, unaffected by shifts created
+    // in the tests above.
+    beforeAll(async () => {
+      agent = request.agent(app!.getHttpServer());
+      const orgId = await signUpAndActivate(agent);
+      productId = await seedProduct(orgId, { status: "active" });
+      const device = await createTestStationDevice(app!, agent, "Numbers terminal");
+      apiKey = device.apiKey;
+    });
+
+    function stationPost(body: Record<string, unknown>) {
+      return request(app!.getHttpServer()).post("/shifts").set("x-api-key", apiKey).send(body);
+    }
+
+    it("assigns sequential per-month numbers and restarts across months", async () => {
+      const a = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", plannedDate: "2031-08-05" })
+        .expect(201);
+      const b = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", plannedDate: "2031-08-20" })
+        .expect(201);
+      const c = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", plannedDate: "2031-09-01" })
+        .expect(201);
+
+      expect(a.body.number).toBe("AUG31-001");
+      expect(b.body.number).toBe("AUG31-002");
+      expect(c.body.number).toBe("SEP31-001");
+    });
+
+    it("suffixes /S for station-created shifts and shares the month sequence", async () => {
+      const first = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", plannedDate: "2031-10-01" })
+        .expect(201);
+      const second = await stationPost({
+        productId,
+        mode: "validation",
+        plannedDate: "2031-10-02",
+      }).expect(201);
+
+      expect(first.body.number).toBe("OCT31-001");
+      expect(second.body.number).toBe("OCT31-002/S");
+    });
+
+    it("keeps the number when plannedDate moves to another month", async () => {
+      const created = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", plannedDate: "2031-11-05" })
+        .expect(201);
+      expect(created.body.number).toBe("NOV31-001");
+
+      const updated = await agent
+        .patch(`/shifts/${created.body.id}`)
+        .send({ plannedDate: "2031-12-05" })
+        .expect(200);
+      expect(updated.body.number).toBe("NOV31-001");
+    });
+
+    it("falls back to the creation month when plannedDate is omitted", async () => {
+      const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+      const todayKey = shiftMonthKey(new Date().toISOString().slice(0, 10));
+      expect((created.body.number as string).startsWith(`${todayKey}-`)).toBe(true);
+    });
+
+    it("lists shifts by real date, newest first", async () => {
+      // Fresh org/agent so only these three shifts exist for the list.
+      const listAgent = request.agent(app!.getHttpServer());
+      const listOrgId = await signUpAndActivate(listAgent);
+      const listProductId = await seedProduct(listOrgId, { status: "active" });
+
+      const early = await listAgent
+        .post("/shifts")
+        .send({ productId: listProductId, mode: "validation", plannedDate: "2020-01-01" })
+        .expect(201);
+      const late = await listAgent
+        .post("/shifts")
+        .send({ productId: listProductId, mode: "validation", plannedDate: "2020-03-01" })
+        .expect(201);
+      const dateless = await listAgent
+        .post("/shifts")
+        .send({ productId: listProductId, mode: "validation" })
+        .expect(201); // real date = today
+
+      const list = await listAgent.get("/shifts").expect(200);
+      const ids = list.body.items.map((item: { id: string }) => item.id as string);
+      expect(ids).toEqual([dateless.body.id, late.body.id, early.body.id]);
     });
   });
 });

@@ -259,6 +259,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         mode: "validation",
         status: "active",
         openedAt: new Date(endsAt.getTime() - 60_000),
+        numberMonthKey: "AUG25",
+        numberSeq: 1,
       },
       {
         id: lateShiftId,
@@ -267,6 +269,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         mode: "validation",
         status: "active",
         openedAt: new Date(endsAt.getTime() + 1_000),
+        numberMonthKey: "AUG25",
+        numberSeq: 2,
       },
     ]);
     await attachPlan(tenantId, { startsAt: new Date(endsAt.getTime() - 86_400_000), endsAt });
@@ -319,6 +323,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       mode: "validation",
       status: "active",
       openedAt: new Date(endsAt.getTime() - 60_000),
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
     const foreign = await postBatch(`foreign-${randomUUID()}`, otherShiftId).expect(201);
     expect(foreign.body).toEqual({ applied: 0, alreadyApplied: false, conflicts: [] });
@@ -349,6 +355,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         mode: "validation",
         status: "active",
         openedAt: new Date(endsAt.getTime() - 60_000),
+        numberMonthKey: "AUG25",
+        numberSeq: 1,
       },
       {
         id: lateShiftId,
@@ -357,6 +365,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
         mode: "validation",
         status: "active",
         openedAt: new Date(endsAt.getTime() + 1_000),
+        numberMonthKey: "AUG25",
+        numberSeq: 2,
       },
     ]);
 
@@ -380,6 +390,8 @@ describe.skipIf(!ready)("subscription expiry and offline recovery", () => {
       mode: "validation",
       status: "active",
       openedAt: new Date(endsAt.getTime() - 60_000),
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
     await attachPlan(tenantId, {
       startsAt: new Date(endsAt.getTime() - 86_400_000),

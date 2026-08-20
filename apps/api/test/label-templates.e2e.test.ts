@@ -389,6 +389,8 @@ describe.skipIf(!ready)("label-templates e2e", () => {
       productId,
       mode: "validation",
       labelTemplateId: id,
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
 
     const deleteRes = await agent.delete(`/label-templates/${id}`).expect(409);
