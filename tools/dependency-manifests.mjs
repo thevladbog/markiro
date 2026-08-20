@@ -42,17 +42,54 @@ export function listManifests() {
 }
 
 /**
- * Returns the leading major version number, or `null` when `v` cannot be
- * parsed as a plain/caret/tilde semver (a dist-tag, a compound range, a
- * git/url dependency, or anything else the regex does not anticipate).
+ * A COMPLETE semver version, optionally prefixed by a single `^` or `~`.
+ *
+ * Anchored at both ends on purpose. An earlier version of this module matched
+ * only a prefix (`/^(\d+)\./`), which made it fail OPEN: `"1.2.3 || 2.0.0"`
+ * read as "major 1" even though it admits version 2, so a compound range that
+ * quietly widened a pin across a major compared equal to its baseline and
+ * passed. Everything this pattern rejects — compound ranges, trailing text,
+ * wildcards (`1.x`), partial versions (`1.2`, `5`), and leading-zero numeric
+ * components (`01.2.3`) — is something the guard genuinely cannot judge, and
+ * "cannot judge" must surface as `null`, never as a silent pass.
+ *
+ * The numeric components use the semver.org grammar (`0|[1-9]\d*`), so a
+ * leading zero is rejected rather than being read as a different number by the
+ * two functions below.
+ *
+ * Prereleases (`1.2.3-beta.1`) and build metadata (`1.2.3+build.5`) ARE
+ * supported, deliberately. Their major/minor is unambiguous under semver, so
+ * treating them as unparseable would fail an honest exact pin like `5.0.0-rc.1`
+ * for no safety gain — and it cannot fail open, because a prerelease of the
+ * next major (`2.0.0-beta.1`) still reports breaking version `"2"` and is
+ * caught as a crossing against a `1.x` baseline.
+ */
+const SEMVER_PIN =
+  /^[\^~]?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*)?(?:\+[0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*)?$/;
+
+/**
+ * Parses `v` into `{ major, minor }`, or `null` when it is not a supported
+ * plain/caret/tilde semver. Sole entry point for version parsing in this
+ * module, so `majorOf` and `breakingVersionOf` can never disagree about what
+ * a given string means.
+ */
+function parsePin(v) {
+  const m = SEMVER_PIN.exec(String(v));
+  return m ? { major: Number(m[1]), minor: Number(m[2]) } : null;
+}
+
+/**
+ * Returns the major version number, or `null` when `v` cannot be parsed as a
+ * plain/caret/tilde semver (a dist-tag, a compound range, a wildcard, a
+ * partial version, a git/url dependency, or anything else `SEMVER_PIN`
+ * declines to accept).
  *
  * Callers MUST treat `null` as "unknown, cannot judge" — never as
  * "unchanged". Silently skipping an unparseable version is exactly how a
  * major crossing would slip past this guard undetected.
  */
 export function majorOf(v) {
-  const m = /^(\d+)\./.exec(String(v).replace(/^[\^~]/, ""));
-  return m ? Number(m[1]) : null;
+  return parsePin(v)?.major ?? null;
 }
 
 /**
@@ -72,9 +109,9 @@ export function majorOf(v) {
  * protection whatsoever.
  */
 export function breakingVersionOf(v) {
-  const m = /^(\d+)\.(\d+)/.exec(String(v).replace(/^[\^~]/, ""));
-  if (!m) return null;
-  return m[1] === "0" ? `0.${m[2]}` : m[1];
+  const pin = parsePin(v);
+  if (pin === null) return null;
+  return pin.major === 0 ? `0.${pin.minor}` : String(pin.major);
 }
 
 /**

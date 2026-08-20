@@ -32,6 +32,61 @@ test("majorOf returns null for anything it cannot parse", () => {
   }
 });
 
+/**
+ * The parser matched only a PREFIX of the version once, which made it fail
+ * OPEN. `"1.2.3 || 2.0.0"` is the dangerous case: it admits version 2, but read
+ * as "major 1", so against a `1.2.3` baseline it compared equal and passed
+ * silently. Everything below is input the guard cannot honestly judge and so
+ * must report as `null`. `"01.2.3"` additionally used to make the two functions
+ * disagree (`1` vs `"01"`), turning a parse failure into a spurious crossing.
+ */
+const UNJUDGEABLE = [
+  "1.2.3 || 2.0.0", // compound range
+  ">=1.2.3 <2.0.0", // compound range
+  "1.2.3 - 2.0.0", // hyphen range
+  "1.2.3abc", // trailing text
+  "1.2.3.4", // trailing text
+  "1.x", // wildcard
+  "1.2.*", // wildcard
+  "01.2.3", // leading zero
+  "1.02.3", // leading zero
+  "1.2.03", // leading zero
+  "1.2", // partial version
+  "5", // partial version
+  "v1.2.3", // unsupported prefix
+  ">=1.2.3", // unsupported operator
+];
+
+test("majorOf returns null for input it cannot judge", () => {
+  for (const v of UNJUDGEABLE) {
+    assert.equal(majorOf(v), null, `expected null for ${JSON.stringify(v)}`);
+  }
+});
+
+test("breakingVersionOf returns null for input it cannot judge", () => {
+  for (const v of UNJUDGEABLE) {
+    assert.equal(breakingVersionOf(v), null, `expected null for ${JSON.stringify(v)}`);
+  }
+});
+
+test("a compound range that admits a new major is not silently accepted", () => {
+  const { crossed, unparseable } = findBreakingChanges({ typescript: "6.0.3" }, [
+    manifest("package.json", { typescript: "6.0.3 || 7.0.2" }),
+  ]);
+  assert.deepEqual(crossed, []);
+  assert.equal(unparseable.length, 1);
+  assert.match(unparseable[0], /typescript 6\.0\.3 -> 6\.0\.3 \|\| 7\.0\.2/);
+});
+
+test("prereleases and build metadata stay parseable, by decision", () => {
+  assert.equal(majorOf("1.2.3-beta.1"), 1);
+  assert.equal(breakingVersionOf("1.2.3-beta.1"), "1");
+  assert.equal(breakingVersionOf("^0.45.0-rc.2"), "0.45");
+  assert.equal(breakingVersionOf("1.2.3+build.5"), "1");
+  // and a prerelease of the NEXT major is still caught as a crossing
+  assert.equal(breakingVersionOf("2.0.0-beta.1"), "2");
+});
+
 test("breakingVersionOf uses the major at 1.0.0 and above", () => {
   assert.equal(breakingVersionOf("10.7.0"), "10");
   assert.equal(breakingVersionOf("^1.2.3"), "1");
