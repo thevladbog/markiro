@@ -2,10 +2,11 @@ import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { buildSscc, gs1CheckDigit } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -98,7 +99,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 45_000 })
       .expect(200);
     const res = await agent.get("/org/profile/sscc").expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 45_000 });
+    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 45_000 });
   });
 
   it("rejects an extension digit outside 0..9", async () => {
@@ -167,7 +168,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 12_345 })
       .expect(200);
     const res = await agent.get(`/counterparties/${counterpartyId}/sscc`).expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 12_345 });
+    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 12_345 });
   });
 
   it("404s a counterparty counter id that does not exist", async () => {
@@ -184,7 +185,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // Org B's own counter starts fresh at 1 -- NOT org A's 555. A missing
     // tenant filter in getSscc's WHERE clause would leak org A's row here.
     const res = await agent2.get("/org/profile/sscc").expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
+    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
 
     const stillOwn = await agent.get("/org/profile/sscc").expect(200);
     expect(stillOwn.body.nextSerial).toBe(555);
@@ -218,7 +219,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // tenantId filter (matching on issuerPrefix + extensionDigit alone)
     // would return SOME row here instead of none.
     const resB = await agentB.get("/org/profile/sscc").expect(200);
-    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
+    expect(resB.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
 
     const resA = await agentA.get("/org/profile/sscc").expect(200);
     expect(resA.body.nextSerial).toBe(700);
@@ -247,7 +248,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
 
     // Same prefix as counterparty A, different tenant -- must read as fresh.
     const resB = await agentB.get(`/counterparties/${cpBId}/sscc`).expect(200);
-    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
+    expect(resB.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
   });
 
   describe("putSscc floor (final review, finding 2)", () => {
@@ -271,7 +272,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       await agent.put("/org/profile").send({ gln: freshGln() }).expect(200);
       await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 777 }).expect(200);
       const res = await agent.get("/org/profile/sscc").expect(200);
-      expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 777 });
+      expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 777 });
     });
 
     it("rejects seeding below the floor once a serial has been printed, but allows seeding at or above it", async () => {
@@ -324,7 +325,9 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
         .put(`/counterparties/${cpId}/sscc`)
         .send({ extensionDigit: 0, nextSerial: floor - 1 })
         .expect(400);
-      expect((rejected.body as { message: string }).message).toContain(String(floor));
+      // Machine-readable since Task 4: the admin client reads `code` off the
+      // body and renders `minSerial` itself, rather than parsing a sentence.
+      expect(rejected.body).toMatchObject({ code: "sscc_seed_below_floor", minSerial: floor });
 
       await agent
         .put(`/counterparties/${cpId}/sscc`)
@@ -452,6 +455,187 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       const applied = await atomicSeedSscc(db, tenantId, prefix, 0, 777);
       expect(applied).toBe(true);
       expect(await readCounter(prefix)).toBe(777);
+    });
+  });
+
+  describe("seed guards and block revocation (2026-08-20 reseed design)", () => {
+    // Own counter, offset clear of BOTH describe blocks above ("46" and
+    // "47"): a shared prefix counter would make these tests seed over rows
+    // another test already cut a block under.
+    let counter = 0;
+    function freshGln(): string {
+      counter += 1;
+      const body = `48${String(counter).padStart(7, "0")}000`;
+      return body + String(gs1CheckDigit(body));
+    }
+
+    // The out-of-sync-device guard fires on a device whose `last_seen_at`
+    // predates the last shift close -- and `createTestStationDevice` leaves it
+    // null. Test 1 below closes a shift, which would then make every later
+    // test in this block see a `device_out_of_sync` blocker for a reason none
+    // of them is about. Stamping the device as freshly checked-in before each
+    // test isolates them to the behaviour they actually assert.
+    beforeEach(async () => {
+      await db
+        .update(schema.stationDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(schema.stationDevices.id, deviceId));
+    });
+
+    /** Direct-DB product seed: product validation is not what these tests exercise. */
+    async function seedProduct(): Promise<string> {
+      const id = randomUUID();
+      await db.insert(schema.products).values({
+        id,
+        tenantId,
+        gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
+        name: "Seed Product",
+        status: "active",
+        // Aggregation shifts refuse to be created without one (see
+        // ShiftsService's "Aggregation mode requires a box capacity").
+        boxCapacity: 12,
+      });
+      return id;
+    }
+
+    /** Direct-DB box label template seed: aggregation shifts require one. */
+    async function seedBoxLabelTemplate(): Promise<string> {
+      const id = randomUUID();
+      await db.insert(schema.labelTemplates).values({
+        id,
+        tenantId,
+        name: `Box Template ${id.slice(0, 8)}`,
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      });
+      return id;
+    }
+
+    /** Creates + opens an aggregation shift, returning its id and display number. */
+    async function openAggregationShift(): Promise<{ id: string; number: string }> {
+      const productId = await seedProduct();
+      const boxLabelTemplateId = await seedBoxLabelTemplate();
+      const created = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation", boxLabelTemplateId })
+        .expect(201);
+      const id = created.body.id as string;
+      const opened = await agent.post(`/shifts/${id}/open`).expect(200);
+      return { id, number: opened.body.number as string };
+    }
+
+    /** Closes a shift so the counter guard stops reporting it (`reason` is min 3 chars). */
+    async function closeShift(id: string): Promise<void> {
+      await agent.post(`/shifts/${id}/close`).send({ reason: "counter reseed test" }).expect(200);
+    }
+
+    it("refuses to seed while a shift is active, and says which one", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const shift = await openAggregationShift();
+
+      const res = await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: 900 })
+        .expect(409);
+      expect(res.body.code).toBe("sscc_seed_active_shift");
+
+      const state = await agent.get("/org/profile/sscc").expect(200);
+      expect(state.body.blockedBy).toEqual({
+        kind: "active_shift",
+        shiftId: shift.id,
+        shiftNumber: shift.number,
+      });
+
+      await closeShift(shift.id);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 900 }).expect(200);
+    });
+
+    it("reports the current floor as minSerial", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+      await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 7));
+
+      const res = await agent.get("/org/profile/sscc").expect(200);
+      expect(res.body.minSerial).toBe(8);
+      expect(res.body.blockedBy).toBeNull();
+    });
+
+    it("revokes the device's live block when the value changes, and leaves it when it does not", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+
+      const liveBlocks = async () =>
+        db
+          .select({ id: schema.ssccBlocks.id })
+          .from(schema.ssccBlocks)
+          .where(
+            and(
+              eq(schema.ssccBlocks.tenantId, tenantId),
+              eq(schema.ssccBlocks.issuerPrefix, prefix),
+              isNull(schema.ssccBlocks.revokedAt),
+            ),
+          );
+
+      // Re-saving the value the counter already holds must NOT revoke: every
+      // redundant "Save" would otherwise burn a whole block and tear a
+      // 2000-serial hole in the numbering.
+      const unchanged = (await agent.get("/org/profile/sscc").expect(200)).body.nextSerial;
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: unchanged })
+        .expect(200);
+      expect(await liveBlocks()).toHaveLength(1);
+
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: block.toSerial + 500 })
+        .expect(200);
+      expect(await liveBlocks()).toHaveLength(0);
+    });
+
+    it("refuses while a device holding a live block is out of sync, unless that device is revoked", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+
+      // A shift closes AFTER the device's last check-in: the device may be
+      // offline holding closed boxes whose SSCCs sit in the block above.
+      await closeShift((await openAggregationShift()).id);
+
+      const res = await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: 900 })
+        .expect(409);
+      expect(res.body.code).toBe("sscc_seed_device_out_of_sync");
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.blockedBy).toEqual({
+        kind: "device_out_of_sync",
+        deviceId,
+        deviceName: "Line 1 terminal",
+      });
+
+      // A decommissioned terminal must not block the setting forever.
+      await db
+        .update(schema.stationDevices)
+        .set({ revokedAt: new Date() })
+        .where(eq(schema.stationDevices.id, deviceId));
+      try {
+        await agent
+          .put("/org/profile/sscc")
+          .send({ extensionDigit: 0, nextSerial: 900 })
+          .expect(200);
+      } finally {
+        await db
+          .update(schema.stationDevices)
+          .set({ revokedAt: null })
+          .where(eq(schema.stationDevices.id, deviceId));
+      }
     });
   });
 });

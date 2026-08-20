@@ -32,6 +32,7 @@ import {
   type SsccCounterDto,
   type UpdateCounterpartyDto,
 } from "./dto";
+import type { SsccCounterStateDto } from "../sscc/dto";
 import { CounterpartiesService } from "./counterparties.service";
 
 @ApiTags("counterparties")
@@ -89,7 +90,10 @@ export class CounterpartiesController {
 
   @Get(":id/sscc")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
-  async getSscc(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<SsccCounterDto> {
+  async getSscc(
+    @Req() req: RequestWithTenant,
+    @Param("id") id: string,
+  ): Promise<SsccCounterStateDto> {
     return this.counterpartiesService.getSscc(req.tenantId!, id);
   }
 

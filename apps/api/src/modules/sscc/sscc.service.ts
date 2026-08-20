@@ -5,10 +5,11 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, isNull, lte, max, sql } from "drizzle-orm";
-import { parseSscc, ssccSerialCapacity } from "@markiro/domain";
+import { and, desc, eq, gte, isNull, lt, lte, max, or, sql } from "drizzle-orm";
+import { formatShiftNumber, parseSscc, ssccSerialCapacity } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import type { SsccCounterStateDto, SsccSeedBlocker } from "./dto";
 
 type SsccTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
@@ -176,6 +177,90 @@ export async function atomicSeedSscc(
   return row !== undefined;
 }
 
+/**
+ * The reason an admin may not reseed this counter right now, or null.
+ *
+ * Two independent checks, in order of how likely they are to be the answer:
+ *
+ * 1. Any shift of this tenant is `active`. Deliberately tenant-wide rather
+ *    than scoped to shifts using THIS issuer prefix: the rule an admin has to
+ *    hold in their head is "close the shifts, then change the number", and a
+ *    prefix-scoped version would let a reseed land while the plant is
+ *    running, on the strength of a `resolveIssuerPrefix` result that a shift
+ *    edit can change a second later.
+ * 2. A device still holding a live block under this prefix has not been seen
+ *    since the last shift closed (`last_seen_at` null or older than
+ *    `MAX(shifts.closed_at)`). That device may hold closed boxes it never
+ *    uploaded, whose SSCCs sit in the range about to be revoked. Revoked
+ *    station devices are skipped -- a decommissioned terminal would otherwise
+ *    block the setting forever.
+ *
+ * Exported as a plain function (not a method) so it can run on a transaction
+ * handle inside `seedCounter` and still be reused by `counterState`.
+ */
+export async function findSeedBlocker(
+  db: Pick<Db, "select">,
+  tenantId: string,
+  issuerPrefix: string,
+  extensionDigit: number,
+): Promise<SsccSeedBlocker | null> {
+  const [active] = await db
+    .select({
+      id: schema.shifts.id,
+      monthKey: schema.shifts.numberMonthKey,
+      seq: schema.shifts.numberSeq,
+      createdFrom: schema.shifts.createdFrom,
+    })
+    .from(schema.shifts)
+    .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.status, "active")))
+    .limit(1);
+  if (active) {
+    return {
+      kind: "active_shift",
+      shiftId: active.id,
+      shiftNumber: formatShiftNumber({
+        monthKey: active.monthKey,
+        seq: active.seq,
+        createdFrom: active.createdFrom,
+      }),
+    };
+  }
+
+  const [lastClose] = await db
+    .select({ at: max(schema.shifts.closedAt) })
+    .from(schema.shifts)
+    .where(eq(schema.shifts.tenantId, tenantId));
+  const closedAt = lastClose?.at ?? null;
+  // No shift has ever closed here: no device can be holding boxes from one.
+  if (!closedAt) return null;
+
+  const [stale] = await db
+    .select({ id: schema.stationDevices.id, name: schema.stationDevices.name })
+    .from(schema.ssccBlocks)
+    .innerJoin(
+      schema.stationDevices,
+      and(
+        eq(schema.stationDevices.tenantId, schema.ssccBlocks.tenantId),
+        eq(schema.stationDevices.id, schema.ssccBlocks.deviceId),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.ssccBlocks.tenantId, tenantId),
+        eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+        eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+        isNull(schema.ssccBlocks.revokedAt),
+        isNull(schema.stationDevices.revokedAt),
+        or(
+          isNull(schema.stationDevices.lastSeenAt),
+          lt(schema.stationDevices.lastSeenAt, closedAt),
+        ),
+      ),
+    )
+    .limit(1);
+  return stale ? { kind: "device_out_of_sync", deviceId: stale.id, deviceName: stale.name } : null;
+}
+
 @Injectable()
 export class SsccService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -224,6 +309,116 @@ export class SsccService {
       .where(eq(schema.orgProfiles.tenantId, tenantId));
     if (!profile?.gln) throw new BadRequestException("organisation profile has no GLN");
     return deriveIssuerPrefix(profile.gln, "organisation profile");
+  }
+
+  /**
+   * Everything the settings form needs in one read: the counter itself, the
+   * floor it may not go below, and why it is currently locked (if it is).
+   * The floor and the blocker are computed here rather than in the UI so the
+   * form can never disagree with what `seedCounter` will actually enforce.
+   */
+  async counterState(
+    tenantId: string,
+    issuerPrefix: string,
+    extensionDigit: number,
+  ): Promise<SsccCounterStateDto> {
+    const [row] = await this.db
+      .select({ nextSerial: schema.ssccCounters.nextSerial })
+      .from(schema.ssccCounters)
+      .where(
+        and(
+          eq(schema.ssccCounters.tenantId, tenantId),
+          eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
+          eq(schema.ssccCounters.extensionDigit, extensionDigit),
+        ),
+      );
+    const firstSerial = extensionDigit === 0 ? 1 : 0;
+    return {
+      extensionDigit,
+      nextSerial: row ? Number(row.nextSerial) : firstSerial,
+      minSerial: await seedFloor(this.db, tenantId, issuerPrefix, extensionDigit),
+      blockedBy: await findSeedBlocker(this.db, tenantId, issuerPrefix, extensionDigit),
+    };
+  }
+
+  /**
+   * Seeds (or reseeds) a counter AND revokes the serial blocks devices hold
+   * under it, so the new value reaches the next printed label instead of
+   * waiting out a 2000-serial block already in a station's hands (the bug
+   * this whole path exists to fix -- see the 2026-08-20 reseed design doc).
+   *
+   * One transaction, in this order, because each step's correctness depends
+   * on the previous one still holding at commit time:
+   *
+   * 1. `findSeedBlocker` -- refuse outright while a station could be
+   *    printing. This is the ONLY thing standing between a reseed and two
+   *    physical boxes sharing an SSCC, since the floor no longer covers
+   *    merely-allocated serials.
+   * 2. `seedFloor` -- refuse to reissue a serial already printed.
+   * 3. `atomicSeedSscc` -- the write, re-validating (2) inside its own
+   *    statement against live data.
+   * 4. Revoke live blocks, but ONLY when the value actually moved. Revoking
+   *    on a no-op save would burn the device's block and tear a hole the
+   *    size of `BOX_BLOCK_SIZE` into the numbering for nothing.
+   */
+  async seedCounter(
+    tenantId: string,
+    issuerPrefix: string,
+    dto: { extensionDigit: number; nextSerial: number },
+  ): Promise<{ extensionDigit: number; nextSerial: number }> {
+    return this.db.transaction(async (tx) => {
+      const blocker = await findSeedBlocker(tx, tenantId, issuerPrefix, dto.extensionDigit);
+      if (blocker) {
+        throw new ConflictException({
+          code:
+            blocker.kind === "active_shift"
+              ? "sscc_seed_active_shift"
+              : "sscc_seed_device_out_of_sync",
+          blockedBy: blocker,
+        });
+      }
+
+      const floor = await seedFloor(tx, tenantId, issuerPrefix, dto.extensionDigit);
+      if (dto.nextSerial < floor) {
+        throw new BadRequestException({ code: "sscc_seed_below_floor", minSerial: floor });
+      }
+
+      const [current] = await tx
+        .select({ nextSerial: schema.ssccCounters.nextSerial })
+        .from(schema.ssccCounters)
+        .where(
+          and(
+            eq(schema.ssccCounters.tenantId, tenantId),
+            eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
+            eq(schema.ssccCounters.extensionDigit, dto.extensionDigit),
+          ),
+        );
+
+      const applied = await atomicSeedSscc(
+        tx,
+        tenantId,
+        issuerPrefix,
+        dto.extensionDigit,
+        dto.nextSerial,
+      );
+      if (!applied) throw new ConflictException({ code: "sscc_seed_floor_moved" });
+
+      if (current == null || Number(current.nextSerial) !== dto.nextSerial) {
+        await tx
+          .update(schema.ssccBlocks)
+          .set({ revokedAt: sql`now()` })
+          .where(
+            and(
+              eq(schema.ssccBlocks.tenantId, tenantId),
+              eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+              eq(schema.ssccBlocks.extensionDigit, dto.extensionDigit),
+              isNull(schema.ssccBlocks.revokedAt),
+            ),
+          );
+      }
+
+      return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
+    });
   }
 
   /**
