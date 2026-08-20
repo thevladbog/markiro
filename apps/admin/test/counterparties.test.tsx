@@ -91,6 +91,12 @@ const ACME = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
+const COUNTER_BLOCKED = {
+  ...COUNTER,
+  blockedBy: { kind: "active_shift", shiftId: "s-1", shiftNumber: "AUG26-003" },
+};
+
 describe("CounterpartiesPage", () => {
   it("keeps counterparty rows readable while hiding mutations without operations.write", async () => {
     vi.stubGlobal(
@@ -380,5 +386,74 @@ describe("CounterpartiesPage", () => {
 
     expect(await within(dialog).findByText(conflictMessage)).toBeDefined();
     expect(screen.getByRole("alertdialog", { name: "Удалить контрагента?" })).toBeDefined();
+  });
+
+  it("locks the counterparty sscc counter while a shift is active and names the shift", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/counterparties/1/sscc") {
+        return jsonResponse(200, COUNTER_BLOCKED);
+      }
+      return jsonResponse(200, { items: [ACME] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Acme Ltd");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    await waitFor(() => expect(input).toHaveProperty("disabled", true));
+    expect(screen.getByText(/AUG26-003/)).toBeDefined();
+    const section = input.closest(".mk-counterparty-panel-section");
+    if (!section) throw new Error("SSCC section not found");
+    expect(
+      within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }),
+    ).toHaveProperty("disabled", true);
+  });
+
+  it("shows the floor the server reported for the counterparty counter, not a hardcoded one", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/counterparties/1/sscc") {
+        return jsonResponse(200, COUNTER);
+      }
+      return jsonResponse(200, { items: [ACME] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Acme Ltd");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const section = input.closest(".mk-counterparty-panel-section");
+    if (!section) throw new Error("SSCC section not found");
+    await waitFor(() => expect(within(section as HTMLElement).getByText(/40\s?000/)).toBeDefined());
+    expect(
+      within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }),
+    ).toHaveProperty("disabled", false);
+  });
+
+  it("says nothing has been printed yet instead of 'напечатано до 0' (final review, finding 4)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/counterparties/1/sscc") {
+        // The floor for a box counter with nothing printed is 1, which used
+        // to interpolate as "Уже напечатано до 0".
+        return jsonResponse(200, { ...COUNTER, nextSerial: 1, minSerial: 1 });
+      }
+      return jsonResponse(200, { items: [ACME] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Acme Ltd");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const section = input.closest(".mk-counterparty-panel-section");
+    if (!section) throw new Error("SSCC section not found");
+    await waitFor(() =>
+      expect(within(section as HTMLElement).getByText(/Ещё ничего не напечатано/)).toBeDefined(),
+    );
+    expect(within(section as HTMLElement).queryByText(/напечатано до 0/)).toBeNull();
   });
 });

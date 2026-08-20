@@ -24,9 +24,9 @@
   <a href="./LICENSE"><img alt="Проприетарная лицензия" src="https://img.shields.io/badge/License-Proprietary-17161A"></a>
 </p>
 
-![Дизайн-концепт линейной станции «Маркиро»](./docs/assets/readme/station.webp)
+![Скриншот линейной станции «Маркиро»](./docs/assets/readme/station.webp)
 
-<p align="center"><em>Дизайн-концепт продукта — режим агрегации на линейной станции с поддержкой автономной работы.</em></p>
+<p align="center"><em>Режим агрегации на линейной станции с поддержкой автономной работы — рендер встроенной галереи экранов приложения на фикстурных данных.</em></p>
 
 ## Что такое «Маркиро»?
 
@@ -46,8 +46,8 @@
 
 <table>
   <tr>
-    <td width="50%"><a href="./docs/assets/readme/admin.webp"><img alt="Дизайн-концепт админ-панели «Маркиро»" src="./docs/assets/readme/admin.webp"></a></td>
-    <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Дизайн-концепт киоска выдачи «Маркиро»" src="./docs/assets/readme/kiosk.webp"></a></td>
+    <td width="50%"><a href="./docs/assets/readme/admin.webp"><img alt="Скриншот админ-панели «Маркиро»" src="./docs/assets/readme/admin.webp"></a></td>
+    <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Скриншот киоска выдачи «Маркиро»" src="./docs/assets/readme/kiosk.webp"></a></td>
   </tr>
   <tr>
     <td><strong>Админ-панель.</strong> Товары, смены, шаблоны этикеток, интеграции, команды, заказы на выдачу и операционный аудит.</td>
@@ -55,7 +55,7 @@
   </tr>
 </table>
 
-<p align="center"><em>Дизайн-концепты из утверждённого handoff-пакета; это не скриншоты подтверждённого production-развёртывания.</em></p>
+<p align="center"><em>Скриншоты работающего приложения в локальной среде разработки с демонстрационными данными.</em></p>
 
 ## Основные возможности
 
@@ -136,15 +136,18 @@ pnpm --silent --filter @markiro/api provision:tenant-owner -- \
 
 ```text
 apps/
-  api/       NestJS API, auth, jobs, integrations
-  admin/     React/Vite production cabinet
-  kiosk/     Offline-first pickup PWA
-  station/   Tauri/React line workstation
+  api/         NestJS API, auth, jobs, integrations
+  admin/       React/Vite production cabinet
+  kiosk/       Offline-first pickup PWA
+  station/     Tauri/React line workstation
+  landing/     Public marketing website
+  saas-admin/  SaaS operator panel
 packages/
-  domain/    GS1, KM, SSCC, labels, shared policy
-  db/        PostgreSQL schema, migrations, SQLite mirror
-  email/     Transactional email templates
-  ui/        Shared design tokens and React components
+  domain/           GS1, KM, SSCC, labels, shared policy
+  db/               PostgreSQL schema, migrations, SQLite mirror
+  email/            Transactional email templates
+  ui/               Shared design tokens and React components
+  legal-documents/  Legal document sources and rendering
 ```
 
 Точечная проверка во время разработки:
@@ -171,6 +174,12 @@ pnpm format:check
 - [Планы реализации](./docs/superpowers/plans/)
 - [Дорожная карта MVP](./docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md)
 - [Обозреватель OpenAPI](http://localhost:3000/docs), когда API запущен
+
+## Контрибуции, безопасность и поддержка
+
+- Внешние контрибуции не принимаются; см. [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Об уязвимостях сообщайте приватно; см. [SECURITY.md](./SECURITY.md).
+- Вопросы, баг-репорты и коммерческая лицензия — см. [SUPPORT.md](./SUPPORT.md).
 
 ## Лицензия
 

@@ -499,6 +499,7 @@ export function DatePicker({
                       ? formatIsoDate(day) === formatIsoDate(selectedDate)
                       : false;
                     const isActive = isSameDate(day, activeDate);
+                    const isToday = isSameDate(day, new Date());
 
                     return (
                       <span key={formatIsoDate(day)} role="gridcell" aria-selected={isSelected}>
@@ -512,6 +513,8 @@ export function DatePicker({
                           className="mk-date-picker__day"
                           data-outside-month={outsideMonth ? "true" : undefined}
                           data-selected={isSelected ? "true" : undefined}
+                          data-today={isToday ? "true" : undefined}
+                          aria-current={isToday ? "date" : undefined}
                           onFocus={() => setActiveDate(day)}
                           onKeyDown={(event) => handleDayKeyDown(event, day)}
                           onClick={() => selectDate(day)}

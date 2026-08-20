@@ -75,6 +75,34 @@ export async function addRange(exec: SqlExecutor, r: ServerRange): Promise<void>
 }
 
 /**
+ * Deletes ranges the server has revoked (`ShiftBundleDto.ssccRevokedFrom`).
+ *
+ * Deleting, not exhausting: `burnSerial` picks the lowest `from_serial` that
+ * still has room, so a revoked block left in place keeps winning over the
+ * replacement the server just cut, and an admin's reseeded number never
+ * reaches a label -- the exact bug this whole path fixes.
+ *
+ * Keyed on the pool's own primary key `(issuer_prefix, extension_digit,
+ * from_serial)`, so a `from_serial` the device does not hold, or holds under
+ * a different extension digit, is simply not matched. Idempotent: a replayed
+ * bundle deletes rows that are already gone.
+ */
+export async function dropRanges(
+  exec: SqlExecutor,
+  issuerPrefix: string,
+  extensionDigit: number,
+  fromSerials: number[],
+): Promise<void> {
+  if (fromSerials.length === 0) return;
+  const placeholders = fromSerials.map(() => "?").join(",");
+  await exec.run(
+    `DELETE FROM sscc_pool
+     WHERE issuer_prefix = ? AND extension_digit = ? AND from_serial IN (${placeholders})`,
+    [issuerPrefix, extensionDigit, ...fromSerials],
+  );
+}
+
+/**
  * Consumes the lowest unspent serial for this issuer prefix and extension
  * digit, or null when the pool is dry.
  *

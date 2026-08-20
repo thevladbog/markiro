@@ -44,13 +44,13 @@ describe.skipIf(!databaseUrl)("center SSCC and fit label templates migration", (
   const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   let created = false;
 
-  // `migrate()` runs 0051 against a database with no organizations, so it
+  // `migrate()` runs 0052 against a database with no organizations, so it
   // updates nothing; the rows the assertions need are created afterwards and
   // the migration's SQL is replayed directly, exactly as the 0049/0050 tests
   // do.
   async function runReseed(): Promise<void> {
     const sql = await readFile(
-      join(migrationsFolder, "0051_center_sscc_and_fit_label_templates.sql"),
+      join(migrationsFolder, "0052_center_sscc_and_fit_label_templates.sql"),
       "utf8",
     );
     for (const stmt of sql.split("--> statement-breakpoint")) {

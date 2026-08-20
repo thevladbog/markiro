@@ -42,7 +42,11 @@ const PROFILE = {
   defaultBoxLabelTemplateId: null as string | null,
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
-const COUNTER = { extensionDigit: 0, nextSerial: 45_000 };
+const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
+const COUNTER_BLOCKED = {
+  ...COUNTER,
+  blockedBy: { kind: "active_shift", shiftId: "s-1", shiftNumber: "AUG26-003" },
+};
 const LABEL_TEMPLATES = [
   {
     id: "11111111-1111-4111-8111-111111111111",
@@ -775,5 +779,50 @@ describe("OrgProfilePage", () => {
       (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
     ).length;
     expect(putCallsAfter).toBe(putCallsBefore);
+  });
+
+  it("locks the sscc counter while a shift is active and names the shift", async () => {
+    vi.stubGlobal("fetch", routeFetch({ sscc: () => jsonResponse(200, COUNTER_BLOCKED) }));
+    renderPage();
+
+    const card = await cardOf("Счётчик SSCC для коробов");
+    const input = await within(card).findByLabelText("Начальный серийный номер");
+    await waitFor(() => expect(input).toHaveProperty("disabled", true));
+    expect(within(card).getByText(/AUG26-003/)).toBeDefined();
+    expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("shows the floor the server reported rather than a hardcoded one", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+
+    const card = await cardOf("Счётчик SSCC для коробов");
+    // 45 000 is the counter (the value the next BLOCK is cut from -- not the
+    // next label's serial, which is wherever the station's current block has
+    // got to), 40 000 the floor -- both come from the server; the form must
+    // not invent either.
+    await waitFor(() => expect(within(card).getByText(/40\s?000/)).toBeDefined());
+    expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("says nothing has been printed yet instead of 'напечатано до 0' (final review, finding 4)", async () => {
+    // The floor for a box counter with nothing printed is 1, and the hint's
+    // "printed through" is minSerial - 1 -- which used to render as
+    // "Уже напечатано до 0".
+    vi.stubGlobal(
+      "fetch",
+      routeFetch({ sscc: () => jsonResponse(200, { ...COUNTER, nextSerial: 1, minSerial: 1 }) }),
+    );
+    renderPage();
+
+    const card = await cardOf("Счётчик SSCC для коробов");
+    await waitFor(() => expect(within(card).getByText(/Ещё ничего не напечатано/)).toBeDefined());
+    expect(within(card).queryByText(/напечатано до 0/)).toBeNull();
   });
 });

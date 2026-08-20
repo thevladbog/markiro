@@ -1,0 +1,1 @@
+ALTER TABLE "sscc_blocks" ADD COLUMN "revoked_at" timestamp with time zone;

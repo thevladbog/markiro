@@ -2,10 +2,11 @@ import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { gs1CheckDigit } from "@markiro/domain";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { buildSscc, gs1CheckDigit } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { loadEnv } from "../src/env";
@@ -98,7 +99,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 45_000 })
       .expect(200);
     const res = await agent.get("/org/profile/sscc").expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 45_000 });
+    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 45_000 });
   });
 
   it("rejects an extension digit outside 0..9", async () => {
@@ -167,7 +168,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       .send({ extensionDigit: 0, nextSerial: 12_345 })
       .expect(200);
     const res = await agent.get(`/counterparties/${counterpartyId}/sscc`).expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 12_345 });
+    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 12_345 });
   });
 
   it("404s a counterparty counter id that does not exist", async () => {
@@ -184,7 +185,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // Org B's own counter starts fresh at 1 -- NOT org A's 555. A missing
     // tenant filter in getSscc's WHERE clause would leak org A's row here.
     const res = await agent2.get("/org/profile/sscc").expect(200);
-    expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
+    expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
 
     const stillOwn = await agent.get("/org/profile/sscc").expect(200);
     expect(stillOwn.body.nextSerial).toBe(555);
@@ -218,7 +219,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
     // tenantId filter (matching on issuerPrefix + extensionDigit alone)
     // would return SOME row here instead of none.
     const resB = await agentB.get("/org/profile/sscc").expect(200);
-    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
+    expect(resB.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
 
     const resA = await agentA.get("/org/profile/sscc").expect(200);
     expect(resA.body.nextSerial).toBe(700);
@@ -247,7 +248,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
 
     // Same prefix as counterparty A, different tenant -- must read as fresh.
     const resB = await agentB.get(`/counterparties/${cpBId}/sscc`).expect(200);
-    expect(resB.body).toEqual({ extensionDigit: 0, nextSerial: 1 });
+    expect(resB.body).toMatchObject({ extensionDigit: 0, nextSerial: 1 });
   });
 
   describe("putSscc floor (final review, finding 2)", () => {
@@ -271,30 +272,28 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       await agent.put("/org/profile").send({ gln: freshGln() }).expect(200);
       await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 777 }).expect(200);
       const res = await agent.get("/org/profile/sscc").expect(200);
-      expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 777 });
+      expect(res.body).toMatchObject({ extensionDigit: 0, nextSerial: 777 });
     });
 
-    it("rejects seeding below the floor once a block has been issued, but allows seeding at or above it", async () => {
+    it("rejects seeding below the floor once a serial has been printed, but allows seeding at or above it", async () => {
       const gln = freshGln();
       await agent.put("/org/profile").send({ gln }).expect(200);
       const prefix = gln.slice(0, 9);
 
       // Cuts a real sscc_blocks row under this prefix, the same one-statement
       // path a shift bundle uses -- no HTTP route exposes raw allocation, so
-      // SsccService is called directly, same as sscc.e2e.test.ts does.
-      // `allocate` itself already advances `sscc_counters` to `1 + size` (51) as
-      // part of granting the block, so the floor -- one past the block's
-      // toSerial -- equals that same baseline here (fromSerial 1, size 50).
-      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
-      const floor = block.toSerial + 1;
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+      // SsccService is called directly, same as sscc.e2e.test.ts does. The
+      // floor comes from the PRINTED serial recorded below, not from the
+      // block's bounds (2026-08-20 reseed design).
+      const service = app!.get(SsccService);
+      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 9));
+      const floor = block.fromSerial + 10;
 
       await agent
         .put("/org/profile/sscc")
         .send({ extensionDigit: 0, nextSerial: floor - 1 })
         .expect(400);
-      // Untouched by the rejected attempt.
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
 
       await agent
         .put("/org/profile/sscc")
@@ -303,7 +302,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
     });
 
-    it("rejects seeding below the floor for a counterparty's counter once a block has been issued", async () => {
+    it("rejects seeding below the floor for a counterparty's counter once a serial has been printed", async () => {
       const gln = freshGln();
       const counterparty = await agent
         .post("/counterparties")
@@ -312,14 +311,23 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       const cpId = (counterparty.body as { id: string }).id;
       const prefix = gln.slice(0, 9);
 
-      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
-      const floor = block.toSerial + 1;
+      // Cuts a real sscc_blocks row under this prefix, the same one-statement
+      // path a shift bundle uses -- no HTTP route exposes raw allocation, so
+      // SsccService is called directly, same as sscc.e2e.test.ts does. The
+      // floor comes from the PRINTED serial recorded below, not from the
+      // block's bounds (2026-08-20 reseed design).
+      const service = app!.get(SsccService);
+      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 9));
+      const floor = block.fromSerial + 10;
 
       const rejected = await agent
         .put(`/counterparties/${cpId}/sscc`)
         .send({ extensionDigit: 0, nextSerial: floor - 1 })
         .expect(400);
-      expect((rejected.body as { message: string }).message).toContain(String(floor));
+      // Machine-readable since Task 4: the admin client reads `code` off the
+      // body and renders `minSerial` itself, rather than parsing a sentence.
+      expect(rejected.body).toMatchObject({ code: "sscc_seed_below_floor", minSerial: floor });
 
       await agent
         .put(`/counterparties/${cpId}/sscc`)
@@ -329,19 +337,54 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
         floor,
       );
     });
+
+    it("floors on what was printed, not on what was handed out", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+
+      // A block of 50 serials is handed to the device, but only serial 10 is
+      // ever reported as actually printed. The old floor (toSerial + 1 = 51)
+      // made every unprinted serial in the block permanently unusable; the
+      // floor is now one past what was really printed.
+      await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 10));
+
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 10 }).expect(400);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 11 }).expect(200);
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(11);
+    });
+
+    it("floors at the box minimum when nothing was ever printed", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+
+      // Handed out but never printed -- serial 1 is still free.
+      expect(await seedFloor(db, tenantId, prefix, 0)).toBe(1);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 1 }).expect(200);
+    });
   });
 
   // CodeRabbit PR33 review, Finding 5: `putSscc` used to read `seedFloor`
-  // and then write `nextSerial` in two SEPARATE statements. If a device's
-  // `allocate()` landed in between -- advancing the counter and recording a
-  // new block -- the write would still land unconditionally, silently
-  // overwriting the counter with a value now behind that block. This
-  // exercises `atomicSeedSscc` (the fix) directly: the interleaving is
-  // forced explicitly (read a floor, THEN let a concurrent allocation
-  // advance the counter, THEN attempt to write the now-stale value), which
-  // is the deterministic way to prove a race window is closed rather than
-  // relying on real thread timing.
-  describe("putSscc atomic write vs a concurrent allocation (CodeRabbit PR33 review, Finding 5)", () => {
+  // and then write `nextSerial` in two SEPARATE statements. That gap is
+  // still open today, but what can land in it has changed with the
+  // 2026-08-20 reseed design: the floor now tracks what was actually
+  // PRINTED (`sscc_blocks.consumedThroughSerial`), not what was merely
+  // allocated, so a plain `allocate()` in the gap no longer moves it. What
+  // still moves it is a concurrent BOX CLOSURE -- a device's closed box
+  // arriving at ingest and calling `SsccService.recordConsumedSerial`
+  // between the admin's floor read and their write. If the write still
+  // landed unconditionally in that case, it would silently overwrite the
+  // counter with a value now behind a serial that is already on a physical
+  // box. This exercises `atomicSeedSscc` (the fix) directly: the
+  // interleaving is forced explicitly (read a floor, THEN let a concurrent
+  // box closure advance the printed floor, THEN attempt to write the
+  // now-stale value), which is the deterministic way to prove the race
+  // window is closed rather than relying on real thread timing.
+  describe("putSscc atomic write vs a concurrent box closure (CodeRabbit PR33 review, Finding 5)", () => {
     let counter = 0;
     function freshGln(): string {
       counter += 1;
@@ -367,21 +410,29 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       return row ? Number(row.nextSerial) : null;
     }
 
-    it("rejects a stale seed once a concurrent allocation has moved the floor, leaving the counter at the allocation's value", async () => {
+    it("rejects a stale seed once a concurrent box closure has moved the printed floor", async () => {
       const gln = freshGln();
       const prefix = gln.slice(0, 9);
 
-      // The admin's own pre-check, run BEFORE the race -- floor is 0, no
-      // block has ever been issued yet.
+      // The admin's own pre-check, run BEFORE the race -- floor is 1 (the
+      // extension digit's own first serial), nothing has ever been printed
+      // under this prefix yet.
       const floorBeforeRace = await seedFloor(db, tenantId, prefix, 0);
-      expect(floorBeforeRace).toBe(0);
+      expect(floorBeforeRace).toBe(1);
       const staleNextSerial = 10; // valid against floorBeforeRace, momentarily
 
-      // The race: a device's bundle fetch allocates a REAL block under this
-      // SAME prefix, in between the admin's floor read above and their
-      // write below -- advancing the counter to 51 and moving the floor to 51.
+      // A block must exist for there to be something to attribute a printed
+      // serial to -- a device's bundle fetch allocates a REAL block under
+      // this SAME prefix. This alone does NOT move the printed floor (the
+      // 2026-08-20 reseed design): the counter advances to 51, but nothing
+      // has been printed yet.
       const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
       expect(block.toSerial).toBe(50);
+
+      // The race: a device's closed box arrives at ingest and reports serial
+      // 40 as actually printed, in between the admin's floor read above and
+      // their write below -- advancing the printed floor to 41.
+      await app!.get(SsccService).recordConsumedSerial(tenantId, buildSscc(0, prefix, 40));
 
       // The admin's write now lands, still carrying the STALE value that
       // was valid a moment ago. The atomic guard must refuse it.
@@ -389,7 +440,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect(applied).toBe(false);
 
       // The counter must be untouched by the rejected write -- still
-      // exactly where the concurrent allocation left it, never silently
+      // exactly where the earlier allocation left it (51), never silently
       // regressed to the stale value.
       expect(await readCounter(prefix)).toBe(51);
     });
@@ -399,11 +450,389 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       const prefix = gln.slice(0, 9);
 
       const floor = await seedFloor(db, tenantId, prefix, 0);
-      expect(floor).toBe(0);
+      expect(floor).toBe(1);
 
       const applied = await atomicSeedSscc(db, tenantId, prefix, 0, 777);
       expect(applied).toBe(true);
       expect(await readCounter(prefix)).toBe(777);
+    });
+  });
+
+  describe("seed guards and block revocation (2026-08-20 reseed design)", () => {
+    // Own counter, offset clear of BOTH describe blocks above ("46" and
+    // "47"): a shared prefix counter would make these tests seed over rows
+    // another test already cut a block under.
+    let counter = 0;
+    function freshGln(): string {
+      counter += 1;
+      const body = `48${String(counter).padStart(7, "0")}000`;
+      return body + String(gs1CheckDigit(body));
+    }
+
+    // The out-of-sync-device guard fires on a device whose `last_seen_at`
+    // predates the last shift close -- and `createTestStationDevice` leaves it
+    // null. Test 1 below closes a shift, which would then make every later
+    // test in this block see a `device_out_of_sync` blocker for a reason none
+    // of them is about. Stamping the device as freshly checked-in before each
+    // test isolates them to the behaviour they actually assert.
+    beforeEach(async () => {
+      await db
+        .update(schema.stationDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(schema.stationDevices.id, deviceId));
+    });
+
+    /** Direct-DB product seed: product validation is not what these tests exercise. */
+    async function seedProduct(): Promise<string> {
+      const id = randomUUID();
+      await db.insert(schema.products).values({
+        id,
+        tenantId,
+        gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
+        name: "Seed Product",
+        status: "active",
+        // Aggregation shifts refuse to be created without one (see
+        // ShiftsService's "Aggregation mode requires a box capacity").
+        boxCapacity: 12,
+      });
+      return id;
+    }
+
+    /** Direct-DB box label template seed: aggregation shifts require one. */
+    async function seedBoxLabelTemplate(): Promise<string> {
+      const id = randomUUID();
+      await db.insert(schema.labelTemplates).values({
+        id,
+        tenantId,
+        name: `Box Template ${id.slice(0, 8)}`,
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      });
+      return id;
+    }
+
+    /** Creates + opens an aggregation shift, returning its id and display number. */
+    async function openAggregationShift(): Promise<{ id: string; number: string }> {
+      const productId = await seedProduct();
+      const boxLabelTemplateId = await seedBoxLabelTemplate();
+      const created = await agent
+        .post("/shifts")
+        .send({ productId, mode: "aggregation", boxLabelTemplateId })
+        .expect(201);
+      const id = created.body.id as string;
+      const opened = await agent.post(`/shifts/${id}/open`).expect(200);
+      return { id, number: opened.body.number as string };
+    }
+
+    /** Closes a shift so the counter guard stops reporting it (`reason` is min 3 chars). */
+    async function closeShift(id: string): Promise<void> {
+      await agent.post(`/shifts/${id}/close`).send({ reason: "counter reseed test" }).expect(200);
+    }
+
+    it("refuses to seed while a shift is active, and says which one", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const shift = await openAggregationShift();
+
+      const res = await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: 900 })
+        .expect(409);
+      expect(res.body.code).toBe("sscc_seed_active_shift");
+
+      const state = await agent.get("/org/profile/sscc").expect(200);
+      expect(state.body.blockedBy).toEqual({
+        kind: "active_shift",
+        shiftId: shift.id,
+        shiftNumber: shift.number,
+      });
+
+      await closeShift(shift.id);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 900 }).expect(200);
+    });
+
+    it("reports the current floor as minSerial", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+      await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 7));
+
+      const res = await agent.get("/org/profile/sscc").expect(200);
+      expect(res.body.minSerial).toBe(8);
+      expect(res.body.blockedBy).toBeNull();
+    });
+
+    it("revokes the device's live block when the value changes, and leaves it when it does not", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+
+      const liveBlocks = async () =>
+        db
+          .select({ id: schema.ssccBlocks.id })
+          .from(schema.ssccBlocks)
+          .where(
+            and(
+              eq(schema.ssccBlocks.tenantId, tenantId),
+              eq(schema.ssccBlocks.issuerPrefix, prefix),
+              isNull(schema.ssccBlocks.revokedAt),
+            ),
+          );
+
+      // Re-saving the value the counter already holds must NOT revoke: every
+      // redundant "Save" would otherwise burn a whole block and tear a
+      // 2000-serial hole in the numbering.
+      const unchanged = (await agent.get("/org/profile/sscc").expect(200)).body.nextSerial;
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: unchanged })
+        .expect(200);
+      expect(await liveBlocks()).toHaveLength(1);
+
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: block.toSerial + 500 })
+        .expect(200);
+      expect(await liveBlocks()).toHaveLength(0);
+    });
+
+    it("refuses while a device holding a live block is out of sync, unless that device is revoked", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+
+      // A shift closes AFTER the device's last check-in: the device may be
+      // offline holding closed boxes whose SSCCs sit in the block above.
+      await closeShift((await openAggregationShift()).id);
+
+      const res = await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: 900 })
+        .expect(409);
+      expect(res.body.code).toBe("sscc_seed_device_out_of_sync");
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.blockedBy).toEqual({
+        kind: "device_out_of_sync",
+        deviceId,
+        deviceName: "Line 1 terminal",
+      });
+
+      // A decommissioned terminal must not block the setting forever.
+      await db
+        .update(schema.stationDevices)
+        .set({ revokedAt: new Date() })
+        .where(eq(schema.stationDevices.id, deviceId));
+      try {
+        await agent
+          .put("/org/profile/sscc")
+          .send({ extensionDigit: 0, nextSerial: 900 })
+          .expect(200);
+      } finally {
+        await db
+          .update(schema.stationDevices)
+          .set({ revokedAt: null })
+          .where(eq(schema.stationDevices.id, deviceId));
+      }
+    });
+  });
+
+  // Task 4 review, Finding 1: `seedCounter`'s pre-write read of the current
+  // counter value used to take no row lock, while the lock on
+  // `sscc_counters` was only taken a few lines later, inside
+  // `atomicSeedSscc`. A concurrent `allocate()` could commit in that window:
+  // the read would still see the PRE-allocation value, `atomicSeedSscc`
+  // would accept the write anyway (its own re-validation floor is
+  // PRINTED-only, by design, and nothing had been printed), and the revoke
+  // check (`current.nextSerial === dto.nextSerial`) would then compare two
+  // copies of the same stale number and conclude "no change" -- skipping
+  // revocation of the live block `allocate()` had just handed a device. The
+  // fix adds `.for("update")` to that read.
+  //
+  // Reproducing this deterministically (no `setTimeout`/sleep race) requires
+  // a REAL held Postgres transaction, because the bug is specifically about
+  // whether a read blocks on another transaction's row lock -- something a
+  // purely sequential test cannot exercise: run the statements in any fixed
+  // order and there is no window left for the race to fall into. So this
+  // holds a genuine `allocate()` transaction open across an `await`, and
+  // uses `pg_locks` (not a timer) to confirm `seedCounter`'s own locked read
+  // has actually queued behind it before releasing -- the DB's own lock
+  // state is the synchronization signal, not wall-clock timing.
+  describe("seedCounter locked read vs a concurrent allocate (final review, finding 1)", () => {
+    let counter = 0;
+    function freshGln(): string {
+      counter += 1;
+      const body = `50${String(counter).padStart(7, "0")}000`;
+      return body + String(gs1CheckDigit(body));
+    }
+
+    beforeEach(async () => {
+      await db
+        .update(schema.stationDevices)
+        .set({ lastSeenAt: new Date() })
+        .where(eq(schema.stationDevices.id, deviceId));
+    });
+
+    /**
+     * Polls for a backend that Postgres itself reports as blocked BY
+     * `holderPid` (`pg_blocking_pids(pid) @> ARRAY[holderPid]`) -- i.e. some
+     * OTHER session is genuinely queued behind a lock the holder transaction
+     * is holding. `pg_locks` alone does NOT surface this directly: a session
+     * blocked on `SELECT ... FOR UPDATE` waits on a `transactionid`-type
+     * lock (the blocker's own transaction ID), not a `relation`-type one, so
+     * joining `pg_locks` to `pg_class` on the target table -- the obvious
+     * first approach -- silently finds nothing and this poll would never
+     * resolve. `pg_blocking_pids()` (backed by `pg_stat_activity` under the
+     * hood) reports the wait regardless of lock type, which is why it's used
+     * here instead.
+     *
+     * Keyed on the holder's own backend pid (captured from
+     * `pg_backend_pid()` inside the holder's own transaction, see below)
+     * rather than on query text: `pg_stat_activity`/`pg_locks` are
+     * CLUSTER-wide, and this repo genuinely shares one dev Postgres across
+     * worktrees (Task 4 review, finding 2), so an unrelated backend --
+     * another worktree, another developer, another test that happens to
+     * mention `sscc_counters` -- could satisfy a loose query-text predicate
+     * and release this poll before THIS test's own statement has actually
+     * queued, silently degrading the synchronization back into a plain
+     * race. Asking "is anyone blocked specifically by MY transaction" is
+     * exact regardless of database noise, and it also survives which
+     * *statement* ends up doing the actual waiting: with the fix in place
+     * that's `seedCounter`'s locked `SELECT ... FOR UPDATE`, but with the
+     * fix reverted (see the finding-1 verification below) it's
+     * `atomicSeedSscc`'s `INSERT ... ON CONFLICT DO UPDATE` instead -- a
+     * query-text fragment tied to one specific statement would silently stop
+     * matching in that second case and turn a real bug into a timeout
+     * instead of the intended assertion failure. The 20ms polling interval
+     * only affects how quickly the poll notices the state change; the
+     * assertion itself waits on that DB-visible state, not on a fixed delay,
+     * so it does not flake under CI scheduling jitter the way a "sleep N ms
+     * and hope" approach would.
+     */
+    async function waitForBlockedByBackend(holderPid: number, timeoutMs = 5000): Promise<void> {
+      const deadline = Date.now() + timeoutMs;
+      for (;;) {
+        const res = await db.execute<{ count: string }>(sql`
+          SELECT count(*)::text AS count
+          FROM pg_stat_activity
+          WHERE datname = current_database()
+            AND pid <> pg_backend_pid()
+            AND ${holderPid} = ANY(pg_blocking_pids(pid))
+        `);
+        if (Number(res.rows[0]?.count ?? "0") > 0) return;
+        if (Date.now() > deadline) {
+          throw new Error(`Timed out waiting for a session blocked by backend pid ${holderPid}`);
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    }
+
+    it("revokes the device's block instead of silently skipping it when a concurrent allocate advances the counter first", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+
+      // Seed once so `sscc_counters` already has a row -- `FOR UPDATE` locks
+      // nothing on a row that doesn't exist yet (see this test's sibling
+      // "seeds freely" case for that path; it needs no lock because the
+      // `current == null` branch already revokes unconditionally).
+      const preAllocationValue = 500;
+      await agent
+        .put("/org/profile/sscc")
+        .send({ extensionDigit: 0, nextSerial: preAllocationValue })
+        .expect(200);
+
+      // Hold a REAL allocate() transaction open on this counter's row: its
+      // own upsert acquires the row lock immediately, `lockAcquired` fires
+      // the instant that statement returns (guaranteeing the lock is held
+      // by the time we proceed), and the transaction then parks on `held`
+      // -- keeping the lock in place -- until this test releases it below.
+      let lockAcquired!: (holderPid: number) => void;
+      const lockAcquiredPromise = new Promise<number>((resolve) => {
+        lockAcquired = resolve;
+      });
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const allocatePromise = db.transaction(async (tx) => {
+        const block = await service.allocate(tenantId, prefix, 0, deviceId, 2000, tx);
+        // This transaction's own backend pid -- read on the SAME `tx` handle
+        // so it names the connection actually holding the row lock, for
+        // `waitForBlockedByBackend` below to key its poll on.
+        const pidRes = await tx.execute<{ pid: number }>(sql`SELECT pg_backend_pid() AS pid`);
+        lockAcquired(Number(pidRes.rows[0]?.pid));
+        await held;
+        return block;
+      });
+      // `db` here is `setup.db` -- the SAME pool the Nest app (and this
+      // file's `afterAll` -> `app.close()` -> `AuthPoolCloser.onModuleDestroy`
+      // -> `pool.end()`) share. `allocatePromise`'s transaction holds a
+      // checked-out client parked on `held` until `release()` runs; if
+      // anything between here and `release()` throws (a `waitForBlockedLockRequest`
+      // timeout, or `seedPromise` rejecting), `release()` would never run,
+      // the held callback would never return, the client would never go back
+      // to the pool, and `afterAll`'s `pool.end()` would then hang forever --
+      // with the row lock on `sscc_counters` sitting against the SHARED dev
+      // Postgres for the rest of the process. Attach the no-op catch on
+      // `seedPromise` at creation (not later) so it is never even briefly an
+      // unhandled rejection, and guarantee `release()` always runs via `finally`.
+      let seedPromise: ReturnType<typeof service.seedCounter> | undefined;
+      try {
+        const holderPid = await lockAcquiredPromise;
+
+        // seedCounter submits the value the counter held BEFORE the
+        // concurrent allocate above -- exactly the stale value an unlocked
+        // read would have produced. Its `findSeedBlocker`/`seedFloor` reads
+        // don't touch `sscc_counters`, so its own locked read is the first
+        // thing it does that can collide with the lock `allocate()` is
+        // holding; started but deliberately not awaited yet, so it can queue
+        // behind that lock.
+        seedPromise = service.seedCounter(tenantId, prefix, {
+          extensionDigit: 0,
+          nextSerial: preAllocationValue,
+        });
+        seedPromise.catch(() => {});
+
+        // Confirms seedCounter's locked read is now genuinely queued behind
+        // allocate()'s held lock, before we let that lock go -- proving the
+        // fix's `.for("update")` is what's blocking it, not coincidence.
+        await waitForBlockedByBackend(holderPid);
+      } finally {
+        release();
+        await allocatePromise.catch(() => {});
+        await seedPromise?.catch(() => {});
+      }
+
+      const block = await allocatePromise;
+      const result = await seedPromise!;
+
+      // The write itself is allowed to land (by design -- `seedFloor` only
+      // tracks PRINTED serials, and nothing was printed here), but with the
+      // locked read now seeing the POST-allocation counter value (not the
+      // stale pre-allocation one this admin submitted), `current.nextSerial
+      // !== dto.nextSerial` holds and the block allocate() just handed the
+      // device must be revoked -- closing exactly the hole Finding 1
+      // describes, instead of silently leaving a live block over a range
+      // the counter can now hand out again.
+      expect(result.nextSerial).toBe(preAllocationValue);
+
+      const liveBlocks = await db
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, prefix),
+            eq(schema.ssccBlocks.extensionDigit, 0),
+            isNull(schema.ssccBlocks.revokedAt),
+          ),
+        );
+      expect(liveBlocks).toHaveLength(0);
+      expect(block.fromSerial).toBe(preAllocationValue);
     });
   });
 });

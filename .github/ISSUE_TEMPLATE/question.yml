@@ -1,0 +1,11 @@
+name: Question
+description: Ask about behaviour, setup, or the project
+labels: ["question"]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Include the context needed to answer without guessing.
+    validations:
+      required: true

@@ -590,9 +590,9 @@ describe("buildDefaultLabelTemplates", () => {
    * one that has to stay in step with this module — and this test must be repointed again by whoever adds
    * the next reseed.
    */
-  it("matches the jsonb inlined into db migration 0051 (drift guard)", async () => {
+  it("matches the jsonb inlined into db migration 0052 (drift guard)", async () => {
     const sql = await readFile(
-      new URL("../../db/migrations/0051_center_sscc_and_fit_label_templates.sql", import.meta.url),
+      new URL("../../db/migrations/0052_center_sscc_and_fit_label_templates.sql", import.meta.url),
       "utf8",
     );
     const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({

@@ -1,0 +1,43 @@
+name: Bug report
+description: Something is broken or behaves unexpectedly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do **not** report security vulnerabilities here — use the private
+        [security advisory form](https://github.com/thevladbog/markiro/security/advisories/new) instead.
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Admin panel
+        - Pickup kiosk
+        - Line station
+        - API
+        - Landing / SaaS admin
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you see, and what did you expect instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, browser or station build, connectivity state (online/offline), anything relevant.

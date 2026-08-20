@@ -36,6 +36,7 @@ import {
   type PutOrgProfileDto,
   type SsccCounterDto,
 } from "./dto";
+import type { SsccCounterStateDto } from "../sscc/dto";
 import { OrgProfileService } from "./org-profile.service";
 
 @ApiTags("org-profile")
@@ -113,7 +114,7 @@ export class OrgProfileController {
   }
 
   @Get("sscc")
-  async getSscc(@Req() req: RequestWithTenant): Promise<SsccCounterDto> {
+  async getSscc(@Req() req: RequestWithTenant): Promise<SsccCounterStateDto> {
     return this.orgProfileService.getSscc(req.tenantId!);
   }
 

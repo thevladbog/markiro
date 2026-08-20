@@ -144,13 +144,8 @@ it("keeps the create panel open and shows the server message after a conflict", 
   const { router, user } = renderPanel(["/shifts/new"]);
 
   const product = await screen.findByRole("combobox", { name: "Продукт" });
-  fireEvent.pointerDown(product, {
-    button: 0,
-    ctrlKey: false,
-    pointerId: 1,
-    pointerType: "mouse",
-  });
-  fireEvent.click(screen.getByRole("option", { name: "Молоко 1л" }));
+  fireEvent.click(product);
+  fireEvent.click(await screen.findByRole("option", { name: "Молоко 1л" }));
   await user.click(screen.getByRole("button", { name: "Запланировать" }));
 
   const panel = screen.getByRole("dialog", { name: "Новая смена" });

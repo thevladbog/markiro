@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../src/lib/mirror.js";
-import { addRange, burnSerial, remaining } from "../src/lib/sscc-pool.js";
+import { addRange, burnSerial, dropRanges, remaining } from "../src/lib/sscc-pool.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
 // A 9-digit GS1 issuer prefix -- see mirror.ts's StationBundle.sscc doc
@@ -243,5 +243,83 @@ describe("sscc pool", () => {
       expect(seen).toEqual([3, 4, 5, 6, 7, 8, 9]);
       expect(new Set(seen).size).toBe(seen.length);
     });
+  });
+
+  it("drops a revoked range so burning moves to the replacement block", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 2000,
+      consumedThroughSerial: 10,
+    });
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 5000,
+      toSerial: 6999,
+      consumedThroughSerial: null,
+    });
+    // burnSerial takes the LOWEST from_serial, so the revoked block wins
+    // until it is actually deleted -- this is the whole reason dropRanges
+    // exists rather than just adding the new range.
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(11);
+
+    await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(5000);
+  });
+
+  it("ignores an empty revocation list and a range it does not hold", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 9,
+      consumedThroughSerial: null,
+    });
+    await dropRanges(exec, ISSUER_PREFIX, 0, []);
+    await dropRanges(exec, ISSUER_PREFIX, 0, [12345]);
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(9);
+  });
+
+  // Characterization test for the load-bearing drop-then-add ordering when
+  // both name the SAME from_serial. `dropRanges` deletes by that primary
+  // key, so the row `addRange` then re-inserts is a brand new one: the
+  // local cursor is gone and is rebuilt from the server's
+  // `consumedThroughSerial`, which lags whatever the device has burned but
+  // not yet uploaded. This is precisely why `mirrorShiftBundleBody` filters
+  // the bundle's own `sscc.fromSerial` out of the drop list -- see the
+  // shift-bundle test of the same finding.
+  it("loses the local cursor when a dropped from_serial is re-added", async () => {
+    const full = {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 2000,
+      toSerial: 3999,
+      consumedThroughSerial: null,
+    };
+    await addRange(exec, full);
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2000);
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2001);
+
+    await dropRanges(exec, ISSUER_PREFIX, 0, [full.fromSerial]);
+    await addRange(exec, full);
+
+    // Back to the start of the block: the MAX(next_serial) upsert guard in
+    // `addRange` cannot protect a row that no longer exists.
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(2000);
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(1999);
+  });
+
+  it("does not drop the same from_serial under another extension digit", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 1,
+      fromSerial: 1,
+      toSerial: 9,
+      consumedThroughSerial: null,
+    });
+    await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
+    expect(await remaining(exec, ISSUER_PREFIX, 1)).toBe(9);
   });
 });
