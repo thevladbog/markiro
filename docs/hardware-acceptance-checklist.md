@@ -58,11 +58,16 @@ beside each item.
       (75×120, 100×100, 100×150) leave a large empty lower region on the
       label. Print one of each and confirm that is acceptable before this
       catalogue ships as-is to every tenant.
-- [ ] **Night-shift expiry date.** Close a box late in the local evening
-      (after 00:00 UTC) and compare the printed "Годен до" date against the
-      expected LOCAL date — the station stamps production/expiry dates in
-      UTC, so a late-evening close is the case most likely to print the wrong
-      calendar day.
+- [ ] **Night-shift production/expiry date.** Storage keeps `closed_at` in
+      UTC; the label shows the station's LOCAL date. Close a box in the hours
+      where the two disagree (in Moscow, between 00:00 and 03:00 local — i.e.
+      the previous day in UTC) and confirm the printed "Дата производства" is
+      TODAY's local calendar day on the station, not yesterday, and that
+      "Годен до" is that same local day plus the product's shelf life. This
+      is the case a UTC-stamped label used to get wrong by one day.
+- [ ] **Station clock and timezone.** The local date comes from the device's
+      own OS timezone, so confirm the station is set to the plant's zone (not
+      left on UTC or on a factory default) before accepting the labels above.
 - [ ] **Reprint date consistency.** Reprint a previously closed box's label on
       a later day and confirm the production date and "Годен до" on the
       reprint match the original label exactly, not the reprint's own date.

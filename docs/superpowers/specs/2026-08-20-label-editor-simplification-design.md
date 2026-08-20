@@ -192,10 +192,27 @@ ZPL and TSPL with `sampleLabelData()` (unit-tested).
 - `lib/shift-bundle.ts` / `lib/mirror.ts`: persist the two new product
   attributes into `product_mirror` as `egais_code` / `shelf_life_days`.
 - `lib/box-label.ts` `boxLabelFields()`: fill `product.egais` from the
-  mirror (empty string when null) and compute
-  `expiry = addDays(closedAt date, shelfLifeDays)` formatted like the
-  existing `date` field; empty string when `shelfLifeDays` is null.
-  Date arithmetic is pure and unit-tested (month/year rollover).
+  mirror (empty string when null) and compute the two printed dates.
+  Project rule: **storage keeps every timestamp in UTC, devices and web
+  display LOCAL dates.** A box label is read by a human standing next to the
+  station, so both dates are the STATION's calendar days:
+  - `date` («Дата производства») = `localIsoDate(closedAt)` — the local
+    calendar day of the stored UTC instant.
+  - `expiry` («Годен до») = `addCalendarDays(localIsoDate(closedAt),
+shelfLifeDays)`, formatted like `date`; empty string when
+    `shelfLifeDays` is null, non-integer, or non-positive.
+
+  The two helpers are separate and pure so each property is provable on its
+  own: `localIsoDate` is the only timezone-aware step, and
+  `addCalendarDays` is plain civil-date arithmetic on a `YYYY-MM-DD` string
+  (run in UTC internally precisely because UTC has no DST), so a
+  daylight-saving transition inside the shelf-life window can never shift
+  the printed day by one. `closedAt` itself stays the stored UTC ISO
+  instant — only the rendering is local. Unit-tested for month/year/leap
+  rollover, for zones ahead of and behind UTC, and across DST boundaries,
+  with the timezone pinned explicitly in each test (a developer machine sits
+  in Moscow, CI runs in UTC).
+
 - Print path (`print-label.ts`, `box-printing.ts`, transports) is untouched.
   Older bundles without the new attributes degrade to empty field values —
   no error state is added.
@@ -224,11 +241,28 @@ ZPL and TSPL with `sampleLabelData()` (unit-tested).
   assignment.
 - **db:** migration test for the backfill (inserts once, skips on re-run,
   skips name collisions); jsonb-equals-module drift test.
-- **station:** `boxLabelFields` fills/omits the new fields; expiry date
-  arithmetic edge cases; mirror round-trip of the new columns.
+- **station:** `boxLabelFields` fills/omits the new fields; mirror
+  round-trip of the new columns; date rendering covered as two separate
+  pure units — `localIsoDate` against zones ahead of and behind UTC (the
+  01:00-Moscow box that used to print yesterday), and `addCalendarDays`
+  with no timezone dependence at all plus explicit DST-boundary cases. Every
+  test that asserts a local date pins `process.env.TZ` around itself
+  (`test/support/timezone.ts`) so it gives the same answer on a Moscow
+  laptop and on a UTC CI runner; a guard test fails if that pinning ever
+  stops taking effect.
 
 ## Known limitations
 
+- **The printed dates trust the station's OS timezone.** «Дата
+  производства» / «Годен до» are local dates by design (storage UTC,
+  display local), and "local" means whatever zone the device is configured
+  for — there is no per-tenant or per-shift timezone setting. A station left
+  on UTC, or on a factory-default zone, prints a correct-looking but wrong
+  calendar day for late-evening and early-morning closes. Covered by the
+  hardware acceptance checklist, not by a product setting.
+  (Superseded caveat: the labels used to stamp the UTC date part outright,
+  so a box closed before ~03:00 Moscow always printed the previous day.
+  That is fixed; the remaining exposure is only device misconfiguration.)
 - **No download-then-reimport round trip.** "Скачать ZPL/TSPL" emits code
   against `sampleLabelData()` and rasterizes any Cyrillic text to `^GFA`
   bitmaps — the importer rejects a bitmap-only source outright, so a
