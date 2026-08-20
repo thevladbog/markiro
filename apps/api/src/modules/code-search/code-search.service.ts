@@ -329,6 +329,16 @@ export class CodeSearchService {
 
     const raws = [...new Set(codeRows.map((r) => r.canonicalRaw))];
     if (raws.length > 0) {
+      // `scan_events.raw` is the ORIGINAL wire text (whatever the scanner
+      // sent), while `codes.canonicalRaw` is `canonicalizeKm`'s output --
+      // edge whitespace (space/tab) trimmed, then a leading `]d2` AIM
+      // symbology-identifier prefix stripped, then trimmed again (see
+      // `canonicalizeKm` in packages/domain/src/gs1/km.ts). Comparing
+      // `raw` to `canonicalRaw` by plain equality therefore misses every
+      // scan whose wire text carried the `]d2` prefix or surrounding
+      // whitespace -- this mirrors `canonicalizeKm`'s edge-trim + prefix
+      // strip in SQL so the two sides compare like-for-like.
+      const normalizedRaw = sql`btrim(regexp_replace(btrim(${schema.scanEvents.raw}, ' ' || chr(9)), '^\]d2', ''), ' ' || chr(9))`;
       const scanRows = await this.db
         .select({
           verdict: schema.scanEvents.verdict,
@@ -338,7 +348,7 @@ export class CodeSearchService {
           scannedAt: schema.scanEvents.scannedAt,
         })
         .from(schema.scanEvents)
-        .where(and(eq(schema.scanEvents.tenantId, tenantId), inArray(schema.scanEvents.raw, raws)));
+        .where(and(eq(schema.scanEvents.tenantId, tenantId), inArray(normalizedRaw, raws)));
       for (const r of scanRows) {
         events.push({
           type: "scanned",
@@ -463,6 +473,11 @@ export class CodeSearchService {
       }
     }
 
+    // `Array.prototype.sort` is spec-guaranteed stable (ES2019+), so
+    // same-`at` events keep the order they were pushed above: scanned,
+    // then this code's box_added/displaced/removed (in box_items row
+    // order), then box_disassembled, then pickup_locked/resolved -- a
+    // deterministic tiebreak without a second sort key.
     events.sort((a, b) => a.at.getTime() - b.at.getTime());
     return events;
   }

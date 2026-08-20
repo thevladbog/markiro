@@ -28,6 +28,7 @@ describe.skipIf(!ready)("code-search e2e", () => {
   let setup: AuthSetup;
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
+  let productId: string;
 
   // Same fixture value boxes.e2e.test.ts / disaggregation-lines.e2e.test.ts use.
   const SSCC1 = "123456789012345675";
@@ -56,7 +57,7 @@ describe.skipIf(!ready)("code-search e2e", () => {
     const station = await createTestStationDevice(app!, agent, "Line 1");
     stationKey = station.apiKey;
 
-    const productId = await createActiveProduct();
+    productId = await createActiveProduct();
     const operatorRes = await agent
       .post("/employees")
       .send({ fullName: "Operator One" })
@@ -189,6 +190,35 @@ describe.skipIf(!ready)("code-search e2e", () => {
   it("404s the code card for a malformed or unknown codeHash", async () => {
     await agent.get(`/code-search/codes/not-a-hash`).expect(404);
     await agent.get(`/code-search/codes/${"0".repeat(64)}`).expect(404);
+  });
+
+  it("code card history includes a scan whose raw carries a ]d2 AIM prefix and edge whitespace", async () => {
+    // `scan_events.raw` is the ORIGINAL wire text; `codes.canonicalRaw` is
+    // `canonicalizeKm`'s output (edge whitespace trimmed, leading `]d2`
+    // AIM prefix stripped). A regression test for matching them by plain
+    // equality: this scan's raw carries both, and its `scanned` event must
+    // still surface in the code card's history.
+    const label = "dd";
+    const raw = ` ]d201${VALID_GTIN14}21S-${label} `;
+    const km = canonicalizeKm(raw);
+    const codeHash = kmHash(km);
+    const shiftId = await openShiftForProduct(productId);
+    await postBatch(stationKey, [
+      {
+        shiftId,
+        terminalId: "t9",
+        raw,
+        verdict: "ok",
+        scannedAt: "2026-07-02T09:00:00.000Z",
+        code: { codeHash, gtin14: km.gtin14, serial: km.serial },
+        boxId: null,
+        operatorId: null,
+      },
+    ]);
+
+    const res = await agent.get(`/code-search/codes/${codeHash}`).expect(200);
+    const card = res.body as { history: { type: string }[] };
+    expect(card.history[0]!.type).toBe("scanned");
   });
 
   it("box card: composition with dimmed removed rows + exceptions", async () => {
