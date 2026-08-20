@@ -100,6 +100,8 @@ export const productMirror = sqliteTable("product_mirror", {
   status: text("status").notNull(),
   defaultCounterpartyId: text("default_counterparty_id"),
   defaultLabelTemplateId: text("default_label_template_id"),
+  egaisCode: text("egais_code"),
+  shelfLifeDays: integer("shelf_life_days"),
   imageChecksum: text("image_checksum"),
   imageContentType: text("image_content_type"),
   imageByteSize: integer("image_byte_size"),

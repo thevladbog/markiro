@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyMigrations,
   upsertBundle,
+  readShiftContext,
   readShiftMirror,
   readOperatorsMirror,
   replaceOperatorsMirror,
@@ -87,6 +88,34 @@ describe("mirror", () => {
     const ops = await readOperatorsMirror(exec);
     expect(ops).toHaveLength(1);
     expect(ops[0]).toMatchObject({ operatorId: "op1", active: true });
+  });
+
+  // Task 8: «Код ЕГАИС» / «Годен до» box-label inputs, mirrored off the
+  // product's bundle fields and joined out by readShiftContext.
+  it("round-trips a product's egaisCode and shelfLifeDays through readShiftContext", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      product: { ...bundle.product, egaisCode: "0101234567890123456", shelfLifeDays: 184 },
+    });
+
+    const ctx = await readShiftContext(exec, "s1");
+    expect(ctx?.egaisCode).toBe("0101234567890123456");
+    expect(ctx?.shelfLifeDays).toBe(184);
+  });
+
+  // Rolling-deployment case: an older server's bundle omits both fields
+  // entirely (not even an explicit null) -- the mirror must still upsert
+  // cleanly and degrade to null rather than error or keep a stale value.
+  it("mirrors null egaisCode/shelfLifeDays when a bundle omits them (older server)", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, bundle);
+
+    const ctx = await readShiftContext(exec, "s1");
+    expect(ctx?.egaisCode).toBeNull();
+    expect(ctx?.shelfLifeDays).toBeNull();
   });
 
   it("explicit nulls clear a prior legacy item spec without changing the box spec", async () => {

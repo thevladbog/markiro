@@ -5,9 +5,25 @@ export interface BoxLabelInput {
   itemCount: number;
   productName: string;
   gtin14: string;
+  egaisCode: string | null;
+  shelfLifeDays: number | null;
   operatorName: string | null;
   counterpartyName: string | null;
   closedAt: string;
+}
+
+/**
+ * «Годен до» = production date (the box's close date) + the product's shelf
+ * life in days, formatted exactly like the `date` field (YYYY-MM-DD). UTC
+ * date math on the date part only — the label carries no time component, so
+ * local timezones must not shift the printed day.
+ */
+export function expiryIsoDate(closedAt: string, shelfLifeDays: number | null): string {
+  if (shelfLifeDays === null || !Number.isInteger(shelfLifeDays) || shelfLifeDays <= 0) return "";
+  const base = new Date(`${closedAt.slice(0, 10)}T00:00:00.000Z`);
+  if (Number.isNaN(base.getTime())) return "";
+  base.setUTCDate(base.getUTCDate() + shelfLifeDays);
+  return base.toISOString().slice(0, 10);
 }
 
 /**
@@ -21,12 +37,12 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
   return {
     "product.name": input.productName,
     "product.gtin": input.gtin14,
-    "product.egais": "",
+    "product.egais": input.egaisCode ?? "",
     "km.code": "",
     sscc: input.sscc,
     "shift.no": "",
     date: input.closedAt.slice(0, 10),
-    expiry: "",
+    expiry: expiryIsoDate(input.closedAt, input.shelfLifeDays),
     qty: String(input.itemCount),
     operator: input.operatorName ?? "",
     "counterparty.name": input.counterpartyName ?? "",

@@ -66,6 +66,10 @@ export interface WorkScreenProps {
   productId?: string;
   productImage?: StationProductImageDescriptor | null | undefined;
   counterpartyName?: string | null;
+  /** The shift's product egais code, printed on the box label's `product.egais` field. */
+  productEgaisCode?: string | null;
+  /** The shift's product shelf life in days, used to compute the box label's `expiry` field. */
+  productShelfLifeDays?: number | null;
   plannedQty?: number | null | undefined;
   source: ScanSource;
   sound: SoundSettings;
@@ -140,6 +144,8 @@ export function WorkScreen({
   productId,
   productImage,
   counterpartyName,
+  productEgaisCode,
+  productShelfLifeDays,
   plannedQty,
   source,
   sound,
@@ -811,6 +817,8 @@ export function WorkScreen({
       itemCount: result.itemCount,
       productName,
       gtin14: expectedGtin14,
+      egaisCode: productEgaisCode ?? null,
+      shelfLifeDays: productShelfLifeDays ?? null,
       operatorName: null,
       counterpartyName: counterpartyName ?? null,
       closedAt: new Date().toISOString(),

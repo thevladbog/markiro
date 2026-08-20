@@ -1395,6 +1395,8 @@ export function App() {
             productId={shiftContext.productId}
             productImage={shiftContext.image}
             counterpartyName={shiftContext.counterpartyName}
+            productEgaisCode={shiftContext.egaisCode}
+            productShelfLifeDays={shiftContext.shelfLifeDays}
             plannedQty={shiftContext.plannedQty}
             source={scanSource}
             sound={sound}

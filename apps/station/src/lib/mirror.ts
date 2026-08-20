@@ -40,6 +40,9 @@ export interface StationBundle {
     defaultCounterpartyId: string | null;
     /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
     defaultLabelTemplateId: string | null;
+    /** Optional: older servers (or a replayed older cached bundle) omit these during a rolling deploy. */
+    egaisCode?: string | null;
+    shelfLifeDays?: number | null;
     image?: StationProductImageDescriptor | null;
   };
   /** Rolling compatibility: current servers send null; older bundles may still carry an item spec. */
@@ -229,13 +232,14 @@ async function upsertBundleBody(
   await exec.run(
     `INSERT INTO product_mirror (
        id, gtin14, name, product_group, box_capacity, pallet_capacity, status,
-       default_counterparty_id, default_label_template_id${imageColumns}
-     ) VALUES (?,?,?,?,?,?,?,?,?${imageValues})
+       default_counterparty_id, default_label_template_id, egais_code, shelf_life_days${imageColumns}
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?${imageValues})
      ON CONFLICT(id) DO UPDATE SET
        gtin14=excluded.gtin14, name=excluded.name, product_group=excluded.product_group,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
-       default_label_template_id=excluded.default_label_template_id${imageUpdate}`,
+       default_label_template_id=excluded.default_label_template_id,
+       egais_code=excluded.egais_code, shelf_life_days=excluded.shelf_life_days${imageUpdate}`,
     [
       p.id,
       p.gtin14,
@@ -246,6 +250,12 @@ async function upsertBundleBody(
       p.status,
       p.defaultCounterpartyId,
       p.defaultLabelTemplateId,
+      // Optional fields (rolling-deploy compatibility): an older server or a
+      // replayed older cached bundle omits these entirely (`undefined`), and
+      // that must mirror to null exactly like an explicit null does -- never
+      // an error, never a stale value left behind from a prior sync.
+      p.egaisCode ?? null,
+      p.shelfLifeDays ?? null,
       ...(p.image === undefined
         ? []
         : [
@@ -486,6 +496,8 @@ export interface ShiftContextRow {
   productName: string;
   counterpartyName: string | null;
   plannedQty: number | null;
+  egaisCode: string | null;
+  shelfLifeDays: number | null;
   image?: StationProductImageDescriptor | null | undefined;
 }
 
@@ -504,6 +516,8 @@ export async function readShiftContext(
     name: string;
     counterparty_name: string | null;
     planned_qty: number | null;
+    egais_code: string | null;
+    shelf_life_days: number | null;
     image_checksum: string | null;
     image_content_type: "image/webp" | null;
     image_byte_size: number | null;
@@ -511,7 +525,7 @@ export async function readShiftContext(
     image_height: number | null;
   }>(
     `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
-       s.planned_qty,
+       s.planned_qty, p.egais_code, p.shelf_life_days,
        p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
      WHERE s.id = ?`,
@@ -525,6 +539,8 @@ export async function readShiftContext(
     productName: row.name,
     counterpartyName: row.counterparty_name,
     plannedQty: row.planned_qty,
+    egaisCode: row.egais_code ?? null,
+    shelfLifeDays: row.shelf_life_days ?? null,
     image:
       row.image_checksum &&
       row.image_content_type &&
