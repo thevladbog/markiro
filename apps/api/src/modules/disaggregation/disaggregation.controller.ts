@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -23,9 +24,11 @@ import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access
 import { TenantGuard, type RequestWithTenant } from "../../tenancy/tenant.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
+  addLinesSchema,
   createDocumentSchema,
   listDocumentsQuerySchema,
   updateDocumentSchema,
+  type AddLinesDto,
   type CreateDocumentDto,
   type ListDocumentsQueryDto,
   type UpdateDocumentDto,
@@ -81,5 +84,28 @@ export class DisaggregationController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   cancel(@Req() req: RequestWithTenant, @Param("id", new ParseUUIDPipe()) id: string) {
     return this.service.cancelDocument(req.tenantId!, id);
+  }
+
+  @Post(":id/lines")
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  addLines(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body(new ZodValidationPipe(addLinesSchema)) body: AddLinesDto,
+  ) {
+    return this.service.addLines(req.tenantId!, id, body.ssccs);
+  }
+
+  @Delete(":id/lines/:lineId")
+  @HttpCode(204)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  removeLine(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Param("lineId", new ParseUUIDPipe()) lineId: string,
+  ) {
+    return this.service.removeLine(req.tenantId!, id, lineId);
   }
 }

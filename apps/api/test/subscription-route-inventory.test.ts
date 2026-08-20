@@ -156,6 +156,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "DELETE /counterparties/:id (CounterpartiesController.deleteCounterparty)",
       "DELETE /disaggregation-reasons/:id (DisaggregationReasonsController.archiveReason)",
+      "DELETE /disaggregation/:id/lines/:lineId (DisaggregationController.removeLine)",
       "DELETE /employees/:id (EmployeesController.archiveEmployee)",
       "DELETE /lines/:id (LinesController.deleteLine)",
       "DELETE /org/profile/logo (OrgProfileController.deleteLogo)",
@@ -186,6 +187,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /disaggregation (DisaggregationController.create)",
       "POST /disaggregation-reasons (DisaggregationReasonsController.createReason)",
       "POST /disaggregation/:id/cancel (DisaggregationController.cancel)",
+      "POST /disaggregation/:id/lines (DisaggregationController.addLines)",
       "POST /employees (EmployeesController.createEmployee)",
       "POST /employees/:id/badges (EmployeesController.issueBadge)",
       "POST /integrations/:type/candidates/:id/hide (IntegrationsController.hideCandidate)",

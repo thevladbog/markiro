@@ -1,7 +1,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, gte, inArray, lte, sql, sum } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
-import { formatSsccWithAi } from "@markiro/domain";
+import { formatSsccWithAi, parseScannedSscc } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { nextDocNo } from "./doc-number";
 import type {
@@ -12,6 +12,7 @@ import type {
   ListDocumentsQueryDto,
   UpdateDocumentDto,
 } from "./dto";
+import { validateBoxCandidates } from "./line-validation";
 
 const PAGE_SIZE = 50;
 
@@ -169,6 +170,100 @@ export class DisaggregationService {
       )
       .orderBy(schema.disaggregationDocumentLines.createdAt);
     return rows.map((r) => ({ ...r, sscc: r.sscc === null ? null : formatSsccWithAi(r.sscc) }));
+  }
+
+  async addLines(tenantId: string, documentId: string, ssccs: string[]) {
+    const doc = await this.findDocument(tenantId, documentId);
+    this.assertDraft(doc);
+
+    // Parse first: normalize every input to bare-18 or null.
+    const parsed = ssccs.map((input) => ({
+      input,
+      sscc: parseScannedSscc(input.trim()),
+    }));
+    const candidates = await validateBoxCandidates(
+      this.db,
+      tenantId,
+      [...new Set(parsed.map((p) => p.sscc).filter((s): s is string => s !== null))],
+    );
+
+    const existing = new Set(
+      (
+        await this.db
+          .select({ sscc: schema.disaggregationDocumentLines.sscc })
+          .from(schema.disaggregationDocumentLines)
+          .where(
+            and(
+              eq(schema.disaggregationDocumentLines.tenantId, tenantId),
+              eq(schema.disaggregationDocumentLines.documentId, documentId),
+            ),
+          )
+      )
+        .map((r) => r.sscc)
+        .filter((s): s is string => s !== null),
+    );
+
+    const values = [];
+    for (const { input, sscc } of parsed) {
+      if (sscc === null) {
+        values.push({ tenantId, documentId, ssccInput: input, sscc: null, status: "not_found" as const });
+        continue;
+      }
+      if (existing.has(sscc)) {
+        // Store nothing for a repeat of an already-present line — repeats in
+        // the SAME request get one real row + duplicate marker rows would
+        // violate the unique index, so mark duplicates with sscc NULL kept
+        // as the raw input for visibility.
+        values.push({ tenantId, documentId, ssccInput: input, sscc: null, status: "duplicate" as const });
+        continue;
+      }
+      existing.add(sscc);
+      const candidate = candidates.get(sscc);
+      values.push({
+        tenantId,
+        documentId,
+        ssccInput: input,
+        sscc,
+        status: candidate?.status ?? ("not_found" as const),
+        boxId: candidate?.boxId ?? null,
+        productId: candidate?.productId ?? null,
+        codeCount: candidate?.codeCount ?? 0,
+      });
+    }
+    if (values.length > 0) {
+      await this.db.insert(schema.disaggregationDocumentLines).values(values);
+      await this.touch(tenantId, documentId);
+    }
+    return { lines: await this.listLines(tenantId, documentId) };
+  }
+
+  async removeLine(tenantId: string, documentId: string, lineId: string): Promise<void> {
+    const doc = await this.findDocument(tenantId, documentId);
+    this.assertDraft(doc);
+    const removed = await this.db
+      .delete(schema.disaggregationDocumentLines)
+      .where(
+        and(
+          eq(schema.disaggregationDocumentLines.tenantId, tenantId),
+          eq(schema.disaggregationDocumentLines.documentId, documentId),
+          eq(schema.disaggregationDocumentLines.id, lineId),
+        ),
+      )
+      .returning({ id: schema.disaggregationDocumentLines.id });
+    if (removed.length === 0) throw new NotFoundException();
+    await this.touch(tenantId, documentId);
+  }
+
+  private async touch(tenantId: string, documentId: string): Promise<void> {
+    await this.db
+      .update(schema.disaggregationDocuments)
+      .set({ updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(schema.disaggregationDocuments.tenantId, tenantId),
+          eq(schema.disaggregationDocuments.id, documentId),
+        ),
+      );
   }
 
   /**

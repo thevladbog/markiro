@@ -24,6 +24,12 @@ export const listDocumentsQuerySchema = z.object({
 });
 export type ListDocumentsQueryDto = z.infer<typeof listDocumentsQuerySchema>;
 
+/** POST /disaggregation/:id/lines schema. */
+export const addLinesSchema = z.object({
+  ssccs: z.array(z.string().trim().min(1).max(64)).min(1).max(500),
+});
+export type AddLinesDto = z.infer<typeof addLinesSchema>;
+
 export type LineStatus =
   | "ok"
   | "not_found"
