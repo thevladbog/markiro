@@ -10,7 +10,7 @@ import {
 } from "../src/lib/mirror.js";
 import { syncOperatorRoster } from "../src/lib/roster-sync.js";
 import { mirrorShiftBundle, refreshShiftBundleForRecovery } from "../src/lib/shift-bundle.js";
-import { remaining } from "../src/lib/sscc-pool.js";
+import { addRange, burnSerial, remaining } from "../src/lib/sscc-pool.js";
 import {
   createCredentialGeneration,
   sealCredentialGeneration,
@@ -443,5 +443,50 @@ describe("mirrorShiftBundle", () => {
 
     await mirrorShiftBundle({ get: vi.fn().mockResolvedValue(bundle) }, exec, "s1");
     expect((await readShiftContext(exec, "s1"))?.number).toBe("AUG26-003/S");
+  });
+
+  it("drops revoked ranges before adding the replacement block", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await addRange(exec, {
+      issuerPrefix: "460123456",
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 2000,
+      consumedThroughSerial: 10,
+    });
+
+    const get = vi.fn().mockResolvedValue({
+      ...bundle,
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 5000,
+        toSerial: 6999,
+        consumedThroughSerial: null,
+      },
+      ssccRevokedFrom: [1],
+    });
+
+    await mirrorShiftBundle({ get }, exec, "s1");
+    expect(await burnSerial(exec, "460123456", 0)).toBe(5000);
+  });
+
+  it("drops nothing when the bundle carries no block", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await addRange(exec, {
+      issuerPrefix: "460123456",
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 2000,
+      consumedThroughSerial: 10,
+    });
+    const get = vi.fn().mockResolvedValue({ ...bundle, sscc: null, ssccRevokedFrom: [1] });
+
+    // A degraded bundle (no GLN, exhausted prefix) names no prefix to scope
+    // the delete to, and must never cost the device serials it can still use.
+    await mirrorShiftBundle({ get }, exec, "s1");
+    expect(await burnSerial(exec, "460123456", 0)).toBe(11);
   });
 });

@@ -75,6 +75,15 @@ export interface StationBundle {
     toSerial: number;
     consumedThroughSerial: number | null;
   } | null;
+  /**
+   * `fromSerial` of blocks the server has revoked for this device (an admin
+   * reseeded the counter). `shift-bundle.ts` deletes the matching pool rows
+   * BEFORE applying `sscc` above.
+   *
+   * Optional: a server older than this field, and every test fixture written
+   * before it, simply revokes nothing.
+   */
+  ssccRevokedFrom?: number[];
 }
 
 export interface StationProductImageDescriptor {

@@ -6,7 +6,7 @@ import {
   type SqlExecutor,
   type StationBundle,
 } from "./mirror.js";
-import { addRange } from "./sscc-pool.js";
+import { addRange, dropRanges } from "./sscc-pool.js";
 import { syncStationProductImage, trackStationProductImageSync } from "./product-image-cache.js";
 
 /**
@@ -81,6 +81,19 @@ async function mirrorShiftBundleBody(
   const bundle = await client.get<StationBundle>(path);
   if (generation?.sealed || !isEntryCurrent()) return false;
   if (mirrorSsccRange && bundle.sscc) {
+    // Revocations first: `addRange` inserts the replacement block, and
+    // `burnSerial` would keep preferring a revoked LOWER range left behind
+    // (it drains by `ORDER BY from_serial`). Scoped to the prefix/digit the
+    // bundle itself names -- a degraded bundle (`sscc: null`) names none, so
+    // it deletes nothing rather than guessing.
+    if (bundle.ssccRevokedFrom?.length) {
+      await dropRanges(
+        exec,
+        bundle.sscc.issuerPrefix,
+        bundle.sscc.extensionDigit,
+        bundle.ssccRevokedFrom,
+      );
+    }
     await addRange(exec, bundle.sscc);
   }
   if (generation?.sealed || !isEntryCurrent()) return false;

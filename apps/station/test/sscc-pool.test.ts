@@ -1,7 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { beforeEach, describe, expect, it } from "vitest";
 import { applyMigrations } from "../src/lib/mirror.js";
-import { addRange, burnSerial, remaining } from "../src/lib/sscc-pool.js";
+import { addRange, burnSerial, dropRanges, remaining } from "../src/lib/sscc-pool.js";
 import { makeExec } from "./support/sqlite-exec.js";
 
 // A 9-digit GS1 issuer prefix -- see mirror.ts's StationBundle.sscc doc
@@ -243,5 +243,54 @@ describe("sscc pool", () => {
       expect(seen).toEqual([3, 4, 5, 6, 7, 8, 9]);
       expect(new Set(seen).size).toBe(seen.length);
     });
+  });
+
+  it("drops a revoked range so burning moves to the replacement block", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 2000,
+      consumedThroughSerial: 10,
+    });
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 5000,
+      toSerial: 6999,
+      consumedThroughSerial: null,
+    });
+    // burnSerial takes the LOWEST from_serial, so the revoked block wins
+    // until it is actually deleted -- this is the whole reason dropRanges
+    // exists rather than just adding the new range.
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(11);
+
+    await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
+    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(5000);
+  });
+
+  it("ignores an empty revocation list and a range it does not hold", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 0,
+      fromSerial: 1,
+      toSerial: 9,
+      consumedThroughSerial: null,
+    });
+    await dropRanges(exec, ISSUER_PREFIX, 0, []);
+    await dropRanges(exec, ISSUER_PREFIX, 0, [12345]);
+    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(9);
+  });
+
+  it("does not drop the same from_serial under another extension digit", async () => {
+    await addRange(exec, {
+      issuerPrefix: ISSUER_PREFIX,
+      extensionDigit: 1,
+      fromSerial: 1,
+      toSerial: 9,
+      consumedThroughSerial: null,
+    });
+    await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
+    expect(await remaining(exec, ISSUER_PREFIX, 1)).toBe(9);
   });
 });
