@@ -72,7 +72,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
   const right = round1(widthMm - m);
   const contentW = round1(widthMm - 2 * m);
   const colW = round1(contentW / 3);
-  const cols = [m, round1(m + colW), round1(m + 2 * colW)];
+  const cols: [number, number, number] = [m, round1(m + colW), round1(m + 2 * colW)];
   const thickness = round1(Math.max(0.2, 0.3 * s));
   const captionPt = pt(5, s);
   const valuePt = pt(8, s);
@@ -106,7 +106,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
       {
         kind: "text",
         id: "cap-date",
-        xMm: cols[0]!,
+        xMm: cols[0],
         yMm: round1(14.2 * s),
         text: "Дата производства:",
         fontSizePt: captionPt,
@@ -115,7 +115,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
       {
         kind: "text",
         id: "cap-expiry",
-        xMm: cols[1]!,
+        xMm: cols[1],
         yMm: round1(14.2 * s),
         text: "Годен до:",
         fontSizePt: captionPt,
@@ -124,7 +124,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
       {
         kind: "text",
         id: "cap-qty",
-        xMm: cols[2]!,
+        xMm: cols[2],
         yMm: round1(14.2 * s),
         text: "Кол-во в упаковке:",
         fontSizePt: captionPt,
@@ -133,7 +133,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
       {
         kind: "field",
         id: "val-date",
-        xMm: cols[0]!,
+        xMm: cols[0],
         yMm: round1(17 * s),
         field: "date",
         fontSizePt: valuePt,
@@ -143,7 +143,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
       {
         kind: "field",
         id: "val-expiry",
-        xMm: cols[1]!,
+        xMm: cols[1],
         yMm: round1(17 * s),
         field: "expiry",
         fontSizePt: valuePt,
@@ -153,7 +153,7 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
       {
         kind: "field",
         id: "val-qty",
-        xMm: cols[2]!,
+        xMm: cols[2],
         yMm: round1(17 * s),
         field: "qty",
         fontSizePt: valuePt,
