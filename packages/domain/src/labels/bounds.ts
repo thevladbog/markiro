@@ -19,6 +19,7 @@
  * same constants the real wrapping uses. Good enough for containment checks
  * and overlay placement, never a pixel-accurate layout.
  */
+import { code128ModuleCount, EAN13_MODULES } from "./code128.js";
 import {
   labelFieldDisplayValue,
   type LabelBarcodeElement,
@@ -38,11 +39,16 @@ export interface BoundsMm {
 }
 
 /**
- * Linear barcode (code128/ean13) width heuristic. The model documents
- * `sizeMm` for these formats as the barcode's HEIGHT only — printed width
- * depends on real Code128/EAN-13 module math (start/stop patterns, check
- * digit, ~11 modules per character), which no schematic preview implements.
- * Width is approximated as `charCount * 0.7 * sizeMm`.
+ * Linear barcode (code128/ean13) width heuristic, used ONLY for an element
+ * that declares no `moduleWidthMm`. The model documents `sizeMm` for these
+ * formats as the barcode's HEIGHT only, so with no X-dimension to work from
+ * there is nothing to derive a real width from and it is approximated as
+ * `charCount * 0.7 * sizeMm` — a shape, not a measurement.
+ *
+ * An element that DOES declare `moduleWidthMm` gets the real thing instead
+ * (see `linearBarcodeWidthMm`): `code128.ts`'s module count is exact, so the
+ * bounds — and therefore the admin preview and the containment checks — agree
+ * with the ink the printer lays down rather than with a fudge factor.
  */
 export const BAR_WIDTH_PER_CHAR_FACTOR = 0.7;
 
@@ -69,6 +75,37 @@ function resolveBarcodeTextForBounds(
   data: Record<LabelField, string>,
 ): string {
   return typeof element.data === "string" ? (data[element.data] ?? "") : element.data.literal;
+}
+
+/**
+ * A `code128`/`ean13` element's printed WIDTH in millimetres.
+ *
+ * With an explicit `moduleWidthMm` this is exact rather than a heuristic:
+ * `moduleCount × X-dimension` is literally how wide the printer draws the
+ * symbol. EAN-13 is a fixed 95 modules; Code 128's count comes from
+ * `code128.ts`, costed against the payload the EMITTERS will actually encode
+ * — which is why the `sscc` field is special-cased here exactly as it is in
+ * `zpl.ts`/`tspl.ts`: those add the `(00)` application identifier and the
+ * FNC1 flag themselves, so an 18-digit SSCC is really a 20-digit GS1-128 and
+ * costs 11 extra modules for the flag. Getting that wrong by one symbol is a
+ * whole 11 modules — 1.4 mm at a 0.125 mm X-dimension — of preview lie.
+ *
+ * Without `moduleWidthMm` there is no X-dimension to multiply, so the legacy
+ * character-count approximation stands (see `BAR_WIDTH_PER_CHAR_FACTOR`) and
+ * every template authored before that field existed keeps its previous
+ * bounds unchanged.
+ */
+function linearBarcodeWidthMm(
+  element: LabelBarcodeElement,
+  data: Record<LabelField, string>,
+): number {
+  const text = resolveBarcodeTextForBounds(element, data);
+  if (element.moduleWidthMm === undefined) {
+    return Math.max(text.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * element.sizeMm;
+  }
+  if (element.format === "ean13") return EAN13_MODULES * element.moduleWidthMm;
+  const gs1 = element.data === "sscc";
+  return code128ModuleCount(gs1 ? `00${text}` : text, gs1) * element.moduleWidthMm;
 }
 
 /**
@@ -108,8 +145,7 @@ export function elementBoundsMm(element: LabelElement, data: Record<LabelField, 
         const side = TOTAL_MODULES * element.sizeMm;
         return { x: element.xMm, y: element.yMm, w: side, h: side };
       }
-      const text = resolveBarcodeTextForBounds(element, data);
-      const w = Math.max(text.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * element.sizeMm;
+      const w = linearBarcodeWidthMm(element, data);
       return { x: element.xMm, y: element.yMm, w, h: element.sizeMm };
     }
     case "line": {

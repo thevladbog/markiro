@@ -337,7 +337,7 @@
 
 .mk-confirm-dialog {
   box-sizing: border-box;
-  width: min(440px, 100%);
+  width: min(480px, 100%);
   max-width: 100%;
   max-height: calc(100dvh - var(--sp-8));
   min-width: 0;
@@ -359,7 +359,6 @@
 }
 
 .mk-confirm-dialog__description {
-  max-width: 36ch;
   margin: var(--sp-3) 0 0;
   color: var(--fg-2);
   font: var(--text-body);
@@ -385,6 +384,12 @@
   justify-content: flex-end;
   gap: var(--sp-2);
   margin-top: var(--sp-6);
+}
+
+/* Длинные подписи кнопок не помещаются в одну строку — вместо «лесенки»
+   растягиваем каждую кнопку на свою строку целиком. */
+.mk-confirm-dialog__actions .mk-btn {
+  flex: 1 1 auto;
 }
 
 .mk-alert,

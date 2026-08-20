@@ -1,4 +1,4 @@
-import type { LabelField } from "@markiro/domain";
+import { formatLabelDate, type LabelField } from "@markiro/domain";
 
 export interface BoxLabelInput {
   sscc: string;
@@ -65,10 +65,12 @@ export function addCalendarDays(isoDate: string, days: number): string {
 
 /**
  * «Годен до» = production date (the box's LOCAL close date) + the product's
- * shelf life in days, formatted exactly like the `date` field (YYYY-MM-DD).
+ * shelf life in days, as a `YYYY-MM-DD` calendar date.
  *
  * Composed from the two pure pieces above: instant → local day, then a
- * calendar-day addition that no timezone can perturb.
+ * calendar-day addition that no timezone can perturb. It stays ISO on
+ * purpose — this is the ARITHMETIC layer, and `boxLabelFields` below is the
+ * one place that turns it into the printed `дд.мм.гггг`.
  */
 export function expiryIsoDate(closedAt: string, shelfLifeDays: number | null): string {
   if (shelfLifeDays === null || !Number.isInteger(shelfLifeDays) || shelfLifeDays <= 0) return "";
@@ -83,9 +85,14 @@ export function expiryIsoDate(closedAt: string, shelfLifeDays: number | null): s
  * export to «Честный знак» rejected.
  *
  * `date`/`expiry` are the human-readable LOCAL calendar dates of the box's
- * close instant. `input.closedAt` itself stays the stored UTC ISO instant —
- * only the rendering is local, and no machine-readable export reads these
- * two fields.
+ * close instant, in the printed `дд.мм.гггг` form — this is the BOUNDARY
+ * where `@markiro/domain`'s `formatLabelDate` is applied, and the admin
+ * preview's `sampleLabelData()` applies the same function to its own samples
+ * so the two can never disagree. Everything upstream (`localIsoDate`,
+ * `addCalendarDays`, `expiryIsoDate`) stays on `YYYY-MM-DD` because that is
+ * what the calendar arithmetic needs, and `input.closedAt` itself stays the
+ * stored UTC ISO instant — only the rendering is local and reformatted, and
+ * no machine-readable export reads these two fields.
  */
 export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string> {
   return {
@@ -95,8 +102,8 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
     "km.code": "",
     sscc: input.sscc,
     "shift.no": input.shiftNumber ?? "",
-    date: localIsoDate(input.closedAt),
-    expiry: expiryIsoDate(input.closedAt, input.shelfLifeDays),
+    date: formatLabelDate(localIsoDate(input.closedAt)),
+    expiry: formatLabelDate(expiryIsoDate(input.closedAt, input.shelfLifeDays)),
     qty: String(input.itemCount),
     operator: input.operatorName ?? "",
     "counterparty.name": input.counterpartyName ?? "",

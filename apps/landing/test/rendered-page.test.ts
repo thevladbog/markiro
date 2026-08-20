@@ -233,10 +233,14 @@ describe("rendered landing page", () => {
       const legalPrefix = expectedLocale === "en" ? "/en" : "";
       expect(form?.querySelector(`a[href="${legalPrefix}/personal-data-consent/"]`)).not.toBeNull();
       expect(form?.querySelector(`a[href="${legalPrefix}/privacy/"]`)).not.toBeNull();
-      expect(form?.querySelector("label[for=consent]")?.textContent).toContain(
+      const consentText = form
+        ?.querySelector("label[for=consent]")
+        ?.textContent?.replace(/\s+/g, " ")
+        .trim();
+      expect(consentText).toBe(
         expectedLocale === "ru"
-          ? "Даю согласие на обработку персональных данных"
-          : "I consent to the processing of my personal data",
+          ? "Даю согласие на обработку персональных данных на условиях согласия и подтверждаю, что ознакомился с политикой обработки персональных данных."
+          : "I consent to the processing of my personal data under the personal-data consent and confirm that I have read the personal-data processing policy.",
       );
 
       expect(form?.querySelector(".smart-captcha")?.getAttribute("data-sitekey")).toBe(

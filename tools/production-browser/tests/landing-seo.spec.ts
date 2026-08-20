@@ -73,6 +73,8 @@ const MARKIRO_MODULE_LAYOUT = [
 const demoCases = [
   {
     company: "Завод Север",
+    consent:
+      "Даю согласие на обработку персональных данных на условиях согласия и подтверждаю, что ознакомился с политикой обработки персональных данных.",
     emailInput: " ANNA@EXAMPLE.TEST ",
     expectedPayload: {
       captchaToken: "ru-captcha-token",
@@ -94,6 +96,8 @@ const demoCases = [
   },
   {
     company: "Factory",
+    consent:
+      "I consent to the processing of my personal data under the personal-data consent and confirm that I have read the personal-data processing policy.",
     emailInput: " ADA@EXAMPLE.TEST ",
     expectedPayload: {
       captchaToken: "en-captcha-token",
@@ -132,6 +136,7 @@ for (const demoCase of demoCases) {
 
     await page.goto(demoCase.path);
     const form = page.locator("form[data-demo-form]");
+    await expect(form.locator('label[for="consent"]')).toHaveText(demoCase.consent);
     await form.locator('input[name="name"]').fill(demoCase.name);
     await form.locator('input[name="company"]').fill(demoCase.company);
     await form.locator('input[name="email"]').fill(demoCase.emailInput);

@@ -617,8 +617,7 @@
         "widthLabel": "Label width, mm",
         "heightLabel": "Label height, mm",
         "dpiLabel": "DPI",
-        "languageLabel": "Language",
-        "languageHint": "Affects download only. When printing, the station uses its own printer's language.",
+        "bothLanguagesNote": "One template prints on both Zebra and TSC: the station picks the language from its own printer.",
         "settingsTitle": "Label settings",
         "empty": "No label content yet — import ZPL or TSPL code.",
         "geometryError": "An element no longer fits the label. Enlarge the label or re-import the code.",
@@ -939,6 +938,7 @@
     },
     "codeSearch": {
       "title": "Code search",
+      "backAction": "← Code search",
       "searchPlaceholder": "Enter an SSCC or marking code",
       "searchButton": "Search",
       "empty": "No codes found",

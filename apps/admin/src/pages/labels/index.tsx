@@ -10,11 +10,6 @@ import { useCan } from "../../access/context.js";
 import { useLabelTemplates, type LabelTemplateSummaryDto } from "./api.js";
 import { TemplateThumb } from "./TemplateThumb.js";
 
-const LANGUAGE_LABEL: Record<LabelTemplateSummaryDto["language"], string> = {
-  zpl: "ZPL",
-  tspl: "TSPL",
-};
-
 /**
  * Primary-CTA styling shared by the page-header "add" action, the
  * EmptyState's action, and (implicitly, via its own dashed-border style
@@ -78,6 +73,10 @@ function TemplateCard({ item }: { item: LabelTemplateSummaryDto }) {
         <span style={{ font: "600 14px/20px var(--font-ui)", color: "var(--fg-1)" }}>
           {item.name}
         </span>
+        {/* Size and DPI only: a template has no language of its own -- it
+            prints on Zebra and TSC alike, and the station picks the language
+            from its own printer (see `editor/index.tsx`). A per-template
+            language badge would be exactly that false claim. */}
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           <Badge>
             {t("pages.labels.sizeBadge", {
@@ -86,7 +85,6 @@ function TemplateCard({ item }: { item: LabelTemplateSummaryDto }) {
             })}
           </Badge>
           <Badge>{t("pages.labels.dpiBadge", { dpi: item.dpi })}</Badge>
-          <Badge>{LANGUAGE_LABEL[item.language]}</Badge>
         </div>
       </div>
     </div>
@@ -95,7 +93,7 @@ function TemplateCard({ item }: { item: LabelTemplateSummaryDto }) {
 
 /**
  * Admin label template library -- Plan 04 Task 8. Card grid: thumbnail
- * (Task 9's real renderer, via `TemplateThumb`), name, size/DPI/language
+ * (Task 9's real renderer, via `TemplateThumb`), name, size/DPI
  * badges, and a trailing "+ Новый шаблон" tile, per the handoff admin
  * prototype's "Этикетки" screen. List/loading/error/empty states follow
  * the same pattern as `pages/counterparties/index.tsx` (Plan 03).

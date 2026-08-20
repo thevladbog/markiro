@@ -253,10 +253,10 @@ function resolveBarcodeSource(
  * Renders a `barcode` element as one of TSPL's dedicated barcode/matrix
  * commands.
  *
- * `code128`/`ean13` use `BARCODE x,y,"<type>",<height>,0,0,2,2,"<data>"` —
- * human-readable interpretation line OFF (`0`), no rotation, narrow/wide bar
- * widths fixed at 2 dots each (no per-element control over bar widths exists
- * in the domain model).
+ * `code128`/`ean13` use `BARCODE x,y,"<type>",<height>,0,0,<n>,<n>,"<data>"` —
+ * human-readable interpretation line OFF (`0`), no rotation, and narrow/wide
+ * bar widths from the element's `moduleWidthMm` (falling back to the
+ * historical fixed 2 dots when it declares none — see `barWidthParams`).
  *
  * HRI IS OFF ON PURPOSE, and this parameter used to be `1`. A
  * `LabelTemplateSpec` is language-neutral: the SAME template is emitted as
@@ -310,6 +310,34 @@ function resolveBarcodeSource(
  * control-character escape) or a newer firmware's dedicated GS1 mode
  * parameter. See this task's report for the ledger note.
  */
+/**
+ * `BARCODE`'s narrow/wide bar-width pair, in dots — the TSPL counterpart of
+ * ZPL's `^BY` (see `zpl.ts`'s `barWidthCommand`).
+ *
+ * `TSPL_DEFAULT_NARROW_DOTS` is the historical hard-coded value this module
+ * emitted for every barcode, and it is still what an element WITHOUT an
+ * explicit `moduleWidthMm` gets, so previously-authored templates emit
+ * byte-identical output. It is also why this parameter cannot simply be left
+ * alone: 2 dots is 0.25 mm at 203 dpi (exactly GS1's minimum X-dimension) but
+ * only 0.17 mm at 300 dpi, BELOW that minimum — so the same template that
+ * scanned fine on a 203 dpi TSC printed an out-of-spec symbol on a 300 dpi
+ * one. An element that states its X-dimension gets it converted to dots here.
+ *
+ * Both parameters are set to the same value: Code 128 is not a two-width
+ * symbology (its four element widths are all multiples of the X-dimension),
+ * so TSPL's "wide" parameter carries no ratio meaning for it, and EAN-13 is
+ * likewise module-based.
+ */
+const TSPL_DEFAULT_NARROW_DOTS = 2;
+
+function barWidthParams(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dpi"]): string {
+  const narrow =
+    element.moduleWidthMm === undefined
+      ? TSPL_DEFAULT_NARROW_DOTS
+      : Math.max(1, mmToDots(element.moduleWidthMm, dpi));
+  return `${narrow},${narrow}`;
+}
+
 function renderBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
@@ -330,11 +358,13 @@ function renderBarcodeElement(
       // rationale. The AI (`00`) is added HERE and nowhere else — storage
       // and transport carry the bare 18 digits.
       const payload = field === "sscc" ? `!100${value}` : value;
-      return `BARCODE ${x},${y},"128",${heightDots},0,0,2,2,"${escapeTsplString(payload)}"`;
+      const bars = barWidthParams(element, dpi);
+      return `BARCODE ${x},${y},"128",${heightDots},0,0,${bars},"${escapeTsplString(payload)}"`;
     }
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
-      return `BARCODE ${x},${y},"EAN13",${heightDots},0,0,2,2,"${escapeTsplString(value)}"`;
+      const bars = barWidthParams(element, dpi);
+      return `BARCODE ${x},${y},"EAN13",${heightDots},0,0,${bars},"${escapeTsplString(value)}"`;
     }
     case "datamatrix": {
       const sideDots = mmToDots(element.sizeMm, dpi);

@@ -1,15 +1,20 @@
 /**
  * The `/labels/new` / `/labels/:id` template page after the visual editor's
- * removal (spec 2026-08-20): a settings form (name, size, dpi, language) +
- * the code-import dialog as the ONLY way to set label content + the
- * read-only "предпросмотр = печать" pane. The drag-and-drop canvas, the
- * element palette and the per-element properties panel are gone -- nothing
- * on this page composes a label element by hand any more; `ImportCodeDialog`
- * parses real ZPL/TSPL into a whole spec and replaces it atomically.
+ * removal (spec 2026-08-20): a settings form (name, size, dpi) + the
+ * code-import dialog as the ONLY way to set label content + the read-only
+ * "предпросмотр = печать" pane. The drag-and-drop canvas, the element palette
+ * and the per-element properties panel are gone -- nothing on this page
+ * composes a label element by hand any more; `ImportCodeDialog` parses real
+ * ZPL/TSPL into a whole spec and replaces it atomically.
  *
- * The spec model and save/download paths are unchanged; `spec.language` only
- * drives download and the library badge -- the station picks its printer's
- * language at print time.
+ * WHY THERE IS NO «ЯЗЫК» CONTROL: a `LabelTemplateSpec` is language-NEUTRAL.
+ * Code is imported in ZPL or TSPL, parsed into a positional model, and the
+ * station generates whichever language ITS printer needs
+ * (`apps/station/src/lib/print-label.ts` reads the station's
+ * `hardware-config` printer language and deliberately ignores
+ * `spec.language`). One template serves Zebra and TSC alike, so the settings
+ * panel must not claim otherwise: both downloads are always offered, and
+ * `spec.language` survives only as the import dialog's initial format.
  *
  * WHY name IS NOT PART OF THE SPEC STATE: `name` isn't a `LabelTemplateSpec`
  * field at all (it lives on the template's DB row / `LabelTemplateDto`, see
@@ -85,10 +90,6 @@ const MIN_SIZE_MM = 10;
 const MAX_SIZE_MM = 300;
 
 const DPI_OPTIONS = ["203", "300"];
-const LANGUAGE_OPTIONS: Array<{ value: LabelTemplateSpec["language"]; label: string }> = [
-  { value: "zpl", label: "ZPL" },
-  { value: "tspl", label: "TSPL (TSC)" },
-];
 
 export interface LabelEditorPageProps {
   rasterizeText?: RasterizeTextFn;
@@ -313,10 +314,15 @@ function LabelEditorContent({
     }
   }
 
-  async function handleDownload(): Promise<void> {
+  /**
+   * Both downloads are generated from the SAME spec on demand -- nothing on
+   * the template picks one language over the other, so neither button is ever
+   * disabled or hidden.
+   */
+  async function handleDownload(format: "zpl" | "tspl"): Promise<void> {
     const sample = sampleLabelData();
     try {
-      if (spec.language === "zpl") {
+      if (format === "zpl") {
         const text = await generateZpl(spec, sample, { rasterizeText });
         downloadBlob(buildZplBlob(text), `${safeFileName(name)}.zpl`);
       } else {
@@ -455,18 +461,17 @@ function LabelEditorContent({
               handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
             }
           />
-          <Select
-            label={t("pages.labels.editor.languageLabel")}
-            options={LANGUAGE_OPTIONS}
-            value={spec.language}
-            onValueChange={(value) => handleReplaceSpec({ ...spec, language: value })}
-          />
-          <p className="label-editor__language-hint">{t("pages.labels.editor.languageHint")}</p>
+          <p className="label-editor__languages-note">
+            {t("pages.labels.editor.bothLanguagesNote")}
+          </p>
           <Button type="button" onClick={() => setShowImportDialog(true)}>
             {t("pages.labels.editor.import.open")}
           </Button>
-          <Button type="button" variant="secondary" onClick={() => void handleDownload()}>
-            {t("pages.labels.editor.download", { format: spec.language.toUpperCase() })}
+          <Button type="button" variant="secondary" onClick={() => void handleDownload("zpl")}>
+            {t("pages.labels.editor.download", { format: "ZPL" })}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void handleDownload("tspl")}>
+            {t("pages.labels.editor.download", { format: "TSPL (TSC)" })}
           </Button>
           {/* The invalid-dimension message wins when it is set: it describes
               the most recent action (a rejected entry never reached the

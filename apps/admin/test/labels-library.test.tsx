@@ -138,7 +138,7 @@ describe("LabelTemplatesPage", () => {
     expect(screen.queryByRole("link", { name: "Новый шаблон" })).toBeNull();
   });
 
-  it("renders cards from the mocked GET response with name and size/DPI/language badges", async () => {
+  it("renders cards from the mocked GET response with name and size/DPI badges", async () => {
     stubFetch([BOX_SUMMARY, UNIT_SUMMARY]);
 
     renderPage();
@@ -148,8 +148,12 @@ describe("LabelTemplatesPage", () => {
     expect(screen.getByText("100.0×100.0 мм")).toBeDefined();
     expect(screen.getByText("58.0×40.0 мм")).toBeDefined();
     expect(screen.getAllByText("203 dpi")).toHaveLength(2);
-    expect(screen.getByText("ZPL")).toBeDefined();
-    expect(screen.getByText("TSPL")).toBeDefined();
+    // A template is language-neutral -- it prints on Zebra and TSC alike and
+    // the station picks the language from its own printer, so no card may
+    // badge one. `language` is still on the summary DTO (these two fixtures
+    // deliberately differ) -- it just must not reach the screen.
+    expect(screen.queryByText("ZPL")).toBeNull();
+    expect(screen.queryByText("TSPL")).toBeNull();
   });
 
   it("rounds imported label dimensions to one decimal place in the card badge", async () => {

@@ -203,7 +203,7 @@ describe("boxLabelFields", () => {
       "km.code": "",
       sscc: SSCC,
       "shift.no": "AUG26-003/S",
-      date: "2026-07-29",
+      date: "29.07.2026",
       expiry: "",
       qty: "12",
       operator: "Иванов",

@@ -200,7 +200,7 @@ describe("boxLabelFields — egais/expiry", () => {
       boxLabelFields({ ...base, egaisCode: "0101234567890123456", shelfLifeDays: 184 }),
     );
     expect(fields["product.egais"]).toBe("0101234567890123456");
-    expect(fields.expiry).toBe("2025-11-20");
+    expect(fields.expiry).toBe("20.11.2025");
   });
 
   // The whole point of the change: both printed dates are the station's own
@@ -210,14 +210,43 @@ describe("boxLabelFields — egais/expiry", () => {
     const moscow = withTimeZone("Europe/Moscow", () =>
       boxLabelFields({ ...base, egaisCode: null, shelfLifeDays: 184 }),
     );
-    expect(moscow.date).toBe("2025-05-20");
-    expect(moscow.expiry).toBe("2025-11-20");
+    expect(moscow.date).toBe("20.05.2025");
+    expect(moscow.expiry).toBe("20.11.2025");
 
     const utc = withTimeZone("UTC", () =>
       boxLabelFields({ ...base, egaisCode: null, shelfLifeDays: 184 }),
     );
-    expect(utc.date).toBe("2025-05-19");
-    expect(utc.expiry).toBe("2025-11-19");
+    expect(utc.date).toBe("19.05.2025");
+    expect(utc.expiry).toBe("19.11.2025");
+  });
+
+  /**
+   * DATE FORMAT REGRESSION GUARD. The first physical print of the stock box
+   * label read `2026-08-20` where the customer-approved mock-up says
+   * `20.08.2026`, because the field VALUES were the same `YYYY-MM-DD` strings
+   * the shelf-life arithmetic runs on. The arithmetic still is — `localIsoDate`
+   * and `addCalendarDays` above are asserted in ISO on purpose — but what
+   * reaches the printer must be `дд.мм.гггг` and nothing else.
+   */
+  it("formats both printed dates as дд.мм.гггг, never ISO", () => {
+    const fields = withTimeZone("Europe/Moscow", () =>
+      boxLabelFields({ ...base, egaisCode: null, shelfLifeDays: 184 }),
+    );
+    expect(fields.date).toBe("20.05.2025");
+    expect(fields.expiry).toBe("20.11.2025");
+    expect(fields.date).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(fields.expiry).not.toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // Zero padding survives: a label column is a fixed width.
+    const padded = withTimeZone("UTC", () =>
+      boxLabelFields({
+        ...base,
+        closedAt: "2026-01-02T12:00:00.000Z",
+        egaisCode: null,
+        shelfLifeDays: 5,
+      }),
+    );
+    expect(padded.date).toBe("02.01.2026");
+    expect(padded.expiry).toBe("07.01.2026");
   });
 
   it("leaves the stored closedAt instant untouched", () => {

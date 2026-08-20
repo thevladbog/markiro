@@ -33,7 +33,6 @@
  * `TemplateThumb.tsx` and `editor/PreviewPane.tsx`.
  */
 import {
-  BAR_WIDTH_PER_CHAR_FACTOR,
   elementBoundsMm,
   INTERIOR_MODULES,
   labelFieldDisplayValue,
@@ -176,6 +175,7 @@ function drawLinearBarcode(
   xPx: number,
   yPx: number,
   heightPx: number,
+  widthPx: number,
 ): void {
   const value = text.length > 0 ? text : " ";
   // Bars fill the WHOLE element height. There is no human-readable caption
@@ -185,8 +185,14 @@ function drawLinearBarcode(
   // preview that drew one would promise ink the printer never lays down. A
   // template that wants readable digits places its own text/field element
   // beneath the barcode, which this renderer draws like any other text.
+  //
+  // `widthPx` is the caller's, taken from `elementBoundsMm` rather than
+  // recomputed here: an element with an explicit `moduleWidthMm` has a REAL
+  // printed width (module count x X-dimension) and a preview that kept using
+  // the old `charCount * 0.7 * height` approximation would draw the stock
+  // templates' centred SSCC barcode both wider than it prints and no longer
+  // centred -- a preview lying about exactly the thing that was just fixed.
   const barsHeightPx = heightPx;
-  const widthPx = Math.max(value.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * heightPx;
   const segmentWidthPx = widthPx / (value.length * 2);
 
   ctx.fillStyle = LABEL_BACKGROUND_COLOR;
@@ -226,7 +232,8 @@ function drawBarcodeElement(
     drawMatrixCode(ctx, text, xPx, yPx, mmToPx(element.sizeMm, scale));
     return;
   }
-  drawLinearBarcode(ctx, text, xPx, yPx, mmToPx(element.sizeMm, scale));
+  const { w } = elementBoundsMm(element, data);
+  drawLinearBarcode(ctx, text, xPx, yPx, mmToPx(element.sizeMm, scale), mmToPx(w, scale));
 }
 
 function drawLineElement(

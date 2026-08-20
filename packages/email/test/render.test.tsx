@@ -10,7 +10,7 @@ function expectTransactionalEmailOnly(output: { html: string; text: string }): v
 }
 
 describe("renderEmail", () => {
-  it("renders the exact image-free Markiro shell for every template", async () => {
+  it("renders the exact image-free Station brand shell for every template", async () => {
     const outputs = await Promise.all([
       renderEmail({
         kind: "tenant-owner-activation",
@@ -44,7 +44,11 @@ describe("renderEmail", () => {
     for (const output of outputs) {
       expect(output.html).toContain('aria-label="Маркиро"');
       expect(output.html.match(/data-markiro-module="true"/g)).toHaveLength(8);
-      expect(output.html).toContain("маркиро");
+      expect(
+        [...output.html.matchAll(/data-markiro-position="([^"]+)"/g)].map((match) => match[1]),
+      ).toEqual(["0-0", "6-0", "3-2", "0-3", "6-3", "0-6", "6-6", "3-7"]);
+      expect(output.html).toContain(">маркиро</td>");
+      expect(output.html).not.toContain(">MARKIRO</td>");
       expect(output.html).toContain("#17161a");
       expect(output.html).toContain("#0faf56");
       expect(output.html).toContain("#3ddc7a");
@@ -245,7 +249,8 @@ describe("renderEmail", () => {
     expect(output.html).toContain('lang="en"');
     expect(output.html).toContain('aria-label="Markiro"');
     expect(output.html.match(/data-markiro-module="true"/g)).toHaveLength(8);
-    expect(output.html).toContain("MARKIRO");
+    expect(output.html).toContain(">маркиро</td>");
+    expect(output.html).not.toContain(">MARKIRO</td>");
     expect(output.text).toContain("Hello, Ada.");
     expect(output.text).toContain("We received your request for a Markiro demo.");
     expect(output.text).toContain("Company: Factory\nEmail: ada@example.test\nPhone: +12025550114");

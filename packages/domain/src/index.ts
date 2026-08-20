@@ -27,6 +27,15 @@ export {
   ptToDots,
   sampleLabelData,
 } from "./labels/model.js";
+export { formatLabelDate, LABEL_DATE_FORMAT } from "./labels/date.js";
+export {
+  code128ModuleCount,
+  CODE128_FNC1_MODULES,
+  CODE128_FRAME_MODULES,
+  CODE128_SYMBOL_MODULES,
+  EAN13_MODULES,
+  GS1_128_QUIET_ZONE_MODULES,
+} from "./labels/code128.js";
 export { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "./labels/defaults.js";
 export type { DefaultLabelTemplate } from "./labels/defaults.js";
 export type {
