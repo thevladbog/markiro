@@ -176,7 +176,7 @@ describe("fixed station viewport source contract", () => {
       /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.station-status-bar\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(0, 1fr\) minmax\(0, 0\.9fr\);/s,
     );
     expect(css).toMatch(
-      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\);[^}]*grid-auto-rows:\s*minmax\(0, 1fr\);/s,
+      /@media \(max-width: 1100px\)\s*\{[\s\S]*?\.shift-selection__grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);[^}]*\}[\s\S]*?\.shift-card__body\s*\{[^}]*grid-template-columns:\s*minmax\(150px, 36%\) minmax\(0, 1fr\);/s,
     );
     expect(css).toMatch(
       /\.station-status-actions \.window-mode-control__action\s*\{[^}]*white-space:\s*normal;[^}]*overflow-wrap:\s*anywhere;/s,

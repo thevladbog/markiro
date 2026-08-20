@@ -1,10 +1,12 @@
 import { Button, Card } from "@markiro/ui";
+import { formatShiftPlannedDate, stationDisplayLocale } from "../lib/format-date.js";
 import type { SqlExecutor, StationProductImageDescriptor } from "../lib/mirror.js";
 import { ProductImage } from "./ProductImage.js";
 
 export interface ShiftCardProps {
   number?: string | null;
   plannedDate?: string | null;
+  locale?: string;
   plannedQty?: number | null;
   mode?: "validation" | "aggregation";
   status?: "planned" | "active" | "closed";
@@ -30,6 +32,7 @@ export function ShiftCard({
   number,
   productName,
   plannedDate,
+  locale = "ru",
   plannedQty,
   mode,
   status,
@@ -48,8 +51,14 @@ export function ShiftCard({
   image,
   imageRefreshKey,
 }: ShiftCardProps) {
+  const formattedDate = formatShiftPlannedDate(plannedDate, locale);
+  const formattedQuantity =
+    plannedQty !== null && plannedQty !== undefined
+      ? new Intl.NumberFormat(stationDisplayLocale(locale)).format(plannedQty)
+      : null;
+
   return (
-    <Card className="shift-card" padding="var(--sp-3)">
+    <Card className="shift-card" padding="var(--sp-1)">
       <div className="shift-card__body">
         {productId && image !== null ? (
           <ProductImage
@@ -59,32 +68,42 @@ export function ShiftCard({
             image={image}
             refreshKey={imageRefreshKey}
           />
-        ) : null}
-        <div className="shift-card__product">
-          {number ? `${number} · ` : ""}
-          {productName ?? "—"}
-        </div>
-        <div className="shift-card__meta">
-          {plannedDate ? `${plannedDate} · ` : ""}
-          {modeLabel ?? mode}
-          {plannedQty !== null && plannedQty !== undefined
-            ? ` · ${plannedLabel ?? "plan"} ${plannedQty}`
-            : ` · ${noPlanLabel ?? "no plan"}`}
-        </div>
-        <div className="shift-card__status">{statusLabel ?? status}</div>
-        <div className="shift-card__counterparty">
-          {counterpartyName ? `${counterpartyLabel} ${counterpartyName}` : null}
+        ) : (
+          <div
+            className="product-image product-image--fallback shift-card__image-placeholder"
+            aria-hidden="true"
+          />
+        )}
+        <div className="shift-card__details">
+          <div className="shift-card__heading">
+            {number ? <div className="shift-card__number">{number}</div> : null}
+            <div className="shift-card__status">{statusLabel ?? status}</div>
+          </div>
+          <div className="shift-card__product">{productName ?? "—"}</div>
+          <div className="shift-card__meta">
+            {formattedDate ? <div className="shift-card__date">{formattedDate}</div> : null}
+            <div className="shift-card__plan">
+              {modeLabel ?? mode}
+              {formattedQuantity !== null
+                ? ` · ${plannedLabel ?? "plan"} ${formattedQuantity}`
+                : ` · ${noPlanLabel ?? "no plan"}`}
+            </div>
+          </div>
+          <div className="shift-card__counterparty">
+            {counterpartyName ? `${counterpartyLabel} ${counterpartyName}` : null}
+          </div>
+          <Button
+            className="shift-card__action"
+            size="floor"
+            variant={active ? "primary" : "secondary"}
+            fullWidth
+            disabled={disabled}
+            onClick={onSelect}
+          >
+            {actionLabel}
+          </Button>
         </div>
       </div>
-      <Button
-        size="floor"
-        variant={active ? "primary" : "secondary"}
-        fullWidth
-        disabled={disabled}
-        onClick={onSelect}
-      >
-        {actionLabel}
-      </Button>
     </Card>
   );
 }
