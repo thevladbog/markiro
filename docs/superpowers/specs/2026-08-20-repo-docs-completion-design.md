@@ -65,8 +65,8 @@ Owner decisions:
 
 ### 4. Package manifests
 
-Add `"license": "SEE LICENSE IN LICENSE"` to all 13 manifests: the root
-`package.json`, six under `apps/`, six under `packages/`. All packages are
+Add `"license": "SEE LICENSE IN LICENSE"` to all 12 manifests: the root
+`package.json`, six under `apps/`, five under `packages/`. All packages are
 already `private: true`; this only makes the license metadata explicit.
 
 ## Out of scope
