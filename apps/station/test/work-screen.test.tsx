@@ -1121,6 +1121,43 @@ describe("WorkScreen box progress, closing and printing", () => {
     activeSource.emit(raw);
   }
 
+  /**
+   * Waits until the scan source's listener actually belongs to whatever the
+   * last committed render says owns it -- call this before `scan(...)`
+   * whenever the preceding step handed the source over.
+   *
+   * `manualSource` (like the real wedge) keeps exactly ONE listener, and
+   * ownership moves in a passive effect on both sides: `PrintVerification`
+   * takes the source over with `scanSource.start(...)` while its prompt is
+   * up, and `WorkScreen`'s own subscription effect early-returns for the
+   * whole time `verification` is set, so it unsubscribes and only re-binds
+   * once the prompt is resolved.
+   *
+   * A `findBy*`/`waitFor` on the DOM proves only that the render COMMITTED,
+   * not that its passive effects ran: React schedules that flush through the
+   * scheduler's `setImmediate` (a check-phase callback), while RTL's own
+   * async wrapper hands control back after a `setTimeout(..., 0)` (a
+   * timers-phase callback). Timers run before immediates in an event-loop
+   * iteration, so on a loaded runner -- where the 1ms timer has long expired
+   * by the time the loop comes round -- the test resumes with the PREVIOUS
+   * owner still listening. On an idle machine the immediate almost always
+   * gets there first, which is why this only ever failed in CI.
+   *
+   * A scan emitted in that window is not delayed, it is LOST: it goes to the
+   * old listener, which drops it (an SSCC is not a valid product KM, and an
+   * ordinary scan is refused while a prompt is pending). Nothing re-delivers
+   * it, so no amount of polling or waiting afterwards recovers it -- the
+   * assertion that follows can only time out.
+   *
+   * `await act(async () => {})` closes the window by construction rather
+   * than by luck: React resumes it through `enqueueTask`, which is
+   * `setImmediate` as well, so it is queued strictly BEHIND the
+   * passive-effect flush that is already pending and cannot overtake it.
+   */
+  async function scanSourceHandedOver(): Promise<void> {
+    await act(async () => {});
+  }
+
   function renderWorkTracked(overrides: RenderWorkOverrides = {}) {
     const source = overrides.source ?? manualSource();
     activeSource = source as ScanSource & { emit: ScanListener };
@@ -2162,7 +2199,13 @@ describe("WorkScreen box progress, closing and printing", () => {
 
     await exec.run("UPDATE shift_mirror SET box_label_template_spec = NULL WHERE id = ?", ["s1"]);
     view.refreshBundle(1);
-    fireEvent.click(screen.getByRole("button", { name: "Закрыть короб" }));
+    // `findByRole`, not `getByRole`: the first close is still settling when
+    // the `print` spy fires above -- the box UI has no close button while
+    // `updateBox(null)` holds and the next box is being opened -- and the
+    // refreshed bundle re-reads the template on top of that. Both land
+    // asynchronously, so the button is briefly absent. Same assertion (the
+    // control must appear), just awaited instead of assumed.
+    fireEvent.click(await screen.findByRole("button", { name: "Закрыть короб" }));
 
     await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
     expect(print).toHaveBeenCalledOnce();
@@ -2327,9 +2370,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
-    expect(zpl).toContain("2026-07-24"); // the box's own close date, in Moscow
-    expect(zpl).toContain("2027-01-20"); // + 180 days of shelf life
-    expect(zpl).not.toContain("2026-09-30"); // never today's date
+    expect(zpl).toContain("24.07.2026"); // the box's own close date, in Moscow
+    expect(zpl).toContain("20.01.2027"); // + 180 days of shelf life
+    expect(zpl).not.toContain("30.09.2026"); // never today's date
+    expect(zpl).not.toMatch(/\d{4}-\d{2}-\d{2}/); // never the ISO form the first print shipped
   });
 
   it("reprints a recovered box with the SAME dates the original label carried", async () => {
@@ -2369,9 +2413,9 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
-    expect(zpl).toContain("2026-07-24");
-    expect(zpl).toContain("2027-01-20");
-    expect(zpl).not.toContain("2026-09-30");
+    expect(zpl).toContain("24.07.2026");
+    expect(zpl).toContain("20.01.2027");
+    expect(zpl).not.toContain("30.09.2026");
   });
 
   // The converse: a box template that is missing entirely must NOT fall back
@@ -2502,6 +2546,7 @@ describe("WorkScreen box progress, closing and printing", () => {
     });
     act(() => scan(KM));
     await screen.findByText("Отсканируйте распечатанную этикетку");
+    await scanSourceHandedOver();
     await exec.run(
       "UPDATE boxes_mirror SET sscc = ?, closed_at = ?, print_state = 'printed' WHERE box_id = ?",
       [SSCC, "2026-08-13T10:00:00.000Z", SEEDED_BOX_ID],
@@ -2562,6 +2607,7 @@ describe("WorkScreen box progress, closing and printing", () => {
       });
       act(() => scan(KM));
       await screen.findByText("Отсканируйте распечатанную этикетку");
+      await scanSourceHandedOver();
       await base.run("UPDATE boxes_mirror SET acked_at = ? WHERE box_id = ?", [
         "2026-08-06T08:00:00Z",
         SEEDED_BOX_ID,
@@ -2705,6 +2751,10 @@ describe("WorkScreen box progress, closing and printing", () => {
       expect(screen.queryByText("Отсканируйте распечатанную этикетку")).toBeNull(),
     );
     await screen.findByText("Короб № 2");
+    // The mirror image of the takeover: resolving the prompt hands the source
+    // back to WorkScreen, again in a passive effect, so this scan would
+    // otherwise be delivered to PrintVerification's torn-down listener.
+    await scanSourceHandedOver();
     act(() => scan(OTHER_KM));
     await waitFor(async () => {
       const rows = await exec.all<{ n: number }>(

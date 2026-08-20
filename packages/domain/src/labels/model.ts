@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DomainError } from "../errors.js";
 import { formatSsccHri } from "../gs1/sscc.js";
+import { formatLabelDate } from "./date.js";
 
 /** Data sources a text/field element on a label can be bound to. */
 export const LABEL_FIELDS = [
@@ -72,6 +73,26 @@ const barcodeElementSchema = z.object({
   // encoded data). For matrix codes (datamatrix/qr) it is the module square side.
   data: z.union([labelFieldSchema, z.object({ literal: z.string() })]),
   sizeMm: z.number().positive(),
+  /**
+   * LINEAR (code128/ean13) X-DIMENSION — the width of one narrow bar, in
+   * millimetres, matching the rest of this mm-based model. Ignored by the
+   * matrix formats, whose module side is `sizeMm`.
+   *
+   * OPTIONAL, and absent means "leave it to the printer": both emitters then
+   * emit exactly what they emitted before this field existed (ZPL: no `^BY`,
+   * so the printer's modal default applies; TSPL: its historical fixed 2-dot
+   * narrow bar). That default is precisely the problem this field exists to
+   * solve — a modal `^BY` left behind by a previously printed label changes
+   * the width of a barcode whose template never mentioned one, so the same
+   * spec prints differently on two printers and even on the same printer at
+   * different times. Templates that care state the X-dimension explicitly;
+   * every stock template in `defaults.ts` does.
+   *
+   * The emitters convert it to whole dots (`mmToDots`), which is the only
+   * unit a printer accepts, so a value that is not a whole number of dots at
+   * the spec's `dpi` is rounded to the nearest one.
+   */
+  moduleWidthMm: z.number().positive().optional(),
 });
 export type LabelBarcodeElement = z.infer<typeof barcodeElementSchema>;
 
@@ -173,7 +194,17 @@ export function ptToDots(pt: number, dpi: number): number {
   return Math.round((pt / 72) * dpi);
 }
 
-/** Deterministic sample values for every `LabelField`, used by previews and golden tests. */
+/**
+ * Deterministic sample values for every `LabelField`, used by previews and
+ * golden tests.
+ *
+ * The two DATE fields go through `formatLabelDate` rather than carrying a
+ * hand-written string: they are what the admin preview draws, and the station
+ * runs its real values through the very same function (`box-label.ts`), so
+ * routing both through one formatter is what keeps the preview WYSIWYG with
+ * the print. Hard-coding `"2026-07-23"` here is exactly how the ISO format
+ * shipped to a physical label in the first place.
+ */
 export function sampleLabelData(): Record<LabelField, string> {
   return {
     "product.name": "Пиво светлое 0,5 л",
@@ -182,8 +213,8 @@ export function sampleLabelData(): Record<LabelField, string> {
     "km.code": "010460068200001321abcDEF1234567",
     sscc: "346006820000000014",
     "shift.no": "214",
-    date: "2026-07-23",
-    expiry: "2027-01-19",
+    date: formatLabelDate("2026-07-23"),
+    expiry: formatLabelDate("2027-01-19"),
     qty: "20",
     operator: "Смирнов А.",
     "counterparty.name": "Завод Партнер",

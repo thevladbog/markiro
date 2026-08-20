@@ -99,6 +99,18 @@ date formatted exactly like the existing `date` sample so admin preview and
 station output share one format). Admin field-name copy (RU/EN i18n) is added
 for both fields.
 
+**Printed date format — corrected after the first physical print.** This
+section originally said the expiry sample should be "formatted exactly like
+the existing ISO `date` field", and that is what shipped: the first real
+58×40 label came off the printer reading `2026-08-20`. The
+customer-approved mock-up has always shown `дд.мм.гггг`. Both label date
+fields (`date`, `expiry`) therefore carry `DD.MM.YYYY` VALUES, produced by
+`labels/date.ts`'s `formatLabelDate` at the display boundary and nowhere
+else: storage stays UTC ISO, the station's shelf-life arithmetic
+(`localIsoDate` / `addCalendarDays`) stays on `YYYY-MM-DD` because it is
+timezone- and DST-safe there, and `sampleLabelData()` runs its own two dates
+through the same function so the admin preview cannot drift from print.
+
 ### Default template module
 
 New `packages/domain/src/labels/defaults.ts` exporting
@@ -106,16 +118,18 @@ New `packages/domain/src/labels/defaults.ts` exporting
 — pure, deterministic, no I/O — used by tenant provisioning and by tests.
 The layout reproduces the approved mock-up, scaled per size:
 
-- product name — `field product.name`, bold, wrapped to **two** lines via
-  `maxWidthMm` + `maxLines: 2`
+- product name — `field product.name`, bold, wrapped to **three** lines via
+  `maxWidthMm` + `maxLines: 3`
 - horizontal separator lines (`line` elements)
 - three-column block: "Дата производства:" / "Годен до:" / "Кол-во в
   упаковке:" as `text` captions with `field date` / `field expiry` /
   `field qty` values beneath
-- "Код ЕГАИС:" caption + `field product.egais`
-- "SSCC:" caption + `barcode code128` bound to `sscc` (the emitter adds the
-  `(00)` AI), with the human-readable digits as an explicit `field sscc`
-  element beneath it
+- "Код ЕГАИС:" caption and `field product.egais` on ONE row — the caption in
+  the first of the block's three columns, the value to its right
+- `barcode code128` bound to `sscc` (the emitter adds the `(00)` AI),
+  **centred** and with an explicit `moduleWidthMm`, with the human-readable
+  digits as an explicit `field sscc` element beneath it — and no caption
+  above it
 
 `maxWidthMm` is a hard CONSTRAINT, not an alignment hint (it was one
 originally, which is how a long Russian product name came to print off the
@@ -129,9 +143,32 @@ does not fit is ellipsized, so a truncated name is visible rather than
 plausible. `maxLines` defaults to 1 — a single line, clipped — for every
 template that does not set it.
 
-The mock-up wraps the name across four lines; the templates use two. Four
-lines of 10 pt type is 21 mm of a 40 mm label, which the rest of the layout
-cannot afford. See `defaults.ts`'s vertical-budget table.
+The mock-up wraps the name across four lines; the templates use three (they
+used two until the first physical print came back with a real product name
+already filling both). Four lines of 10 pt type is 21 mm of a 40 mm label,
+which the rest of the layout still cannot afford. The third line is paid for
+by two changes on the same label: the «SSCC:» caption is gone (the digits
+under the barcode already identify it, and at 5 pt the caption was nearly
+illegible on the print) and the ЕГАИС caption moved onto its value's row.
+The vertical budget is COMPUTED from the actual per-size font metrics rather
+than tabulated — see `defaults.ts`'s `buildBoxLabelSpec`, whose doc comment
+carries the resulting 58×40 table.
+
+**The SSCC barcode is centred, and its X-dimension is explicit.** An SSCC is
+always 18 digits and the emitters always prefix AI `(00)`, so the encoded
+payload is always 20 digits and — in Code 128 subset C — always exactly 156
+modules (`labels/code128.ts`). A deterministic width is a width the template
+can centre by arithmetic, which is why `LabelBarcodeElement` gained
+`moduleWidthMm` (an X-dimension in millimetres, honoured by ZPL's `^BY` and
+TSPL's narrow/wide parameters) but NOT an alignment property. `defaults.ts`
+picks the widest whole-dot module whose symbol plus GS1's two mandatory 10X
+quiet zones still fits the content width: 2 dots (0.2502 mm, 39.0 mm of
+bars) at 203 dpi — already GS1's minimum X-dimension, so those templates
+were always as wide as the standard permits — and 3 dots (0.254 mm,
+39.6 mm) at 300 dpi. Leaving `moduleWidthMm` unset is still legal and still
+emits exactly what the emitters emitted before it existed, which means the
+printer's modal `^BY` decides — the very behaviour that let one template
+print at two widths.
 
 **Barcode HRI is off in both languages.** A `LabelTemplateSpec` is
 language-neutral — the station picks ZPL or TSPL per printer — so the ZPL
