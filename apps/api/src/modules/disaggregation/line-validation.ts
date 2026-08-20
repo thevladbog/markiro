@@ -34,8 +34,20 @@ export async function validateBoxCandidates(
       shiftStatus: schema.shifts.status,
       productId: schema.shifts.productId,
       codeCount: sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(Number),
-      // Box referenced by any non-cancelled kiosk order?
-      inActiveOrder: sql<boolean>`coalesce(bool_or(${schema.pickupOrders.status} is not null and ${schema.pickupOrders.status} <> 'cancelled'), false)`.mapWith(Boolean),
+      // Box referenced by any non-cancelled kiosk order? A correlated EXISTS,
+      // not a LEFT JOIN + bool_or: pickup_order_boxes is unique on
+      // (tenantId, orderId, boxId), NOT (tenantId, boxId), so a box referenced
+      // by 2+ orders (e.g. one cancelled + one live) would fan out the
+      // boxItems rows in the SAME grouped query and multiply codeCount by the
+      // number of matching order rows. EXISTS never joins into the row set,
+      // so it can't affect any other aggregate in this select.
+      inActiveOrder: sql<boolean>`exists (
+        select 1 from ${schema.pickupOrderBoxes} pob
+        join ${schema.pickupOrders} po
+          on po.tenant_id = pob.tenant_id and po.id = pob.order_id
+        where pob.tenant_id = ${schema.boxes.tenantId}
+          and pob.box_id = ${schema.boxes.id}
+          and po.status <> 'cancelled')`.mapWith(Boolean),
     })
     .from(schema.boxes)
     .innerJoin(
@@ -45,20 +57,6 @@ export async function validateBoxCandidates(
     .leftJoin(
       schema.boxItems,
       and(eq(schema.boxItems.tenantId, schema.boxes.tenantId), eq(schema.boxItems.boxId, schema.boxes.id)),
-    )
-    .leftJoin(
-      schema.pickupOrderBoxes,
-      and(
-        eq(schema.pickupOrderBoxes.tenantId, schema.boxes.tenantId),
-        eq(schema.pickupOrderBoxes.boxId, schema.boxes.id),
-      ),
-    )
-    .leftJoin(
-      schema.pickupOrders,
-      and(
-        eq(schema.pickupOrders.tenantId, schema.pickupOrderBoxes.tenantId),
-        eq(schema.pickupOrders.id, schema.pickupOrderBoxes.orderId),
-      ),
     )
     .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.sscc, ssccs)))
     .groupBy(schema.boxes.id, schema.shifts.status, schema.shifts.productId);
