@@ -17,9 +17,12 @@ export const SHIFT_EXPORT_SAFE_ERROR_CODES = [
   "SHIFT_HAS_NO_CODES",
   "SHIFT_DATE_MISSING",
   "BOX_COVERAGE_INCOMPLETE",
+  "ORG_INN_MISSING",
   "FORMAT_NOT_FOUND",
   "INVALID_LINE_LIMIT",
   "BOX_EXCEEDS_LINE_LIMIT",
+  "INVALID_BOX_SSCC",
+  "INVALID_CIS",
   "GENERATION_FAILED",
   "STORAGE_FAILED",
   "QUEUE_FAILED",
@@ -67,7 +70,7 @@ export class ShiftExportRunnerService {
 
     try {
       const format = getShiftExportFormat(claimed.formatId, claimed.formatVersion);
-      const snapshot = await this.source.load(claimed.tenantId, claimed.shiftId, format.boxMode);
+      const snapshot = await this.source.load(claimed.tenantId, claimed.shiftId, format);
 
       const snapshotUpdates = await this.db
         .update(schema.shiftExports)
@@ -88,6 +91,7 @@ export class ShiftExportRunnerService {
         shiftDate: snapshot.shiftDate,
         maxLines: claimed.maxLines,
         source: snapshot.source,
+        organizationInn: snapshot.organizationInn,
       });
 
       infrastructureErrorCode = "STORAGE_FAILED";
@@ -332,6 +336,9 @@ function safeDomainErrorCode(error: unknown): ShiftExportSafeErrorCode | null {
     case "FORMAT_NOT_FOUND":
     case "INVALID_LINE_LIMIT":
     case "BOX_EXCEEDS_LINE_LIMIT":
+    case "INVALID_BOX_SSCC":
+    case "INVALID_CIS":
+    case "ORG_INN_MISSING":
       return error.code;
     case "FORMAT_SOURCE_MISMATCH":
     case "EMPTY_SOURCE":
