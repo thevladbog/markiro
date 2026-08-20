@@ -112,6 +112,8 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       tenantId,
       productId,
       mode: "aggregation",
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
     const timestamp = new Date(Date.now() - 60_000);
     const closure = new Date(timestamp.getTime() - 10_000);
@@ -183,6 +185,8 @@ describe.skipIf(!ready)("kiosk box registry e2e", () => {
       tenantId: foreignTenantId,
       productId: foreignProductId,
       mode: "aggregation",
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
     await db.insert(schema.boxes).values({
       tenantId: foreignTenantId,

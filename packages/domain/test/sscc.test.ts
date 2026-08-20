@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSscc,
+  DomainError,
+  formatSsccHri,
+  formatSsccWithAi,
   isValidSscc,
   parseScannedSscc,
   parseSscc,
   ssccSerialCapacity,
-} from "../src/gs1/sscc.js";
+} from "../src/index.js";
 
 describe("buildSscc", () => {
   it("builds ext+prefix+padded serial+check", () => {
@@ -163,5 +166,52 @@ describe("parseSscc", () => {
     expect(() => parseSscc(sscc, 13)).toThrowError(
       expect.objectContaining({ code: "SSCC_PREFIX" }),
     );
+  });
+});
+
+describe("formatSsccWithAi", () => {
+  it("prepends the 00 application identifier to a bare 18-digit SSCC", () => {
+    expect(formatSsccWithAi("346006820000000014")).toBe("00346006820000000014");
+  });
+
+  it.each([
+    ["17 digits", "34600682000000001"],
+    ["19 digits", "3460068200000000140"],
+    ["already 00-prefixed 20 digits", "00346006820000000014"],
+    ["non-digits", "34600682000000001X"],
+    ["empty", ""],
+  ])("throws SSCC_FORMAT on %s", (_name, value) => {
+    expect(() => formatSsccWithAi(value)).toThrowError(DomainError);
+    try {
+      formatSsccWithAi(value);
+    } catch (error) {
+      expect((error as DomainError).code).toBe("SSCC_FORMAT");
+    }
+  });
+});
+
+describe("formatSsccHri", () => {
+  it("formats a bare 18-digit SSCC as (00)…", () => {
+    expect(formatSsccHri("346006820000000014")).toBe("(00)346006820000000014");
+  });
+
+  it("accepts an already 00-prefixed 20-digit value and formats the bare part", () => {
+    expect(formatSsccHri("00346006820000000014")).toBe("(00)346006820000000014");
+  });
+
+  it("does NOT strip a leading 00 from a value that is itself a bare 18-digit SSCC", () => {
+    // 18 digits starting with 00 is a bare SSCC (extension digit 0, prefix 0…),
+    // not an AI-prefixed 16-digit tail.
+    expect(formatSsccHri("004601234560000017")).toBe("(00)004601234560000017");
+  });
+
+  it.each([
+    ["17 digits", "34600682000000001"],
+    ["19 digits", "3460068200000000140"],
+    ["20 digits without 00", "12346006820000000014"],
+    ["non-digits", "34600682000000001X"],
+    ["empty", ""],
+  ])("throws SSCC_FORMAT on %s", (_name, value) => {
+    expect(() => formatSsccHri(value)).toThrowError(DomainError);
   });
 });

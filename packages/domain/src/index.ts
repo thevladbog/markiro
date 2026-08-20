@@ -5,6 +5,8 @@ export { canonicalizeKm, kmHash, kmKey, MAX_KM_UTF8_BYTES, parseKm } from "./gs1
 export type { ParsedKm } from "./gs1/km.js";
 export {
   buildSscc,
+  formatSsccHri,
+  formatSsccWithAi,
   isValidSscc,
   parseScannedSscc,
   parseSscc,
@@ -19,6 +21,7 @@ export { validateShiftScan } from "./scan/validate.js";
 export type { ScanVerdict, ShiftScanContext } from "./scan/validate.js";
 export {
   LABEL_FIELDS,
+  labelFieldDisplayValue,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
@@ -98,6 +101,7 @@ export {
   shiftCloseReasonRequired,
 } from "./shift-close.js";
 export type { ShiftCloseReasonCode } from "./shift-close.js";
+export { formatShiftNumber, shiftMonthKey } from "./shift-number.js";
 export {
   CABINET_CAPABILITY,
   hasCabinetCapabilities,

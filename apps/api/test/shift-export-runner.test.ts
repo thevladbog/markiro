@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
+import { getShiftExportFormat } from "@markiro/domain";
 import { PgDialect } from "drizzle-orm/pg-core";
 import type { SQL } from "drizzle-orm";
 import {
@@ -208,6 +209,7 @@ function source(snapshot?: Partial<ShiftExportSnapshot>): ShiftExportSourceServi
       sourceSnapshotStartedAt: SNAPSHOT_AT,
       productName: "Вода",
       shiftDate: "2026-08-13",
+      organizationInn: null,
       source: { mode: "flat", codes: ["code-a", "code-b"] },
       ...snapshot,
     }),
@@ -261,7 +263,11 @@ describe("ShiftExportRunnerService", () => {
       totalBoxCount: 0,
       errorCode: null,
     });
-    expect(loader.load).toHaveBeenCalledWith("tenant-1", fake.state.row.shiftId, "flat");
+    expect(loader.load).toHaveBeenCalledWith(
+      "tenant-1",
+      fake.state.row.shiftId,
+      getShiftExportFormat("shift_csv_flat", 1),
+    );
     expect(fake.updatePredicates.map(sqlText).join("\n")).toContain(
       '"shift_exports"."tenant_id" = $1',
     );
@@ -282,7 +288,7 @@ describe("ShiftExportRunnerService", () => {
         physicalLineCount: 2,
         codeCount: 1,
         boxCount: 0,
-        filename: "Вода_1_2026-08-13_часть_1.csv",
+        filename: "Вода_1pcs_2026-08-13_часть_1.csv",
         mimeType: "text/csv; charset=utf-8",
       }),
       expect.objectContaining({
@@ -292,7 +298,7 @@ describe("ShiftExportRunnerService", () => {
         physicalLineCount: 2,
         codeCount: 1,
         boxCount: 0,
-        filename: "Вода_1_2026-08-13_часть_2.csv",
+        filename: "Вода_1pcs_2026-08-13_часть_2.csv",
         mimeType: "text/csv; charset=utf-8",
       }),
     ]);
@@ -577,9 +583,12 @@ describe("ShiftExportRunnerService", () => {
       "SHIFT_HAS_NO_CODES",
       "SHIFT_DATE_MISSING",
       "BOX_COVERAGE_INCOMPLETE",
+      "ORG_INN_MISSING",
       "FORMAT_NOT_FOUND",
       "INVALID_LINE_LIMIT",
       "BOX_EXCEEDS_LINE_LIMIT",
+      "INVALID_BOX_SSCC",
+      "INVALID_CIS",
       "GENERATION_FAILED",
       "STORAGE_FAILED",
       "QUEUE_FAILED",

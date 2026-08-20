@@ -30,6 +30,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
+  labelFieldDisplayValue,
   mmToDots,
   needsImageRendering,
   ptToDots,
@@ -83,7 +84,7 @@ function resolvedTextOf(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : (data[element.field] ?? "");
+  return element.kind === "text" ? element.text : labelFieldDisplayValue(element.field, data);
 }
 
 /** Every text/field element whose RESOLVED text needs rasterization -- the

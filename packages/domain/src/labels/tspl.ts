@@ -45,6 +45,7 @@
 
 import { DomainError } from "../errors.js";
 import {
+  labelFieldDisplayValue,
   mmToDots,
   ptToDots,
   type LabelBarcodeElement,
@@ -418,7 +419,14 @@ export async function generateTspl(
         lines.push(await renderTextLikeElement(element, element.text, spec, deps));
         break;
       case "field":
-        lines.push(await renderTextLikeElement(element, data[element.field] ?? "", spec, deps));
+        lines.push(
+          await renderTextLikeElement(
+            element,
+            labelFieldDisplayValue(element.field, data),
+            spec,
+            deps,
+          ),
+        );
         break;
       case "barcode":
         lines.push(renderBarcodeElement(element, data, spec.dpi));

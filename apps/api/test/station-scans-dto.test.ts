@@ -99,4 +99,16 @@ describe("syncBatchSchema marking-code contract", () => {
       }).success,
     ).toBe(false);
   });
+
+  it("rejects a box closure sscc that is the right length but not all digits", () => {
+    // Length-only validation would accept this and let it reach storage,
+    // where formatSsccWithAi (@markiro/domain) and the v2 boxes shift-export
+    // both require exactly 18 digits and throw/error otherwise.
+    expect(
+      syncBatchSchema.safeParse({
+        ...body(),
+        boxes: [closure({ sscc: "12345678901234567X" })],
+      }).success,
+    ).toBe(false);
+  });
 });

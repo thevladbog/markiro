@@ -19,12 +19,13 @@
  * same constants the real wrapping uses. Good enough for containment checks
  * and overlay placement, never a pixel-accurate layout.
  */
-import type {
-  LabelBarcodeElement,
-  LabelElement,
-  LabelField,
-  LabelFieldElement,
-  LabelTextElement,
+import {
+  labelFieldDisplayValue,
+  type LabelBarcodeElement,
+  type LabelElement,
+  type LabelField,
+  type LabelFieldElement,
+  type LabelTextElement,
 } from "./model.js";
 import { estimatedLineCount, estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm } from "./wrap.js";
 
@@ -60,7 +61,7 @@ function resolveTextForBounds(
   element: LabelTextElement | LabelFieldElement,
   data: Record<LabelField, string>,
 ): string {
-  return element.kind === "text" ? element.text : (data[element.field] ?? "");
+  return element.kind === "text" ? element.text : labelFieldDisplayValue(element.field, data);
 }
 
 function resolveBarcodeTextForBounds(

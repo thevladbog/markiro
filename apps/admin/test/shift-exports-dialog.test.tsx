@@ -6,6 +6,7 @@ import { ShiftExportsDialog } from "../src/pages/shifts/ShiftExportsDialog.js";
 
 const SHIFT = {
   id: "11111111-1111-4111-8111-111111111111",
+  number: "AUG26-001",
   status: "closed",
   mode: "validation",
   productId: "product-1",
@@ -42,7 +43,7 @@ const FORMATS = [
   },
   {
     id: "shift_txt_boxes",
-    version: 1,
+    version: 2,
     label: "[TXT][С коробами] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
@@ -58,7 +59,7 @@ const FORMATS = [
   },
   {
     id: "shift_csv_boxes",
-    version: 1,
+    version: 2,
     label: "[CSV][С коробами] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
@@ -192,7 +193,13 @@ describe("ShiftExportsDialog", () => {
       within(dialog).getByText("Данные смены изменились — сформируйте новый отчет."),
     ).toBeDefined();
     expect(within(dialog).getByText("Иванов Иван")).toBeDefined();
+    // READY_EXPORT is a legacy shift_txt_boxes@1 export; the live formats list only
+    // advertises shift_txt_boxes@2, so the exact id@version lookup misses. The label
+    // text itself is version-independent, so the id-only fallback still resolves it
+    // to the friendly label (once for the radio button, once for the history row)
+    // instead of falling back to the raw formatId (see ShiftExportsDialog.tsx).
     expect(within(dialog).getAllByText("[TXT][С коробами] Отчет смены")).toHaveLength(2);
+    expect(within(dialog).queryByText("shift_txt_boxes")).toBeNull();
     expect(within(dialog).getByText("3 кодов")).toBeDefined();
     expect(within(dialog).getByText("2 коробов")).toBeDefined();
     expect(within(dialog).getByText("Часть 1")).toBeDefined();
@@ -216,6 +223,7 @@ describe("ShiftExportsDialog", () => {
       ...READY_EXPORT,
       id: "33333333-3333-4333-8333-333333333333",
       formatId: "shift_csv_flat",
+      formatVersion: 1,
       status: "failed",
       errorCode: "GENERATION_FAILED",
       artifacts: [],
@@ -227,6 +235,7 @@ describe("ShiftExportsDialog", () => {
       ...READY_EXPORT,
       id: "44444444-4444-4444-8444-444444444444",
       formatId: "shift_txt_flat",
+      formatVersion: 1,
       status: "processing",
       artifacts: [],
       totalBoxCount: 0,
@@ -237,6 +246,7 @@ describe("ShiftExportsDialog", () => {
       ...READY_EXPORT,
       id: "55555555-5555-4555-8555-555555555555",
       formatId: "shift_csv_flat",
+      formatVersion: 1,
       status: "queued",
       artifacts: [],
       totalBoxCount: 0,
@@ -330,6 +340,35 @@ describe("ShiftExportsDialog", () => {
     fireEvent.click(createButton);
     await waitFor(() => expect(requests).toHaveLength(2));
     expect(requests[0]).toBe(requests[1]);
+  });
+
+  it("sends the selected format's actual advertised version, not a hardcoded one", async () => {
+    let capturedBody: { formatId?: string; formatVersion?: number } | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        if (String(url).includes("/formats")) return response(FORMATS);
+        if (String(url).includes("/shifts/") && init?.method === "POST") {
+          capturedBody = JSON.parse(String(init.body)) as {
+            formatId: string;
+            formatVersion: number;
+          };
+          return response({ ...READY_EXPORT, status: "queued", artifacts: [] });
+        }
+        return response([]);
+      }),
+    );
+    renderDialog();
+    const dialog = await screen.findByRole("dialog", { name: "Отчеты смены" });
+    const boxesFormat = FORMATS.find((format) => format.id === "shift_txt_boxes");
+    if (!boxesFormat) throw new Error("shift_txt_boxes format is missing from fixture");
+    fireEvent.click(await within(dialog).findByRole("radio", { name: boxesFormat.label }));
+    const createButton = within(dialog).getByRole("button", { name: "Сформировать отчет" });
+    await waitFor(() => expect((createButton as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(createButton);
+    await waitFor(() => expect(capturedBody).toBeDefined());
+    expect(capturedBody?.formatId).toBe("shift_txt_boxes");
+    expect(capturedBody?.formatVersion).toBe(2);
   });
 
   it("rejects empty, fractional, and out-of-range split limits", async () => {

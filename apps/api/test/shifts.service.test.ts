@@ -154,19 +154,27 @@ describe("ShiftsService box-template snapshot boundary", () => {
         },
       }),
       insert: (table: unknown) => ({
-        values: (values: Record<string, unknown>) => ({
-          returning: async () => {
-            if (table === schema.shifts && values.boxLabelTemplateId === foreignTemplateId) {
-              throw {
-                code: "23503",
-                constraint: "shifts_tenant_box_label_template_fk",
-              };
-            }
-            insertedShifts.push(values);
-            return [{ ...SHIFT_ROW, ...values }];
-          },
-        }),
+        values: (values: Record<string, unknown>) =>
+          table === schema.shiftNumberCounters
+            ? {
+                onConflictDoUpdate: () => ({
+                  returning: async () => [{ lastSeq: 1 }],
+                }),
+              }
+            : {
+                returning: async () => {
+                  if (table === schema.shifts && values.boxLabelTemplateId === foreignTemplateId) {
+                    throw {
+                      code: "23503",
+                      constraint: "shifts_tenant_box_label_template_fk",
+                    };
+                  }
+                  insertedShifts.push(values);
+                  return [{ ...SHIFT_ROW, ...values }];
+                },
+              },
       }),
+      transaction: async (run: (tx: Db) => Promise<unknown>) => run(db),
     } as unknown as Db;
     const entitlements = {
       assertFeatureAccess: async () => undefined,

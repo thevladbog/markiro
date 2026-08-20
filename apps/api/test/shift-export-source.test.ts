@@ -8,6 +8,9 @@ import {
 } from "../src/modules/shift-exports/shift-export-source.service";
 
 const SNAPSHOT_STARTED_AT = new Date("2026-08-13T12:34:56.789Z");
+const FLAT = { boxMode: "flat", extension: "txt" } as const;
+const BOXES = { boxMode: "boxes", extension: "txt" } as const;
+const XML_BOXES = { boxMode: "boxes", extension: "xml" } as const;
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
 const HASH_C = "c".repeat(64);
@@ -45,6 +48,7 @@ interface BoxMembershipRow {
 
 interface Fixture {
   shifts?: ShiftRow[];
+  orgProfiles?: { tenantId: string; inn: string | null }[];
   registry?: RegistryRow[];
   codeHistory?: CodeHistoryRow[];
   memberships?: BoxMembershipRow[];
@@ -82,6 +86,7 @@ function fakeDb(fixture: Fixture): FakeDbResult {
 
   const rowsFor = (table: unknown): unknown[] => {
     if (table === schema.shifts) return fixture.shifts ?? [];
+    if (table === schema.orgProfiles) return fixture.orgProfiles ?? [];
     if (table === schema.boxItems) return fixture.memberships ?? [];
     if (table === schema.codeRegistry) {
       return (fixture.registry ?? []).flatMap((owner) =>
@@ -232,16 +237,13 @@ describe("ShiftExportSourceService", () => {
       ],
     });
 
-    const snapshot = await new ShiftExportSourceService(fake.db).load(
-      "tenant-1",
-      "shift-1",
-      "flat",
-    );
+    const snapshot = await new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT);
 
     expect(snapshot).toEqual({
       sourceSnapshotStartedAt: SNAPSHOT_STARTED_AT,
       productName: "Вода газированная",
       shiftDate: "2026-08-13",
+      organizationInn: null,
       source: { mode: "flat", codes: ["code-a", "code-b", "code-c"] },
     });
     expect(fake.transactionOptions).toEqual([
@@ -271,7 +273,7 @@ describe("ShiftExportSourceService", () => {
     });
 
     await expect(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
     ).resolves.toMatchObject({
       sourceSnapshotStartedAt: new Date("2026-08-14T13:45:53.789Z"),
     });
@@ -281,7 +283,7 @@ describe("ShiftExportSourceService", () => {
     const fake = fakeDb({ shifts: [] });
 
     await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
       "SHIFT_NOT_CLOSED",
     );
   });
@@ -293,7 +295,7 @@ describe("ShiftExportSourceService", () => {
     const fake = fakeDb({ shifts: [closedShift({ status })] });
 
     await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
       expectedCode,
     );
   });
@@ -302,7 +304,7 @@ describe("ShiftExportSourceService", () => {
     const fake = fakeDb({ shifts: [closedShift({ plannedDate: null })] });
 
     await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
       "SHIFT_DATE_MISSING",
     );
   });
@@ -311,7 +313,7 @@ describe("ShiftExportSourceService", () => {
     const fake = fakeDb({ shifts: [closedShift()] });
 
     await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
       "SHIFT_HAS_NO_CODES",
     );
   });
@@ -324,7 +326,7 @@ describe("ShiftExportSourceService", () => {
     });
 
     await expect(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "flat"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
     ).resolves.toMatchObject({ productName: "Продукция" });
   });
 
@@ -349,7 +351,7 @@ describe("ShiftExportSourceService", () => {
     });
 
     await expect(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "boxes"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", BOXES),
     ).resolves.toMatchObject({
       source: {
         mode: "boxes",
@@ -375,7 +377,7 @@ describe("ShiftExportSourceService", () => {
     });
 
     await expect(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "boxes"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", BOXES),
     ).resolves.toMatchObject({
       source: {
         mode: "boxes",
@@ -405,7 +407,7 @@ describe("ShiftExportSourceService", () => {
     });
 
     await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "boxes"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", BOXES),
       "BOX_COVERAGE_INCOMPLETE",
     );
   });
@@ -435,8 +437,41 @@ describe("ShiftExportSourceService", () => {
     });
 
     await expectSourceError(
-      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", "boxes"),
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", BOXES),
       "BOX_COVERAGE_INCOMPLETE",
+    );
+  });
+
+  it("loads the organization INN for the GISMT XML format", async () => {
+    const fake = fakeDb({
+      shifts: [closedShift()],
+      orgProfiles: [{ tenantId: "tenant-1", inn: " 9705119097 " }],
+      registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+      codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+      memberships: [membership("box-1", "100000000000000001", HASH_A)],
+    });
+
+    await expect(
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", XML_BOXES),
+    ).resolves.toMatchObject({ organizationInn: "9705119097" });
+  });
+
+  it.each([
+    ["no profile row", []],
+    ["blank INN", [{ tenantId: "tenant-1", inn: "   " }]],
+    ["null INN", [{ tenantId: "tenant-1", inn: null }]],
+  ])("rejects the GISMT XML format with %s", async (_case, orgProfiles) => {
+    const fake = fakeDb({
+      shifts: [closedShift()],
+      orgProfiles,
+      registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+      codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+      memberships: [membership("box-1", "100000000000000001", HASH_A)],
+    });
+
+    await expectSourceError(
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", XML_BOXES),
+      "ORG_INN_MISSING",
     );
   });
 });

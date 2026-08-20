@@ -327,15 +327,8 @@
     {
       "idx": 46,
       "version": "7",
-      "when": 1787181938062,
-      "tag": "0046_product_shelf_life_days",
-      "breakpoints": true
-    },
-    {
-      "idx": 47,
-      "version": "7",
-      "when": 1787182380653,
-      "tag": "0047_default_label_templates",
+      "when": 1787184184891,
+      "tag": "0046_yummy_morph",
       "breakpoints": true
     }
   ]

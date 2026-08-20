@@ -1,5 +1,5 @@
 {
-  "id": "04ee3fd7-d606-4726-8e06-068b6c0516ba",
+  "id": "9b3aef85-eec9-4001-abf6-535aff464127",
   "prevId": "ef8480b5-1216-4e19-a1d1-f00c429f9ecf",
   "version": "7",
   "dialect": "postgresql",
@@ -2030,12 +2030,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "shelf_life_days": {
-          "name": "shelf_life_days",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
         "external_ref": {
           "name": "external_ref",
           "type": "text",
@@ -2254,6 +2248,60 @@
       "checkConstraints": {},
       "isRLSEnabled": false
     },
+    "public.shift_number_counters": {
+      "name": "shift_number_counters",
+      "schema": "",
+      "columns": {
+        "tenant_id": {
+          "name": "tenant_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "month_key": {
+          "name": "month_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "last_seq": {
+          "name": "last_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "shift_number_counters_tenant_id_organization_id_fk": {
+          "name": "shift_number_counters_tenant_id_organization_id_fk",
+          "tableFrom": "shift_number_counters",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "tenant_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "shift_number_counters_tenant_id_month_key_pk": {
+          "name": "shift_number_counters_tenant_id_month_key_pk",
+          "columns": [
+            "tenant_id",
+            "month_key"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.shifts": {
       "name": "shifts",
       "schema": "",
@@ -2355,6 +2403,18 @@
           "notNull": true,
           "default": "'admin'"
         },
+        "number_month_key": {
+          "name": "number_month_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "number_seq": {
+          "name": "number_seq",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
         "station_close_policy": {
           "name": "station_close_policy",
           "type": "station_close_policy",
@@ -2407,7 +2467,35 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "shifts_tenant_month_seq_uq": {
+          "name": "shifts_tenant_month_seq_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "number_month_key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "number_seq",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "shifts_tenant_id_organization_id_fk": {
           "name": "shifts_tenant_id_organization_id_fk",

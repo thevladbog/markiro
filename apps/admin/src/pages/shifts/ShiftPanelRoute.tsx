@@ -236,6 +236,7 @@ function EditShiftPanel() {
       <ShiftForm
         mode="edit"
         editStatus={shift.status}
+        title={`${t("pages.shifts.form.editTitle")} · ${shift.number}`}
         initialValues={initialValues}
         products={context.products}
         lines={context.lines}

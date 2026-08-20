@@ -36,6 +36,7 @@ import {
   BAR_WIDTH_PER_CHAR_FACTOR,
   elementBoundsMm,
   INTERIOR_MODULES,
+  labelFieldDisplayValue,
   LINE_HEIGHT_EM,
   ptToMm,
   QUIET_ZONE_MODULES,
@@ -290,7 +291,7 @@ export function draw(
         drawTextElement(ctx, element, element.text, scale);
         break;
       case "field":
-        drawTextElement(ctx, element, data[element.field] ?? "", scale);
+        drawTextElement(ctx, element, labelFieldDisplayValue(element.field, data), scale);
         break;
       case "barcode":
         drawBarcodeElement(ctx, element, data, scale);

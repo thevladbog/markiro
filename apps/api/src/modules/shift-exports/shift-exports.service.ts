@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -49,6 +50,13 @@ export class ShiftExportsService {
     shiftId: string,
     input: CreateShiftExportDto,
   ): Promise<ShiftExportDto> {
+    const advertised = SHIFT_EXPORT_FORMATS.some(
+      (format) => format.id === input.formatId && format.version === input.formatVersion,
+    );
+    if (!advertised) {
+      throw new BadRequestException("Unknown or superseded export format version");
+    }
+
     let row: ShiftExportRow;
     let shouldEnqueue = true;
     try {
@@ -251,7 +259,7 @@ export class ShiftExportsService {
       id: row.id,
       shiftId: row.shiftId,
       formatId: row.formatId as ShiftExportFormatId,
-      formatVersion: row.formatVersion as 1,
+      formatVersion: row.formatVersion,
       maxLines: row.maxLines,
       status: row.status,
       errorCode: row.errorCode,

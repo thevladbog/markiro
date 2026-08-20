@@ -87,6 +87,9 @@ export const shiftMirror = sqliteTable("shift_mirror", {
   // template. See migrations.ts's trailing ALTER for why this trails the
   // rest of the table too.
   boxLabelTemplateSpec: text("box_label_template_spec"),
+  // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
+  // composed server-side; see migrations.ts's trailing ALTER.
+  number: text("number"),
 });
 
 /** Local mirror of the shift's product (for ad-hoc GTIN resolution offline). */

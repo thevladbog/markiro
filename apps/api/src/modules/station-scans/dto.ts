@@ -93,7 +93,7 @@ const boxClosureSchema = z
     boxId: z.string().min(1).max(64),
     shiftId: z.string().uuid().toLowerCase(),
     terminalId: z.string().nullable(),
-    sscc: z.string().length(18),
+    sscc: z.string().regex(/^\d{18}$/),
     closedAt: z.string().datetime(),
     operatorId: z.string().uuid().toLowerCase().nullable(),
     // Defaults preserve compatibility with older stations that omit outcomes.

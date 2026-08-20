@@ -43,7 +43,7 @@ const OPEN_BOX = {
 
 const CLOSED_BOX = {
   id: "b2",
-  sscc: "123456789012345675",
+  sscc: "00123456789012345675",
   terminalId: "t1",
   lineName: "Линия розлива № 1",
   operatorId: "emp1",
@@ -146,7 +146,7 @@ describe("BoxesPage", () => {
     renderPage();
     const table = within(await screen.findByRole("table"));
 
-    expect(table.getByText(CLOSED_BOX.sscc)).toBeDefined();
+    expect(table.getByText("(00)123456789012345675")).toBeDefined();
     expect(table.getByText("Линия розлива № 1")).toBeDefined();
     expect(table.getByText(EMPLOYEE.fullName)).toBeDefined();
     expect(table.getByText("2")).toBeDefined();

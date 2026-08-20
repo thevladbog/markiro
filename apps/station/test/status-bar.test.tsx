@@ -77,6 +77,25 @@ describe("StatusBar", () => {
     expect(screen.getAllByText("2")).toHaveLength(1);
   });
 
+  it("renders a shift label combining the shift number and the product", () => {
+    render(
+      <StatusBar
+        {...context}
+        shiftLabel="AUG26-003/S · Вода"
+        serverReachability="reachable"
+        scanner="keyboard"
+        printerConfigured={false}
+        syncPending={0}
+        syncStuck={false}
+        conflicts={0}
+      />,
+    );
+
+    const shiftStatus = screen.getByTestId("shift-status");
+    expect(shiftStatus.textContent).toContain("AUG26-003/S");
+    expect(shiftStatus.textContent).toContain("Вода");
+  });
+
   it("keeps a semantic update entry point visible with severity metadata", () => {
     render(
       <StatusBar

@@ -285,7 +285,7 @@ describe.skipIf(!ready)("boxes e2e", () => {
   it("maps the box's own sscc, terminal, line, operator, and closing time onto the DTO", async () => {
     const res = await agent.get(`/boxes?shiftId=${displacedShiftId}`).expect(200);
     const box = res.body.items[0];
-    expect(box.sscc).toBe("123456789012345675");
+    expect(box.sscc).toBe("00123456789012345675");
     expect(box.terminalId).toBe(stationDeviceId);
     expect(box.lineName).toBeNull();
     expect(box.operatorId).toBe(operatorId);

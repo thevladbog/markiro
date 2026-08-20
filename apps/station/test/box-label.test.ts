@@ -29,6 +29,7 @@ describe("boxLabelFields — egais/expiry", () => {
     operatorName: null,
     counterpartyName: null,
     closedAt: "2025-05-20T10:15:00.000Z",
+    shiftNumber: null,
   };
 
   it("fills product.egais and computed expiry", () => {

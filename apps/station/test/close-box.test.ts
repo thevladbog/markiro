@@ -179,7 +179,7 @@ describe("closeCurrentBox", () => {
 });
 
 describe("boxLabelFields", () => {
-  it("maps every input to its own labelled slot, leaving product.egais, km.code, shift.no, and expiry blank", () => {
+  it("maps every input to its own labelled slot, leaving product.egais, km.code, and expiry blank and printing the shift number", () => {
     const fields = boxLabelFields({
       sscc: SSCC,
       itemCount: 12,
@@ -190,6 +190,7 @@ describe("boxLabelFields", () => {
       operatorName: "Иванов",
       counterpartyName: "Клиент",
       closedAt: "2026-07-29T10:15:00.000Z",
+      shiftNumber: "AUG26-003/S",
     });
     expect(fields).toEqual({
       "product.name": "Кола",
@@ -197,7 +198,7 @@ describe("boxLabelFields", () => {
       "product.egais": "",
       "km.code": "",
       sscc: SSCC,
-      "shift.no": "",
+      "shift.no": "AUG26-003/S",
       date: "2026-07-29",
       expiry: "",
       qty: "12",
@@ -206,7 +207,7 @@ describe("boxLabelFields", () => {
     });
   });
 
-  it("defaults a missing operator or counterparty to an empty string", () => {
+  it("defaults a missing operator, counterparty or shift number to an empty string", () => {
     const fields = boxLabelFields({
       sscc: SSCC,
       itemCount: 1,
@@ -217,9 +218,11 @@ describe("boxLabelFields", () => {
       operatorName: null,
       counterpartyName: null,
       closedAt: ISO,
+      shiftNumber: null,
     });
     expect(fields.operator).toBe("");
     expect(fields["counterparty.name"]).toBe("");
+    expect(fields["shift.no"]).toBe("");
   });
 
   it("puts no application identifier in the field record", () => {
@@ -233,6 +236,7 @@ describe("boxLabelFields", () => {
       operatorName: null,
       counterpartyName: null,
       closedAt: ISO,
+      shiftNumber: null,
     });
     expect(fields.sscc).toHaveLength(18);
     expect(fields.sscc.startsWith("00")).toBe(false);

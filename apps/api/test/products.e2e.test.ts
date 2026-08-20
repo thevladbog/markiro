@@ -440,6 +440,8 @@ describe.skipIf(!ready)("products e2e", () => {
       tenantId: orgId,
       productId,
       mode: "validation",
+      numberMonthKey: "AUG25",
+      numberSeq: 1,
     });
 
     const deleteRes = await agent.delete(`/products/${productId}`).expect(409);

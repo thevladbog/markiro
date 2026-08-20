@@ -195,6 +195,14 @@ export const STATION_MIGRATIONS: string[] = [
   `ALTER TABLE product_mirror ADD COLUMN image_pointer_checksum TEXT;`,
   `ALTER TABLE shift_mirror ADD COLUMN station_close_policy TEXT;`,
   `ALTER TABLE shift_mirror ADD COLUMN station_close_owner_device_id TEXT;`,
+  // Human-readable shift number (`AUG26-003`, `/S` = station-created),
+  // composed server-side and mirrored for offline display. Nullable: absent
+  // from bundles served by pre-upgrade servers, and from any local row
+  // written before this column existed until the next successful bundle
+  // sync. Written by `upsertBundle` alongside the other shift_mirror
+  // columns; read back by `readShiftContext`. Same re-runnable idempotency
+  // as the `login` ALTER above.
+  `ALTER TABLE shift_mirror ADD COLUMN number TEXT;`,
   `CREATE TABLE IF NOT EXISTS shift_close_outbox (
      event_id TEXT PRIMARY KEY,
      shift_id TEXT NOT NULL,

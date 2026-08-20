@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { DomainError } from "../errors.js";
+import { formatSsccHri } from "../gs1/sscc.js";
 
 /** Data sources a text/field element on a label can be bound to. */
 export const LABEL_FIELDS = [
@@ -187,4 +188,20 @@ export function sampleLabelData(): Record<LabelField, string> {
     operator: "Смирнов А.",
     "counterparty.name": "Завод Партнер",
   };
+}
+
+/**
+ * Resolves a `field` element's display text. The one field-specific rule
+ * lives here: `sscc` renders in GS1 HRI form `(00)…` — the barcode emitters
+ * already add the AI to the encoded data, and Chestny ZNAK requires the
+ * human-readable form to show it too. Tolerant by design: preview/generation
+ * may run with empty or arbitrary data, so a value that isn't 18 digits is
+ * returned unchanged rather than throwing.
+ */
+export function labelFieldDisplayValue(
+  field: LabelField,
+  data: Record<LabelField, string>,
+): string {
+  const value = data[field] ?? "";
+  return field === "sscc" && /^\d{18}$/.test(value) ? formatSsccHri(value) : value;
 }

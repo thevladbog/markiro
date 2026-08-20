@@ -70,6 +70,8 @@ export interface WorkScreenProps {
   productEgaisCode?: string | null;
   /** The shift's product shelf life in days, used to compute the box label's `expiry` field. */
   productShelfLifeDays?: number | null;
+  /** Human-readable shift number for the box label's `shift.no` field. */
+  shiftNumber?: string | null;
   plannedQty?: number | null | undefined;
   source: ScanSource;
   sound: SoundSettings;
@@ -146,6 +148,7 @@ export function WorkScreen({
   counterpartyName,
   productEgaisCode,
   productShelfLifeDays,
+  shiftNumber,
   plannedQty,
   source,
   sound,
@@ -847,6 +850,7 @@ export function WorkScreen({
       operatorName: null,
       counterpartyName: counterpartyName ?? null,
       closedAt: result.closedAt,
+      shiftNumber: shiftNumber ?? null,
     });
   }
 

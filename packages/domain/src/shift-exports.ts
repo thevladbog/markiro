@@ -1,14 +1,23 @@
+import { DomainError } from "./errors.js";
+import { parseKmSegments } from "./gs1/km.js";
+import { formatSsccWithAi } from "./gs1/sscc.js";
+
 export type ShiftExportFormatId =
-  "shift_txt_flat" | "shift_txt_boxes" | "shift_csv_flat" | "shift_csv_boxes";
+  | "shift_txt_flat"
+  | "shift_txt_boxes"
+  | "shift_csv_flat"
+  | "shift_csv_boxes"
+  | "shift_xml_gismt_aggregation";
 
 export type ShiftExportBoxMode = "flat" | "boxes";
 
 export interface ShiftExportFormatDescriptor {
   id: ShiftExportFormatId;
-  version: 1;
+  version: 1 | 2;
   label: string;
-  extension: "txt" | "csv";
-  mimeType: "text/plain; charset=utf-8" | "text/csv; charset=utf-8";
+  extension: "txt" | "csv" | "xml";
+  mimeType:
+    "text/plain; charset=utf-8" | "text/csv; charset=utf-8" | "application/xml; charset=utf-8";
   boxMode: ShiftExportBoxMode;
 }
 
@@ -18,11 +27,13 @@ export type ShiftExportSource =
 
 export interface RenderShiftExportInput {
   formatId: ShiftExportFormatId;
-  formatVersion: 1;
+  formatVersion: number;
   productName: string;
   shiftDate: string;
   maxLines: number | null;
   source: ShiftExportSource;
+  /** Tenant's tax id (ИНН); required by the GISMT aggregation XML (`LP_TIN`). */
+  organizationInn?: string | null;
 }
 
 export interface ShiftExportPart {
@@ -40,7 +51,10 @@ export type ShiftExportDomainErrorCode =
   | "FORMAT_SOURCE_MISMATCH"
   | "EMPTY_SOURCE"
   | "INVALID_LINE_LIMIT"
-  | "BOX_EXCEEDS_LINE_LIMIT";
+  | "BOX_EXCEEDS_LINE_LIMIT"
+  | "INVALID_BOX_SSCC"
+  | "INVALID_CIS"
+  | "ORG_INN_MISSING";
 
 export class ShiftExportDomainError extends Error {
   constructor(readonly code: ShiftExportDomainErrorCode) {
@@ -60,7 +74,7 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   } as const),
   Object.freeze({
     id: "shift_txt_boxes",
-    version: 1,
+    version: 2,
     label: "[TXT][С коробами] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
@@ -76,6 +90,39 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
   } as const),
   Object.freeze({
     id: "shift_csv_boxes",
+    version: 2,
+    label: "[CSV][С коробами] Отчет смены",
+    extension: "csv",
+    mimeType: "text/csv; charset=utf-8",
+    boxMode: "boxes",
+  } as const),
+  Object.freeze({
+    id: "shift_xml_gismt_aggregation",
+    version: 1,
+    label: "[XML][ГИСМТ] Отчет об агрегации",
+    extension: "xml",
+    mimeType: "application/xml; charset=utf-8",
+    boxMode: "boxes",
+  } as const),
+] as const satisfies readonly ShiftExportFormatDescriptor[]);
+
+/**
+ * Frozen v1 descriptors for the boxes formats: version 2 switched the SSCC
+ * to the 20-digit 00-prefixed form, but already-created v1 exports must keep
+ * re-rendering (retry) and re-downloading byte-identically. Not advertised —
+ * `SHIFT_EXPORT_FORMATS` is what the UI offers for NEW exports.
+ */
+const LEGACY_SHIFT_EXPORT_FORMATS = Object.freeze([
+  Object.freeze({
+    id: "shift_txt_boxes",
+    version: 1,
+    label: "[TXT][С коробами] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "boxes",
+  } as const),
+  Object.freeze({
+    id: "shift_csv_boxes",
     version: 1,
     label: "[CSV][С коробами] Отчет смены",
     extension: "csv",
@@ -86,6 +133,24 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
 
 const UTF8_BOM = Uint8Array.of(0xef, 0xbb, 0xbf);
 const textEncoder = new TextEncoder();
+
+const XML_FOOTER_LINES = ["    </Document>", "</unit_pack>"] as const;
+
+function xmlHeaderLines(organizationInn: string): string[] {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    "<unit_pack>",
+    "    <Document>",
+    "        <organisation>",
+    "            <id_info>",
+    `                <LP_info LP_TIN="${xmlAttribute(organizationInn)}" />`,
+    "            </id_info>",
+    "        </organisation>",
+  ];
+}
+
+/** Header + footer lines every GISMT XML part carries besides its pack_content blocks. */
+const XML_OVERHEAD_LINE_COUNT = xmlHeaderLines("").length + XML_FOOTER_LINES.length;
 
 interface ShiftExportBlock {
   lines: readonly string[];
@@ -100,7 +165,7 @@ interface ShiftExportPartBlocks {
 }
 
 export function getShiftExportFormat(id: string, version: number): ShiftExportFormatDescriptor {
-  const descriptor = SHIFT_EXPORT_FORMATS.find(
+  const descriptor = [...SHIFT_EXPORT_FORMATS, ...LEGACY_SHIFT_EXPORT_FORMATS].find(
     (candidate) => candidate.id === id && candidate.version === version,
   );
 
@@ -124,6 +189,11 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
 
   validateLineLimit(input.maxLines);
 
+  const organizationInn = input.organizationInn?.trim() ?? "";
+  if (descriptor.extension === "xml" && organizationInn === "") {
+    throw new ShiftExportDomainError("ORG_INN_MISSING");
+  }
+
   const blocks = createBlocks(descriptor, input.source);
   if (blocks.reduce((total, block) => total + block.codeCount, 0) === 0) {
     throw new ShiftExportDomainError("EMPTY_SOURCE");
@@ -137,7 +207,7 @@ export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPar
     const partNumber = index + 1;
     const codeCount = part.blocks.reduce((total, block) => total + block.codeCount, 0);
     const boxCount = part.blocks.reduce((total, block) => total + block.boxCount, 0);
-    const body = encodePart(descriptor, part.blocks);
+    const body = encodePart(descriptor, part.blocks, organizationInn);
 
     return {
       partNumber,
@@ -193,10 +263,27 @@ function createBlocks(
   }
 
   return source.boxes.map((box) => {
+    if (descriptor.extension === "xml") {
+      const lines = [
+        "        <pack_content>",
+        `            <pack_code>${xmlText(formatBoxSscc(box.sscc))}</pack_code>`,
+        ...box.codes.map((code) => `            <cis>${xmlText(stripKmCryptoTail(code))}</cis>`),
+        "        </pack_content>",
+      ];
+
+      return {
+        lines,
+        physicalLineCount: lines.length,
+        codeCount: box.codes.length,
+        boxCount: 1,
+      };
+    }
+
+    const ssccOut = descriptor.version >= 2 ? formatBoxSscc(box.sscc) : box.sscc;
     const lines =
       descriptor.extension === "txt"
-        ? [box.sscc, ...box.codes, ""]
-        : box.codes.map((code) => `${csvField(box.sscc)};${csvField(code)}`);
+        ? [ssccOut, ...box.codes, ""]
+        : box.codes.map((code) => `${csvField(ssccOut)};${csvField(code)}`);
 
     return {
       lines,
@@ -215,7 +302,12 @@ function splitBlocks(
   blocks: readonly ShiftExportBlock[],
   maxLines: number | null,
 ): ShiftExportPartBlocks[] {
-  const headerLines = descriptor.extension === "csv" ? 1 : 0;
+  const headerLines =
+    descriptor.extension === "csv"
+      ? 1
+      : descriptor.extension === "xml"
+        ? XML_OVERHEAD_LINE_COUNT
+        : 0;
 
   if (maxLines === null) {
     return [
@@ -253,15 +345,18 @@ function splitBlocks(
 function encodePart(
   descriptor: ShiftExportFormatDescriptor,
   blocks: readonly ShiftExportBlock[],
+  organizationInn: string,
 ): Uint8Array {
   const lines = blocks.flatMap((block) => block.lines);
   const content =
-    descriptor.extension === "csv"
-      ? [descriptor.boxMode === "flat" ? "code" : "box_sscc;code", ...lines].join("\r\n") + "\r\n"
-      : lines.join("\n") + "\n";
+    descriptor.extension === "xml"
+      ? [...xmlHeaderLines(organizationInn), ...lines, ...XML_FOOTER_LINES].join("\n") + "\n"
+      : descriptor.extension === "csv"
+        ? [descriptor.boxMode === "flat" ? "code" : "box_sscc;code", ...lines].join("\r\n") + "\r\n"
+        : lines.join("\n") + "\n";
   const encoded = textEncoder.encode(content);
 
-  if (descriptor.extension === "txt") {
+  if (descriptor.extension !== "csv") {
     return encoded;
   }
 
@@ -280,10 +375,68 @@ function createFilename(input: {
   partNumber: number;
   hasMultipleParts: boolean;
 }): string {
-  const boxCountSegment = input.descriptor.boxMode === "boxes" ? `_${input.boxCount}` : "";
+  const boxCountSegment = input.descriptor.boxMode === "boxes" ? `_${input.boxCount}box` : "";
   const partSegment = input.hasMultipleParts ? `_часть_${input.partNumber}` : "";
 
-  return `${input.productName}_${input.codeCount}${boxCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;
+  return `${input.productName}_${input.codeCount}pcs${boxCountSegment}_${input.shiftDate}${partSegment}.${input.descriptor.extension}`;
+}
+
+/**
+ * Wraps `formatSsccWithAi` so a malformed v2 box SSCC surfaces through this
+ * module's own error taxonomy (`ShiftExportDomainError`) instead of the
+ * `gs1/sscc.js` module's plain `DomainError` — every failure mode of
+ * `renderShiftExport`/`createBlocks` is a `ShiftExportDomainError`, and
+ * callers (e.g. the export runner) pattern-match on `ShiftExportDomainErrorCode`.
+ */
+function formatBoxSscc(sscc: string): string {
+  try {
+    return formatSsccWithAi(sscc);
+  } catch (error) {
+    if (error instanceof DomainError) {
+      throw new ShiftExportDomainError("INVALID_BOX_SSCC");
+    }
+    throw error;
+  }
+}
+
+/**
+ * Reduces a stored KM to the identification code (КИ) the GISMT aggregation
+ * XML expects in `<cis>`: `01<gtin14>21<serial>` with the crypto tail (AI 93
+ * and everything behind it) dropped. XML 1.0 cannot carry the GS separator
+ * that delimits trailing AIs, so only the fixed-position КИ survives.
+ */
+/**
+ * Characters a `<cis>` value must never carry: XML 1.0-illegal code points
+ * (C0 controls, lone surrogates, U+FFFE/U+FFFF) plus tab/LF/CR — those three
+ * are XML-legal but would corrupt this renderer's line-oriented output.
+ */
+const XML_PROHIBITED_CIS_CHARACTERS =
+  // eslint-disable-next-line no-control-regex
+  /[\u0000-\u001f\u007f\ufffe\uffff]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+function stripKmCryptoTail(code: string): string {
+  let cis: string;
+  try {
+    const segments = parseKmSegments(code);
+    cis = `01${segments.gtin14}21${segments.serial}`;
+  } catch (error) {
+    if (error instanceof DomainError) {
+      throw new ShiftExportDomainError("INVALID_CIS");
+    }
+    throw error;
+  }
+  if (XML_PROHIBITED_CIS_CHARACTERS.test(cis)) {
+    throw new ShiftExportDomainError("INVALID_CIS");
+  }
+  return cis;
+}
+
+function xmlText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function xmlAttribute(value: string): string {
+  return xmlText(value).replaceAll('"', "&quot;");
 }
 
 function csvField(value: string): string {
