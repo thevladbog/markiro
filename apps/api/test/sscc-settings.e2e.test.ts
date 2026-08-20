@@ -301,7 +301,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
     });
 
-    it("rejects seeding below the floor for a counterparty's counter once a block has been issued", async () => {
+    it("rejects seeding below the floor for a counterparty's counter once a serial has been printed", async () => {
       const gln = freshGln();
       const counterparty = await agent
         .post("/counterparties")
@@ -310,8 +310,15 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       const cpId = (counterparty.body as { id: string }).id;
       const prefix = gln.slice(0, 9);
 
-      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
-      const floor = block.toSerial + 1;
+      // Cuts a real sscc_blocks row under this prefix, the same one-statement
+      // path a shift bundle uses -- no HTTP route exposes raw allocation, so
+      // SsccService is called directly, same as sscc.e2e.test.ts does. The
+      // floor comes from the PRINTED serial recorded below, not from the
+      // block's bounds (2026-08-20 reseed design).
+      const service = app!.get(SsccService);
+      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 9));
+      const floor = block.fromSerial + 10;
 
       const rejected = await agent
         .put(`/counterparties/${cpId}/sscc`)
@@ -359,16 +366,22 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
   });
 
   // CodeRabbit PR33 review, Finding 5: `putSscc` used to read `seedFloor`
-  // and then write `nextSerial` in two SEPARATE statements. If a device's
-  // `allocate()` landed in between -- advancing the counter and recording a
-  // new block -- the write would still land unconditionally, silently
-  // overwriting the counter with a value now behind that block. This
-  // exercises `atomicSeedSscc` (the fix) directly: the interleaving is
-  // forced explicitly (read a floor, THEN let a concurrent allocation
-  // advance the counter, THEN attempt to write the now-stale value), which
-  // is the deterministic way to prove a race window is closed rather than
-  // relying on real thread timing.
-  describe("putSscc atomic write vs a concurrent allocation (CodeRabbit PR33 review, Finding 5)", () => {
+  // and then write `nextSerial` in two SEPARATE statements. That gap is
+  // still open today, but what can land in it has changed with the
+  // 2026-08-20 reseed design: the floor now tracks what was actually
+  // PRINTED (`sscc_blocks.consumedThroughSerial`), not what was merely
+  // allocated, so a plain `allocate()` in the gap no longer moves it. What
+  // still moves it is a concurrent BOX CLOSURE -- a device's closed box
+  // arriving at ingest and calling `SsccService.recordConsumedSerial`
+  // between the admin's floor read and their write. If the write still
+  // landed unconditionally in that case, it would silently overwrite the
+  // counter with a value now behind a serial that is already on a physical
+  // box. This exercises `atomicSeedSscc` (the fix) directly: the
+  // interleaving is forced explicitly (read a floor, THEN let a concurrent
+  // box closure advance the printed floor, THEN attempt to write the
+  // now-stale value), which is the deterministic way to prove the race
+  // window is closed rather than relying on real thread timing.
+  describe("putSscc atomic write vs a concurrent box closure (CodeRabbit PR33 review, Finding 5)", () => {
     let counter = 0;
     function freshGln(): string {
       counter += 1;
@@ -394,21 +407,29 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       return row ? Number(row.nextSerial) : null;
     }
 
-    it("rejects a stale seed once a concurrent allocation has moved the floor, leaving the counter at the allocation's value", async () => {
+    it("rejects a stale seed once a concurrent box closure has moved the printed floor", async () => {
       const gln = freshGln();
       const prefix = gln.slice(0, 9);
 
-      // The admin's own pre-check, run BEFORE the race -- floor is 0, no
-      // block has ever been issued yet.
+      // The admin's own pre-check, run BEFORE the race -- floor is 1 (the
+      // extension digit's own first serial), nothing has ever been printed
+      // under this prefix yet.
       const floorBeforeRace = await seedFloor(db, tenantId, prefix, 0);
-      expect(floorBeforeRace).toBe(0);
+      expect(floorBeforeRace).toBe(1);
       const staleNextSerial = 10; // valid against floorBeforeRace, momentarily
 
-      // The race: a device's bundle fetch allocates a REAL block under this
-      // SAME prefix, in between the admin's floor read above and their
-      // write below -- advancing the counter to 51 and moving the floor to 51.
+      // A block must exist for there to be something to attribute a printed
+      // serial to -- a device's bundle fetch allocates a REAL block under
+      // this SAME prefix. This alone does NOT move the printed floor (the
+      // 2026-08-20 reseed design): the counter advances to 51, but nothing
+      // has been printed yet.
       const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
       expect(block.toSerial).toBe(50);
+
+      // The race: a device's closed box arrives at ingest and reports serial
+      // 40 as actually printed, in between the admin's floor read above and
+      // their write below -- advancing the printed floor to 41.
+      await app!.get(SsccService).recordConsumedSerial(tenantId, buildSscc(0, prefix, 40));
 
       // The admin's write now lands, still carrying the STALE value that
       // was valid a moment ago. The atomic guard must refuse it.
@@ -416,7 +437,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect(applied).toBe(false);
 
       // The counter must be untouched by the rejected write -- still
-      // exactly where the concurrent allocation left it, never silently
+      // exactly where the earlier allocation left it (51), never silently
       // regressed to the stale value.
       expect(await readCounter(prefix)).toBe(51);
     });
@@ -426,7 +447,7 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       const prefix = gln.slice(0, 9);
 
       const floor = await seedFloor(db, tenantId, prefix, 0);
-      expect(floor).toBe(0);
+      expect(floor).toBe(1);
 
       const applied = await atomicSeedSscc(db, tenantId, prefix, 0, 777);
       expect(applied).toBe(true);
