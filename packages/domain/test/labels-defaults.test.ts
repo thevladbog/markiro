@@ -216,9 +216,9 @@ describe("buildDefaultLabelTemplates", () => {
     expect(buildDefaultLabelTemplates()).toEqual(buildDefaultLabelTemplates());
   });
 
-  it("matches the jsonb inlined into db migration 0048 (drift guard)", async () => {
+  it("matches the jsonb inlined into db migration 0049 (drift guard)", async () => {
     const sql = await readFile(
-      new URL("../../db/migrations/0048_default_label_templates.sql", import.meta.url),
+      new URL("../../db/migrations/0049_default_label_templates.sql", import.meta.url),
       "utf8",
     );
     const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({

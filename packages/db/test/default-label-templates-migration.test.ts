@@ -34,11 +34,11 @@ describe.skipIf(!databaseUrl)("default label templates migration", () => {
   const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   let created = false;
 
-  // 0048's own pass (run inside migrate() below) sees no orgs, so it seeds
+  // 0049's own pass (run inside migrate() below) sees no orgs, so it seeds
   // nothing; the orgs used by the test are created afterward and backfilled
   // by re-running the migration's SQL directly.
   async function runBackfill(): Promise<void> {
-    const sql = await readFile(join(migrationsFolder, "0048_default_label_templates.sql"), "utf8");
+    const sql = await readFile(join(migrationsFolder, "0049_default_label_templates.sql"), "utf8");
     for (const stmt of sql.split("--> statement-breakpoint")) {
       if (stmt.trim()) await pool.query(stmt);
     }
@@ -59,7 +59,7 @@ describe.skipIf(!databaseUrl)("default label templates migration", () => {
   });
 
   it("seeds five templates per tenant, skips name collisions, and is idempotent", async () => {
-    // Orgs created AFTER migrate() ran, so 0048's original pass saw nothing.
+    // Orgs created AFTER migrate() ran, so 0049's original pass saw nothing.
     await pool.query(
       "INSERT INTO organization (id, name, slug, created_at) VALUES ('lt-a','A','lt-a',now()), ('lt-b','B','lt-b',now())",
     );
