@@ -140,12 +140,21 @@ describe.skipIf(!url)("pickup schema constraints", () => {
       },
     ]);
     await db.insert(schema.shifts).values([
-      { id: shiftId, tenantId: org.id, productId, mode: "validation" },
+      {
+        id: shiftId,
+        tenantId: org.id,
+        productId,
+        mode: "validation",
+        numberMonthKey: "AUG26",
+        numberSeq: 1,
+      },
       {
         id: foreignShiftId,
         tenantId: foreignOrg.id,
         productId: foreignProductId,
         mode: "validation",
+        numberMonthKey: "AUG26",
+        numberSeq: 1,
       },
     ]);
     await db.insert(schema.boxes).values([

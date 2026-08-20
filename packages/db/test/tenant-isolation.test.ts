@@ -85,6 +85,8 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
         tenantId: orgB.id,
         productId: productA!.id,
         mode: "validation",
+        numberMonthKey: "AUG26",
+        numberSeq: 1,
       }),
     ).rejects.toMatchObject({ cause: { code: FOREIGN_KEY_VIOLATION } });
   });
@@ -98,7 +100,13 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
 
     const [shift] = await db
       .insert(shifts)
-      .values({ tenantId: orgA.id, productId: productA2!.id, mode: "validation" })
+      .values({
+        tenantId: orgA.id,
+        productId: productA2!.id,
+        mode: "validation",
+        numberMonthKey: "AUG26",
+        numberSeq: 1,
+      })
       .returning();
     shiftIds.push(shift!.id);
 
