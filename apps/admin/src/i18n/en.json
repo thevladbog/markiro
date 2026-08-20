@@ -187,6 +187,7 @@
     "shifts": "Shifts",
     "lines": "Lines",
     "boxes": "Boxes",
+    "codes": "Code search",
     "conflicts": "Conflicts",
     "counterparties": "Counterparties",
     "labels": "Labels",
@@ -958,6 +959,42 @@
         "itemCount": "Count",
         "closedAt": "Closed",
         "status": "Status"
+      }
+    },
+    "codeSearch": {
+      "title": "Code search",
+      "searchPlaceholder": "Enter an SSCC or marking code",
+      "searchButton": "Search",
+      "empty": "No codes found",
+      "errors": {
+        "unrecognized": "Code not recognized",
+        "notFound": "Nothing found for this query"
+      },
+      "status": {
+        "free": "Free",
+        "aggregated": "In box",
+        "written_off": "Written off"
+      },
+      "filters": {
+        "fromLabel": "From",
+        "toLabel": "To",
+        "productLabel": "Product",
+        "productSearchPlaceholder": "Search products",
+        "productEmpty": "No products found",
+        "statusLabel": "Status",
+        "status": {
+          "all": "All statuses"
+        },
+        "product": {
+          "all": "All products"
+        }
+      },
+      "table": {
+        "code": "Code",
+        "product": "Product",
+        "status": "Status",
+        "box": "Box",
+        "scannedAt": "Scanned"
       }
     },
     "conflicts": {

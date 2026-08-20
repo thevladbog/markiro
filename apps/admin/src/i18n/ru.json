@@ -187,6 +187,7 @@
     "shifts": "Смены",
     "lines": "Линии",
     "boxes": "Короба",
+    "codes": "Поиск кодов",
     "conflicts": "Конфликты",
     "counterparties": "Контрагенты",
     "labels": "Этикетки",
@@ -958,6 +959,42 @@
         "itemCount": "Кол-во",
         "closedAt": "Закрыт",
         "status": "Статус"
+      }
+    },
+    "codeSearch": {
+      "title": "Поиск кодов",
+      "searchPlaceholder": "Введите SSCC или код маркировки",
+      "searchButton": "Найти",
+      "empty": "Коды не найдены",
+      "errors": {
+        "unrecognized": "Код не распознан",
+        "notFound": "Ничего не найдено по этому запросу"
+      },
+      "status": {
+        "free": "Свободен",
+        "aggregated": "В коробе",
+        "written_off": "Списан"
+      },
+      "filters": {
+        "fromLabel": "С даты",
+        "toLabel": "По дату",
+        "productLabel": "Товар",
+        "productSearchPlaceholder": "Поиск товара",
+        "productEmpty": "Товары не найдены",
+        "statusLabel": "Статус",
+        "status": {
+          "all": "Все статусы"
+        },
+        "product": {
+          "all": "Все товары"
+        }
+      },
+      "table": {
+        "code": "Код",
+        "product": "Товар",
+        "status": "Статус",
+        "box": "Короб",
+        "scannedAt": "Отсканирован"
       }
     },
     "conflicts": {

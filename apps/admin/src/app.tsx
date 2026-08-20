@@ -27,6 +27,7 @@ import {
   EmployeeCreatePanelRoute,
   EmployeeEditPanelRoute,
 } from "./pages/employees/EmployeePanelRoute.js";
+import { CodeSearchPage } from "./pages/code-search/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
@@ -157,6 +158,14 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <BoxesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <CodeSearchPage />
             </RequireCapability>
           }
         />
