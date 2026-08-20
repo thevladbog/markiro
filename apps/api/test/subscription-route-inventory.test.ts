@@ -186,6 +186,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /counterparties (CounterpartiesController.createCounterparty)",
       "POST /disaggregation (DisaggregationController.create)",
       "POST /disaggregation-reasons (DisaggregationReasonsController.createReason)",
+      "POST /disaggregation/:id/apply (DisaggregationController.apply)",
       "POST /disaggregation/:id/cancel (DisaggregationController.cancel)",
       "POST /disaggregation/:id/import (DisaggregationController.importLines)",
       "POST /disaggregation/:id/lines (DisaggregationController.addLines)",

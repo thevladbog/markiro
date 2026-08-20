@@ -1,8 +1,10 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, count, desc, eq, gte, inArray, lte, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, isNull, lte, sql, sum } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi, parseScannedSscc } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
+import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
+import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import { nextDocNo } from "./doc-number";
 import type {
   CreateDocumentDto,
@@ -117,6 +119,172 @@ export class DisaggregationService {
       )
       .returning();
     return this.toDocumentDto(tenantId, updated!);
+  }
+
+  /**
+   * Applies (проводит) a document: re-validates every line under the box
+   * registry lock and, only if all lines are still `ok`, disassembles their
+   * boxes, releases the boxes' live items, records `disassemble` box
+   * exceptions, bumps the registry version once, and marks the document
+   * applied -- all in one transaction.
+   *
+   * IMPORTANT ordering: a `ConflictException` thrown INSIDE `tx` rolls the
+   * whole transaction back, including the just-computed fresh line statuses.
+   * The invalid-lines case must not lose that revalidation, so this method
+   * never throws `invalid_lines` inside the transaction -- it sets `allOk =
+   * false`, lets the transaction commit (persisting the fresh statuses, the
+   * document still `draft`, no box mutated), and only then throws after
+   * commit. Only `reason_required` / `no_lines` / `not_draft` / NotFound may
+   * throw inside `tx`, because none of those has anything to persist.
+   */
+  async applyDocument(tenantId: string, documentId: string, userId: string): Promise<DocumentDetailDto> {
+    let allOk = true;
+
+    await this.db.transaction(async (tx) => {
+      // Same lock root every station batch / kiosk mutation takes first.
+      await lockTenantBoxRegistry(tx, tenantId);
+
+      const [doc] = await tx
+        .select()
+        .from(schema.disaggregationDocuments)
+        .where(
+          and(
+            eq(schema.disaggregationDocuments.tenantId, tenantId),
+            eq(schema.disaggregationDocuments.id, documentId),
+          ),
+        )
+        .for("update");
+      if (!doc) throw new NotFoundException();
+      this.assertDraft(doc);
+      if (!doc.reasonId) throw new ConflictException({ code: "reason_required" });
+
+      const lines = await tx
+        .select()
+        .from(schema.disaggregationDocumentLines)
+        .where(
+          and(
+            eq(schema.disaggregationDocumentLines.tenantId, tenantId),
+            eq(schema.disaggregationDocumentLines.documentId, documentId),
+          ),
+        );
+      if (lines.length === 0) throw new ConflictException({ code: "no_lines" });
+
+      // Re-validate everything under the lock.
+      const ssccs = lines.map((l) => l.sscc).filter((s): s is string => s !== null);
+      const candidates = await validateBoxCandidates(tx, tenantId, ssccs);
+      for (const line of lines) {
+        const fresh =
+          line.sscc === null
+            ? line.status // not_found / duplicate rows keep their status
+            : (candidates.get(line.sscc)?.status ?? "not_found");
+        if (fresh !== line.status || line.sscc !== null) {
+          await tx
+            .update(schema.disaggregationDocumentLines)
+            .set({
+              status: fresh,
+              validatedAt: sql`now()`,
+              boxId: line.sscc !== null ? (candidates.get(line.sscc)?.boxId ?? null) : line.boxId,
+              codeCount: line.sscc !== null ? (candidates.get(line.sscc)?.codeCount ?? 0) : line.codeCount,
+            })
+            .where(
+              and(
+                eq(schema.disaggregationDocumentLines.tenantId, tenantId),
+                eq(schema.disaggregationDocumentLines.id, line.id),
+              ),
+            );
+        }
+        if (fresh !== "ok") allOk = false;
+      }
+      // Do NOT throw here: let the fresh statuses above commit even when
+      // invalid, and only mutate boxes / apply the document when they're
+      // all clean.
+      if (!allOk) return;
+
+      const [reason] = await tx
+        .select({ name: schema.disaggregationReasons.name })
+        .from(schema.disaggregationReasons)
+        .where(
+          and(
+            eq(schema.disaggregationReasons.tenantId, tenantId),
+            eq(schema.disaggregationReasons.id, doc.reasonId),
+          ),
+        );
+      const reasonText = doc.comment ? `${reason!.name}: ${doc.comment}` : reason!.name;
+
+      const boxIds = ssccs.map((s) => candidates.get(s)!.boxId);
+      const boxRows = await tx
+        .select({
+          id: schema.boxes.id,
+          shiftId: schema.boxes.shiftId,
+          terminalId: schema.boxes.terminalId,
+        })
+        .from(schema.boxes)
+        .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
+
+      // Same mechanics as the station's "disassemble" branch
+      // (station-scans.service.ts): retire the box, release its live items.
+      await tx
+        .update(schema.boxes)
+        .set({ disassembledAt: sql`now()` })
+        .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
+      await tx
+        .update(schema.boxItems)
+        .set({ removedAt: sql`now()` })
+        .where(
+          and(
+            eq(schema.boxItems.tenantId, tenantId),
+            inArray(schema.boxItems.boxId, boxIds),
+            isNull(schema.boxItems.displacedAt),
+            isNull(schema.boxItems.removedAt),
+          ),
+        );
+      await tx.insert(schema.boxExceptions).values(
+        boxRows.map((box) => ({
+          tenantId,
+          kind: "disassemble" as const,
+          boxId: box.id,
+          shiftId: box.shiftId,
+          terminalId: box.terminalId,
+          operatorId: null, // admin action; the actor is on the document + audit event
+          reason: reasonText.slice(0, 500),
+          occurredAt: new Date(),
+          disaggregationDocumentId: documentId,
+        })),
+      );
+      await advanceBoxRegistryVersion(tx, tenantId, boxIds);
+
+      await tx
+        .update(schema.disaggregationDocuments)
+        .set({
+          status: "applied",
+          appliedAt: sql`now()`,
+          appliedByUserId: userId,
+          updatedAt: sql`now()`,
+        })
+        .where(
+          and(
+            eq(schema.disaggregationDocuments.tenantId, tenantId),
+            eq(schema.disaggregationDocuments.id, documentId),
+          ),
+        );
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId: userId,
+        action: "disaggregation.document.applied",
+        outcome: "success",
+        targetType: "disaggregation_document",
+        targetId: documentId,
+        after: { boxIds },
+      });
+    });
+
+    if (!allOk) {
+      throw new ConflictException({
+        code: "invalid_lines",
+        lines: await this.listLines(tenantId, documentId),
+      });
+    }
+    return this.getDocument(tenantId, documentId);
   }
 
   // ---- shared helpers (Tasks 4-6 reuse these) ----
