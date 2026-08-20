@@ -6,6 +6,7 @@ import { ShiftExportsDialog } from "../src/pages/shifts/ShiftExportsDialog.js";
 
 const SHIFT = {
   id: "11111111-1111-4111-8111-111111111111",
+  number: "AUG26-001",
   status: "closed",
   mode: "validation",
   productId: "product-1",

@@ -800,6 +800,7 @@
         }
       },
       "table": {
+        "number": "Number",
         "plannedDate": "Date",
         "product": "Product",
         "line": "Line",
