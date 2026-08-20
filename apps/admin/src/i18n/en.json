@@ -481,7 +481,8 @@
           "nameTooLong": "200 characters or fewer",
           "productGroupTooLong": "200 characters or fewer",
           "capacityInvalid": "Enter a positive whole number",
-          "unitPriceInvalid": "Enter price in format 0.00 or leave blank"
+          "unitPriceInvalid": "Enter price in format 0.00 or leave blank",
+          "shelfLifeInvalid": "Enter a whole number from 1 to 3650"
         },
         "externalLink": {
           "linkedText": "Linked to 1C: {{ref}}",

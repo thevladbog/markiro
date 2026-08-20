@@ -31,8 +31,11 @@ import { productImageUrl } from "./api.js";
  * validate and reports GTIN_INVALID on mismatch), name 1..200,
  * boxCapacity/palletCapacity optional positive integers entered as text
  * (kept as strings in form state, parsed to number|null on submit by
- * `toCreateInput`). Error messages are i18n keys (resolved through `t()` at
- * render time) -- same convention as `../counterparties/CounterpartyForm.tsx`.
+ * `toCreateInput`). shelfLifeDays is also an optional positive integer, but
+ * unlike box/pallet capacity the API bounds it (`z.number().int().min(1).
+ * max(3650)`), so its client check enforces that same 1..3650 range. Error
+ * messages are i18n keys (resolved through `t()` at render time) -- same
+ * convention as `../counterparties/CounterpartyForm.tsx`.
  */
 const productFormSchema = z.object({
   gtin: z
@@ -73,7 +76,10 @@ const productFormSchema = z.object({
     .string()
     .trim()
     .optional()
-    .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.catalog.form.errors.capacityInvalid"),
+    .refine(
+      (v) => !v || (/^[1-9]\d*$/.test(v) && Number(v) <= 3650),
+      "pages.catalog.form.errors.shelfLifeInvalid",
+    ),
   defaultCounterpartyId: z.string().trim().optional(),
 });
 

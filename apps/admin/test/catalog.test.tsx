@@ -760,6 +760,38 @@ describe("CatalogPage", () => {
     });
   });
 
+  it("blocks submit and shows a range error when shelfLifeDays exceeds the API's 3650-day bound", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/products" && init?.method === "POST") {
+        throw new Error("must not POST when shelfLifeDays fails client-side validation");
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    await screen.findByText("Новый продукт");
+
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Напиток" } });
+    fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
+    fireEvent.change(screen.getByLabelText("Срок годности, дней"), { target: { value: "3651" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    expect(await screen.findByText("Введите целое число от 1 до 3650")).toBeDefined();
+    // Scoped to the create endpoint -- the GTIN field's own debounced
+    // gtin-check POST is expected and unrelated to shelfLifeDays validation.
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === "/api/products" && init?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
   it("pre-fills unitPrice/egaisCode/shelfLifeDays when editing a product that has them, and preserves them on an untouched save", async () => {
     // Based on DRAFT_PRODUCT (not ACTIVE_PRODUCT) -- its gtin14 is a
     // checksum-valid vector, so the zod-validated edit form can actually

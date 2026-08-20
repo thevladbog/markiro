@@ -481,7 +481,8 @@
           "nameTooLong": "Не более 200 символов",
           "productGroupTooLong": "Не более 200 символов",
           "capacityInvalid": "Введите положительное целое число",
-          "unitPriceInvalid": "Укажите цену в формате 0.00 или оставьте пустым"
+          "unitPriceInvalid": "Укажите цену в формате 0.00 или оставьте пустым",
+          "shelfLifeInvalid": "Введите целое число от 1 до 3650"
         },
         "externalLink": {
           "linkedText": "Связано с 1С: {{ref}}",
