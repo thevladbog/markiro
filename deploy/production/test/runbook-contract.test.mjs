@@ -157,7 +157,7 @@ test("landing publication records every external legal and artifact acceptance g
     "договор с провайдером",
     "хранение в Российской Федерации",
     "Роскомнадзор",
-    "уведомление не подано",
+    "уведомление подано",
     "PDF/A-2b",
     "veraPDF 1.30.2",
     "Microsoft Word",
@@ -170,6 +170,7 @@ test("landing publication records every external legal and artifact acceptance g
     assert.match(runbook + "\n" + secrets, new RegExp(escapeRegExp(required), "i"));
 
   assert.match(runbook, /статус уведомления[^\n]*не является секретом/i);
+  assert.doesNotMatch(runbook, /уведомление не подано/i);
   assert.match(runbook, /тесты репозитория не доказывают[^\n]*PDF\/A/i);
   assert.match(runbook, /тесты репозитория не доказывают[^\n]*Microsoft Word/i);
   assert.match(runbook, /тесты репозитория не доказывают[^\n]*физическ/i);
