@@ -1,113 +1,45 @@
 #!/usr/bin/env node
 /**
- * Fails when any manifest pin has crossed a MAJOR version relative to
- * `tools/dependency-baseline.json`.
+ * Fails when any manifest pin has crossed a breaking version boundary relative
+ * to `tools/dependency-baseline.json`.
  *
  * Every manifest in this repository pins exact versions, so the only way to
- * upgrade is `pnpm update --latest` — which happily crosses majors. This guard
- * is what makes that command safe to run: the sweep is allowed to move
- * anything within a major and nothing across one.
+ * upgrade is `pnpm update -r --latest` — which happily crosses majors. This
+ * guard is what makes that command safe to run: the sweep is allowed to move
+ * anything within a breaking boundary and nothing across one.
  *
- * The manifest section list and manifest-discovery logic below are also
- * imported by `tools/generate-dependency-baseline.mjs`, so the guard and the
- * baseline it checks against can never scan different things.
- */
-import { readFileSync, readdirSync, existsSync } from "node:fs";
-
-/** Manifest sections scanned for version pins. */
-export const SECTIONS = [
-  "dependencies",
-  "devDependencies",
-  "peerDependencies",
-  "optionalDependencies",
-];
-
-/**
- * Lists `<dir>/<entry>/package.json` for every entry in `dir` that actually
- * has one. Entries without a `package.json` (a stray file, an empty
- * directory, etc.) are skipped rather than crashing.
- */
-function listWorkspaceManifests(dir) {
-  return readdirSync(dir)
-    .map((name) => `${dir}/${name}/package.json`)
-    .filter((manifestPath) => existsSync(manifestPath));
-}
-
-export function listManifests() {
-  return ["package.json", ...listWorkspaceManifests("apps"), ...listWorkspaceManifests("packages")];
-}
-
-/**
- * Returns the leading major version number, or `null` when `v` cannot be
- * parsed as a plain/caret/tilde semver (a dist-tag, a compound range, a
- * git/url dependency, or anything else the regex does not anticipate).
+ * "Breaking" is the major at `1.0.0` and above, and the MINOR below it:
+ * `0.45.2 -> 0.46.0` is reported as a crossing, `0.45.2 -> 0.45.3` is not.
+ * See `breakingVersionOf` in `./dependency-manifests.mjs` for why.
  *
- * Callers MUST treat `null` as "unknown, cannot judge" — never as
- * "unchanged". Silently skipping an unparseable version is exactly how a
- * major crossing would slip past this guard undetected.
+ * Run from the repository root: `pnpm check:deps`.
+ *
+ * This file is a CLI and nothing else — it does its work unconditionally, with
+ * no "am I the entry point?" test that could silently skip it. Everything
+ * reusable lives in `./dependency-manifests.mjs`; import from there.
  */
-export function majorOf(v) {
-  const m = /^(\d+)\./.exec(String(v).replace(/^[\^~]/, ""));
-  return m ? Number(m[1]) : null;
+import { readFileSync } from "node:fs";
+
+import { findBreakingChanges, listManifests, readManifests } from "./dependency-manifests.mjs";
+
+const baseline = JSON.parse(readFileSync("tools/dependency-baseline.json", "utf8"));
+const files = listManifests();
+const { crossed, unparseable } = findBreakingChanges(baseline, readManifests(files));
+
+const messages = [];
+if (unparseable.length > 0) {
+  messages.push(
+    `Cannot determine whether these crossed a breaking version — treat that as unsafe:\n  ${unparseable.join("\n  ")}`,
+  );
+}
+if (crossed.length > 0) {
+  messages.push(
+    `Breaking version change (major, or minor below 1.0) is out of scope for this branch:\n  ${crossed.join("\n  ")}`,
+  );
 }
 
-function main() {
-  const baseline = JSON.parse(readFileSync("tools/dependency-baseline.json", "utf8"));
-  const manifests = listManifests();
-
-  const crossed = [];
-  const unparseable = [];
-
-  for (const file of manifests) {
-    const d = JSON.parse(readFileSync(file, "utf8"));
-    for (const section of SECTIONS) {
-      for (const [name, version] of Object.entries(d[section] ?? {})) {
-        if (String(version).startsWith("workspace:")) continue;
-
-        const hasBaseline = Object.hasOwn(baseline, name);
-        if (!hasBaseline) {
-          // A package with no baseline entry is a genuinely new dependency —
-          // there is nothing to compare it against, so this is intentionally
-          // not a major crossing, and not a failure.
-          continue;
-        }
-        const before = baseline[name];
-
-        const a = majorOf(before);
-        const b = majorOf(version);
-        if (a === null || b === null) {
-          unparseable.push(
-            `${file}: ${name} ${before} -> ${version} (cannot determine major version)`,
-          );
-          continue;
-        }
-        if (b !== a) {
-          crossed.push(`${file}: ${name} ${before} -> ${version}`);
-        }
-      }
-    }
-  }
-
-  const messages = [];
-  if (unparseable.length > 0) {
-    messages.push(
-      `Cannot determine whether these crossed a major version — treat that as unsafe:\n  ${unparseable.join("\n  ")}`,
-    );
-  }
-  if (crossed.length > 0) {
-    messages.push(
-      `Major version change is out of scope for this branch:\n  ${crossed.join("\n  ")}`,
-    );
-  }
-
-  if (messages.length > 0) {
-    console.error(messages.join("\n\n"));
-    process.exit(1);
-  }
-  console.log(`No major version changes across ${manifests.length} manifests.`);
+if (messages.length > 0) {
+  console.error(messages.join("\n\n"));
+  process.exit(1);
 }
-
-const isMain = import.meta.url === `file://${process.argv[1]}`;
-if (isMain) {
-  main();
-}
+console.log(`No breaking version changes across ${files.length} manifests.`);
