@@ -19,6 +19,9 @@ import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { DevicesPage } from "./pages/devices/index.js";
+import { DisaggregationDocumentPage } from "./pages/disaggregation/DocumentDetail.js";
+import { DisaggregationPage } from "./pages/disaggregation/index.js";
+import { DisaggregationReasonsPage } from "./pages/disaggregation/ReasonsPage.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import {
   EmployeeCreatePanelRoute,
@@ -325,6 +328,30 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <OrderDetailPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="disaggregation"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DisaggregationPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="disaggregation/reasons"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DisaggregationReasonsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="disaggregation/:id"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DisaggregationDocumentPage />
             </RequireCapability>
           }
         />

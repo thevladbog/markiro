@@ -191,6 +191,7 @@
     "counterparties": "Контрагенты",
     "labels": "Этикетки",
     "pickup": "Для себя",
+    "disaggregation": "Дезагрегация",
     "employees": "Операторы и сотрудники",
     "kiosks": "Киоски",
     "devices": "Устройства",
@@ -1171,6 +1172,67 @@
         "cancelError": "Не удалось отменить заявку",
         "exportSuccess": "Коды выгружены",
         "exportError": "Не удалось выгрузить коды"
+      }
+    },
+    "disaggregation": {
+      "title": "Дезагрегация",
+      "create": "Создать документ",
+      "reasonsLink": "Причины дезагрегации",
+      "empty": "Документы не найдены",
+      "filters": {
+        "statusLabel": "Статус",
+        "reasonLabel": "Причина",
+        "status": {
+          "all": "Все статусы"
+        },
+        "reason": {
+          "all": "Все причины"
+        }
+      },
+      "status": {
+        "draft": "Черновик",
+        "applied": "Проведён",
+        "cancelled": "Отменён"
+      },
+      "table": {
+        "docNo": "№ документа",
+        "createdAt": "Создан",
+        "status": "Статус",
+        "reason": "Причина",
+        "lineCount": "Коробов",
+        "codeCount": "Кодов"
+      },
+      "reasons": {
+        "title": "Причины дезагрегации",
+        "backLink": "← Дезагрегация",
+        "emptyTitle": "Причины не добавлены",
+        "emptyHint": "Причины дезагрегации не добавлены",
+        "refetchError": "Не удалось обновить причины. Показаны последние загруженные данные.",
+        "retry": "Повторить",
+        "addAction": "Добавить причину",
+        "createAction": "Создать",
+        "cancelAction": "Отмена",
+        "nameLabel": "Название",
+        "sortOrderLabel": "Порядок",
+        "saveAction": "Сохранить",
+        "edit": "Изменить",
+        "actions": "Действия",
+        "archiveAction": "Удалить",
+        "archiveConfirmTitle": "Удалить причину?",
+        "archiveConfirmBody": "Причина «{{name}}» будет удалена.",
+        "archiveConfirmAction": "Удалить",
+        "errors": {
+          "nameRequired": "Укажите название",
+          "sortOrderInvalid": "Введите целое число для порядка",
+          "createFailed": "Не удалось создать причину. Попробуйте ещё раз.",
+          "updateFailed": "Не удалось сохранить причину. Попробуйте ещё раз.",
+          "archiveFailed": "Не удалось удалить причину. Попробуйте ещё раз."
+        },
+        "toasts": {
+          "createSuccess": "Причина добавлена",
+          "updateSuccess": "Причина обновлена",
+          "archiveSuccess": "Причина удалена"
+        }
       }
     },
     "employees": {

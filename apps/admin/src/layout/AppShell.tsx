@@ -57,6 +57,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.OPERATIONS_READ,
   },
   {
+    to: "/disaggregation",
+    key: "nav.disaggregation",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
     to: "/catalog",
     key: "nav.catalog",
     sectionKey: "shell.sections.reference",

@@ -191,6 +191,7 @@
     "counterparties": "Counterparties",
     "labels": "Labels",
     "pickup": "Self-pickup",
+    "disaggregation": "Disaggregation",
     "employees": "Operators and employees",
     "kiosks": "Kiosks",
     "devices": "Devices",
@@ -1171,6 +1172,67 @@
         "cancelError": "Could not cancel the order",
         "exportSuccess": "Codes exported",
         "exportError": "Could not export the codes"
+      }
+    },
+    "disaggregation": {
+      "title": "Disaggregation",
+      "create": "Create document",
+      "reasonsLink": "Disaggregation reasons",
+      "empty": "No documents found",
+      "filters": {
+        "statusLabel": "Status",
+        "reasonLabel": "Reason",
+        "status": {
+          "all": "All statuses"
+        },
+        "reason": {
+          "all": "All reasons"
+        }
+      },
+      "status": {
+        "draft": "Draft",
+        "applied": "Applied",
+        "cancelled": "Cancelled"
+      },
+      "table": {
+        "docNo": "Document No.",
+        "createdAt": "Created",
+        "status": "Status",
+        "reason": "Reason",
+        "lineCount": "Boxes",
+        "codeCount": "Codes"
+      },
+      "reasons": {
+        "title": "Disaggregation reasons",
+        "backLink": "← Disaggregation",
+        "emptyTitle": "No reasons added",
+        "emptyHint": "No disaggregation reasons have been added",
+        "refetchError": "Could not refresh the reasons. Showing the last loaded data.",
+        "retry": "Retry",
+        "addAction": "Add reason",
+        "createAction": "Create",
+        "cancelAction": "Cancel",
+        "nameLabel": "Name",
+        "sortOrderLabel": "Order",
+        "saveAction": "Save",
+        "edit": "Edit",
+        "actions": "Actions",
+        "archiveAction": "Delete",
+        "archiveConfirmTitle": "Delete this reason?",
+        "archiveConfirmBody": "The reason \"{{name}}\" will be deleted.",
+        "archiveConfirmAction": "Delete",
+        "errors": {
+          "nameRequired": "Enter a name",
+          "sortOrderInvalid": "Enter a whole number for order",
+          "createFailed": "Could not create the reason. Please try again.",
+          "updateFailed": "Could not save the reason. Please try again.",
+          "archiveFailed": "Could not delete the reason. Please try again."
+        },
+        "toasts": {
+          "createSuccess": "Reason added",
+          "updateSuccess": "Reason updated",
+          "archiveSuccess": "Reason deleted"
+        }
       }
     },
     "employees": {
