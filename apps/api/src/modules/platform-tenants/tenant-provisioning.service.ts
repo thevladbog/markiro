@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { ConflictException, Inject, Injectable } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -106,6 +107,27 @@ export class TenantProvisioningService {
       await tx
         .insert(schema.pickupTenantPolicies)
         .values({ tenantId: tenant.id, limitsEnabled: true, updatedAt: operationAt });
+
+      // Stock box-label templates (spec: 2026-08-20 label editor simplification).
+      // Seeded only on tenant CREATION — re-provisioning an existing tenant
+      // (idempotent retry) must not duplicate them.
+      let defaultBoxLabelTemplateId: string | null = null;
+      for (const template of buildDefaultLabelTemplates()) {
+        const templateId = createId();
+        await tx.insert(schema.labelTemplates).values({
+          id: templateId,
+          tenantId: tenant.id,
+          name: template.name,
+          spec: template.spec,
+        });
+        if (template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME) {
+          defaultBoxLabelTemplateId = templateId;
+        }
+      }
+      await tx.insert(schema.orgProfiles).values({
+        tenantId: tenant.id,
+        defaultBoxLabelTemplateId,
+      });
     }
 
     let [user] = await tx

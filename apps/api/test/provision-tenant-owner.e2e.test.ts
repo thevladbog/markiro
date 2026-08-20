@@ -230,6 +230,57 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
     ]);
   });
 
+  it("seeds five default label templates and the default box label for a new tenant", async () => {
+    await useDemo();
+    const suffix = crypto.randomUUID();
+    const email = `first-owner-${suffix}@example.com`;
+    const tenantSlug = `first-tenant-${suffix}`;
+    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x71)), () =>
+      crypto.randomUUID(),
+    );
+
+    const result = await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input: { email, tenantName: "Этикетки", tenantSlug },
+    });
+
+    const templates = await connection.db
+      .select({ id: schema.labelTemplates.id, name: schema.labelTemplates.name })
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.tenantId, result.tenantId));
+    expect(templates.map((t) => t.name).sort()).toEqual(
+      [
+        "Коробка 58×40 (203 dpi)",
+        "Коробка 58×40 (300 dpi)",
+        "Коробка 75×120 (203 dpi)",
+        "Коробка 100×100 (203 dpi)",
+        "Коробка 100×150 (203 dpi)",
+      ].sort(),
+    );
+
+    const [profile] = await connection.db
+      .select({ defaultId: schema.orgProfiles.defaultBoxLabelTemplateId })
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, result.tenantId));
+    const expected = templates.find((t) => t.name === "Коробка 58×40 (203 dpi)");
+    expect(profile?.defaultId).toBe(expected?.id);
+
+    // Idempotency: re-provisioning the same tenant must not duplicate templates.
+    await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input: { email, tenantName: "Этикетки", tenantSlug },
+    });
+    const after = await connection.db
+      .select({ id: schema.labelTemplates.id })
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.tenantId, result.tenantId));
+    expect(after).toHaveLength(5);
+  });
+
   it("renews an expired unused activation only when explicitly requested", async () => {
     await useDemo();
     const suffix = crypto.randomUUID();
