@@ -20,6 +20,7 @@ import * as signalSound from "../src/lib/signal-sound.js";
 import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
+import { useTimeZone } from "./support/timezone.js";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -2292,10 +2293,12 @@ describe("WorkScreen box progress, closing and printing", () => {
   // below run the clock well past the box's own closure to prove the printed
   // dates come from the BOX, not from "now".
   //
-  // The UTC slice itself is unchanged and deliberately so (a box closed
-  // before ~03:00 Moscow prints the previous day): that predates this fix and
-  // is a product decision.
+  // Both dates are the station's LOCAL calendar days (storage stays UTC,
+  // devices display local), so the zone is pinned: 21:40 UTC on the 23rd is
+  // 00:40 on the 24th in Moscow, which is exactly the night-shift box that
+  // used to print the previous day.
   it("stamps the box's own closure date on the label, not the wall clock", async () => {
+    useTimeZone("Europe/Moscow");
     vi.setSystemTime(new Date("2026-09-30T06:00:00.000Z"));
     const close = vi
       .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
@@ -2324,12 +2327,13 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
-    expect(zpl).toContain("2026-07-23"); // the box's own close date
-    expect(zpl).toContain("2027-01-19"); // + 180 days of shelf life
+    expect(zpl).toContain("2026-07-24"); // the box's own close date, in Moscow
+    expect(zpl).toContain("2027-01-20"); // + 180 days of shelf life
     expect(zpl).not.toContain("2026-09-30"); // never today's date
   });
 
   it("reprints a recovered box with the SAME dates the original label carried", async () => {
+    useTimeZone("Europe/Moscow");
     vi.setSystemTime(new Date("2026-09-30T06:00:00.000Z"));
     const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
     const exec = makeExec();
@@ -2365,8 +2369,8 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
-    expect(zpl).toContain("2026-07-23");
-    expect(zpl).toContain("2027-01-19");
+    expect(zpl).toContain("2026-07-24");
+    expect(zpl).toContain("2027-01-20");
     expect(zpl).not.toContain("2026-09-30");
   });
 

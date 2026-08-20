@@ -831,9 +831,10 @@ export function WorkScreen({
    * `closed_at`: the close result for a fresh print, `boxes_mirror` (via
    * `findUnresolvedBoxPrint` / `listClosedBoxes`) for every later one.
    *
-   * The timestamp stays UTC-sliced by `boxLabelFields` — a box closed before
-   * ~03:00 Moscow time prints the previous day. That predates this change
-   * and is a product decision, deliberately left alone here.
+   * The timestamp stays a UTC ISO instant in storage; `boxLabelFields`
+   * renders it as this station's LOCAL calendar day (storage UTC, display
+   * local), so a box closed at 01:00 Moscow time prints today, not
+   * yesterday.
    */
   function fieldsForClosedBox(result: {
     sscc: string;
