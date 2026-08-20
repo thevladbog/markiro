@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   applyMigrations,
   readOperatorsMirror,
+  readShiftContext,
   type SqlExecutor,
   type StationBundle,
 } from "../src/lib/mirror.js";
@@ -45,6 +46,7 @@ const bundle: StationBundle = {
     palletCapacity: 48,
     palletsEnabled: false,
     openedAt: "2026-07-23T08:00:00Z",
+    number: "AUG26-003/S",
   },
   product: {
     id: "p1",
@@ -137,6 +139,9 @@ describe("mirrorShiftBundle", () => {
       ["p1"],
     );
     expect(productRows).toHaveLength(1);
+
+    const context = await readShiftContext(exec, "s1");
+    expect(context?.number).toBe("AUG26-003/S");
   });
 
   it("keeps an image pointer when an older bundle omits the optional image field", async () => {

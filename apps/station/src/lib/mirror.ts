@@ -28,6 +28,8 @@ export interface StationBundle {
     palletCapacity: number | null;
     palletsEnabled: boolean;
     openedAt: string | null;
+    /** Human-readable shift number; absent from bundles served by pre-upgrade servers. */
+    number?: string | null;
   };
   product: {
     id: string;
@@ -168,8 +170,8 @@ async function upsertBundleBody(
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
        planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at,
-       issuer_prefix, box_label_template_spec
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       issuer_prefix, box_label_template_spec, number
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
        product_name=excluded.product_name,
@@ -181,7 +183,7 @@ async function upsertBundleBody(
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
        issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
-       box_label_template_spec=excluded.box_label_template_spec`,
+       box_label_template_spec=excluded.box_label_template_spec, number=excluded.number`,
     [
       s.id,
       s.status,
@@ -210,6 +212,9 @@ async function upsertBundleBody(
       // The box label's OWN template spec (Finding 3) -- never a fallback to
       // `bundle.labelTemplate`'s spec, even when this is null.
       bundle.boxLabelTemplate ? JSON.stringify(bundle.boxLabelTemplate.spec) : null,
+      // Always updates from the bundle -- unlike issuer_prefix, there's no
+      // durable local state to preserve here.
+      s.number ?? null,
     ],
   );
 
@@ -487,6 +492,8 @@ export interface ShiftContextRow {
   counterpartyName: string | null;
   plannedQty: number | null;
   image?: StationProductImageDescriptor | null | undefined;
+  /** Human-readable shift number (`AUG26-003/S`); null until a post-upgrade bundle sync. */
+  number: string | null;
 }
 
 /**
@@ -509,9 +516,10 @@ export async function readShiftContext(
     image_byte_size: number | null;
     image_width: number | null;
     image_height: number | null;
+    number: string | null;
   }>(
     `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
-       s.planned_qty,
+       s.planned_qty, s.number AS number,
        p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
      WHERE s.id = ?`,
@@ -525,6 +533,7 @@ export async function readShiftContext(
     productName: row.name,
     counterpartyName: row.counterparty_name,
     plannedQty: row.planned_qty,
+    number: row.number ?? null,
     image:
       row.image_checksum &&
       row.image_content_type &&

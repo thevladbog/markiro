@@ -1,6 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
+import { shiftMirror } from "../src/sqlite/schema.js";
 
 /** Mirrors apps/station/src/lib/mirror.ts's applyMigrations against a raw node:sqlite handle. */
 function applyStatements(db: DatabaseSync, statements: readonly string[]): void {
@@ -47,6 +48,25 @@ describe("STATION_MIGRATIONS", () => {
     expect(names).toContain("sscc_pool");
     expect(names).toContain("boxes_mirror");
     expect(names).toContain("station_product_images");
+  });
+
+  it("mirrors the shift number", () => {
+    expect(shiftMirror.number).toBeDefined();
+    expect(shiftMirror.number.notNull).toBe(false);
+  });
+
+  it("adds shift_mirror.number via the trailing ALTER and survives a second migration run", () => {
+    const db = new DatabaseSync(":memory:");
+    applyStationMigrations(db);
+    expect(() => applyStationMigrations(db)).not.toThrow();
+
+    const columns = db.prepare("PRAGMA table_info(shift_mirror)").all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    const number = columns.find((c) => c.name === "number");
+    expect(number).toBeDefined();
+    expect(number?.notnull).toBe(0);
   });
 
   it("retains deprecated item-label columns for rolling station compatibility", () => {
