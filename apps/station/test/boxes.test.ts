@@ -387,6 +387,9 @@ describe("boxes", () => {
         boxId: "older",
         sscc: "004601234560000017",
         itemCount: 1,
+        // The box's own closure timestamp: the reprint path stamps the
+        // label's production/expiry dates from this, not from "now".
+        closedAt: "2026-07-29T10:05:00.000Z",
         state: "pending",
         errorCode: "printer_unconfigured",
       });
@@ -407,6 +410,7 @@ describe("boxes", () => {
         boxId: "b1",
         sscc: "004601234560000017",
         itemCount: 0,
+        closedAt: "2026-07-29T10:05:00.000Z",
         state: "printed",
         errorCode: null,
       });
@@ -488,6 +492,7 @@ describe("boxes", () => {
             boxId: "b1",
             sscc: "004601234560000017",
             itemCount: 1,
+            closedAt: "2026-07-29T10:05:00.000Z",
             state: "pending",
             errorCode: "transport_failed",
           });

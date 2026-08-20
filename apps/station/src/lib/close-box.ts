@@ -11,7 +11,15 @@ import { burnSerial } from "./sscc-pool.js";
 const BOX_EXTENSION_DIGIT = 0;
 
 export type CloseBoxResult =
-  | { status: "closed"; sscc: string; itemCount: number }
+  /**
+   * `closedAt` is the exact timestamp written to `boxes_mirror.closed_at`,
+   * returned so the caller stamps the label from the box's OWN closure
+   * moment rather than calling `new Date()` again at render time. A later
+   * recovery print reads the same value back off the row
+   * (`findUnresolvedBoxPrint`), so both labels for one SSCC always carry the
+   * same «Дата производства» and «Годен до».
+   */
+  | { status: "closed"; sscc: string; itemCount: number; closedAt: string }
   | { status: "no-serials" }
   | { status: "empty" }
   /**
@@ -82,5 +90,5 @@ export async function closeCurrentBox(
   const closedAt = new Date(deps.now ? deps.now() : Date.now()).toISOString();
   await closeBox(deps.exec, box.boxId, sscc, closedAt, operatorId);
 
-  return { status: "closed", sscc, itemCount: box.itemCount };
+  return { status: "closed", sscc, itemCount: box.itemCount, closedAt };
 }
