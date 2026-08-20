@@ -1,5 +1,5 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, count, desc, eq, gte, lte, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lte, sql, sum } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -64,7 +64,7 @@ export class DisaggregationService {
       .orderBy(desc(schema.disaggregationDocuments.createdAt))
       .limit(PAGE_SIZE)
       .offset((query.page - 1) * PAGE_SIZE);
-    const items = await Promise.all(rows.map((r) => this.toDocumentDto(tenantId, r)));
+    const items = await this.toDocumentDtos(tenantId, rows);
     return {
       items,
       page: query.page,
@@ -169,6 +169,69 @@ export class DisaggregationService {
       )
       .orderBy(schema.disaggregationDocumentLines.createdAt);
     return rows.map((r) => ({ ...r, sscc: r.sscc === null ? null : formatSsccWithAi(r.sscc) }));
+  }
+
+  /**
+   * Batched sibling of `toDocumentDto` for `listDocuments`: one grouped
+   * aggregate query and one reason lookup for the whole page, instead of
+   * up to 2 extra round-trips per row (N+1 at PAGE_SIZE rows/page).
+   */
+  private async toDocumentDtos(
+    tenantId: string,
+    rows: (typeof schema.disaggregationDocuments.$inferSelect)[],
+  ): Promise<DocumentDto[]> {
+    if (rows.length === 0) return [];
+    const documentIds = rows.map((row) => row.id);
+    const aggRows = await this.db
+      .select({
+        documentId: schema.disaggregationDocumentLines.documentId,
+        lineCount: count(),
+        codeCount: sum(schema.disaggregationDocumentLines.codeCount).mapWith(Number),
+      })
+      .from(schema.disaggregationDocumentLines)
+      .where(
+        and(
+          eq(schema.disaggregationDocumentLines.tenantId, tenantId),
+          inArray(schema.disaggregationDocumentLines.documentId, documentIds),
+        ),
+      )
+      .groupBy(schema.disaggregationDocumentLines.documentId);
+    const aggByDocumentId = new Map(aggRows.map((agg) => [agg.documentId, agg]));
+
+    const reasonIds = [...new Set(rows.flatMap((row) => (row.reasonId ? [row.reasonId] : [])))];
+    const reasonNameById = new Map<string, string>();
+    if (reasonIds.length > 0) {
+      const reasonRows = await this.db
+        .select({ id: schema.disaggregationReasons.id, name: schema.disaggregationReasons.name })
+        .from(schema.disaggregationReasons)
+        .where(
+          and(
+            eq(schema.disaggregationReasons.tenantId, tenantId),
+            inArray(schema.disaggregationReasons.id, reasonIds),
+          ),
+        );
+      for (const reason of reasonRows) reasonNameById.set(reason.id, reason.name);
+    }
+
+    return rows.map((row) => {
+      const agg = aggByDocumentId.get(row.id);
+      return {
+        id: row.id,
+        docNo: row.docNo,
+        status: row.status,
+        reasonId: row.reasonId,
+        reasonName: row.reasonId ? (reasonNameById.get(row.reasonId) ?? null) : null,
+        comment: row.comment,
+        source: row.source,
+        lineCount: agg?.lineCount ?? 0,
+        codeCount: agg?.codeCount ?? 0,
+        createdByUserId: row.createdByUserId,
+        createdAt: row.createdAt,
+        appliedAt: row.appliedAt,
+        appliedByUserId: row.appliedByUserId,
+        cancelledAt: row.cancelledAt,
+      };
+    });
   }
 
   private async toDocumentDto(
