@@ -391,6 +391,8 @@
     "noActions": "No actions are available right now.",
     "chooseReason": "Choose a reason",
     "selectTarget": "Choose a closed box",
+    "scanTargetHint": "Scan the box label or choose it from the list",
+    "scanTargetNotFound": "This box is not among this shift's closed boxes",
     "reprintAction": "Reprint label",
     "disassembleAction": "Disassemble box",
     "back": "Back",

@@ -1,6 +1,28 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ExceptionFlow } from "../src/pages/ExceptionFlow.js";
+import type { ScanSource } from "../src/lib/scan-source.js";
+
+function fakeScanSource() {
+  let listener: ((raw: string) => void) | null = null;
+  const source: ScanSource = {
+    start(next) {
+      listener = next;
+      return () => {
+        if (listener === next) listener = null;
+      };
+    },
+  };
+  return {
+    source,
+    emit(raw: string) {
+      act(() => listener?.(raw));
+    },
+    get subscribed() {
+      return listener !== null;
+    },
+  };
+}
 
 const BOXES = [
   {
@@ -147,6 +169,53 @@ describe("ExceptionFlow", () => {
     expect(screen.getByTestId("exception-stage-applying")).toBeDefined();
     resolve();
     await screen.findByTestId("exception-stage-result");
+  });
+
+  it("selects the box by scanning its SSCC on the target stage and advances to reasons", async () => {
+    const scanner = fakeScanSource();
+    const onDisassemble = vi.fn().mockResolvedValue(undefined);
+    renderFlow({ onDisassemble, scanSource: scanner.source });
+    expect(scanner.subscribed).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать короб" }));
+    expect(scanner.subscribed).toBe(true);
+    scanner.emit("00123456789012345675");
+
+    expect(screen.getByTestId("exception-stage-reason")).toBeDefined();
+    expect(scanner.subscribed).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Неверное количество" }));
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать безвозвратно" }));
+    await waitFor(() => expect(onDisassemble).toHaveBeenCalledWith("b1", "Неверное количество"));
+  });
+
+  it("stays on the target stage with feedback for unknown or non-SSCC scans", () => {
+    const scanner = fakeScanSource();
+    renderFlow({ scanSource: scanner.source });
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать короб" }));
+
+    scanner.emit("not-a-code");
+    expect(screen.getByTestId("exception-stage-target")).toBeDefined();
+    expect(screen.getByText("Это не групповой код")).toBeDefined();
+
+    scanner.emit("00999999999012345679");
+    expect(screen.getByTestId("exception-stage-target")).toBeDefined();
+    expect(screen.getByText("Короб не найден среди закрытых коробов этой смены")).toBeDefined();
+
+    scanner.emit("00123456789012345675");
+    expect(screen.getByTestId("exception-stage-reason")).toBeDefined();
+  });
+
+  it("clears scan feedback when re-entering the target stage", () => {
+    const scanner = fakeScanSource();
+    renderFlow({ scanSource: scanner.source });
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать короб" }));
+    scanner.emit("not-a-code");
+    expect(screen.getByText("Это не групповой код")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(scanner.subscribed).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать короб" }));
+    expect(screen.queryByText("Это не групповой код")).toBeNull();
   });
 
   it("reports pending for its full lifetime and exposes a recoverable error result", async () => {
