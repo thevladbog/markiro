@@ -21,6 +21,7 @@ test("station beta publication is protected, serialized, main-only and channel-l
     "next-beta",
     "next-patch-beta",
     "next-minor-beta",
+    "next-major-beta",
   ]);
   assert.equal(workflow.concurrency.group, "station-beta-release");
   assert.equal(workflow.concurrency["cancel-in-progress"], false);
