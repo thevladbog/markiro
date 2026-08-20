@@ -129,6 +129,29 @@ export interface ShiftPlanningConfigDto {
   defaultBoxLabelTemplateId: string | null;
 }
 
+/**
+ * Box-template summary exposed to station credentials. Deliberately excludes
+ * the template `spec`: the station only ever receives a spec through the
+ * shift bundle after the shift snapshot exists.
+ */
+export interface ShiftBoxLabelTemplateOptionDto {
+  id: string;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  dpi: LabelTemplateSpec["dpi"];
+  language: LabelTemplateSpec["language"];
+}
+
+/**
+ * GET /shifts/box-label-templates response. The organisation default (when
+ * set) is the first item; the rest follow ordered by name.
+ */
+export interface ShiftBoxLabelTemplatesDto {
+  items: ShiftBoxLabelTemplateOptionDto[];
+  defaultBoxLabelTemplateId: string | null;
+}
+
 /** Legacy fields retained only on station bundles during a rolling deployment. */
 export type StationBundleProductDto = ProductDto & {
   defaultLabelTemplateId: null;

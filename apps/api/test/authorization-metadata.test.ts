@@ -182,6 +182,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
     {
       listShifts: sharedReadPolicy,
       getPlanningConfig: readPolicy,
+      listBoxLabelTemplates: sharedReadPolicy,
       getShift: readPolicy,
       createShift: sharedWritePolicy,
       updateShift: writePolicy,

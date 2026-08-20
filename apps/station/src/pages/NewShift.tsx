@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, Input } from "@markiro/ui";
+import { Alert, Button, Card, Input, Pager } from "@markiro/ui";
 import { classifyScan, DomainError, normalizeToGtin14 } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
+import { paginate } from "../lib/pagination.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { StationScreen } from "../ui/StationScreen.js";
@@ -14,6 +15,18 @@ interface ResolvedProduct {
   boxCapacity: number | null;
 }
 
+/** Spec-free summary from GET /shifts/box-label-templates. */
+interface BoxLabelTemplateOption {
+  id: string;
+  name: string;
+  widthMm: number;
+  heightMm: number;
+  dpi: number;
+  language: string;
+}
+
+const TEMPLATE_PAGE_SIZE = 4;
+
 export interface NewShiftProps {
   client: StationClient;
   source: ScanSource;
@@ -21,7 +34,7 @@ export interface NewShiftProps {
   onBack: () => void;
 }
 
-export type NewShiftView = "input" | "found" | "notFound";
+export type NewShiftView = "input" | "found" | "notFound" | "template";
 export type NewShiftMode = "validation" | "aggregation";
 
 function currentLocalDate(now = new Date()): string {
@@ -41,6 +54,10 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
   const [product, setProduct] = useState<ResolvedProduct | null>(null);
   const [mode, setMode] = useState<NewShiftMode>("validation");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
+  const [templates, setTemplates] = useState<BoxLabelTemplateOption[]>([]);
+  const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [templatePage, setTemplatePage] = useState(1);
   const resolving = useRef(false);
 
   const resolveRaw = useCallback(
@@ -97,8 +114,44 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
     void resolveRaw(raw);
   }
 
+  /**
+   * Aggregation-only: refetched on every found → template transition so a
+   * template created or set as default in the cabinet is visible on the next
+   * attempt without restarting the flow.
+   */
+  async function openTemplateStep() {
+    if (!product || busy) return;
+    setError(null);
+    setBusy(true);
+    try {
+      const config = await client.get<{
+        items: BoxLabelTemplateOption[];
+        defaultBoxLabelTemplateId: string | null;
+      }>("/shifts/box-label-templates");
+      const preselected =
+        config.defaultBoxLabelTemplateId !== null &&
+        config.items.some((item) => item.id === config.defaultBoxLabelTemplateId)
+          ? config.defaultBoxLabelTemplateId
+          : null;
+      setTemplates(config.items);
+      setDefaultTemplateId(config.defaultBoxLabelTemplateId);
+      setSelectedTemplateId(preselected);
+      setTemplatePage(1);
+      setView("template");
+    } catch (err) {
+      setError(err instanceof StationApiError ? err.message : t("shifts.templatesLoadFailed"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function start() {
     if (!product || busy) return;
+    if (mode === "aggregation" && view === "found") {
+      await openTemplateStep();
+      return;
+    }
+    if (mode === "aggregation" && !selectedTemplateId) return;
     setError(null);
     setBusy(true);
     try {
@@ -106,6 +159,9 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
         productId: product.id,
         mode,
         plannedDate: currentLocalDate(),
+        // Validation shifts print nothing and keep the legacy payload; an
+        // aggregation shift snapshots exactly the template the operator saw.
+        ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
       });
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${created.id}/open`,
@@ -159,6 +215,105 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
             <p className="new-shift__code">GTIN: {unknownGtin}</p>
             <p>{t("shifts.notInCatalogHint")}</p>
           </div>
+          {messageSlot}
+        </section>
+      </StationScreen>
+    );
+  }
+
+  if (view === "template" && product) {
+    const currentPage = paginate(templates, templatePage, TEMPLATE_PAGE_SIZE);
+    return (
+      <StationScreen
+        title={t("shifts.new")}
+        actions={
+          <FloorFooter ariaLabel={t("shifts.newActions")}>
+            <Button
+              size="floor"
+              fullWidth
+              loading={busy}
+              disabled={!selectedTemplateId}
+              onClick={() => void start()}
+            >
+              {t("shifts.start")}
+            </Button>
+            <Button
+              size="floor"
+              fullWidth
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setError(null);
+                setView("found");
+              }}
+            >
+              {t("shifts.back")}
+            </Button>
+          </FloorFooter>
+        }
+      >
+        <section
+          className="new-shift__panel new-shift__panel--template"
+          data-testid="new-shift-template"
+        >
+          <h2 className="new-shift__template-title">{t("shifts.templateLabel")}</h2>
+          {templates.length === 0 ? (
+            <div className="new-shift__center">
+              <p>{t("shifts.templatesEmpty")}</p>
+            </div>
+          ) : (
+            <>
+              <div
+                className="new-shift__templates"
+                role="group"
+                aria-label={t("shifts.templateLabel")}
+              >
+                {currentPage.items.map((option) => {
+                  const selected = option.id === selectedTemplateId;
+                  return (
+                    <button
+                      key={option.id}
+                      type="button"
+                      className={
+                        selected
+                          ? "new-shift__template new-shift__template--selected"
+                          : "new-shift__template"
+                      }
+                      aria-pressed={selected}
+                      disabled={busy}
+                      onClick={() => setSelectedTemplateId(option.id)}
+                    >
+                      <span className="new-shift__template-name">{option.name}</span>
+                      <span className="new-shift__template-meta">
+                        {t("shifts.templateMeta", {
+                          width: option.widthMm,
+                          height: option.heightMm,
+                          dpi: option.dpi,
+                        })}
+                      </span>
+                      {option.id === defaultTemplateId ? (
+                        <span className="new-shift__template-badge">
+                          {t("shifts.templateDefault")}
+                        </span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+              {currentPage.pageCount > 1 ? (
+                <Pager
+                  page={currentPage.page}
+                  pageCount={currentPage.pageCount}
+                  onPageChange={setTemplatePage}
+                  ariaLabel={t("shifts.templatePagination")}
+                  previousLabel={t("shifts.previousPage")}
+                  nextLabel={t("shifts.nextPage")}
+                  pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
+                  className="new-shift__template-pager"
+                />
+              ) : null}
+            </>
+          )}
           {messageSlot}
         </section>
       </StationScreen>

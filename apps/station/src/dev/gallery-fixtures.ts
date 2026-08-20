@@ -112,6 +112,7 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "not-found",
     source: "synthetic",
   },
+  { id: "new-shift-template", kind: "new-shift", variant: "template", source: "synthetic" },
   { id: "shift-loading", kind: "shift", variant: "loading", source: "synthetic" },
   { id: "shift-read-error", kind: "shift", variant: "read-error", source: "synthetic" },
   { id: "shift-empty", kind: "shift", variant: "empty", source: "synthetic" },

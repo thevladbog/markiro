@@ -1156,7 +1156,8 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
 
   // ---------------------------------------------------------------------
   // Device-key surface (Task 9): lines are cabinet-only; shifts is a mix --
-  // the station's own five routes (list, create, open, bundle, reference bundle -- covered by
+  // the station's own six routes (list, create, open, bundle, reference bundle,
+  // box-label-templates -- covered by
   // station-auth.e2e.test.ts, shifts-bundle.e2e.test.ts) stay reachable, but
   // get-by-id/patch/delete/close are cabinet-only since the station never
   // calls them (verified against apps/station/src). Routes carry no global
@@ -1208,7 +1209,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     const apiKey = device.apiKey;
     const server = app!.getHttpServer();
 
-    // Session-only: not part of the station's five routes.
+    // Session-only: not part of the station's six routes.
     await request(server).get(`/shifts/${id}`).set("x-api-key", apiKey).expect(403);
     await request(server).get("/shifts/planning-config").set("x-api-key", apiKey).expect(403);
     await request(server)
@@ -1236,6 +1237,42 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       createdFrom: "station",
       plannedDate: null,
     });
+  });
+
+  it("serves spec-free box-template summaries to a station key with the default first", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const zebraId = await seedLabelTemplate(orgId, "Zebra 58x40");
+    const defaultId = await setDefaultBoxLabelTemplate(agent, orgId, "Org Default Box");
+    const alphaId = await seedLabelTemplate(orgId, "Alpha 58x40");
+    const device = await createTestStationDevice(app!, agent, "Template picker terminal");
+    const server = app!.getHttpServer();
+
+    await request(server).get("/shifts/box-label-templates").expect(401);
+
+    const response = await request(server)
+      .get("/shifts/box-label-templates")
+      .set("x-api-key", device.apiKey)
+      .expect(200);
+    expect(response.body.defaultBoxLabelTemplateId).toBe(defaultId);
+    expect(response.body.items.map((item: { id: string }) => item.id)).toEqual([
+      defaultId,
+      alphaId,
+      zebraId,
+    ]);
+    // Exact shape: summaries never leak the template spec to a device key.
+    expect(response.body.items[0]).toEqual({
+      id: defaultId,
+      name: "Org Default Box",
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "zpl",
+    });
+
+    // The same summaries remain readable by a cabinet operations-read session.
+    const cabinet = await agent.get("/shifts/box-label-templates").expect(200);
+    expect(cabinet.body.defaultBoxLabelTemplateId).toBe(defaultId);
   });
 
   // ---------------------------------------------------------------------

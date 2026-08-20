@@ -33,6 +33,7 @@ import {
   type CreateShiftDto,
   type ListShiftsQueryDto,
   type ListShiftsResponseDto,
+  type ShiftBoxLabelTemplatesDto,
   type ShiftBundleDto,
   type ShiftDto,
   type ShiftPlanningConfigDto,
@@ -67,9 +68,19 @@ export class ShiftsController {
     return this.shiftsService.getPlanningConfig(req.tenantId!);
   }
 
-  // Cabinet-only: not one of the station's five routes (list, create, open,
-  // bundle, reference bundle) below. A device reading an arbitrary shift by id has no
-  // legitimate use once it can already list/open/bundle its own.
+  // Station-readable template summaries for the NewShift picker. Specs stay
+  // cabinet-only; the station receives a spec exclusively through the shift
+  // bundle after the snapshot exists (see docs/device-key-surface.md).
+  @Get("box-label-templates")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async listBoxLabelTemplates(@Req() req: RequestWithTenant): Promise<ShiftBoxLabelTemplatesDto> {
+    return this.shiftsService.listBoxLabelTemplates(req.tenantId!);
+  }
+
+  // Cabinet-only: not one of the station's six routes (list, create, open,
+  // bundle, reference bundle, box-label-templates) here. A device reading an
+  // arbitrary shift by id has no legitimate use once it can already
+  // list/open/bundle its own.
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   async getShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {

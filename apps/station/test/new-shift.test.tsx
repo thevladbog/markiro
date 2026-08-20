@@ -27,6 +27,20 @@ const resolvedProduct = {
   boxCapacity: null,
 };
 const silentSource: ScanSource = { start: () => () => {} };
+const templateLibrary = {
+  items: [
+    { id: "tpl-default", name: "Box 58x40", widthMm: 58, heightMm: 40, dpi: 203, language: "zpl" },
+    {
+      id: "tpl-alt",
+      name: "Euro pallet 100x80",
+      widthMm: 100,
+      heightMm: 80,
+      dpi: 300,
+      language: "tspl",
+    },
+  ],
+  defaultBoxLabelTemplateId: "tpl-default",
+};
 
 function deferredResponse() {
   let settle: (response: Response) => void = () => {};
@@ -448,7 +462,7 @@ describe("NewShift", () => {
   // only half the job: 12:00 UTC is still the 14th in Moscow but already the
   // 15th in Kiritimati (UTC+14), which would fail the body assertion below.
   // Pinning the zone makes the literal date mean one thing everywhere.
-  it("keeps aggregation on the found product, explains missing box labels in English, and retries after configuration", async () => {
+  it("opens the template picker for aggregation with the org default preselected and snapshots it on start", async () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
@@ -460,15 +474,8 @@ describe("NewShift", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
       )
-      .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify({
-            message: "Aggregation shifts require a box label template",
-            code: "BOX_LABEL_TEMPLATE_REQUIRED",
-          }),
-          { status: 422 },
-        ),
-      )
+      // GET /shifts/box-label-templates
+      .mockResolvedValueOnce(new Response(JSON.stringify(templateLibrary), { status: 200 }))
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ id: "s9", status: "planned", mode: "aggregation" }), {
           status: 201,
@@ -487,34 +494,194 @@ describe("NewShift", () => {
     await screen.findByText("Cola");
 
     fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3000/shifts/box-label-templates");
+    expect(screen.queryByTestId("new-shift-found")).toBeNull();
+    // The admin default arrives preselected and badged.
+    const defaultOption = screen.getByRole("button", { name: /Box 58x40/ });
+    expect(defaultOption.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Default")).toBeDefined();
+    expect(screen.getByText("58×40 mm · 203 dpi")).toBeDefined();
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() =>
+      expect(onStarted).toHaveBeenCalledWith({ id: "s9", status: "active", mode: "aggregation" }),
+    );
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("http://localhost:3000/shifts");
+    expect(JSON.parse(fetchMock.mock.calls[3]?.[1]?.body as string)).toEqual({
+      productId: "p1",
+      mode: "aggregation",
+      plannedDate: "2026-08-14",
+      boxLabelTemplateId: "tpl-default",
+    });
+    expect(fetchMock.mock.calls[4]?.[0]).toBe("http://localhost:3000/shifts/s9/open");
+  });
+
+  it("lets the operator switch to a different template before starting", async () => {
+    useTimeZone("Europe/Moscow");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(templateLibrary), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "planned", mode: "aggregation" }), {
+          status: 201,
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "active", mode: "aggregation" }), {
+          status: 200,
+        }),
+      );
+    const onStarted = vi.fn();
+    render(
+      <NewShift client={client} source={silentSource} onStarted={onStarted} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+
+    const altOption = screen.getByRole("button", { name: /Euro pallet 100x80/ });
+    fireEvent.click(altOption);
+    expect(altOption.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: /Box 58x40/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(onStarted).toHaveBeenCalledOnce());
+    expect(JSON.parse(fetchMock.mock.calls[3]?.[1]?.body as string)).toMatchObject({
+      boxLabelTemplateId: "tpl-alt",
+    });
+  });
+
+  it("disables Start on the template step until a template is selected when no default exists", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ items: templateLibrary.items, defaultBoxLabelTemplateId: null }),
+          { status: 200 },
+        ),
+      );
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+
+    expectButtonDisabled(screen.getByRole("button", { name: "Start" }), true);
+    expect(screen.queryByText("Default")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Box 58x40/ }));
+    expectButtonDisabled(screen.getByRole("button", { name: "Start" }), false);
+  });
+
+  it("shows guidance and blocks start when the template library is empty", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [], defaultBoxLabelTemplateId: null }), {
+          status: 200,
+        }),
+      );
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+    expect(
+      screen.getByText("No label templates in the admin panel. Create one and try again."),
+    ).toBeDefined();
+    expectButtonDisabled(screen.getByRole("button", { name: "Start" }), true);
+  });
+
+  it("stays on the found product with a retriable error when the template list fails to load", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockRejectedValueOnce(new TypeError("network down"))
+      .mockResolvedValueOnce(new Response(JSON.stringify(templateLibrary), { status: 200 }));
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
     const startButton = screen.getByRole("button", { name: "Start" });
     fireEvent.click(startButton);
 
     await waitFor(() =>
-      expect(
-        screen.getByText(
-          "A box label template is not configured in the admin panel. Configure it and try again.",
-        ),
-      ).toBeDefined(),
+      expect(screen.getByText("Failed to load label templates. Try again.")).toBeDefined(),
     );
     expect(screen.getByTestId("new-shift-found")).toBeDefined();
-    expect(onStarted).not.toHaveBeenCalled();
     expectButtonDisabled(startButton, false);
-    expect(fetchMock.mock.calls).toHaveLength(3);
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("http://localhost:3000/shifts");
-    expect(fetchMock.mock.calls[2]?.[1]?.body).toBe(
-      JSON.stringify({ productId: "p1", mode: "aggregation", plannedDate: "2026-08-14" }),
-    );
-    expect(screen.queryByRole("combobox")).toBeNull();
 
     fireEvent.click(startButton);
-    await waitFor(() =>
-      expect(onStarted).toHaveBeenCalledWith({ id: "s9", status: "active", mode: "aggregation" }),
-    );
-    expect(fetchMock.mock.calls[4]?.[0]).toBe("http://localhost:3000/shifts/s9/open");
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+    expect(fetchMock.mock.calls).toHaveLength(4);
   });
 
-  it("explains missing box labels in Russian", async () => {
+  it("returns from the template step to the found product without creating a shift", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response(JSON.stringify(templateLibrary), { status: 200 }));
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+    fireEvent.click(screen.getByRole("button", { name: "Aggregation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByTestId("new-shift-found")).toBeDefined();
+    expect(screen.queryByTestId("new-shift-template")).toBeNull();
+    // Only gtin-check, product search, and the template list were requested.
+    expect(fetchMock.mock.calls).toHaveLength(3);
+  });
+
+  it("renders the template step and the server safety net in Russian", async () => {
     await i18n.changeLanguage("ru");
     vi.spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(
@@ -523,6 +690,8 @@ describe("NewShift", () => {
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
       )
+      .mockResolvedValueOnce(new Response(JSON.stringify(templateLibrary), { status: 200 }))
+      // Safety net: the template was deleted between listing and creation.
       .mockResolvedValueOnce(
         new Response(
           JSON.stringify({
@@ -542,7 +711,12 @@ describe("NewShift", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Агрегация" }));
     fireEvent.click(screen.getByRole("button", { name: "Начать" }));
+    await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
+    expect(screen.getByRole("heading", { name: "Шаблон этикетки короба" })).toBeDefined();
+    expect(screen.getByText("По умолчанию")).toBeDefined();
+    expect(screen.getByText("58×40 мм · 203 dpi")).toBeDefined();
 
+    fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     await waitFor(() =>
       expect(
         screen.getByText(

@@ -26,6 +26,8 @@ import type {
   CreateShiftDto,
   ListShiftsQueryDto,
   ListShiftsResponseDto,
+  ShiftBoxLabelTemplateOptionDto,
+  ShiftBoxLabelTemplatesDto,
   ShiftBundleDto,
   ShiftDto,
   ShiftMode,
@@ -164,6 +166,35 @@ export class ShiftsService {
   /** The one organisation setting needed by operations shift planning. */
   async getPlanningConfig(tenantId: string): Promise<ShiftPlanningConfigDto> {
     return { defaultBoxLabelTemplateId: await this.findDefaultBoxLabelTemplateId(tenantId) };
+  }
+
+  async listBoxLabelTemplates(tenantId: string): Promise<ShiftBoxLabelTemplatesDto> {
+    const defaultBoxLabelTemplateId = await this.findDefaultBoxLabelTemplateId(tenantId);
+    const rows = await this.db
+      .select({
+        id: schema.labelTemplates.id,
+        name: schema.labelTemplates.name,
+        spec: schema.labelTemplates.spec,
+      })
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.tenantId, tenantId))
+      .orderBy(schema.labelTemplates.name, schema.labelTemplates.id);
+    const items = rows.map((row): ShiftBoxLabelTemplateOptionDto => {
+      const spec = row.spec as LabelTemplateSpec;
+      return {
+        id: row.id,
+        name: row.name,
+        widthMm: spec.widthMm,
+        heightMm: spec.heightMm,
+        dpi: spec.dpi,
+        language: spec.language,
+      };
+    });
+    // Default first so the preselected option is on the station's first page.
+    items.sort((a, b) =>
+      a.id === defaultBoxLabelTemplateId ? -1 : b.id === defaultBoxLabelTemplateId ? 1 : 0,
+    );
+    return { items, defaultBoxLabelTemplateId };
   }
 
   /** Get a single shift (joined), must belong to the tenant. */
