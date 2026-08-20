@@ -924,6 +924,7 @@
     },
     "codeSearch": {
       "title": "Code search",
+      "backAction": "← Code search",
       "searchPlaceholder": "Enter an SSCC or marking code",
       "searchButton": "Search",
       "empty": "No codes found",

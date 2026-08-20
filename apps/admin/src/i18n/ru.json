@@ -924,6 +924,7 @@
     },
     "codeSearch": {
       "title": "Поиск кодов",
+      "backAction": "← Поиск кодов",
       "searchPlaceholder": "Введите SSCC или код маркировки",
       "searchButton": "Найти",
       "empty": "Коды не найдены",

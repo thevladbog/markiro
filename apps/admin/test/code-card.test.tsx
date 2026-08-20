@@ -124,4 +124,12 @@ describe("CodeCardPage", () => {
     const docLink = screen.getByRole("link", { name: "DSG-26-0001" });
     expect(docLink.getAttribute("href")).toBe("/disaggregation/d1");
   });
+
+  it("offers a back link to the code registry", async () => {
+    stubFetch();
+    renderPage();
+
+    const backLink = await screen.findByRole("link", { name: "← Поиск кодов" });
+    expect(backLink.getAttribute("href")).toBe("/codes");
+  });
 });
