@@ -259,18 +259,52 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     expect(kinds).toContain("disassemble");
   });
 
-  it("apply is all-or-nothing: a written_off line blocks and re-marks", async () => {
-    // Second document, second box: lock SSCC2 via a kiosk pickup order
-    // AFTER the draft validated it as ok, then attempt apply.
-    const doc = await draftWithReasonAndLines([SSCC1, SSCC2]);
+  it("apply is all-or-nothing: a written_off line blocks and re-marks, the valid line's box stays untouched", async () => {
+    // A fresh box for the still-valid line: SSCC1's box was already
+    // disassembled by the previous test, so reusing it here would prove
+    // nothing about a *valid* line's box staying untouched -- both lines
+    // would already be invalid.
+    const shift3 = await openShiftForProduct(productId);
+    const validSscc = "123456789012345705";
+    await postBatch(stationKey, [scan(shift3, "gg", "t3", "2026-07-01T12:00:00.000Z", "b6")]);
+    await postBatch(stationKey, [], [
+      {
+        boxId: "b6",
+        shiftId: shift3,
+        terminalId: "t3",
+        sscc: validSscc,
+        closedAt: "2026-01-03T00:00:00.000Z",
+        operatorId: null,
+      },
+    ]);
+    await agent.post(`/shifts/${shift3}/close`).send({ reason: "done" }).expect(200);
+
+    // Second box (SSCC2, still untouched so far): lock it via a kiosk
+    // pickup order AFTER the draft validated it as ok, then attempt apply.
+    const doc = await draftWithReasonAndLines([validSscc, SSCC2]);
     await lockBoxViaKioskOrder(SSCC2, 1);
     const res = await agent.post(`/disaggregation/${doc.id}/apply`).expect(409);
-    expect((res.body as { code: string }).code).toBe("invalid_lines");
+    const resBody = res.body as { code: string; lines: { sscc: string | null; status: string }[] };
+    expect(resBody.code).toBe("invalid_lines");
+    // The 409 payload itself carries the refreshed statuses, not just the
+    // re-fetched document below.
+    expect(resBody.lines.find((l) => l.sscc?.endsWith(SSCC2))?.status).toBe("written_off");
+    expect(resBody.lines.find((l) => l.sscc?.endsWith(validSscc))?.status).toBe("ok");
 
     const detail = await agent.get(`/disaggregation/${doc.id}`).expect(200);
     const body = detail.body as DocumentDetailWire;
     expect(body.status).toBe("draft"); // nothing applied
     expect(body.lines.find((l) => l.sscc?.endsWith(SSCC2))?.status).toBe("written_off");
+    expect(body.lines.find((l) => l.sscc?.endsWith(validSscc))?.status).toBe("ok");
+
+    // The valid line's own box must be completely untouched by the failed
+    // apply: still not disassembled, its item still active.
+    const boxes = await agent.get(`/boxes?shiftId=${shift3}`).expect(200);
+    const validBox = (
+      boxes.body as { items: { sscc: string | null; itemCount: number; disassembledAt: string | null }[] }
+    ).items.find((b) => b.sscc?.endsWith(validSscc));
+    expect(validBox?.disassembledAt).toBeNull();
+    expect(validBox?.itemCount).toBe(1);
   });
 
   it("refuses apply without a reason / without lines / twice", async () => {

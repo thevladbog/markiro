@@ -108,6 +108,11 @@ export class DisaggregationService {
   async cancelDocument(tenantId: string, id: string): Promise<DocumentDto> {
     const row = await this.findDocument(tenantId, id);
     this.assertDraft(row);
+    // Re-assert draft in the WHERE itself: a concurrent apply between the
+    // read above and this UPDATE would otherwise let this write a
+    // "cancelled" status over an "applied" row, tripping
+    // disaggregation_documents_applied_fields_check (500) instead of a
+    // clean 409.
     const [updated] = await this.db
       .update(schema.disaggregationDocuments)
       .set({ status: "cancelled", cancelledAt: sql`now()`, updatedAt: sql`now()` })
@@ -115,10 +120,12 @@ export class DisaggregationService {
         and(
           eq(schema.disaggregationDocuments.tenantId, tenantId),
           eq(schema.disaggregationDocuments.id, id),
+          eq(schema.disaggregationDocuments.status, "draft"),
         ),
       )
       .returning();
-    return this.toDocumentDto(tenantId, updated!);
+    if (!updated) throw new ConflictException({ code: "not_draft", message: "Document is not a draft" });
+    return this.toDocumentDto(tenantId, updated);
   }
 
   /**
