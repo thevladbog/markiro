@@ -85,7 +85,7 @@ describe("generateZpl - native latin-only document (golden)", () => {
         "^LL320",
         "^FO16,16^A0N,34,34^FDACME Foods^FS",
         "^FO16,80^A0N,28,28^FB400,1,0,C,0^FD04600682000013^FS",
-        "^FO16,144^A0N,23,23^FD2026-07-23^FS",
+        "^FO16,144^A0N,23,23^FD23.07.2026^FS",
         "^FO16,192^BEN,80^FD04600682000013^FS",
         "^FO0,272^GB464,2,2^FS",
         "^FO0,0^GB464,320,2^FS",

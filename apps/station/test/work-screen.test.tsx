@@ -2327,9 +2327,10 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
-    expect(zpl).toContain("2026-07-24"); // the box's own close date, in Moscow
-    expect(zpl).toContain("2027-01-20"); // + 180 days of shelf life
-    expect(zpl).not.toContain("2026-09-30"); // never today's date
+    expect(zpl).toContain("24.07.2026"); // the box's own close date, in Moscow
+    expect(zpl).toContain("20.01.2027"); // + 180 days of shelf life
+    expect(zpl).not.toContain("30.09.2026"); // never today's date
+    expect(zpl).not.toMatch(/\d{4}-\d{2}-\d{2}/); // never the ISO form the first print shipped
   });
 
   it("reprints a recovered box with the SAME dates the original label carried", async () => {
@@ -2369,9 +2370,9 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(print).toHaveBeenCalledOnce());
 
     const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
-    expect(zpl).toContain("2026-07-24");
-    expect(zpl).toContain("2027-01-20");
-    expect(zpl).not.toContain("2026-09-30");
+    expect(zpl).toContain("24.07.2026");
+    expect(zpl).toContain("20.01.2027");
+    expect(zpl).not.toContain("30.09.2026");
   });
 
   // The converse: a box template that is missing entirely must NOT fall back

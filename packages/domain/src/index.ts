@@ -27,6 +27,7 @@ export {
   ptToDots,
   sampleLabelData,
 } from "./labels/model.js";
+export { formatLabelDate, LABEL_DATE_FORMAT } from "./labels/date.js";
 export { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "./labels/defaults.js";
 export type { DefaultLabelTemplate } from "./labels/defaults.js";
 export type {
