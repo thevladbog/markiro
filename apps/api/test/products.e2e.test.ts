@@ -650,10 +650,7 @@ describe.skipIf(!ready)("products e2e", () => {
     expect(getRes.body).toMatchObject({ shelfLifeDays: 184 });
 
     // PATCH shelfLifeDays to null clears it
-    const patchRes = await agent
-      .patch(`/products/${id}`)
-      .send({ shelfLifeDays: null })
-      .expect(200);
+    const patchRes = await agent.patch(`/products/${id}`).send({ shelfLifeDays: null }).expect(200);
     expect(patchRes.body).toMatchObject({ shelfLifeDays: null });
 
     // Verify the clear persists

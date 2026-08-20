@@ -33,7 +33,11 @@ describe("boxLabelFields — egais/expiry", () => {
   };
 
   it("fills product.egais and computed expiry", () => {
-    const fields = boxLabelFields({ ...base, egaisCode: "0101234567890123456", shelfLifeDays: 184 });
+    const fields = boxLabelFields({
+      ...base,
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
+    });
     expect(fields["product.egais"]).toBe("0101234567890123456");
     expect(fields.expiry).toBe("2025-11-20");
   });

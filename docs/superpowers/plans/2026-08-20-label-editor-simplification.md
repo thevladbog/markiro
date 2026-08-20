@@ -28,6 +28,7 @@
 ### Task 1: Domain — `product.egais` and `expiry` label fields
 
 **Files:**
+
 - Modify: `packages/domain/src/labels/model.ts`
 - Modify: `packages/domain/test/labels-import.test.ts` (contract test, ~line 15)
 - Modify: `apps/admin/src/pages/labels/editor/ImportCodeDialog.tsx` (`FIELD_COPY_KEYS`, ~line 29)
@@ -35,6 +36,7 @@
 - Modify: `apps/station/src/lib/box-label.ts` (compile-only stub values; real values in Task 8)
 
 **Interfaces:**
+
 - Produces: `LabelField` union now includes `"product.egais"` and `"expiry"`; `sampleLabelData()` returns values for them. Every `Record<LabelField, string>` in the repo must carry the new keys.
 
 - [ ] **Step 1: Update the field-inventory contract test to the new expectation (failing first)**
@@ -42,29 +44,29 @@
 In `packages/domain/test/labels-import.test.ts` replace the array inside the `"exports one canonical ordered label-field inventory"` test:
 
 ```ts
-    expect(LABEL_FIELDS).toEqual([
-      "product.name",
-      "product.gtin",
-      "product.egais",
-      "km.code",
-      "sscc",
-      "shift.no",
-      "date",
-      "expiry",
-      "qty",
-      "operator",
-      "counterparty.name",
-    ]);
+expect(LABEL_FIELDS).toEqual([
+  "product.name",
+  "product.gtin",
+  "product.egais",
+  "km.code",
+  "sscc",
+  "shift.no",
+  "date",
+  "expiry",
+  "qty",
+  "operator",
+  "counterparty.name",
+]);
 ```
 
 Also add a placeholder acceptance case to the `"recognizes only an exact known field placeholder"` test:
 
 ```ts
-    expect(parseTemplatePayload("{{product.egais}}", 9)).toEqual({
-      kind: "field",
-      field: "product.egais",
-    });
-    expect(parseTemplatePayload("{{expiry}}", 10)).toEqual({ kind: "field", field: "expiry" });
+expect(parseTemplatePayload("{{product.egais}}", 9)).toEqual({
+  kind: "field",
+  field: "product.egais",
+});
+expect(parseTemplatePayload("{{expiry}}", 10)).toEqual({ kind: "field", field: "expiry" });
 ```
 
 - [ ] **Step 2: Run to verify it fails**
@@ -147,11 +149,13 @@ git commit -m "feat(domain): add product.egais and expiry label fields"
 ### Task 2: Domain — default box-label template module
 
 **Files:**
+
 - Create: `packages/domain/src/labels/defaults.ts`
 - Modify: `packages/domain/src/index.ts` (exports)
 - Test: `packages/domain/test/labels-defaults.test.ts` (create)
 
 **Interfaces:**
+
 - Produces: `buildDefaultLabelTemplates(): DefaultLabelTemplate[]` where `DefaultLabelTemplate = { name: string; spec: LabelTemplateSpec }`, and `DEFAULT_BOX_LABEL_TEMPLATE_NAME = "Коробка 58×40 (203 dpi)"`. Consumed by Task 4 (migration SQL generation + drift test) and Task 7 (provisioning).
 
 - [ ] **Step 1: Write the failing test `packages/domain/test/labels-defaults.test.ts`**
@@ -202,9 +206,7 @@ describe("buildDefaultLabelTemplates", () => {
     for (const { spec } of buildDefaultLabelTemplates()) {
       expect(() => parseLabelTemplate(spec)).not.toThrow();
       const kindsByField = new Map(
-        spec.elements
-          .filter((el) => el.kind === "field")
-          .map((el) => [el.field, el] as const),
+        spec.elements.filter((el) => el.kind === "field").map((el) => [el.field, el] as const),
       );
       for (const field of ["product.name", "date", "expiry", "qty", "product.egais"] as const) {
         expect(kindsByField.has(field), `missing field ${field}`).toBe(true);
@@ -440,10 +442,7 @@ export function buildDefaultLabelTemplates(): DefaultLabelTemplate[] {
 Add to `packages/domain/src/index.ts` next to the other label exports:
 
 ```ts
-export {
-  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
-  buildDefaultLabelTemplates,
-} from "./labels/defaults.js";
+export { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "./labels/defaults.js";
 export type { DefaultLabelTemplate } from "./labels/defaults.js";
 ```
 
@@ -464,11 +463,13 @@ git commit -m "feat(domain): stock box-label templates (buildDefaultLabelTemplat
 ### Task 3: DB (Postgres) — `products.shelf_life_days`
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts` (products table, after `egaisCode` ~line 75)
 - Create (generated): `packages/db/migrations/0046_product_shelf_life_days.sql` + meta updates
 - Test: `packages/db/test/schema.test.ts` (extend if it asserts the products column set — inspect first)
 
 **Interfaces:**
+
 - Produces: `schema.products.shelfLifeDays` (`integer`, nullable) for Tasks 5–7.
 
 - [ ] **Step 1: Add the column to `packages/db/src/schema/platform.ts`**
@@ -511,11 +512,13 @@ git commit -m "feat(db): products.shelf_life_days column"
 ### Task 4: DB — backfill migration seeding the five default templates
 
 **Files:**
+
 - Create (generated shell): `packages/db/migrations/0047_default_label_templates.sql`
 - Test: `packages/db/test/default-label-templates-migration.test.ts` (create)
 - Test: `packages/domain/test/labels-defaults.test.ts` (add the SQL drift test)
 
 **Interfaces:**
+
 - Consumes: `buildDefaultLabelTemplates()` (Task 2) — its JSON is inlined into the SQL.
 - Produces: every existing tenant gains any of the five templates it doesn't already have (by name). Does NOT touch `org_profiles`.
 
@@ -569,9 +572,7 @@ it("matches the jsonb inlined into db migration 0047 (drift guard)", async () =>
     name: m[1]!,
     spec: JSON.parse(m[2]!) as unknown,
   }));
-  expect(rows).toEqual(
-    buildDefaultLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
-  );
+  expect(rows).toEqual(buildDefaultLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })));
 });
 ```
 
@@ -642,16 +643,19 @@ git commit -m "feat(db): backfill five default label templates per tenant"
 ### Task 5: API — `shelfLifeDays` on the products module
 
 **Files:**
+
 - Modify: `apps/api/src/modules/products/dto.ts`
 - Modify: `apps/api/src/modules/products/products.service.ts` (`CURRENT_PRODUCT_SELECTION` ~line 45, create ~line 135, update ~line 189, `rowToDto` ~line 751)
 - Test: `apps/api/test/products.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces: `ProductDto.shelfLifeDays: number | null`; `createProductSchema`/`updateProductSchema` accept `shelfLifeDays?: number | null` (int, 1–3650). Flows into `StationBundleProductDto` automatically (it extends `ProductDto`).
 
 - [ ] **Step 1: Extend the e2e test (failing first)**
 
 In `apps/api/test/products.e2e.test.ts`, next to the existing `egaisCode` create/patch coverage (grep `egaisCode` in the file and mirror the surrounding request helpers exactly), add a test that:
+
 1. POSTs a product with `shelfLifeDays: 184` → response body has `shelfLifeDays: 184`;
 2. PATCHes it with `shelfLifeDays: null` → response has `shelfLifeDays: null`;
 3. POSTs `shelfLifeDays: 0` → 400.
@@ -669,7 +673,7 @@ Add to BOTH `createProductSchema` and `updateProductSchema` (after `egaisCode`):
 Add to `ProductDto` (after `egaisCode`):
 
 ```ts
-  shelfLifeDays: number | null;
+shelfLifeDays: number | null;
 ```
 
 - [ ] **Step 3: Service — `apps/api/src/modules/products/products.service.ts`**
@@ -696,10 +700,12 @@ git commit -m "feat(api): product shelfLifeDays field"
 ### Task 6: API — shift bundle carries `shelfLifeDays` (egaisCode already flows)
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts` (`CURRENT_PRODUCT_SELECTION` ~line 77, bundle product payload ~line 569)
 - Test: `apps/api/test/shifts-bundle.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces: `ShiftBundleDto.product.shelfLifeDays: number | null` (via `ProductDto`), alongside the already-present `egaisCode`.
 
 - [ ] **Step 1: Extend the bundle e2e test (failing first)**
@@ -707,8 +713,8 @@ git commit -m "feat(api): product shelfLifeDays field"
 In `apps/api/test/shifts-bundle.e2e.test.ts`, find where the seeded product row is inserted (grep `insert(schema.products)` or the product fixture) and add `shelfLifeDays: 184` to the seed; find the bundle-shape assertion on `bundle.product` and add:
 
 ```ts
-    expect(bundle.product.shelfLifeDays).toBe(184);
-    expect(bundle.product.egaisCode).not.toBeUndefined();
+expect(bundle.product.shelfLifeDays).toBe(184);
+expect(bundle.product.egaisCode).not.toBeUndefined();
 ```
 
 Run: `pnpm --filter api test -- shifts-bundle` — Expected: FAIL (`shelfLifeDays` undefined).
@@ -735,10 +741,12 @@ git commit -m "feat(api): shift bundle carries product shelfLifeDays"
 ### Task 7: API — tenant provisioning seeds templates + default box label
 
 **Files:**
+
 - Modify: `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` (tenant-creation block, ~lines 98–109)
 - Test: `apps/api/test/provision-tenant-owner.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `buildDefaultLabelTemplates()`, `DEFAULT_BOX_LABEL_TEMPLATE_NAME` from `@markiro/domain` (Task 2).
 - Produces: every NEW tenant gets 5 `label_templates` rows and an `org_profiles` row with `default_box_label_template_id` set to the 58×40@203 template.
 
@@ -827,26 +835,26 @@ import { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "@ma
 Inside the `if (!tenant) { … }` creation block (after the `pickupTenantPolicies` insert, still inside the transaction):
 
 ```ts
-      // Stock box-label templates (spec: 2026-08-20 label editor simplification).
-      // Seeded only on tenant CREATION — re-provisioning an existing tenant
-      // (idempotent retry) must not duplicate them.
-      let defaultBoxLabelTemplateId: string | null = null;
-      for (const template of buildDefaultLabelTemplates()) {
-        const templateId = createId();
-        await tx.insert(schema.labelTemplates).values({
-          id: templateId,
-          tenantId: tenant.id,
-          name: template.name,
-          spec: template.spec,
-        });
-        if (template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME) {
-          defaultBoxLabelTemplateId = templateId;
-        }
-      }
-      await tx.insert(schema.orgProfiles).values({
-        tenantId: tenant.id,
-        defaultBoxLabelTemplateId,
-      });
+// Stock box-label templates (spec: 2026-08-20 label editor simplification).
+// Seeded only on tenant CREATION — re-provisioning an existing tenant
+// (idempotent retry) must not duplicate them.
+let defaultBoxLabelTemplateId: string | null = null;
+for (const template of buildDefaultLabelTemplates()) {
+  const templateId = createId();
+  await tx.insert(schema.labelTemplates).values({
+    id: templateId,
+    tenantId: tenant.id,
+    name: template.name,
+    spec: template.spec,
+  });
+  if (template.name === DEFAULT_BOX_LABEL_TEMPLATE_NAME) {
+    defaultBoxLabelTemplateId = templateId;
+  }
+}
+await tx.insert(schema.orgProfiles).values({
+  tenantId: tenant.id,
+  defaultBoxLabelTemplateId,
+});
 ```
 
 (`createId` is already in scope. A brand-new tenant has no `org_profiles` row, so a plain insert is correct; nothing else in provisioning writes that table.)
@@ -868,6 +876,7 @@ git commit -m "feat(api): seed default label templates on tenant provisioning"
 ### Task 8: Station — mirror the new product attributes and print egais/expiry
 
 **Files:**
+
 - Modify: `packages/db/src/sqlite/schema.ts` (`productMirror`), `packages/db/src/sqlite/migrations.ts` (trailing ALTERs)
 - Modify: `apps/station/src/lib/mirror.ts` (`StationBundle.product`, `upsertBundleBody`, `ShiftContextRow`, `readShiftContext`)
 - Modify: `apps/station/src/lib/box-label.ts` (real values; new `expiryIsoDate`)
@@ -876,6 +885,7 @@ git commit -m "feat(api): seed default label templates on tenant provisioning"
 - Test: `apps/station/test/box-label.test.ts` (create), `apps/station/test/mirror.test.ts` (extend), `packages/db/test/sqlite-schema.test.ts` (extend if it enumerates columns)
 
 **Interfaces:**
+
 - Consumes: bundle `product.egaisCode` / `product.shelfLifeDays` (Task 6).
 - Produces: `expiryIsoDate(closedAt: string, shelfLifeDays: number | null): string`; `BoxLabelInput` gains `egaisCode: string | null; shelfLifeDays: number | null`; `ShiftContextRow` gains `egaisCode: string | null; shelfLifeDays: number | null`; `WorkScreenProps` gains `productEgaisCode?: string | null; productShelfLifeDays?: number | null`.
 
@@ -916,7 +926,11 @@ describe("boxLabelFields — egais/expiry", () => {
   };
 
   it("fills product.egais and computed expiry", () => {
-    const fields = boxLabelFields({ ...base, egaisCode: "0101234567890123456", shelfLifeDays: 184 });
+    const fields = boxLabelFields({
+      ...base,
+      egaisCode: "0101234567890123456",
+      shelfLifeDays: 184,
+    });
     expect(fields["product.egais"]).toBe("0101234567890123456");
     expect(fields.expiry).toBe("2025-11-20");
   });
@@ -1045,8 +1059,8 @@ and in the params array, after `p.defaultLabelTemplateId`:
 `ShiftContextRow` — add:
 
 ```ts
-  egaisCode: string | null;
-  shelfLifeDays: number | null;
+egaisCode: string | null;
+shelfLifeDays: number | null;
 ```
 
 `readShiftContext` — extend the row type with `egais_code: string | null; shelf_life_days: number | null;`, the SELECT with `p.egais_code, p.shelf_life_days,` (before the image columns), and the returned object with:
@@ -1061,22 +1075,23 @@ Extend `apps/station/test/mirror.test.ts`: in an existing `upsertBundle` round-t
 - [ ] **Step 5: Thread into WorkScreen**
 
 `apps/station/src/pages/WorkScreen.tsx`:
+
 - `WorkScreenProps` (after `counterpartyName`): `productEgaisCode?: string | null;` and `productShelfLifeDays?: number | null;`
 - destructure both in the component signature;
 - `fieldsForClosedBox` (~line 808):
 
 ```ts
-    return boxLabelFields({
-      sscc: result.sscc,
-      itemCount: result.itemCount,
-      productName,
-      gtin14: expectedGtin14,
-      egaisCode: productEgaisCode ?? null,
-      shelfLifeDays: productShelfLifeDays ?? null,
-      operatorName: null,
-      counterpartyName: counterpartyName ?? null,
-      closedAt: new Date().toISOString(),
-    });
+return boxLabelFields({
+  sscc: result.sscc,
+  itemCount: result.itemCount,
+  productName,
+  gtin14: expectedGtin14,
+  egaisCode: productEgaisCode ?? null,
+  shelfLifeDays: productShelfLifeDays ?? null,
+  operatorName: null,
+  counterpartyName: counterpartyName ?? null,
+  closedAt: new Date().toISOString(),
+});
 ```
 
 `apps/station/src/App.tsx` `<WorkScreen …>` (~line 1388), after `counterpartyName={…}`:
@@ -1103,6 +1118,7 @@ git commit -m "feat(station): print EGAIS code and computed expiry on box labels
 ### Task 9: Admin — remove the visual editor; settings form + import + preview
 
 **Files:**
+
 - Delete: `apps/admin/src/pages/labels/editor/LabelCanvas.tsx`, `Palette.tsx`, `PropertiesPanel.tsx`, `useEditorState.ts`; `apps/admin/test/labels-canvas.test.tsx`
 - Move: `apps/admin/src/pages/labels/editor/renderer.ts` → `apps/admin/src/pages/labels/renderer.ts`; `editor/geometry.ts` → `labels/geometry.ts`
 - Create: `apps/admin/src/pages/labels/editor/useSpecState.ts`
@@ -1110,6 +1126,7 @@ git commit -m "feat(station): print EGAIS code and computed expiry on box labels
 - Modify: `apps/admin/src/pages/labels/TemplateThumb.tsx`, `editor/PreviewPane.tsx`, `editor/ImportCodeDialog.tsx` (import paths), `editor/editor.css`, `apps/admin/src/i18n/en.json` + `ru.json`
 
 **Interfaces:**
+
 - Consumes: `parseLabelCode` via `ImportCodeDialog` (unchanged), `fitSpecElements` from the moved `../geometry.js`.
 - Produces: `useSpecState(initialSpec)` → `{ state: { spec, geometryError }, replaceSpec(spec), resizeLabel(w, h) }`. Routes and the `/labels` library screen keep working unchanged.
 
@@ -1121,6 +1138,7 @@ git mv apps/admin/src/pages/labels/editor/geometry.ts apps/admin/src/pages/label
 ```
 
 Update import specifiers:
+
 - `apps/admin/src/pages/labels/TemplateThumb.tsx`: `"./editor/renderer.js"` → `"./renderer.js"`
 - `apps/admin/src/pages/labels/renderer.ts`: no change (it imports nothing from editor/)
 - `apps/admin/src/pages/labels/geometry.ts`: `"./renderer.js"` stays valid (both moved together)
@@ -1761,9 +1779,7 @@ describe("edit flow, download, dirty guard", () => {
       heightMm: 40,
       dpi: 203,
       language: "zpl",
-      elements: [
-        { kind: "text", id: "t1", xMm: 2, yMm: 2, text: "ACME", fontSizePt: 10 },
-      ],
+      elements: [{ kind: "text", id: "t1", xMm: 2, yMm: 2, text: "ACME", fontSizePt: 10 }],
     },
     createdAt: "2026-08-20T00:00:00.000Z",
     updatedAt: "2026-08-20T00:00:00.000Z",
@@ -1832,6 +1848,7 @@ git commit -m "feat(admin)!: replace the visual label editor with settings + cod
 ### Task 10: Admin — «Срок годности, дней» on the product form
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/catalog/api.ts` (`ProductDto`, `CreateProductInput`, update input)
 - Modify: `apps/admin/src/pages/catalog/ProductForm.tsx` (zod schema ~line 71, `EMPTY_VALUES` ~line 116, aggregation section ~line 441, `toCreateInput` ~line 512)
 - Modify: `apps/admin/src/pages/catalog/ProductPanelRoute.tsx` (initialValues mappings ~lines 98, 182, memo deps)
@@ -1839,6 +1856,7 @@ git commit -m "feat(admin)!: replace the visual label editor with settings + cod
 - Test: `apps/admin/test/catalog.test.tsx`
 
 **Interfaces:**
+
 - Consumes: API `shelfLifeDays` (Task 5).
 - Produces: form field `shelfLifeDays` (string in the form, `number | null` in the payload).
 
@@ -1853,6 +1871,7 @@ Run: `pnpm --filter admin test -- catalog` — Expected: FAIL (no such input).
 `api.ts`: add `shelfLifeDays: number | null;` to `ProductDto` and `shelfLifeDays?: number | null;` to `CreateProductInput` (and the update input type if separate).
 
 `ProductForm.tsx`:
+
 - zod schema, after `egaisCode`:
 
 ```ts
@@ -1867,13 +1886,13 @@ Run: `pnpm --filter admin test -- catalog` — Expected: FAIL (no such input).
 - Aggregation section, after the `egaisCode` Input:
 
 ```tsx
-          <Input
-            label={t("pages.catalog.form.shelfLifeDaysLabel")}
-            mono
-            inputMode="numeric"
-            {...errorProp(translateFieldError(t, errors.shelfLifeDays?.message))}
-            {...register("shelfLifeDays")}
-          />
+<Input
+  label={t("pages.catalog.form.shelfLifeDaysLabel")}
+  mono
+  inputMode="numeric"
+  {...errorProp(translateFieldError(t, errors.shelfLifeDays?.message))}
+  {...register("shelfLifeDays")}
+/>
 ```
 
 - `toCreateInput`:
@@ -1911,6 +1930,7 @@ git commit -m "feat(admin): product shelf-life field on the catalog form"
 ### Task 11: Full verification and spec status
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-08-20-label-editor-simplification-design.md` (Status line)
 
 - [ ] **Step 1: Repo-wide gates**
