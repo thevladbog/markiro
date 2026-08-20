@@ -202,8 +202,16 @@ describe("buildDefaultLabelTemplates", () => {
       expect(capQty.maxWidthMm, `${name}: caption box`).toBe(capEgais.maxWidthMm);
       expect(valQty.xMm, `${name}: value x`).toBe(valEgais.xMm);
       expect(valQty.maxWidthMm, `${name}: value box`).toBe(valEgais.maxWidthMm);
+      // Narrowed rather than asserted non-null: `maxWidthMm` is optional on the
+      // element schema, and the arithmetic below is meaningless without it, so
+      // an absent box must fail as its own named problem instead of silently
+      // becoming NaN (which `toBeGreaterThan` would report as a bogus mismatch).
+      const capQtyBox = capQty.maxWidthMm;
+      if (capQtyBox === undefined) {
+        throw new Error(`${name}: quantity caption has no maxWidthMm to sit left of`);
+      }
       expect(valQty.xMm, `${name}: value sits right of its caption`).toBeGreaterThan(
-        capQty.xMm + capQty.maxWidthMm! - 1e-9,
+        capQty.xMm + capQtyBox - 1e-9,
       );
     }
   });

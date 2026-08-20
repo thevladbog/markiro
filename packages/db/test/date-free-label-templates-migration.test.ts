@@ -36,7 +36,11 @@ function quoteIdentifier(identifier: string): string {
 }
 
 describe.skipIf(!databaseUrl)("date-free label templates migration", () => {
-  const databaseName = `markiro_date_free_label_templates_${randomUUID().replaceAll("-", "_")}`;
+  // PostgreSQL truncates identifiers at 63 bytes. The 36-character UUID leaves
+  // 27 for the prefix, so this one is kept short deliberately: a longer prefix
+  // still "works" (CREATE and the connection lookup truncate identically) but
+  // only by accident, and it emits a NOTICE on every run.
+  const databaseName = `markiro_date_free_${randomUUID().replaceAll("-", "_")}`;
   const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
   scratchUrl.pathname = `/${databaseName}`;
   scratchUrl.search = "";
