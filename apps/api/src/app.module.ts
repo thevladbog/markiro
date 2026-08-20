@@ -18,6 +18,8 @@ import { EmployeesModule } from "./modules/employees/employees.module";
 import { OperatorsModule } from "./modules/operators/operators.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
 import { PickupReasonsModule } from "./modules/pickup-reasons/pickup-reasons.module";
+import { DisaggregationReasonsModule } from "./modules/disaggregation-reasons/disaggregation-reasons.module";
+import { DisaggregationModule } from "./modules/disaggregation/disaggregation.module";
 import { IntegrationsModule } from "./modules/integrations/integrations.module";
 import { ApiKeysModule } from "./modules/api-keys/api-keys.module";
 import { ExchangeModule } from "./modules/exchange/exchange.module";
@@ -28,6 +30,7 @@ import { PickupRejectionsModule } from "./modules/pickup-rejections/pickup-rejec
 import { SsccModule } from "./modules/sscc/sscc.module";
 import { BoxesModule } from "./modules/boxes/boxes.module";
 import { BoxExceptionsModule } from "./modules/box-exceptions/box-exceptions.module";
+import { CodeSearchModule } from "./modules/code-search/code-search.module";
 import { AuthorizationModule } from "./authorization/authorization.module";
 import { loadEnv, type Env } from "./env";
 import { TeamModule } from "./modules/team/team.module";
@@ -106,6 +109,8 @@ export class AppModule {
         OperatorsModule,
         KiosksModule,
         PickupReasonsModule,
+        DisaggregationReasonsModule,
+        DisaggregationModule,
         IntegrationsModule,
         ApiKeysModule,
         ExchangeModule,
@@ -116,6 +121,7 @@ export class AppModule {
         SsccModule,
         BoxesModule,
         BoxExceptionsModule,
+        CodeSearchModule,
         StorageModule.forRoot(env),
         TeamModule.forRoot(env.ADMIN_ORIGIN),
         InvitationsModule.forRoot(setup.databaseUrl),

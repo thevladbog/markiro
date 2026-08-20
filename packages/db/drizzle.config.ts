@@ -18,6 +18,7 @@ export default defineConfig({
     "./src/schema/saas.ts",
     "./src/schema/billing.ts",
     "./src/schema/shift-exports.ts",
+    "./src/schema/disaggregation.ts",
   ],
   out: "./migrations",
   dbCredentials: { url: process.env.DATABASE_URL ?? "" },

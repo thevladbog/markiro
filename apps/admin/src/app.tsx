@@ -19,11 +19,17 @@ import { CounterpartiesPage } from "./pages/counterparties/index.js";
 import { CounterpartyPanelRoute } from "./pages/counterparties/CounterpartyPanelRoute.js";
 import { DashboardPage } from "./pages/dashboard/index.js";
 import { DevicesPage } from "./pages/devices/index.js";
+import { DisaggregationDocumentPage } from "./pages/disaggregation/DocumentDetail.js";
+import { DisaggregationPage } from "./pages/disaggregation/index.js";
+import { DisaggregationReasonsPage } from "./pages/disaggregation/ReasonsPage.js";
 import { EmployeesPage } from "./pages/employees/index.js";
 import {
   EmployeeCreatePanelRoute,
   EmployeeEditPanelRoute,
 } from "./pages/employees/EmployeePanelRoute.js";
+import { BoxCardPage } from "./pages/code-search/BoxCard.js";
+import { CodeCardPage } from "./pages/code-search/CodeCard.js";
+import { CodeSearchPage } from "./pages/code-search/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
 import { InvitationPage } from "./pages/invitations/InvitationPage.js";
@@ -154,6 +160,30 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <BoxesPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <CodeSearchPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes/km/:codeHash"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <CodeCardPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes/box/:boxId"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <BoxCardPage />
             </RequireCapability>
           }
         />
@@ -325,6 +355,30 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <OrderDetailPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="disaggregation"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DisaggregationPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="disaggregation/reasons"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DisaggregationReasonsPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="disaggregation/:id"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <DisaggregationDocumentPage />
             </RequireCapability>
           }
         />

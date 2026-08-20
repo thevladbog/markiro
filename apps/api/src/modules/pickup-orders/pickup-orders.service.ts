@@ -2076,7 +2076,6 @@ export class PickupOrdersService {
             tenantId,
             employeeId,
             utcDay,
-            hasBoxes: remainingBoxes.length > 0,
           });
 
           // Lock the kiosk row before inserting. `PairingService.attemptRedeem`

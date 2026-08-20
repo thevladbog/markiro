@@ -45,6 +45,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.OPERATIONS_READ,
   },
   {
+    to: "/codes",
+    key: "nav.codes",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
     to: "/conflicts",
     key: "nav.conflicts",
     sectionKey: "shell.sections.production",
@@ -53,6 +59,12 @@ export const NAV_ITEMS: ReadonlyArray<{
   {
     to: "/pickup",
     key: "nav.pickup",
+    sectionKey: "shell.sections.production",
+    capability: C.OPERATIONS_READ,
+  },
+  {
+    to: "/disaggregation",
+    key: "nav.disaggregation",
     sectionKey: "shell.sections.production",
     capability: C.OPERATIONS_READ,
   },
