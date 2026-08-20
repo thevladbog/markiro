@@ -63,6 +63,7 @@ export const PERSISTENT_STATION_STATE_GALLERY = {
     input: "new-shift-input",
     found: "new-shift-found",
     notFound: "new-shift-not-found",
+    template: "new-shift-template",
   } as const satisfies Record<NewShiftView, string>,
   shiftSelection: {
     loading: "shift-loading",

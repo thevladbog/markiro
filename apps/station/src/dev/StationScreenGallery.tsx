@@ -398,6 +398,7 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
   const ru = locale === "ru";
   const notFound = view === "not-found";
   const found = view === "found";
+  const template = view === "template";
   return (
     <StationScreen
       title={ru ? "Новая смена" : "New shift"}
@@ -409,7 +410,7 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
               ? ru
                 ? "Сканировать снова"
                 : "Scan again"
-              : found
+              : found || template
                 ? ru
                   ? "Начать смену"
                   : "Start shift"
@@ -421,7 +422,36 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
       }
     >
       <div className="gallery-new-shift">
-        {notFound ? (
+        {template ? (
+          <>
+            <h2 className="new-shift__template-title">
+              {ru ? "Шаблон этикетки короба" : "Box label template"}
+            </h2>
+            <div className="new-shift__templates">
+              <button
+                type="button"
+                className="new-shift__template new-shift__template--selected"
+                aria-pressed="true"
+              >
+                <span className="new-shift__template-name">
+                  {ru ? "Коробка 58×40 (203 dpi)" : "Box 58×40 (203 dpi)"}
+                </span>
+                <span className="new-shift__template-meta">
+                  {ru ? "58×40 мм · 203 dpi" : "58×40 mm · 203 dpi"}
+                </span>
+                <span className="new-shift__template-badge">{ru ? "По умолчанию" : "Default"}</span>
+              </button>
+              <button type="button" className="new-shift__template" aria-pressed="false">
+                <span className="new-shift__template-name">
+                  {ru ? "Паллета 100×80 (300 dpi)" : "Pallet 100×80 (300 dpi)"}
+                </span>
+                <span className="new-shift__template-meta">
+                  {ru ? "100×80 мм · 300 dpi" : "100×80 mm · 300 dpi"}
+                </span>
+              </button>
+            </div>
+          </>
+        ) : notFound ? (
           <Alert tone="warn" title={ru ? "Товар не найден" : "Product not found"}>
             <p>GTIN: 04607000000999</p>
             <p>

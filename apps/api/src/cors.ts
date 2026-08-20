@@ -57,6 +57,7 @@ function isStationRequest(req: Request): boolean {
         path === "/station/shift-closures")) ||
     (method === "GET" && (path === "/station/identity" || path === "/station/operators")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
+    (method === "GET" && path === "/shifts/box-label-templates") ||
     (method === "GET" && path === "/products") ||
     (method === "POST" && path === "/products/gtin-check")
   ) {

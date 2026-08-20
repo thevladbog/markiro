@@ -93,6 +93,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shift-exports/formats (ShiftExportsController.formats)",
       "GET /shifts (ShiftsController.listShifts)",
       "GET /shifts/planning-config (ShiftsController.getPlanningConfig)",
+      "GET /shifts/box-label-templates (ShiftsController.listBoxLabelTemplates)",
       "GET /shifts/:id (ShiftsController.getShift)",
       "GET /shifts/:shiftId/exports (ShiftExportsController.list)",
       "GET /lines/presence (LinesController.listPresence)",
