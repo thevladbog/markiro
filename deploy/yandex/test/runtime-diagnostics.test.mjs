@@ -5,6 +5,7 @@ import test from "node:test";
 import { load } from "js-yaml";
 
 import {
+  RUNTIME_CONFIGURATION_ISSUES,
   RUNTIME_ERROR_CLASSES,
   collectRuntimeSnapshot,
   runRuntimeProbeCli,
@@ -110,7 +111,7 @@ function fixtureDependencies(overrides = {}) {
       commandKey("docker", ["logs", "--tail", "200", "a1b2c3d4e5f6"]),
       {
         stdout: "",
-        stderr: `ZodError: required environment value is missing ${PRIVATE_FRAGMENTS.join(" ")}\n`,
+        stderr: `ZodError: required environment value is missing at LANDING_ORIGIN and SMARTCAPTCHA_SERVER_KEY ${PRIVATE_FRAGMENTS.join(" ")}\n`,
       },
     ],
     [commandKey("docker", ["logs", "--tail", "200", "b1c2d3e4f5a6"]), ""],
@@ -158,6 +159,19 @@ function fixtureDependencies(overrides = {}) {
 }
 
 test("runtime probe emits only the closed diagnostic schema and safe categories", async () => {
+  assert.deepEqual(RUNTIME_CONFIGURATION_ISSUES, [
+    "LANDING_DEMO_SUBMISSION_ENABLED",
+    "LANDING_ORIGIN",
+    "LANDING_DEMO_RECIPIENT",
+    "LANDING_DEMO_REPLY_TO",
+    "SMARTCAPTCHA_SERVER_KEY",
+    "LANDING_DEMO_RATE_WINDOW_SECONDS",
+    "LANDING_DEMO_SOURCE_LIMIT",
+    "LANDING_DEMO_GLOBAL_LIMIT",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+  ]);
+  assert.equal(Object.isFrozen(RUNTIME_CONFIGURATION_ISSUES), true);
   assert.deepEqual(RUNTIME_ERROR_CLASSES, [
     "configuration",
     "database_connection",
@@ -172,7 +186,7 @@ test("runtime probe emits only the closed diagnostic schema and safe categories"
   const dependencies = fixtureDependencies();
   const snapshot = await collectRuntimeSnapshot(dependencies);
   assert.deepEqual(snapshot, {
-    version: 1,
+    version: 2,
     docker: "active",
     runtimeEnv: "active",
     activeRelease: CURRENT,
@@ -184,6 +198,7 @@ test("runtime probe emits only the closed diagnostic schema and safe categories"
       oomKilled: false,
       release: CURRENT,
       errorClasses: ["configuration", "healthcheck", "process_crash"],
+      configurationIssues: ["LANDING_ORIGIN", "SMARTCAPTCHA_SERVER_KEY"],
     },
     edge: {
       state: "running",
@@ -192,6 +207,7 @@ test("runtime probe emits only the closed diagnostic schema and safe categories"
       oomKilled: false,
       release: CURRENT,
       errorClasses: [],
+      configurationIssues: [],
     },
   });
   const serialized = JSON.stringify(snapshot);

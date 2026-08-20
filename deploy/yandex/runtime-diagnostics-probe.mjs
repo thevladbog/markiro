@@ -20,6 +20,19 @@ export const RUNTIME_ERROR_CLASSES = Object.freeze([
   "unknown",
 ]);
 
+export const RUNTIME_CONFIGURATION_ISSUES = Object.freeze([
+  "LANDING_DEMO_SUBMISSION_ENABLED",
+  "LANDING_ORIGIN",
+  "LANDING_DEMO_RECIPIENT",
+  "LANDING_DEMO_REPLY_TO",
+  "SMARTCAPTCHA_SERVER_KEY",
+  "LANDING_DEMO_RATE_WINDOW_SECONDS",
+  "LANDING_DEMO_SOURCE_LIMIT",
+  "LANDING_DEMO_GLOBAL_LIMIT",
+  "SMTP_USER",
+  "SMTP_PASSWORD",
+]);
+
 const errorClassOrder = new Map(RUNTIME_ERROR_CLASSES.map((value, index) => [value, index]));
 
 function boundedStatus(value) {
@@ -71,6 +84,10 @@ function classifyEvidence(logs, state) {
   return [...classes].toSorted(
     (left, right) => errorClassOrder.get(left) - errorClassOrder.get(right),
   );
+}
+
+function configurationIssues(logs) {
+  return RUNTIME_CONFIGURATION_ISSUES.filter((name) => logs.includes(name));
 }
 
 function parseState(text) {
@@ -182,6 +199,7 @@ async function inspectService(service, records, dependencies) {
       oomKilled: false,
       release: "unknown",
       errorClasses: ["unknown"],
+      configurationIssues: [],
     };
   if (ids.length !== 1 || !CONTAINER_ID.test(ids[0]))
     return {
@@ -191,6 +209,7 @@ async function inspectService(service, records, dependencies) {
       oomKilled: false,
       release: "unknown",
       errorClasses: ["unknown"],
+      configurationIssues: [],
     };
 
   const id = ids[0];
@@ -215,6 +234,8 @@ async function inspectService(service, records, dependencies) {
     repoDigest = parseRepoDigest(digestResult.stdout.trim(), service);
   }
   const logs = await dependencies.run("docker", ["logs", "--tail", "200", id]);
+  const logText = `${logs.stdout ?? ""}\n${logs.stderr ?? ""}`;
+  const errorClasses = classifyEvidence(logText, state);
   const digestKey = service === "api" ? "apiDigest" : "edgeDigest";
   const release = repoDigest
     ? (newestRecord(records, (record) => record[digestKey] === repoDigest)?.tag ?? "unknown")
@@ -222,7 +243,8 @@ async function inspectService(service, records, dependencies) {
   return {
     ...state,
     release,
-    errorClasses: classifyEvidence(`${logs.stdout ?? ""}\n${logs.stderr ?? ""}`, state),
+    errorClasses,
+    configurationIssues: errorClasses.includes("configuration") ? configurationIssues(logText) : [],
   };
 }
 
@@ -246,7 +268,7 @@ export async function collectRuntimeSnapshot(supplied = {}) {
     inspectService("edge", records, dependencies),
   ]);
   return {
-    version: 1,
+    version: 2,
     docker: boundedStatus(dockerResult.stdout.trim()),
     runtimeEnv: boundedStatus(runtimeEnvResult.stdout.trim()),
     activeRelease: active,
@@ -265,7 +287,7 @@ function validService(value) {
     .sort()
     .join(",");
   return (
-    keys === "errorClasses,exitCode,health,oomKilled,release,state" &&
+    keys === "configurationIssues,errorClasses,exitCode,health,oomKilled,release,state" &&
     ["running", "exited", "missing", "unknown"].includes(value.state) &&
     ["healthy", "unhealthy", "starting", "none", "unknown"].includes(value.health) &&
     (value.exitCode === null ||
@@ -277,6 +299,14 @@ function validService(value) {
       index === 0
         ? RUNTIME_ERROR_CLASSES.includes(item)
         : errorClassOrder.get(value.errorClasses[index - 1]) < errorClassOrder.get(item),
+    ) &&
+    Array.isArray(value.configurationIssues) &&
+    (value.configurationIssues.length === 0 || value.errorClasses.includes("configuration")) &&
+    value.configurationIssues.every((item, index) =>
+      index === 0
+        ? RUNTIME_CONFIGURATION_ISSUES.includes(item)
+        : RUNTIME_CONFIGURATION_ISSUES.indexOf(value.configurationIssues[index - 1]) <
+          RUNTIME_CONFIGURATION_ISSUES.indexOf(item),
     )
   );
 }
@@ -286,7 +316,7 @@ export function validateRuntimeSnapshot(value) {
     Object.keys(value ?? {})
       .sort()
       .join(",") !== "activeRelease,api,candidateRelease,docker,edge,runtimeEnv,version" ||
-    value.version !== 1 ||
+    value.version !== 2 ||
     !["active", "inactive", "failed", "unknown"].includes(value.docker) ||
     !["active", "inactive", "failed", "unknown"].includes(value.runtimeEnv) ||
     !validRelease(value.activeRelease) ||
