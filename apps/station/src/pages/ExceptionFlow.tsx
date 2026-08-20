@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { parseScannedSscc } from "@markiro/domain";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
 import type { ClosedBoxSummary } from "../lib/boxes.js";
+import type { ScanSource } from "../lib/scan-source.js";
 import { ShiftBoxesPanel } from "../ui/ShiftBoxesPanel.js";
 import { ExceptionActions, type BoxExceptionAction } from "../ui/exceptions/ExceptionActions.js";
 import { OtherReasonDialog } from "../ui/exceptions/OtherReasonDialog.js";
@@ -19,6 +21,8 @@ export interface ExceptionFlowProps {
   onDisassemble: (boxId: string, reason: string) => Promise<void>;
   onBack: () => void;
   onPendingChange?: (pending: boolean) => void;
+  /** Lets the operator pick the target box by scanning its label instead of tapping the list. */
+  scanSource?: ScanSource;
 }
 
 export function ExceptionFlow({
@@ -31,6 +35,7 @@ export function ExceptionFlow({
   onDisassemble,
   onBack,
   onPendingChange,
+  scanSource,
 }: ExceptionFlowProps) {
   const { t } = useTranslation();
   const [stage, setStage] = useState<ExceptionStage>("action");
@@ -39,8 +44,33 @@ export function ExceptionFlow({
   const [reason, setReason] = useState("");
   const [otherOpen, setOtherOpen] = useState(false);
   const [succeeded, setSucceeded] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<"notSscc" | "notFound" | null>(null);
   const applying = useRef(false);
   const selectedBox = boxes.find((box) => box.boxId === selectedBoxId) ?? null;
+
+  // While the target list is up, the work screen's own scan loop is paused
+  // (WorkScreen unsubscribes for the whole exception flow), so this is the
+  // only consumer: a box-label scan picks the target exactly like a tap.
+  useEffect(() => {
+    if (stage !== "target" || !scanSource) {
+      setScanFeedback(null);
+      return;
+    }
+    return scanSource.start((raw) => {
+      const parsed = parseScannedSscc(raw);
+      if (parsed === null) {
+        setScanFeedback("notSscc");
+        return;
+      }
+      const match = boxes.find((box) => box.sscc === parsed) ?? null;
+      if (!match) {
+        setScanFeedback("notFound");
+        return;
+      }
+      setScanFeedback(null);
+      selectBox(match);
+    });
+  }, [stage, scanSource, boxes]);
 
   useEffect(() => {
     onPendingChange?.(true);
@@ -190,6 +220,13 @@ export function ExceptionFlow({
 
         {stage === "target" ? (
           <div data-testid="exception-stage-target" className="exception-stage">
+            {scanSource ? <p className="exception-stage__hint">{t("box.scanTargetHint")}</p> : null}
+            {scanFeedback === "notSscc" ? (
+              <Alert tone="error">{t("box.printNotSscc")}</Alert>
+            ) : null}
+            {scanFeedback === "notFound" ? (
+              <Alert tone="error">{t("box.scanTargetNotFound")}</Alert>
+            ) : null}
             <ShiftBoxesPanel
               boxes={boxes}
               selectedBoxId={selectedBoxId}

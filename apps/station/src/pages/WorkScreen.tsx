@@ -1534,6 +1534,7 @@ export function WorkScreen({
             onDisassemble={handleDisassemble}
             onBack={() => setShowExceptions(false)}
             onPendingChange={setBoxActionPending}
+            scanSource={source}
           />
         ) : (
           <div className="work-screen__instruments">
