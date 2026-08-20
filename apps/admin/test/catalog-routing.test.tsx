@@ -326,6 +326,7 @@ it("releases a busy-only Back block after an unchanged edit request fails", asyn
     palletCapacity: null,
     unitPrice: null,
     egaisCode: null,
+    shelfLifeDays: null,
     externalRef: null,
     status: "draft",
     defaultCounterpartyId: null,

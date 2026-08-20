@@ -452,6 +452,7 @@
         "palletCapacityLabel": "Вместимость поддона, шт",
         "unitPriceLabel": "Цена за шт., ₽",
         "egaisCodeLabel": "Код ЕГАИС",
+        "shelfLifeDaysLabel": "Срок годности, дней",
         "defaultCounterpartyLabel": "Контрагент по умолчанию",
         "noCounterparty": "Не выбран",
         "submitCreate": "Создать",

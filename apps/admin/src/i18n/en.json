@@ -452,6 +452,7 @@
         "palletCapacityLabel": "Pallet capacity, units",
         "unitPriceLabel": "Price per unit, ₽",
         "egaisCodeLabel": "EGAIS code",
+        "shelfLifeDaysLabel": "Shelf life, days",
         "defaultCounterpartyLabel": "Default counterparty",
         "noCounterparty": "None selected",
         "submitCreate": "Create",

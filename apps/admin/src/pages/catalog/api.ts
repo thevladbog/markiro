@@ -31,6 +31,7 @@ export interface ProductDto {
   palletCapacity: number | null;
   unitPrice: string | null;
   egaisCode: string | null;
+  shelfLifeDays: number | null;
   /**
    * The `<Ид>` of the 1С item this product is linked to (Task 10's
    * `integration_candidates.external_ref`), or `null` if never linked.
@@ -57,6 +58,7 @@ export interface CreateProductInput {
   palletCapacity?: number | null;
   unitPrice?: string | null;
   egaisCode?: string | null;
+  shelfLifeDays?: number | null;
   defaultCounterpartyId?: string | null;
 }
 

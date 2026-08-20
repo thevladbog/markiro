@@ -69,6 +69,11 @@ const productFormSchema = z.object({
       "pages.catalog.form.errors.unitPriceInvalid",
     ),
   egaisCode: z.string().trim().optional(),
+  shelfLifeDays: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.catalog.form.errors.capacityInvalid"),
   defaultCounterpartyId: z.string().trim().optional(),
 });
 
@@ -114,6 +119,7 @@ const EMPTY_VALUES: ProductFormValues = {
   palletCapacity: "",
   unitPrice: "",
   egaisCode: "",
+  shelfLifeDays: "",
   defaultCounterpartyId: "",
 };
 
@@ -442,6 +448,13 @@ export function ProductForm({
             {...errorProp(translateFieldError(t, errors.egaisCode?.message))}
             {...register("egaisCode")}
           />
+          <Input
+            label={t("pages.catalog.form.shelfLifeDaysLabel")}
+            mono
+            inputMode="numeric"
+            {...errorProp(translateFieldError(t, errors.shelfLifeDays?.message))}
+            {...register("shelfLifeDays")}
+          />
         </section>
         <section className="mk-catalog-panel-section" aria-labelledby="product-form-image">
           <h3 id="product-form-image">{t("pages.catalog.form.sections.image")}</h3>
@@ -510,6 +523,7 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
   const palletCapacity = values.palletCapacity?.trim();
   const unitPrice = values.unitPrice?.trim();
   const egaisCode = values.egaisCode?.trim();
+  const shelfLifeDays = values.shelfLifeDays?.trim();
   const defaultCounterpartyId = values.defaultCounterpartyId?.trim();
   return {
     gtin: values.gtin.trim(),
@@ -519,6 +533,7 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
     palletCapacity: palletCapacity ? Number(palletCapacity) : null,
     unitPrice: unitPrice ? unitPrice.replace(",", ".") : null,
     egaisCode: egaisCode ? egaisCode : null,
+    shelfLifeDays: shelfLifeDays ? Number(shelfLifeDays) : null,
     defaultCounterpartyId: defaultCounterpartyId ? defaultCounterpartyId : null,
   };
 }
