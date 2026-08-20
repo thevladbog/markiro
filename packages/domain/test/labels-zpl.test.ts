@@ -337,6 +337,10 @@ describe("generateZpl - raster fallback", () => {
       fontFamily: "sans-serif",
       fontSizePx: 34,
       bold: false,
+      // The element carries no `maxWidthMm`, so the rasterizer is told there
+      // is no width to bound the bitmap to and only one line to produce.
+      maxWidthPx: undefined,
+      maxLines: 1,
     });
   });
 

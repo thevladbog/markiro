@@ -29,6 +29,19 @@ export interface UnresolvedBoxPrint {
   boxId: string;
   sscc: string;
   itemCount: number;
+  /**
+   * The box's OWN closure timestamp, read back off `boxes_mirror` — not
+   * "now". The box label prints «Дата производства» and «Годен до» derived
+   * from it (`box-label.ts`'s `boxLabelFields`), so a recovery print issued
+   * the next morning would otherwise stamp today's date and today + shelf
+   * life: two physical labels for the same SSCC bearing different expiry
+   * dates. Carrying the persisted value makes a given box print the same
+   * dates no matter when it is reprinted.
+   *
+   * Non-null by construction: `findUnresolvedBoxPrint` only ever returns
+   * rows with `closed_at IS NOT NULL`.
+   */
+  closedAt: string;
   state: "pending" | "printed";
   errorCode: BoxPrintErrorCode | null;
 }
@@ -194,11 +207,13 @@ export async function findUnresolvedBoxPrint(
     box_id: string;
     sscc: string;
     item_count: number;
+    closed_at: string;
     print_state: "pending" | "printed";
     print_error_code: BoxPrintErrorCode | null;
   }>(
     `SELECT b.box_id AS box_id, b.sscc AS sscc,
             (SELECT COUNT(*) FROM codes_mirror c WHERE c.box_id = b.box_id) AS item_count,
+            b.closed_at AS closed_at,
             b.print_state AS print_state, b.print_error_code AS print_error_code
        FROM boxes_mirror b
        JOIN shift_mirror s
@@ -225,6 +240,7 @@ export async function findUnresolvedBoxPrint(
     boxId: row.box_id,
     sscc: row.sscc,
     itemCount: Number(row.item_count),
+    closedAt: row.closed_at,
     state: row.print_state,
     errorCode: row.print_error_code,
   };

@@ -22,7 +22,13 @@
  * pixel data -- exactly Idento's pattern, pinned by
  * `test/labels-raster.test.ts`.
  */
-import { bitmapToZplHex, convertToMonochrome, type RasterizeTextFn } from "@markiro/domain";
+import {
+  bitmapToZplHex,
+  convertToMonochrome,
+  wrapTextToWidth,
+  type RasterizeTextFn,
+  type RasterizeTextOptions,
+} from "@markiro/domain";
 
 /**
  * Thrown when a browser 2D canvas context could not be obtained -- either
@@ -95,13 +101,24 @@ function buildFontShorthand(fontFamily: string, fontSizePx: number, bold: boolea
  *    resizing a canvas after the fact resets its 2D state including
  *    `font`, so measurement happens on its own context before the
  *    real, correctly-sized one is created).
- * 3. Height is fixed at `ceil(sizePx * 1.5)` -- a simple, deterministic
- *    line-box heuristic (not real font-metrics ascent/descent), matching
- *    the plan brief exactly rather than trying to read font-specific
- *    metrics that vary per family/weight.
- * 4. Fill the sized canvas white, draw `text` in black with
- *    `textBaseline = "middle"` at vertical center, then `getImageData` the
- *    whole canvas and convert/pack it through `@markiro/domain`.
+ * 3. Break the text against `maxWidthPx`/`maxLines` using that same live
+ *    `measureText` as `wrapTextToWidth`'s measure function. THIS IS WHAT
+ *    KEEPS THE BITMAP ON THE LABEL: the emitters position the returned
+ *    bitmap at the element's `^FO`/`BITMAP` origin and never clip it, so a
+ *    bitmap sized from the raw text's own width -- what this function used
+ *    to return -- printed a long Cyrillic product name straight off the
+ *    right edge of a 58 mm label. `RasterizeTextOptions`'s doc comment
+ *    states the contract; overflow that still does not fit is ellipsized by
+ *    `wrapTextToWidth` so the operator can see the name was cut.
+ * 4. Line box height is `ceil(sizePx * 1.5)` per line -- a simple,
+ *    deterministic heuristic (not real font-metrics ascent/descent),
+ *    matching the plan brief rather than reading font-specific metrics that
+ *    vary per family/weight. A single unwrapped line therefore produces
+ *    exactly the same bitmap this function always did.
+ * 5. Fill the sized canvas white, draw each line in black with
+ *    `textBaseline = "middle"` at its line box's vertical center, then
+ *    `getImageData` the whole canvas and convert/pack it through
+ *    `@markiro/domain`.
  *
  * Kept separate from the exported `rasterizeText` below (rather than folding
  * everything into that function's body) purely so `RasterUnavailableError`
@@ -112,14 +129,23 @@ function buildFontShorthand(fontFamily: string, fontSizePx: number, bold: boolea
  */
 function rasterizeTextSync(
   text: string,
-  { fontFamily, fontSizePx, bold }: { fontFamily: string; fontSizePx: number; bold: boolean },
+  { fontFamily, fontSizePx, bold, maxWidthPx, maxLines }: RasterizeTextOptions,
 ) {
   const font = buildFontShorthand(fontFamily, fontSizePx, bold);
 
   const measureCtx = getCanvas2dContext(1, 1);
   measureCtx.font = font;
-  const width = Math.max(1, Math.ceil(measureCtx.measureText(text).width));
-  const height = Math.ceil(fontSizePx * 1.5);
+  const measure = (s: string) => measureCtx.measureText(s).width;
+
+  const bounded = maxWidthPx !== undefined && maxWidthPx > 0;
+  const lines = bounded ? wrapTextToWidth(text, measure, maxWidthPx, maxLines ?? 1) : [text];
+  const lineHeight = Math.ceil(fontSizePx * 1.5);
+  const naturalWidth = Math.ceil(Math.max(...lines.map(measure)));
+  // Clamped as well as wrapped: `measure` is fractional and `wrapTextToWidth`
+  // only guarantees each line is <= maxWidthPx BEFORE the ceil, so a line
+  // that exactly fills the box could otherwise round one dot past it.
+  const width = Math.max(1, bounded ? Math.min(maxWidthPx, naturalWidth) : naturalWidth);
+  const height = lineHeight * lines.length;
 
   const ctx = getCanvas2dContext(width, height);
   ctx.font = font;
@@ -127,7 +153,9 @@ function rasterizeTextSync(
   ctx.fillRect(0, 0, width, height);
   ctx.fillStyle = "#000000";
   ctx.textBaseline = "middle";
-  ctx.fillText(text, 0, height / 2);
+  lines.forEach((line, i) => {
+    ctx.fillText(line, 0, i * lineHeight + lineHeight / 2);
+  });
 
   const { data } = ctx.getImageData(0, 0, width, height);
   const monochrome = convertToMonochrome(data, width, height);

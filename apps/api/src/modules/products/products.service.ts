@@ -54,6 +54,7 @@ const CURRENT_PRODUCT_SELECTION = {
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
   unitPrice: schema.products.unitPrice,
   egaisCode: schema.products.egaisCode,
+  shelfLifeDays: schema.products.shelfLifeDays,
   externalRef: schema.products.externalRef,
   createdAt: schema.products.createdAt,
 };
@@ -133,6 +134,7 @@ export class ProductsService {
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
           unitPrice: data.unitPrice ?? null,
           egaisCode: data.egaisCode ?? null,
+          shelfLifeDays: data.shelfLifeDays ?? null,
           externalRef: data.externalRef ?? null,
         })
         .returning({ id: schema.products.id });
@@ -187,6 +189,7 @@ export class ProductsService {
         };
         if (data.unitPrice !== undefined) set.unitPrice = data.unitPrice;
         if (data.egaisCode !== undefined) set.egaisCode = data.egaisCode;
+        if (data.shelfLifeDays !== undefined) set.shelfLifeDays = data.shelfLifeDays;
         if (data.externalRef !== undefined) set.externalRef = data.externalRef;
 
         const [row] = await tx
@@ -749,6 +752,7 @@ export class ProductsService {
       defaultCounterpartyId: row.defaultCounterpartyId,
       unitPrice: row.unitPrice,
       egaisCode: row.egaisCode,
+      shelfLifeDays: row.shelfLifeDays,
       externalRef: row.externalRef,
       createdAt: row.createdAt,
       image: this.imageDescriptor(row),

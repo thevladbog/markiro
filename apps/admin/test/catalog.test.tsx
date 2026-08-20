@@ -120,6 +120,7 @@ const DRAFT_PRODUCT = {
   palletCapacity: null,
   unitPrice: null,
   egaisCode: null,
+  shelfLifeDays: null,
   status: "draft",
   defaultCounterpartyId: null,
   createdAt: "2026-01-01T00:00:00.000Z",
@@ -134,6 +135,7 @@ const ACTIVE_PRODUCT = {
   palletCapacity: 48,
   unitPrice: null,
   egaisCode: null,
+  shelfLifeDays: null,
   status: "active",
   defaultCounterpartyId: null,
   createdAt: "2026-01-02T00:00:00.000Z",
@@ -503,6 +505,7 @@ describe("CatalogPage", () => {
             palletCapacity: null,
             unitPrice: null,
             egaisCode: null,
+            shelfLifeDays: null,
             defaultCounterpartyId: "cp1",
           }),
         }),
@@ -690,14 +693,21 @@ describe("CatalogPage", () => {
         palletCapacity: null,
         unitPrice: null,
         egaisCode: null,
+        shelfLifeDays: null,
         defaultCounterpartyId: null,
       });
       expect(body).not.toHaveProperty("defaultLabelTemplateId");
     });
   });
 
-  it("renders unitPrice and egaisCode inputs and sends them normalized in the create payload", async () => {
-    const created = { ...DRAFT_PRODUCT, id: "p5", unitPrice: "52.00", egaisCode: "ЕГАИС123" };
+  it("renders unitPrice, egaisCode, and shelfLifeDays inputs and sends them normalized in the create payload", async () => {
+    const created = {
+      ...DRAFT_PRODUCT,
+      id: "p5",
+      unitPrice: "52.00",
+      egaisCode: "ЕГАИС123",
+      shelfLifeDays: 184,
+    };
     let didCreate = false;
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -719,12 +729,14 @@ describe("CatalogPage", () => {
     // Assert the new inputs are rendered
     expect(screen.getByLabelText("Цена за шт., ₽")).toBeDefined();
     expect(screen.getByLabelText("Код ЕГАИС")).toBeDefined();
+    expect(screen.getByLabelText("Срок годности, дней")).toBeDefined();
 
     // Fill required and new optional fields
     fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Напиток" } });
     fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
     fireEvent.change(screen.getByLabelText("Цена за шт., ₽"), { target: { value: "52,00" } });
     fireEvent.change(screen.getByLabelText("Код ЕГАИС"), { target: { value: "ЕГАИС123" } });
+    fireEvent.change(screen.getByLabelText("Срок годности, дней"), { target: { value: "184" } });
     fireEvent.click(screen.getByRole("button", { name: "Создать" }));
 
     await waitFor(() => {
@@ -740,6 +752,7 @@ describe("CatalogPage", () => {
             palletCapacity: null,
             unitPrice: "52.00",
             egaisCode: "ЕГАИС123",
+            shelfLifeDays: 184,
             defaultCounterpartyId: null,
           }),
         }),
@@ -747,7 +760,39 @@ describe("CatalogPage", () => {
     });
   });
 
-  it("pre-fills unitPrice/egaisCode when editing a product that has them, and preserves them on an untouched save", async () => {
+  it("blocks submit and shows a range error when shelfLifeDays exceeds the API's 3650-day bound", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/counterparties") return jsonResponse(200, { items: [] });
+      if (path === "/api/products" && init?.method === "POST") {
+        throw new Error("must not POST when shelfLifeDays fails client-side validation");
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Каталог пуст");
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Добавить продукт" })[0]!);
+    await screen.findByText("Новый продукт");
+
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Напиток" } });
+    fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
+    fireEvent.change(screen.getByLabelText("Срок годности, дней"), { target: { value: "3651" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать" }));
+
+    expect(await screen.findByText("Введите целое число от 1 до 3650")).toBeDefined();
+    // Scoped to the create endpoint -- the GTIN field's own debounced
+    // gtin-check POST is expected and unrelated to shelfLifeDays validation.
+    expect(
+      fetchMock.mock.calls.some(
+        ([url, init]) => String(url) === "/api/products" && init?.method === "POST",
+      ),
+    ).toBe(false);
+  });
+
+  it("pre-fills unitPrice/egaisCode/shelfLifeDays when editing a product that has them, and preserves them on an untouched save", async () => {
     // Based on DRAFT_PRODUCT (not ACTIVE_PRODUCT) -- its gtin14 is a
     // checksum-valid vector, so the zod-validated edit form can actually
     // submit; ACTIVE_PRODUCT's gtin14 fails the check digit and would block
@@ -757,6 +802,7 @@ describe("CatalogPage", () => {
       id: "p6",
       unitPrice: "52.00",
       egaisCode: "EG-123",
+      shelfLifeDays: 90,
     };
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const path = String(url);
@@ -777,6 +823,7 @@ describe("CatalogPage", () => {
     // The edit form must seed from the product being edited, not render blank.
     expect((screen.getByLabelText("Цена за шт., ₽") as HTMLInputElement).value).toBe("52.00");
     expect((screen.getByLabelText("Код ЕГАИС") as HTMLInputElement).value).toBe("EG-123");
+    expect((screen.getByLabelText("Срок годности, дней") as HTMLInputElement).value).toBe("90");
     expect(screen.queryByLabelText("Шаблон этикетки по умолчанию")).toBeNull();
 
     // Save without touching either field -- the PATCH must round-trip the
@@ -801,6 +848,7 @@ describe("CatalogPage", () => {
     >;
     expect(patchBody.unitPrice).toBe("52.00");
     expect(patchBody.egaisCode).toBe("EG-123");
+    expect(patchBody.shelfLifeDays).toBe(90);
     expect(patchBody).not.toHaveProperty("defaultLabelTemplateId");
   });
 

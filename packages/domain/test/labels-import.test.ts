@@ -15,10 +15,12 @@ describe("label code import contract", () => {
     expect(LABEL_FIELDS).toEqual([
       "product.name",
       "product.gtin",
+      "product.egais",
       "km.code",
       "sscc",
       "shift.no",
       "date",
+      "expiry",
       "qty",
       "operator",
       "counterparty.name",
@@ -37,6 +39,11 @@ describe("label code import contract", () => {
       field: "product.name",
     });
     expect(parseTemplatePayload("Партия", 8)).toEqual({ kind: "literal", value: "Партия" });
+    expect(parseTemplatePayload("{{product.egais}}", 9)).toEqual({
+      kind: "field",
+      field: "product.egais",
+    });
+    expect(parseTemplatePayload("{{expiry}}", 10)).toEqual({ kind: "field", field: "expiry" });
   });
 
   it("rejects unknown and mixed placeholders with a source location", () => {

@@ -91,6 +91,7 @@ const CURRENT_PRODUCT_SELECTION = {
   defaultCounterpartyId: schema.products.defaultCounterpartyId,
   unitPrice: schema.products.unitPrice,
   egaisCode: schema.products.egaisCode,
+  shelfLifeDays: schema.products.shelfLifeDays,
   externalRef: schema.products.externalRef,
   createdAt: schema.products.createdAt,
 };
@@ -603,6 +604,7 @@ export class ShiftsService {
       defaultLabelTemplateId: null,
       unitPrice: productRow.unitPrice,
       egaisCode: productRow.egaisCode,
+      shelfLifeDays: productRow.shelfLifeDays,
       externalRef: productRow.externalRef,
       createdAt: productRow.createdAt,
       image,

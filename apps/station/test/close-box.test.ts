@@ -8,6 +8,7 @@ import { recordScan, type AcceptedCode, type ScanEventRow } from "../src/lib/jou
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { addRange, remaining } from "../src/lib/sscc-pool.js";
 import { makeExec } from "./support/sqlite-exec.js";
+import { useTimeZone } from "./support/timezone.js";
 
 // A 9-digit GS1 issuer prefix -- see sscc-pool.ts's doc comment for why the
 // pool is keyed by prefix rather than by GLN.
@@ -179,12 +180,17 @@ describe("closeCurrentBox", () => {
 });
 
 describe("boxLabelFields", () => {
-  it("maps every input to its own labelled slot, leaving km.code blank and printing the shift number", () => {
+  it("maps every input to its own labelled slot, leaving product.egais, km.code, and expiry blank and printing the shift number", () => {
+    // `date` is the station's LOCAL day, so the zone has to be pinned or this
+    // assertion would depend on wherever the runner happens to sit.
+    useTimeZone("Europe/Moscow");
     const fields = boxLabelFields({
       sscc: SSCC,
       itemCount: 12,
       productName: "Кола",
       gtin14: GTIN,
+      egaisCode: null,
+      shelfLifeDays: null,
       operatorName: "Иванов",
       counterpartyName: "Клиент",
       closedAt: "2026-07-29T10:15:00.000Z",
@@ -193,10 +199,12 @@ describe("boxLabelFields", () => {
     expect(fields).toEqual({
       "product.name": "Кола",
       "product.gtin": GTIN,
+      "product.egais": "",
       "km.code": "",
       sscc: SSCC,
       "shift.no": "AUG26-003/S",
       date: "2026-07-29",
+      expiry: "",
       qty: "12",
       operator: "Иванов",
       "counterparty.name": "Клиент",
@@ -209,6 +217,8 @@ describe("boxLabelFields", () => {
       itemCount: 1,
       productName: "",
       gtin14: GTIN,
+      egaisCode: null,
+      shelfLifeDays: null,
       operatorName: null,
       counterpartyName: null,
       closedAt: ISO,
@@ -225,6 +235,8 @@ describe("boxLabelFields", () => {
       itemCount: 1,
       productName: "",
       gtin14: GTIN,
+      egaisCode: null,
+      shelfLifeDays: null,
       operatorName: null,
       counterpartyName: null,
       closedAt: ISO,

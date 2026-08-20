@@ -267,10 +267,12 @@ describe("sampleLabelData", () => {
     expect(data).toEqual({
       "product.name": "Пиво светлое 0,5 л",
       "product.gtin": "04600682000013",
+      "product.egais": "0101234567890123456",
       "km.code": "010460068200001321abcDEF1234567",
       sscc: "346006820000000014",
       "shift.no": "214",
       date: "2026-07-23",
+      expiry: "2027-01-19",
       qty: "20",
       operator: "Смирнов А.",
       "counterparty.name": "Завод Партнер",

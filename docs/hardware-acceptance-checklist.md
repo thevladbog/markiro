@@ -24,6 +24,53 @@ beside each item.
       Reprint remains available; scanning a non-SSCC payload shows the
       "not an SSCC" message. Skip always works, including with the scanner
       disconnected — confirm neither button is ever disabled or hidden.
+- [ ] **Long product name on the stock 58×40 template.** Print the seeded
+      "Коробка 58×40 (203 dpi)" template with a 40+ character Cyrillic product
+      name, on both a Zebra (ZPL) and a TSC (TSPL) printer. Confirm the name
+      wraps within the label — nothing runs off the physical edge, and no
+      character is silently dropped.
+- [ ] **SSCC barcode module width at 300 dpi.** The GS1-128 is emitted with no
+      explicit module width, so it takes the printer's default (nominally 2
+      dots). At 300 dpi that is an X-dimension of roughly 0.169 mm, below the
+      GS1 minimum of 0.25 mm. Scan the "Коробка 58×40 (300 dpi)" template's
+      barcode with a real warehouse scanner — not a phone camera. Also print a
+      label at a different module width first, then this template, to confirm
+      the emitter is not inheriting a stale module-width setting from the
+      previous job.
+- [ ] **SSCC barcode bar height.** On the small stock templates the barcode is
+      only a few millimetres tall, well below the GS1 recommendation for
+      logistics labels. Verify the read rate at normal warehouse scanner
+      distance and angle, not just square-on and close.
+- [ ] **Human-readable SSCC line.** On both 58×40 templates (203 and 300 dpi),
+      on both printer languages, confirm the readable SSCC digits beneath the
+      barcode actually print and are not clipped at the label's bottom edge.
+- [ ] **Small caption legibility.** The column captions ("Дата производства:",
+      "Годен до:", "Кол-во в упаковке:", etc.) are rasterized Cyrillic at a
+      small point size. Verify they are readable on the actual label stock at
+      both 203 and 300 dpi, not just in the admin preview.
+- [ ] **DPI mismatch has no warning.** The station has no printer-resolution
+      setting, so nothing tells an operator that a template's `spec.dpi`
+      doesn't match the printer. Deliberately print the 203 dpi default
+      ("Коробка 58×40 (203 dpi)") on a 300 dpi printer and confirm the
+      resulting roughly two-thirds-scale label is obviously wrong, not merely
+      "a bit small."
+- [ ] **All five stock templates, printed once each.** The three larger sizes
+      (75×120, 100×100, 100×150) leave a large empty lower region on the
+      label. Print one of each and confirm that is acceptable before this
+      catalogue ships as-is to every tenant.
+- [ ] **Night-shift production/expiry date.** Storage keeps `closed_at` in
+      UTC; the label shows the station's LOCAL date. Close a box in the hours
+      where the two disagree (in Moscow, between 00:00 and 03:00 local — i.e.
+      the previous day in UTC) and confirm the printed "Дата производства" is
+      TODAY's local calendar day on the station, not yesterday, and that
+      "Годен до" is that same local day plus the product's shelf life. This
+      is the case a UTC-stamped label used to get wrong by one day.
+- [ ] **Station clock and timezone.** The local date comes from the device's
+      own OS timezone, so confirm the station is set to the plant's zone (not
+      left on UTC or on a factory default) before accepting the labels above.
+- [ ] **Reprint date consistency.** Reprint a previously closed box's label on
+      a later day and confirm the production date and "Годен до" on the
+      reprint match the original label exactly, not the reprint's own date.
 
 ## Station storage (plans 05a, 05b-1, 05b-2)
 

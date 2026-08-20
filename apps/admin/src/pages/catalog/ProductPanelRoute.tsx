@@ -96,6 +96,8 @@ function CreateProductPanel() {
               createdProduct.palletCapacity === null ? "" : String(createdProduct.palletCapacity),
             unitPrice: createdProduct.unitPrice ?? "",
             egaisCode: createdProduct.egaisCode ?? "",
+            shelfLifeDays:
+              createdProduct.shelfLifeDays === null ? "" : String(createdProduct.shelfLifeDays),
             defaultCounterpartyId: createdProduct.defaultCounterpartyId ?? "",
           }
         : undefined,
@@ -180,6 +182,7 @@ function EditProductPanel() {
             palletCapacity: product.palletCapacity === null ? "" : String(product.palletCapacity),
             unitPrice: product.unitPrice ?? "",
             egaisCode: product.egaisCode ?? "",
+            shelfLifeDays: product.shelfLifeDays === null ? "" : String(product.shelfLifeDays),
             defaultCounterpartyId: product.defaultCounterpartyId ?? "",
           }
         : undefined,
@@ -193,6 +196,7 @@ function EditProductPanel() {
       product?.name,
       product?.palletCapacity,
       product?.productGroup,
+      product?.shelfLifeDays,
       product?.unitPrice,
     ],
   );

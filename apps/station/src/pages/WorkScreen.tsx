@@ -66,6 +66,10 @@ export interface WorkScreenProps {
   productId?: string;
   productImage?: StationProductImageDescriptor | null | undefined;
   counterpartyName?: string | null;
+  /** The shift's product egais code, printed on the box label's `product.egais` field. */
+  productEgaisCode?: string | null;
+  /** The shift's product shelf life in days, used to compute the box label's `expiry` field. */
+  productShelfLifeDays?: number | null;
   /** Human-readable shift number for the box label's `shift.no` field. */
   shiftNumber?: string | null;
   plannedQty?: number | null | undefined;
@@ -142,6 +146,8 @@ export function WorkScreen({
   productId,
   productImage,
   counterpartyName,
+  productEgaisCode,
+  productShelfLifeDays,
   shiftNumber,
   plannedQty,
   source,
@@ -425,6 +431,11 @@ export function WorkScreen({
     Array<{
       sscc: string;
       itemCount: number;
+      /** The box's persisted `closed_at`. The "reprint" action below can
+       * re-render the label from scratch when the original bytes are gone
+       * (a restart), and must reproduce the SAME dates the first label
+       * carried -- see `fieldsForClosedBox`. */
+      closedAt: string;
       bytes: Uint8Array | null;
       boxId: string | null;
     }>
@@ -435,6 +446,7 @@ export function WorkScreen({
   function enqueueVerification(entry: {
     sscc: string;
     itemCount: number;
+    closedAt: string;
     bytes: Uint8Array | null;
     boxId: string | null;
   }): void {
@@ -683,6 +695,7 @@ export function WorkScreen({
           enqueueVerification({
             sscc: unresolved.sscc,
             itemCount: unresolved.itemCount,
+            closedAt: unresolved.closedAt,
             bytes: null,
             boxId: unresolved.boxId,
           });
@@ -808,20 +821,45 @@ export function WorkScreen({
     };
   }, [exec, shiftId, issuerPrefix, bundleRevision]);
 
-  function fieldsForClosedBox(result: { sscc: string; itemCount: number }): Record<string, string> {
+  /**
+   * `closedAt` comes from the BOX, never from `new Date()` at render time.
+   * The label's «Дата производства» is the box's close date and «Годен до»
+   * is that plus the product's shelf life, so stamping the current clock
+   * here made a recovery print issued the next morning — or a reprint days
+   * later — carry a different expiry than the label already stuck to the
+   * same physical box. Every caller supplies the box's own persisted
+   * `closed_at`: the close result for a fresh print, `boxes_mirror` (via
+   * `findUnresolvedBoxPrint` / `listClosedBoxes`) for every later one.
+   *
+   * The timestamp stays a UTC ISO instant in storage; `boxLabelFields`
+   * renders it as this station's LOCAL calendar day (storage UTC, display
+   * local), so a box closed at 01:00 Moscow time prints today, not
+   * yesterday.
+   */
+  function fieldsForClosedBox(result: {
+    sscc: string;
+    itemCount: number;
+    closedAt: string;
+  }): Record<string, string> {
     return boxLabelFields({
       sscc: result.sscc,
       itemCount: result.itemCount,
       productName,
       gtin14: expectedGtin14,
+      egaisCode: productEgaisCode ?? null,
+      shelfLifeDays: productShelfLifeDays ?? null,
       operatorName: null,
       counterpartyName: counterpartyName ?? null,
-      closedAt: new Date().toISOString(),
+      closedAt: result.closedAt,
       shiftNumber: shiftNumber ?? null,
     });
   }
 
-  async function attemptClosedBoxPrint(result: { sscc: string; itemCount: number }) {
+  async function attemptClosedBoxPrint(result: {
+    sscc: string;
+    itemCount: number;
+    closedAt: string;
+  }) {
     await labelSpecReady.current;
     const currentPrinting = printingRef.current;
     return attemptBoxPrint({
@@ -864,6 +902,7 @@ export function WorkScreen({
       enqueueVerification({
         sscc: job.sscc,
         itemCount: job.itemCount,
+        closedAt: job.closedAt,
         bytes: attempt.bytes,
         boxId: job.boxId,
       });
@@ -872,7 +911,7 @@ export function WorkScreen({
   }
 
   async function printExceptionLabel(
-    result: { sscc: string; itemCount: number },
+    result: { sscc: string; itemCount: number; closedAt: string },
     boxId: string,
   ): Promise<void> {
     const attempt = await attemptClosedBoxPrint(result);
@@ -880,6 +919,7 @@ export function WorkScreen({
       enqueueVerification({
         sscc: result.sscc,
         itemCount: result.itemCount,
+        closedAt: result.closedAt,
         bytes: attempt.bytes,
         boxId,
       });
@@ -969,6 +1009,7 @@ export function WorkScreen({
         boxId: closingBoxId,
         sscc: result.sscc,
         itemCount: result.itemCount,
+        closedAt: result.closedAt,
         state: "pending",
         errorCode: "transport_failed",
         pending: false,
@@ -1285,7 +1326,12 @@ export function WorkScreen({
         reason,
         at: new Date().toISOString(),
       });
-      void printExceptionLabel({ sscc: target.sscc, itemCount: target.itemCount }, boxId);
+      // `target.closedAt` is the box's persisted closure timestamp, so a
+      // reprint reproduces the ORIGINAL label's dates rather than today's.
+      void printExceptionLabel(
+        { sscc: target.sscc, itemCount: target.itemCount, closedAt: target.closedAt },
+        boxId,
+      );
       await reloadClosedBoxes();
       live.current.onScanRecorded?.();
     });

@@ -672,6 +672,7 @@ describe("credential rejection recovery", () => {
       boxId: "box-1",
       sscc: "046012345678901234",
       itemCount: 1,
+      closedAt: "2026-08-06T08:10:00.000Z",
       state: "pending",
       errorCode: null,
     });

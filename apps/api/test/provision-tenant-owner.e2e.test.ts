@@ -90,6 +90,34 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
           ),
         );
       }
+
+      // This suite provisions tenants (and therefore label_templates +
+      // org_profiles rows, seeded by TenantProvisioningService on tenant
+      // creation) for every tenantSlug pattern used by the tests above.
+      // Resolve just those tenant ids and delete their child rows so the
+      // suite doesn't accumulate rows in the shared dev database on every
+      // run. org_profiles must go first: default_box_label_template_id
+      // carries a composite FK into label_templates.
+      const tenants = await connection.db
+        .select({ id: schema.organization.id })
+        .from(schema.organization)
+        .where(
+          or(
+            like(schema.organization.slug, "first-tenant-%"),
+            like(schema.organization.slug, "renew-tenant-%"),
+            like(schema.organization.slug, "locked-renew-%"),
+            like(schema.organization.slug, "unmanaged-%"),
+          ),
+        );
+      const tenantIds = tenants.map((tenant) => tenant.id);
+      if (tenantIds.length > 0) {
+        await connection.db
+          .delete(schema.orgProfiles)
+          .where(inArray(schema.orgProfiles.tenantId, tenantIds));
+        await connection.db
+          .delete(schema.labelTemplates)
+          .where(inArray(schema.labelTemplates.tenantId, tenantIds));
+      }
     } finally {
       try {
         await defaultDemo.restore();
@@ -228,6 +256,57 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
     expect(subscriptionEvents).toEqual([
       expect.objectContaining({ kind: "demo.provisioned", tenantId: first.tenantId }),
     ]);
+  });
+
+  it("seeds five default label templates and the default box label for a new tenant", async () => {
+    await useDemo();
+    const suffix = crypto.randomUUID();
+    const email = `first-owner-${suffix}@example.com`;
+    const tenantSlug = `first-tenant-${suffix}`;
+    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x71)), () =>
+      crypto.randomUUID(),
+    );
+
+    const result = await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input: { email, tenantName: "Этикетки", tenantSlug },
+    });
+
+    const templates = await connection.db
+      .select({ id: schema.labelTemplates.id, name: schema.labelTemplates.name })
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.tenantId, result.tenantId));
+    expect(templates.map((t) => t.name).sort()).toEqual(
+      [
+        "Коробка 58×40 (203 dpi)",
+        "Коробка 58×40 (300 dpi)",
+        "Коробка 75×120 (203 dpi)",
+        "Коробка 100×100 (203 dpi)",
+        "Коробка 100×150 (203 dpi)",
+      ].sort(),
+    );
+
+    const [profile] = await connection.db
+      .select({ defaultId: schema.orgProfiles.defaultBoxLabelTemplateId })
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, result.tenantId));
+    const expected = templates.find((t) => t.name === "Коробка 58×40 (203 dpi)");
+    expect(profile?.defaultId).toBe(expected?.id);
+
+    // Idempotency: re-provisioning the same tenant must not duplicate templates.
+    await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input: { email, tenantName: "Этикетки", tenantSlug },
+    });
+    const after = await connection.db
+      .select({ id: schema.labelTemplates.id })
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.tenantId, result.tenantId));
+    expect(after).toHaveLength(5);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {

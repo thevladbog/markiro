@@ -6,10 +6,12 @@ import { formatSsccHri } from "../gs1/sscc.js";
 export const LABEL_FIELDS = [
   "product.name",
   "product.gtin",
+  "product.egais",
   "km.code",
   "sscc",
   "shift.no",
   "date",
+  "expiry",
   "qty",
   "operator",
   "counterparty.name",
@@ -28,14 +30,27 @@ const elementBaseShape = {
   yMm: z.number(),
 };
 
-const textElementSchema = z.object({
-  kind: z.literal("text"),
-  ...elementBaseShape,
-  text: z.string(),
+/**
+ * `maxWidthMm` is a hard CONSTRAINT, not just an alignment box: text is
+ * broken into at most `maxLines` lines that each fit it, and any remainder is
+ * truncated with an ellipsis (see `wrap.ts`). `maxLines` is optional and
+ * defaults to 1 — one line, clipped — which is what every template authored
+ * before wrapping existed already expects. Without `maxWidthMm` there is no
+ * width to wrap against and text is emitted on a single unbounded line.
+ */
+const wrappableTextShape = {
   fontSizePt: z.number().min(4).max(72),
   bold: z.boolean().optional(),
   align: alignSchema.optional(),
   maxWidthMm: z.number().positive().optional(),
+  maxLines: z.number().int().min(1).max(16).optional(),
+};
+
+const textElementSchema = z.object({
+  kind: z.literal("text"),
+  ...elementBaseShape,
+  text: z.string(),
+  ...wrappableTextShape,
 });
 export type LabelTextElement = z.infer<typeof textElementSchema>;
 
@@ -43,10 +58,7 @@ const fieldElementSchema = z.object({
   kind: z.literal("field"),
   ...elementBaseShape,
   field: labelFieldSchema,
-  fontSizePt: z.number().min(4).max(72),
-  bold: z.boolean().optional(),
-  align: alignSchema.optional(),
-  maxWidthMm: z.number().positive().optional(),
+  ...wrappableTextShape,
 });
 export type LabelFieldElement = z.infer<typeof fieldElementSchema>;
 
@@ -166,10 +178,12 @@ export function sampleLabelData(): Record<LabelField, string> {
   return {
     "product.name": "Пиво светлое 0,5 л",
     "product.gtin": "04600682000013",
+    "product.egais": "0101234567890123456",
     "km.code": "010460068200001321abcDEF1234567",
     sscc: "346006820000000014",
     "shift.no": "214",
     date: "2026-07-23",
+    expiry: "2027-01-19",
     qty: "20",
     operator: "Смирнов А.",
     "counterparty.name": "Завод Партнер",

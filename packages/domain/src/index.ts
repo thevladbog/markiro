@@ -27,6 +27,8 @@ export {
   ptToDots,
   sampleLabelData,
 } from "./labels/model.js";
+export { DEFAULT_BOX_LABEL_TEMPLATE_NAME, buildDefaultLabelTemplates } from "./labels/defaults.js";
+export type { DefaultLabelTemplate } from "./labels/defaults.js";
 export type {
   LabelBarcodeElement,
   LabelBoxElement,
@@ -59,6 +61,25 @@ export {
   rasterAlignOffsetDots,
 } from "./labels/zpl.js";
 export type { GenerateZplDeps, RasterResult, RasterizeTextFn } from "./labels/zpl.js";
+export type { RasterizeTextOptions } from "./labels/raster-types.js";
+export {
+  AVG_CHAR_WIDTH_EM,
+  clipWithEllipsis,
+  estimatedLineCount,
+  estimatedTextWidthMm,
+  LINE_HEIGHT_EM,
+  ptToMm,
+  wrapTextToWidth,
+  WRAP_ELLIPSIS,
+} from "./labels/wrap.js";
+export {
+  BAR_WIDTH_PER_CHAR_FACTOR,
+  elementBoundsMm,
+  INTERIOR_MODULES,
+  QUIET_ZONE_MODULES,
+  TOTAL_MODULES,
+} from "./labels/bounds.js";
+export type { BoundsMm } from "./labels/bounds.js";
 export { buildBitmapCommand, generateTspl } from "./labels/tspl.js";
 export type { GenerateTsplDeps } from "./labels/tspl.js";
 export { bitmapToTsplBytes, bitmapToZplHex, convertToMonochrome } from "./labels/raster.js";

@@ -121,6 +121,7 @@ const PRODUCT_A: ProductDto = {
   palletCapacity: 48,
   unitPrice: null,
   egaisCode: null,
+  shelfLifeDays: null,
   externalRef: null,
   status: "active",
   defaultCounterpartyId: "cp1",

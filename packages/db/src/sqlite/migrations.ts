@@ -289,4 +289,8 @@ export const STATION_MIGRATIONS: string[] = [
   // and their historical rows must migrate to `legacy`, never `pending`.
   `ALTER TABLE boxes_mirror ADD COLUMN print_state TEXT NOT NULL DEFAULT 'legacy';`,
   `ALTER TABLE boxes_mirror ADD COLUMN print_error_code TEXT;`,
+  // Box-label «Код ЕГАИС» / «Годен до» inputs mirrored off the shift bundle
+  // (spec 2026-08-20). Same re-runnable idempotency as the `login` ALTER above.
+  `ALTER TABLE product_mirror ADD COLUMN egais_code TEXT;`,
+  `ALTER TABLE product_mirror ADD COLUMN shelf_life_days INTEGER;`,
 ];

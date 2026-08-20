@@ -12,9 +12,10 @@
  *    /label-templates/:id` (`useLabelTemplate`), so the fetch mock below
  *    must answer both endpoints.
  *  - `TemplateThumb`'s canvas draw is a no-op under jsdom (`getContext("2d")`
- *    returns `null` there -- same constraint `labels-canvas.test.tsx`
- *    documents for `LabelCanvas`), so the "renders without crashing" case is
- *    just: the page renders, and a `<canvas>` element exists in the DOM.
+ *    returns `null` there -- same constraint `labels-geometry.test.ts`
+ *    documents for the shared `renderer.ts`), so the "renders without
+ *    crashing" case is just: the page renders, and a `<canvas>` element
+ *    exists in the DOM.
  *
  * Needs a `MemoryRouter` (not just `QueryClientProvider`): every card and
  * the "+ Новый шаблон" tile are real `<Link>`s (see `index.tsx`'s doc

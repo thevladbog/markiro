@@ -624,6 +624,50 @@ describe.skipIf(!ready)("products e2e", () => {
     });
   });
 
+  it("POST /products accepts shelfLifeDays and GET returns it; PATCH null clears it; 0 is rejected", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Product with Shelf Life",
+        shelfLifeDays: 184,
+      })
+      .expect(201);
+
+    expect(createRes.body).toMatchObject({
+      gtin14: GTIN14_CANONICAL,
+      name: "Product with Shelf Life",
+      shelfLifeDays: 184,
+    });
+
+    const id = createRes.body.id as string;
+
+    // GET /products returns the field
+    const getRes = await agent.get(`/products/${id}`).expect(200);
+    expect(getRes.body).toMatchObject({ shelfLifeDays: 184 });
+
+    // PATCH shelfLifeDays to null clears it
+    const patchRes = await agent.patch(`/products/${id}`).send({ shelfLifeDays: null }).expect(200);
+    expect(patchRes.body).toMatchObject({ shelfLifeDays: null });
+
+    // Verify the clear persists
+    const verifyRes = await agent.get(`/products/${id}`).expect(200);
+    expect(verifyRes.body).toMatchObject({ shelfLifeDays: null });
+
+    // 0 is out of bounds (min 1)
+    await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Product with Invalid Shelf Life",
+        shelfLifeDays: 0,
+      })
+      .expect(400);
+  });
+
   it("uploads, enriches, replaces, reads, and idempotently deletes a private product image", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);

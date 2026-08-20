@@ -1,21 +1,20 @@
 /**
- * Plan 04 Task 10: label editor chrome -- the full `/labels/new` /
- * `/labels/:id` editor page. Composes Task 9's `LabelCanvas`/`useEditorState`
- * with this task's `Palette` (left), `PropertiesPanel` (right), `PreviewPane`
- * (the "предпросмотр = печать" WYSIWYG pane), a top toolbar (back link,
- * name, label-level size/dpi/language settings, download, save), and a
- * dirty-guard confirm modal on the back action.
+ * The `/labels/new` / `/labels/:id` template page after the visual editor's
+ * removal (spec 2026-08-20): a settings form (name, size, dpi, language) +
+ * the code-import dialog as the ONLY way to set label content + the
+ * read-only "предпросмотр = печать" pane. The drag-and-drop canvas, the
+ * element palette and the per-element properties panel are gone -- nothing
+ * on this page composes a label element by hand any more; `ImportCodeDialog`
+ * parses real ZPL/TSPL into a whole spec and replaces it atomically.
  *
- * WHY LABEL-LEVEL SETTINGS (name/size/dpi/language) LIVE HERE, NOT IN
- * `PropertiesPanel.tsx`: the handoff prototype puts them in the top toolbar
- * (name + size/dpi pill + language pill), visually separate from the right
- * sidebar's per-ELEMENT properties -- this file mirrors that split. `name`
- * in particular isn't even part of `LabelTemplateSpec` (it lives on the
- * template's DB row / `LabelTemplateDto`, not the domain model -- see
- * `packages/domain/src/labels/model.ts`), so it can't live inside the
- * reducer-managed spec at all; `widthMm`/`heightMm`/`dpi`/`language` ARE
- * spec fields and are changed here via `useEditorState`'s existing
- * `replaceSpec` action (no new reducer action needed).
+ * The spec model and save/download paths are unchanged; `spec.language` only
+ * drives download and the library badge -- the station picks its printer's
+ * language at print time.
+ *
+ * WHY name IS NOT PART OF THE SPEC STATE: `name` isn't a `LabelTemplateSpec`
+ * field at all (it lives on the template's DB row / `LabelTemplateDto`, see
+ * `packages/domain/src/labels/model.ts`), so it stays plain component state
+ * next to `useSpecState`'s reducer-managed spec.
  *
  * INJECTABLE GENERATION/RASTERIZATION (hard rule): `rasterizeText` and
  * `checkFamilyCoverage` are props of `LabelEditorPage` itself, defaulting to
@@ -33,7 +32,6 @@ import {
   generateTspl,
   generateZpl,
   sampleLabelData,
-  type LabelElement,
   type LabelImportResult,
   type LabelTemplateSpec,
   type RasterizeTextFn,
@@ -50,16 +48,13 @@ import { toast } from "../../../lib/toast.js";
 import { useCreateLabelTemplate, useLabelTemplate, useUpdateLabelTemplate } from "../api.js";
 import "./editor.css";
 import { buildTsplBlob, buildZplBlob, downloadBlob, safeFileName } from "./download.js";
-import { LabelCanvas } from "./LabelCanvas.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
-import { Palette } from "./Palette.js";
 import { PreviewPane } from "./PreviewPane.js";
-import { PropertiesPanel } from "./PropertiesPanel.js";
-import { useEditorState } from "./useEditorState.js";
+import { useSpecState } from "./useSpecState.js";
 
 const DEFAULT_SPEC: LabelTemplateSpec = {
-  widthMm: 100,
-  heightMm: 100,
+  widthMm: 58,
+  heightMm: 40,
   dpi: 203,
   language: "zpl",
   elements: [],
@@ -67,6 +62,8 @@ const DEFAULT_SPEC: LabelTemplateSpec = {
 
 const SIZE_PRESETS = [
   { key: "58x40", widthMm: 58, heightMm: 40 },
+  { key: "60x40", widthMm: 60, heightMm: 40 },
+  { key: "75x120", widthMm: 75, heightMm: 120 },
   { key: "100x100", widthMm: 100, heightMm: 100 },
   { key: "100x150", widthMm: 100, heightMm: 150 },
 ] as const;
@@ -76,10 +73,21 @@ function matchPresetKey(widthMm: number, heightMm: number): string | null {
   return preset ? preset.key : null;
 }
 
+/**
+ * The bounds `labelTemplateSpecSchema` puts on `widthMm`/`heightMm`
+ * (`packages/domain/src/labels/model.ts`). Checked HERE, before dispatching a
+ * resize, so that an out-of-range or non-numeric entry is reported as what it
+ * is instead of reaching `fitSpecElements`, whose only vocabulary is
+ * `ELEMENT_TOO_LARGE` -- a different failure that would be a lie about e.g. an
+ * empty field on a label with no elements at all.
+ */
+const MIN_SIZE_MM = 10;
+const MAX_SIZE_MM = 300;
+
 const DPI_OPTIONS = ["203", "300"];
 const LANGUAGE_OPTIONS: Array<{ value: LabelTemplateSpec["language"]; label: string }> = [
   { value: "zpl", label: "ZPL" },
-  { value: "tspl", label: "TSPL" },
+  { value: "tspl", label: "TSPL (TSC)" },
 ];
 
 export interface LabelEditorPageProps {
@@ -156,49 +164,64 @@ function LabelEditorContent({
 }: LabelEditorContentProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const editor = useEditorState(initialSpec);
+  const editor = useSpecState(initialSpec);
   const [name, setName] = useState(initialName);
   const [dirty, setDirty] = useState(false);
   const [showDirtyConfirm, setShowDirtyConfirm] = useState(false);
   const [customSize, setCustomSize] = useState(
     () => matchPresetKey(initialSpec.widthMm, initialSpec.heightMm) === null,
   );
-  const [propertiesCollapsed, setPropertiesCollapsed] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  /**
+   * WHY THE CUSTOM-SIZE INPUTS ARE DRAFTED, NOT CONTROLLED BY THE SPEC: a
+   * resize that cannot fit the imported elements keeps the OLD spec (see
+   * `useSpecState`), so a spec-controlled input snaps back mid-typing and a
+   * multi-digit number can never be entered at all ("58.1" -> type "4" -> a
+   * 4mm label is rejected -> the field reverts). `null` means "no pending
+   * edit, show the spec"; a string is what the user has typed so far, and it
+   * is committed on blur / Enter -- never per keystroke.
+   */
+  const [widthDraft, setWidthDraft] = useState<string | null>(null);
+  const [heightDraft, setHeightDraft] = useState<string | null>(null);
+  /**
+   * WHY THE INVALID-DIMENSION FLAG IS PER-AXIS: the drafts are per-axis and a
+   * rejected entry deliberately STAYS in its field, so a single shared flag
+   * would be cleared by a valid commit on the OTHER axis -- leaving the
+   * rejected text on screen with no error next to it, i.e. a field showing a
+   * size the spec does not hold and Save would not post.
+   */
+  const [invalidSizeAxes, setInvalidSizeAxes] = useState<{ width: boolean; height: boolean }>({
+    width: false,
+    height: false,
+  });
+  const hasInvalidSize = invalidSizeAxes.width || invalidSizeAxes.height;
 
   const createMutation = useCreateLabelTemplate();
   const updateMutation = useUpdateLabelTemplate();
 
   const spec = editor.state.spec;
-  const selectedElement = spec.elements.find((el) => el.id === editor.state.selectedId) ?? null;
 
   function markDirty(): void {
     setDirty(true);
   }
 
-  function handleAddElement(element: LabelElement): void {
-    editor.addElement(element);
-    markDirty();
-  }
-
-  function handlePropertyChange(elementId: string, patch: Partial<LabelElement>): void {
-    editor.setElement(elementId, patch);
-    markDirty();
-  }
-
-  function handleDeleteElement(elementId: string): void {
-    editor.removeElement(elementId);
-    markDirty();
-  }
-
-  function handleMoveBy(elementId: string, dxMm: number, dyMm: number): void {
-    editor.moveBy(elementId, dxMm, dyMm);
-    markDirty();
-  }
-
   function handleNameChange(value: string): void {
     setName(value);
     markDirty();
+  }
+
+  /** Drops any pending (uncommitted) size edit and the invalid-dimension
+   * message, so the inputs fall back to whatever the spec now says. */
+  function clearSizeDrafts(): void {
+    setWidthDraft(null);
+    setHeightDraft(null);
+    setInvalidSizeAxes({ width: false, height: false });
+  }
+
+  function setAxisInvalid(axis: "width" | "height", invalid: boolean): void {
+    setInvalidSizeAxes((current) =>
+      current[axis] === invalid ? current : { ...current, [axis]: invalid },
+    );
   }
 
   function handleReplaceSpec(nextSpec: LabelTemplateSpec): void {
@@ -213,13 +236,14 @@ function LabelEditorContent({
 
   function handleImportReplace(result: LabelImportResult): void {
     editor.replaceSpec(result.spec);
-    editor.select(null);
     setCustomSize(matchPresetKey(result.spec.widthMm, result.spec.heightMm) === null);
+    clearSizeDrafts();
     markDirty();
     setShowImportDialog(false);
   }
 
   function handleSizePresetChange(value: string): void {
+    clearSizeDrafts();
     if (value === "custom") {
       setCustomSize(true);
       return;
@@ -230,7 +254,45 @@ function LabelEditorContent({
     handleLabelResize(preset.widthMm, preset.heightMm);
   }
 
+  /**
+   * Commits one axis of the custom size. An empty, non-numeric or
+   * out-of-bounds entry stops here with its own message and leaves the typed
+   * text in place to be corrected; a valid one drops the draft (the input goes
+   * back to mirroring the spec) and lets the reducer have the final say on
+   * whether the elements still fit.
+   */
+  function commitSize(axis: "width" | "height"): void {
+    const raw = axis === "width" ? widthDraft : heightDraft;
+    // Nothing typed since the last commit: a bare focus/blur must not
+    // re-dispatch a resize (and mark the page dirty) for the value the spec
+    // already holds.
+    if (raw === null) return;
+    const value = Number(raw.trim());
+    if (
+      raw.trim() === "" ||
+      !Number.isFinite(value) ||
+      value < MIN_SIZE_MM ||
+      value > MAX_SIZE_MM
+    ) {
+      setAxisInvalid(axis, true);
+      return;
+    }
+    setAxisInvalid(axis, false);
+    if (axis === "width") {
+      setWidthDraft(null);
+      handleLabelResize(value, spec.heightMm);
+    } else {
+      setHeightDraft(null);
+      handleLabelResize(spec.widthMm, value);
+    }
+  }
+
   async function handleSave(): Promise<void> {
+    // A flagged axis still shows its rejected text in the input (see
+    // `invalidSizeAxes`'s doc comment above) -- the spec was never updated,
+    // so saving now would silently persist the last COMMITTED size instead
+    // of the one on screen. Refuse until the user fixes or clears it.
+    if (hasInvalidSize) return;
     try {
       if (mode === "edit" && id) {
         await updateMutation.mutateAsync({ id, input: { name, spec } });
@@ -303,128 +365,135 @@ function LabelEditorContent({
           aria-label={t("pages.labels.editor.nameLabel")}
           value={name}
           onChange={(event) => handleNameChange(event.target.value)}
-          style={{ width: 220 }}
-        />
-        <Select
-          aria-label={t("pages.labels.editor.sizePresetLabel")}
-          options={[
-            ...SIZE_PRESETS.map((preset) => ({
-              value: preset.key,
-              label: `${preset.widthMm}×${preset.heightMm}`,
-            })),
-            { value: "custom", label: t("pages.labels.editor.customSizeOption") },
-          ]}
-          value={customSize ? "custom" : (matchPresetKey(spec.widthMm, spec.heightMm) ?? "custom")}
-          onValueChange={handleSizePresetChange}
-          style={{ width: 140 }}
-        />
-        {customSize && (
-          <>
-            <Input
-              aria-label={t("pages.labels.editor.widthLabel")}
-              type="number"
-              mono
-              value={spec.widthMm.toFixed(1)}
-              onChange={(event) =>
-                handleLabelResize(Number(event.target.value) || 0, spec.heightMm)
-              }
-              style={{ width: 90 }}
-            />
-            <Input
-              aria-label={t("pages.labels.editor.heightLabel")}
-              type="number"
-              mono
-              value={spec.heightMm.toFixed(1)}
-              onChange={(event) => handleLabelResize(spec.widthMm, Number(event.target.value) || 0)}
-              style={{ width: 90 }}
-            />
-          </>
-        )}
-        <Select
-          aria-label={t("pages.labels.editor.dpiLabel")}
-          options={DPI_OPTIONS}
-          value={String(spec.dpi)}
-          onValueChange={(value) =>
-            handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
-          }
-          style={{ width: 100 }}
-        />
-        <Select
-          aria-label={t("pages.labels.editor.languageLabel")}
-          options={LANGUAGE_OPTIONS}
-          value={spec.language}
-          onValueChange={(value) => handleReplaceSpec({ ...spec, language: value })}
-          style={{ width: 100 }}
+          style={{ width: 260 }}
         />
         <span style={{ flex: 1 }} />
-        <Button type="button" variant="secondary" onClick={() => setShowImportDialog(true)}>
-          {t("pages.labels.editor.import.open")}
-        </Button>
-        <Button type="button" variant="secondary" onClick={() => void handleDownload()}>
-          {t("pages.labels.editor.download", { format: spec.language.toUpperCase() })}
-        </Button>
-        <Button type="button" loading={isSaving} onClick={() => void handleSave()}>
+        <Button
+          type="button"
+          loading={isSaving}
+          disabled={hasInvalidSize}
+          onClick={() => void handleSave()}
+        >
           {t("pages.labels.editor.save")}
         </Button>
       </div>
 
-      <div
-        className={`label-editor__body${propertiesCollapsed ? " label-editor__body--properties-collapsed" : ""}`}
-      >
+      <div className="label-editor__body">
         <aside
-          className="label-editor__palette-region"
-          aria-label={t("pages.labels.editor.palette.title")}
+          className="label-editor__settings"
+          aria-label={t("pages.labels.editor.settingsTitle")}
         >
-          <Palette
-            labelWidthMm={spec.widthMm}
-            labelHeightMm={spec.heightMm}
-            onAdd={handleAddElement}
+          <Select
+            label={t("pages.labels.editor.sizePresetLabel")}
+            options={[
+              ...SIZE_PRESETS.map((preset) => ({
+                value: preset.key,
+                label: `${preset.widthMm}×${preset.heightMm}`,
+              })),
+              { value: "custom", label: t("pages.labels.editor.customSizeOption") },
+            ]}
+            value={
+              customSize ? "custom" : (matchPresetKey(spec.widthMm, spec.heightMm) ?? "custom")
+            }
+            onValueChange={handleSizePresetChange}
           />
+          {customSize && (
+            <div className="label-editor__size-inputs">
+              <Input
+                label={t("pages.labels.editor.widthLabel")}
+                type="number"
+                min={MIN_SIZE_MM}
+                max={MAX_SIZE_MM}
+                step={0.1}
+                mono
+                value={widthDraft ?? spec.widthMm.toFixed(1)}
+                {...(invalidSizeAxes.width
+                  ? { error: t("pages.labels.editor.invalidSizeError") }
+                  : {})}
+                onChange={(event) => {
+                  setWidthDraft(event.target.value);
+                  // Retyping answers the complaint; keeping the message up
+                  // would have it contradict what the field now reads.
+                  setAxisInvalid("width", false);
+                }}
+                onBlur={() => commitSize("width")}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  commitSize("width");
+                }}
+              />
+              <Input
+                label={t("pages.labels.editor.heightLabel")}
+                type="number"
+                min={MIN_SIZE_MM}
+                max={MAX_SIZE_MM}
+                step={0.1}
+                mono
+                value={heightDraft ?? spec.heightMm.toFixed(1)}
+                {...(invalidSizeAxes.height
+                  ? { error: t("pages.labels.editor.invalidSizeError") }
+                  : {})}
+                onChange={(event) => {
+                  setHeightDraft(event.target.value);
+                  setAxisInvalid("height", false);
+                }}
+                onBlur={() => commitSize("height")}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  commitSize("height");
+                }}
+              />
+            </div>
+          )}
+          <Select
+            label={t("pages.labels.editor.dpiLabel")}
+            options={DPI_OPTIONS}
+            value={String(spec.dpi)}
+            onValueChange={(value) =>
+              handleReplaceSpec({ ...spec, dpi: value === "300" ? 300 : 203 })
+            }
+          />
+          <Select
+            label={t("pages.labels.editor.languageLabel")}
+            options={LANGUAGE_OPTIONS}
+            value={spec.language}
+            onValueChange={(value) => handleReplaceSpec({ ...spec, language: value })}
+          />
+          <p className="label-editor__language-hint">{t("pages.labels.editor.languageHint")}</p>
+          <Button type="button" onClick={() => setShowImportDialog(true)}>
+            {t("pages.labels.editor.import.open")}
+          </Button>
+          <Button type="button" variant="secondary" onClick={() => void handleDownload()}>
+            {t("pages.labels.editor.download", { format: spec.language.toUpperCase() })}
+          </Button>
+          {/* The invalid-dimension message wins when it is set: it describes
+              the most recent action (a rejected entry never reached the
+              reducer, so a stale `geometryError` from an earlier resize must
+              not be presented as the reason). */}
+          {hasInvalidSize ? (
+            <Alert tone="error">{t("pages.labels.editor.invalidSizeError")}</Alert>
+          ) : (
+            editor.state.geometryError !== null && (
+              <Alert tone="error">{t("pages.labels.editor.geometryError")}</Alert>
+            )
+          )}
         </aside>
 
         <main
           className="label-editor__workspace"
-          aria-label={t("pages.labels.editor.workspaceLabel")}
+          aria-label={t("pages.labels.editor.preview.caption")}
         >
-          <LabelCanvas
-            spec={spec}
-            selectedId={editor.state.selectedId}
-            onSelect={editor.select}
-            onMoveBy={handleMoveBy}
-            onDelete={handleDeleteElement}
-          />
+          {spec.elements.length === 0 && (
+            <p className="label-editor__empty">{t("pages.labels.editor.empty")}</p>
+          )}
           <PreviewPane
             spec={spec}
             rasterizeText={rasterizeText}
             checkFamilyCoverage={checkFamilyCoverage}
           />
         </main>
-
-        <aside
-          className="label-editor__properties"
-          aria-label={t("pages.labels.editor.properties.title")}
-        >
-          {propertiesCollapsed ? (
-            <Button
-              type="button"
-              variant="secondary"
-              size="compact"
-              className="label-editor__reopen-properties"
-              aria-label={t("pages.labels.editor.properties.expand")}
-              onClick={() => setPropertiesCollapsed(false)}
-            >
-              {t("pages.labels.editor.properties.expand")}
-            </Button>
-          ) : (
-            <PropertiesPanel
-              element={selectedElement}
-              onChange={handlePropertyChange}
-              onDelete={handleDeleteElement}
-              onCollapse={() => setPropertiesCollapsed(true)}
-              geometryError={editor.state.geometryError}
-            />
-          )}
-        </aside>
       </div>
 
       <Modal
