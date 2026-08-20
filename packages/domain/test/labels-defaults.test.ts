@@ -170,7 +170,7 @@ describe("buildDefaultLabelTemplates", () => {
       // Before this fix the emitter passed neither, and the rasterizer sized
       // the bitmap from the text's own measured width.
       expect(call![1].maxWidthPx, `${name}: maxWidthPx`).toBe(expectedMaxWidthPx);
-      expect(call![1].maxLines, `${name}: maxLines`).toBe(2);
+      expect(call![1].maxLines, `${name}: maxLines`).toBe(3);
 
       const raster = await rasterizeText(LONG_CYRILLIC_NAME, call![1]);
       expect(raster.width, `${name}: bitmap width`).toBeLessThanOrEqual(expectedMaxWidthPx);
@@ -198,7 +198,104 @@ describe("buildDefaultLabelTemplates", () => {
       // line, which is what used to differ by brand.
       expect(zpl, `${name}: ZPL HRI`).toContain("^BCN,");
       expect(zpl, `${name}: ZPL HRI`).toMatch(/\^BCN,\d+,N,N,N/);
-      expect(tspl, `${name}: TSPL HRI`).toMatch(/BARCODE \d+,\d+,"128",\d+,0,0,2,2,/);
+      expect(tspl, `${name}: TSPL HRI`).toMatch(/BARCODE \d+,\d+,"128",\d+,0,0,\d+,\d+,/);
+    }
+  });
+
+  /**
+   * The product name gets THREE lines (it had two, and the first physical
+   * print already filled both with a name the owner says is not their
+   * longest), and the «SSCC:» caption that used to sit above the barcode is
+   * gone — the digits underneath already identify it, and at 5 pt the caption
+   * was barely legible on the print.
+   */
+  it("gives the product name three lines and drops the SSCC caption", () => {
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const nameEl = spec.elements.find((el) => el.id === "name");
+      expect(nameEl, `${name}: no product-name element`).toBeDefined();
+      if (nameEl?.kind !== "field") throw new Error("unreachable");
+      expect(nameEl.maxLines, `${name}: name maxLines`).toBe(3);
+
+      expect(
+        spec.elements.some((el) => el.kind === "text" && el.text.startsWith("SSCC")),
+        `${name}: the SSCC caption is back`,
+      ).toBe(false);
+      // The caption it replaced is still there, one row up: the digits are
+      // the human-readable form of the barcode, not a stray number.
+      expect(spec.elements.some((el) => el.kind === "field" && el.field === "sscc")).toBe(true);
+    }
+  });
+
+  /**
+   * The SSCC barcode's width is DETERMINISTIC (18 digits + the emitters' own
+   * `(00)` prefix = 20 digits = 156 modules in subset C), which is what lets
+   * the template centre it by arithmetic. This pins both halves: the widest
+   * X-dimension that leaves GS1's 10X quiet zones inside the content width,
+   * and the resulting centred `xMm`.
+   */
+  it("centres the SSCC barcode at the widest GS1-legal module width", () => {
+    const expected: Record<string, { moduleWidthMm: number; xMm: number }> = {
+      // 203 dpi: 2 dots = 0.2502 mm, already GS1's MINIMUM X-dimension — a
+      // 3-dot module would be 58.6 mm of bars on a 58 mm label.
+      "Коробка 58×40 (203 dpi)": { moduleWidthMm: 0.2502, xMm: 9.5 },
+      // 300 dpi: 3 dots = 0.254 mm. 4 dots (52.8 mm of bars) fits the label
+      // but leaves only 2.6 mm of quiet zone where GS1 wants 3.4 mm.
+      "Коробка 58×40 (300 dpi)": { moduleWidthMm: 0.254, xMm: 9.2 },
+      "Коробка 75×120 (203 dpi)": { moduleWidthMm: 0.3754, xMm: 8.2 },
+      "Коробка 100×100 (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
+      "Коробка 100×150 (203 dpi)": { moduleWidthMm: 0.5005, xMm: 11 },
+    };
+
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const barcode = spec.elements.find((el) => el.kind === "barcode");
+      if (barcode?.kind !== "barcode") throw new Error(`${name}: no barcode`);
+      expect(barcode.moduleWidthMm, `${name}: module width`).toBe(expected[name]!.moduleWidthMm);
+      expect(barcode.xMm, `${name}: centred x`).toBe(expected[name]!.xMm);
+
+      // Whole dots, or the printer rounds the template's intent away.
+      const moduleDots = (barcode.moduleWidthMm! * spec.dpi) / 25.4;
+      expect(moduleDots, `${name}: module in dots`).toBeCloseTo(Math.round(moduleDots), 3);
+
+      // Centred, and its quiet zones are real blank label on both sides.
+      const bars = 156 * barcode.moduleWidthMm!;
+      expect(barcode.xMm, `${name}: centred`).toBeCloseTo((spec.widthMm - bars) / 2, 1);
+      const quietZone = (spec.widthMm - bars) / 2;
+      expect(quietZone, `${name}: quiet zone`).toBeGreaterThanOrEqual(10 * barcode.moduleWidthMm!);
+    }
+  });
+
+  /** The bars got taller — the whole point of reclaiming the caption's row. */
+  it("prints a taller barcode than the 3.5 mm the first physical label used", () => {
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const barcode = spec.elements.find((el) => el.kind === "barcode");
+      if (barcode?.kind !== "barcode") throw new Error(`${name}: no barcode`);
+      expect(barcode.sizeMm, `${name}: bar height`).toBeGreaterThan(3.5);
+    }
+  });
+
+  /**
+   * DATE FORMAT REGRESSION GUARD. The first physical print read `2026-08-20`
+   * where the customer-approved mock-up says `20.08.2026`. Both label date
+   * fields are asserted through the RENDERED output, not just the data, so a
+   * future change that reintroduces ISO anywhere between `sampleLabelData()`
+   * and the emitters fails here.
+   */
+  it("prints both dates as дд.мм.гггг, never ISO", async () => {
+    const data = sampleLabelData();
+    expect(data.date).toBe("23.07.2026");
+    expect(data.expiry).toBe("19.01.2027");
+
+    for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const zpl = await generateZpl(spec, data, { rasterizeText: boundedRasterizer() });
+      const tspl = await generateTspl(spec, data, { rasterizeText: boundedRasterizer() });
+      for (const [language, document] of [
+        ["ZPL", zpl],
+        ["TSPL", tspl],
+      ] as const) {
+        expect(document, `${name}: ${language} production date`).toContain("23.07.2026");
+        expect(document, `${name}: ${language} expiry date`).toContain("19.01.2027");
+        expect(document, `${name}: ${language} ISO leak`).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+      }
     }
   });
 

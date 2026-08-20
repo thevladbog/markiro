@@ -166,6 +166,34 @@ describe("elementBoundsMm", () => {
     expect(bounds.w).toBeCloseTo(Math.max(sampleText.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * 8, 6);
   });
 
+  /**
+   * The schematic preview draws a linear barcode `elementBoundsMm` wide (see
+   * `renderer.ts`'s `drawLinearBarcode`), so once a template states its
+   * X-dimension the preview must show the REAL printed width — otherwise the
+   * stock templates' centred SSCC barcode looks wider than it prints and
+   * off-centre with it, which is exactly what the centring was meant to fix.
+   */
+  it("barcode (code128 with moduleWidthMm): real module width, not the char-count fudge", () => {
+    const bounds = elementBoundsMm(
+      {
+        kind: "barcode",
+        id: "b-module",
+        xMm: 9.5,
+        yMm: 32,
+        format: "code128",
+        data: "sscc",
+        sizeMm: 4.8,
+        moduleWidthMm: 0.2502,
+      },
+      sampleData,
+    );
+    // 18-digit SSCC + the emitters' own `(00)` prefix = 156 modules.
+    expect(bounds.w).toBeCloseTo(156 * 0.2502, 6);
+    expect(bounds.h).toBe(4.8);
+    // Centred on a 58 mm label, and it stays on it.
+    expect(bounds.x + bounds.w).toBeLessThanOrEqual(58);
+  });
+
   it("barcode (datamatrix/qr): square bounds = TOTAL_MODULES * sizeMm (module square side)", () => {
     const bounds = elementBoundsMm(
       {

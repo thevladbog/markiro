@@ -213,6 +213,32 @@ function resolveBarcodeSource(
   return { value: source.literal };
 }
 
+/**
+ * `^BY<module width in dots>` for a linear barcode that declares an explicit
+ * `moduleWidthMm`, or `""` when it does not.
+ *
+ * `^BY` is ZPL's Bar Code Field Default command and it is MODAL: it applies
+ * to every subsequent barcode in the format — and, on real printers, survives
+ * into the next label. Emitting nothing (what this module did for every
+ * barcode before `moduleWidthMm` existed) therefore does not mean "the
+ * default 2 dots"; it means "whatever the last thing to print happened to
+ * leave set", which is how one template came to print at different widths on
+ * two printers. An element that states its X-dimension gets it pinned right
+ * before its own barcode command, which is where Zebra's own documentation
+ * puts `^BY` (`^FO…^BY3^BCN,…^FD…^FS`).
+ *
+ * The dot count is clamped into `^BY`'s documented 1–10 range so an absurd
+ * `moduleWidthMm` still produces a command the printer accepts instead of one
+ * it rejects outright — the same defensive clamp `^BQ`'s magnification gets
+ * below. Elements WITHOUT `moduleWidthMm` emit nothing at all, so every
+ * previously-authored template's output is byte-identical.
+ */
+function barWidthCommand(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dpi"]): string {
+  if (element.moduleWidthMm === undefined) return "";
+  const moduleDots = Math.max(1, Math.min(10, mmToDots(element.moduleWidthMm, dpi)));
+  return `^BY${moduleDots}`;
+}
+
 function renderBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
@@ -242,12 +268,12 @@ function renderBarcodeElement(
       // see `defaults.ts`'s `val-sscc`.
       const payload = field === "sscc" ? `>;>800${value}` : value;
       const { fh, data: escaped } = escapeFdData(payload);
-      return `^FO${x},${y}^BCN,${heightDots},N,N,N${fh}^FD${escaped}^FS`;
+      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BCN,${heightDots},N,N,N${fh}^FD${escaped}^FS`;
     }
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
       const { fh, data: escaped } = escapeFdData(value);
-      return `^FO${x},${y}^BEN,${heightDots}${fh}^FD${escaped}^FS`;
+      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${fh}^FD${escaped}^FS`;
     }
     case "datamatrix": {
       const moduleDots = mmToDots(element.sizeMm, dpi);
