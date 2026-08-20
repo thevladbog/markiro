@@ -30,8 +30,8 @@ pub fn decode_payload(payload_base64: &str) -> Result<Vec<u8>, String> {
     STANDARD.decode(payload_base64).map_err(|e| e.to_string())
 }
 
-/// One installed Windows printer queue bound to a USB port. Identified by the
-/// spooler queue name (stable across replugging), not the `USBnnn` port.
+/// One installed Windows printer queue. Identified by the spooler queue name
+/// (stable across replugging), while the port is shown for operator context.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsbPrinter {
@@ -39,15 +39,16 @@ pub struct UsbPrinter {
     pub port: String,
 }
 
-/// Keeps only queues whose port says USB (`USB001`, ...). Pure so it is
-/// testable on every OS; the Win32 enumeration behind it is not. Outside
-/// `cfg(test)`, only the `cfg(windows)` branch of `list_usb_printers` calls
-/// this, so non-Windows release builds would otherwise warn it dead.
+/// Keeps every installed queue because vendor drivers do not have to expose a
+/// physical USB connection as a `USBnnn` spooler port. USB-named ports sort
+/// first so the common direct-attach case stays easiest to find. Pure so it
+/// is testable on every OS; the Win32 enumeration behind it is not.
 #[cfg_attr(not(windows), allow(dead_code))]
-pub fn filter_usb_printers(printers: Vec<(String, String)>) -> Vec<UsbPrinter> {
+pub fn prioritize_installed_printers(printers: Vec<(String, String)>) -> Vec<UsbPrinter> {
+    let mut printers = printers;
+    printers.sort_by_key(|(_, port)| !port.to_ascii_uppercase().starts_with("USB"));
     printers
         .into_iter()
-        .filter(|(_, port)| port.to_ascii_uppercase().starts_with("USB"))
         .map(|(name, port)| UsbPrinter { name, port })
         .collect()
 }
@@ -59,7 +60,9 @@ pub async fn list_usb_printers() -> Result<Vec<UsbPrinter>, String> {
     tauri::async_runtime::spawn_blocking(|| -> Result<Vec<UsbPrinter>, String> {
         #[cfg(windows)]
         {
-            Ok(filter_usb_printers(spooler::enumerate_local_printers()?))
+            Ok(prioritize_installed_printers(
+                spooler::enumerate_installed_printers()?,
+            ))
         }
         #[cfg(not(windows))]
         {
@@ -75,8 +78,8 @@ pub async fn list_usb_printers() -> Result<Vec<UsbPrinter>, String> {
 #[cfg(windows)]
 mod spooler {
     use windows_sys::Win32::Graphics::Printing::{
-        ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinterW,
-        StartDocPrinterW, StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_ENUM_LOCAL,
+        ClosePrinter, EndDocPrinter, EndPagePrinter, EnumPrintersW, OpenPrinterW, StartDocPrinterW,
+        StartPagePrinter, WritePrinter, DOC_INFO_1W, PRINTER_ENUM_CONNECTIONS, PRINTER_ENUM_LOCAL,
         PRINTER_HANDLE, PRINTER_INFO_2W,
     };
 
@@ -99,14 +102,15 @@ mod spooler {
         format!("{call} failed: {}", std::io::Error::last_os_error())
     }
 
-    /// Local queues as (queue name, port name) pairs. The first
+    /// Installed local queues and user printer connections as (queue name,
+    /// port name) pairs. The first
     /// `EnumPrintersW` call intentionally measures the needed buffer size.
-    pub fn enumerate_local_printers() -> Result<Vec<(String, String)>, String> {
+    pub fn enumerate_installed_printers() -> Result<Vec<(String, String)>, String> {
         unsafe {
             let mut needed = 0u32;
             let mut returned = 0u32;
             let first_call_ok = EnumPrintersW(
-                PRINTER_ENUM_LOCAL,
+                PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
                 std::ptr::null(),
                 2,
                 std::ptr::null_mut(),
@@ -139,7 +143,7 @@ mod spooler {
             // works in practice on this allocator.
             let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
             if EnumPrintersW(
-                PRINTER_ENUM_LOCAL,
+                PRINTER_ENUM_LOCAL | PRINTER_ENUM_CONNECTIONS,
                 std::ptr::null(),
                 2,
                 buffer.as_mut_ptr() as *mut u8,
@@ -301,7 +305,10 @@ mod tests {
     fn decodes_base64_into_exact_bytes() {
         // "^XA" plus a byte above 0x7F, which must survive intact.
         let encoded = "XlhBpA==";
-        assert_eq!(decode_payload(encoded).unwrap(), vec![0x5E, 0x58, 0x41, 0xA4]);
+        assert_eq!(
+            decode_payload(encoded).unwrap(),
+            vec![0x5E, 0x58, 0x41, 0xA4]
+        );
     }
 
     #[test]
@@ -334,27 +341,34 @@ mod tests {
     }
 
     #[test]
-    fn filter_usb_printers_keeps_only_usb_ports_case_insensitively() {
-        let filtered = super::filter_usb_printers(vec![
+    fn installed_printer_list_keeps_every_queue_and_prioritizes_usb_ports() {
+        let filtered = super::prioritize_installed_printers(vec![
             ("Zebra ZD421".to_string(), "USB001".to_string()),
             ("Office Laser".to_string(), "192.168.0.20".to_string()),
             ("TSC TE200".to_string(), "usb002".to_string()),
-            ("Microsoft Print to PDF".to_string(), "PORTPROMPT:".to_string()),
+            (
+                "Microsoft Print to PDF".to_string(),
+                "PORTPROMPT:".to_string(),
+            ),
         ]);
-        let pairs: Vec<(String, String)> =
-            filtered.into_iter().map(|p| (p.name, p.port)).collect();
+        let pairs: Vec<(String, String)> = filtered.into_iter().map(|p| (p.name, p.port)).collect();
         assert_eq!(
             pairs,
             vec![
                 ("Zebra ZD421".to_string(), "USB001".to_string()),
                 ("TSC TE200".to_string(), "usb002".to_string()),
+                ("Office Laser".to_string(), "192.168.0.20".to_string()),
+                (
+                    "Microsoft Print to PDF".to_string(),
+                    "PORTPROMPT:".to_string(),
+                ),
             ]
         );
     }
 
     #[test]
-    fn filter_usb_printers_returns_empty_for_no_printers() {
-        assert!(super::filter_usb_printers(Vec::new()).is_empty());
+    fn installed_printer_list_returns_empty_for_no_printers() {
+        assert!(super::prioritize_installed_printers(Vec::new()).is_empty());
     }
 
     #[test]
@@ -377,6 +391,9 @@ mod tests {
             b"^XA^XZ",
         )
         .unwrap_err();
-        assert!(err.contains("Windows"), "error should say Windows-only: {err}");
+        assert!(
+            err.contains("Windows"),
+            "error should say Windows-only: {err}"
+        );
     }
 }

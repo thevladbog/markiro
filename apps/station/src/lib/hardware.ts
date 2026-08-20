@@ -7,7 +7,7 @@ export type PrintTarget =
   | { kind: "tcp"; host: string; port: number }
   | { kind: "usb"; printer: string };
 
-/** One installed Windows printer queue on a USB port. */
+/** One installed Windows printer queue available to the current user. */
 export interface UsbPrinterInfo {
   name: string;
   port: string;
@@ -23,7 +23,7 @@ export type ScannerStatus = "connected" | "disconnected";
  */
 export interface HardwareContract {
   listScannerPorts(): Promise<string[]>;
-  /** Installed USB label printers; empty on non-Windows platforms. */
+  /** Installed Windows printer queues, with USB ports first; empty off Windows. */
   listUsbPrinters(): Promise<UsbPrinterInfo[]>;
   openScanner(port: string, baud: number): Promise<void>;
   closeScanner(): Promise<void>;

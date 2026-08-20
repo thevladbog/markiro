@@ -932,7 +932,7 @@ describe("pairingServerUrl", () => {
 });
 
 describe("App", () => {
-  it("shows window control on the floor, restores setup lockdown, and changes no operator state", async () => {
+  it("keeps fullscreen while workstation setup opens and closes", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {
       scanner: null,
@@ -951,11 +951,12 @@ describe("App", () => {
     expect(lockdownMock.start).toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
-    await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
-    expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+    expect(lockdownMock.exit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
 
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
-    await waitFor(() => expect(lockdownMock.enter).toHaveBeenCalledTimes(1));
+    expect(lockdownMock.enter).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Exit fullscreen" })).toBeDefined();
     expect(screen.getByText("Ivan")).toBeDefined();
 
@@ -966,7 +967,7 @@ describe("App", () => {
     expect(screen.getByText("Ivan")).toBeDefined();
   });
 
-  it("does not re-enter after setup when the operator had already selected windowed mode", async () => {
+  it("keeps windowed mode while workstation setup opens and closes", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {
       scanner: null,
@@ -991,12 +992,12 @@ describe("App", () => {
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
 
-    expect(lockdownMock.exit).toHaveBeenCalledTimes(1);
+    expect(lockdownMock.exit).not.toHaveBeenCalled();
     expect(lockdownMock.enter).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Return to fullscreen" })).toBeDefined();
   });
 
-  it("still exits for setup after a failed enter may have partially changed the OS window", async () => {
+  it("does not change the window after a failed fullscreen attempt when setup opens", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {
       scanner: null,
@@ -1017,7 +1018,8 @@ describe("App", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Workstation setup" }));
 
-    await waitFor(() => expect(lockdownMock.exit).toHaveBeenCalledTimes(1));
+    expect(await screen.findByRole("heading", { name: "Workstation setup" })).toBeDefined();
+    expect(lockdownMock.exit).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Done" }));
     expect(lockdownMock.enter).not.toHaveBeenCalled();
   });
