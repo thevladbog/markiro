@@ -10,7 +10,11 @@ import { Alert, Button, Input, SidePanel, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
-import { describeSsccBlocker, describeSsccSeedError } from "../../lib/sscc-counter.js";
+import {
+  describeSsccBlocker,
+  describeSsccNextLabelHint,
+  describeSsccSeedError,
+} from "../../lib/sscc-counter.js";
 import { toast } from "../../lib/toast.js";
 import {
   useCounterpartySscc,
@@ -310,7 +314,7 @@ function CounterpartySsccSection({
             <Alert tone="warn">{blocked}</Alert>
           ) : (
             <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
-              {t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial })}
+              {describeSsccNextLabelHint(t, minSerial)}
             </p>
           )}
           <div>

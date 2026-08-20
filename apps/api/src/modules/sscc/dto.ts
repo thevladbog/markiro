@@ -21,7 +21,14 @@ export type SsccSeedBlocker =
 /** `GET /org/profile/sscc` and `GET /counterparties/:id/sscc` response. */
 export interface SsccCounterStateDto {
   extensionDigit: number;
-  /** The serial the next printed label will carry. */
+  /**
+   * The value the NEXT BLOCK will be cut from -- not, in general, the serial
+   * the next label will carry. While a station burns a block it already
+   * holds, this counter already points past that whole block (see §4 of the
+   * 2026-08-20 reseed design). The two coincide only immediately after a
+   * reseed, which revokes the outstanding blocks so the next one is cut from
+   * exactly this value.
+   */
   nextSerial: number;
   /** The lowest value `PUT` will accept right now (`seedFloor`). */
   minSerial: number;

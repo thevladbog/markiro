@@ -36,6 +36,23 @@ export function describeSsccBlocker(
 }
 
 /**
+ * The caption under the counter field: what has been printed so far, what
+ * saving will do, and the lowest value the server will accept.
+ *
+ * `minSerial` is one PAST the highest serial ever printed, so "printed
+ * through" is `minSerial - 1` -- which is 0 (the box floor's `minSerial` is
+ * 1) when nothing has been printed at all, and "Printed through 0" is not a
+ * sentence anyone should read. That case gets its own key rather than an
+ * interpolated zero. Shared by both counter forms so the two can never
+ * disagree about when to use which.
+ */
+export function describeSsccNextLabelHint(t: TFunction, minSerial: number): string {
+  return minSerial <= 1
+    ? t("common.sscc.nextLabelHintNothingPrinted", { min: minSerial })
+    : t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial });
+}
+
+/**
  * A save rejection, as a localized sentence. The server's own message is
  * English-only prose meant for logs; what reaches the operator is keyed off
  * the machine-readable `code` instead. Anything unrecognised falls back to

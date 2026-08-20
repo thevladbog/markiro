@@ -16,6 +16,7 @@
     },
     "sscc": {
       "nextLabelHint": "Printed through {{printed}}. The value you save is what the next shift's first label will carry; the lowest allowed value is {{min}}.",
+      "nextLabelHintNothingPrinted": "Nothing has been printed yet. The value you save is what the next shift's first label will carry; the lowest allowed value is {{min}}.",
       "blocked": {
         "activeShift": "Shift {{number}} is open, so a station may be printing right now. Close it before changing the counter.",
         "deviceOutOfSync": "Station \"{{device}}\" has not checked in since the last shift closed. Wait for it to sync, or its boxes will take serials that were handed out again. If the station is decommissioned, revoke it under Devices."

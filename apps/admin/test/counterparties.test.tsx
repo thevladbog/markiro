@@ -432,4 +432,28 @@ describe("CounterpartiesPage", () => {
       within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }),
     ).toHaveProperty("disabled", false);
   });
+
+  it("says nothing has been printed yet instead of 'напечатано до 0' (final review, finding 4)", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url === "/api/counterparties/1/sscc") {
+        // The floor for a box counter with nothing printed is 1, which used
+        // to interpolate as "Уже напечатано до 0".
+        return jsonResponse(200, { ...COUNTER, nextSerial: 1, minSerial: 1 });
+      }
+      return jsonResponse(200, { items: [ACME] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Acme Ltd");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+
+    const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
+    const section = input.closest(".mk-counterparty-panel-section");
+    if (!section) throw new Error("SSCC section not found");
+    await waitFor(() =>
+      expect(within(section as HTMLElement).getByText(/Ещё ничего не напечатано/)).toBeDefined(),
+    );
+    expect(within(section as HTMLElement).queryByText(/напечатано до 0/)).toBeNull();
+  });
 });

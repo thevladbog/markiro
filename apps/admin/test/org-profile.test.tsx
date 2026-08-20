@@ -800,12 +800,29 @@ describe("OrgProfilePage", () => {
     renderPage();
 
     const card = await cardOf("Счётчик SSCC для коробов");
-    // 45 000 is the counter (the next label's serial), 40 000 the floor --
-    // both come from the server; the form must not invent either.
+    // 45 000 is the counter (the value the next BLOCK is cut from -- not the
+    // next label's serial, which is wherever the station's current block has
+    // got to), 40 000 the floor -- both come from the server; the form must
+    // not invent either.
     await waitFor(() => expect(within(card).getByText(/40\s?000/)).toBeDefined());
     expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
       "disabled",
       false,
     );
+  });
+
+  it("says nothing has been printed yet instead of 'напечатано до 0' (final review, finding 4)", async () => {
+    // The floor for a box counter with nothing printed is 1, and the hint's
+    // "printed through" is minSerial - 1 -- which used to render as
+    // "Уже напечатано до 0".
+    vi.stubGlobal(
+      "fetch",
+      routeFetch({ sscc: () => jsonResponse(200, { ...COUNTER, nextSerial: 1, minSerial: 1 }) }),
+    );
+    renderPage();
+
+    const card = await cardOf("Счётчик SSCC для коробов");
+    await waitFor(() => expect(within(card).getByText(/Ещё ничего не напечатано/)).toBeDefined());
+    expect(within(card).queryByText(/напечатано до 0/)).toBeNull();
   });
 });
