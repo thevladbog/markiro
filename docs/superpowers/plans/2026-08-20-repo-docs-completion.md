@@ -25,10 +25,12 @@
 ### Task 1: README workspace tree and support section (both languages)
 
 **Files:**
+
 - Modify: `README.md:135-165` (Development tree) and `README.md:166-177` (before/inside Documentation area)
 - Modify: `README.ru.md:135-165` and `README.ru.md:166-177` (same edits in Russian)
 
 **Interfaces:**
+
 - Produces: links to `./CONTRIBUTING.md`, `./SECURITY.md`, `./SUPPORT.md` (created in Tasks 2–4; forward links are acceptable within this plan).
 
 - [ ] **Step 1: Update the workspace tree in README.md**
@@ -111,9 +113,11 @@ git commit -m "docs: list all workspaces and link community files from READMEs"
 ### Task 2: SECURITY.md
 
 **Files:**
+
 - Create: `SECURITY.md`
 
 **Interfaces:**
+
 - Produces: `SECURITY.md` linked from READMEs (Task 1), CONTRIBUTING.md (Task 3), and issue-template config (Task 5).
 
 - [ ] **Step 1: Create SECURITY.md with exactly this content**
@@ -169,9 +173,11 @@ git commit -m "docs: add security policy with private advisory reporting"
 ### Task 3: CONTRIBUTING.md
 
 **Files:**
+
 - Create: `CONTRIBUTING.md`
 
 **Interfaces:**
+
 - Consumes: `SECURITY.md` (Task 2) for the vulnerability pointer.
 - Produces: `CONTRIBUTING.md` linked from READMEs (Task 1) and the PR template (Task 5).
 
@@ -221,9 +227,11 @@ git commit -m "docs: add contributing policy (external contributions not accepte
 ### Task 4: SUPPORT.md
 
 **Files:**
+
 - Create: `SUPPORT.md`
 
 **Interfaces:**
+
 - Consumes: `SECURITY.md` (Task 2), `CONTRIBUTING.md` (Task 3).
 - Produces: `SUPPORT.md` linked from READMEs (Task 1) and CONTRIBUTING.md.
 
@@ -272,6 +280,7 @@ git commit -m "docs: add support and commercial licensing contact guide"
 ### Task 5: GitHub templates and CODEOWNERS
 
 **Files:**
+
 - Create: `.github/CODEOWNERS`
 - Create: `.github/PULL_REQUEST_TEMPLATE.md`
 - Create: `.github/ISSUE_TEMPLATE/bug_report.yml`
@@ -279,6 +288,7 @@ git commit -m "docs: add support and commercial licensing contact guide"
 - Create: `.github/ISSUE_TEMPLATE/config.yml`
 
 **Interfaces:**
+
 - Consumes: `CONTRIBUTING.md` (Task 3) linked from the PR template; security advisory URL from Task 2.
 
 - [ ] **Step 1: Create `.github/CODEOWNERS`**
@@ -310,7 +320,7 @@ git commit -m "docs: add support and commercial licensing contact guide"
 ```yaml
 name: Bug report
 description: Something is broken or behaves unexpectedly
-labels: ['bug']
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
@@ -358,7 +368,7 @@ body:
 ```yaml
 name: Question
 description: Ask about behaviour, setup, or the project
-labels: ['question']
+labels: ["question"]
 body:
   - type: textarea
     id: question
@@ -396,9 +406,11 @@ git commit -m "docs: add CODEOWNERS, PR template, and issue forms"
 ### Task 6: License metadata in all package manifests
 
 **Files:**
+
 - Modify: `package.json`, `apps/admin/package.json`, `apps/api/package.json`, `apps/kiosk/package.json`, `apps/landing/package.json`, `apps/saas-admin/package.json`, `apps/station/package.json`, `packages/db/package.json`, `packages/domain/package.json`, `packages/email/package.json`, `packages/legal-documents/package.json`, `packages/ui/package.json`
 
 **Interfaces:**
+
 - Produces: `"license": "SEE LICENSE IN LICENSE"` in all 12 manifests.
 
 - [ ] **Step 1: Add the license field to every manifest**
