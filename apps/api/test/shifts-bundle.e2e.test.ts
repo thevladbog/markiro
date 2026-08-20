@@ -169,6 +169,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       defaultCounterpartyId: counterpartyId,
       defaultLabelTemplateId: templateId,
       shelfLifeDays: 184,
+      egaisCode: "0123456789012345678901234567890123",
     });
     const employee = await agent
       .post("/employees")
@@ -201,7 +202,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       defaultLabelTemplateId: null,
     });
     expect(bundle.body.product.shelfLifeDays).toBe(184);
-    expect(bundle.body.product.egaisCode).not.toBeUndefined();
+    expect(bundle.body.product.egaisCode).toBe("0123456789012345678901234567890123");
     expect(bundle.body.labelTemplate).toBeNull();
     expect(bundle.body.boxLabelTemplate).toMatchObject({
       id: boxTemplateId,

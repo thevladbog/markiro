@@ -288,6 +288,11 @@ function LabelEditorContent({
   }
 
   async function handleSave(): Promise<void> {
+    // A flagged axis still shows its rejected text in the input (see
+    // `invalidSizeAxes`'s doc comment above) -- the spec was never updated,
+    // so saving now would silently persist the last COMMITTED size instead
+    // of the one on screen. Refuse until the user fixes or clears it.
+    if (hasInvalidSize) return;
     try {
       if (mode === "edit" && id) {
         await updateMutation.mutateAsync({ id, input: { name, spec } });
@@ -363,7 +368,12 @@ function LabelEditorContent({
           style={{ width: 260 }}
         />
         <span style={{ flex: 1 }} />
-        <Button type="button" loading={isSaving} onClick={() => void handleSave()}>
+        <Button
+          type="button"
+          loading={isSaving}
+          disabled={hasInvalidSize}
+          onClick={() => void handleSave()}
+        >
           {t("pages.labels.editor.save")}
         </Button>
       </div>
@@ -394,6 +404,7 @@ function LabelEditorContent({
                 type="number"
                 min={MIN_SIZE_MM}
                 max={MAX_SIZE_MM}
+                step={0.1}
                 mono
                 value={widthDraft ?? spec.widthMm.toFixed(1)}
                 onChange={(event) => {
@@ -414,6 +425,7 @@ function LabelEditorContent({
                 type="number"
                 min={MIN_SIZE_MM}
                 max={MAX_SIZE_MM}
+                step={0.1}
                 mono
                 value={heightDraft ?? spec.heightMm.toFixed(1)}
                 onChange={(event) => {

@@ -372,6 +372,30 @@ describe("Settings form", () => {
     expect(width.value).toBe("");
   });
 
+  it("does not POST when Save is pressed while a size axis is flagged invalid", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCreateFetch("new-5");
+
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+
+    // Below the model's 10mm minimum -- the width axis stays flagged invalid
+    // and its rejected text stays on screen (see the "invalid dimension"
+    // test above); Save must not be usable while that is true.
+    fireEvent.change(width, { target: { value: "5" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect(save.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(save);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("clears the size error once a subsequent valid size is committed", async () => {
     const user = userEvent.setup();
     renderCreateFlow();
