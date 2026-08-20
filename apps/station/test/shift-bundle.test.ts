@@ -384,7 +384,8 @@ describe("mirrorShiftBundle", () => {
 
     // Literal pre-upgrade server payload: the optional field is absent
     // (server rolled back mid-fleet). The absence must not erase the number.
-    const { number: _omitted, ...preUpgradeShift } = bundle.shift;
+    const preUpgradeShift = { ...bundle.shift };
+    delete preUpgradeShift.number;
     await mirrorShiftBundle(
       { get: vi.fn().mockResolvedValue({ ...bundle, shift: preUpgradeShift }) },
       exec,
@@ -404,7 +405,8 @@ describe("mirrorShiftBundle", () => {
   it("mirrors null on a first fetch from a pre-upgrade server", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);
-    const { number: _omitted, ...preUpgradeShift } = bundle.shift;
+    const preUpgradeShift = { ...bundle.shift };
+    delete preUpgradeShift.number;
 
     await mirrorShiftBundle(
       { get: vi.fn().mockResolvedValue({ ...bundle, shift: preUpgradeShift }) },
