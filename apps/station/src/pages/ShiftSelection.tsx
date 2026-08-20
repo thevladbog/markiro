@@ -87,7 +87,7 @@ export function ShiftSelection({
   onConflicts,
   isCurrent,
 }: ShiftSelectionProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [items, setItems] = useState<ShiftListItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
@@ -294,6 +294,7 @@ export function ShiftSelection({
                   number={shift.number ?? null}
                   productName={shift.productName}
                   plannedDate={shift.plannedDate}
+                  locale={i18n.resolvedLanguage ?? i18n.language}
                   plannedQty={shift.plannedQty}
                   mode={shift.mode}
                   status={shift.status}

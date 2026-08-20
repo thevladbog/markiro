@@ -7,6 +7,7 @@ import type { RecentOperation } from "../lib/journal.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
+import { ShiftCard } from "../ui/ShiftCard.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
@@ -78,7 +79,8 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
-  const withActiveShiftControls = headerVariant !== null || fixture.kind === "work";
+  const withActiveShiftControls =
+    headerVariant !== null || fixture.kind === "shift" || fixture.kind === "work";
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -490,27 +492,91 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
     );
   }
   const page = variant === "2" ? 2 : 1;
-  const shifts = page === 1 ? ["ДЕМО-01", "ДЕМО-02", "ДЕМО-03"] : ["ДЕМО-04", "ДЕМО-05"];
+  const shifts =
+    page === 1
+      ? [
+          {
+            number: "AUG26-041",
+            productName: ru
+              ? "Молоко ультрапастеризованное безлактозное обогащённое витаминами A и D для детского питания с массовой долей жира 3,2%, 930 мл"
+              : "Ultra-pasteurized lactose-free milk enriched with vitamins A and D for children, 3.2% fat, 930 ml",
+            active: false,
+            mode: "validation" as const,
+            plannedQty: 10_000,
+          },
+          {
+            number: "AUG26-040/S",
+            productName: ru
+              ? "Пиво светлое фильтрованное пастеризованное «Жигулёвское», 0,5 л"
+              : "Zhigulevskoye light filtered pasteurized beer, 0.5 l",
+            active: true,
+            mode: "aggregation" as const,
+            plannedQty: null,
+          },
+        ]
+      : [
+          {
+            number: "AUG26-039",
+            productName: ru ? "Вода питьевая газированная, 1 л" : "Sparkling drinking water, 1 l",
+            active: false,
+            mode: "validation" as const,
+            plannedQty: 4_000,
+          },
+          {
+            number: "AUG26-038",
+            productName: ru ? "Квас хлебный фильтрованный, 1,5 л" : "Filtered bread kvass, 1.5 l",
+            active: false,
+            mode: "aggregation" as const,
+            plannedQty: 2_400,
+          },
+        ];
   return (
-    <StationScreen title={ru ? "Выберите смену" : "Select shift"}>
-      <div className="gallery-paged-grid">
-        <div className="gallery-three-cards">
-          {shifts.map((shift, index) => (
-            <Card
-              key={shift}
-              className="gallery-card"
-              title={ru ? `Смена ${shift}` : `Shift ${shift}`}
-            >
-              <p>
-                {ru
-                  ? `Линия ${index + 1} · Задание TEST-${page}${index + 1}`
-                  : `Line ${index + 1} · Job TEST-${page}${index + 1}`}
-              </p>
-              <Button size="floor" fullWidth>
-                {ru ? "Открыть" : "Open"}
-              </Button>
-            </Card>
-          ))}
+    <StationScreen
+      title={ru ? "Смены" : "Shifts"}
+      header={<div className="shift-selection__message" aria-hidden="true" />}
+      actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
+    >
+      <div className="shift-selection__content">
+        <div className="shift-selection__slot">
+          <div className="shift-selection__grid">
+            {shifts.map((shift, index) => (
+              <ShiftCard
+                key={shift.number}
+                number={shift.number}
+                productName={shift.productName}
+                plannedDate={`2026-08-${String(21 - index - (page - 1) * 2).padStart(2, "0")}`}
+                locale={locale}
+                plannedQty={shift.plannedQty}
+                mode={shift.mode}
+                status={shift.active ? "active" : "planned"}
+                modeLabel={
+                  shift.mode === "aggregation"
+                    ? ru
+                      ? "Агрегация"
+                      : "Aggregation"
+                    : ru
+                      ? "Валидация"
+                      : "Validation"
+                }
+                statusLabel={
+                  shift.active ? (ru ? "Активна" : "Active") : ru ? "Запланирована" : "Planned"
+                }
+                plannedLabel={ru ? "план" : "plan"}
+                noPlanLabel={ru ? "без плана" : "no plan"}
+                counterpartyName={null}
+                counterpartyLabel={ru ? "Для" : "For"}
+                actionLabel={
+                  shift.active ? (ru ? "Присоединиться" : "Join") : ru ? "Открыть" : "Open"
+                }
+                active={shift.active}
+                disabled={false}
+                onSelect={() => undefined}
+                exec={galleryProductImageExecutor}
+                productId={`gallery-shift-product-${page}-${index}`}
+                image={galleryProductImage}
+              />
+            ))}
+          </div>
         </div>
         <GalleryPager
           page={page}
