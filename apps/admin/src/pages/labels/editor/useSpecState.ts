@@ -10,6 +10,11 @@
  * the imported elements (`fitSpecElements` -> `ELEMENT_TOO_LARGE`): the page
  * shows the error instead, so a bad size can never silently truncate content
  * that a subsequent Save would then persist.
+ *
+ * `resizeLabel` is only ever handed dimensions the page has already checked
+ * against the model's 10-300mm bounds, so `ELEMENT_TOO_LARGE` here always
+ * means what it says -- "the elements do not fit" -- and never doubles as the
+ * report for an empty or out-of-range entry in the size inputs.
  */
 import { useCallback, useReducer } from "react";
 
@@ -17,7 +22,7 @@ import { type LabelTemplateSpec } from "@markiro/domain";
 
 import { fitSpecElements } from "../geometry.js";
 
-export interface SpecState {
+interface SpecState {
   spec: LabelTemplateSpec;
   geometryError: "ELEMENT_TOO_LARGE" | null;
 }
@@ -26,7 +31,7 @@ type SpecAction =
   | { type: "replaceSpec"; spec: LabelTemplateSpec }
   | { type: "resizeLabel"; widthMm: number; heightMm: number };
 
-export function specReducer(state: SpecState, action: SpecAction): SpecState {
+function specReducer(state: SpecState, action: SpecAction): SpecState {
   switch (action.type) {
     case "replaceSpec":
       return { spec: action.spec, geometryError: null };

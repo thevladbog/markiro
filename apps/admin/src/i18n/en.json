@@ -593,7 +593,6 @@
         "nameLabel": "Name",
         "defaultName": "New template",
         "save": "Save",
-        "saving": "Saving…",
         "download": "Download {{format}}",
         "sizePresetLabel": "Size",
         "customSizeOption": "Custom size",
@@ -605,6 +604,7 @@
         "settingsTitle": "Label settings",
         "empty": "No label content yet — import ZPL or TSPL code.",
         "geometryError": "An element no longer fits the label. Enlarge the label or re-import the code.",
+        "invalidSizeError": "Label size must be between 10 and 300 mm. Enter a value in that range.",
         "import": {
           "open": "Import code",
           "title": "Import code",

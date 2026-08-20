@@ -9,6 +9,11 @@
  *    the deleted palette/properties chrome is provably absent;
  *  - shrinking the label re-fits imported elements, and an impossible shrink
  *    surfaces the geometry error instead of silently truncating content;
+ *  - the custom width/height inputs are DRAFTED (committed on blur / Enter),
+ *    so a multi-digit size can actually be typed, and the two failure modes
+ *    stay distinct: an out-of-range/empty entry reports an invalid dimension,
+ *    only a valid-but-unfittable one reports "element larger than the label";
+ *    both clear once a later valid resize or import succeeds;
  *  - "Скачать ZPL"/"Скачать TSPL" produce a real, byte-safe download -- ZPL's
  *    Blob text contains `^XA`; TSPL's Blob bytes preserve an injected raster
  *    byte > 0x7F intact (never UTF-8-mangled into two bytes);
@@ -278,17 +283,132 @@ describe("Settings form", () => {
     expect(() => parseLabelTemplate(spec)).not.toThrow();
   });
 
-  it("surfaces the geometry error (and keeps the last good spec) when a shrink cannot fit an element", () => {
+  it("surfaces the geometry error (and keeps the last good spec) when a valid shrink cannot fit an element", () => {
     renderCreateFlow();
     importZpl(IMPORT_ZPL);
 
-    fireEvent.change(screen.getByLabelText("Ширина этикетки, мм"), { target: { value: "5" } });
+    // 10mm is a size the MODEL accepts -- so this really is the "elements do
+    // not fit" failure, not an invalid dimension.
+    const width = screen.getByLabelText("Ширина этикетки, мм");
+    fireEvent.change(width, { target: { value: "10" } });
+    fireEvent.blur(width);
 
     expect(
       screen.getByText("Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново."),
     ).toBeDefined();
     // The rejected width never reached the spec -- the inputs still show 58mm.
-    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.1");
+    expect((width as HTMLInputElement).value).toBe("58.1");
+  });
+
+  it("lets a multi-digit custom size be typed without the field fighting back, and commits it on blur", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCreateFetch("new-4");
+
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+
+    // The first keystroke of "45" is a 4mm label -- under the old
+    // per-keystroke, spec-controlled input this snapped straight back to
+    // "58.1" (and raised an error), making 45 unreachable.
+    fireEvent.change(width, { target: { value: "4" } });
+    expect(width.value).toBe("4");
+    expect(screen.queryByRole("alert")).toBeNull();
+
+    fireEvent.change(width, { target: { value: "45" } });
+    fireEvent.blur(width);
+
+    expect(width.value).toBe("45.0");
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(postedSpec<{ widthMm: number }>(fetchMock).widthMm).toBe(45);
+  });
+
+  it("commits a custom size on Enter too", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const height = screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement;
+
+    fireEvent.change(height, { target: { value: "120" } });
+    fireEvent.keyDown(height, { key: "Enter" });
+
+    expect(height.value).toBe("120.0");
+  });
+
+  it("reports an out-of-range or empty size as an invalid dimension -- never as the too-large geometry error", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+
+    // Below the model's 10mm minimum.
+    fireEvent.change(width, { target: { value: "5" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+    expect(
+      screen.queryByText(
+        "Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново.",
+      ),
+    ).toBeNull();
+
+    // Cleared field: 0mm is not "an element is too large" either -- this label
+    // has no elements at all.
+    fireEvent.change(width, { target: { value: "" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+    expect(
+      screen.queryByText(
+        "Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново.",
+      ),
+    ).toBeNull();
+    // The typed text stays put to be corrected.
+    expect(width.value).toBe("");
+  });
+
+  it("clears the size error once a subsequent valid size is committed", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+
+    fireEvent.change(width, { target: { value: "900" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+
+    fireEvent.change(width, { target: { value: "90" } });
+    fireEvent.blur(width);
+
+    expect(
+      screen.queryByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeNull();
+    expect(width.value).toBe("90.0");
+  });
+
+  it("clears the geometry error when a later import replaces the spec", () => {
+    renderCreateFlow();
+    importZpl(IMPORT_ZPL);
+
+    const width = screen.getByLabelText("Ширина этикетки, мм");
+    fireEvent.change(width, { target: { value: "10" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново."),
+    ).toBeDefined();
+
+    importZpl(WIDE_IMPORT_ZPL);
+
+    expect(
+      screen.queryByText(
+        "Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново.",
+      ),
+    ).toBeNull();
   });
 });
 

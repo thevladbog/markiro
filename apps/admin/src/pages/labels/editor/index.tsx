@@ -73,6 +73,17 @@ function matchPresetKey(widthMm: number, heightMm: number): string | null {
   return preset ? preset.key : null;
 }
 
+/**
+ * The bounds `labelTemplateSpecSchema` puts on `widthMm`/`heightMm`
+ * (`packages/domain/src/labels/model.ts`). Checked HERE, before dispatching a
+ * resize, so that an out-of-range or non-numeric entry is reported as what it
+ * is instead of reaching `fitSpecElements`, whose only vocabulary is
+ * `ELEMENT_TOO_LARGE` -- a different failure that would be a lie about e.g. an
+ * empty field on a label with no elements at all.
+ */
+const MIN_SIZE_MM = 10;
+const MAX_SIZE_MM = 300;
+
 const DPI_OPTIONS = ["203", "300"];
 const LANGUAGE_OPTIONS: Array<{ value: LabelTemplateSpec["language"]; label: string }> = [
   { value: "zpl", label: "ZPL" },
@@ -161,6 +172,18 @@ function LabelEditorContent({
     () => matchPresetKey(initialSpec.widthMm, initialSpec.heightMm) === null,
   );
   const [showImportDialog, setShowImportDialog] = useState(false);
+  /**
+   * WHY THE CUSTOM-SIZE INPUTS ARE DRAFTED, NOT CONTROLLED BY THE SPEC: a
+   * resize that cannot fit the imported elements keeps the OLD spec (see
+   * `useSpecState`), so a spec-controlled input snaps back mid-typing and a
+   * multi-digit number can never be entered at all ("58.1" -> type "4" -> a
+   * 4mm label is rejected -> the field reverts). `null` means "no pending
+   * edit, show the spec"; a string is what the user has typed so far, and it
+   * is committed on blur / Enter -- never per keystroke.
+   */
+  const [widthDraft, setWidthDraft] = useState<string | null>(null);
+  const [heightDraft, setHeightDraft] = useState<string | null>(null);
+  const [sizeInputError, setSizeInputError] = useState<"INVALID_DIMENSION" | null>(null);
 
   const createMutation = useCreateLabelTemplate();
   const updateMutation = useUpdateLabelTemplate();
@@ -176,6 +199,14 @@ function LabelEditorContent({
     markDirty();
   }
 
+  /** Drops any pending (uncommitted) size edit and the invalid-dimension
+   * message, so the inputs fall back to whatever the spec now says. */
+  function clearSizeDrafts(): void {
+    setWidthDraft(null);
+    setHeightDraft(null);
+    setSizeInputError(null);
+  }
+
   function handleReplaceSpec(nextSpec: LabelTemplateSpec): void {
     editor.replaceSpec(nextSpec);
     markDirty();
@@ -189,11 +220,13 @@ function LabelEditorContent({
   function handleImportReplace(result: LabelImportResult): void {
     editor.replaceSpec(result.spec);
     setCustomSize(matchPresetKey(result.spec.widthMm, result.spec.heightMm) === null);
+    clearSizeDrafts();
     markDirty();
     setShowImportDialog(false);
   }
 
   function handleSizePresetChange(value: string): void {
+    clearSizeDrafts();
     if (value === "custom") {
       setCustomSize(true);
       return;
@@ -202,6 +235,39 @@ function LabelEditorContent({
     if (!preset) return;
     setCustomSize(false);
     handleLabelResize(preset.widthMm, preset.heightMm);
+  }
+
+  /**
+   * Commits one axis of the custom size. An empty, non-numeric or
+   * out-of-bounds entry stops here with its own message and leaves the typed
+   * text in place to be corrected; a valid one drops the draft (the input goes
+   * back to mirroring the spec) and lets the reducer have the final say on
+   * whether the elements still fit.
+   */
+  function commitSize(axis: "width" | "height"): void {
+    const raw = axis === "width" ? widthDraft : heightDraft;
+    // Nothing typed since the last commit: a bare focus/blur must not
+    // re-dispatch a resize (and mark the page dirty) for the value the spec
+    // already holds.
+    if (raw === null) return;
+    const value = Number(raw.trim());
+    if (
+      raw.trim() === "" ||
+      !Number.isFinite(value) ||
+      value < MIN_SIZE_MM ||
+      value > MAX_SIZE_MM
+    ) {
+      setSizeInputError("INVALID_DIMENSION");
+      return;
+    }
+    setSizeInputError(null);
+    if (axis === "width") {
+      setWidthDraft(null);
+      handleLabelResize(value, spec.heightMm);
+    } else {
+      setHeightDraft(null);
+      handleLabelResize(spec.widthMm, value);
+    }
   }
 
   async function handleSave(): Promise<void> {
@@ -310,19 +376,27 @@ function LabelEditorContent({
                 label={t("pages.labels.editor.widthLabel")}
                 type="number"
                 mono
-                value={spec.widthMm.toFixed(1)}
-                onChange={(event) =>
-                  handleLabelResize(Number(event.target.value) || 0, spec.heightMm)
-                }
+                value={widthDraft ?? spec.widthMm.toFixed(1)}
+                onChange={(event) => setWidthDraft(event.target.value)}
+                onBlur={() => commitSize("width")}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  commitSize("width");
+                }}
               />
               <Input
                 label={t("pages.labels.editor.heightLabel")}
                 type="number"
                 mono
-                value={spec.heightMm.toFixed(1)}
-                onChange={(event) =>
-                  handleLabelResize(spec.widthMm, Number(event.target.value) || 0)
-                }
+                value={heightDraft ?? spec.heightMm.toFixed(1)}
+                onChange={(event) => setHeightDraft(event.target.value)}
+                onBlur={() => commitSize("height")}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  commitSize("height");
+                }}
               />
             </div>
           )}
@@ -347,8 +421,16 @@ function LabelEditorContent({
           <Button type="button" variant="secondary" onClick={() => void handleDownload()}>
             {t("pages.labels.editor.download", { format: spec.language.toUpperCase() })}
           </Button>
-          {editor.state.geometryError !== null && (
-            <Alert tone="error">{t("pages.labels.editor.geometryError")}</Alert>
+          {/* The invalid-dimension message wins when it is set: it describes
+              the most recent action (a rejected entry never reached the
+              reducer, so a stale `geometryError` from an earlier resize must
+              not be presented as the reason). */}
+          {sizeInputError !== null ? (
+            <Alert tone="error">{t("pages.labels.editor.invalidSizeError")}</Alert>
+          ) : (
+            editor.state.geometryError !== null && (
+              <Alert tone="error">{t("pages.labels.editor.geometryError")}</Alert>
+            )
           )}
         </aside>
 
