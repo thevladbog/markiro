@@ -136,15 +136,18 @@ The command is idempotent for the same tenant/email and prints identifiers only.
 
 ```text
 apps/
-  api/       NestJS API, auth, jobs, integrations
-  admin/     React/Vite production cabinet
-  kiosk/     Offline-first pickup PWA
-  station/   Tauri/React line workstation
+  api/         NestJS API, auth, jobs, integrations
+  admin/       React/Vite production cabinet
+  kiosk/       Offline-first pickup PWA
+  station/     Tauri/React line workstation
+  landing/     Public marketing website
+  saas-admin/  SaaS operator panel
 packages/
-  domain/    GS1, KM, SSCC, labels, shared policy
-  db/        PostgreSQL schema, migrations, SQLite mirror
-  email/     Transactional email templates
-  ui/        Shared design tokens and React components
+  domain/           GS1, KM, SSCC, labels, shared policy
+  db/               PostgreSQL schema, migrations, SQLite mirror
+  email/            Transactional email templates
+  ui/               Shared design tokens and React components
+  legal-documents/  Legal document sources and rendering
 ```
 
 Focused iteration:
@@ -171,6 +174,12 @@ Database-backed tests require the exported `DATABASE_URL`. Report intentional sk
 - [Implementation plans](./docs/superpowers/plans/)
 - [MVP roadmap](./docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md)
 - [OpenAPI explorer](http://localhost:3000/docs) when the API is running
+
+## Contributing, security, and support
+
+- External contributions are not accepted; see [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Report vulnerabilities privately; see [SECURITY.md](./SECURITY.md).
+- Questions, bug reports, and commercial licensing; see [SUPPORT.md](./SUPPORT.md).
 
 ## License
 

@@ -136,15 +136,18 @@ pnpm --silent --filter @markiro/api provision:tenant-owner -- \
 
 ```text
 apps/
-  api/       NestJS API, auth, jobs, integrations
-  admin/     React/Vite production cabinet
-  kiosk/     Offline-first pickup PWA
-  station/   Tauri/React line workstation
+  api/         NestJS API, auth, jobs, integrations
+  admin/       React/Vite production cabinet
+  kiosk/       Offline-first pickup PWA
+  station/     Tauri/React line workstation
+  landing/     Public marketing website
+  saas-admin/  SaaS operator panel
 packages/
-  domain/    GS1, KM, SSCC, labels, shared policy
-  db/        PostgreSQL schema, migrations, SQLite mirror
-  email/     Transactional email templates
-  ui/        Shared design tokens and React components
+  domain/           GS1, KM, SSCC, labels, shared policy
+  db/               PostgreSQL schema, migrations, SQLite mirror
+  email/            Transactional email templates
+  ui/               Shared design tokens and React components
+  legal-documents/  Legal document sources and rendering
 ```
 
 Точечная проверка во время разработки:
@@ -171,6 +174,12 @@ pnpm format:check
 - [Планы реализации](./docs/superpowers/plans/)
 - [Дорожная карта MVP](./docs/superpowers/plans/2026-07-21-markiro-mvp-roadmap.md)
 - [Обозреватель OpenAPI](http://localhost:3000/docs), когда API запущен
+
+## Контрибуции, безопасность и поддержка
+
+- Внешние контрибуции не принимаются; см. [CONTRIBUTING.md](./CONTRIBUTING.md).
+- Об уязвимостях сообщайте приватно; см. [SECURITY.md](./SECURITY.md).
+- Вопросы, баг-репорты и коммерческая лицензия — см. [SUPPORT.md](./SUPPORT.md).
 
 ## Лицензия
 
