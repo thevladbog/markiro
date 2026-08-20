@@ -1,5 +1,5 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, eq, gte, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, lte, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -101,13 +101,18 @@ export class CodeSearchService {
    * that one owner row instead of every historical claim.
    *
    * `products` is LEFT JOINed on `(tenant_id, gtin14)` -- a scanned GTIN
-   * need not be a registered product. The current box is resolved with a
-   * LEFT JOIN LATERAL rather than a plain LEFT JOIN: a code can have many
-   * historical `box_items` rows (displaced/removed ones are never deleted,
-   * see boxItems' own schema comment) but at most one ACTIVE one, and the
-   * LATERAL's own `WHERE`/`LIMIT 1` keeps that guarantee explicit in the
-   * query itself rather than relying on the data never violating it, so no
-   * `code_registry` row is ever duplicated by this join.
+   * need not be a registered product. The current box is resolved through a
+   * `DISTINCT ON (code_hash)` derived table, not a plain LEFT JOIN on
+   * `code_hash` alone: a code can have many historical `box_items` rows
+   * (displaced/removed ones are never deleted, see boxItems' own schema
+   * comment), and "at most one ACTIVE row per code" is an APPLICATION
+   * invariant only -- `box_items`' primary key is `(tenant_id, box_id,
+   * code_hash)`, which does not itself forbid two different boxes both
+   * holding an active row for the same code_hash. `DISTINCT ON (code_hash)
+   * ORDER BY code_hash, added_at DESC` makes the "exactly one row per code"
+   * guarantee explicit and deterministic in the query itself (newest
+   * `added_at` wins if the invariant is ever violated), so this join can
+   * never duplicate a `code_registry` row even if that invariant breaks.
    */
   async listCodes(tenantId: string, query: ListCodesQueryDto): Promise<ListCodesResponseDto> {
     const statusSql = sql<string>`case
@@ -116,7 +121,7 @@ export class CodeSearchService {
       else 'free' end`;
 
     const currentBox = this.db
-      .select({
+      .selectDistinctOn([schema.boxItems.codeHash], {
         codeHash: schema.boxItems.codeHash,
         boxId: schema.boxItems.boxId,
         boxSscc: schema.boxes.sscc,
@@ -137,6 +142,7 @@ export class CodeSearchService {
           sql`${schema.boxes.disassembledAt} is null`,
         ),
       )
+      .orderBy(schema.boxItems.codeHash, desc(schema.boxItems.addedAt))
       .as("current_box");
 
     const where = and(
