@@ -179,6 +179,17 @@ export interface ShiftBundleDto {
     toSerial: number;
     consumedThroughSerial: number | null;
   } | null;
+  /**
+   * `fromSerial` of every block this device was handed and that has since
+   * been revoked by an admin reseeding the counter. The station deletes the
+   * matching `sscc_pool` rows (`dropRanges`) before applying `sscc` above --
+   * without that, its `burnSerial` would keep draining the revoked lower
+   * range and the reseeded number would never reach a label.
+   *
+   * Always present, `[]` when there is nothing to drop (including every
+   * reference-only bundle, which never touches allocation state at all).
+   */
+  ssccRevokedFrom: number[];
 }
 
 /**

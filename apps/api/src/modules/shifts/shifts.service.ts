@@ -574,11 +574,11 @@ export class ShiftsService {
    */
   async getBundle(tenantId: string, id: string, deviceId: string | null): Promise<ShiftBundleDto> {
     const referenceBundle = await this.getReferenceBundle(tenantId, id);
-    const sscc: ShiftBundleDto["sscc"] =
+    const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
         ? await this.bundleSscc(tenantId, referenceBundle.shift.id, deviceId)
-        : null;
-    return { ...referenceBundle, sscc };
+        : { sscc: null, ssccRevokedFrom: [] };
+    return { ...referenceBundle, ...allocation };
   }
 
   /**
@@ -669,6 +669,7 @@ export class ShiftsService {
       counterpartyGln,
       operators,
       sscc: null,
+      ssccRevokedFrom: [],
     };
   }
 
@@ -723,7 +724,7 @@ export class ShiftsService {
     tenantId: string,
     shiftId: string,
     deviceId: string,
-  ): Promise<ShiftBundleDto["sscc"]> {
+  ): Promise<Pick<ShiftBundleDto, "sscc" | "ssccRevokedFrom">> {
     return this.db.transaction(async (tx) => {
       const [shift] = await tx
         .select({
@@ -734,12 +735,16 @@ export class ShiftsService {
         .from(schema.shifts)
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)))
         .for("update");
-      if (!shift || shift.status !== "active" || shift.mode !== "aggregation") return null;
+      if (!shift || shift.status !== "active" || shift.mode !== "aggregation") {
+        return { sscc: null, ssccRevokedFrom: [] };
+      }
 
       const access = await this.entitlements.resolveRecovery(tenantId, tx, new Date());
       if (access.access === "read_only") {
         const endsAt = access.subscription?.endsAt;
-        if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) return null;
+        if (!endsAt || !shift.openedAt || shift.openedAt >= endsAt) {
+          return { sscc: null, ssccRevokedFrom: [] };
+        }
       }
 
       let issuerPrefix: string;
@@ -756,10 +761,10 @@ export class ShiftsService {
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return null;
+        return { sscc: null, ssccRevokedFrom: [] };
       }
       try {
-        return await this.sscc.allocateForBundle(
+        const sscc = await this.sscc.allocateForBundle(
           tenantId,
           issuerPrefix,
           BOX_EXTENSION_DIGIT,
@@ -767,12 +772,23 @@ export class ShiftsService {
           BOX_BLOCK_SIZE,
           tx,
         );
+        // Read AFTER allocation, in the same transaction: allocation is what
+        // may have just cut the replacement for a revoked block, and the two
+        // must describe one consistent moment.
+        const ssccRevokedFrom = await this.sscc.revokedFromSerials(
+          tenantId,
+          issuerPrefix,
+          BOX_EXTENSION_DIGIT,
+          deviceId,
+          tx,
+        );
+        return { sscc, ssccRevokedFrom };
       } catch (error) {
         if (!(error instanceof SsccCapacityExhaustedException)) throw error;
         this.logger.warn(
           `Shift ${shiftId} (tenant ${tenantId}) bundle has no box serial block -- ${error.message}`,
         );
-        return null;
+        return { sscc: null, ssccRevokedFrom: [] };
       }
     });
   }

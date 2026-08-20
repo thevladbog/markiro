@@ -5,7 +5,7 @@ import {
   Injectable,
   InternalServerErrorException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, isNull, lt, lte, max, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lt, lte, max, or, sql } from "drizzle-orm";
 import { formatShiftNumber, parseSscc, ssccSerialCapacity } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
@@ -686,6 +686,45 @@ export class SsccService {
       return this.allocate(tenantId, issuerPrefix, extensionDigit, deviceId, size, tx);
     };
     return transaction ? perform(transaction) : this.db.transaction(perform);
+  }
+
+  /**
+   * The `fromSerial` of every block this device holds that has since been
+   * revoked, oldest first.
+   *
+   * The device cannot work this out on its own: `burnSerial` drains ranges
+   * by `ORDER BY from_serial`, so a revoked low range keeps winning over the
+   * fresh high one until it is deleted locally. An explicit list -- rather
+   * than "delete anything the bundle didn't name" -- is what keeps this
+   * correct on the day a device legitimately holds two live blocks (the
+   * station's ingest-response top-up path in sync.ts is already written,
+   * just not yet served).
+   *
+   * Sent on every bundle, not just the first after a revocation: the station
+   * may miss any single fetch, and re-sending is idempotent -- the rows are
+   * already gone.
+   */
+  async revokedFromSerials(
+    tenantId: string,
+    issuerPrefix: string,
+    extensionDigit: number,
+    deviceId: string,
+    executor: Pick<Db, "select"> = this.db,
+  ): Promise<number[]> {
+    const rows = await executor
+      .select({ fromSerial: schema.ssccBlocks.fromSerial })
+      .from(schema.ssccBlocks)
+      .where(
+        and(
+          eq(schema.ssccBlocks.tenantId, tenantId),
+          eq(schema.ssccBlocks.issuerPrefix, issuerPrefix),
+          eq(schema.ssccBlocks.extensionDigit, extensionDigit),
+          eq(schema.ssccBlocks.deviceId, deviceId),
+          isNotNull(schema.ssccBlocks.revokedAt),
+        ),
+      )
+      .orderBy(schema.ssccBlocks.fromSerial);
+    return rows.map((row) => Number(row.fromSerial));
   }
 
   /**

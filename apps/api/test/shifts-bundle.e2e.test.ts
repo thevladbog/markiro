@@ -450,6 +450,33 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       expect(res.body.sscc).toBeNull();
     });
 
+    it("tells the device which of its blocks were revoked", async () => {
+      const server = app!.getHttpServer();
+      const fetchBundle = () =>
+        request(server).get(`/shifts/${shiftId}/bundle`).set("x-api-key", stationKey).expect(200);
+
+      const bundle = await fetchBundle();
+      expect(bundle.body.ssccRevokedFrom).toEqual([]);
+      const held = bundle.body.sscc.fromSerial as number;
+
+      await db
+        .update(schema.ssccBlocks)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, orgId),
+            eq(schema.ssccBlocks.deviceId, stationDeviceId),
+          ),
+        );
+
+      const after = await fetchBundle();
+      // A fresh block, plus the old one named so the device drops it -- without
+      // that list the station's burnSerial would keep draining the lower range
+      // (ORDER BY from_serial) and the reseed would never reach a label.
+      expect(after.body.sscc.fromSerial).toBeGreaterThan(held);
+      expect(after.body.ssccRevokedFrom).toEqual([held]);
+    });
+
     /** Snapshot of this tenant/issuer/extension-digit's sscc_blocks rows, for delta assertions. */
     async function blocksForOrgGln(): Promise<(typeof schema.ssccBlocks.$inferSelect)[]> {
       return db
