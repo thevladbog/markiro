@@ -11,6 +11,7 @@ import { Alert, Button, Card, Checkbox, Input, PageHeader, Select, Spinner } fro
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
+import { describeSsccBlocker, describeSsccSeedError } from "../../lib/sscc-counter.js";
 import { toast } from "../../lib/toast.js";
 import {
   useOrgProfile,
@@ -461,6 +462,9 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
     }
   }, [ssccQuery.data, reset]);
 
+  const blocked = describeSsccBlocker(t, ssccQuery.data?.blockedBy ?? null);
+  const minSerial = ssccQuery.data?.minSerial ?? 1;
+
   const submit = handleSubmit(async (values) => {
     try {
       await updateSscc.mutateAsync({
@@ -471,10 +475,14 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
     } catch (error) {
       toast(
         "error",
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.settings.sscc.toasts.updateError"),
+        describeSsccSeedError(t, error, minSerial) ??
+          (error instanceof ApiRequestError
+            ? error.message
+            : t("pages.settings.sscc.toasts.updateError")),
       );
+      // The floor and the blocker both live server-side; a rejection means
+      // this form's copy of them is stale.
+      await ssccQuery.refetch();
     }
   });
 
@@ -515,11 +523,23 @@ function OrgProfileSsccCard({ derivedPrefix }: { derivedPrefix: string | null })
             label={t("pages.settings.sscc.nextSerialLabel")}
             mono
             inputMode="numeric"
+            disabled={blocked !== null}
             {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
             {...register("nextSerial")}
           />
+          {blocked ? (
+            <Alert tone="warn">{blocked}</Alert>
+          ) : (
+            <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
+              {t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial })}
+            </p>
+          )}
           <div>
-            <Button type="submit" loading={updateSscc.isPending} disabled={!derivedPrefix}>
+            <Button
+              type="submit"
+              loading={updateSscc.isPending}
+              disabled={!derivedPrefix || blocked !== null}
+            >
               {t("pages.settings.sscc.save")}
             </Button>
           </div>

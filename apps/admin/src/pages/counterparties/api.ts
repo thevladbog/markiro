@@ -9,6 +9,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiFetch } from "../../api/client.js";
+import type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
+
+export type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
 /** Mirrors `apps/api/src/modules/counterparties/dto.ts`'s `CounterpartyDto`. */
 export interface CounterpartyDto {
@@ -31,7 +34,7 @@ export interface CreateCounterpartyInput {
 
 export type UpdateCounterpartyInput = Partial<CreateCounterpartyInput>;
 
-/** Mirrors `apps/api/src/modules/counterparties/dto.ts`'s (re-exported) `SsccCounterDto`. */
+/** Mirrors `apps/api/src/modules/counterparties/dto.ts`'s (re-exported) `SsccCounterDto` -- the PUT body. */
 export interface SsccCounterDto {
   extensionDigit: number;
   nextSerial: number;
@@ -117,8 +120,8 @@ export function useDeleteCounterparty(): UseMutationResult<void, Error, string> 
   });
 }
 
-function fetchCounterpartySscc(id: string): Promise<SsccCounterDto> {
-  return apiFetch<SsccCounterDto>(`/counterparties/${id}/sscc`);
+function fetchCounterpartySscc(id: string): Promise<SsccCounterStateDto> {
+  return apiFetch<SsccCounterStateDto>(`/counterparties/${id}/sscc`);
 }
 
 function putCounterpartySscc(id: string, input: SsccCounterDto): Promise<SsccCounterDto> {
@@ -134,7 +137,7 @@ function putCounterpartySscc(id: string, input: SsccCounterDto): Promise<SsccCou
  * optional and the query stays disabled (never fires) until one is given --
  * covers the create-modal case, which has no id yet.
  */
-export function useCounterpartySscc(id: string | undefined): UseQueryResult<SsccCounterDto> {
+export function useCounterpartySscc(id: string | undefined): UseQueryResult<SsccCounterStateDto> {
   return useQuery({
     queryKey: ssccQueryKey(id ?? ""),
     queryFn: () => fetchCounterpartySscc(id!),

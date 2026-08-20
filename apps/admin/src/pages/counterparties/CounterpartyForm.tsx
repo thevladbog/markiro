@@ -10,6 +10,7 @@ import { Alert, Button, Input, SidePanel, Spinner } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { errorProp } from "../../lib/form-error.js";
+import { describeSsccBlocker, describeSsccSeedError } from "../../lib/sscc-counter.js";
 import { toast } from "../../lib/toast.js";
 import {
   useCounterpartySscc,
@@ -242,6 +243,9 @@ function CounterpartySsccSection({
   useEffect(() => onDirtyChange(isDirty), [isDirty, onDirtyChange]);
   useEffect(() => onBusyChange(updateSscc.isPending), [onBusyChange, updateSscc.isPending]);
 
+  const blocked = describeSsccBlocker(t, ssccQuery.data?.blockedBy ?? null);
+  const minSerial = ssccQuery.data?.minSerial ?? 1;
+
   const submit = handleSubmit(async (values) => {
     try {
       setSaveError(null);
@@ -253,10 +257,14 @@ function CounterpartySsccSection({
       toast("ok", t("pages.counterparties.form.sscc.toasts.updateSuccess"));
     } catch (error) {
       setSaveError(
-        error instanceof ApiRequestError
-          ? error.message
-          : t("pages.counterparties.form.sscc.toasts.updateError"),
+        describeSsccSeedError(t, error, minSerial) ??
+          (error instanceof ApiRequestError
+            ? error.message
+            : t("pages.counterparties.form.sscc.toasts.updateError")),
       );
+      // The floor and the blocker both live server-side; a rejection means
+      // this form's copy of them is stale.
+      await ssccQuery.refetch();
     }
   });
 
@@ -294,14 +302,22 @@ function CounterpartySsccSection({
             label={t("pages.counterparties.form.sscc.nextSerialLabel")}
             mono
             inputMode="numeric"
+            disabled={blocked !== null}
             {...errorProp(translateFieldError(t, errors.nextSerial?.message))}
             {...register("nextSerial")}
           />
+          {blocked ? (
+            <Alert tone="warn">{blocked}</Alert>
+          ) : (
+            <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
+              {t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial })}
+            </p>
+          )}
           <div>
             <Button
               type="button"
               loading={updateSscc.isPending}
-              disabled={!derivedPrefix}
+              disabled={!derivedPrefix || blocked !== null}
               onClick={() => void submit()}
             >
               {t("pages.counterparties.form.sscc.save")}

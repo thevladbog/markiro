@@ -42,7 +42,11 @@ const PROFILE = {
   defaultBoxLabelTemplateId: null as string | null,
 };
 const EMPTY_PROFILE = { ...PROFILE, gln: null, gs1Prefixes: [], inn: null };
-const COUNTER = { extensionDigit: 0, nextSerial: 45_000 };
+const COUNTER = { extensionDigit: 0, nextSerial: 45_000, minSerial: 40_000, blockedBy: null };
+const COUNTER_BLOCKED = {
+  ...COUNTER,
+  blockedBy: { kind: "active_shift", shiftId: "s-1", shiftNumber: "AUG26-003" },
+};
 const LABEL_TEMPLATES = [
   {
     id: "11111111-1111-4111-8111-111111111111",
@@ -775,5 +779,33 @@ describe("OrgProfilePage", () => {
       (call) => (call[1] as RequestInit | undefined)?.method === "PUT",
     ).length;
     expect(putCallsAfter).toBe(putCallsBefore);
+  });
+
+  it("locks the sscc counter while a shift is active and names the shift", async () => {
+    vi.stubGlobal("fetch", routeFetch({ sscc: () => jsonResponse(200, COUNTER_BLOCKED) }));
+    renderPage();
+
+    const card = await cardOf("Счётчик SSCC для коробов");
+    const input = await within(card).findByLabelText("Начальный серийный номер");
+    await waitFor(() => expect(input).toHaveProperty("disabled", true));
+    expect(within(card).getByText(/AUG26-003/)).toBeDefined();
+    expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("shows the floor the server reported rather than a hardcoded one", async () => {
+    vi.stubGlobal("fetch", routeFetch({}));
+    renderPage();
+
+    const card = await cardOf("Счётчик SSCC для коробов");
+    // 45 000 is the counter (the next label's serial), 40 000 the floor --
+    // both come from the server; the form must not invent either.
+    await waitFor(() => expect(within(card).getByText(/40\s?000/)).toBeDefined());
+    expect(within(card).getByRole("button", { name: "Сохранить" })).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 });
