@@ -995,6 +995,56 @@
         "status": "Status",
         "box": "Box",
         "scannedAt": "Scanned"
+      },
+      "codeCard": {
+        "title": "Code card",
+        "productLabel": "Product",
+        "gtinLabel": "GTIN",
+        "serialLabel": "Serial",
+        "statusLabel": "Status",
+        "currentBoxLabel": "Current box",
+        "historyTitle": "History"
+      },
+      "boxCard": {
+        "noSscc": "No SSCC",
+        "status": {
+          "open": "Open",
+          "closed": "Closed",
+          "disassembled": "Disassembled"
+        },
+        "productLabel": "Product",
+        "shiftLabel": "Shift",
+        "openedAtLabel": "Opened",
+        "closedAtLabel": "Closed",
+        "disassembledAtLabel": "Disassembled",
+        "itemsTitle": "Composition",
+        "itemsEmpty": "Box is empty",
+        "table": {
+          "code": "Code",
+          "addedAt": "Added",
+          "state": "State"
+        },
+        "displaced": "Displaced",
+        "removed": "Removed",
+        "exceptionsTitle": "Exceptions",
+        "exceptionsEmpty": "No exceptions",
+        "exceptionKind": {
+          "undo": "Undo",
+          "clear": "Clear",
+          "disassemble": "Disassembled",
+          "reprint": "Reprint"
+        },
+        "pickupOrdersTitle": "Pickup orders",
+        "pickupOrdersEmpty": "No orders"
+      },
+      "history": {
+        "scanned": "Scanned",
+        "box_added": "Added to box",
+        "box_displaced": "Moved to another box",
+        "box_removed": "Removed from box",
+        "box_disassembled": "Box disassembled",
+        "pickup_locked": "Locked in a pickup order",
+        "pickup_resolved": "Pickup order resolved"
       }
     },
     "conflicts": {

@@ -27,6 +27,8 @@ import {
   EmployeeCreatePanelRoute,
   EmployeeEditPanelRoute,
 } from "./pages/employees/EmployeePanelRoute.js";
+import { BoxCardPage } from "./pages/code-search/BoxCard.js";
+import { CodeCardPage } from "./pages/code-search/CodeCard.js";
 import { CodeSearchPage } from "./pages/code-search/index.js";
 import { ChannelPage } from "./pages/integrations/ChannelPage.js";
 import { IntegrationsPage } from "./pages/integrations/index.js";
@@ -166,6 +168,22 @@ function appRouteElements() {
           element={
             <RequireCapability capability={C.OPERATIONS_READ}>
               <CodeSearchPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes/km/:codeHash"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <CodeCardPage />
+            </RequireCapability>
+          }
+        />
+        <Route
+          path="codes/box/:boxId"
+          element={
+            <RequireCapability capability={C.OPERATIONS_READ}>
+              <BoxCardPage />
             </RequireCapability>
           }
         />

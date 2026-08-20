@@ -995,6 +995,56 @@
         "status": "Статус",
         "box": "Короб",
         "scannedAt": "Отсканирован"
+      },
+      "codeCard": {
+        "title": "Карточка кода",
+        "productLabel": "Товар",
+        "gtinLabel": "GTIN",
+        "serialLabel": "Серийный номер",
+        "statusLabel": "Статус",
+        "currentBoxLabel": "Текущий короб",
+        "historyTitle": "История"
+      },
+      "boxCard": {
+        "noSscc": "Без SSCC",
+        "status": {
+          "open": "Открыт",
+          "closed": "Закрыт",
+          "disassembled": "Расформирован"
+        },
+        "productLabel": "Товар",
+        "shiftLabel": "Смена",
+        "openedAtLabel": "Открыт",
+        "closedAtLabel": "Закрыт",
+        "disassembledAtLabel": "Расформирован",
+        "itemsTitle": "Состав",
+        "itemsEmpty": "Короб пуст",
+        "table": {
+          "code": "Код",
+          "addedAt": "Добавлен",
+          "state": "Состояние"
+        },
+        "displaced": "Перемещён",
+        "removed": "Убран",
+        "exceptionsTitle": "Исключения",
+        "exceptionsEmpty": "Исключений нет",
+        "exceptionKind": {
+          "undo": "Отмена",
+          "clear": "Очистка",
+          "disassemble": "Расформирование",
+          "reprint": "Перепечать"
+        },
+        "pickupOrdersTitle": "Заказы на выдачу",
+        "pickupOrdersEmpty": "Заказов нет"
+      },
+      "history": {
+        "scanned": "Скан",
+        "box_added": "Добавлен в короб",
+        "box_displaced": "Перемещён в другой короб",
+        "box_removed": "Убран из короба",
+        "box_disassembled": "Короб расформирован",
+        "pickup_locked": "Заблокирован в заказе на выдачу",
+        "pickup_resolved": "Заказ на выдачу закрыт"
       }
     },
     "conflicts": {
