@@ -10,6 +10,7 @@ import { createFloorWorkRegistry, readSealedWorkSummary } from "../src/lib/crede
 import type { PrinterLanguage } from "../src/lib/hardware-config.js";
 import type { PrintTarget } from "../src/lib/hardware.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
+import type * as ProductImageCache from "../src/lib/product-image-cache.js";
 import {
   createKeyboardWedgeSource,
   type ScanListener,
@@ -21,6 +22,45 @@ import type { SoundSettings } from "../src/lib/signal-sound.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen } from "../src/pages/WorkScreen.js";
 import { useTimeZone } from "./support/timezone.js";
+
+/**
+ * Only the product-photo surface is replaced, via `importOriginal`: everything
+ * else in this module stays real, because `credential-recovery.js` -- imported
+ * by this file for the floor work registry -- pulls its cache-clearing helpers
+ * from here too.
+ *
+ * The overridden `subscribeStationProductImageCache` is a genuine registry
+ * rather than a `vi.fn()`, so the image tests at the bottom of this file can
+ * drive the work screen through the same seam production uses: an announcement
+ * published by `syncStationProductImage` when a product's cached photo changes.
+ *
+ * No other test in this file renders `ProductImage` at all (none of them pass
+ * `productId`), so the stubbed readers are never reached from them.
+ */
+const imageCache = vi.hoisted(() => {
+  const listeners = new Set<(productId: string) => void>();
+  return {
+    readStationProductImage: vi.fn(),
+    readCachedStationProductImage: vi.fn(),
+    subscribeStationProductImageCache: (listener: (productId: string) => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    announce(productId: string) {
+      for (const listener of [...listeners]) listener(productId);
+    },
+    listeners,
+  };
+});
+
+vi.mock("../src/lib/product-image-cache.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof ProductImageCache>()),
+  readStationProductImage: imageCache.readStationProductImage,
+  readCachedStationProductImage: imageCache.readCachedStationProductImage,
+  subscribeStationProductImageCache: imageCache.subscribeStationProductImageCache,
+}));
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -2785,5 +2825,135 @@ describe("WorkScreen box progress, closing and printing", () => {
     act(() => scan(KM));
     await waitFor(() => expect(screen.getByText("1")).toBeDefined());
     expect(close).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * The product photo is refreshed by an announcement from the image cache, not
+ * by a timer. Media sync deliberately runs independently of the operational
+ * bundle, so this screen is routinely up and scanning before the photo exists
+ * locally -- and far more often the photo was cached on a previous shift entry,
+ * in which case there is nothing to re-read at all.
+ */
+describe("WorkScreen product image refresh", () => {
+  const DESCRIPTOR = {
+    checksum: "a".repeat(64),
+    contentType: "image/webp" as const,
+    byteSize: 4,
+    width: 2,
+    height: 2,
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:photo");
+    vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    imageCache.listeners.clear();
+    imageCache.readStationProductImage.mockReset();
+    imageCache.readCachedStationProductImage.mockReset();
+  });
+
+  function renderPhoto() {
+    return render(
+      <WorkScreen
+        // An empty mirror: `issuerPrefix: null` keeps the box section -- the
+        // only part of this screen that needs rows -- off entirely.
+        exec={{ run: async () => {}, all: async <T,>() => [] as T[] }}
+        shiftId="s1"
+        terminalId="dev-1"
+        operatorId="operator-1"
+        expectedGtin14="04600000000015"
+        productName="Water 0.5"
+        counterpartyName={null}
+        productId="p1"
+        productImage={DESCRIPTOR}
+        source={manualSource()}
+        sound={{ muted: true, volume: 1 }}
+        onExit={() => {}}
+        pendingSync={0}
+        issuerPrefix={null}
+        boxCapacity={null}
+        verifyPrintedLabel={false}
+      />,
+    );
+  }
+
+  /**
+   * Runs fake time past every re-read this screen can make on its own:
+   * `ProductImage`'s two 350ms retries, and the 300ms/1s bumps this screen used
+   * to fire before the cache told it when to re-read.
+   *
+   * Split across several `act` blocks on purpose. The retry is a chain -- each
+   * timer's state update has to render and re-run the effect before the next
+   * timer is scheduled -- and inside a single `act` React holds that work on the
+   * act queue until the block exits. One long `act` therefore leaves the chain
+   * half-run, with a retry still armed to fire later and quietly satisfy
+   * whatever the test asserts next.
+   */
+  async function settleAllSelfDrivenRereads(steps = 8) {
+    for (let step = 0; step < steps; step += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(250);
+      });
+    }
+  }
+
+  it("shows the photo when image sync finishes after the shift is already open", async () => {
+    let cached = false;
+    imageCache.readStationProductImage.mockImplementation(() =>
+      Promise.resolve(cached ? new Blob(["photo"], { type: "image/webp" }) : null),
+    );
+    imageCache.readCachedStationProductImage.mockResolvedValue(null);
+
+    renderPhoto();
+    // Settled FIRST on purpose: once everything that re-reads on its own has
+    // given up, the announcement is the only thing left that can put the photo
+    // on screen.
+    await settleAllSelfDrivenRereads();
+    expect(imageCache.readStationProductImage).toHaveBeenCalled();
+    expect(screen.queryByRole("img", { name: "Water 0.5" })).toBeNull();
+
+    cached = true;
+    await act(async () => {
+      imageCache.announce("p1");
+    });
+    await settleAllSelfDrivenRereads(2);
+
+    expect(screen.getByRole("img", { name: "Water 0.5" }).getAttribute("src")).toBe("blob:photo");
+  });
+
+  it("ignores an announcement for a different product", async () => {
+    imageCache.readStationProductImage.mockResolvedValue(null);
+    imageCache.readCachedStationProductImage.mockResolvedValue(null);
+
+    renderPhoto();
+    await settleAllSelfDrivenRereads();
+    const readsBefore = imageCache.readStationProductImage.mock.calls.length;
+    expect(readsBefore).toBeGreaterThan(0);
+
+    await act(async () => {
+      imageCache.announce("some-other-product");
+    });
+    await settleAllSelfDrivenRereads(2);
+
+    expect(imageCache.readStationProductImage.mock.calls.length).toBe(readsBefore);
+  });
+
+  it("does not re-read the cache when the first read already produced the photo", async () => {
+    imageCache.readStationProductImage.mockResolvedValue(
+      new Blob(["photo"], { type: "image/webp" }),
+    );
+    imageCache.readCachedStationProductImage.mockResolvedValue(null);
+
+    renderPhoto();
+    // Long past the timers this screen used to fire at 300ms and 1s. Nothing
+    // announced a new image, so nothing should have gone back to the cache.
+    await settleAllSelfDrivenRereads();
+    expect(imageCache.readStationProductImage).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("img", { name: "Water 0.5" }).getAttribute("src")).toBe("blob:photo");
   });
 });

@@ -21,6 +21,55 @@ const CACHE_ORIGIN = "https://station.invalid/product-images/";
 
 type CacheLike = Cache & { delete(request: RequestInfo): Promise<boolean> };
 const activeImageMirrors = new Set<Promise<void>>();
+const imageCacheListeners = new Set<(productId: string) => void>();
+
+/**
+ * Notified when a sync has changed what `readStationProductImage` will return
+ * for a product -- i.e. its image became readable for the first time, or was
+ * replaced by a different one.
+ *
+ * Media sync deliberately runs independently of the operational bundle so a
+ * dead object store cannot block opening a shift, which means a screen can be
+ * showing a product well before that product's photo exists locally. This is
+ * how such a screen finds out, instead of re-reading at guessed moments and
+ * being both wasteful (when the image was cached all along) and unreliable
+ * (when the bytes land after the last guess).
+ *
+ * Deliberately silent when a sync re-confirms an image that was already
+ * published: nothing a subscriber can see has changed, so nothing should be
+ * asked to re-read.
+ */
+export function subscribeStationProductImageCache(
+  listener: (productId: string) => void,
+): () => void {
+  imageCacheListeners.add(listener);
+  return () => {
+    imageCacheListeners.delete(listener);
+  };
+}
+
+function announceStationProductImage(productId: string): void {
+  // Copied first, and each listener isolated: a subscriber that unsubscribes or
+  // throws while being notified must not skip the rest of them.
+  for (const listener of [...imageCacheListeners]) {
+    try {
+      listener(productId);
+    } catch (error) {
+      console.error("station: product image cache listener failed", error);
+    }
+  }
+}
+
+async function publishedImageChecksum(
+  exec: SqlExecutor,
+  productId: string,
+): Promise<string | null> {
+  const rows = await exec.all<{ image_pointer_checksum: string | null }>(
+    "SELECT image_pointer_checksum FROM product_mirror WHERE id = ?",
+    [productId],
+  );
+  return rows[0]?.image_pointer_checksum ?? null;
+}
 
 function cacheKey(productId: string, checksum: string): string {
   return `${CACHE_ORIGIN}${encodeURIComponent(productId)}/${encodeURIComponent(checksum)}`;
@@ -211,6 +260,9 @@ export async function syncStationProductImage(
       }
       return;
     }
+    // Read before any of the writes below, so the comparison after them is
+    // against what a reader could actually see when this sync started.
+    const publishedBefore = await publishedImageChecksum(exec, product.id);
     let blob = await readSqliteImage(exec, product.image.checksum, product.image);
     if (!blob) {
       blob = await readBrowserImage(product.id, product.image);
@@ -235,6 +287,9 @@ export async function syncStationProductImage(
       "UPDATE product_mirror SET image_pointer_checksum = ? WHERE id = ? AND image_checksum = ?",
       [product.image.checksum, product.id, product.image.checksum],
     );
+    // The pointer is what `readStationProductImage` gates on, so a change to it
+    // is exactly the moment a reader's answer changes.
+    if (publishedBefore !== product.image.checksum) announceStationProductImage(product.id);
   } catch (error) {
     console.error("station: product image sync failed", error);
   }
