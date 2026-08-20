@@ -1,9 +1,7 @@
 import { canonicalizeKm, kmHash, parseScannedSscc } from "@markiro/domain";
 
 export type SearchClassification =
-  | { kind: "sscc"; sscc: string }
-  | { kind: "km"; codeHash: string }
-  | { kind: "unrecognized" };
+  { kind: "sscc"; sscc: string } | { kind: "km"; codeHash: string } | { kind: "unrecognized" };
 
 /**
  * SSCC first (cheap, unambiguous, and a KM's own `canonicalizeKm` would

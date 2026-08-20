@@ -1,9 +1,9 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, desc, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import { isDateOnly, toExclusiveEnd } from "../../lib/date-range";
+import { upperBoundCondition } from "../../lib/date-range";
 import { classifySearchInput } from "./input-classifier";
 import type {
   BoxCardDto,
@@ -17,6 +17,17 @@ import type {
 } from "./dto";
 
 const PAGE_SIZE = 50;
+
+/** Tie-break rank for `CodeHistoryEvent.type` when two events share the same `at` -- see `getCodeCard`. */
+const EVENT_TYPE_RANK: Record<CodeHistoryEvent["type"], number> = {
+  scanned: 0,
+  box_added: 1,
+  box_displaced: 2,
+  box_removed: 3,
+  box_disassembled: 4,
+  pickup_locked: 5,
+  pickup_resolved: 6,
+};
 
 interface CodeListRow {
   codeHash: string;
@@ -155,16 +166,12 @@ export class CodeSearchService {
       when ${this.aggregatedSql} then 'aggregated'
       else 'free' end`;
 
-    // A date-only `to` (the admin sends `YYYY-MM-DD`) coerces to midnight
-    // UTC via zod's `z.coerce.date()`, so a plain `lte` would exclude the
-    // whole day it names -- switch to an exclusive `lt` against the START OF
-    // THE NEXT DAY for that shape only; a `to` that already carries a real
-    // time-of-day keeps the inclusive `lte` it always had.
-    const toCondition = query.to
-      ? isDateOnly(query.to)
-        ? lt(schema.codeRegistry.scannedAt, toExclusiveEnd(query.to))
-        : lte(schema.codeRegistry.scannedAt, query.to)
-      : undefined;
+    // A date-only `to` (the admin sends `YYYY-MM-DD`) would exclude the whole
+    // day it names under a plain `lte` -- switch to an exclusive `lt`
+    // against the START OF THE NEXT DAY for that shape only; a `to` that
+    // already carries a real time-of-day keeps the inclusive `lte` it always
+    // had. See `upperBoundCondition`/`listCodesQuerySchema`.
+    const toCondition = upperBoundCondition(schema.codeRegistry.scannedAt, query.to);
 
     const where = and(
       eq(schema.codeRegistry.tenantId, tenantId),
@@ -420,8 +427,10 @@ export class CodeSearchService {
       const boxSscc = r.boxSscc === null ? null : formatSsccWithAi(r.boxSscc);
       boxSsccById.set(r.boxId, boxSscc);
       events.push({ type: "box_added", at: r.addedAt, boxId: r.boxId, boxSscc });
-      if (r.displacedAt) events.push({ type: "box_displaced", at: r.displacedAt, boxId: r.boxId, boxSscc });
-      if (r.removedAt) events.push({ type: "box_removed", at: r.removedAt, boxId: r.boxId, boxSscc });
+      if (r.displacedAt)
+        events.push({ type: "box_displaced", at: r.displacedAt, boxId: r.boxId, boxSscc });
+      if (r.removedAt)
+        events.push({ type: "box_removed", at: r.removedAt, boxId: r.boxId, boxSscc });
     }
 
     // 3. box_disassembled -- box_exceptions (kind='disassemble') for those
@@ -466,9 +475,7 @@ export class CodeSearchService {
 
     // 4. pickup_locked/pickup_resolved -- pickup_order_items on the
     // reconstructed kmKey for each distinct gtin/serial of the code.
-    const kmKeys = [
-      ...new Set(codeRows.map((r) => `01${r.gtin14}21${r.serial}`)),
-    ];
+    const kmKeys = [...new Set(codeRows.map((r) => `01${r.gtin14}21${r.serial}`))];
     if (kmKeys.length > 0) {
       const pickupRows = await this.db
         .select({
@@ -494,11 +501,22 @@ export class CodeSearchService {
           ),
         );
       for (const r of pickupRows) {
-        events.push({ type: "pickup_locked", at: r.scannedAt, orderId: r.orderId, orderNo: r.orderNo });
+        events.push({
+          type: "pickup_locked",
+          at: r.scannedAt,
+          orderId: r.orderId,
+          orderNo: r.orderNo,
+        });
         if (r.resolvedAt || r.orderStatus === "cancelled") {
+          // A cancelled order with no resolvedAt falls back to its
+          // createdAt, which precedes the order's own pickup_locked
+          // (scannedAt) -- floor the fallback at scannedAt so this event
+          // never sorts ahead of the lock it resolves.
+          const resolvedAt =
+            r.resolvedAt ?? (r.createdAt > r.scannedAt ? r.createdAt : r.scannedAt);
           events.push({
             type: "pickup_resolved",
-            at: r.resolvedAt ?? r.createdAt,
+            at: resolvedAt,
             orderId: r.orderId,
             orderNo: r.orderNo,
             orderStatus: r.orderStatus as "punched" | "writtenoff" | "cancelled",
@@ -507,12 +525,13 @@ export class CodeSearchService {
       }
     }
 
-    // `Array.prototype.sort` is spec-guaranteed stable (ES2019+), so
-    // same-`at` events keep the order they were pushed above: scanned,
-    // then this code's box_added/displaced/removed (in box_items row
-    // order), then box_disassembled, then pickup_locked/resolved -- a
-    // deterministic tiebreak without a second sort key.
-    events.sort((a, b) => a.at.getTime() - b.at.getTime());
+    // Same-`at` events are tie-broken by a fixed type rank rather than push
+    // order, so e.g. `pickup_resolved` never sorts before its own
+    // `pickup_locked` even when both land on the exact same instant.
+    events.sort(
+      (a, b) =>
+        a.at.getTime() - b.at.getTime() || EVENT_TYPE_RANK[a.type] - EVENT_TYPE_RANK[b.type],
+    );
     return events;
   }
 
@@ -540,7 +559,10 @@ export class CodeSearchService {
       .from(schema.boxes)
       .leftJoin(
         schema.shifts,
-        and(eq(schema.shifts.tenantId, schema.boxes.tenantId), eq(schema.shifts.id, schema.boxes.shiftId)),
+        and(
+          eq(schema.shifts.tenantId, schema.boxes.tenantId),
+          eq(schema.shifts.id, schema.boxes.shiftId),
+        ),
       )
       .leftJoin(
         schema.products,
@@ -561,7 +583,8 @@ export class CodeSearchService {
         removedAt: schema.boxItems.removedAt,
       })
       .from(schema.boxItems)
-      .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)));
+      .where(and(eq(schema.boxItems.tenantId, tenantId), eq(schema.boxItems.boxId, boxId)))
+      .orderBy(desc(schema.boxItems.addedAt), schema.boxItems.codeHash);
 
     const codeHashes = [...new Set(itemRows.map((r) => r.codeHash))];
     const codeDetailsByHash = new Map<string, { gtin14: string; serial: string }>();
@@ -575,7 +598,8 @@ export class CodeSearchService {
         .from(schema.codes)
         .where(and(eq(schema.codes.tenantId, tenantId), inArray(schema.codes.codeHash, codeHashes)))
         .orderBy(schema.codes.codeHash, desc(schema.codes.scannedAt));
-      for (const r of codeRows) codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial });
+      for (const r of codeRows)
+        codeDetailsByHash.set(r.codeHash, { gtin14: r.gtin14, serial: r.serial });
     }
 
     const items = itemRows.map((r) => {
@@ -607,7 +631,9 @@ export class CodeSearchService {
           eq(schema.disaggregationDocuments.id, schema.boxExceptions.disaggregationDocumentId),
         ),
       )
-      .where(and(eq(schema.boxExceptions.tenantId, tenantId), eq(schema.boxExceptions.boxId, boxId)));
+      .where(
+        and(eq(schema.boxExceptions.tenantId, tenantId), eq(schema.boxExceptions.boxId, boxId)),
+      );
 
     const pickupOrderRows = await this.db
       .select({
@@ -623,7 +649,12 @@ export class CodeSearchService {
           eq(schema.pickupOrders.id, schema.pickupOrderBoxes.orderId),
         ),
       )
-      .where(and(eq(schema.pickupOrderBoxes.tenantId, tenantId), eq(schema.pickupOrderBoxes.boxId, boxId)));
+      .where(
+        and(
+          eq(schema.pickupOrderBoxes.tenantId, tenantId),
+          eq(schema.pickupOrderBoxes.boxId, boxId),
+        ),
+      );
 
     const status: BoxCardDto["status"] = box.disassembledAt
       ? "disassembled"

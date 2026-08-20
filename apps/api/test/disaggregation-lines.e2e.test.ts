@@ -170,10 +170,15 @@ describe.skipIf(!ready)("disaggregation lines e2e", () => {
       .expect(201);
     const lines = (res.body as { lines: LineDtoWire[] }).lines;
     expect(lines).toHaveLength(3);
-    expect(lines[0]!.status).toBe("shift_open"); // box closed, but shift not
-    expect(lines[1]!.status).toBe("not_found"); // unparseable input preserved
-    expect(lines[1]!.ssccInput).toBe("not-an-sscc");
-    expect(lines[2]!.status).toBe("duplicate");
+    // Response order isn't insertion order (see `listLinesTx`'s
+    // `(createdAt, id)` orderBy -- all three lines land in the same
+    // millisecond via one bulk INSERT, so ties break on the lines' random
+    // ids, not on array position), so match by content instead of index.
+    const notFoundLine = lines.find((line) => line.status === "not_found");
+    expect(notFoundLine?.ssccInput).toBe("not-an-sscc"); // unparseable input preserved
+    const ssccLines = lines.filter((line) => line.ssccInput === `(00)${SSCC1}`);
+    expect(ssccLines).toHaveLength(2);
+    expect(ssccLines.map((line) => line.status).sort()).toEqual(["duplicate", "shift_open"]); // box closed, but shift not
   });
 
   it("flips shift_open → ok once the shift closes", async () => {
@@ -196,7 +201,10 @@ describe.skipIf(!ready)("disaggregation lines e2e", () => {
     const lineId = (added.body as { lines: { id: string }[] }).lines[0]!.id;
     await agent.delete(`/disaggregation/${doc.id}/lines/${lineId}`).expect(204);
     await agent.post(`/disaggregation/${doc.id}/cancel`).expect(200);
-    await agent.post(`/disaggregation/${doc.id}/lines`).send({ ssccs: [SSCC1] }).expect(409);
+    await agent
+      .post(`/disaggregation/${doc.id}/lines`)
+      .send({ ssccs: [SSCC1] })
+      .expect(409);
   });
 
   it("imports a text file of SSCCs", async () => {

@@ -33,7 +33,10 @@ export async function validateBoxCandidates(
       disassembledAt: schema.boxes.disassembledAt,
       shiftStatus: schema.shifts.status,
       productId: schema.shifts.productId,
-      codeCount: sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(Number),
+      codeCount:
+        sql<number>`count(${schema.boxItems.codeHash}) filter (where ${schema.boxItems.displacedAt} is null and ${schema.boxItems.removedAt} is null)`.mapWith(
+          Number,
+        ),
       // Box referenced by any non-cancelled kiosk order? A correlated EXISTS,
       // not a LEFT JOIN + bool_or: pickup_order_boxes is unique on
       // (tenantId, orderId, boxId), NOT (tenantId, boxId), so a box referenced
@@ -52,11 +55,17 @@ export async function validateBoxCandidates(
     .from(schema.boxes)
     .innerJoin(
       schema.shifts,
-      and(eq(schema.shifts.tenantId, schema.boxes.tenantId), eq(schema.shifts.id, schema.boxes.shiftId)),
+      and(
+        eq(schema.shifts.tenantId, schema.boxes.tenantId),
+        eq(schema.shifts.id, schema.boxes.shiftId),
+      ),
     )
     .leftJoin(
       schema.boxItems,
-      and(eq(schema.boxItems.tenantId, schema.boxes.tenantId), eq(schema.boxItems.boxId, schema.boxes.id)),
+      and(
+        eq(schema.boxItems.tenantId, schema.boxes.tenantId),
+        eq(schema.boxItems.boxId, schema.boxes.id),
+      ),
     )
     .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.sscc, ssccs)))
     .groupBy(schema.boxes.id, schema.shifts.status, schema.shifts.productId);

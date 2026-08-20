@@ -29,11 +29,13 @@ Two new admin (cabinet) screens:
 
 ## 1. Database schema
 
-New tables in `packages/db/src/schema/platform.ts` (near boxes/box_exceptions). Migration in `packages/db/migrations/`. After schema edits: `pnpm --filter @markiro/db build` (repo rule).
+New tables in `packages/db/src/schema/disaggregation.ts` (a separate file, not `platform.ts` — it imports `boxes`/`products` FROM `platform.ts`, so putting the new tables there too would create an import cycle). Migration in `packages/db/migrations/`. After schema edits: `pnpm --filter @markiro/db build` (repo rule).
 
 ### `disaggregation_reasons`
 
-`id`, `tenantId`, `title` (unique per tenant), `isActive`, `sortOrder`, `createdAt`, `updatedAt`. Clone of `pickup_order_reasons`.
+`id`, `tenantId`, `name` (unique per tenant), `archived`, `sortOrder`, `createdAt`, `updatedAt`. Clone of `pickup_order_reasons`.
+
+> **Implementation-time change:** shipped fields are `name`/`archived`, matching `pickup_order_reasons`'s actual column names — this doc originally said `title`/`isActive`, which don't exist on the cloned table.
 
 ### `disaggregation_documents`
 

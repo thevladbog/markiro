@@ -173,7 +173,16 @@ export function BoxCardPage() {
             {t("pages.codeSearch.boxCard.exceptionsEmpty")}
           </span>
         ) : (
-          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+          <ul
+            style={{
+              margin: 0,
+              padding: 0,
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
             {box.exceptions.map((exception, index) => (
               <li
                 key={`${exception.kind}:${exception.occurredAt}:${index}`}
@@ -207,7 +216,16 @@ export function BoxCardPage() {
             {t("pages.codeSearch.boxCard.pickupOrdersEmpty")}
           </span>
         ) : (
-          <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 8 }}>
+          <ul
+            style={{
+              margin: 0,
+              padding: 0,
+              listStyle: "none",
+              display: "flex",
+              flexDirection: "column",
+              gap: 8,
+            }}
+          >
             {box.pickupOrders.map((order) => (
               <li key={order.orderId} style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
                 <Link to={`/pickup/${order.orderId}`}>{order.orderNo}</Link>

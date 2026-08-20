@@ -1,9 +1,15 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
-import { and, count, desc, eq, gte, ilike, inArray, isNull, lt, lte, sql, sum } from "drizzle-orm";
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
+import { and, count, desc, eq, gte, ilike, inArray, isNull, sql, sum } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi, parseScannedSscc } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import { isDateOnly, toExclusiveEnd } from "../../lib/date-range";
+import { upperBoundCondition } from "../../lib/date-range";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import { nextDocNo } from "./doc-number";
@@ -29,6 +35,7 @@ export class DisaggregationService {
     data: CreateDocumentDto,
   ): Promise<DocumentDto> {
     return this.db.transaction(async (tx) => {
+      if (data.reasonId) await this.assertReasonExists(tx, tenantId, data.reasonId);
       const docNo = await nextDocNo(
         { execute: (q) => tx.execute<{ seq: number }>(q as Parameters<typeof tx.execute>[0]) },
         tenantId,
@@ -60,11 +67,7 @@ export class DisaggregationService {
     // Same date-only `to` treatment as code-search's listCodes: the admin
     // sends `YYYY-MM-DD`, which a plain `lte` would cut off at midnight UTC
     // instead of the end of that day.
-    const toCondition = query.to
-      ? isDateOnly(query.to)
-        ? lt(schema.disaggregationDocuments.createdAt, toExclusiveEnd(query.to))
-        : lte(schema.disaggregationDocuments.createdAt, query.to)
-      : undefined;
+    const toCondition = upperBoundCondition(schema.disaggregationDocuments.createdAt, query.to);
     const where = and(
       eq(schema.disaggregationDocuments.tenantId, tenantId),
       query.status ? eq(schema.disaggregationDocuments.status, query.status) : undefined,
@@ -110,6 +113,7 @@ export class DisaggregationService {
     // apply is the `status = 'draft'` condition on the UPDATE's WHERE
     // itself -- same TOCTOU shape `cancelDocument` already closes.
     await this.findDocument(tenantId, id);
+    if (data.reasonId) await this.assertReasonExists(this.db, tenantId, data.reasonId);
     const set: Record<string, unknown> = { updatedAt: sql`now()` };
     if (data.reasonId !== undefined) set.reasonId = data.reasonId;
     if (data.comment !== undefined) set.comment = data.comment;
@@ -124,7 +128,8 @@ export class DisaggregationService {
         ),
       )
       .returning();
-    if (!updated) throw new ConflictException({ code: "not_draft", message: "Document is not a draft" });
+    if (!updated)
+      throw new ConflictException({ code: "not_draft", message: "Document is not a draft" });
     return this.toDocumentDto(tenantId, updated);
   }
 
@@ -146,7 +151,8 @@ export class DisaggregationService {
         ),
       )
       .returning();
-    if (!updated) throw new ConflictException({ code: "not_draft", message: "Document is not a draft" });
+    if (!updated)
+      throw new ConflictException({ code: "not_draft", message: "Document is not a draft" });
     await this.db.insert(schema.tenantAuditEvents).values({
       organizationId: tenantId,
       actorUserId: userId,
@@ -174,7 +180,11 @@ export class DisaggregationService {
    * commit. Only `reason_required` / `no_lines` / `not_draft` / NotFound may
    * throw inside `tx`, because none of those has anything to persist.
    */
-  async applyDocument(tenantId: string, documentId: string, userId: string): Promise<DocumentDetailDto> {
+  async applyDocument(
+    tenantId: string,
+    documentId: string,
+    userId: string,
+  ): Promise<DocumentDetailDto> {
     let allOk = true;
 
     await this.db.transaction(async (tx) => {
@@ -221,7 +231,8 @@ export class DisaggregationService {
               status: fresh,
               validatedAt: sql`now()`,
               boxId: line.sscc !== null ? (candidates.get(line.sscc)?.boxId ?? null) : line.boxId,
-              codeCount: line.sscc !== null ? (candidates.get(line.sscc)?.codeCount ?? 0) : line.codeCount,
+              codeCount:
+                line.sscc !== null ? (candidates.get(line.sscc)?.codeCount ?? 0) : line.codeCount,
             })
             .where(
               and(
@@ -246,7 +257,8 @@ export class DisaggregationService {
             eq(schema.disaggregationReasons.id, doc.reasonId),
           ),
         );
-      const reasonText = doc.comment ? `${reason!.name}: ${doc.comment}` : reason!.name;
+      if (!reason) throw new ConflictException({ code: "reason_required" });
+      const reasonText = doc.comment ? `${reason.name}: ${doc.comment}` : reason.name;
 
       const boxIds = ssccs.map((s) => candidates.get(s)!.boxId);
       const boxRows = await tx
@@ -346,6 +358,24 @@ export class DisaggregationService {
     }
   }
 
+  /** Throws `BadRequestException({ code: "unknown_reason" })` unless (tenantId, reasonId) exists. */
+  private async assertReasonExists(
+    db: Pick<Db, "select">,
+    tenantId: string,
+    reasonId: string,
+  ): Promise<void> {
+    const [row] = await db
+      .select({ id: schema.disaggregationReasons.id })
+      .from(schema.disaggregationReasons)
+      .where(
+        and(
+          eq(schema.disaggregationReasons.tenantId, tenantId),
+          eq(schema.disaggregationReasons.id, reasonId),
+        ),
+      );
+    if (!row) throw new BadRequestException({ code: "unknown_reason" });
+  }
+
   async listLines(tenantId: string, documentId: string): Promise<LineDto[]> {
     return this.listLinesTx(this.db, tenantId, documentId);
   }
@@ -382,7 +412,7 @@ export class DisaggregationService {
           eq(schema.disaggregationDocumentLines.documentId, documentId),
         ),
       )
-      .orderBy(schema.disaggregationDocumentLines.createdAt);
+      .orderBy(schema.disaggregationDocumentLines.createdAt, schema.disaggregationDocumentLines.id);
     return rows.map((r) => ({ ...r, sscc: r.sscc === null ? null : formatSsccWithAi(r.sscc) }));
   }
 
@@ -416,11 +446,9 @@ export class DisaggregationService {
         input,
         sscc: parseScannedSscc(input.trim()),
       }));
-      const candidates = await validateBoxCandidates(
-        tx,
-        tenantId,
-        [...new Set(parsed.map((p) => p.sscc).filter((s): s is string => s !== null))],
-      );
+      const candidates = await validateBoxCandidates(tx, tenantId, [
+        ...new Set(parsed.map((p) => p.sscc).filter((s): s is string => s !== null)),
+      ]);
 
       const existing = new Set(
         (
@@ -441,7 +469,13 @@ export class DisaggregationService {
       const values = [];
       for (const { input, sscc } of parsed) {
         if (sscc === null) {
-          values.push({ tenantId, documentId, ssccInput: input, sscc: null, status: "not_found" as const });
+          values.push({
+            tenantId,
+            documentId,
+            ssccInput: input,
+            sscc: null,
+            status: "not_found" as const,
+          });
           continue;
         }
         if (existing.has(sscc)) {
@@ -449,7 +483,13 @@ export class DisaggregationService {
           // the SAME request get one real row + duplicate marker rows would
           // violate the unique index, so mark duplicates with sscc NULL kept
           // as the raw input for visibility.
-          values.push({ tenantId, documentId, ssccInput: input, sscc: null, status: "duplicate" as const });
+          values.push({
+            tenantId,
+            documentId,
+            ssccInput: input,
+            sscc: null,
+            status: "duplicate" as const,
+          });
           continue;
         }
         existing.add(sscc);

@@ -1,28 +1,35 @@
+import type { AnyColumn, SQL } from "drizzle-orm";
+import { lt, lte } from "drizzle-orm";
+
 /**
  * Normalizes a `to` filter's upper bound for date-range queries. Admin UIs
- * send date-only strings (`YYYY-MM-DD`); zod's `z.coerce.date()` parses that
- * as UTC MIDNIGHT of that day, so a plain `lte(column, to)` silently
- * excludes every row scanned/created later that same day -- exactly the day
- * the caller meant to include.
+ * send date-only strings (`YYYY-MM-DD`); a plain `lte(column, to)` on the
+ * coerced midnight-UTC `Date` would silently exclude every row
+ * scanned/created later that same day -- exactly the day the caller meant to
+ * include. An explicit timestamp (e.g. `2026-08-20T00:00:00.000Z`) that
+ * happens to land on midnight must NOT get this treatment, so the date-only
+ * shape can't be detected from the coerced `Date` alone -- it has to come
+ * from the RAW query-string value (see `listCodesQuerySchema` /
+ * `listDocumentsQuerySchema`, which transform the raw `to` string into this
+ * `{ date, dateOnly }` shape).
  *
- * `isDateOnly` detects that shape (all UTC time-of-day fields at zero); for
- * those, `toExclusiveEnd` returns the START OF THE NEXT DAY so the caller
- * can switch to an exclusive `lt` comparison, which is inclusive of the
- * whole named day. A `to` that already carries a real time-of-day keeps
- * using `lte` unchanged -- see call sites (`code-search.service.ts`,
- * `disaggregation.service.ts`).
+ * `dateOnly: true` switches to an exclusive `lt` against the START OF THE
+ * NEXT DAY, which is inclusive of the whole named day. `dateOnly: false`
+ * (a real timestamp) keeps `lte` unchanged.
  */
-export function isDateOnly(to: Date): boolean {
-  return (
-    to.getUTCHours() === 0 &&
-    to.getUTCMinutes() === 0 &&
-    to.getUTCSeconds() === 0 &&
-    to.getUTCMilliseconds() === 0
-  );
+export interface DateBound {
+  date: Date;
+  dateOnly: boolean;
 }
 
-export function toExclusiveEnd(to: Date): Date {
-  const next = new Date(to);
+export function toExclusiveEnd(date: Date): Date {
+  const next = new Date(date);
   next.setUTCDate(next.getUTCDate() + 1);
   return next;
+}
+
+/** Builds the upper-bound condition for a `to` filter, or `undefined` if none was supplied. */
+export function upperBoundCondition(column: AnyColumn, to: DateBound | undefined): SQL | undefined {
+  if (!to) return undefined;
+  return to.dateOnly ? lt(column, toExclusiveEnd(to.date)) : lte(column, to.date);
 }

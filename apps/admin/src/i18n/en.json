@@ -1264,6 +1264,7 @@
     "disaggregation": {
       "title": "Disaggregation",
       "create": "Create document",
+      "createError": "Could not create the document. Please try again.",
       "reasonsLink": "Disaggregation reasons",
       "empty": "No documents found",
       "filters": {
@@ -1354,6 +1355,7 @@
           "actions": "Actions"
         },
         "deleteLine": "Delete",
+        "deleteLineNamed": "Delete line {{sscc}}",
         "deleteLineError": "Could not delete the line. Please try again.",
         "applyAction": "Apply",
         "applyConfirmTitle": "Apply this document?",

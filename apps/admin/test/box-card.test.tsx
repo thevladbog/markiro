@@ -25,7 +25,7 @@ function jsonResponse(status: number, body: unknown): Response {
 
 const BOX_CARD = {
   id: "b1",
-  sscc: "000000000000000001",
+  sscc: "00000000000000000001",
   status: "disassembled" as const,
   shiftId: "sh1",
   productId: "p1",

@@ -229,7 +229,7 @@ describe("DisaggregationDocumentPage", () => {
     const { fetchMock, user } = renderPage(DOC_DRAFT_READY);
 
     await screen.findByText("DSG-26-0001");
-    const deleteButtons = screen.getAllByRole("button", { name: "Удалить" });
+    const deleteButtons = screen.getAllByRole("button", { name: /Удалить/ });
     await user.click(deleteButtons[0]!);
 
     await waitFor(() =>
@@ -296,7 +296,9 @@ describe("DisaggregationDocumentPage", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
 
     expect(
-      await screen.findByText("Часть строк изменила статус и не готова к проведению. Проверьте таблицу ниже."),
+      await screen.findByText(
+        "Часть строк изменила статус и не готова к проведению. Проверьте таблицу ниже.",
+      ),
     ).toBeTruthy();
 
     await waitFor(() => expect(getCount()).toBeGreaterThanOrEqual(2));

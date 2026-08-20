@@ -47,11 +47,19 @@ export interface ListCodesFilters {
 }
 
 /** `GET /code-search` response: which entity the input resolved to. */
-export type ClassifySearchResult = { type: "box"; boxId: string } | { type: "code"; codeHash: string };
+export type ClassifySearchResult =
+  { type: "box"; boxId: string } | { type: "code"; codeHash: string };
 
 /** Mirrors `apps/api/src/modules/code-search/dto.ts`'s `CodeHistoryEvent`, `Date` fields as `string`. */
 export type CodeHistoryEvent =
-  | { type: "scanned"; at: string; verdict: string; shiftId: string; terminalId: string | null; operatorId: string | null }
+  | {
+      type: "scanned";
+      at: string;
+      verdict: string;
+      shiftId: string;
+      terminalId: string | null;
+      operatorId: string | null;
+    }
   | { type: "box_added"; at: string; boxId: string; boxSscc: string | null }
   | { type: "box_displaced"; at: string; boxId: string; boxSscc: string | null }
   | { type: "box_removed"; at: string; boxId: string; boxSscc: string | null }

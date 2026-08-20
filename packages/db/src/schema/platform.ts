@@ -314,12 +314,18 @@ export const boxExceptions = pgTable(
     reason: text("reason"),
     /**
      * Set when this disassemble was performed by an admin Disaggregation
-     * document rather than a station operator. Deliberately no FK: the
+     * document rather than a station operator. No FK expressed HERE: the
      * documents table lives in disaggregation.ts, which imports boxes FROM
-     * this file — a composite FK here would create a hard import cycle.
-     * Same precedent as shifts.stationCloseOwnerDeviceId above; the
-     * disaggregation service is the only writer and always supplies its own
-     * document id inside the same transaction.
+     * this file — a composite FK in this Drizzle definition would create a
+     * hard import cycle. The FK DOES exist in the database -- hand-spelled
+     * as `box_exceptions_tenant_disaggregation_document_fk` at the end of
+     * migration 0046 (same precedent as shifts.stationCloseOwnerDeviceId /
+     * scan_events' hand-migrated FKs elsewhere in this schema). Nullable, so
+     * MATCH SIMPLE skips every station-originated exception (NULL column).
+     * `drizzle-kit generate` won't propose dropping it: it diffs the
+     * schema-file snapshot against the previous snapshot, not against the
+     * live database, so a constraint that only ever existed in raw SQL never
+     * shows up as a pending change.
      */
     disaggregationDocumentId: uuid("disaggregation_document_id"),
     occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),

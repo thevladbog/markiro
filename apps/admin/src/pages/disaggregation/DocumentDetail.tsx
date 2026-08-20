@@ -267,13 +267,13 @@ function AddLinesPanel({ docId }: { docId: string }) {
   );
 }
 
-function DeleteLineAction({ docId, lineId }: { docId: string; lineId: string }) {
+function DeleteLineAction({ docId, line }: { docId: string; line: LineDto }) {
   const { t } = useTranslation();
   const removeMutation = useRemoveLine(docId);
 
   const handleDelete = async () => {
     try {
-      await removeMutation.mutateAsync(lineId);
+      await removeMutation.mutateAsync(line.id);
     } catch (error) {
       toast(
         "error",
@@ -290,6 +290,7 @@ function DeleteLineAction({ docId, lineId }: { docId: string; lineId: string }) 
         type="button"
         size="compact"
         variant="destructive"
+        aria-label={t("pages.disaggregation.detail.deleteLineNamed", { sscc: formatSscc(line) })}
         loading={removeMutation.isPending}
         onClick={() => void handleDelete()}
       >
@@ -309,7 +310,9 @@ function DraftActions({ doc }: { doc: DocumentDetailDto }) {
   const [applyBlocked, setApplyBlocked] = useState(false);
 
   const canApply =
-    doc.lines.length > 0 && doc.lines.every((line) => line.status === "ok") && Boolean(doc.reasonId);
+    doc.lines.length > 0 &&
+    doc.lines.every((line) => line.status === "ok") &&
+    Boolean(doc.reasonId);
 
   const handleApply = async () => {
     try {
@@ -318,7 +321,11 @@ function DraftActions({ doc }: { doc: DocumentDetailDto }) {
       setConfirmApply(false);
       setApplyBlocked(false);
     } catch (error) {
-      if (error instanceof ApiRequestError && error.status === 409 && error.code === "invalid_lines") {
+      if (
+        error instanceof ApiRequestError &&
+        error.status === 409 &&
+        error.code === "invalid_lines"
+      ) {
         setApplyBlocked(true);
         setConfirmApply(false);
         return;
@@ -458,7 +465,7 @@ export function DisaggregationDocumentPage() {
           {
             key: "actions",
             title: t("pages.disaggregation.detail.table.actions"),
-            render: (line: LineDto) => <DeleteLineAction docId={doc.id} lineId={line.id} />,
+            render: (line: LineDto) => <DeleteLineAction docId={doc.id} line={line} />,
           },
         ]
       : []),

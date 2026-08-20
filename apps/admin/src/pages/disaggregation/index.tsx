@@ -19,8 +19,15 @@ import type { SelectOption, StatusChipStatus, TableColumn } from "@markiro/ui";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
+import { ApiRequestError } from "../../api/client.js";
 import { formatCreatedAt } from "../../lib/datetime.js";
-import { useCreateDocument, useDisaggregationReasons, useDocuments, type DocumentDto } from "./api.js";
+import { toast } from "../../lib/toast.js";
+import {
+  useCreateDocument,
+  useDisaggregationReasons,
+  useDocuments,
+  type DocumentDto,
+} from "./api.js";
 
 type StatusFilter = "all" | "draft" | "applied" | "cancelled";
 
@@ -130,6 +137,11 @@ export function DisaggregationPage() {
   const handleCreate = () => {
     createMutation.mutate(undefined, {
       onSuccess: (doc) => void navigate(`/disaggregation/${doc.id}`),
+      onError: (error) =>
+        toast(
+          "error",
+          error instanceof ApiRequestError ? error.message : t("pages.disaggregation.createError"),
+        ),
     });
   };
 

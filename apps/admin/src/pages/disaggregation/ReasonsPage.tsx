@@ -2,15 +2,7 @@ import { Fragment, useMemo, useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router";
 
-import {
-  Alert,
-  Button,
-  Card,
-  ConfirmDialog,
-  EmptyState,
-  Input,
-  PageHeader,
-} from "@markiro/ui";
+import { Alert, Button, Card, ConfirmDialog, EmptyState, Input, PageHeader } from "@markiro/ui";
 
 import { CABINET_CAPABILITY } from "@markiro/domain";
 
@@ -282,7 +274,9 @@ function AuthorizedReasonsEditor({
       setDeleteTarget(null);
       toast("ok", t("pages.disaggregation.reasons.toasts.archiveSuccess"));
     } catch (error) {
-      setDeleteError(getErrorMessage(error, t("pages.disaggregation.reasons.errors.archiveFailed")));
+      setDeleteError(
+        getErrorMessage(error, t("pages.disaggregation.reasons.errors.archiveFailed")),
+      );
     }
   };
 

@@ -116,7 +116,10 @@ export class DisaggregationController {
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @UseInterceptors(
-    FileInterceptor("file", { storage: memoryStorage(), limits: { fileSize: 1024 * 1024, files: 1 } }),
+    FileInterceptor("file", {
+      storage: memoryStorage(),
+      limits: { fileSize: 1024 * 1024, files: 1 },
+    }),
   )
   @ApiConsumes("multipart/form-data")
   async importLines(

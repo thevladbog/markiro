@@ -30,7 +30,7 @@ const CODE_CARD = {
   productId: "p1",
   productName: "Молоко 1л",
   status: "aggregated" as const,
-  currentBox: { id: "b1", sscc: "000000000000000001" },
+  currentBox: { id: "b1", sscc: "00000000000000000001" },
   history: [
     {
       type: "scanned" as const,
@@ -44,13 +44,13 @@ const CODE_CARD = {
       type: "box_added" as const,
       at: "2026-08-20T08:01:00.000Z",
       boxId: "b1",
-      boxSscc: "000000000000000001",
+      boxSscc: "00000000000000000001",
     },
     {
       type: "box_disassembled" as const,
       at: "2026-08-20T09:00:00.000Z",
       boxId: "b2",
-      boxSscc: "000000000000000002",
+      boxSscc: "00000000000000000002",
       reason: "damaged",
       disaggregationDocumentId: "d1",
       disaggregationDocNo: "DSG-26-0001",

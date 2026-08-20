@@ -1264,6 +1264,7 @@
     "disaggregation": {
       "title": "Дезагрегация",
       "create": "Создать документ",
+      "createError": "Не удалось создать документ. Попробуйте ещё раз.",
       "reasonsLink": "Причины дезагрегации",
       "empty": "Документы не найдены",
       "filters": {
@@ -1354,6 +1355,7 @@
           "actions": "Действия"
         },
         "deleteLine": "Удалить",
+        "deleteLineNamed": "Удалить строку {{sscc}}",
         "deleteLineError": "Не удалось удалить строку. Попробуйте ещё раз.",
         "applyAction": "Провести",
         "applyConfirmTitle": "Провести документ?",

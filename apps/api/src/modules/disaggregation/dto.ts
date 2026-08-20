@@ -1,4 +1,17 @@
 import { z } from "zod";
+import type { DateBound } from "../../lib/date-range";
+
+/** `^YYYY-MM-DD$`; must be checked against the RAW query string, not the coerced `Date` -- see `date-range.ts`. */
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const dateBoundSchema = z.string().transform((raw, ctx) => {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid date" });
+    return z.NEVER;
+  }
+  return { date, dateOnly: DATE_ONLY_RE.test(raw) } satisfies DateBound;
+});
 
 /** POST /disaggregation schema. */
 export const createDocumentSchema = z.object({
@@ -19,7 +32,7 @@ export const listDocumentsQuerySchema = z.object({
   status: z.enum(["draft", "applied", "cancelled"]).optional(),
   reasonId: z.string().uuid().optional(),
   from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+  to: dateBoundSchema.optional(),
   docNo: z.string().trim().min(1).max(40).optional(),
   page: z.coerce.number().int().min(1).default(1),
 });

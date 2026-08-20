@@ -4,7 +4,11 @@ import { parseSsccImport } from "../src/modules/disaggregation/import-parser";
 describe("parseSsccImport", () => {
   it("splits on newlines, semicolons and commas; trims; drops empties", () => {
     expect(parseSsccImport("123;456\n789,abc\r\n\n  042  \n")).toEqual([
-      "123", "456", "789", "abc", "042",
+      "123",
+      "456",
+      "789",
+      "abc",
+      "042",
     ]);
   });
   it("keeps duplicates (dedup is the document's job, visible as duplicate lines)", () => {

@@ -114,9 +114,9 @@ export function CodeSearchPage() {
       title: t("pages.codeSearch.table.box"),
       mono: true,
       render: (row) =>
-        row.boxId && row.boxSscc ? (
+        row.boxId ? (
           <Link to={`/codes/box/${row.boxId}`} onClick={(event) => event.stopPropagation()}>
-            {formatSsccHri(row.boxSscc)}
+            {row.boxSscc ? formatSsccHri(row.boxSscc) : t("pages.codeSearch.boxCard.noSscc")}
           </Link>
         ) : (
           "—"
@@ -151,9 +151,17 @@ export function CodeSearchPage() {
         // understood your input and it just isn't there", so it gets the
         // same generic failure alert the registry section below already
         // uses rather than being mislabeled as "not found".
-        if (error instanceof ApiRequestError && error.status === 404 && error.code === "unrecognized") {
+        if (
+          error instanceof ApiRequestError &&
+          error.status === 404 &&
+          error.code === "unrecognized"
+        ) {
           setSearchError("unrecognized");
-        } else if (error instanceof ApiRequestError && error.status === 404 && error.code === "not_found") {
+        } else if (
+          error instanceof ApiRequestError &&
+          error.status === 404 &&
+          error.code === "not_found"
+        ) {
           setSearchError("not_found");
         } else {
           setSearchError("generic");
@@ -166,10 +174,7 @@ export function CodeSearchPage() {
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
       <PageHeader title={t("pages.codeSearch.title")} />
 
-      <form
-        onSubmit={handleSearch}
-        style={{ display: "flex", gap: 12, alignItems: "flex-end" }}
-      >
+      <form onSubmit={handleSearch} style={{ display: "flex", gap: 12, alignItems: "flex-end" }}>
         <div style={{ flex: 1, maxWidth: 480 }}>
           <Input
             mono
@@ -187,7 +192,9 @@ export function CodeSearchPage() {
 
       {searchError && (
         <Alert tone="error">
-          {searchError === "generic" ? t("common.loadError") : t(`pages.codeSearch.errors.${searchError}`)}
+          {searchError === "generic"
+            ? t("common.loadError")
+            : t(`pages.codeSearch.errors.${searchError}`)}
         </Alert>
       )}
 

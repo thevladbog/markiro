@@ -106,10 +106,7 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     );
     await agent.post(`/shifts/${shiftId}/close`).send({ reason: "done shift" }).expect(200);
 
-    const reason = await agent
-      .post("/disaggregation-reasons")
-      .send({ name: "Порча" })
-      .expect(201);
+    const reason = await agent.post("/disaggregation-reasons").send({ name: "Порча" }).expect(201);
     reasonId = (reason.body as { id: string }).id;
 
     // Kiosk fixture for the race test: a kiosk device + a badged employee
@@ -209,13 +206,19 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
 
   async function createDraftWithLine(sscc: string): Promise<{ id: string }> {
     const doc = await createDraft();
-    await agent.post(`/disaggregation/${doc.id}/lines`).send({ ssccs: [sscc] }).expect(201);
+    await agent
+      .post(`/disaggregation/${doc.id}/lines`)
+      .send({ ssccs: [sscc] })
+      .expect(201);
     return doc;
   }
 
   async function draftWithReasonAndLine(sscc: string): Promise<{ id: string }> {
     const doc = await createDraftWithReason();
-    await agent.post(`/disaggregation/${doc.id}/lines`).send({ ssccs: [sscc] }).expect(201);
+    await agent
+      .post(`/disaggregation/${doc.id}/lines`)
+      .send({ ssccs: [sscc] })
+      .expect(201);
     return doc;
   }
 
@@ -248,7 +251,9 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     // The box surfaces as disassembled on the existing per-shift endpoint.
     const boxes = await agent.get(`/boxes?shiftId=${shiftId}`).expect(200);
     const box = (
-      boxes.body as { items: { sscc: string | null; itemCount: number; disassembledAt: string | null }[] }
+      boxes.body as {
+        items: { sscc: string | null; itemCount: number; disassembledAt: string | null }[];
+      }
     ).items.find((b) => b.sscc?.endsWith(SSCC1));
     expect(box?.disassembledAt).toBeTruthy();
     expect(box?.itemCount).toBe(0); // active items removed
@@ -267,16 +272,20 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     const shift3 = await openShiftForProduct(productId);
     const validSscc = "123456789012345705";
     await postBatch(stationKey, [scan(shift3, "gg", "t3", "2026-07-01T12:00:00.000Z", "b6")]);
-    await postBatch(stationKey, [], [
-      {
-        boxId: "b6",
-        shiftId: shift3,
-        terminalId: "t3",
-        sscc: validSscc,
-        closedAt: "2026-01-03T00:00:00.000Z",
-        operatorId: null,
-      },
-    ]);
+    await postBatch(
+      stationKey,
+      [],
+      [
+        {
+          boxId: "b6",
+          shiftId: shift3,
+          terminalId: "t3",
+          sscc: validSscc,
+          closedAt: "2026-01-03T00:00:00.000Z",
+          operatorId: null,
+        },
+      ],
+    );
     await agent.post(`/shifts/${shift3}/close`).send({ reason: "done" }).expect(200);
 
     // Second box (SSCC2, still untouched so far): lock it via a kiosk
@@ -301,7 +310,9 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     // apply: still not disassembled, its item still active.
     const boxes = await agent.get(`/boxes?shiftId=${shift3}`).expect(200);
     const validBox = (
-      boxes.body as { items: { sscc: string | null; itemCount: number; disassembledAt: string | null }[] }
+      boxes.body as {
+        items: { sscc: string | null; itemCount: number; disassembledAt: string | null }[];
+      }
     ).items.find((b) => b.sscc?.endsWith(validSscc));
     expect(validBox?.disassembledAt).toBeNull();
     expect(validBox?.itemCount).toBe(1);
@@ -310,9 +321,11 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
   it("refuses apply without a reason / without lines / twice", async () => {
     const noReason = await createDraftWithLine(SSCC1);
     expect(
-      ((await agent.post(`/disaggregation/${noReason.id}/apply`).expect(409)).body as {
-        code: string;
-      }).code,
+      (
+        (await agent.post(`/disaggregation/${noReason.id}/apply`).expect(409)).body as {
+          code: string;
+        }
+      ).code,
     ).toBe("reason_required");
 
     const empty = await createDraftWithReason();
@@ -327,9 +340,20 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     const shift2 = await openShiftForProduct(productId);
     const sscc5 = "123456789012345699";
     await postBatch(stationKey, [scan(shift2, "ff", "t2", "2026-07-01T11:00:00.000Z", "b5")]);
-    await postBatch(stationKey, [], [
-      { boxId: "b5", shiftId: shift2, terminalId: "t2", sscc: sscc5, closedAt: "2026-01-02T00:00:00.000Z", operatorId: null },
-    ]);
+    await postBatch(
+      stationKey,
+      [],
+      [
+        {
+          boxId: "b5",
+          shiftId: shift2,
+          terminalId: "t2",
+          sscc: sscc5,
+          closedAt: "2026-01-02T00:00:00.000Z",
+          operatorId: null,
+        },
+      ],
+    );
     await agent.post(`/shifts/${shift2}/close`).send({ reason: "done" }).expect(200);
     const doc = await draftWithReasonAndLine(sscc5);
     await agent.post(`/disaggregation/${doc.id}/apply`).expect(200);

@@ -17,13 +17,23 @@ import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { ApiRequestError, apiFetch } from "../../api/client.js";
 
+/** Mirrors `apps/api/src/modules/disaggregation/dto.ts`'s `LineStatus`. */
+export type LineStatus =
+  | "ok"
+  | "not_found"
+  | "not_closed"
+  | "shift_open"
+  | "already_disassembled"
+  | "written_off"
+  | "duplicate";
+
 /** Mirrors `apps/api/src/modules/disaggregation/dto.ts`'s `LineDto`, `Date` fields as `string`. */
 export interface LineDto {
   id: string;
   ssccInput: string;
   sscc: string | null;
   boxId: string | null;
-  status: string;
+  status: LineStatus;
   productId: string | null;
   productName: string | null;
   codeCount: number;
@@ -184,9 +194,7 @@ function archiveReasonRequest(id: string): Promise<void> {
 }
 
 /** `GET /disaggregation` -- the active tenant's disaggregation documents, filtered/paged. */
-export function useDocuments(
-  filters: ListDocumentsFilters,
-): UseQueryResult<ListDocumentsResponse> {
+export function useDocuments(filters: ListDocumentsFilters): UseQueryResult<ListDocumentsResponse> {
   return useQuery({
     queryKey: [...DISAGGREGATION_QUERY_KEY, filters],
     queryFn: () => fetchDocuments(filters),
@@ -276,7 +284,11 @@ export function useApplyDocument(id: string): UseMutationResult<DocumentDetailDt
       void queryClient.invalidateQueries({ queryKey: DISAGGREGATION_QUERY_KEY });
     },
     onError: (error) => {
-      if (error instanceof ApiRequestError && error.status === 409 && error.code === "invalid_lines") {
+      if (
+        error instanceof ApiRequestError &&
+        error.status === 409 &&
+        error.code === "invalid_lines"
+      ) {
         void queryClient.invalidateQueries({ queryKey: DISAGGREGATION_QUERY_KEY });
       }
     },

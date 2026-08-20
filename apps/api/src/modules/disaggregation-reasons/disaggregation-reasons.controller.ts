@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -62,7 +63,7 @@ export class DisaggregationReasonsController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   async updateReason(
     @Req() req: RequestWithTenant,
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Body(new ZodValidationPipe(updateReasonSchema)) body: UpdateReasonDto,
   ): Promise<ReasonDto> {
     return this.disaggregationReasonsService.updateReason(req.tenantId!, id, body);
@@ -72,7 +73,10 @@ export class DisaggregationReasonsController {
   @HttpCode(204)
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
-  async archiveReason(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<void> {
+  async archiveReason(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ParseUUIDPipe()) id: string,
+  ): Promise<void> {
     return this.disaggregationReasonsService.archiveReason(req.tenantId!, id);
   }
 }

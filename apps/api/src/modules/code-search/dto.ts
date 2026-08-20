@@ -1,4 +1,17 @@
 import { z } from "zod";
+import type { DateBound } from "../../lib/date-range";
+
+/** `^YYYY-MM-DD$`; must be checked against the RAW query string, not the coerced `Date` -- see `date-range.ts`. */
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+const dateBoundSchema = z.string().transform((raw, ctx) => {
+  const date = new Date(raw);
+  if (Number.isNaN(date.getTime())) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "Invalid date" });
+    return z.NEVER;
+  }
+  return { date, dateOnly: DATE_ONLY_RE.test(raw) } satisfies DateBound;
+});
 
 /** `GET /code-search?q=` query. `q` is bounded at 1024 bytes, matching a KM's own `MAX_KM_UTF8_BYTES` ceiling (see `canonicalizeKm`) -- anything longer is unrecognized input, not a DB lookup worth attempting. */
 export const classifyQuerySchema = z.object({
@@ -8,8 +21,7 @@ export type ClassifyQueryDto = z.infer<typeof classifyQuerySchema>;
 
 /** `GET /code-search` response: which entity the input resolved to. */
 export type ClassifySearchResponseDto =
-  | { type: "box"; boxId: string }
-  | { type: "code"; codeHash: string };
+  { type: "box"; boxId: string } | { type: "code"; codeHash: string };
 
 /** 404 body shape for `/code-search`: distinguishes "not a recognized SSCC/KM shape at all" from "well-formed, but nothing in this tenant matches". */
 export interface ClassifyNotFoundDto {
@@ -19,7 +31,7 @@ export interface ClassifyNotFoundDto {
 export const listCodesQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+  to: dateBoundSchema.optional(),
   productId: z.string().uuid().optional(),
   shiftId: z.string().uuid().optional(),
   status: z.enum(["free", "aggregated", "written_off"]).optional(),
@@ -62,7 +74,14 @@ export const codeHashParamSchema = z.string().regex(/^[0-9a-f]{64}$/);
  * merged/sorted ascending by `at` -- see `CodeSearchService.getCodeCard`.
  */
 export type CodeHistoryEvent =
-  | { type: "scanned"; at: Date; verdict: string; shiftId: string; terminalId: string | null; operatorId: string | null }
+  | {
+      type: "scanned";
+      at: Date;
+      verdict: string;
+      shiftId: string;
+      terminalId: string | null;
+      operatorId: string | null;
+    }
   | { type: "box_added"; at: Date; boxId: string; boxSscc: string | null }
   | { type: "box_displaced"; at: Date; boxId: string; boxSscc: string | null }
   | { type: "box_removed"; at: Date; boxId: string; boxSscc: string | null }
