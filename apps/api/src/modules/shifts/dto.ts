@@ -89,6 +89,8 @@ export type ListShiftsQueryDto = z.infer<typeof listShiftsQuerySchema>;
 /** Response DTO for a shift, joined with product/line/counterparty names. */
 export interface ShiftDto {
   id: string;
+  /** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
+  number: string;
   status: ShiftStatus;
   mode: ShiftMode;
   productId: string;

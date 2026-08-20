@@ -13,6 +13,7 @@ import {
   counterparties,
   lines,
   products,
+  shiftNumberCounters,
   shifts,
   ssccBlocks,
   ssccCounters,
@@ -198,6 +199,31 @@ describe("platform schema", () => {
   it("stores the exact scan targeted by an undo exception", () => {
     expect(Object.keys(boxExceptions)).toContain("targetScannedAt");
   });
+
+  it("gives shifts a NOT NULL month key and sequence for the shift number", () => {
+    expect(shifts.numberMonthKey).toBeDefined();
+    expect(shifts.numberMonthKey.notNull).toBe(true);
+    expect(shifts.numberSeq).toBeDefined();
+    expect(shifts.numberSeq.notNull).toBe(true);
+
+    const uq = getTableConfig(shifts).indexes.find(
+      (item) => item.config.name === "shifts_tenant_month_seq_uq",
+    );
+    expect(uq, "missing shifts (tenant, month, seq) unique index").toBeDefined();
+    expect(uq?.config.unique).toBe(true);
+    expect(
+      uq?.config.columns.map((column) => (is(column, IndexedColumn) ? column.name : undefined)),
+    ).toEqual(["tenant_id", "number_month_key", "number_seq"]);
+  });
+
+  it("keys the shift number counter by tenant and month", () => {
+    expect(getTableName(shiftNumberCounters)).toBe("shift_number_counters");
+    const cols = Object.keys(shiftNumberCounters);
+    expect(cols).toEqual(expect.arrayContaining(["tenantId", "monthKey", "lastSeq"]));
+    const pk = getTableConfig(shiftNumberCounters).primaryKeys[0];
+    expect(pk).toBeDefined();
+    expect(pk?.columns.map((column) => column.name)).toEqual(["tenant_id", "month_key"]);
+  });
 });
 
 const url = process.env.DATABASE_URL;
@@ -229,6 +255,8 @@ describe.skipIf(!url)("box_items.removed_at / boxes.disassembled_at / box_except
       tenantId,
       productId,
       mode: "validation",
+      numberMonthKey: "AUG26",
+      numberSeq: 1,
     });
     await db.insert(schema.boxes).values({
       id: boxId,

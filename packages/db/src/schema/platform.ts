@@ -159,6 +159,14 @@ export const shifts = pgTable(
     palletCapacity: integer("pallet_capacity"),
     palletsEnabled: boolean("pallets_enabled").notNull().default(false),
     createdFrom: shiftOrigin("created_from").notNull().default("admin"),
+    /**
+     * The shift's human number, split into its immutable parts: `AUG26` +
+     * `3` render as `AUG26-003` (`/S` appended for station-created shifts).
+     * Assigned once at creation from `shift_number_counters` and NEVER
+     * recomputed — a printed number must survive a planned-date move.
+     */
+    numberMonthKey: text("number_month_key").notNull(),
+    numberSeq: integer("number_seq").notNull(),
     stationClosePolicy: stationClosePolicy("station_close_policy")
       .notNull()
       .default("single_device"),
@@ -181,6 +189,7 @@ export const shifts = pgTable(
   },
   (t) => [
     unique("shifts_tenant_id_uq").on(t.tenantId, t.id),
+    uniqueIndex("shifts_tenant_month_seq_uq").on(t.tenantId, t.numberMonthKey, t.numberSeq),
     // Composite FKs: product/line/counterparty must belong to the same
     // tenant as the shift referencing them. line_id/counterparty_id are
     // nullable — MATCH SIMPLE (the default) means a NULL skips the check.
@@ -587,6 +596,23 @@ export const ssccCounters = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.tenantId, t.issuerPrefix, t.extensionDigit] })],
+);
+
+/**
+ * Hands out per-(tenant, month) shift sequence numbers. `month_key` is the
+ * `MONYY` bucket (`AUG26`) the shift's number was drawn from. Incremented
+ * atomically (INSERT .. ON CONFLICT DO UPDATE .. RETURNING) inside the same
+ * transaction as the shift insert, so concurrent creates cannot collide and
+ * numbers have no gaps.
+ */
+export const shiftNumberCounters = pgTable(
+  "shift_number_counters",
+  {
+    tenantId: tenantId(),
+    monthKey: text("month_key").notNull(),
+    lastSeq: integer("last_seq").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.tenantId, t.monthKey] })],
 );
 
 /**

@@ -800,6 +800,7 @@
         }
       },
       "table": {
+        "number": "Номер",
         "plannedDate": "Дата",
         "product": "Продукт",
         "line": "Линия",

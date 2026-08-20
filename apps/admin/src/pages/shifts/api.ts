@@ -21,6 +21,8 @@ export type ShiftOrigin = "admin" | "station";
 /** Mirrors `apps/api/src/modules/shifts/dto.ts`'s `ShiftDto` (joined with product/line/counterparty names). */
 export interface ShiftDto {
   id: string;
+  /** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
+  number: string;
   status: ShiftStatus;
   mode: ShiftMode;
   productId: string;

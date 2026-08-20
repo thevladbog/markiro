@@ -1,8 +1,10 @@
 import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it, vi } from "vitest";
+import { STATION_MIGRATIONS } from "@markiro/db/station-sqlite";
 import {
   applyMigrations,
   readOperatorsMirror,
+  readShiftContext,
   type SqlExecutor,
   type StationBundle,
 } from "../src/lib/mirror.js";
@@ -45,6 +47,7 @@ const bundle: StationBundle = {
     palletCapacity: 48,
     palletsEnabled: false,
     openedAt: "2026-07-23T08:00:00Z",
+    number: "AUG26-003/S",
   },
   product: {
     id: "p1",
@@ -137,6 +140,9 @@ describe("mirrorShiftBundle", () => {
       ["p1"],
     );
     expect(productRows).toHaveLength(1);
+
+    const context = await readShiftContext(exec, "s1");
+    expect(context?.number).toBe("AUG26-003/S");
   });
 
   it("keeps an image pointer when an older bundle omits the optional image field", async () => {
@@ -368,4 +374,74 @@ describe("mirrorShiftBundle", () => {
       expect(await remaining(exec, "460123456", 0)).toBe(5);
     },
   );
+
+  it("keeps a mirrored shift number when a pre-upgrade bundle omits the field", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+
+    await mirrorShiftBundle({ get: vi.fn().mockResolvedValue(bundle) }, exec, "s1");
+    expect((await readShiftContext(exec, "s1"))?.number).toBe("AUG26-003/S");
+
+    // Literal pre-upgrade server payload: the optional field is absent
+    // (server rolled back mid-fleet). The absence must not erase the number.
+    const preUpgradeShift = { ...bundle.shift };
+    delete preUpgradeShift.number;
+    await mirrorShiftBundle(
+      { get: vi.fn().mockResolvedValue({ ...bundle, shift: preUpgradeShift }) },
+      exec,
+      "s1",
+    );
+    expect((await readShiftContext(exec, "s1"))?.number).toBe("AUG26-003/S");
+
+    // An explicit server null still applies.
+    await mirrorShiftBundle(
+      { get: vi.fn().mockResolvedValue({ ...bundle, shift: { ...bundle.shift, number: null } }) },
+      exec,
+      "s1",
+    );
+    expect((await readShiftContext(exec, "s1"))?.number).toBeNull();
+  });
+
+  it("mirrors null on a first fetch from a pre-upgrade server", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    const preUpgradeShift = { ...bundle.shift };
+    delete preUpgradeShift.number;
+
+    await mirrorShiftBundle(
+      { get: vi.fn().mockResolvedValue({ ...bundle, shift: preUpgradeShift }) },
+      exec,
+      "s1",
+    );
+
+    expect((await readShiftContext(exec, "s1"))?.number).toBeNull();
+  });
+
+  it("upgrades a station database that predates shift_mirror.number in place", async () => {
+    // An old on-device database: every migration EXCEPT the trailing
+    // `number` ALTER has run.
+    const exec = nodeExecutor();
+    const numberAlter = "ALTER TABLE shift_mirror ADD COLUMN number TEXT;";
+    expect(STATION_MIGRATIONS).toContain(numberAlter);
+    for (const stmt of STATION_MIGRATIONS) {
+      if (stmt === numberAlter) continue;
+      try {
+        await exec.run(stmt);
+      } catch (err) {
+        if (!/duplicate column name/i.test(err instanceof Error ? err.message : String(err)))
+          throw err;
+      }
+    }
+    const before = await exec.all<{ name: string }>("SELECT name FROM pragma_table_info(?)", [
+      "shift_mirror",
+    ]);
+    expect(before.map((column) => column.name)).not.toContain("number");
+
+    // The regular boot path (run twice: the re-run must stay idempotent).
+    await applyMigrations(exec);
+    await applyMigrations(exec);
+
+    await mirrorShiftBundle({ get: vi.fn().mockResolvedValue(bundle) }, exec, "s1");
+    expect((await readShiftContext(exec, "s1"))?.number).toBe("AUG26-003/S");
+  });
 });

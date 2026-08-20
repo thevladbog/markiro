@@ -66,6 +66,8 @@ export interface WorkScreenProps {
   productId?: string;
   productImage?: StationProductImageDescriptor | null | undefined;
   counterpartyName?: string | null;
+  /** Human-readable shift number for the box label's `shift.no` field. */
+  shiftNumber?: string | null;
   plannedQty?: number | null | undefined;
   source: ScanSource;
   sound: SoundSettings;
@@ -140,6 +142,7 @@ export function WorkScreen({
   productId,
   productImage,
   counterpartyName,
+  shiftNumber,
   plannedQty,
   source,
   sound,
@@ -814,6 +817,7 @@ export function WorkScreen({
       operatorName: null,
       counterpartyName: counterpartyName ?? null,
       closedAt: new Date().toISOString(),
+      shiftNumber: shiftNumber ?? null,
     });
   }
 

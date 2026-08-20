@@ -8,6 +8,8 @@ export interface BoxLabelInput {
   operatorName: string | null;
   counterpartyName: string | null;
   closedAt: string;
+  /** `AUG26-003/S`; null when the mirror predates the shift-number sync. */
+  shiftNumber: string | null;
 }
 
 /**
@@ -23,7 +25,7 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
     "product.gtin": input.gtin14,
     "km.code": "",
     sscc: input.sscc,
-    "shift.no": "",
+    "shift.no": input.shiftNumber ?? "",
     date: input.closedAt.slice(0, 10),
     qty: String(input.itemCount),
     operator: input.operatorName ?? "",
