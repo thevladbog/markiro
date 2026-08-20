@@ -30,6 +30,31 @@ export function ProductImage({
 
   useEffect(() => {
     let cancelled = false;
+    let retry: number | undefined;
+    /**
+     * Re-reads the cache shortly, but ONLY while there is still nothing to show.
+     *
+     * The reason this retry exists is that media sync runs independently of the
+     * operational bundle (a dead object store must not block opening a shift),
+     * so a product's descriptor can already be mirrored while its bytes are
+     * still landing -- and until they do, the read simply answers `null`. Two
+     * short re-reads cover that gap without anyone having to notify us.
+     *
+     * It deliberately does NOT run after a read that produced an image. Bytes
+     * come out of the cache checksum-validated, so re-reading can only ever
+     * yield the same picture, at the cost of another cache read plus a fresh
+     * `createObjectURL` and a `revokeObjectURL` of the URL currently on screen.
+     * Nor does it run when a later refresh finds nothing while a photo is
+     * already displayed: that photo stays up (see the `previousUrl` handling
+     * below), and a refresh is driven by `refreshKey` when new bytes actually
+     * arrive.
+     */
+    const retryWhileNothingToShow = () => {
+      if (cancelled || retryKey >= 2 || objectUrlRef.current !== null) return;
+      retry = window.setTimeout(() => {
+        if (!cancelled) setRetryKey((key) => key + 1);
+      }, 350);
+    };
     setFailed(false);
     // `undefined` is a legacy/unknown descriptor. The mirror may still have
     // a validated pointer from a newer response, so let the cache reader use
@@ -46,7 +71,14 @@ export function ProductImage({
     void (async () => {
       let blob: Blob | null = await readStationProductImage(exec, productId, image);
       if (!blob && image) blob = await readCachedStationProductImage(productId, image, exec);
-      if (cancelled || !blob || typeof URL.createObjectURL !== "function") return;
+      if (cancelled) return;
+      if (!blob) {
+        // Nothing cached for this descriptor yet -- the case the retry is for.
+        retryWhileNothingToShow();
+        return;
+      }
+      // No object-URL support at all is permanent, so it is not retried.
+      if (typeof URL.createObjectURL !== "function") return;
       const nextUrl = URL.createObjectURL(blob);
       if (cancelled) {
         URL.revokeObjectURL(nextUrl);
@@ -57,14 +89,11 @@ export function ProductImage({
       setObjectUrl(nextUrl);
       if (previousUrl) URL.revokeObjectURL(previousUrl);
     })().catch(() => {
-      if (!cancelled && objectUrlRef.current === null) setFailed(true);
+      if (cancelled) return;
+      if (objectUrlRef.current === null) setFailed(true);
+      // A read that threw is exactly as retryable as one that found nothing.
+      retryWhileNothingToShow();
     });
-    const retry =
-      retryKey < 2
-        ? window.setTimeout(() => {
-            if (!cancelled) setRetryKey((key) => key + 1);
-          }, 350)
-        : undefined;
     return () => {
       cancelled = true;
       if (retry !== undefined) window.clearTimeout(retry);

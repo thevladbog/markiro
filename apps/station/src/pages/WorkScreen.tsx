@@ -40,6 +40,7 @@ import {
 } from "../lib/journal.js";
 import { applyMigrations, readShiftMirror, type SqlExecutor } from "../lib/mirror.js";
 import { renderLabelBytes } from "../lib/print-label.js";
+import { subscribeStationProductImageCache } from "../lib/product-image-cache.js";
 import { rasterizeText } from "../lib/rasterizer.js";
 import { createScanQueue, type ScanOutcome, type ScanQueue } from "../lib/scan-queue.js";
 import type { ScanSource } from "../lib/scan-source.js";
@@ -187,14 +188,19 @@ export function WorkScreen({
   const [showExceptions, setShowExceptions] = useState(false);
   const [recentOperations, setRecentOperations] = useState<RecentOperation[]>([]);
   const [imageRefreshKey, setImageRefreshKey] = useState(0);
+  // Driven by the cache itself rather than by a guess about how long media sync
+  // takes. The bundle mirrors operational data first and syncs the product photo
+  // separately, so this screen is routinely up and scanning before the photo
+  // exists locally -- but far more often the photo was already cached from a
+  // previous shift entry, and then there is nothing to re-read at all. Timers
+  // got both cases wrong: they re-read twice for nothing in the common case,
+  // and gave up before a slow sync landed in the case they existed for.
   useEffect(() => {
-    const first = window.setTimeout(() => setImageRefreshKey((key) => key + 1), 300);
-    const second = window.setTimeout(() => setImageRefreshKey((key) => key + 1), 1_000);
-    return () => {
-      window.clearTimeout(first);
-      window.clearTimeout(second);
-    };
-  }, [shiftId]);
+    if (!productId) return;
+    return subscribeStationProductImageCache((changedProductId) => {
+      if (changedProductId === productId) setImageRefreshKey((key) => key + 1);
+    });
+  }, [productId]);
   const [latestAcceptedOperation, setLatestAcceptedOperation] = useState<RecentOperation | null>(
     null,
   );

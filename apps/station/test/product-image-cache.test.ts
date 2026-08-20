@@ -7,6 +7,7 @@ import {
   readCachedStationProductImage,
   readStationProductImage,
   stationProductImageCacheKey,
+  subscribeStationProductImageCache,
   syncStationProductImage,
 } from "../src/lib/product-image-cache.js";
 
@@ -260,5 +261,113 @@ describe("station product image cache", () => {
     expect(cacheDelete).toHaveBeenCalledWith(
       stationProductImageCacheKey("p1", descriptor.checksum),
     );
+  });
+});
+
+describe("station product image cache announcements", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("announces a product once its image becomes readable", async () => {
+    vi.stubGlobal("caches", undefined);
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await insertProduct(exec);
+    const announced: string[] = [];
+    const unsubscribe = subscribeStationProductImageCache((productId) => {
+      announced.push(productId);
+    });
+
+    try {
+      await syncStationProductImage(
+        exec,
+        {
+          download: vi
+            .fn()
+            .mockResolvedValue(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/webp" })),
+        },
+        { id: "p1", image: descriptor },
+      );
+    } finally {
+      unsubscribe();
+    }
+
+    expect(announced).toEqual(["p1"]);
+    // The announcement means precisely "this now reads back", so a subscriber
+    // that re-reads on it is guaranteed to find bytes rather than another null.
+    expect(await readStationProductImage(exec, "p1", descriptor)).not.toBeNull();
+  });
+
+  it("stays silent when a later sync finds the same image already cached", async () => {
+    vi.stubGlobal("caches", undefined);
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await insertProduct(exec);
+    const download = vi
+      .fn()
+      .mockResolvedValue(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/webp" }));
+    await syncStationProductImage(exec, { download }, { id: "p1", image: descriptor });
+
+    const announced: string[] = [];
+    const unsubscribe = subscribeStationProductImageCache((productId) => {
+      announced.push(productId);
+    });
+    try {
+      // Re-entering the same shift mirrors the bundle again. Nothing about the
+      // photo changed, so nothing should be asked to re-read it.
+      await syncStationProductImage(exec, { download }, { id: "p1", image: descriptor });
+    } finally {
+      unsubscribe();
+    }
+
+    expect(announced).toEqual([]);
+  });
+
+  it("announces again when the product's image is replaced by a different one", async () => {
+    vi.stubGlobal("caches", undefined);
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await insertProduct(exec);
+    await syncStationProductImage(
+      exec,
+      {
+        download: vi
+          .fn()
+          .mockResolvedValue(new Blob([new Uint8Array([1, 2, 3, 4])], { type: "image/webp" })),
+      },
+      { id: "p1", image: descriptor },
+    );
+    const replacement = {
+      checksum: "c42522128b49193de8cd45d8f7589cd7e085e65f138640d57d4482e5f7189623",
+      contentType: "image/webp" as const,
+      byteSize: 2,
+      width: 1,
+      height: 1,
+    };
+    await exec.run("UPDATE product_mirror SET image_checksum = ? WHERE id = ?", [
+      replacement.checksum,
+      "p1",
+    ]);
+
+    const announced: string[] = [];
+    const unsubscribe = subscribeStationProductImageCache((productId) => {
+      announced.push(productId);
+    });
+    try {
+      await syncStationProductImage(
+        exec,
+        {
+          download: vi
+            .fn()
+            .mockResolvedValue(new Blob([new Uint8Array([5, 6])], { type: "image/webp" })),
+        },
+        { id: "p1", image: replacement },
+      );
+    } finally {
+      unsubscribe();
+    }
+
+    expect(announced).toEqual(["p1"]);
   });
 });
