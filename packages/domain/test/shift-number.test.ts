@@ -13,6 +13,16 @@ describe("shiftMonthKey", () => {
     expect(() => shiftMonthKey("2026-8-1")).toThrow(DomainError);
     expect(() => shiftMonthKey("garbage")).toThrow(DomainError);
   });
+
+  it("rejects impossible calendar days", () => {
+    expect(() => shiftMonthKey("2026-02-29")).toThrow(DomainError);
+    expect(() => shiftMonthKey("2026-04-31")).toThrow(DomainError);
+    expect(() => shiftMonthKey("2026-01-00")).toThrow(DomainError);
+  });
+
+  it("accepts a real leap day", () => {
+    expect(shiftMonthKey("2028-02-29")).toBe("FEB28");
+  });
 });
 
 describe("formatShiftNumber", () => {

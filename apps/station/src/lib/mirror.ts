@@ -164,6 +164,10 @@ async function upsertBundleBody(
   preserveIssuerPrefix: boolean,
 ): Promise<void> {
   const s = bundle.shift;
+  // A pre-upgrade server omits `number` entirely; that absence must not
+  // erase a number an upgraded server already mirrored (server rollback
+  // mid-fleet). An explicit `null` from the server still applies.
+  const numberUpdate = s.number === undefined ? "" : ", number=excluded.number";
   await exec.run(
     `INSERT INTO shift_mirror (
        id, status, mode, product_id, product_name, line_id, line_name,
@@ -183,7 +187,7 @@ async function upsertBundleBody(
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
        issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
-       box_label_template_spec=excluded.box_label_template_spec, number=excluded.number`,
+       box_label_template_spec=excluded.box_label_template_spec${numberUpdate}`,
     [
       s.id,
       s.status,
@@ -212,8 +216,8 @@ async function upsertBundleBody(
       // The box label's OWN template spec (Finding 3) -- never a fallback to
       // `bundle.labelTemplate`'s spec, even when this is null.
       bundle.boxLabelTemplate ? JSON.stringify(bundle.boxLabelTemplate.spec) : null,
-      // Always updates from the bundle -- unlike issuer_prefix, there's no
-      // durable local state to preserve here.
+      // Insert value only; whether the UPDATE branch touches `number` is
+      // decided by `numberUpdate` above.
       s.number ?? null,
     ],
   );

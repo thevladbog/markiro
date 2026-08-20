@@ -394,10 +394,14 @@ describe("ShiftsPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("AUG26-001")).toBeDefined();
-    expect(screen.getByText("AUG26-002/S")).toBeDefined();
+    await screen.findByText("AUG26-001");
     const headers = screen.getAllByRole("columnheader");
     expect(headers[0]?.textContent).toContain("Номер");
+    // The number lives in the FIRST data cell of each row, not merely
+    // somewhere on the page.
+    const rows = screen.getAllByRole("row").slice(1); // drop the header row
+    const firstCells = rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+    expect(firstCells).toEqual(["AUG26-001", "AUG26-002/S", "AUG26-003"]);
   });
 
   it("marks a shift that received data after it was closed", async () => {
@@ -497,7 +501,7 @@ describe("ShiftsPage", () => {
     const row = (await screen.findByText("Сыр Российский")).closest("tr");
     expect(row).not.toBeNull();
     await user.click(within(row!).getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-002/S");
 
     expect((screen.getByRole("radio", { name: "Валидация" }) as HTMLButtonElement).disabled).toBe(
       true,
@@ -1205,7 +1209,7 @@ describe("ShiftsPage", () => {
     renderPage();
     await screen.findByText("Молоко 1л");
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-001");
 
     await user.click(screen.getByRole("button", { name: "Очистить дату: Дата смены" }));
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
@@ -1237,7 +1241,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Молоко 1л");
 
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-001");
 
     fireEvent.change(screen.getByLabelText("Плановое количество, шт"), {
       target: { value: "750" },
@@ -1291,7 +1295,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Молоко 1л");
 
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-001");
 
     // The issuer select defaults to "our own organization", not "none" --
     // it must read as a real choice with its own identity, not an absence.
@@ -1338,7 +1342,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Молоко 1л");
 
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-001");
 
     // Same "default sends null" contract counterpartyId already has its own
     // test for (see "sends counterpartyId: null..."
@@ -1382,7 +1386,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Молоко 1л");
 
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-001");
 
     // Same contract as above, for the box label template select: touch it
     // away from its default, then clear it back to the no-template option
@@ -1433,7 +1437,7 @@ describe("ShiftsPage", () => {
     await screen.findByText("Молоко 1л");
 
     fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
-    await screen.findByText(/^Изменить смену/);
+    await screen.findByText("Изменить смену · AUG26-001");
 
     expect(
       screen.getByRole("combobox", { name: "Для контрагента (толлинг)" }).textContent,

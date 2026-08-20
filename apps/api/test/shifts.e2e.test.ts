@@ -1312,7 +1312,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     });
 
     it("falls back to the creation month when plannedDate is omitted", async () => {
-      const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+      const created = await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation" })
+        .expect(201);
       const todayKey = shiftMonthKey(new Date().toISOString().slice(0, 10));
       expect((created.body.number as string).startsWith(`${todayKey}-`)).toBe(true);
     });

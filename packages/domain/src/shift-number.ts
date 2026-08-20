@@ -1,8 +1,18 @@
 import { DomainError } from "./errors.js";
 
 const MONTH_KEYS = [
-  "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+  "JAN",
+  "FEB",
+  "MAR",
+  "APR",
+  "MAY",
+  "JUN",
+  "JUL",
+  "AUG",
+  "SEP",
+  "OCT",
+  "NOV",
+  "DEC",
 ] as const;
 
 /**
@@ -11,11 +21,22 @@ const MONTH_KEYS = [
  * is a stable identifier and must not depend on the server's locale.
  */
 export function shiftMonthKey(isoDate: string): string {
-  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(isoDate);
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate);
   if (!match) throw new DomainError("SHIFT_DATE_FORMAT", `malformed ISO date: "${isoDate}"`);
-  const month = Number(match[2]!);
-  if (month < 1 || month > 12) throw new DomainError("SHIFT_DATE_FORMAT", `invalid month: ${match[2]}`);
-  return `${MONTH_KEYS[month - 1]}${match[1]!.slice(2)}`;
+  const [, yearPart, monthPart, dayPart] = match;
+  if (yearPart === undefined || monthPart === undefined || dayPart === undefined)
+    throw new DomainError("SHIFT_DATE_FORMAT", `malformed ISO date: "${isoDate}"`);
+  const year = Number(yearPart);
+  const month = Number(monthPart);
+  const day = Number(dayPart);
+  if (month < 1 || month > 12)
+    throw new DomainError("SHIFT_DATE_FORMAT", `invalid month: ${monthPart}`);
+  // The upstream zod check is a bare regex, so `2026-02-31` can reach this
+  // point; reject impossible calendar days rather than bucket them.
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (day < 1 || day > daysInMonth)
+    throw new DomainError("SHIFT_DATE_FORMAT", `invalid day: ${dayPart}`);
+  return `${MONTH_KEYS[month - 1]}${yearPart.slice(2)}`;
 }
 
 /**

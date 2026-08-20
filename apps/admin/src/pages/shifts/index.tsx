@@ -127,7 +127,9 @@ function AuthorizedPlannedShiftActions({ shift }: { shift: ShiftDto }) {
         title={t("pages.shifts.deleteConfirmTitle")}
         description={
           <>
-            <p>{t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? shift.number })}</p>
+            <p>
+              {t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? shift.number })}
+            </p>
             {deleteError ? <Alert tone="error">{deleteError}</Alert> : null}
           </>
         }

@@ -26,11 +26,13 @@
 ### Task 1: Domain helpers `shiftMonthKey` + `formatShiftNumber`
 
 **Files:**
+
 - Create: `packages/domain/src/shift-number.ts`
 - Modify: `packages/domain/src/index.ts` (add exports)
 - Test: `packages/domain/test/shift-number.test.ts`
 
 **Interfaces:**
+
 - Consumes: `DomainError` from `packages/domain/src/errors.ts` (existing; constructor takes a string code, e.g. `new DomainError("SSCC_FORMAT")` — follow that pattern).
 - Produces (used by Tasks 3, 5):
   - `shiftMonthKey(isoDate: string): string` — `"2026-08-20"` → `"AUG26"`; throws `DomainError("SHIFT_DATE_FORMAT")` on malformed input.
@@ -93,8 +95,18 @@ Expected: FAIL — `formatShiftNumber`/`shiftMonthKey` are not exported.
 import { DomainError } from "./errors.js";
 
 const MONTH_KEYS = [
-  "JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-  "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
+  "JAN",
+  "FEB",
+  "MAR",
+  "APR",
+  "MAY",
+  "JUN",
+  "JUL",
+  "AUG",
+  "SEP",
+  "OCT",
+  "NOV",
+  "DEC",
 ] as const;
 
 /**
@@ -148,11 +160,13 @@ git commit -m "feat(domain): shift number helpers (AUG26-003, /S suffix)"
 ### Task 2: Postgres schema + migration with backfill
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts` (shifts table ~line 136-220; new table after `ssccCounters` pattern at line 580)
 - Create: `packages/db/migrations/0046_*.sql` (via `db:generate`, then hand-edit)
 - Test: `packages/db/test/schema.test.ts`
 
 **Interfaces:**
+
 - Produces (used by Task 3):
   - `schema.shifts.numberMonthKey` (`number_month_key text NOT NULL`), `schema.shifts.numberSeq` (`number_seq integer NOT NULL`).
   - `schema.shiftNumberCounters` table: `{ tenantId, monthKey, lastSeq }`, PK `(tenant_id, month_key)`.
@@ -277,6 +291,7 @@ CREATE UNIQUE INDEX "shifts_tenant_month_seq_uq" ON "shifts" USING btree ("tenan
 ```
 
 Notes for the implementer:
+
 - Compare against what drizzle actually generated: keep drizzle's exact constraint/FK names and any statements it emitted that are missing above (adjust names above to the generated ones if they differ). The functional change you're making by hand: columns are added NULLABLE, backfilled, then `SET NOT NULL` — drizzle's generated `ADD COLUMN ... NOT NULL` would fail on non-empty tables.
 - Postgres `to_char(date, 'MONYY')` yields uppercase English month abbreviations (`AUG26`) regardless of locale — it matches `shiftMonthKey` exactly.
 - `created_at::date` uses the DB session timezone; that is acceptable for the backfill fallback (only shifts with no planned date).
@@ -299,12 +314,14 @@ git commit -m "feat(db): shift number columns + per-month counters with backfill
 ### Task 3: API — assign numbers, expose `number`, sort by real date
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts` (imports; `CURRENT_SHIFT_STORAGE_SELECTION` line ~52; `JoinedShiftRow` line ~42; `listShifts` orderBy line ~150; `createShift` line ~226-256; `joinedSelection()` line ~855; `mapShiftRow()` line ~888)
 - Modify: `apps/api/src/modules/shifts/dto.ts` (`ShiftDto` line ~90)
 - Modify: `apps/api/test/shifts.service.test.ts` (insert stub, line ~156)
 - Test: `apps/api/test/shifts.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `shiftMonthKey`, `formatShiftNumber` from `@markiro/domain` (Task 1); `schema.shiftNumberCounters`, `schema.shifts.numberMonthKey/.numberSeq` (Task 2).
 - Produces (used by Tasks 4, 5): `ShiftDto.number: string` on every shifts endpoint (`GET /shifts`, `GET /shifts/:id`, `POST /shifts`, `PATCH`, `/bundle`, `/reference-bundle`).
 
@@ -316,12 +333,18 @@ Append a `describe` block inside the existing `describe.skipIf(!ready)("lines + 
 describe("shift numbers", () => {
   it("assigns sequential per-month numbers and restarts across months", async () => {
     // agent + productId prepared like the neighbouring tests
-    const a = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-08-05" }).expect(201);
-    const b = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-08-20" }).expect(201);
-    const c = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-09-01" }).expect(201);
+    const a = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-08-05" })
+      .expect(201);
+    const b = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-08-20" })
+      .expect(201);
+    const c = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-09-01" })
+      .expect(201);
 
     expect(a.body.number).toBe("AUG31-001");
     expect(b.body.number).toBe("AUG31-002");
@@ -329,42 +352,55 @@ describe("shift numbers", () => {
   });
 
   it("suffixes /S for station-created shifts and shares the month sequence", async () => {
-    const first = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-10-01" }).expect(201);
+    const first = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-10-01" })
+      .expect(201);
     // stationAgent: request authorized with the device api-key, as in the
     // createdFrom test at ~line 1225
-    const second = await stationAgent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-10-02" }).expect(201);
+    const second = await stationAgent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-10-02" })
+      .expect(201);
 
     expect(first.body.number).toBe("OCT31-001");
     expect(second.body.number).toBe("OCT31-002/S");
   });
 
   it("keeps the number when plannedDate moves to another month", async () => {
-    const created = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-11-05" }).expect(201);
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-11-05" })
+      .expect(201);
     expect(created.body.number).toBe("NOV31-001");
 
-    const updated = await agent.patch(`/shifts/${created.body.id}`)
-      .send({ plannedDate: "2031-12-05" }).expect(200);
+    const updated = await agent
+      .patch(`/shifts/${created.body.id}`)
+      .send({ plannedDate: "2031-12-05" })
+      .expect(200);
     expect(updated.body.number).toBe("NOV31-001");
   });
 
   it("falls back to the creation month when plannedDate is omitted", async () => {
-    const created = await agent.post("/shifts")
-      .send({ productId, mode: "validation" }).expect(201);
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
     const todayKey = shiftMonthKey(new Date().toISOString().slice(0, 10));
     expect(created.body.number.startsWith(`${todayKey}-`)).toBe(true);
   });
 
   it("lists shifts by real date, newest first", async () => {
     // fresh org/agent so only these three shifts exist
-    const early = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-01-01" }).expect(201);
-    const late = await agent.post("/shifts")
-      .send({ productId, mode: "validation", plannedDate: "2031-03-01" }).expect(201);
-    const dateless = await agent.post("/shifts")
-      .send({ productId, mode: "validation" }).expect(201); // real date = today
+    const early = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-01-01" })
+      .expect(201);
+    const late = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", plannedDate: "2031-03-01" })
+      .expect(201);
+    const dateless = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation" })
+      .expect(201); // real date = today
 
     const list = await agent.get("/shifts").expect(200);
     const ids = list.body.items.map((item: { id: string }) => item.id);
@@ -382,7 +418,7 @@ Expected: new tests FAIL (`number` undefined); pre-existing tests still pass.
 
 - [ ] **Step 3: Implement in `shifts.service.ts`**
 
-Imports: add `desc`, `sql` to the `drizzle-orm` import; add `import { formatShiftNumber, shiftMonthKey } from "@markiro/domain";` (note the file already imports a *type* from `@markiro/domain` — add a value import line).
+Imports: add `desc`, `sql` to the `drizzle-orm` import; add `import { formatShiftNumber, shiftMonthKey } from "@markiro/domain";` (note the file already imports a _type_ from `@markiro/domain` — add a value import line).
 
 `JoinedShiftRow` (line ~42): the selection carries the parts, not the composed string:
 
@@ -471,48 +507,48 @@ type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
 `mapShiftRow()` (line ~888): destructure the parts out and compose:
 
 ```ts
-    const {
-      numberMonthKey,
-      numberSeq,
-      imageChecksum,
-      imageByteSize,
-      imageWidth,
-      imageHeight,
-      stationClosePolicy,
-      stationCloseOwnerDeviceId,
-      ...shift
-    } = row;
-    const access =
-      stationClosePolicy === "admin_only"
-        ? ({ kind: "admin_only" } as const)
-        : stationCloseOwnerDeviceId
-          ? ({ kind: "single_device", ownerDeviceId: stationCloseOwnerDeviceId } as const)
-          : undefined;
-    return {
-      ...shift,
-      number: formatShiftNumber({
-        monthKey: numberMonthKey,
-        seq: numberSeq,
-        createdFrom: shift.createdFrom,
-      }),
-      ...(access ? { stationCloseAccess: access } : {}),
-      image: imageChecksum
-        ? {
-            checksum: imageChecksum,
-            contentType: "image/webp",
-            byteSize: imageByteSize ?? 0,
-            width: imageWidth ?? 0,
-            height: imageHeight ?? 0,
-          }
-        : null,
-    };
+const {
+  numberMonthKey,
+  numberSeq,
+  imageChecksum,
+  imageByteSize,
+  imageWidth,
+  imageHeight,
+  stationClosePolicy,
+  stationCloseOwnerDeviceId,
+  ...shift
+} = row;
+const access =
+  stationClosePolicy === "admin_only"
+    ? ({ kind: "admin_only" } as const)
+    : stationCloseOwnerDeviceId
+      ? ({ kind: "single_device", ownerDeviceId: stationCloseOwnerDeviceId } as const)
+      : undefined;
+return {
+  ...shift,
+  number: formatShiftNumber({
+    monthKey: numberMonthKey,
+    seq: numberSeq,
+    createdFrom: shift.createdFrom,
+  }),
+  ...(access ? { stationCloseAccess: access } : {}),
+  image: imageChecksum
+    ? {
+        checksum: imageChecksum,
+        contentType: "image/webp",
+        byteSize: imageByteSize ?? 0,
+        width: imageWidth ?? 0,
+        height: imageHeight ?? 0,
+      }
+    : null,
+};
 ```
 
 `dto.ts` `ShiftDto` (line ~90), right after `id`:
 
 ```ts
-  /** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
-  number: string;
+/** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
+number: string;
 ```
 
 - [ ] **Step 4: Fix the service unit-test stub**
@@ -541,6 +577,7 @@ type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
 ```bash
 pnpm --filter @markiro/api exec vitest run test/shifts.service.test.ts test/shifts.e2e.test.ts test/shifts.controller.test.ts test/shifts-bundle.e2e.test.ts
 ```
+
 Expected: PASS. The bundle e2e should show `shift.number` flowing through untouched (`StationBundleShiftDto` extends `ShiftDto`). If other API test files construct `ShiftDto` literals, add `number` there too (`pnpm --filter @markiro/api typecheck` finds them all).
 
 - [ ] **Step 6: Typecheck + commit**
@@ -556,6 +593,7 @@ git commit -m "feat(api): assign immutable shift numbers, expose number, sort li
 ### Task 4: Admin — number column, dialog/panel labels, i18n
 
 **Files:**
+
 - Modify: `apps/admin/src/pages/shifts/api.ts` (ShiftDto, line ~22)
 - Modify: `apps/admin/src/pages/shifts/index.tsx` (columns line ~276; dialog entity lines 130/134/208)
 - Modify: `apps/admin/src/pages/shifts/ShiftPanelRoute.tsx` (edit panel title, line ~203)
@@ -563,6 +601,7 @@ git commit -m "feat(api): assign immutable shift numbers, expose number, sort li
 - Test: `apps/admin/test/shifts.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `ShiftDto.number: string` from the API (Task 3).
 - Produces: nothing consumed downstream.
 
@@ -592,8 +631,8 @@ Expected: new test FAILS; possibly TS errors on fixtures until `number` is added
 `api.ts` `ShiftDto` — after `id: string;`:
 
 ```ts
-  /** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
-  number: string;
+/** Human-readable immutable number, e.g. `AUG26-003` (`/S` = station-created). */
+number: string;
 ```
 
 `index.tsx` columns array (line ~277) — new first entry:
@@ -616,7 +655,7 @@ Dialog labels — replace `shift.productName ?? shift.id` at lines 134 and 208 w
 and line 130's body param with:
 
 ```tsx
-            <p>{t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? shift.number })}</p>
+<p>{t("pages.shifts.deleteConfirmBody", { name: shift.productName ?? shift.number })}</p>
 ```
 
 `ShiftPanelRoute.tsx` line ~203 (the loaded edit panel, where the fetched shift is in scope — NOT the loading/error `PanelState`):
@@ -630,6 +669,7 @@ i18n — in both `ru.json` and `en.json`, inside `pages.shifts.table` add as the
 ```json
         "number": "Номер",
 ```
+
 (en: `"number": "Number",`)
 
 - [ ] **Step 4: Run tests**
@@ -637,6 +677,7 @@ i18n — in both `ru.json` and `en.json`, inside `pages.shifts.table` add as the
 ```bash
 pnpm --filter @markiro/admin exec vitest run test/shifts.test.tsx test/shifts-routing.test.tsx test/shift-exports-dialog.test.tsx test/dashboard.test.tsx test/conflicts.test.tsx test/boxes.test.tsx
 ```
+
 Expected: PASS (fixtures in the other files may also need `number` — typecheck will list them).
 
 - [ ] **Step 5: Typecheck + commit**
@@ -652,12 +693,14 @@ git commit -m "feat(admin): shift number column and labels"
 ### Task 5: Station data plumbing — bundle type, SQLite mirror, contexts
 
 **Files:**
+
 - Modify: `packages/db/src/sqlite/schema.ts` (`shiftMirror`, line ~60)
 - Modify: `packages/db/src/sqlite/migrations.ts` (trailing `ALTER TABLE` list, line ~197)
 - Modify: `apps/station/src/lib/mirror.ts` (`StationBundle.shift` line ~11; `upsertBundleBody` line ~159; `ShiftContextRow` + `readShiftContext` lines ~483-545)
 - Test: `packages/db/test/sqlite-schema.test.ts`, `apps/station/test/shift-bundle.test.ts` (extend existing)
 
 **Interfaces:**
+
 - Consumes: bundle JSON now carries `shift.number: string` (Task 3).
 - Produces (used by Task 6): `ShiftContextRow.number: string | null` from `readShiftContext`; `shift_mirror.number` column.
 
@@ -685,6 +728,7 @@ expect(context?.number).toBe("AUG26-003/S");
 pnpm --filter @markiro/db exec vitest run test/sqlite-schema.test.ts
 pnpm --filter @markiro/station exec vitest run test/shift-bundle.test.ts
 ```
+
 Expected: FAIL (no `number` column / field).
 
 - [ ] **Step 3: Implement**
@@ -717,8 +761,8 @@ Expected: FAIL (no `number` column / field).
 3. `ShiftContextRow` (line ~483) — add:
 
 ```ts
-  /** Human-readable shift number (`AUG26-003/S`); null until a post-upgrade bundle sync. */
-  number: string | null;
+/** Human-readable shift number (`AUG26-003/S`); null until a post-upgrade bundle sync. */
+number: string | null;
 ```
 
 4. `readShiftContext` (line ~497): add `s.number` to the SELECT (`s.number AS number` alongside `s.counterparty_name`), `number: string | null` to the row generic, and `number: row.number ?? null` to the returned object.
@@ -729,6 +773,7 @@ Expected: FAIL (no `number` column / field).
 pnpm --filter @markiro/db exec vitest run test/sqlite-schema.test.ts && pnpm --filter @markiro/db build
 pnpm --filter @markiro/station exec vitest run test/shift-bundle.test.ts
 ```
+
 Expected: PASS. (`@markiro/db build` first — station consumes the built package.)
 
 - [ ] **Step 5: Typecheck + commit**
@@ -744,6 +789,7 @@ git commit -m "feat(station): mirror the shift number into SQLite and the shift 
 ### Task 6: Station UI — selection card, status bar, box label
 
 **Files:**
+
 - Modify: `apps/station/src/pages/ShiftSelection.tsx` (`ShiftListItem` line ~19; `ShiftCard` render line ~291)
 - Modify: `apps/station/src/ui/ShiftCard.tsx` (props line ~5; render line ~61)
 - Modify: `apps/station/src/App.tsx` (`shiftLabel` line ~1300; `<WorkScreen>` props line ~1388)
@@ -752,6 +798,7 @@ git commit -m "feat(station): mirror the shift number into SQLite and the shift 
 - Test: `apps/station/test/shift-selection.test.tsx`, `apps/station/test/status-bar.test.tsx`, `apps/station/test/close-box.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ShiftDto.number` on `GET /shifts` items (Task 3); `ShiftContextRow.number` (Task 5).
 - Produces: `boxLabelFields` input gains `shiftNumber: string | null`; `"shift.no"` renders it.
 
@@ -778,6 +825,7 @@ Also keep one case with `shiftNumber: null` expecting `""` (old mirrors before t
 ```bash
 pnpm --filter @markiro/station exec vitest run test/shift-selection.test.tsx test/status-bar.test.tsx test/close-box.test.ts
 ```
+
 Expected: FAIL (missing field/props).
 
 - [ ] **Step 3: Implement**
@@ -834,10 +882,10 @@ destructure it in the component signature, and in `fieldsForClosedBox` (line ~80
 `ShiftCard.tsx` — add `number?: string | null;` to `ShiftCardProps`, destructure it, and prefix the product line (line 61):
 
 ```tsx
-        <div className="shift-card__product">
-          {number ? `${number} · ` : ""}
-          {productName ?? "—"}
-        </div>
+<div className="shift-card__product">
+  {number ? `${number} · ` : ""}
+  {productName ?? "—"}
+</div>
 ```
 
 - [ ] **Step 4: Run station tests**
@@ -845,6 +893,7 @@ destructure it in the component signature, and in `fieldsForClosedBox` (line ~80
 ```bash
 pnpm --filter @markiro/station exec vitest run
 ```
+
 Expected: PASS. If `screen-gallery.test.tsx` / `gallery-fixtures.ts` snapshots break, add plausible `number` values (e.g. `"AUG26-001"`) to the gallery's shift fixtures rather than weakening assertions.
 
 - [ ] **Step 5: Typecheck + commit**
@@ -868,6 +917,7 @@ pnpm typecheck
 pnpm lint
 pnpm test
 ```
+
 Expected: all green. (API e2e suites self-skip without `DATABASE_URL`/`BETTER_AUTH_*`; if the shared dev Postgres is available, export them so the shift-number e2e actually runs — see the memory note about the shared Postgres in local env.)
 
 - [ ] **Step 2: Fix any stragglers**
@@ -880,4 +930,5 @@ Typical fallout: `ShiftDto`-typed fixtures in tests not touched above (`dashboar
 git add -A
 git commit -m "test: align shift fixtures with the new number field"
 ```
+
 (Skip if nothing changed.)

@@ -10,9 +10,9 @@ ALTER TABLE "shifts" ADD COLUMN "number_seq" integer;--> statement-breakpoint
 ALTER TABLE "shift_number_counters" ADD CONSTRAINT "shift_number_counters_tenant_id_organization_id_fk" FOREIGN KEY ("tenant_id") REFERENCES "public"."organization"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 WITH numbered AS (
 	SELECT id,
-		to_char(coalesce(planned_date, created_at::date), 'MONYY') AS mk,
+		to_char(coalesce(planned_date, (created_at AT TIME ZONE 'UTC')::date), 'MONYY') AS mk,
 		row_number() OVER (
-			PARTITION BY tenant_id, to_char(coalesce(planned_date, created_at::date), 'MONYY')
+			PARTITION BY tenant_id, to_char(coalesce(planned_date, (created_at AT TIME ZONE 'UTC')::date), 'MONYY')
 			ORDER BY created_at, id
 		) AS seq
 	FROM shifts

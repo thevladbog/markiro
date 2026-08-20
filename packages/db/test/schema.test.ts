@@ -210,7 +210,10 @@ describe("platform schema", () => {
       (item) => item.config.name === "shifts_tenant_month_seq_uq",
     );
     expect(uq, "missing shifts (tenant, month, seq) unique index").toBeDefined();
-    expect(uq!.config.unique).toBe(true);
+    expect(uq?.config.unique).toBe(true);
+    expect(
+      uq?.config.columns.map((column) => (is(column, IndexedColumn) ? column.name : undefined)),
+    ).toEqual(["tenant_id", "number_month_key", "number_seq"]);
   });
 
   it("keys the shift number counter by tenant and month", () => {
@@ -219,7 +222,7 @@ describe("platform schema", () => {
     expect(cols).toEqual(expect.arrayContaining(["tenantId", "monthKey", "lastSeq"]));
     const pk = getTableConfig(shiftNumberCounters).primaryKeys[0];
     expect(pk).toBeDefined();
-    expect(pk!.columns.map((column) => column.name)).toEqual(["tenant_id", "month_key"]);
+    expect(pk?.columns.map((column) => column.name)).toEqual(["tenant_id", "month_key"]);
   });
 });
 
