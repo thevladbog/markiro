@@ -144,9 +144,9 @@ export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void
  * gets the `prefixUnavailable` hint (see OrgProfilePage.tsx) instead of that
  * 400 being surfaced as a generic load error.
  */
-export function useOrgProfileSscc(
-  options?: { enabled?: boolean },
-): UseQueryResult<SsccCounterStateDto> {
+export function useOrgProfileSscc(options?: {
+  enabled?: boolean;
+}): UseQueryResult<SsccCounterStateDto> {
   return useQuery({
     queryKey: ORG_PROFILE_SSCC_QUERY_KEY,
     queryFn: fetchOrgProfileSscc,

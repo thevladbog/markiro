@@ -25,7 +25,10 @@ export interface SsccCounterStateDto {
  * Shared by the organisation settings card and the counterparty panel: the
  * rule is one rule, and two copies of this text would drift.
  */
-export function describeSsccBlocker(t: TFunction, blockedBy: SsccSeedBlocker | null): string | null {
+export function describeSsccBlocker(
+  t: TFunction,
+  blockedBy: SsccSeedBlocker | null,
+): string | null {
   if (!blockedBy) return null;
   return blockedBy.kind === "active_shift"
     ? t("common.sscc.blocked.activeShift", { number: blockedBy.shiftNumber })

@@ -427,9 +427,7 @@ describe("CounterpartiesPage", () => {
     const input = (await screen.findByLabelText("Начальный серийный номер")) as HTMLInputElement;
     const section = input.closest(".mk-counterparty-panel-section");
     if (!section) throw new Error("SSCC section not found");
-    await waitFor(() =>
-      expect(within(section as HTMLElement).getByText(/40\s?000/)).toBeDefined(),
-    );
+    await waitFor(() => expect(within(section as HTMLElement).getByText(/40\s?000/)).toBeDefined());
     expect(
       within(section as HTMLElement).getByRole("button", { name: "Сохранить SSCC" }),
     ).toHaveProperty("disabled", false);

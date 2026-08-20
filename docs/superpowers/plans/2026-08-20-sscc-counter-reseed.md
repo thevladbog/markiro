@@ -28,11 +28,13 @@
 ### Task 1: Колонка `sscc_blocks.revoked_at`
 
 **Files:**
+
 - Modify: `packages/db/src/schema/platform.ts:647-700` (таблица `ssccBlocks`)
 - Create: `packages/db/migrations/00NN_<generated>.sql` (генерируется drizzle-kit)
 - Test: `packages/db/test/schema.test.ts`
 
 **Interfaces:**
+
 - Consumes: ничего.
 - Produces: `schema.ssccBlocks.revokedAt` — Drizzle-колонка `revoked_at timestamptz NULL`.
 
@@ -41,13 +43,13 @@
 В `packages/db/test/schema.test.ts`, рядом с тестом `"keys the sscc counter by tenant, issuer prefix and extension digit"` (строка ~57), добавить. `ssccBlocks` уже импортирован в шапке файла (строка 18):
 
 ```ts
-  it("lets an sscc block be revoked without being deleted", () => {
-    const cols = Object.keys(ssccBlocks);
-    expect(cols).toEqual(expect.arrayContaining(["revokedAt"]));
-    // Nullable: null IS the live state, and a revoked block must survive as
-    // the only record of where a gap in the numbering came from.
-    expect(ssccBlocks.revokedAt.notNull).toBe(false);
-  });
+it("lets an sscc block be revoked without being deleted", () => {
+  const cols = Object.keys(ssccBlocks);
+  expect(cols).toEqual(expect.arrayContaining(["revokedAt"]));
+  // Nullable: null IS the live state, and a revoked block must survive as
+  // the only record of where a gap in the numbering came from.
+  expect(ssccBlocks.revokedAt.notNull).toBe(false);
+});
 ```
 
 - [ ] **Step 2: Убедиться, что тест падает**
@@ -124,10 +126,12 @@ git commit -m "feat(db): add sscc_blocks.revoked_at"
 ### Task 2: Нижняя граница по фактически напечатанному
 
 **Files:**
+
 - Modify: `apps/api/src/modules/sscc/sscc.service.ts:95-171` (`seedFloor`, `atomicSeedSscc`)
 - Test: `apps/api/test/sscc-settings.e2e.test.ts:253-320` (блок `describe("putSscc floor ...")`)
 
 **Interfaces:**
+
 - Consumes: `schema.ssccBlocks.consumedThroughSerial`.
 - Produces: `seedFloor(db, tenantId, issuerPrefix, extensionDigit): Promise<number>` — сигнатура не меняется, меняется смысл: «на один выше самого высокого НАПЕЧАТАННОГО серийника», минимум `firstSerial`. `atomicSeedSscc(db, tenantId, issuerPrefix, extensionDigit, nextSerial): Promise<boolean>` — сигнатура не меняется.
 
@@ -136,34 +140,34 @@ git commit -m "feat(db): add sscc_blocks.revoked_at"
 В `apps/api/test/sscc-settings.e2e.test.ts`, внутри `describe("putSscc floor (final review, finding 2)")`, добавить новым тестом:
 
 ```ts
-    it("floors on what was printed, not on what was handed out", async () => {
-      const gln = freshGln();
-      await agent.put("/org/profile").send({ gln }).expect(200);
-      const prefix = gln.slice(0, 9);
-      const service = app!.get(SsccService);
+it("floors on what was printed, not on what was handed out", async () => {
+  const gln = freshGln();
+  await agent.put("/org/profile").send({ gln }).expect(200);
+  const prefix = gln.slice(0, 9);
+  const service = app!.get(SsccService);
 
-      // A block of 50 serials is handed to the device, but only serial 10 is
-      // ever reported as actually printed. The old floor (toSerial + 1 = 51)
-      // made every unprinted serial in the block permanently unusable; the
-      // floor is now one past what was really printed.
-      await service.allocate(tenantId, prefix, 0, deviceId, 50);
-      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 10));
+  // A block of 50 serials is handed to the device, but only serial 10 is
+  // ever reported as actually printed. The old floor (toSerial + 1 = 51)
+  // made every unprinted serial in the block permanently unusable; the
+  // floor is now one past what was really printed.
+  await service.allocate(tenantId, prefix, 0, deviceId, 50);
+  await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 10));
 
-      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 10 }).expect(400);
-      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 11 }).expect(200);
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(11);
-    });
+  await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 10 }).expect(400);
+  await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 11 }).expect(200);
+  expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(11);
+});
 
-    it("floors at the box minimum when nothing was ever printed", async () => {
-      const gln = freshGln();
-      await agent.put("/org/profile").send({ gln }).expect(200);
-      const prefix = gln.slice(0, 9);
-      await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+it("floors at the box minimum when nothing was ever printed", async () => {
+  const gln = freshGln();
+  await agent.put("/org/profile").send({ gln }).expect(200);
+  const prefix = gln.slice(0, 9);
+  await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
 
-      // Handed out but never printed -- serial 1 is still free.
-      expect(await seedFloor(db, tenantId, prefix, 0)).toBe(1);
-      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 1 }).expect(200);
-    });
+  // Handed out but never printed -- serial 1 is still free.
+  expect(await seedFloor(db, tenantId, prefix, 0)).toBe(1);
+  await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 1 }).expect(200);
+});
 ```
 
 В шапке файла дополнить импорт домена (строка 6) до:
@@ -255,32 +259,29 @@ export async function seedFloor(
 В том же файле тест `"rejects seeding below the floor once a block has been issued, but allows seeding at or above it"` строится на старом определении (`floor = block.toSerial + 1`). Он проверяет реальное поведение и должен остаться зелёным — переписать его тело так, чтобы граница создавалась печатью, а не выдачей:
 
 ```ts
-    it("rejects seeding below the floor once a serial has been printed, but allows seeding at or above it", async () => {
-      const gln = freshGln();
-      await agent.put("/org/profile").send({ gln }).expect(200);
-      const prefix = gln.slice(0, 9);
+it("rejects seeding below the floor once a serial has been printed, but allows seeding at or above it", async () => {
+  const gln = freshGln();
+  await agent.put("/org/profile").send({ gln }).expect(200);
+  const prefix = gln.slice(0, 9);
 
-      // Cuts a real sscc_blocks row under this prefix, the same one-statement
-      // path a shift bundle uses -- no HTTP route exposes raw allocation, so
-      // SsccService is called directly, same as sscc.e2e.test.ts does. The
-      // floor comes from the PRINTED serial recorded below, not from the
-      // block's bounds (2026-08-20 reseed design).
-      const service = app!.get(SsccService);
-      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
-      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 9));
-      const floor = block.fromSerial + 10;
+  // Cuts a real sscc_blocks row under this prefix, the same one-statement
+  // path a shift bundle uses -- no HTTP route exposes raw allocation, so
+  // SsccService is called directly, same as sscc.e2e.test.ts does. The
+  // floor comes from the PRINTED serial recorded below, not from the
+  // block's bounds (2026-08-20 reseed design).
+  const service = app!.get(SsccService);
+  const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+  await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 9));
+  const floor = block.fromSerial + 10;
 
-      await agent
-        .put("/org/profile/sscc")
-        .send({ extensionDigit: 0, nextSerial: floor - 1 })
-        .expect(400);
+  await agent
+    .put("/org/profile/sscc")
+    .send({ extensionDigit: 0, nextSerial: floor - 1 })
+    .expect(400);
 
-      await agent
-        .put("/org/profile/sscc")
-        .send({ extensionDigit: 0, nextSerial: floor })
-        .expect(200);
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
-    });
+  await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: floor }).expect(200);
+  expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+});
 ```
 
 - [ ] **Step 6: Прогнать весь файл + смежный e2e SSCC**
@@ -303,10 +304,12 @@ git commit -m "fix(sscc): floor the counter seed on printed serials, not issued 
 ### Task 3: `allocateForBundle` не выдаёт отозванный блок
 
 **Files:**
+
 - Modify: `apps/api/src/modules/sscc/sscc.service.ts:397-452` (`allocateForBundle`)
 - Test: `apps/api/test/sscc.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `schema.ssccBlocks.revokedAt` (Task 1).
 - Produces: поведение — `allocateForBundle` нарезает свежий блок, если все блоки устройства отозваны.
 
@@ -315,45 +318,45 @@ git commit -m "fix(sscc): floor the counter seed on printed serials, not issued 
 В `apps/api/test/sscc.e2e.test.ts` добавить тест внутрь существующего верхнего `describe`. `schema`, `and`, `eq`, `SsccService`, `db`, `tenantId` и хелпер `registerDevice(name)` (строка ~129) там уже есть; дополнить импорт drizzle до `import { and, eq, isNull } from "drizzle-orm";` не нужно — `isNull` в этом тесте не используется:
 
 ```ts
-  it("cuts a fresh block instead of handing back a revoked one", async () => {
-    const service = app!.get(SsccService);
-    const deviceId = await registerDevice("Revoked block device");
-    const prefix = freshPrefix();
+it("cuts a fresh block instead of handing back a revoked one", async () => {
+  const service = app!.get(SsccService);
+  const deviceId = await registerDevice("Revoked block device");
+  const prefix = freshPrefix();
 
-    const first = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
-    // A repeat fetch must still hand back the SAME block -- that invariant is
-    // what keeps a station from burning through the number space on every
-    // shift entry, and this test must not silently relax it.
-    const repeat = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
-    expect(repeat.fromSerial).toBe(first.fromSerial);
+  const first = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
+  // A repeat fetch must still hand back the SAME block -- that invariant is
+  // what keeps a station from burning through the number space on every
+  // shift entry, and this test must not silently relax it.
+  const repeat = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
+  expect(repeat.fromSerial).toBe(first.fromSerial);
 
-    await db
-      .update(schema.ssccBlocks)
-      .set({ revokedAt: new Date() })
-      .where(
-        and(
-          eq(schema.ssccBlocks.tenantId, tenantId),
-          eq(schema.ssccBlocks.issuerPrefix, prefix),
-          eq(schema.ssccBlocks.extensionDigit, 0),
-        ),
-      );
+  await db
+    .update(schema.ssccBlocks)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(schema.ssccBlocks.tenantId, tenantId),
+        eq(schema.ssccBlocks.issuerPrefix, prefix),
+        eq(schema.ssccBlocks.extensionDigit, 0),
+      ),
+    );
 
-    const afterRevoke = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
-    expect(afterRevoke.fromSerial).toBe(first.toSerial + 1);
-  });
+  const afterRevoke = await service.allocateForBundle(tenantId, prefix, 0, deviceId, 50);
+  expect(afterRevoke.fromSerial).toBe(first.toSerial + 1);
+});
 ```
 
 `freshPrefix()` — если в файле уже есть хелпер, дающий неиспользованный 9-значный префикс, использовать его; иначе добавить рядом с остальными фикстурами файла:
 
 ```ts
-  // A 9-digit issuer prefix unused by any other test in this file: these
-  // tests cut REAL sscc_blocks rows, and sharing a prefix would make one
-  // test's blocks shift another's expected serials.
-  let prefixCounter = 0;
-  function freshPrefix(): string {
-    prefixCounter += 1;
-    return `47${String(prefixCounter).padStart(7, "0")}`;
-  }
+// A 9-digit issuer prefix unused by any other test in this file: these
+// tests cut REAL sscc_blocks rows, and sharing a prefix would make one
+// test's blocks shift another's expected serials.
+let prefixCounter = 0;
+function freshPrefix(): string {
+  prefixCounter += 1;
+  return `47${String(prefixCounter).padStart(7, "0")}`;
+}
 ```
 
 - [ ] **Step 2: Убедиться, что тест падает**
@@ -402,6 +405,7 @@ git commit -m "feat(sscc): skip revoked blocks when serving a shift bundle"
 ### Task 4: `SsccService.seedCounter` — гуард, запись, отзыв
 
 **Files:**
+
 - Create: `apps/api/src/modules/sscc/dto.ts`
 - Modify: `apps/api/src/modules/sscc/sscc.service.ts` (новые экспорты)
 - Modify: `apps/api/src/modules/org-profile/org-profile.service.ts:485-552` (`getSscc`, `putSscc`)
@@ -413,8 +417,10 @@ git commit -m "feat(sscc): skip revoked blocks when serving a shift bundle"
 - Test: `apps/api/test/sscc-settings.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `seedFloor`, `atomicSeedSscc` (Task 2), `schema.ssccBlocks.revokedAt` (Task 1).
 - Produces:
+
   ```ts
   export type SsccSeedBlocker =
     | { kind: "active_shift"; shiftId: string; shiftNumber: string }
@@ -427,6 +433,7 @@ git commit -m "feat(sscc): skip revoked blocks when serving a shift bundle"
     blockedBy: SsccSeedBlocker | null;
   }
   ```
+
   `SsccService.seedCounter(tenantId: string, issuerPrefix: string, dto: SsccCounterDto): Promise<SsccCounterDto>`
   `SsccService.counterState(tenantId: string, issuerPrefix: string, extensionDigit: number): Promise<SsccCounterStateDto>`
 
@@ -435,112 +442,109 @@ git commit -m "feat(sscc): skip revoked blocks when serving a shift bundle"
 В `apps/api/test/sscc-settings.e2e.test.ts` добавить новый `describe` на верхнем уровне файла (внутри корневого `describe`):
 
 ```ts
-  describe("seed guards and block revocation (2026-08-20 reseed design)", () => {
-    it("refuses to seed while a shift is active, and says which one", async () => {
-      const gln = freshGln();
-      await agent.put("/org/profile").send({ gln }).expect(200);
-      const shift = await openAggregationShift();
+describe("seed guards and block revocation (2026-08-20 reseed design)", () => {
+  it("refuses to seed while a shift is active, and says which one", async () => {
+    const gln = freshGln();
+    await agent.put("/org/profile").send({ gln }).expect(200);
+    const shift = await openAggregationShift();
 
-      const res = await agent
-        .put("/org/profile/sscc")
-        .send({ extensionDigit: 0, nextSerial: 900 })
-        .expect(409);
-      expect(res.body.code).toBe("sscc_seed_active_shift");
+    const res = await agent
+      .put("/org/profile/sscc")
+      .send({ extensionDigit: 0, nextSerial: 900 })
+      .expect(409);
+    expect(res.body.code).toBe("sscc_seed_active_shift");
 
-      const state = await agent.get("/org/profile/sscc").expect(200);
-      expect(state.body.blockedBy).toEqual({
-        kind: "active_shift",
-        shiftId: shift.id,
-        shiftNumber: shift.number,
-      });
-
-      await closeShift(shift.id);
-      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 900 }).expect(200);
+    const state = await agent.get("/org/profile/sscc").expect(200);
+    expect(state.body.blockedBy).toEqual({
+      kind: "active_shift",
+      shiftId: shift.id,
+      shiftNumber: shift.number,
     });
 
-    it("reports the current floor as minSerial", async () => {
-      const gln = freshGln();
-      await agent.put("/org/profile").send({ gln }).expect(200);
-      const prefix = gln.slice(0, 9);
-      const service = app!.get(SsccService);
-      await service.allocate(tenantId, prefix, 0, deviceId, 50);
-      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 7));
-
-      const res = await agent.get("/org/profile/sscc").expect(200);
-      expect(res.body.minSerial).toBe(8);
-      expect(res.body.blockedBy).toBeNull();
-    });
-
-    it("revokes the device's live block when the value changes, and leaves it when it does not", async () => {
-      const gln = freshGln();
-      await agent.put("/org/profile").send({ gln }).expect(200);
-      const prefix = gln.slice(0, 9);
-      const service = app!.get(SsccService);
-      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
-
-      const liveBlocks = async () =>
-        db
-          .select({ id: schema.ssccBlocks.id })
-          .from(schema.ssccBlocks)
-          .where(
-            and(
-              eq(schema.ssccBlocks.tenantId, tenantId),
-              eq(schema.ssccBlocks.issuerPrefix, prefix),
-              isNull(schema.ssccBlocks.revokedAt),
-            ),
-          );
-
-      // Re-saving the value the counter already holds must NOT revoke: every
-      // redundant "Save" would otherwise burn a whole block and tear a
-      // 2000-serial hole in the numbering.
-      const unchanged = (await agent.get("/org/profile/sscc").expect(200)).body.nextSerial;
-      await agent
-        .put("/org/profile/sscc")
-        .send({ extensionDigit: 0, nextSerial: unchanged })
-        .expect(200);
-      expect(await liveBlocks()).toHaveLength(1);
-
-      await agent
-        .put("/org/profile/sscc")
-        .send({ extensionDigit: 0, nextSerial: block.toSerial + 500 })
-        .expect(200);
-      expect(await liveBlocks()).toHaveLength(0);
-    });
+    await closeShift(shift.id);
+    await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 900 }).expect(200);
   });
+
+  it("reports the current floor as minSerial", async () => {
+    const gln = freshGln();
+    await agent.put("/org/profile").send({ gln }).expect(200);
+    const prefix = gln.slice(0, 9);
+    const service = app!.get(SsccService);
+    await service.allocate(tenantId, prefix, 0, deviceId, 50);
+    await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 7));
+
+    const res = await agent.get("/org/profile/sscc").expect(200);
+    expect(res.body.minSerial).toBe(8);
+    expect(res.body.blockedBy).toBeNull();
+  });
+
+  it("revokes the device's live block when the value changes, and leaves it when it does not", async () => {
+    const gln = freshGln();
+    await agent.put("/org/profile").send({ gln }).expect(200);
+    const prefix = gln.slice(0, 9);
+    const service = app!.get(SsccService);
+    const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+
+    const liveBlocks = async () =>
+      db
+        .select({ id: schema.ssccBlocks.id })
+        .from(schema.ssccBlocks)
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, tenantId),
+            eq(schema.ssccBlocks.issuerPrefix, prefix),
+            isNull(schema.ssccBlocks.revokedAt),
+          ),
+        );
+
+    // Re-saving the value the counter already holds must NOT revoke: every
+    // redundant "Save" would otherwise burn a whole block and tear a
+    // 2000-serial hole in the numbering.
+    const unchanged = (await agent.get("/org/profile/sscc").expect(200)).body.nextSerial;
+    await agent
+      .put("/org/profile/sscc")
+      .send({ extensionDigit: 0, nextSerial: unchanged })
+      .expect(200);
+    expect(await liveBlocks()).toHaveLength(1);
+
+    await agent
+      .put("/org/profile/sscc")
+      .send({ extensionDigit: 0, nextSerial: block.toSerial + 500 })
+      .expect(200);
+    expect(await liveBlocks()).toHaveLength(0);
+  });
+});
 ```
 
 Хелперы в файле отсутствуют — добавить их внутрь этого же `describe`, рядом с существующим `freshGln()` (порядок вызовов скопирован из `apps/api/test/shifts-bundle.e2e.test.ts`, где та же последовательность уже работает):
 
 ```ts
-    /** Direct-DB product seed: product validation is not what these tests exercise. */
-    async function seedProduct(): Promise<string> {
-      const id = randomUUID();
-      await db.insert(schema.products).values({
-        id,
-        tenantId,
-        gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
-        name: "Seed Product",
-        status: "active",
-      });
-      return id;
-    }
+/** Direct-DB product seed: product validation is not what these tests exercise. */
+async function seedProduct(): Promise<string> {
+  const id = randomUUID();
+  await db.insert(schema.products).values({
+    id,
+    tenantId,
+    gtin14: `${Math.floor(Math.random() * 1e13)}`.padStart(14, "0"),
+    name: "Seed Product",
+    status: "active",
+  });
+  return id;
+}
 
-    /** Creates + opens an aggregation shift, returning its id and display number. */
-    async function openAggregationShift(): Promise<{ id: string; number: string }> {
-      const productId = await seedProduct();
-      const created = await agent
-        .post("/shifts")
-        .send({ productId, mode: "aggregation" })
-        .expect(201);
-      const id = created.body.id as string;
-      const opened = await agent.post(`/shifts/${id}/open`).expect(200);
-      return { id, number: opened.body.number as string };
-    }
+/** Creates + opens an aggregation shift, returning its id and display number. */
+async function openAggregationShift(): Promise<{ id: string; number: string }> {
+  const productId = await seedProduct();
+  const created = await agent.post("/shifts").send({ productId, mode: "aggregation" }).expect(201);
+  const id = created.body.id as string;
+  const opened = await agent.post(`/shifts/${id}/open`).expect(200);
+  return { id, number: opened.body.number as string };
+}
 
-    /** Closes a shift so the counter guard stops reporting it (`reason` is min 3 chars). */
-    async function closeShift(id: string): Promise<void> {
-      await agent.post(`/shifts/${id}/close`).send({ reason: "counter reseed test" }).expect(200);
-    }
+/** Closes a shift so the counter guard stops reporting it (`reason` is min 3 chars). */
+async function closeShift(id: string): Promise<void> {
+  await agent.post(`/shifts/${id}/close`).send({ reason: "counter reseed test" }).expect(200);
+}
 ```
 
 В шапке файла дополнить импорт drizzle до `import { and, eq, isNull } from "drizzle-orm";` и добавить `import { randomUUID } from "node:crypto";`.
@@ -856,12 +860,14 @@ git commit -m "feat(sscc): guard and revoke on counter reseed via shared seedCou
 ### Task 5: Bundle отдаёт `ssccRevokedFrom`
 
 **Files:**
+
 - Modify: `apps/api/src/modules/shifts/dto.ts:175-188`
 - Modify: `apps/api/src/modules/shifts/shifts.service.ts:575-582` (`getBundle`), `:668-672` (`getReferenceBundle` return), `:722-777` (`bundleSscc`)
 - Modify: `apps/api/src/modules/sscc/sscc.service.ts` (новый метод)
 - Test: `apps/api/test/shifts-bundle.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `schema.ssccBlocks.revokedAt` (Task 1), `SsccService.allocateForBundle` (Task 3).
 - Produces: `ShiftBundleDto.ssccRevokedFrom: number[]`; `SsccService.revokedFromSerials(tenantId, issuerPrefix, extensionDigit, deviceId, executor?): Promise<number[]>`.
 
@@ -870,32 +876,29 @@ git commit -m "feat(sscc): guard and revoke on counter reseed via shared seedCou
 В `apps/api/test/shifts-bundle.e2e.test.ts` добавить тест внутрь уже существующего `describe("box serial block on the bundle (Task 7)")` (строка ~363) — там уже подготовлены `agent`, `orgId`, `stationKey`, `stationDeviceId`, `shiftId`:
 
 ```ts
-    it("tells the device which of its blocks were revoked", async () => {
-      const server = app!.getHttpServer();
-      const fetchBundle = () =>
-        request(server).get(`/shifts/${shiftId}/bundle`).set("x-api-key", stationKey).expect(200);
+it("tells the device which of its blocks were revoked", async () => {
+  const server = app!.getHttpServer();
+  const fetchBundle = () =>
+    request(server).get(`/shifts/${shiftId}/bundle`).set("x-api-key", stationKey).expect(200);
 
-      const bundle = await fetchBundle();
-      expect(bundle.body.ssccRevokedFrom).toEqual([]);
-      const held = bundle.body.sscc.fromSerial as number;
+  const bundle = await fetchBundle();
+  expect(bundle.body.ssccRevokedFrom).toEqual([]);
+  const held = bundle.body.sscc.fromSerial as number;
 
-      await db
-        .update(schema.ssccBlocks)
-        .set({ revokedAt: new Date() })
-        .where(
-          and(
-            eq(schema.ssccBlocks.tenantId, orgId),
-            eq(schema.ssccBlocks.deviceId, stationDeviceId),
-          ),
-        );
+  await db
+    .update(schema.ssccBlocks)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(eq(schema.ssccBlocks.tenantId, orgId), eq(schema.ssccBlocks.deviceId, stationDeviceId)),
+    );
 
-      const after = await fetchBundle();
-    // A fresh block, plus the old one named so the device drops it -- without
-    // that list the station's burnSerial would keep draining the lower range
-    // (ORDER BY from_serial) and the reseed would never reach a label.
-    expect(after.body.sscc.fromSerial).toBeGreaterThan(held);
-    expect(after.body.ssccRevokedFrom).toEqual([held]);
-  });
+  const after = await fetchBundle();
+  // A fresh block, plus the old one named so the device drops it -- without
+  // that list the station's burnSerial would keep draining the lower range
+  // (ORDER BY from_serial) and the reseed would never reach a label.
+  expect(after.body.sscc.fromSerial).toBeGreaterThan(held);
+  expect(after.body.ssccRevokedFrom).toEqual([held]);
+});
 ```
 
 - [ ] **Step 2: Убедиться, что тест падает**
@@ -1044,12 +1047,14 @@ git commit -m "feat(shifts): carry revoked serial blocks in the station bundle"
 ### Task 6: Станция удаляет отозванные диапазоны
 
 **Files:**
+
 - Modify: `apps/station/src/lib/sscc-pool.ts`
 - Modify: `apps/station/src/lib/mirror.ts:60-78` (`StationBundle.sscc` рядом)
 - Modify: `apps/station/src/lib/shift-bundle.ts:70-102`
 - Test: `apps/station/test/sscc-pool.test.ts`, `apps/station/test/shift-bundle.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ShiftBundleDto.ssccRevokedFrom` (Task 5).
 - Produces: `dropRanges(exec: SqlExecutor, issuerPrefix: string, extensionDigit: number, fromSerials: number[]): Promise<void>`.
 
@@ -1058,54 +1063,54 @@ git commit -m "feat(shifts): carry revoked serial blocks in the station bundle"
 В `apps/station/test/sscc-pool.test.ts` дописать в `describe("sscc pool")`:
 
 ```ts
-  it("drops a revoked range so burning moves to the replacement block", async () => {
-    await addRange(exec, {
-      issuerPrefix: ISSUER_PREFIX,
-      extensionDigit: 0,
-      fromSerial: 1,
-      toSerial: 2000,
-      consumedThroughSerial: 10,
-    });
-    await addRange(exec, {
-      issuerPrefix: ISSUER_PREFIX,
-      extensionDigit: 0,
-      fromSerial: 5000,
-      toSerial: 6999,
-      consumedThroughSerial: null,
-    });
-    // burnSerial takes the LOWEST from_serial, so the revoked block wins
-    // until it is actually deleted -- this is the whole reason dropRanges
-    // exists rather than just adding the new range.
-    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(11);
-
-    await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
-    expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(5000);
+it("drops a revoked range so burning moves to the replacement block", async () => {
+  await addRange(exec, {
+    issuerPrefix: ISSUER_PREFIX,
+    extensionDigit: 0,
+    fromSerial: 1,
+    toSerial: 2000,
+    consumedThroughSerial: 10,
   });
-
-  it("ignores an empty revocation list and a range it does not hold", async () => {
-    await addRange(exec, {
-      issuerPrefix: ISSUER_PREFIX,
-      extensionDigit: 0,
-      fromSerial: 1,
-      toSerial: 9,
-      consumedThroughSerial: null,
-    });
-    await dropRanges(exec, ISSUER_PREFIX, 0, []);
-    await dropRanges(exec, ISSUER_PREFIX, 0, [12345]);
-    expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(9);
+  await addRange(exec, {
+    issuerPrefix: ISSUER_PREFIX,
+    extensionDigit: 0,
+    fromSerial: 5000,
+    toSerial: 6999,
+    consumedThroughSerial: null,
   });
+  // burnSerial takes the LOWEST from_serial, so the revoked block wins
+  // until it is actually deleted -- this is the whole reason dropRanges
+  // exists rather than just adding the new range.
+  expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(11);
 
-  it("does not drop the same from_serial under another extension digit", async () => {
-    await addRange(exec, {
-      issuerPrefix: ISSUER_PREFIX,
-      extensionDigit: 1,
-      fromSerial: 1,
-      toSerial: 9,
-      consumedThroughSerial: null,
-    });
-    await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
-    expect(await remaining(exec, ISSUER_PREFIX, 1)).toBe(9);
+  await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
+  expect(await burnSerial(exec, ISSUER_PREFIX, 0)).toBe(5000);
+});
+
+it("ignores an empty revocation list and a range it does not hold", async () => {
+  await addRange(exec, {
+    issuerPrefix: ISSUER_PREFIX,
+    extensionDigit: 0,
+    fromSerial: 1,
+    toSerial: 9,
+    consumedThroughSerial: null,
   });
+  await dropRanges(exec, ISSUER_PREFIX, 0, []);
+  await dropRanges(exec, ISSUER_PREFIX, 0, [12345]);
+  expect(await remaining(exec, ISSUER_PREFIX, 0)).toBe(9);
+});
+
+it("does not drop the same from_serial under another extension digit", async () => {
+  await addRange(exec, {
+    issuerPrefix: ISSUER_PREFIX,
+    extensionDigit: 1,
+    fromSerial: 1,
+    toSerial: 9,
+    consumedThroughSerial: null,
+  });
+  await dropRanges(exec, ISSUER_PREFIX, 0, [1]);
+  expect(await remaining(exec, ISSUER_PREFIX, 1)).toBe(9);
+});
 ```
 
 Дополнить импорт файла: `import { addRange, burnSerial, dropRanges, remaining } from "../src/lib/sscc-pool.js";`
@@ -1165,50 +1170,50 @@ pnpm --filter @markiro/station test test/sscc-pool.test.ts
 В `apps/station/test/shift-bundle.test.ts` добавить тест по образцу уже имеющихся там (мок `client.get`, `node:sqlite`-executor):
 
 ```ts
-  it("drops revoked ranges before adding the replacement block", async () => {
-    await addRange(exec, {
-      issuerPrefix: "460123456",
-      extensionDigit: 0,
-      fromSerial: 1,
-      toSerial: 2000,
-      consumedThroughSerial: 10,
-    });
-
-    const client = {
-      get: vi.fn().mockResolvedValue({
-        ...BUNDLE,
-        sscc: {
-          issuerPrefix: "460123456",
-          extensionDigit: 0,
-          fromSerial: 5000,
-          toSerial: 6999,
-          consumedThroughSerial: null,
-        },
-        ssccRevokedFrom: [1],
-      }),
-    };
-
-    await mirrorShiftBundle(client, exec, SHIFT_ID);
-    expect(await burnSerial(exec, "460123456", 0)).toBe(5000);
+it("drops revoked ranges before adding the replacement block", async () => {
+  await addRange(exec, {
+    issuerPrefix: "460123456",
+    extensionDigit: 0,
+    fromSerial: 1,
+    toSerial: 2000,
+    consumedThroughSerial: 10,
   });
 
-  it("drops nothing when the bundle carries no block", async () => {
-    await addRange(exec, {
-      issuerPrefix: "460123456",
-      extensionDigit: 0,
-      fromSerial: 1,
-      toSerial: 2000,
-      consumedThroughSerial: 10,
-    });
-    const client = {
-      get: vi.fn().mockResolvedValue({ ...BUNDLE, sscc: null, ssccRevokedFrom: [1] }),
-    };
+  const client = {
+    get: vi.fn().mockResolvedValue({
+      ...BUNDLE,
+      sscc: {
+        issuerPrefix: "460123456",
+        extensionDigit: 0,
+        fromSerial: 5000,
+        toSerial: 6999,
+        consumedThroughSerial: null,
+      },
+      ssccRevokedFrom: [1],
+    }),
+  };
 
-    // A degraded bundle (no GLN, exhausted prefix) names no prefix to scope
-    // the delete to, and must never cost the device serials it can still use.
-    await mirrorShiftBundle(client, exec, SHIFT_ID);
-    expect(await burnSerial(exec, "460123456", 0)).toBe(11);
+  await mirrorShiftBundle(client, exec, SHIFT_ID);
+  expect(await burnSerial(exec, "460123456", 0)).toBe(5000);
+});
+
+it("drops nothing when the bundle carries no block", async () => {
+  await addRange(exec, {
+    issuerPrefix: "460123456",
+    extensionDigit: 0,
+    fromSerial: 1,
+    toSerial: 2000,
+    consumedThroughSerial: 10,
   });
+  const client = {
+    get: vi.fn().mockResolvedValue({ ...BUNDLE, sscc: null, ssccRevokedFrom: [1] }),
+  };
+
+  // A degraded bundle (no GLN, exhausted prefix) names no prefix to scope
+  // the delete to, and must never cost the device serials it can still use.
+  await mirrorShiftBundle(client, exec, SHIFT_ID);
+  expect(await burnSerial(exec, "460123456", 0)).toBe(11);
+});
 ```
 
 `BUNDLE` / `SHIFT_ID` — существующие фикстуры файла; если они называются иначе, использовать местные имена, не переименовывая их.
@@ -1240,22 +1245,22 @@ pnpm --filter @markiro/station test test/shift-bundle.test.ts
 В `apps/station/src/lib/shift-bundle.ts` дополнить импорт до `import { addRange, dropRanges } from "./sscc-pool.js";` и заменить блок применения диапазона в `mirrorShiftBundleBody`:
 
 ```ts
-  if (mirrorSsccRange && bundle.sscc) {
-    // Revocations first: `addRange` inserts the replacement block, and
-    // `burnSerial` would keep preferring a revoked LOWER range left behind
-    // (it drains by `ORDER BY from_serial`). Scoped to the prefix/digit the
-    // bundle itself names -- a degraded bundle (`sscc: null`) names none, so
-    // it deletes nothing rather than guessing.
-    if (bundle.ssccRevokedFrom?.length) {
-      await dropRanges(
-        exec,
-        bundle.sscc.issuerPrefix,
-        bundle.sscc.extensionDigit,
-        bundle.ssccRevokedFrom,
-      );
-    }
-    await addRange(exec, bundle.sscc);
+if (mirrorSsccRange && bundle.sscc) {
+  // Revocations first: `addRange` inserts the replacement block, and
+  // `burnSerial` would keep preferring a revoked LOWER range left behind
+  // (it drains by `ORDER BY from_serial`). Scoped to the prefix/digit the
+  // bundle itself names -- a degraded bundle (`sscc: null`) names none, so
+  // it deletes nothing rather than guessing.
+  if (bundle.ssccRevokedFrom?.length) {
+    await dropRanges(
+      exec,
+      bundle.sscc.issuerPrefix,
+      bundle.sscc.extensionDigit,
+      bundle.ssccRevokedFrom,
+    );
   }
+  await addRange(exec, bundle.sscc);
+}
 ```
 
 Порядок относительно `upsertBundle` не менять — обоснование в доккомменте файла (CodeRabbit PR33, Finding 10) остаётся в силе: пул целиком приводится в актуальное состояние до публикации `shift_mirror.issuer_prefix`.
@@ -1281,6 +1286,7 @@ git commit -m "feat(station): drop revoked serial ranges from the local pool"
 ### Task 7: Админка — граница, блокировка и локализованные ошибки
 
 **Files:**
+
 - Create: `apps/admin/src/lib/sscc-counter.ts`
 - Modify: `apps/admin/src/pages/settings/api.ts:36-64`
 - Modify: `apps/admin/src/pages/settings/OrgProfilePage.tsx:75-95, 443-530`
@@ -1290,6 +1296,7 @@ git commit -m "feat(station): drop revoked serial ranges from the local pool"
 - Test: `apps/admin/test/org-profile.test.tsx`, `apps/admin/test/counterparties.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `SsccCounterStateDto`, `SsccSeedBlocker`, коды ошибок `sscc_seed_active_shift` / `sscc_seed_device_out_of_sync` / `sscc_seed_below_floor` / `sscc_seed_floor_moved` (Task 4).
 - Produces: в `apps/admin/src/lib/sscc-counter.ts` — типы `SsccSeedBlocker` / `SsccCounterStateDto` и функции `describeSsccBlocker(t: TFunction, blockedBy: SsccSeedBlocker | null): string | null` и `describeSsccSeedError(t: TFunction, error: unknown, minSerial: number): string | null`; обе формы используют их без дублирования.
 
@@ -1306,27 +1313,27 @@ const COUNTER_BLOCKED = {
 ```
 
 ```ts
-  it("locks the sscc counter while a shift is active and names the shift", async () => {
-    vi.stubGlobal("fetch", routeFetch({ sscc: () => jsonResponse(200, COUNTER_BLOCKED) }));
-    renderPage();
+it("locks the sscc counter while a shift is active and names the shift", async () => {
+  vi.stubGlobal("fetch", routeFetch({ sscc: () => jsonResponse(200, COUNTER_BLOCKED) }));
+  renderPage();
 
-    const card = await cardOf("Счётчик SSCC для коробов");
-    const input = within(card).getByLabelText("Начальный серийный номер");
-    await waitFor(() => expect(input).toBeDisabled());
-    expect(within(card).getByText(/AUG26-003/)).toBeDefined();
-    expect(within(card).getByRole("button", { name: "Сохранить" })).toBeDisabled();
-  });
+  const card = await cardOf("Счётчик SSCC для коробов");
+  const input = within(card).getByLabelText("Начальный серийный номер");
+  await waitFor(() => expect(input).toBeDisabled());
+  expect(within(card).getByText(/AUG26-003/)).toBeDefined();
+  expect(within(card).getByRole("button", { name: "Сохранить" })).toBeDisabled();
+});
 
-  it("shows the floor the server reported rather than a hardcoded one", async () => {
-    vi.stubGlobal("fetch", routeFetch({}));
-    renderPage();
+it("shows the floor the server reported rather than a hardcoded one", async () => {
+  vi.stubGlobal("fetch", routeFetch({}));
+  renderPage();
 
-    const card = await cardOf("Счётчик SSCC для коробов");
-    // 45 000 is the counter (the next label's serial), 40 000 the floor --
-    // both come from the server; the form must not invent either.
-    await waitFor(() => expect(within(card).getByText(/40\s?000/)).toBeDefined());
-    expect(within(card).getByRole("button", { name: "Сохранить" })).not.toBeDisabled();
-  });
+  const card = await cardOf("Счётчик SSCC для коробов");
+  // 45 000 is the counter (the next label's serial), 40 000 the floor --
+  // both come from the server; the form must not invent either.
+  await waitFor(() => expect(within(card).getByText(/40\s?000/)).toBeDefined());
+  expect(within(card).getByRole("button", { name: "Сохранить" })).not.toBeDisabled();
+});
 ```
 
 `routeFetch`, `jsonResponse`, `cardOf` и `COUNTER` уже определены в этом файле (строки 13-90); добавляется только фикстура `COUNTER_BLOCKED` выше. Тесты этого файла ходят по русским строкам — брать их из `ru.json` дословно.
@@ -1403,7 +1410,10 @@ export interface SsccCounterStateDto {
  * Shared by the organisation settings card and the counterparty panel: the
  * rule is one rule, and two copies of this text would drift.
  */
-export function describeSsccBlocker(t: TFunction, blockedBy: SsccSeedBlocker | null): string | null {
+export function describeSsccBlocker(
+  t: TFunction,
+  blockedBy: SsccSeedBlocker | null,
+): string | null {
   if (!blockedBy) return null;
   return blockedBy.kind === "active_shift"
     ? t("common.sscc.blocked.activeShift", { number: blockedBy.shiftNumber })
@@ -1460,13 +1470,15 @@ export interface SsccCounterDto {
 - у `<Input>` для `nextSerial` добавить `disabled={blocked !== null}`;
 - под `<Input>` вывести подсказку, когда блокировки нет:
   ```tsx
-          {blocked ? (
-            <Alert tone="warning">{blocked}</Alert>
-          ) : (
-            <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
-              {t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial })}
-            </p>
-          )}
+  {
+    blocked ? (
+      <Alert tone="warning">{blocked}</Alert>
+    ) : (
+      <p style={{ font: "var(--text-caption)", color: "var(--fg-2)", margin: 0 }}>
+        {t("common.sscc.nextLabelHint", { printed: minSerial - 1, min: minSerial })}
+      </p>
+    );
+  }
   ```
   (если `Alert` не поддерживает tone `"warning"` — использовать тот tone, который в компоненте уже объявлен для предупреждений; проверить его тип, не изобретать новый);
 - у кнопки `Сохранить`: `disabled={!derivedPrefix || blocked !== null}`;
@@ -1509,10 +1521,12 @@ git commit -m "feat(admin): surface the sscc counter floor, lock and localized e
 ### Task 8: Сквозная проверка и документация
 
 **Files:**
+
 - Modify: `docs/architecture.md` (раздел про SSCC, если он там есть)
 - Test: полные наборы всех затронутых пакетов
 
 **Interfaces:**
+
 - Consumes: всё выше.
 - Produces: ничего нового.
 
