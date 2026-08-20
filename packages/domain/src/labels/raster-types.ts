@@ -152,13 +152,20 @@ export function buildBitmapCommand(x: number, y: number, r: RasterResult): strin
 }
 
 /**
- * Computes the extra x-offset (in dots) a rasterized-text bitmap must be
- * shifted by, to honor an element's `align`/`maxWidthMm` the same way the
- * native-text branch does (ZPL's `^FB` block / TSPL's `TEXT` alignment
- * parameter both anchor relative to the element's declared box, not its raw
- * `x`) — without this offset the raster branch would always anchor the
- * bitmap flush to the element's bare `x`, silently dropping `align` for any
- * text that happens to need rasterization (Cyrillic/CJK/etc.).
+ * Computes the extra x-offset (in dots) a piece of text must be shifted by to
+ * honor its element's `align` within its `maxWidthMm` box.
+ *
+ * It is named for the raster branch it was written for — without it, a
+ * bitmap would always be anchored flush to the element's bare `x`, silently
+ * dropping `align` for any text that happens to need rasterization
+ * (Cyrillic/CJK/etc.) — but it is now the SINGLE definition of what `align`
+ * means, in dots, for every path that has to place the text itself: both
+ * emitters' raster branches AND `tspl.ts`'s native branch (see
+ * `nativeAlignOffsetDots`, which feeds it a character-count width estimate
+ * instead of a measured bitmap width). Only ZPL's native branch computes
+ * nothing, because it hands the job to the printer via `^FB`'s justification
+ * parameter — and `^FB` justifies inside the same `maxWidthMm` box, so the
+ * two agree.
  *
  * `align: "left"` (or unset) needs no offset: the native path's default
  * already anchors flush-left at `x`, exactly where the raster bitmap is
@@ -177,10 +184,9 @@ export function buildBitmapCommand(x: number, y: number, r: RasterResult): strin
  *
  * With no `maxWidthMm` on the element (`maxWidthDots === undefined`) there
  * is no box to align within, so the offset is always 0 regardless of
- * `align` — matching TSPL's native-text behavior, where `align` without a
- * width is meaningless (see `tspl.ts`'s `renderTextLikeElement` doc
- * comment), and keeping ZPL's raster and native paths consistent with each
- * other for the same case.
+ * `align` — the same documented no-op ZPL's native branch has (no
+ * `maxWidthMm`, no `^FB`, hence no justification) and the admin preview has
+ * (`renderer.ts` draws flush-left when `maxWidthMm` is absent).
  *
  * A single pure function (not duplicated per emitter) so `zpl.ts`,
  * `tspl.ts`, and (via a re-export chain, ultimately from `@markiro/domain`)

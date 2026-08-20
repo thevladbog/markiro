@@ -66,6 +66,14 @@ describe("generateTspl - native latin-only document (golden)", () => {
     // type font's width/height IN POINTS -- unlike the numbered bitmap
     // fonts 1-8 where these parameters are a 1-10 integer scale factor --
     // so fontSizePt is passed straight through with no ptToDots conversion.
+    //
+    // `f1` is align=center with maxWidthMm=50, and the x it lands on is
+    // COMPUTED here rather than delegated to TSPL's `TEXT` alignment
+    // parameter (which aligns about the command's own x, carries no width,
+    // and therefore meant something different from ZPL's `^FB` — see
+    // `nativeAlignOffsetDots`): x=16, maxWidthDots=mmToDots(50,203)=400,
+    // estimated text width = 14 glyphs x ptToMm(10) x 0.55 = 27.16 mm = 217
+    // dots, offset = round((400-217)/2) = 92, so x = 16+92 = 108.
     expect(tspl).toBe(
       [
         "SIZE 58 mm, 40 mm",
@@ -73,7 +81,7 @@ describe("generateTspl - native latin-only document (golden)", () => {
         "DIRECTION 1",
         "CLS",
         'TEXT 16,16,"0",0,12,12,"ACME Foods"',
-        'TEXT 16,80,"0",0,10,10,2,"04600682000013"',
+        'TEXT 108,80,"0",0,10,10,"04600682000013"',
         'TEXT 16,144,"0",0,8,8,"23.07.2026"',
         'BARCODE 16,192,"EAN13",80,0,0,2,2,"04600682000013"',
         "BAR 0,272,464,2",
@@ -113,33 +121,108 @@ describe("generateTspl - special-character escaping", () => {
   });
 });
 
+/**
+ * TSPL used to hand `align` to `TEXT`'s own alignment parameter (1/2/3).
+ * That parameter carries NO WIDTH — it aligns the string about the command's
+ * own `x` — so `align: "center"` on an element at `xMm: 2` centred the string
+ * ON 2 mm and hung half of it off the left edge, while the very same template
+ * emitted as ZPL centred it INSIDE its `maxWidthMm` box via `^FB…,C,…`, and
+ * the admin preview drew it at `x + boxWidth/2`. A `LabelTemplateSpec` is
+ * language-neutral, so that was one template printing differently by printer
+ * brand. TSPL now computes the offset itself, from the same
+ * `rasterAlignOffsetDots` arithmetic its own raster branch and ZPL's raster
+ * branch use, and no alignment parameter is emitted at all.
+ */
 describe("generateTspl - text alignment", () => {
-  it("omits the optional alignment parameter when align is not set", async () => {
-    const spec: LabelTemplateSpec = {
+  function alignedSpec(
+    align: "left" | "center" | "right" | undefined,
+    maxWidthMm: number | undefined,
+  ): LabelTemplateSpec {
+    return {
       widthMm: 58,
       heightMm: 40,
       dpi: 203,
       language: "tspl",
-      elements: [{ kind: "text", id: "t1", xMm: 0, yMm: 0, text: "Hi", fontSizePt: 12 }],
+      elements: [
+        {
+          kind: "text",
+          id: "t1",
+          xMm: 0,
+          yMm: 0,
+          text: "Hi",
+          fontSizePt: 12,
+          ...(align === undefined ? {} : { align }),
+          ...(maxWidthMm === undefined ? {} : { maxWidthMm }),
+        },
+      ],
     };
-    const tspl = await generateTspl(spec, sampleLabelData());
-    expect(tspl).toContain('TEXT 0,0,"0",0,12,12,"Hi"');
+  }
+
+  it("never emits TSPL's own alignment parameter", async () => {
+    for (const align of ["left", "center", "right", undefined] as const) {
+      for (const maxWidthMm of [undefined, 40]) {
+        const tspl = await generateTspl(alignedSpec(align, maxWidthMm), sampleLabelData());
+        expect(tspl, `align=${align} maxWidthMm=${maxWidthMm}`).toMatch(
+          /^TEXT \d+,\d+,"0",0,12,12,"Hi"$/m,
+        );
+      }
+    }
+  });
+
+  it("draws flush-left at x when the element declares no maxWidthMm, whatever align says", async () => {
+    // No box to align within — the same documented no-op ZPL's native branch
+    // (no `^FB`) and the admin preview both have.
+    for (const align of ["left", "center", "right", undefined] as const) {
+      const tspl = await generateTspl(alignedSpec(align, undefined), sampleLabelData());
+      expect(tspl, `align=${align}`).toContain('TEXT 0,0,"0",0,12,12,"Hi"');
+    }
   });
 
   it.each([
-    ["left", 1],
-    ["center", 2],
-    ["right", 3],
-  ] as const)("maps align=%s to TSPL alignment parameter %d", async (align, alignment) => {
+    // maxWidthDots = mmToDots(40,203) = 320; "Hi" = 2 glyphs x ptToMm(12) x
+    // 0.55 = 4.657 mm = mmToDots(...,203) = 37 dots; leftover = 283.
+    ["left", 0],
+    [undefined, 0],
+    ["center", 142], // round(283/2)
+    ["right", 283],
+  ] as const)("aligns within maxWidthMm: align=%s shifts x by %d dots", async (align, offset) => {
+    const tspl = await generateTspl(alignedSpec(align, 40), sampleLabelData());
+    expect(tspl).toContain(`TEXT ${offset},0,"0",0,12,12,"Hi"`);
+  });
+
+  it("aligns each wrapped line individually, like ZPL's ^FB field block", async () => {
     const spec: LabelTemplateSpec = {
       widthMm: 58,
       heightMm: 40,
       dpi: 203,
       language: "tspl",
-      elements: [{ kind: "text", id: "t1", xMm: 0, yMm: 0, text: "Hi", fontSizePt: 12, align }],
+      elements: [
+        {
+          kind: "text",
+          id: "t1",
+          xMm: 0,
+          yMm: 0,
+          text: "AAAA BB",
+          fontSizePt: 12,
+          align: "center",
+          maxWidthMm: 12,
+          maxLines: 2,
+        },
+      ],
     };
     const tspl = await generateTspl(spec, sampleLabelData());
-    expect(tspl).toContain(`TEXT 0,0,"0",0,12,12,${alignment},"Hi"`);
+    const xs = [...tspl.matchAll(/^TEXT (\d+),(\d+),"0",0,12,12,"([^"]*)"$/gm)].map((m) => ({
+      x: Number(m[1]),
+      y: Number(m[2]),
+      text: m[3],
+    }));
+    expect(xs.map((l) => l.text)).toEqual(["AAAA", "BB"]);
+    // The SHORTER line is pushed further right — each line centres on its own
+    // width rather than the block being shifted as a whole.
+    expect(xs[1]!.x).toBeGreaterThan(xs[0]!.x);
+    // ...and both centre on the same point, the box's midpoint.
+    expect(xs[0]!.y).toBe(0);
+    expect(xs[1]!.y).toBeGreaterThan(0);
   });
 });
 
