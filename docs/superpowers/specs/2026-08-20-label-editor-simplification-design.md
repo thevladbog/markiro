@@ -109,7 +109,7 @@ The layout reproduces the approved mock-up, scaled per size:
 - product name — `field product.name`, bold, wrapped to **two** lines via
   `maxWidthMm` + `maxLines: 2`
 - horizontal separator lines (`line` elements)
-- three-column block: "Дата производства:" / "Годен до:" / "Количество в
+- three-column block: "Дата производства:" / "Годен до:" / "Кол-во в
   упаковке:" as `text` captions with `field date` / `field expiry` /
   `field qty` values beneath
 - "Код ЕГАИС:" caption + `field product.egais`
@@ -168,8 +168,8 @@ ZPL and TSPL with `sampleLabelData()` (unit-tested).
   for existing tenants — tenants that already print have a working default,
   and choosing one for the rest is a UI action.
 - Station SQLite mirror (`packages/db/src/sqlite/schema.ts` +
-  `migrations.ts`): `shifts_mirror` gains `product_egais_code` (text, null)
-  and `product_shelf_life_days` (integer, null).
+  `migrations.ts`): `product_mirror` gains `egais_code` (text, null)
+  and `shelf_life_days` (integer, null).
 
 ## 4. API (`apps/api`)
 
@@ -226,6 +226,22 @@ ZPL and TSPL with `sampleLabelData()` (unit-tested).
   skips name collisions); jsonb-equals-module drift test.
 - **station:** `boxLabelFields` fills/omits the new fields; expiry date
   arithmetic edge cases; mirror round-trip of the new columns.
+
+## Known limitations
+
+- **No download-then-reimport round trip.** "Скачать ZPL/TSPL" emits code
+  against `sampleLabelData()` and rasterizes any Cyrillic text to `^GFA`
+  bitmaps — the importer rejects a bitmap-only source outright, so a
+  downloaded file cannot be fed back in. With the canvas gone, editing a
+  seeded template's content means hand-authoring ZPL/TSPL against the
+  `{{field}}` placeholder list, not round-tripping through download/import.
+  Worth saying plainly so nobody rediscovers it in front of a customer.
+- **Nothing ties a template's DPI to the printer's actual resolution.** The
+  station has no printer-resolution setting; it prints whatever `spec.dpi`
+  the assigned template carries. Provisioning assigns the 203 dpi
+  "Коробка 58×40 (203 dpi)" template as every new tenant's default, so a
+  tenant whose printer is actually 300 dpi gets every box label at roughly
+  two-thirds scale, silently. Known gap, not covered by this change.
 
 ## Out of scope
 
