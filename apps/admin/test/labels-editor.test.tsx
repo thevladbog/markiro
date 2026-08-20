@@ -13,7 +13,9 @@
  *    so a multi-digit size can actually be typed, and the two failure modes
  *    stay distinct: an out-of-range/empty entry reports an invalid dimension,
  *    only a valid-but-unfittable one reports "element larger than the label";
- *    both clear once a later valid resize or import succeeds;
+ *    both clear once a later valid resize or import succeeds, and the
+ *    invalid-dimension message is tracked PER AXIS, so a valid commit on one
+ *    axis never leaves the other axis' rejected text on screen unexplained;
  *  - "Скачать ZPL"/"Скачать TSPL" produce a real, byte-safe download -- ZPL's
  *    Blob text contains `^XA`; TSPL's Blob bytes preserve an injected raster
  *    byte > 0x7F intact (never UTF-8-mangled into two bytes);
@@ -389,6 +391,69 @@ describe("Settings form", () => {
       screen.queryByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
     ).toBeNull();
     expect(width.value).toBe("90.0");
+  });
+
+  it("keeps the invalid-dimension message up when the OTHER axis commits a valid size", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+    const height = screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement;
+
+    fireEvent.change(width, { target: { value: "5" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+
+    // A valid commit on the height must not speak for the width: the rejected
+    // "5" is still sitting in the width field, so its error has to stay.
+    fireEvent.change(height, { target: { value: "120" } });
+    fireEvent.blur(height);
+
+    expect(height.value).toBe("120.0");
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+    expect(width.value).toBe("5");
+  });
+
+  it("does not resize or dirty the page when a size field is focused and blurred without typing", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+
+    fireEvent.focus(width);
+    fireEvent.blur(width);
+
+    expect(width.value).toBe("58.0");
+    expect(screen.queryByRole("alert")).toBeNull();
+    // Nothing was dispatched, so the dirty guard must not intercept "back".
+    fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
+    expect(await screen.findByText("Library page")).toBeDefined();
+  });
+
+  it("discards a rejected custom size when a preset is chosen", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    await chooseOption(user, "Размер", "Свой размер");
+    const width = screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement;
+
+    fireEvent.change(width, { target: { value: "5" } });
+    fireEvent.blur(width);
+    expect(
+      screen.getByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeDefined();
+
+    await chooseOption(user, "Размер", "75×120");
+
+    expect(
+      screen.queryByText("Размер этикетки — от 10 до 300 мм. Введите значение в этих пределах."),
+    ).toBeNull();
+    // Back to custom: the draft is gone, the inputs mirror the preset's spec.
+    await chooseOption(user, "Размер", "Свой размер");
+    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("75.0");
   });
 
   it("clears the geometry error when a later import replaces the spec", () => {

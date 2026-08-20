@@ -183,7 +183,18 @@ function LabelEditorContent({
    */
   const [widthDraft, setWidthDraft] = useState<string | null>(null);
   const [heightDraft, setHeightDraft] = useState<string | null>(null);
-  const [sizeInputError, setSizeInputError] = useState<"INVALID_DIMENSION" | null>(null);
+  /**
+   * WHY THE INVALID-DIMENSION FLAG IS PER-AXIS: the drafts are per-axis and a
+   * rejected entry deliberately STAYS in its field, so a single shared flag
+   * would be cleared by a valid commit on the OTHER axis -- leaving the
+   * rejected text on screen with no error next to it, i.e. a field showing a
+   * size the spec does not hold and Save would not post.
+   */
+  const [invalidSizeAxes, setInvalidSizeAxes] = useState<{ width: boolean; height: boolean }>({
+    width: false,
+    height: false,
+  });
+  const hasInvalidSize = invalidSizeAxes.width || invalidSizeAxes.height;
 
   const createMutation = useCreateLabelTemplate();
   const updateMutation = useUpdateLabelTemplate();
@@ -204,7 +215,13 @@ function LabelEditorContent({
   function clearSizeDrafts(): void {
     setWidthDraft(null);
     setHeightDraft(null);
-    setSizeInputError(null);
+    setInvalidSizeAxes({ width: false, height: false });
+  }
+
+  function setAxisInvalid(axis: "width" | "height", invalid: boolean): void {
+    setInvalidSizeAxes((current) =>
+      current[axis] === invalid ? current : { ...current, [axis]: invalid },
+    );
   }
 
   function handleReplaceSpec(nextSpec: LabelTemplateSpec): void {
@@ -257,10 +274,10 @@ function LabelEditorContent({
       value < MIN_SIZE_MM ||
       value > MAX_SIZE_MM
     ) {
-      setSizeInputError("INVALID_DIMENSION");
+      setAxisInvalid(axis, true);
       return;
     }
-    setSizeInputError(null);
+    setAxisInvalid(axis, false);
     if (axis === "width") {
       setWidthDraft(null);
       handleLabelResize(value, spec.heightMm);
@@ -375,9 +392,16 @@ function LabelEditorContent({
               <Input
                 label={t("pages.labels.editor.widthLabel")}
                 type="number"
+                min={MIN_SIZE_MM}
+                max={MAX_SIZE_MM}
                 mono
                 value={widthDraft ?? spec.widthMm.toFixed(1)}
-                onChange={(event) => setWidthDraft(event.target.value)}
+                onChange={(event) => {
+                  setWidthDraft(event.target.value);
+                  // Retyping answers the complaint; keeping the message up
+                  // would have it contradict what the field now reads.
+                  setAxisInvalid("width", false);
+                }}
                 onBlur={() => commitSize("width")}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
@@ -388,9 +412,14 @@ function LabelEditorContent({
               <Input
                 label={t("pages.labels.editor.heightLabel")}
                 type="number"
+                min={MIN_SIZE_MM}
+                max={MAX_SIZE_MM}
                 mono
                 value={heightDraft ?? spec.heightMm.toFixed(1)}
-                onChange={(event) => setHeightDraft(event.target.value)}
+                onChange={(event) => {
+                  setHeightDraft(event.target.value);
+                  setAxisInvalid("height", false);
+                }}
                 onBlur={() => commitSize("height")}
                 onKeyDown={(event) => {
                   if (event.key !== "Enter") return;
@@ -425,7 +454,7 @@ function LabelEditorContent({
               the most recent action (a rejected entry never reached the
               reducer, so a stale `geometryError` from an earlier resize must
               not be presented as the reason). */}
-          {sizeInputError !== null ? (
+          {hasInvalidSize ? (
             <Alert tone="error">{t("pages.labels.editor.invalidSizeError")}</Alert>
           ) : (
             editor.state.geometryError !== null && (
