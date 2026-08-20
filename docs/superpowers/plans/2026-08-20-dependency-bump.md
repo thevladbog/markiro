@@ -1,5 +1,16 @@
 # Dependency Bump Implementation Plan
 
+> **⚠️ HISTORICAL — pre-implementation plan. Do not copy commands or snippets from it.**
+>
+> This is the plan as drafted **before** implementation, kept unchanged as a record of what was intended. The design changed under review, so parts of it no longer describe the shipped code. For what actually shipped, read **`docs/superpowers/specs/2026-08-20-dependency-bump-design.md`** and the code in `tools/`.
+>
+> Known divergences (non-exhaustive):
+>
+> - **Baseline generation.** Task 1's inline baseline script scans only `dependencies` and `devDependencies`. The shipped `tools/generate-dependency-baseline.mjs` also scans `peerDependencies` and `optionalDependencies`, sharing discovery with the guard via `tools/dependency-manifests.mjs`.
+> - **The guard.** The draft guard here predates `breakingVersionOf` and compares majors only. The shipped guard treats the MINOR as breaking below `1.0.0` (`0.45.2 -> 0.46.0` is a crossing), because `majorOf` reports `0` for every pre-1.0 version.
+> - **Unparseable pins.** The draft skips a version it cannot parse. The shipped guard fails on it — "cannot judge" is never "unchanged".
+> - **Task 2, Step 4.** It expects `pnpm-lock.yaml` to gain a `packageManager` entry. It did not, and the lockfile was correctly left alone.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Raise pnpm from 11.10.0 to 11.22.0 and bring all 47 outdated JavaScript dependencies up to date within their current majors, holding back the two upgrades that would cross a major.
