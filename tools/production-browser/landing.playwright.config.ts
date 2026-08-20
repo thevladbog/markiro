@@ -21,6 +21,7 @@ export default defineConfig({
     env: {
       ASTRO_TELEMETRY_DISABLED: "1",
       PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
+      PUBLIC_PHONE: "+7 934 355-14-90",
       PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_playwright-test-key",
     },
   },

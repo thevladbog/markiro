@@ -407,6 +407,25 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
   };
 }
 
+function smokeClientWithLandingScript(source, landingDemoSubmissionState) {
+  const client = smokeClient(undefined, landingDemoSubmissionState);
+  const original = client.request;
+  client.request = (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === "markiro.example" && parsed.pathname === "/") {
+      return landingResponse({
+        body: landingShell().replace("</head>", `<script src="${source}" defer></script></head>`),
+        headers: {
+          "cache-control": "no-cache",
+          "content-type": "text/html; charset=utf-8",
+        },
+      });
+    }
+    return original(url, init);
+  };
+  return client;
+}
+
 test("runner public smoke exercises the external route contract without local Docker access", async () => {
   const client = smokeClient();
 
@@ -479,6 +498,60 @@ test("landing smoke exercises the approved enabled API state without captcha or 
   );
   assert.equal(submission.init.body, "{}");
   assert.equal(submission.init.headers["content-type"], "application/json");
+});
+
+test("landing smoke allows SmartCaptcha runtime assets in enabled mode", async () => {
+  const client = smokeClientWithLandingScript(
+    "https://smartcaptcha.cloud.yandex.ru/captcha.js",
+    "enabled",
+  );
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+      landingDemoSubmissionState: "enabled",
+    },
+    client,
+  );
+});
+
+test("landing smoke rejects unknown runtime origins in enabled mode", async () => {
+  const client = smokeClientWithLandingScript("https://cdn.example/captcha.js", "enabled");
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+        landingDemoSubmissionState: "enabled",
+      },
+      client,
+    ),
+    /external origin/,
+  );
+});
+
+test("landing smoke rejects SmartCaptcha runtime assets in disabled mode", async () => {
+  const client = smokeClientWithLandingScript(
+    "https://smartcaptcha.cloud.yandex.ru/captcha.js",
+    "disabled",
+  );
+
+  await assert.rejects(
+    runPublicSmoke(
+      {
+        adminBaseUrl: "https://app.markiro.example",
+        kioskBaseUrl: "https://kiosk.markiro.example",
+        landingBaseUrl: "https://markiro.example",
+        landingDemoSubmissionState: "disabled",
+      },
+      client,
+    ),
+    /external origin/,
+  );
 });
 
 test("landing smoke rejects the wrong disabled API error code", async () => {
