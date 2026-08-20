@@ -9,6 +9,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
 import { apiErrorFromResponse, apiFetch } from "../../api/client.js";
+import type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
+
+export type { SsccCounterStateDto } from "../../lib/sscc-counter.js";
 
 /** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `OrgProfileDto`. */
 export interface OrgProfileDto {
@@ -33,7 +36,7 @@ export interface OrganizationLogoDto {
   logoUrl: string;
 }
 
-/** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `SsccCounterDto`. */
+/** Mirrors `apps/api/src/modules/org-profile/dto.ts`'s `SsccCounterDto` -- the PUT body. */
 export interface SsccCounterDto {
   extensionDigit: number;
   nextSerial: number;
@@ -53,8 +56,8 @@ function putOrgProfile(input: PutOrgProfileInput): Promise<OrgProfileDto> {
   });
 }
 
-function fetchOrgProfileSscc(): Promise<SsccCounterDto> {
-  return apiFetch<SsccCounterDto>("/org/profile/sscc");
+function fetchOrgProfileSscc(): Promise<SsccCounterStateDto> {
+  return apiFetch<SsccCounterStateDto>("/org/profile/sscc");
 }
 
 function putOrgProfileSscc(input: SsccCounterDto): Promise<SsccCounterDto> {
@@ -141,7 +144,9 @@ export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void
  * gets the `prefixUnavailable` hint (see OrgProfilePage.tsx) instead of that
  * 400 being surfaced as a generic load error.
  */
-export function useOrgProfileSscc(options?: { enabled?: boolean }): UseQueryResult<SsccCounterDto> {
+export function useOrgProfileSscc(options?: {
+  enabled?: boolean;
+}): UseQueryResult<SsccCounterStateDto> {
   return useQuery({
     queryKey: ORG_PROFILE_SSCC_QUERY_KEY,
     queryFn: fetchOrgProfileSscc,

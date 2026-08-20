@@ -682,6 +682,83 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       expect(rowsAfter).toHaveLength(rowsBefore.length + 1);
       expect(res.body.sscc).not.toBeNull();
     });
+
+    it("tells the device which of its blocks were revoked", async () => {
+      const server = app!.getHttpServer();
+      // Its own device -- revoking blocks below must not disturb the shared
+      // stationDeviceId fixture that other tests in this describe rely on.
+      const device = await createTestStationDevice(app!, agent, "Revocation-aware terminal");
+      const deviceKey = device.apiKey;
+      const fetchBundle = () =>
+        request(server).get(`/shifts/${shiftId}/bundle`).set("x-api-key", deviceKey).expect(200);
+
+      const bundle = await fetchBundle();
+      expect(bundle.body.ssccRevokedFrom).toEqual([]);
+      const held = bundle.body.sscc.fromSerial as number;
+
+      await db
+        .update(schema.ssccBlocks)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, orgId),
+            eq(schema.ssccBlocks.deviceId, device.deviceId),
+          ),
+        );
+
+      const after = await fetchBundle();
+      // A fresh block, plus the old one named so the device drops it -- without
+      // that list the station's burnSerial would keep draining the lower range
+      // (ORDER BY from_serial) and the reseed would never reach a label.
+      expect(after.body.sscc.fromSerial).toBeGreaterThan(held);
+      expect(after.body.ssccRevokedFrom).toEqual([held]);
+    });
+
+    it("never names a from_serial the device also holds LIVE (final review, finding 1)", async () => {
+      const server = app!.getHttpServer();
+      // Its own device again -- this test revokes and re-inserts blocks.
+      const device = await createTestStationDevice(app!, agent, "Reused-from-serial terminal");
+      const deviceKey = device.apiKey;
+      const fetchBundle = () =>
+        request(server).get(`/shifts/${shiftId}/bundle`).set("x-api-key", deviceKey).expect(200);
+
+      const first = await fetchBundle();
+      const block = first.body.sscc as {
+        issuerPrefix: string;
+        extensionDigit: number;
+        fromSerial: number;
+        toSerial: number;
+      };
+
+      // Revoke everything this device holds, then hand it a NEW live block
+      // that starts at the SAME from_serial -- exactly what an admin gets by
+      // reseeding the counter back to a value they already seeded once
+      // before, with nothing printed in between to raise the floor.
+      await db
+        .update(schema.ssccBlocks)
+        .set({ revokedAt: new Date() })
+        .where(
+          and(
+            eq(schema.ssccBlocks.tenantId, orgId),
+            eq(schema.ssccBlocks.deviceId, device.deviceId),
+          ),
+        );
+      await db.insert(schema.ssccBlocks).values({
+        tenantId: orgId,
+        issuerPrefix: block.issuerPrefix,
+        extensionDigit: block.extensionDigit,
+        deviceId: device.deviceId,
+        fromSerial: block.fromSerial,
+        toSerial: block.toSerial,
+      });
+
+      const after = await fetchBundle();
+      // The bundle hands back the live block at that from_serial...
+      expect(after.body.sscc.fromSerial).toBe(block.fromSerial);
+      // ...so naming it in the revocation list would tell the station to
+      // DELETE the very pool row this same bundle is telling it to use.
+      expect(after.body.ssccRevokedFrom).not.toContain(block.fromSerial);
+    });
   });
 
   describe("bundle degrades gracefully when numbers are unavailable (Task 7 finding 1)", () => {

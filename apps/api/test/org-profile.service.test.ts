@@ -17,7 +17,7 @@ describe("OrgProfileService logo processing errors", () => {
   it("maps invalid raster input to a 400 without touching persistence", async () => {
     processLogo.mockRejectedValueOnce(new RasterImageInputError("Logo dimensions are invalid"));
     const db = { insert: vi.fn() };
-    const service = new OrgProfileService(db as never, {} as never);
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
 
     const error = await caught(service.uploadLogo("tenant", "actor", Buffer.from("bad")));
 
@@ -34,7 +34,7 @@ describe("OrgProfileService logo processing errors", () => {
   ])("maps transient processing failure to 503 without touching persistence", async (error) => {
     processLogo.mockRejectedValueOnce(error);
     const db = { insert: vi.fn() };
-    const service = new OrgProfileService(db as never, {} as never);
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
 
     const rejection = await caught(service.uploadLogo("tenant", "actor", Buffer.from("valid")));
 
@@ -66,7 +66,7 @@ describe("OrgProfileService box label defaults", () => {
         innerJoin: () => ({ where: () => result }),
       }),
     }));
-    const service = new OrgProfileService({ select } as never, {} as never);
+    const service = new OrgProfileService({ select } as never, {} as never, {} as never);
 
     await expect(service.getProfile("tenant-a")).resolves.toEqual(emptyProfile);
   });
@@ -80,7 +80,7 @@ describe("OrgProfileService box label defaults", () => {
     ["clears on explicit null", null, null],
   ])("%s", async (_name, supplied, expected) => {
     const { db, onConflictDoUpdate, values } = profileUpsertDb();
-    const service = new OrgProfileService(db as never, {} as never);
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
     vi.spyOn(service, "getProfile").mockResolvedValue({
       ...emptyProfile,
       defaultBoxLabelTemplateId: expected,
@@ -101,7 +101,7 @@ describe("OrgProfileService box label defaults", () => {
 
   it("leaves the box label default untouched when omitted", async () => {
     const { db, onConflictDoUpdate, values } = profileUpsertDb();
-    const service = new OrgProfileService(db as never, {} as never);
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
     vi.spyOn(service, "getProfile").mockResolvedValue({
       ...emptyProfile,
       defaultBoxLabelTemplateId: "a0000000-0000-4000-8000-000000000001",
@@ -120,7 +120,7 @@ describe("OrgProfileService box label defaults", () => {
       constraint: "org_profiles_box_label_template_tenant_fk",
     });
     const { db } = profileUpsertDb(foreignKey);
-    const service = new OrgProfileService(db as never, {} as never);
+    const service = new OrgProfileService(db as never, {} as never, {} as never);
     const getProfile = vi.spyOn(service, "getProfile");
 
     const rejection = await caught(

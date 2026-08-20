@@ -1,4 +1,5 @@
 import { Module } from "@nestjs/common";
+import { SsccModule } from "../sscc/sscc.module";
 import { OrgProfileController } from "./org-profile.controller";
 import { OrgProfileService } from "./org-profile.service";
 
@@ -9,6 +10,7 @@ import { OrgProfileService } from "./org-profile.service";
  * AppModule.forRoot() has wired it in) -- see app.module.ts.
  */
 @Module({
+  imports: [SsccModule],
   controllers: [OrgProfileController],
   providers: [OrgProfileService],
   exports: [OrgProfileService],

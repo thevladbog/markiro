@@ -1,5 +1,4 @@
 import {
-  BadRequestException,
   ConflictException,
   Inject,
   Injectable,
@@ -9,12 +8,8 @@ import {
 import { and, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
-import {
-  atomicSeedSscc,
-  BOX_EXTENSION_DIGIT,
-  deriveIssuerPrefix,
-  seedFloor,
-} from "../sscc/sscc.service";
+import { BOX_EXTENSION_DIGIT, deriveIssuerPrefix, SsccService } from "../sscc/sscc.service";
+import type { SsccCounterStateDto } from "../sscc/dto";
 import type {
   CounterpartyDto,
   CreateCounterpartyDto,
@@ -25,7 +20,10 @@ import type {
 
 @Injectable()
 export class CounterpartiesService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly sscc: SsccService,
+  ) {}
 
   /** List all counterparties for a tenant. */
   async listCounterparties(tenantId: string): Promise<ListCounterpartiesResponseDto> {
@@ -125,61 +123,30 @@ export class CounterpartiesService {
   }
 
   /**
-   * A counterparty's box SSCC counter (Task 5) -- kept separate from the
-   * tenant's own counter (org-profile.service.ts's getSscc) because it's
-   * keyed by the counterparty's own GLN-derived prefix, which is ordinarily
-   * a different number space entirely. `getCounterparty` both 404s a
-   * cross-tenant id and tenant-scopes the lookup in one place.
+   * A counterparty's box SSCC counter plus everything the settings form needs
+   * to render its rules (floor, current blocker) -- see
+   * `SsccService.counterState`. Kept separate from the tenant's own counter
+   * (org-profile.service.ts's getSscc) because it's keyed by the
+   * counterparty's own GLN-derived prefix, ordinarily a different number
+   * space entirely. `getCounterparty` both 404s a cross-tenant id and
+   * tenant-scopes the lookup in one place.
    */
-  async getSscc(tenantId: string, id: string): Promise<SsccCounterDto> {
+  async getSscc(tenantId: string, id: string): Promise<SsccCounterStateDto> {
     const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
-    const [row] = await this.db
-      .select({ nextSerial: schema.ssccCounters.nextSerial })
-      .from(schema.ssccCounters)
-      .where(
-        and(
-          eq(schema.ssccCounters.tenantId, tenantId),
-          eq(schema.ssccCounters.issuerPrefix, issuerPrefix),
-          eq(schema.ssccCounters.extensionDigit, BOX_EXTENSION_DIGIT),
-        ),
-      );
-    return { extensionDigit: BOX_EXTENSION_DIGIT, nextSerial: row ? Number(row.nextSerial) : 1 };
+    return this.sscc.counterState(tenantId, issuerPrefix, BOX_EXTENSION_DIGIT);
   }
 
   /**
-   * Seeds (or reseeds) a counterparty's box counter. See getSscc's doc
-   * comment. Refuses to seed below `seedFloor` (final review, finding 2) --
-   * see org-profile.service.ts's `putSscc` for the full rationale, which
-   * applies identically here since both write the same `sscc_counters`
-   * table keyed by the same derived issuer prefix.
-   *
-   * CodeRabbit PR33 review, Finding 5: same fix as org-profile.service.ts's
-   * `putSscc`, applied identically here -- `atomicSeedSscc` re-validates
-   * `seedFloor`'s condition live, inside the SAME statement as the write,
-   * closing the race where a concurrent `allocate()` issues a new block
-   * between this method's own `seedFloor` read and its write.
+   * Seeds a counterparty's box counter. All of the rules -- the active-shift
+   * and out-of-sync-device guards, the printed-serial floor, the atomic
+   * write, the revocation of blocks devices still hold -- live in
+   * `SsccService.seedCounter`, shared verbatim with the org-profile module.
+   * The prefix is resolved FIRST: that call is also what 404s a counterparty
+   * id belonging to another tenant.
    */
   async putSscc(tenantId: string, id: string, dto: SsccCounterDto): Promise<SsccCounterDto> {
     const issuerPrefix = await this.counterpartyIssuerPrefix(tenantId, id);
-    const floor = await seedFloor(this.db, tenantId, issuerPrefix, dto.extensionDigit);
-    if (dto.nextSerial < floor) {
-      throw new BadRequestException(
-        `nextSerial must be at least ${floor}: serials below it were already issued to a device under this prefix`,
-      );
-    }
-    const applied = await atomicSeedSscc(
-      this.db,
-      tenantId,
-      issuerPrefix,
-      dto.extensionDigit,
-      dto.nextSerial,
-    );
-    if (!applied) {
-      throw new ConflictException(
-        "nextSerial floor moved: a box serial block was issued under this prefix while this seed was in flight. Retry with the current floor.",
-      );
-    }
-    return { extensionDigit: dto.extensionDigit, nextSerial: dto.nextSerial };
+    return this.sscc.seedCounter(tenantId, issuerPrefix, dto);
   }
 
   /** The 9-digit prefix derived from this counterparty's own GLN; 404s if the id isn't this tenant's. */

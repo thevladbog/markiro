@@ -6,7 +6,7 @@ import {
   type SqlExecutor,
   type StationBundle,
 } from "./mirror.js";
-import { addRange } from "./sscc-pool.js";
+import { addRange, dropRanges } from "./sscc-pool.js";
 import { syncStationProductImage, trackStationProductImageSync } from "./product-image-cache.js";
 
 /**
@@ -80,8 +80,34 @@ async function mirrorShiftBundleBody(
     : `/shifts/${shiftId}/reference-bundle`;
   const bundle = await client.get<StationBundle>(path);
   if (generation?.sealed || !isEntryCurrent()) return false;
-  if (mirrorSsccRange && bundle.sscc) {
-    await addRange(exec, bundle.sscc);
+  const block = bundle.sscc;
+  if (mirrorSsccRange && block) {
+    // Revocations first: `addRange` inserts the replacement block, and
+    // `burnSerial` would keep preferring a revoked LOWER range left behind
+    // (it drains by `ORDER BY from_serial`). Scoped to the prefix/digit the
+    // bundle itself names -- a degraded bundle (`sscc: null`) names none, so
+    // it deletes nothing rather than guessing.
+    //
+    // The bundle's OWN block is filtered out of that list, belt and braces
+    // with the server's matching exclusion (final review, finding 1). Two
+    // `sscc_blocks` rows can share one `from_serial` -- a revoked block and
+    // the replacement cut after an admin reseeded the counter back to a
+    // value they had seeded before -- and deleting that row here is
+    // unrecoverable: the DELETE takes the local cursor with it, so
+    // `addRange`'s `next_serial = MAX(...)` regression guard has no row left
+    // to protect and rebuilds the cursor from the server's
+    // `consumedThroughSerial`, which is still null while this device's
+    // printed boxes sit unsent in the outbox. `burnSerial` would then hand
+    // out serials that are already on physical boxes -- a duplicate SSCC,
+    // which no later sync can repair. Never delete the very range the same
+    // bundle is telling us to use.
+    const revokedFrom = bundle.ssccRevokedFrom?.filter(
+      (fromSerial) => fromSerial !== block.fromSerial,
+    );
+    if (revokedFrom?.length) {
+      await dropRanges(exec, block.issuerPrefix, block.extensionDigit, revokedFrom);
+    }
+    await addRange(exec, block);
   }
   if (generation?.sealed || !isEntryCurrent()) return false;
   if (mirrorSsccRange) {
