@@ -36,7 +36,7 @@ const STATUS_TO_CHIP: Record<Exclude<StatusFilter, "all">, StatusChipStatus> = {
   written_off: "warn",
 };
 
-type SearchErrorCode = "unrecognized" | "not_found";
+type SearchErrorCode = "unrecognized" | "not_found" | "generic";
 
 /**
  * Admin code-search page (Task 11): an exact-lookup box up top (SSCC or KM,
@@ -145,10 +145,18 @@ export function CodeSearchPage() {
         }
       })
       .catch((error: unknown) => {
-        if (error instanceof ApiRequestError && error.status === 404) {
-          setSearchError(error.code === "unrecognized" ? "unrecognized" : "not_found");
-        } else {
+        // Only a confirmed 404 with one of the two known codes maps to its
+        // specific copy -- anything else (5xx, a network failure, or a 404
+        // with an unexpected/missing code) is a genuine failure, not "we
+        // understood your input and it just isn't there", so it gets the
+        // same generic failure alert the registry section below already
+        // uses rather than being mislabeled as "not found".
+        if (error instanceof ApiRequestError && error.status === 404 && error.code === "unrecognized") {
+          setSearchError("unrecognized");
+        } else if (error instanceof ApiRequestError && error.status === 404 && error.code === "not_found") {
           setSearchError("not_found");
+        } else {
+          setSearchError("generic");
         }
       })
       .finally(() => setSearching(false));
@@ -178,7 +186,9 @@ export function CodeSearchPage() {
       </form>
 
       {searchError && (
-        <Alert tone="error">{t(`pages.codeSearch.errors.${searchError}`)}</Alert>
+        <Alert tone="error">
+          {searchError === "generic" ? t("common.loadError") : t(`pages.codeSearch.errors.${searchError}`)}
+        </Alert>
       )}
 
       <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
