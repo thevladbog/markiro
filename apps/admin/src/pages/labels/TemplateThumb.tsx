@@ -1,14 +1,14 @@
 /**
  * Plan 04 Task 8: label template library screen -- per-card thumbnail.
  *
- * Reuses Task 9's shared renderer (`editor/renderer.ts`'s `draw`) at a small
+ * Reuses the shared renderer (`./renderer.ts`'s `draw`) at a small
  * scale, with deterministic `sampleLabelData()` (same sample source Task
  * 10's live preview will use) so cards show plausible content instead of
  * raw `{field}` placeholders. See `api.ts`'s `useLabelTemplate` doc comment
  * for why this fetches its own template lazily rather than the library
  * screen fetching every full spec up front.
  *
- * JSDOM NOTE (mirrors `LabelCanvas.tsx`/`renderer.ts`'s identical
+ * JSDOM NOTE (mirrors `renderer.ts`'s identical
  * constraint): `HTMLCanvasElement.prototype.getContext("2d")` returns
  * `null` under jsdom (no native `canvas` backend installed), so `draw` is
  * simply skipped there -- this component renders a normal (empty) canvas
@@ -18,7 +18,7 @@ import { useEffect, useRef } from "react";
 
 import { sampleLabelData } from "@markiro/domain";
 
-import { draw } from "./editor/renderer.js";
+import { draw } from "./renderer.js";
 import { useLabelTemplate } from "./api.js";
 
 /** Thumbnail track (the shaded box the label preview sits inside), matching
@@ -44,10 +44,10 @@ export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
   const widthPx = widthMm * scale;
   const heightPx = heightMm * scale;
 
-  // Redraws on every render (no dependency array) -- same rationale as
-  // `LabelCanvas.tsx`: a plain imperative paint surface with no internal
-  // state, cheap to repaint unconditionally, and this sidesteps having to
-  // depend on a fresh `sampleLabelData()` object identity.
+  // Redraws on every render (no dependency array): a plain imperative paint
+  // surface with no internal state, cheap to repaint unconditionally, and
+  // this sidesteps having to depend on a fresh `sampleLabelData()` object
+  // identity.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !data) return;

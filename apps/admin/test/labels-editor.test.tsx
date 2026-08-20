@@ -1,26 +1,33 @@
 /**
- * Plan 04 Task 10: label editor chrome -- palette, properties, preview,
- * save/export. Covers the plan brief's explicit test list:
+ * The `/labels/new` / `/labels/:id` template page after the visual editor's
+ * removal (spec 2026-08-20). What is left to cover, and what these tests
+ * therefore assert:
  *
- *  - palette click adds an element (centered, auto-selected);
- *  - a properties-panel X change round-trips into the spec the "Save"
- *    button POSTs;
- *  - a dpi/language change (label-level) round-trips the same way;
- *  - "Скачать ZPL"/"Скачать TSPL" produce a real, byte-safe download --
- *    ZPL's Blob text contains `^XA`; TSPL's Blob bytes preserve an injected
- *    raster byte > 0x7F intact (never UTF-8-mangled into two bytes);
- *  - Save POSTs a `parseLabelTemplate`-valid spec and navigates
- *    (create flow) / PATCHes an existing template (edit flow);
+ *  - the settings form (size preset / custom size / dpi / language) really
+ *    round-trips into the spec the "Сохранить" button POSTs;
+ *  - IMPORT IS THE ONLY CONTENT PATH: pasted ZPL replaces the whole spec, and
+ *    the deleted palette/properties chrome is provably absent;
+ *  - shrinking the label re-fits imported elements, and an impossible shrink
+ *    surfaces the geometry error instead of silently truncating content;
+ *  - "Скачать ZPL"/"Скачать TSPL" produce a real, byte-safe download -- ZPL's
+ *    Blob text contains `^XA`; TSPL's Blob bytes preserve an injected raster
+ *    byte > 0x7F intact (never UTF-8-mangled into two bytes);
+ *  - Save POSTs a `parseLabelTemplate`-valid spec and navigates (create flow)
+ *    / PATCHes an existing template (edit flow);
  *  - the dirty-guard confirm modal blocks "back" until confirmed;
- *  - the font-coverage check surfaces two DISTINCT warnings: "no
- *    Cyrillic in this font" (coverage resolves `false`) vs. "could not
- *    verify" (coverage throws/rejects) -- never an unhandled rejection.
+ *  - the font-coverage check surfaces two DISTINCT warnings: "no Cyrillic in
+ *    this font" (coverage resolves `false`) vs. "could not verify" (coverage
+ *    throws/rejects) -- never an unhandled rejection.
  *
  * A fake `rasterizeText` (deterministic single-pixel `RasterResult`) is
  * injected into every render, per the plan's "injectable, default real"
  * hard rule -- this is what lets `generateZpl`/`generateTspl` actually
  * reach their rasterized-fallback branch under jsdom (the REAL rasterizer
  * always throws `RasterUnavailableError` there, see `labels-raster.test.ts`).
+ *
+ * Every test that needs label CONTENT gets it the same way a user now must:
+ * through the import dialog (`importZpl` below). There is no other way to put
+ * an element on a label from this page any more.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -37,6 +44,7 @@ import { decodeRasterToRgba, rasterDestXPx } from "../src/pages/labels/editor/ra
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
@@ -138,6 +146,9 @@ function renderEditFlow(id: string, options: RenderOptions = {}) {
   );
 }
 
+/** `@markiro/ui`'s `Select` is a Radix listbox (a `combobox` button + a
+ * portalled option list), NOT a native `<select>` -- `userEvent.selectOptions`
+ * does not apply. */
 async function chooseOption(
   user: ReturnType<typeof userEvent.setup>,
   label: string,
@@ -147,138 +158,258 @@ async function chooseOption(
   await user.click(await screen.findByRole("option", { name: option }));
 }
 
-describe("Palette", () => {
-  it("clicking a palette button adds an element centered on the label and selects it", async () => {
-    renderCreateFlow();
+/** The one and only way to put content on a label now: paste code, check it,
+ * replace the spec. */
+function importZpl(source: string): void {
+  fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+  const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+  fireEvent.change(within(dialog).getByLabelText("Код ZPL"), { target: { value: source } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+}
 
-    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+/** 58x40mm at 203dpi (the create-flow default size), one literal text line
+ * and one `{{qty}}` field. */
+const IMPORT_ZPL = [
+  "^XA",
+  "^PW464",
+  "^LL320",
+  "^FO40,40^A0N,34,34^FDПартия^FS",
+  "^FO40,100^A0N,34,34^FD{{qty}}^FS",
+  "^XZ",
+].join("\n");
 
-    expect(await screen.findByText("Выбрано: Текст")).toBeDefined();
-    // Default create spec is 100x100mm -> center is (50, 50).
-    expect((screen.getByLabelText("X, мм") as HTMLInputElement).value).toBe("50");
-    expect((screen.getByLabelText("Y, мм") as HTMLInputElement).value).toBe("50");
-  });
+/** ~100x100mm at 203dpi with a short text element near the RIGHT edge --
+ * shrinking the label to 58x40 must slide it back inside. */
+const WIDE_IMPORT_ZPL = ["^XA", "^PW800", "^LL800", "^FO600,40^A0N,34,34^FDACME^FS", "^XZ"].join(
+  "\n",
+);
 
-  it("shows a visible label for every palette action", () => {
-    renderCreateFlow();
+/** A field bound to a Cyrillic sample value (`product.name` -> "Пиво светлое
+ * 0,5 л"), which is what makes `needsImageRendering` -- and therefore the
+ * rasterized ZPL/TSPL fallback and the font-coverage check -- relevant. */
+const CYRILLIC_FIELD_ZPL = [
+  "^XA",
+  "^PW464",
+  "^LL320",
+  "^FO40,40^A0N,34,34^FD{{product.name}}^FS",
+  "^XZ",
+].join("\n");
 
-    for (const label of [
-      "Текст",
-      "Поле",
-      "DataMatrix",
-      "Code128",
-      "EAN-13",
-      "QR",
-      "Линия",
-      "Рамка",
-    ]) {
-      expect(screen.getByText(label)).toBeDefined();
+function stubCreateFetch(id: string) {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url === "/api/label-templates" && init?.method === "POST") {
+      const body = JSON.parse(init.body as string) as { name: string; spec: unknown };
+      return jsonResponse(201, {
+        id,
+        name: body.name,
+        spec: body.spec,
+        createdAt: "2026-08-20T00:00:00.000Z",
+        updatedAt: "2026-08-20T00:00:00.000Z",
+      });
     }
+    throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
   });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
 
-  it("collapses and reopens properties without clearing the selected element", () => {
-    renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+function postedSpec<T>(fetchMock: { mock: { calls: unknown[][] } }): T {
+  const init = fetchMock.mock.calls[0]![1] as RequestInit;
+  return (JSON.parse(init.body as string) as { spec: T }).spec;
+}
 
-    fireEvent.click(screen.getByRole("button", { name: "Свернуть" }));
-    expect(screen.queryByText("Выбрано: Текст")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Открыть свойства" }));
-    expect(screen.getByText("Выбрано: Текст")).toBeDefined();
-    expect((screen.getByLabelText("X, мм") as HTMLInputElement).value).toBe("50");
-  });
-});
-
-describe("PropertiesPanel + Save (round-trip into the POSTed spec)", () => {
-  it("an X change round-trips into the spec Save POSTs", async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/label-templates" && init?.method === "POST") {
-        const body = JSON.parse(init.body as string) as { name: string; spec: unknown };
-        return jsonResponse(201, {
-          id: "new-1",
-          name: body.name,
-          spec: body.spec,
-          createdAt: "2026-07-23T00:00:00.000Z",
-          updatedAt: "2026-07-23T00:00:00.000Z",
-        });
-      }
-      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
+describe("Settings form", () => {
+  it("shows the empty-state hint until code is imported", () => {
     renderCreateFlow();
 
-    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
-    fireEvent.change(screen.getByLabelText("X, мм"), { target: { value: "77" } });
+    expect(
+      screen.getByText("Содержимое этикетки не задано — импортируйте код ZPL или TSPL."),
+    ).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    importZpl(IMPORT_ZPL);
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [, init] = fetchMock.mock.calls[0]!;
-    const body = JSON.parse((init as RequestInit).body as string) as {
-      name: string;
-      spec: { elements: Array<{ xMm: number }> };
-    };
-    expect(body.spec.elements[0]?.xMm).toBe(77);
-    expect(() => parseLabelTemplate(body.spec)).not.toThrow();
+    expect(
+      screen.queryByText("Содержимое этикетки не задано — импортируйте код ZPL или TSPL."),
+    ).toBeNull();
   });
 
-  it("a dpi/language change (label-level) round-trips into the POSTed spec", async () => {
+  it("a dpi/language change round-trips into the spec Save POSTs", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/label-templates" && init?.method === "POST") {
-        const body = JSON.parse(init.body as string) as { name: string; spec: unknown };
-        return jsonResponse(201, {
-          id: "new-1",
-          name: body.name,
-          spec: body.spec,
-          createdAt: "2026-07-23T00:00:00.000Z",
-          updatedAt: "2026-07-23T00:00:00.000Z",
-        });
-      }
-      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+    const fetchMock = stubCreateFetch("new-1");
 
     renderCreateFlow();
 
     await chooseOption(user, "DPI", "300");
-    await chooseOption(user, "Язык", "TSPL");
-
+    await chooseOption(user, "Язык", "TSPL (TSC)");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    const [, init] = fetchMock.mock.calls[0]!;
-    const body = JSON.parse((init as RequestInit).body as string) as {
-      spec: { dpi: number; language: string };
-    };
-    expect(body.spec.dpi).toBe(300);
-    expect(body.spec.language).toBe("tspl");
+    const spec = postedSpec<{ dpi: number; language: string }>(fetchMock);
+    expect(spec.dpi).toBe(300);
+    expect(spec.language).toBe("tspl");
+    expect(() => parseLabelTemplate(spec)).not.toThrow();
+    expect(await screen.findByText("Editor route: new-1")).toBeDefined();
   });
 
-  it("Save POSTs a parseable spec and navigates to /labels/:id (create flow)", async () => {
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      if (url === "/api/label-templates" && init?.method === "POST") {
-        const body = JSON.parse(init.body as string) as { name: string; spec: unknown };
-        return jsonResponse(201, {
-          id: "brand-new-id",
-          name: body.name,
-          spec: body.spec,
-          createdAt: "2026-07-23T00:00:00.000Z",
-          updatedAt: "2026-07-23T00:00:00.000Z",
-        });
-      }
-      throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
-    });
-    vi.stubGlobal("fetch", fetchMock);
+  it("a size preset round-trips and re-fits imported elements inside the smaller label", async () => {
+    const user = userEvent.setup();
+    const fetchMock = stubCreateFetch("new-2");
 
     renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+    importZpl(WIDE_IMPORT_ZPL);
+
+    // The imported 100x100mm size matches no preset, so the custom inputs show it.
+    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("100.1");
+    await chooseOption(user, "Размер", "58×40");
     fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
 
-    expect(await screen.findByText("Editor route: brand-new-id")).toBeDefined();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const spec = postedSpec<{
+      widthMm: number;
+      heightMm: number;
+      elements: Array<{ xMm: number }>;
+    }>(fetchMock);
+    expect(spec.widthMm).toBe(58);
+    expect(spec.heightMm).toBe(40);
+    // Imported at 600 dots ~= 75mm, i.e. off the right edge of a 58mm label.
+    expect(spec.elements[0]!.xMm).toBeGreaterThanOrEqual(0);
+    expect(spec.elements[0]!.xMm).toBeLessThan(58);
+    expect(() => parseLabelTemplate(spec)).not.toThrow();
   });
 
-  it("loads an existing template (edit mode) and Save PATCHes it", async () => {
+  it("surfaces the geometry error (and keeps the last good spec) when a shrink cannot fit an element", () => {
+    renderCreateFlow();
+    importZpl(IMPORT_ZPL);
+
+    fireEvent.change(screen.getByLabelText("Ширина этикетки, мм"), { target: { value: "5" } });
+
+    expect(
+      screen.getByText("Элемент больше этикетки. Увеличьте этикетку или импортируйте код заново."),
+    ).toBeDefined();
+    // The rejected width never reached the spec -- the inputs still show 58mm.
+    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.1");
+  });
+});
+
+describe("Import is the only content path", () => {
+  it("the deleted canvas-editor chrome is gone", () => {
+    renderCreateFlow();
+
+    // Palette buttons, per-element properties and the canvas itself.
+    expect(screen.queryByRole("button", { name: "Текст" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Поле" })).toBeNull();
+    expect(screen.queryByLabelText("X, мм")).toBeNull();
+    expect(screen.queryByText("Выберите элемент на холсте")).toBeNull();
+
+    // What IS offered instead.
+    expect(screen.getByRole("button", { name: "Импорт кода" })).toBeDefined();
+    expect(screen.getByText("предпросмотр = печать")).toBeDefined();
+  });
+
+  it("imported ZPL replaces the spec and Save POSTs it", async () => {
+    const fetchMock = stubCreateFetch("new-3");
+
+    renderCreateFlow();
+    importZpl(IMPORT_ZPL);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const spec = postedSpec<{
+      widthMm: number;
+      heightMm: number;
+      elements: Array<{ kind: string; field?: string }>;
+    }>(fetchMock);
+    expect(spec.widthMm).toBeCloseTo(58, 0);
+    expect(spec.heightMm).toBeCloseTo(40, 0);
+    expect(spec.elements).toHaveLength(2);
+    expect(spec.elements[0]).toMatchObject({ kind: "text" });
+    expect(spec.elements[1]).toMatchObject({ kind: "field", field: "qty" });
+    expect(() => parseLabelTemplate(spec)).not.toThrow();
+  });
+
+  it("opens a labelled import dialog with every available template field", () => {
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+
+    expect(screen.getByRole("dialog", { name: "Импорт кода" })).toBeDefined();
+    for (const placeholder of [
+      "{{product.name}}",
+      "{{product.gtin}}",
+      "{{km.code}}",
+      "{{sscc}}",
+      "{{shift.no}}",
+      "{{date}}",
+      "{{qty}}",
+      "{{operator}}",
+      "{{counterparty.name}}",
+    ]) {
+      expect(screen.getByText(placeholder)).toBeDefined();
+    }
+  });
+
+  it("requires acknowledgement for unsupported source lines and invalidates stale analysis", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    const source = "^XA\n^PW799\n^LL400\n^FO10,10^FD{{product.name}}^FS\n^GFA,10,10,1,FF\n^XZ";
+    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), { target: { value: source } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+
+    expect(await within(dialog).findByText("^GFA,10,10,1,FF")).toBeDefined();
+    const replace = within(dialog).getByRole("button", { name: "Заменить этикетку" });
+    expect(replace.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /Удалить неподдерживаемые/ }));
+    expect(replace.hasAttribute("disabled")).toBe(false);
+
+    await chooseOption(user, "DPI импорта", "300 DPI");
+    expect(replace.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("copies an exact field placeholder and leaves the template name alone on replace", () => {
+    const clipboard = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText: clipboard } });
+    renderCreateFlow();
+
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Копировать {{product.name}}" }));
+    expect(clipboard).toHaveBeenCalledWith("{{product.name}}");
+
+    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), {
+      target: { value: "^XA\n^PW799\n^LL400\n^FO10,10^FD{{product.name}}^FS\n^XZ" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
+    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
+    // Importing marks the page dirty -- "back" is now guarded.
+    fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
+    expect(screen.getByRole("dialog", { name: "Отменить несохранённые изменения?" })).toBeDefined();
+  });
+
+  it("shows imported custom dimensions rounded to one decimal place in the size inputs", async () => {
+    const user = userEvent.setup();
+    renderCreateFlow();
+    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
+    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
+    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), {
+      target: { value: "^XA\n^PW685\n^LL472\n^XZ" },
+    });
+    await chooseOption(user, "DPI импорта", "300 DPI");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
+
+    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.0");
+    expect((screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement).value).toBe("40.0");
+  });
+});
+
+describe("Edit flow (load + PATCH)", () => {
+  it("loads an existing template and Save PATCHes it", async () => {
     const existingSpec = {
       widthMm: 58,
       heightMm: 40,
@@ -303,7 +434,7 @@ describe("PropertiesPanel + Save (round-trip into the POSTed spec)", () => {
           name: body.name,
           spec: body.spec,
           createdAt: "2026-07-01T00:00:00.000Z",
-          updatedAt: "2026-07-23T00:00:00.000Z",
+          updatedAt: "2026-08-20T00:00:00.000Z",
         });
       }
       throw new Error(`Unexpected fetch: ${init?.method ?? "GET"} ${url}`);
@@ -376,7 +507,7 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     expect(Array.from(bytes)).not.toContain(0xc3); // the UTF-8 lead byte "é" would become if re-encoded
   });
 
-  it("Скачать ZPL produces a Blob whose text contains ^XA", async () => {
+  it("Скачать ZPL produces a Blob whose text contains ^XA (and the raster fallback)", async () => {
     let capturedBlob: Blob | undefined;
     vi.spyOn(URL, "createObjectURL").mockImplementation((blob: Blob | MediaSource) => {
       capturedBlob = blob as Blob;
@@ -385,9 +516,7 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
     renderCreateFlow();
-    // A field element bound to a Cyrillic sample value so generateZpl
-    // actually exercises the rasterized-fallback (`^GFA`) branch too.
-    fireEvent.click(screen.getByRole("button", { name: "Поле" }));
+    importZpl(CYRILLIC_FIELD_ZPL);
 
     fireEvent.click(screen.getByRole("button", { name: "Скачать ZPL" }));
 
@@ -407,8 +536,8 @@ describe("Download (ZPL/TSPL byte safety)", () => {
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
 
     renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Поле" }));
-    await chooseOption(user, "Язык", "TSPL");
+    importZpl(CYRILLIC_FIELD_ZPL);
+    await chooseOption(user, "Язык", "TSPL (TSC)");
 
     fireEvent.click(screen.getByRole("button", { name: "Скачать TSPL" }));
 
@@ -426,7 +555,7 @@ describe("Dirty guard", () => {
   it("blocks 'back' behind a confirm modal once the spec is dirty, until confirmed", async () => {
     renderCreateFlow();
 
-    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
+    importZpl(IMPORT_ZPL);
 
     fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
     const dialog = await screen.findByRole("dialog");
@@ -457,108 +586,11 @@ describe("Dirty guard", () => {
   });
 });
 
-describe("Zoom captions (LabelCanvas + PreviewPane)", () => {
-  it("shows each canvas's own zoom caption (LabelCanvas 4px/mm, PreviewPane 3px/mm)", () => {
-    renderCreateFlow();
-
-    expect(screen.getByText("масштаб 4 px/мм")).toBeDefined();
-    expect(screen.getByText("масштаб 3 px/мм")).toBeDefined();
-  });
-});
-
-describe("Code import", () => {
-  it("opens a labelled import dialog with every available template field", () => {
-    renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
-
-    expect(screen.getByRole("dialog", { name: "Импорт кода" })).toBeDefined();
-    for (const placeholder of [
-      "{{product.name}}",
-      "{{product.gtin}}",
-      "{{km.code}}",
-      "{{sscc}}",
-      "{{shift.no}}",
-      "{{date}}",
-      "{{qty}}",
-      "{{operator}}",
-      "{{counterparty.name}}",
-    ]) {
-      expect(screen.getByText(placeholder)).toBeDefined();
-    }
-  });
-
-  it("requires acknowledgement for unsupported source lines and invalidates stale analysis", async () => {
-    const user = userEvent.setup();
-    renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
-    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
-    const source = "^XA\n^PW799\n^LL400\n^FO10,10^FD{{product.name}}^FS\n^GFA,10,10,1,FF\n^XZ";
-    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), { target: { value: source } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
-
-    expect(await within(dialog).findByText("^GFA,10,10,1,FF")).toBeDefined();
-    const replace = within(dialog).getByRole("button", { name: "Заменить этикетку" });
-    expect(replace.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(within(dialog).getByRole("checkbox", { name: /Удалить неподдерживаемые/ }));
-    expect(replace.hasAttribute("disabled")).toBe(false);
-
-    const dpi = within(dialog).getByRole("combobox", { name: "DPI импорта" });
-    await user.click(dpi);
-    await user.click(await screen.findByRole("option", { name: "300 DPI" }));
-    expect(replace.hasAttribute("disabled")).toBe(true);
-  });
-
-  it("copies an exact field placeholder and atomically replaces the composition", async () => {
-    const clipboard = vi.fn(async () => undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText: clipboard } });
-    renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Текст" }));
-    expect(screen.getByText("Выбрано: Текст")).toBeDefined();
-    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
-    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
-    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Копировать {{product.name}}" }));
-    expect(clipboard).toHaveBeenCalledWith("{{product.name}}");
-
-    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), {
-      target: {
-        value: "^XA\n^PW799\n^LL400\n^FO10,10^FD{{product.name}}^FS\n^XZ",
-      },
-    });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
-
-    expect(screen.queryByRole("dialog", { name: "Импорт кода" })).toBeNull();
-    expect(screen.getByText("Выберите элемент на холсте")).toBeDefined();
-    expect((screen.getByLabelText("Название") as HTMLInputElement).value).toBe("Новый шаблон");
-    fireEvent.click(screen.getByRole("link", { name: "← Шаблоны" }));
-    expect(screen.getByRole("dialog", { name: "Отменить несохранённые изменения?" })).toBeDefined();
-  });
-
-  it("shows imported custom dimensions rounded to one decimal place in size inputs", async () => {
-    const user = userEvent.setup();
-    renderCreateFlow();
-    fireEvent.click(screen.getByRole("button", { name: "Импорт кода" }));
-    const dialog = screen.getByRole("dialog", { name: "Импорт кода" });
-    fireEvent.change(within(dialog).getByLabelText("Код ZPL"), {
-      target: { value: "^XA\n^PW685\n^LL472\n^XZ" },
-    });
-    await chooseOption(user, "DPI импорта", "300 DPI");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Проверить код" }));
-    fireEvent.click(within(dialog).getByRole("button", { name: "Заменить этикетку" }));
-
-    expect((screen.getByLabelText("Ширина этикетки, мм") as HTMLInputElement).value).toBe("58.0");
-    expect((screen.getByLabelText("Высота этикетки, мм") as HTMLInputElement).value).toBe("40.0");
-  });
-});
-
 describe("Font coverage warnings (PreviewPane)", () => {
   it("shows the Cyrillic-missing warning when checkFamilyCoverage resolves false", async () => {
     renderCreateFlow({ checkFamilyCoverage: async () => false });
 
-    // A field bound to a Cyrillic sample value triggers needsImageRendering,
-    // which is what makes the coverage check relevant at all.
-    fireEvent.click(screen.getByRole("button", { name: "Поле" }));
+    importZpl(CYRILLIC_FIELD_ZPL);
 
     expect(
       await screen.findByText(
@@ -579,7 +611,7 @@ describe("Font coverage warnings (PreviewPane)", () => {
       },
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Поле" }));
+    importZpl(CYRILLIC_FIELD_ZPL);
 
     expect(
       await screen.findByText(

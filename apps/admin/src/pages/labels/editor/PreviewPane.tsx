@@ -17,7 +17,7 @@
  *  - The DRAW effect (schematic paint + raster compositing) needs a real 2D
  *    canvas context, which jsdom does not provide (see `renderer.ts`'s
  *    identical constraint) -- it silently no-ops there, same as
- *    `LabelCanvas.tsx`/`TemplateThumb.tsx`.
+ *    `TemplateThumb.tsx`.
  *  - The COVERAGE-CHECK effect (which font-coverage Alert, if any, to show)
  *    has NOTHING to do with canvas pixels -- it must run and be assertable
  *    under jsdom too, since that's the only way this task's test suite can
@@ -49,7 +49,7 @@ import {
 } from "../../../labels/fontCoverage.js";
 import { rasterizeText as realRasterizeText } from "../../../labels/rasterizer.js";
 import { decodeRasterToRgba, dotsToMm, rasterDestXPx } from "./raster-preview.js";
-import { draw, elementBoundsMm, LABEL_BACKGROUND_COLOR } from "./renderer.js";
+import { draw, elementBoundsMm, LABEL_BACKGROUND_COLOR } from "../renderer.js";
 
 /**
  * MVP SIMPLIFICATION (documented, not an oversight): `LabelTextElement`/

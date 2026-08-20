@@ -1,14 +1,15 @@
 /**
- * Plan 04 Task 9: label editor canvas core -- shared renderer.
+ * Shared label renderer. Lives at `pages/labels/` (NOT under `editor/`)
+ * because the visual editor it was born with is gone (spec 2026-08-20): its
+ * remaining consumers are the library screen's card thumbnails
+ * (`TemplateThumb.tsx`) and the editor page's read-only preview pane
+ * (`editor/PreviewPane.tsx`), neither of which is part of an interactive
+ * canvas.
  *
  * `draw` paints a `LabelTemplateSpec` onto a real `CanvasRenderingContext2D`
  * at a given `scale` (pixels PER millimetre -- NOT a DPI/print-resolution
  * value; purely a canvas zoom factor chosen by the caller) using `data` to
- * resolve `field`/`barcode` element values. It is deliberately reusable by
- * three different call sites: the editor canvas (`LabelCanvas.tsx`, this
- * task), the live preview pane (Task 10), and library thumbnails (Task 8,
- * which may land before or after this task -- see the plan's own
- * execution-order note).
+ * resolve `field`/`barcode` element values.
  *
  * Barcodes are rendered SCHEMATICALLY, never via a real symbology encoder:
  * `code128`/`ean13` draw deterministic bar stripes (widths derived from the
@@ -26,9 +27,10 @@
  * unless the optional native `canvas` package is installed (deliberately
  * NOT a dependency here -- see `labels/rasterizer.ts`'s identical note), so
  * `draw`'s actual pixel output can never be asserted in this test suite.
- * Only the PURE geometry helper below (`elementBoundsMm`) is unit-tested;
- * `draw`/`drawSelectionOutline` are exercised indirectly (called-or-skipped
- * based on whether a real 2D context is available) by `LabelCanvas.tsx`.
+ * Only the PURE helpers below (`elementBoundsMm`, `simpleHash`,
+ * `mulberry32`) are unit-tested; `draw` is exercised indirectly
+ * (called-or-skipped based on whether a real 2D context is available) by
+ * `TemplateThumb.tsx` and `editor/PreviewPane.tsx`.
  */
 import {
   type LabelBarcodeElement,
@@ -145,13 +147,13 @@ function resolveBarcodeTextForBounds(
  * every element kind (ZPL `^FO`/TSPL coordinates are always the upper-left
  * corner, never a center or baseline; alignment, where it applies, only
  * shifts text WITHIN its box, never the box's own origin -- see `zpl.ts`'s
- * `renderTextLikeElement`). Used for hit-testing (`hitTest` in
- * `LabelCanvas.tsx`), drag bounds, and the selected-element outline.
+ * `renderTextLikeElement`). Used by `geometry.ts` to keep imported elements
+ * inside the label and by `editor/PreviewPane.tsx` to place raster overlays.
  *
  * CRITICAL: `data` is REQUIRED and must be the SAME data used by `draw`.
  * Bounds and rendered size must always agree; callers MUST pass the actual
- * data, never relying on sample fallbacks. This ensures hit-testing, drag
- * bounds, and selection outlines all match the actual on-screen render.
+ * data, never relying on sample fallbacks. This ensures containment checks
+ * and raster overlays match the actual on-screen render.
  *
  * See the heuristic constants above for exactly how `text`/`field`/
  * `barcode` sizes are approximated; `line`/`box` bounds are exact (derived
@@ -384,7 +386,7 @@ function drawBoxElement(
  * Draws `spec` onto `ctx` at `scale` (pixels per millimetre) using `data`
  * to resolve `field`/`barcode` element values. Clears and repaints the
  * whole `widthMm x heightMm` label area on every call -- callers (e.g.
- * `LabelCanvas.tsx`) are responsible for calling this only when a real 2D
+ * `TemplateThumb.tsx`) are responsible for calling this only when a real 2D
  * context is available (`canvas.getContext("2d")` returns `null` under
  * jsdom, see this module's doc comment) and for re-invoking it whenever
  * `spec`/`scale`/`data` change; this function itself holds no state and
@@ -422,44 +424,4 @@ export function draw(
         break;
     }
   }
-}
-
-/**
- * Selection-highlight blue (`#1a4f9c`), matching the design handoff
- * prototype's own DataMatrix selection outline
- * (`docs/design-briefs/design_handoff_markiro/prototypes/admin-panel.dc.html`,
- * "Редактор этикетки" screen). Deliberately distinct from
- * `packages/ui/src/tokens.css`'s `--accent` (brand green, reserved for the
- * module mark and key CTAs only per that file's own comment) -- this is a
- * canvas 2D stroke color, not a CSS value, and represents a different
- * concept (a transient selection highlight, not brand identity) anyway.
- */
-const SELECTION_COLOR = "#1a4f9c";
-const SELECTION_OUTLINE_OFFSET_PX = 3;
-const SELECTION_OUTLINE_WIDTH_PX = 2;
-
-/**
- * Draws the selected-element outline used by `LabelCanvas.tsx`, offset
- * outward from `bounds` (in millimetres, as returned by `elementBoundsMm`)
- * so the stroke never overlaps the element's own content. Kept in this
- * module (rather than inline in `LabelCanvas.tsx`) so the editor and any
- * future consumer share one visual definition of "selected" -- library
- * thumbnails (Task 8) and the read-only preview pane (Task 10) simply never
- * call this function, since they have no selection concept.
- */
-export function drawSelectionOutline(
-  ctx: CanvasRenderingContext2D,
-  bounds: BoundsMm,
-  scale: number,
-): void {
-  ctx.save();
-  ctx.strokeStyle = SELECTION_COLOR;
-  ctx.lineWidth = SELECTION_OUTLINE_WIDTH_PX;
-  ctx.strokeRect(
-    mmToPx(bounds.x, scale) - SELECTION_OUTLINE_OFFSET_PX,
-    mmToPx(bounds.y, scale) - SELECTION_OUTLINE_OFFSET_PX,
-    mmToPx(bounds.w, scale) + SELECTION_OUTLINE_OFFSET_PX * 2,
-    mmToPx(bounds.h, scale) + SELECTION_OUTLINE_OFFSET_PX * 2,
-  );
-  ctx.restore();
 }

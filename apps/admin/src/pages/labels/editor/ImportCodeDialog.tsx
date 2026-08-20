@@ -10,7 +10,7 @@ import {
 } from "@markiro/domain";
 import { Button, Checkbox, Modal, Select, Textarea } from "@markiro/ui";
 
-import { fitSpecElements } from "./geometry.js";
+import { fitSpecElements } from "../geometry.js";
 
 export interface ImportCodeDialogProps {
   open: boolean;
