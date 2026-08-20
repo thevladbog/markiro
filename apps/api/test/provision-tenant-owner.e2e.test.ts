@@ -90,6 +90,34 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
           ),
         );
       }
+
+      // This suite provisions tenants (and therefore label_templates +
+      // org_profiles rows, seeded by TenantProvisioningService on tenant
+      // creation) for every tenantSlug pattern used by the tests above.
+      // Resolve just those tenant ids and delete their child rows so the
+      // suite doesn't accumulate rows in the shared dev database on every
+      // run. org_profiles must go first: default_box_label_template_id
+      // carries a composite FK into label_templates.
+      const tenants = await connection.db
+        .select({ id: schema.organization.id })
+        .from(schema.organization)
+        .where(
+          or(
+            like(schema.organization.slug, "first-tenant-%"),
+            like(schema.organization.slug, "renew-tenant-%"),
+            like(schema.organization.slug, "locked-renew-%"),
+            like(schema.organization.slug, "unmanaged-%"),
+          ),
+        );
+      const tenantIds = tenants.map((tenant) => tenant.id);
+      if (tenantIds.length > 0) {
+        await connection.db
+          .delete(schema.orgProfiles)
+          .where(inArray(schema.orgProfiles.tenantId, tenantIds));
+        await connection.db
+          .delete(schema.labelTemplates)
+          .where(inArray(schema.labelTemplates.tenantId, tenantIds));
+      }
     } finally {
       try {
         await defaultDemo.restore();

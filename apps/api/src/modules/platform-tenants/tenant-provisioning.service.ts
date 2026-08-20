@@ -124,6 +124,16 @@ export class TenantProvisioningService {
           defaultBoxLabelTemplateId = templateId;
         }
       }
+      if (defaultBoxLabelTemplateId === null) {
+        // Programming error, not a user-facing conflict: DEFAULT_BOX_LABEL_TEMPLATE_NAME
+        // and buildDefaultLabelTemplates() are independently hardcoded in
+        // @markiro/domain. A composite FK with a null column is unenforced
+        // (MATCH SIMPLE), so failing to match here would otherwise let
+        // org_profiles.default_box_label_template_id insert as null silently.
+        throw new Error(
+          `No seeded label template matched DEFAULT_BOX_LABEL_TEMPLATE_NAME (${DEFAULT_BOX_LABEL_TEMPLATE_NAME})`,
+        );
+      }
       await tx.insert(schema.orgProfiles).values({
         tenantId: tenant.id,
         defaultBoxLabelTemplateId,
