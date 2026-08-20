@@ -13,6 +13,8 @@
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:deps": "node tools/check-no-major-bumps.mjs",
+    "test:dependency-guard": "node --test tools/test/*.test.mjs",
     "test:yandex-runtime": "node --test deploy/yandex/test/*.test.mjs",
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
     "verify:station-production-cors": "node tools/station-release/verify-api-cors.mjs https://admin.markiro.app",
