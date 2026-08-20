@@ -57,6 +57,7 @@ import {
 } from "./model.js";
 import { buildBitmapCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
+import { estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm, wrapTextToWidth } from "./wrap.js";
 
 export { buildBitmapCommand, rasterAlignOffsetDots } from "./raster-types.js";
 export type { RasterResult, RasterizeTextFn } from "./raster-types.js";
@@ -90,6 +91,44 @@ function alignToTsplAlignment(
   if (align === "center") return 2;
   if (align === "right") return 3;
   return undefined;
+}
+
+/**
+ * Breaks a NATIVE-text element's string against its `maxWidthMm`.
+ *
+ * TSPL's `TEXT` has no field-block equivalent of ZPL's `^FB` — its alignment
+ * parameter carries no width — so there is nothing to hand the printer and
+ * nothing that can measure the printer's own internal font from here. The
+ * width is therefore ESTIMATED (`wrap.ts`'s `estimatedTextWidthMm`,
+ * 0.55em per character) and the string is split into at most `maxLines`
+ * lines that the caller emits as separate positioned `TEXT` commands.
+ *
+ * This is an approximation, and deliberately a conservative one: font `"0"`
+ * is Triumvirate Bold CONDENSED, narrower than the 0.55em average this
+ * estimate assumes, so it errs toward breaking a line early rather than
+ * letting it run past `maxWidthMm`. It is not a guarantee the way the
+ * raster branch's real `measureText` is — but the alternative, which is what
+ * this module did before, is `maxWidthMm` being ignored outright and long
+ * text running off the label with nothing bounding it at all.
+ *
+ * Returns `null` — "emit the string as-is, on one line" — whenever the
+ * element declares no `maxWidthMm` or the estimate says the text already
+ * fits untouched, so previously-authored templates emit byte-identical
+ * output.
+ */
+function wrapNativeText(
+  element: LabelTextElement | LabelFieldElement,
+  text: string,
+): string[] | null {
+  if (element.maxWidthMm === undefined) return null;
+  const lines = wrapTextToWidth(
+    text,
+    (s) => estimatedTextWidthMm(s, element.fontSizePt),
+    element.maxWidthMm,
+    element.maxLines ?? 1,
+  );
+  if (lines.length === 1 && lines[0] === text) return null;
+  return lines;
 }
 
 /**
@@ -160,10 +199,16 @@ async function renderTextLikeElement(
       );
     }
     const fontSizePx = ptToDots(element.fontSizePt, spec.dpi);
+    const maxWidthDots =
+      element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
+    // `maxWidthPx`/`maxLines` bound the bitmap itself — identical to zpl.ts's
+    // raster branch; see `RasterizeTextOptions`'s doc comment.
     const raster = await deps.rasterizeText(text, {
       fontFamily: "sans-serif",
       fontSizePx,
       bold: element.bold ?? false,
+      maxWidthPx: maxWidthDots,
+      maxLines: element.maxLines ?? 1,
     });
     // Honor align/maxWidthMm — see zpl.ts's identical raster-branch offset
     // and `rasterAlignOffsetDots`'s doc comment for the full rationale.
@@ -172,8 +217,6 @@ async function renderTextLikeElement(
     // rasterized element DOES carry `maxWidthMm` through to this offset, so
     // a rasterized (e.g. Cyrillic) centered/right-aligned text still lines
     // up the same way the ZPL raster branch does.
-    const maxWidthDots =
-      element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
     const offsetXDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
     return buildBitmapCommand(x + offsetXDots, y, raster);
   }
@@ -181,7 +224,20 @@ async function renderTextLikeElement(
   const alignment = alignToTsplAlignment(element.align);
   const alignmentParam = alignment !== undefined ? `${alignment},` : "";
   const size = element.fontSizePt;
-  return `TEXT ${x},${y},"0",0,${size},${size},${alignmentParam}"${escapeTsplString(text)}"`;
+  const lines = wrapNativeText(element, text);
+  if (lines === null) {
+    return `TEXT ${x},${y},"0",0,${size},${size},${alignmentParam}"${escapeTsplString(text)}"`;
+  }
+  // One `TEXT` per wrapped line, stepped by the same 1.5em line box the
+  // rasterizers use, so a wrapped native line and a wrapped rasterized one
+  // occupy the same vertical footprint.
+  const lineStepDots = mmToDots(ptToMm(element.fontSizePt) * LINE_HEIGHT_EM, spec.dpi);
+  return lines
+    .map(
+      (line, i) =>
+        `TEXT ${x},${y + i * lineStepDots},"0",0,${size},${size},${alignmentParam}"${escapeTsplString(line)}"`,
+    )
+    .join("\n");
 }
 
 function resolveBarcodeSource(
@@ -196,10 +252,25 @@ function resolveBarcodeSource(
  * Renders a `barcode` element as one of TSPL's dedicated barcode/matrix
  * commands.
  *
- * `code128`/`ean13` use `BARCODE x,y,"<type>",<height>,1,0,2,2,"<data>"` —
- * human-readable text ON (`1`), no rotation, narrow/wide bar widths fixed
- * at 2 dots each (this task's brief pins this exact parameter shape; no
- * per-element control over bar widths exists in the domain model).
+ * `code128`/`ean13` use `BARCODE x,y,"<type>",<height>,0,0,2,2,"<data>"` —
+ * human-readable interpretation line OFF (`0`), no rotation, narrow/wide bar
+ * widths fixed at 2 dots each (no per-element control over bar widths exists
+ * in the domain model).
+ *
+ * HRI IS OFF ON PURPOSE, and this parameter used to be `1`. A
+ * `LabelTemplateSpec` is language-neutral: the SAME template is emitted as
+ * ZPL or as TSPL depending on which printer the station happens to have
+ * (`hardware-config.ts`'s `printerLanguage`), so any per-language difference
+ * is a defect by construction. ZPL's `^BCN,<h>,N,N,N` prints no
+ * interpretation line, so a TSPL `1` here meant the identical template
+ * printed readable SSCC digits on a TSC printer and none at all on a Zebra —
+ * and the extra TSPL-only line, which the template author never laid out,
+ * printed on top of whatever sat beneath the barcode (on the stock 58×40 box
+ * label it fell off the bottom edge entirely). Both languages now agree on
+ * "bars only"; a template that wants readable digits places an explicit
+ * `text`/`field` element under the barcode, which is WYSIWYG in the admin
+ * preview and renders identically in both languages — see
+ * `defaults.ts`'s `val-sscc`.
  *
  * `qr` uses `QRCODE x,y,<ECC>,<cell>,<mode>,<rotation>,"<data>"` — ECC
  * level fixed at `M` (~15% recovery, a reasonable general-purpose default;
@@ -258,11 +329,11 @@ function renderBarcodeElement(
       // rationale. The AI (`00`) is added HERE and nowhere else — storage
       // and transport carry the bare 18 digits.
       const payload = field === "sscc" ? `!100${value}` : value;
-      return `BARCODE ${x},${y},"128",${heightDots},1,0,2,2,"${escapeTsplString(payload)}"`;
+      return `BARCODE ${x},${y},"128",${heightDots},0,0,2,2,"${escapeTsplString(payload)}"`;
     }
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
-      return `BARCODE ${x},${y},"EAN13",${heightDots},1,0,2,2,"${escapeTsplString(value)}"`;
+      return `BARCODE ${x},${y},"EAN13",${heightDots},0,0,2,2,"${escapeTsplString(value)}"`;
     }
     case "datamatrix": {
       const sideDots = mmToDots(element.sizeMm, dpi);

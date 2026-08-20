@@ -153,21 +153,28 @@ async function renderTextLikeElement(
       );
     }
     const fontSizePx = ptToDots(element.fontSizePt, spec.dpi);
+    const maxWidthDots =
+      element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
     // Generic CSS family name, not an admin-specific bundled font: the
     // domain model has no per-element font-family selection, and this
     // package stays DOM/font-agnostic per the plan's Global Constraints —
     // the real rasterizer (apps/admin, Task 5) maps this however it likes.
+    //
+    // `maxWidthPx`/`maxLines` are what BOUND the bitmap: without them the
+    // rasterizer sizes the bitmap from the text's own measured width, and a
+    // long Cyrillic product name prints off the right edge of the label
+    // (`RasterizeTextOptions`'s doc comment has the full story).
     const raster = await deps.rasterizeText(text, {
       fontFamily: "sans-serif",
       fontSizePx,
       bold: element.bold ?? false,
+      maxWidthPx: maxWidthDots,
+      maxLines: element.maxLines ?? 1,
     });
     // Honor align/maxWidthMm the same way the native ^FB branch below does
     // — see `rasterAlignOffsetDots`'s doc comment for the full rationale;
     // without this, a rasterized (e.g. Cyrillic) piece of centered/
     // right-aligned text would always render flush-left instead.
-    const maxWidthDots =
-      element.maxWidthMm !== undefined ? mmToDots(element.maxWidthMm, spec.dpi) : undefined;
     const offsetXDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
     return `^FO${x + offsetXDots},${y}${buildGfaCommand(raster)}^FS`;
   }
@@ -184,7 +191,13 @@ async function renderTextLikeElement(
   if (element.maxWidthMm !== undefined) {
     const widthDots = mmToDots(element.maxWidthMm, spec.dpi);
     const justification = alignToJustification(element.align);
-    const block = `^FB${widthDots},1,0,${justification},0`;
+    // ^FB's second parameter is the MAXIMUM NUMBER OF LINES the field block
+    // may wrap into; the printer truncates past it. It stays 1 when the
+    // element declares no `maxLines`, keeping every previously-authored
+    // template byte-identical, and follows `maxLines` when one is set (the
+    // stock box labels use 2 for the product name).
+    const maxLines = element.maxLines ?? 1;
+    const block = `^FB${widthDots},${maxLines},0,${justification},0`;
     return `^FO${x},${y}${font}${block}${fh}^FD${data}^FS`;
   }
 
@@ -217,6 +230,15 @@ function renderBarcodeElement(
       // The AI is added HERE and nowhere else — storage and transport carry
       // the bare 18 digits. See `renderGs1DataMatrixTail` above for the
       // datamatrix/km.code equivalent of this same field-gated decision.
+      //
+      // `^BCN,<h>,N,N,N`: the third parameter is the print-interpretation
+      // line, deliberately off. TSPL's `BARCODE` agrees (`tspl.ts` passes
+      // `0` for the same parameter, see its doc comment): one
+      // language-neutral template must not print differently depending on
+      // which printer the station has. A template that wants readable digits
+      // places an explicit `text`/`field` element beneath the barcode, which
+      // is WYSIWYG in the admin preview and identical in both languages —
+      // see `defaults.ts`'s `val-sscc`.
       const payload = field === "sscc" ? `>;>800${value}` : value;
       const { fh, data: escaped } = escapeFdData(payload);
       return `^FO${x},${y}^BCN,${heightDots},N,N,N${fh}^FD${escaped}^FS`;

@@ -29,14 +29,27 @@ const elementBaseShape = {
   yMm: z.number(),
 };
 
-const textElementSchema = z.object({
-  kind: z.literal("text"),
-  ...elementBaseShape,
-  text: z.string(),
+/**
+ * `maxWidthMm` is a hard CONSTRAINT, not just an alignment box: text is
+ * broken into at most `maxLines` lines that each fit it, and any remainder is
+ * truncated with an ellipsis (see `wrap.ts`). `maxLines` is optional and
+ * defaults to 1 — one line, clipped — which is what every template authored
+ * before wrapping existed already expects. Without `maxWidthMm` there is no
+ * width to wrap against and text is emitted on a single unbounded line.
+ */
+const wrappableTextShape = {
   fontSizePt: z.number().min(4).max(72),
   bold: z.boolean().optional(),
   align: alignSchema.optional(),
   maxWidthMm: z.number().positive().optional(),
+  maxLines: z.number().int().min(1).max(16).optional(),
+};
+
+const textElementSchema = z.object({
+  kind: z.literal("text"),
+  ...elementBaseShape,
+  text: z.string(),
+  ...wrappableTextShape,
 });
 export type LabelTextElement = z.infer<typeof textElementSchema>;
 
@@ -44,10 +57,7 @@ const fieldElementSchema = z.object({
   kind: z.literal("field"),
   ...elementBaseShape,
   field: labelFieldSchema,
-  fontSizePt: z.number().min(4).max(72),
-  bold: z.boolean().optional(),
-  align: alignSchema.optional(),
-  maxWidthMm: z.number().positive().optional(),
+  ...wrappableTextShape,
 });
 export type LabelFieldElement = z.infer<typeof fieldElementSchema>;
 

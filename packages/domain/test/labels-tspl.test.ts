@@ -75,7 +75,7 @@ describe("generateTspl - native latin-only document (golden)", () => {
         'TEXT 16,16,"0",0,12,12,"ACME Foods"',
         'TEXT 16,80,"0",0,10,10,2,"04600682000013"',
         'TEXT 16,144,"0",0,8,8,"2026-07-23"',
-        'BARCODE 16,192,"EAN13",80,1,0,2,2,"04600682000013"',
+        'BARCODE 16,192,"EAN13",80,0,0,2,2,"04600682000013"',
         "BAR 0,272,464,2",
         "BOX 0,0,464,320,2",
         "PRINT 1",
@@ -261,7 +261,7 @@ describe("generateTspl - barcode formats", () => {
       ],
     };
     const tspl = await generateTspl(spec, sampleLabelData());
-    expect(tspl).toContain('BARCODE 0,0,"128",80,1,0,2,2,"12345"');
+    expect(tspl).toContain('BARCODE 0,0,"128",80,0,0,2,2,"12345"');
   });
 
   it("emits a GS1-128 (FNC1 !1 + AI 00) for a code128 element bound to sscc", async () => {
@@ -277,7 +277,7 @@ describe("generateTspl - barcode formats", () => {
     const tspl = await generateTspl(spec, { ...sampleLabelData(), sscc: "004601234560000017" });
     // xMm=5,yMm=5 -> 40,40 dots; sizeMm=15 -> mmToDots(15,203)=120 dots.
     // !1 is TSPL's FNC1 marker, then the 00 AI and the 18 digits.
-    expect(tspl).toContain('BARCODE 40,40,"128",120,1,0,2,2,"!100004601234560000017"');
+    expect(tspl).toContain('BARCODE 40,40,"128",120,0,0,2,2,"!100004601234560000017"');
   });
 
   it("leaves a code128 element bound to another (non-sscc) field as a plain Code 128", async () => {
@@ -291,7 +291,7 @@ describe("generateTspl - barcode formats", () => {
       ],
     };
     const tspl = await generateTspl(spec, { ...sampleLabelData(), qty: "12" });
-    expect(tspl).toContain('BARCODE 40,40,"128",120,1,0,2,2,"12"');
+    expect(tspl).toContain('BARCODE 40,40,"128",120,0,0,2,2,"12"');
     expect(tspl).not.toContain("!1");
   });
 
@@ -378,6 +378,10 @@ describe("generateTspl - raster fallback", () => {
       fontFamily: "sans-serif",
       fontSizePx: 34,
       bold: false,
+      // The element carries no `maxWidthMm`, so the rasterizer is told there
+      // is no width to bound the bitmap to and only one line to produce.
+      maxWidthPx: undefined,
+      maxLines: 1,
     });
   });
 

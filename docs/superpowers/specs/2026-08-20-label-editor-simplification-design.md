@@ -22,7 +22,7 @@ label templates to every tenant.
    `label_templates`). Pasted ZPL or TSPL is parsed into the spec by the
    existing importers; at print time the station keeps generating code in the
    language configured for its printer (`hardware-config.ts
-   printerLanguage`), ignoring `spec.language`. One template entity therefore
+printerLanguage`), ignoring `spec.language`. One template entity therefore
    serves both ZPL and TSC printers — no per-language code blobs are stored.
    Raw-code storage was rejected: it would need a new `{{field}}`
    substitution mechanism on the station and would break Cyrillic field
@@ -106,23 +106,50 @@ New `packages/domain/src/labels/defaults.ts` exporting
 — pure, deterministic, no I/O — used by tenant provisioning and by tests.
 The layout reproduces the approved mock-up, scaled per size:
 
-- product name — `field product.name`, bold, multiline via `maxWidthMm`
+- product name — `field product.name`, bold, wrapped to **two** lines via
+  `maxWidthMm` + `maxLines: 2`
 - horizontal separator lines (`line` elements)
 - three-column block: "Дата производства:" / "Годен до:" / "Количество в
   упаковке:" as `text` captions with `field date` / `field expiry` /
   `field qty` values beneath
 - "Код ЕГАИС:" caption + `field product.egais`
 - "SSCC:" caption + `barcode code128` bound to `sscc` (the emitter adds the
-  `(00)` AI) with the human-readable line the emitter already produces
+  `(00)` AI), with the human-readable digits as an explicit `field sscc`
+  element beneath it
+
+`maxWidthMm` is a hard CONSTRAINT, not an alignment hint (it was one
+originally, which is how a long Russian product name came to print off the
+right edge of a 58 mm label). Text is broken by `labels/wrap.ts` into at most
+`maxLines` lines — the injected `RasterizeTextFn` measures with the real
+canvas font and MUST NOT return a bitmap wider than the `maxWidthPx` it is
+given; ZPL's native path uses `^FB<width>,<maxLines>`; TSPL's native path,
+which has no field-block command at all, emits one positioned `TEXT` per
+line using a documented character-count width estimate. Anything that still
+does not fit is ellipsized, so a truncated name is visible rather than
+plausible. `maxLines` defaults to 1 — a single line, clipped — for every
+template that does not set it.
+
+The mock-up wraps the name across four lines; the templates use two. Four
+lines of 10 pt type is 21 mm of a 40 mm label, which the rest of the layout
+cannot afford. See `defaults.ts`'s vertical-budget table.
+
+**Barcode HRI is off in both languages.** A `LabelTemplateSpec` is
+language-neutral — the station picks ZPL or TSPL per printer — so the ZPL
+`^BCN,<h>,N,N,N` (no interpretation line) and TSPL `BARCODE ...,1,...` (HRI
+on) pairing meant one template printed readable SSCC digits on a TSC printer
+and none on a Zebra, with the TSPL-only line landing wherever the author had
+not reserved space. TSPL now passes `0` for that parameter, and templates
+that want digits place a `text`/`field` element under the barcode, which is
+WYSIWYG in the admin preview and identical in both languages.
 
 Five templates (one entity covers both languages; `spec.language` is set to
 `"zpl"` nominally):
 
-| Name | Size | DPI |
-| --- | --- | --- |
-| Коробка 58×40 (203 dpi) | 58×40 mm | 203 |
-| Коробка 58×40 (300 dpi) | 58×40 mm | 300 |
-| Коробка 75×120 (203 dpi) | 75×120 mm | 203 |
+| Name                      | Size       | DPI |
+| ------------------------- | ---------- | --- |
+| Коробка 58×40 (203 dpi)   | 58×40 mm   | 203 |
+| Коробка 58×40 (300 dpi)   | 58×40 mm   | 300 |
+| Коробка 75×120 (203 dpi)  | 75×120 mm  | 203 |
 | Коробка 100×100 (203 dpi) | 100×100 mm | 203 |
 | Коробка 100×150 (203 dpi) | 100×150 mm | 203 |
 

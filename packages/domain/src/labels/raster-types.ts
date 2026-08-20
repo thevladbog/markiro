@@ -37,15 +37,39 @@ export interface RasterResult {
 }
 
 /**
- * Injectable text-to-bitmap rasterizer. The real implementation (browser
- * `<canvas>` plus admin-bundled fonts) lives in `apps/admin` (Task 5);
+ * Options an emitter hands to an injected rasterizer.
+ *
+ * `maxWidthPx`/`maxLines` are a CONTRACT, not a hint: an implementation MUST
+ * NOT return a bitmap wider than `maxWidthPx` when one is given. Before this
+ * existed, the rasterizers sized their bitmap from the text's own measured
+ * width and the emitters used `maxWidthMm` only to compute an alignment
+ * offset — so a long Cyrillic product name produced a bitmap far wider than
+ * the label and `^FO`/`BITMAP` printed it straight off the right edge.
+ * Implementations satisfy this by wrapping (up to `maxLines` lines) and
+ * ellipsizing the remainder — `wrap.ts`'s `wrapTextToWidth` is the shared
+ * algorithm; see `apps/admin/src/labels/rasterizer.ts` for the reference
+ * implementation.
+ */
+export interface RasterizeTextOptions {
+  fontFamily: string;
+  fontSizePx: number;
+  bold: boolean;
+  /** Hard upper bound on the returned bitmap's width, in printer dots.
+   * `undefined` when the element carries no `maxWidthMm` (unbounded single
+   * line) — spelled explicitly rather than as a bare optional so an emitter
+   * can pass it through unconditionally under `exactOptionalPropertyTypes`. */
+  maxWidthPx?: number | undefined;
+  /** Maximum number of wrapped lines; defaults to 1 (single line, clipped). */
+  maxLines?: number;
+}
+
+/**
+ * Injectable text-to-bitmap rasterizer. The real implementations (browser
+ * `<canvas>` plus bundled fonts) live in `apps/admin` and `apps/station`;
  * `generateZpl`/`generateTspl` are pure and DOM-free per the plan's Global
  * Constraints and only ever see this signature.
  */
-export type RasterizeTextFn = (
-  text: string,
-  opts: { fontFamily: string; fontSizePx: number; bold: boolean },
-) => Promise<RasterResult>;
+export type RasterizeTextFn = (text: string, opts: RasterizeTextOptions) => Promise<RasterResult>;
 
 /**
  * Assembles a ZPL `^GFA` (Graphic Field, ASCII-hex, uncompressed) command

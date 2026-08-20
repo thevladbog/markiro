@@ -13,7 +13,7 @@
  *
  * Barcodes are rendered SCHEMATICALLY, never via a real symbology encoder:
  * `code128`/`ean13` draw deterministic bar stripes (widths derived from the
- * resolved text's own character codes) plus a caption; `datamatrix`/`qr`
+ * resolved text's own character codes) and nothing else; `datamatrix`/`qr`
  * draw a deterministic module grid derived from a simple hash of the
  * resolved text, with a blank quiet-zone margin. This mirrors the actual
  * print path's own division of labor: real barcode encoding only ever
@@ -33,167 +33,35 @@
  * `TemplateThumb.tsx` and `editor/PreviewPane.tsx`.
  */
 import {
+  BAR_WIDTH_PER_CHAR_FACTOR,
+  elementBoundsMm,
+  INTERIOR_MODULES,
+  LINE_HEIGHT_EM,
+  ptToMm,
+  QUIET_ZONE_MODULES,
+  TOTAL_MODULES,
+  wrapTextToWidth,
+  type BoundsMm,
   type LabelBarcodeElement,
   type LabelBoxElement,
-  type LabelElement,
   type LabelField,
-  type LabelFieldElement,
   type LabelLineElement,
   type LabelTemplateSpec,
   type LabelTextElement,
+  type LabelFieldElement,
 } from "@markiro/domain";
 
-/** An element's approximate bounding box, in millimetres, top-left anchored. */
-export interface BoundsMm {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-const MM_PER_INCH = 25.4;
-const POINTS_PER_INCH = 72;
-
 /**
- * Points -> millimetres, a plain typographic unit conversion independent of
- * any print DPI. NOT the same thing as `@markiro/domain`'s `ptToDots`
- * (which converts points to PRINTER DOTS at a given resolution) -- this
- * canvas renders at an arbitrary on-screen `scale` (px/mm), not at the
- * template's `dpi`, so a DPI-free conversion is what's needed here.
+ * `elementBoundsMm` and its `BoundsMm` type moved into `@markiro/domain`
+ * (`labels/bounds.ts`) so `packages/domain`'s own tests can assert that the
+ * stock templates' rendered EXTENTS stay on the label -- the check that
+ * catches a product name printing off the right edge. Re-exported here
+ * unchanged so this module stays the app's single import site for label
+ * geometry (`geometry.ts`, `PreviewPane.tsx`, and the geometry tests all keep
+ * importing it from `renderer.js`).
  */
-function ptToMm(pt: number): number {
-  return (pt / POINTS_PER_INCH) * MM_PER_INCH;
-}
-
-/**
- * Text/field bounds heuristic (documented per the plan brief's explicit
- * requirement): canvas cannot measure real glyph widths without a live 2D
- * context, which is unavailable under jsdom (see this module's doc comment
- * above) -- and even in a real browser, `elementBoundsMm` must stay a PURE,
- * synchronous function of the element alone (no ctx, no async font
- * loading), so it never calls `measureText`. Instead:
- *
- *  - Average glyph advance width is approximated as `0.55` of the font's em
- *    size. Real proportional glyphs vary roughly 0.2em ("i") to 1em ("W")
- *    wide; 0.55em is a common rule-of-thumb average for Latin/Cyrillic
- *    sans-serif text, good enough for hit-testing/selection/drag bounds but
- *    NOT a pixel-accurate layout measurement (only a live canvas 2D
- *    context, or the real print-time rasterizer in `labels/rasterizer.ts`,
- *    can provide that).
- *  - Line height is approximated as `1.5` of the font's em size -- the SAME
- *    ratio `labels/rasterizer.ts` already uses for its own (real,
- *    canvas-measured) text height heuristic, reused here rather than
- *    inventing a second, unrelated constant.
- */
-const AVG_CHAR_WIDTH_EM = 0.55;
-const LINE_HEIGHT_EM = 1.5;
-
-/**
- * Linear barcode (code128/ean13) width heuristic. The model documents
- * `sizeMm` for these formats as the barcode's HEIGHT only (see
- * `LabelBarcodeElement` in `@markiro/domain`'s `model.ts`) -- printed width
- * depends on the real Code128/EAN-13 module math (start/stop patterns,
- * check digit, ~11 modules per character for Code128, etc.), which this
- * SCHEMATIC renderer does not implement. Width is instead approximated as
- * `charCount * BAR_WIDTH_PER_CHAR_FACTOR * sizeMm` -- i.e. each encoded
- * character is assumed to occupy roughly 0.7x the barcode's own height in
- * printed width, a plausible-looking aspect ratio, never intended to match
- * a real symbology's actual printed dimensions.
- */
-const BAR_WIDTH_PER_CHAR_FACTOR = 0.7;
-
-/**
- * Matrix code (datamatrix/qr) module-grid heuristic. The model documents
- * `sizeMm` for these formats as a SINGLE MODULE's square side, not the
- * overall symbol size (same `model.ts` comment as above) -- so the overall
- * schematic symbol size is `TOTAL_MODULES * sizeMm` on each axis.
- * `TOTAL_MODULES` is a FIXED constant, not derived from the encoded data's
- * real length via an actual DataMatrix/QR symbol-sizing table (out of scope
- * for a schematic preview): `INTERIOR_MODULES` (20) data modules plus a
- * blank `QUIET_ZONE_MODULES` (2) margin on every side, matching real
- * symbology quiet-zone requirements conceptually rather than any specific
- * standard's exact minimum.
- */
-const INTERIOR_MODULES = 20;
-const QUIET_ZONE_MODULES = 2;
-const TOTAL_MODULES = INTERIOR_MODULES + QUIET_ZONE_MODULES * 2;
-
-/**
- * Resolves the display text `elementBoundsMm` measures for a `text`/`field`
- * element. `text` elements carry their own literal string; `field`
- * elements resolve from the provided `data` record. Callers MUST pass the
- * SAME data used by `draw`; there is no fallback -- the bounds and the
- * actual rendered size must always agree, matching the on-canvas render.
- */
-function resolveTextForBounds(
-  element: LabelTextElement | LabelFieldElement,
-  data: Record<LabelField, string>,
-): string {
-  return element.kind === "text" ? element.text : (data[element.field] ?? "");
-}
-
-/** Same requirement as `resolveTextForBounds`: callers pass the data used by `draw`. */
-function resolveBarcodeTextForBounds(
-  element: LabelBarcodeElement,
-  data: Record<LabelField, string>,
-): string {
-  return typeof element.data === "string" ? (data[element.data] ?? "") : element.data.literal;
-}
-
-/**
- * Pure geometry: approximates `element`'s on-label bounding box in
- * millimetres, top-left anchored at `(element.xMm, element.yMm)` --
- * matching how `@markiro/domain`'s ZPL/TSPL emitters themselves position
- * every element kind (ZPL `^FO`/TSPL coordinates are always the upper-left
- * corner, never a center or baseline; alignment, where it applies, only
- * shifts text WITHIN its box, never the box's own origin -- see `zpl.ts`'s
- * `renderTextLikeElement`). Used by `geometry.ts` to keep imported elements
- * inside the label and by `editor/PreviewPane.tsx` to place raster overlays.
- *
- * CRITICAL: `data` is REQUIRED and must be the SAME data used by `draw`.
- * Bounds and rendered size must always agree; callers MUST pass the actual
- * data, never relying on sample fallbacks. This ensures containment checks
- * and raster overlays match the actual on-screen render.
- *
- * See the heuristic constants above for exactly how `text`/`field`/
- * `barcode` sizes are approximated; `line`/`box` bounds are exact (derived
- * directly from the element's own documented geometry fields, no
- * heuristic needed).
- */
-export function elementBoundsMm(element: LabelElement, data: Record<LabelField, string>): BoundsMm {
-  switch (element.kind) {
-    case "text":
-    case "field": {
-      const text = resolveTextForBounds(element, data);
-      const w =
-        element.maxWidthMm ??
-        Math.max(text.length, 1) * ptToMm(element.fontSizePt) * AVG_CHAR_WIDTH_EM;
-      const h = ptToMm(element.fontSizePt) * LINE_HEIGHT_EM;
-      return { x: element.xMm, y: element.yMm, w, h };
-    }
-    case "barcode": {
-      if (element.format === "datamatrix" || element.format === "qr") {
-        const side = TOTAL_MODULES * element.sizeMm;
-        return { x: element.xMm, y: element.yMm, w: side, h: side };
-      }
-      const text = resolveBarcodeTextForBounds(element, data);
-      const w = Math.max(text.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * element.sizeMm;
-      return { x: element.xMm, y: element.yMm, w, h: element.sizeMm };
-    }
-    case "line": {
-      // Mirrors `zpl.ts`'s `renderLineElement`: a perfectly horizontal or
-      // vertical line still needs a non-zero hit-testable thickness on its
-      // thin axis, so each axis is clamped up to at least `thicknessMm`.
-      const x = Math.min(element.xMm, element.x2Mm);
-      const y = Math.min(element.yMm, element.y2Mm);
-      const w = Math.max(Math.abs(element.x2Mm - element.xMm), element.thicknessMm);
-      const h = Math.max(Math.abs(element.y2Mm - element.yMm), element.thicknessMm);
-      return { x, y, w, h };
-    }
-    case "box":
-      return { x: element.xMm, y: element.yMm, w: element.widthMm, h: element.heightMm };
-  }
-}
+export { elementBoundsMm };
+export type { BoundsMm };
 
 function mmToPx(mm: number, scale: number): number {
   return mm * scale;
@@ -225,17 +93,31 @@ function drawTextElement(
   // Matches `zpl.ts`'s own rule: alignment only shifts text WITHIN an
   // explicit `maxWidthMm` box (ZPL's `^FB` block); without one, text is
   // always drawn flush-left from `(xMm, yMm)` regardless of `align`.
-  if (element.maxWidthMm !== undefined) {
-    const boxWidthPx = mmToPx(element.maxWidthMm, scale);
-    const align = element.align ?? "left";
-    ctx.textAlign = align;
-    const drawX =
-      align === "center" ? xPx + boxWidthPx / 2 : align === "right" ? xPx + boxWidthPx : xPx;
-    ctx.fillText(text, drawX, yPx, boxWidthPx);
-  } else {
+  if (element.maxWidthMm === undefined) {
     ctx.textAlign = "left";
     ctx.fillText(text, xPx, yPx);
+    return;
   }
+
+  // Wrapped/ellipsized exactly like print: `maxWidthMm` is a real constraint
+  // now (see `@markiro/domain`'s `wrap.ts`), so the schematic must break the
+  // same way rather than squeezing everything onto one condensed line and
+  // showing an operator a layout the printer will never produce.
+  const boxWidthPx = mmToPx(element.maxWidthMm, scale);
+  const align = element.align ?? "left";
+  ctx.textAlign = align;
+  const drawX =
+    align === "center" ? xPx + boxWidthPx / 2 : align === "right" ? xPx + boxWidthPx : xPx;
+  const lines = wrapTextToWidth(
+    text,
+    (s) => ctx.measureText(s).width,
+    boxWidthPx,
+    element.maxLines ?? 1,
+  );
+  const lineHeightPx = ptToMm(element.fontSizePt) * LINE_HEIGHT_EM * scale;
+  lines.forEach((line, i) => {
+    ctx.fillText(line, drawX, yPx + i * lineHeightPx, boxWidthPx);
+  });
 }
 
 /**
@@ -295,11 +177,14 @@ function drawLinearBarcode(
   heightPx: number,
 ): void {
   const value = text.length > 0 ? text : " ";
-  // Bars occupy the top ~70% of the element's height; the bottom ~30% is
-  // reserved for the human-readable caption -- kept WITHIN the same
-  // `elementBoundsMm` box (never overflowing it) so the drawn footprint and
-  // the hit-tested/selected bounding box always agree.
-  const barsHeightPx = heightPx * 0.7;
+  // Bars fill the WHOLE element height. There is no human-readable caption
+  // any more: neither emitter asks the printer for an interpretation line
+  // (see `@markiro/domain`'s `zpl.ts`/`tspl.ts` -- they used to disagree, so
+  // the same template printed digits on a TSC and none on a Zebra), and a
+  // preview that drew one would promise ink the printer never lays down. A
+  // template that wants readable digits places its own text/field element
+  // beneath the barcode, which this renderer draws like any other text.
+  const barsHeightPx = heightPx;
   const widthPx = Math.max(value.length, 1) * BAR_WIDTH_PER_CHAR_FACTOR * heightPx;
   const segmentWidthPx = widthPx / (value.length * 2);
 
@@ -317,12 +202,6 @@ function drawLinearBarcode(
     ctx.fillRect(cursorPx, yPx, segmentWidthPx * jitter, barsHeightPx);
     cursorPx += segmentWidthPx * 2;
   }
-
-  ctx.fillStyle = INK_COLOR;
-  ctx.font = `400 ${Math.max(barsHeightPx * 0.3, 6)}px monospace`;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.fillText(value, xPx, yPx + barsHeightPx);
 }
 
 function resolveBarcodeText(
