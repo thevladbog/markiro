@@ -95,4 +95,16 @@ describe("estimatedTextWidthMm / estimatedLineCount", () => {
     expect(estimatedLineCount("x".repeat(500), 10, 10, 4)).toBe(4);
     expect(estimatedLineCount("x", 10, 10, undefined)).toBe(1);
   });
+
+  it("counts lines by actually packing words, the same way wrapTextToWidth does -- not by an aggregate totalWidth/maxWidth ratio", () => {
+    // Three 3-char words at a width that fits 6 estimated characters: none of
+    // "aaa aaa" (7 chars) fits, so each word needs its own line -- 3 lines.
+    // The aggregate calculation this regresses against would instead compute
+    // ceil(totalWidth / maxWidth) = ceil(11 chars / 6 chars) = 2, undercounting
+    // by a line.
+    const fontSizePt = 10;
+    const charWidthMm = estimatedTextWidthMm("a", fontSizePt);
+    const maxWidthMm = charWidthMm * 6;
+    expect(estimatedLineCount("aaa aaa aaa", fontSizePt, maxWidthMm, 3)).toBe(3);
+  });
 });

@@ -168,6 +168,6 @@ export function estimatedLineCount(
 ): number {
   const limit = Math.max(1, Math.floor(maxLines ?? 1));
   if (maxWidthMm === undefined || !(maxWidthMm > 0)) return 1;
-  const natural = estimatedTextWidthMm(text, fontSizePt);
-  return Math.min(limit, Math.max(1, Math.ceil(natural / maxWidthMm)));
+  const measure = (s: string) => estimatedTextWidthMm(s, fontSizePt);
+  return wrapTextToWidth(text, measure, maxWidthMm, limit).length;
 }
