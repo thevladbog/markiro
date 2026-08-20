@@ -135,4 +135,12 @@ describe("BoxCardPage", () => {
     const orderLink = screen.getByRole("link", { name: "PU-26-0001" });
     expect(orderLink.getAttribute("href")).toBe("/pickup/o1");
   });
+
+  it("offers a back link to the code registry", async () => {
+    stubFetch();
+    renderPage();
+
+    const backLink = await screen.findByRole("link", { name: "← Поиск кодов" });
+    expect(backLink.getAttribute("href")).toBe("/codes");
+  });
 });

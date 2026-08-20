@@ -243,6 +243,21 @@ body {
   font-family: var(--font-ui);
 }
 
+/* Links otherwise fall back to the UA's blue/purple, which clashes with the
+   palette everywhere one is rendered without an explicit color (the code
+   registry / box card tables, exception and pickup-order rows, ...). The
+   app's own precedent (`.mk-dashboard-section__header a`) is plain --fg-1;
+   the underline stays for affordance but is muted until hover. */
+a {
+  color: var(--fg-1);
+  text-decoration-color: var(--line-strong);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  text-decoration-color: currentcolor;
+}
+
 button,
 input,
 select,

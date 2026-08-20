@@ -126,6 +126,13 @@ export function CodeCardPage() {
 
   return (
     <div style={{ padding: "28px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+      <Link
+        to="/codes"
+        style={{ font: "var(--text-body)", color: "var(--fg-3)", textDecoration: "none" }}
+      >
+        {t("pages.codeSearch.backAction")}
+      </Link>
+
       <PageHeader title={t("pages.codeSearch.codeCard.title")} />
       <span
         className="font-mono"
