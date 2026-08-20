@@ -297,7 +297,6 @@ export function App() {
     getLockdownSnapshot,
     getLockdownSnapshot,
   );
-  const restoreLockdownAfterSetup = useRef(false);
   const registerFloorWorkBarrier = useCallback(
     (barrier: FloorWorkBarrier) => floorWorkRegistry.register(barrier),
     [floorWorkRegistry],
@@ -344,28 +343,6 @@ export function App() {
   const [sessionEpoch, setSessionEpoch] = useState(0);
 
   useEffect(() => lockdown.start(), [lockdown]);
-
-  useEffect(() => {
-    if (!showSetup) return;
-    let cancelled = false;
-    restoreLockdownAfterSetup.current = false;
-    void (async () => {
-      await lockdown.whenSettled();
-      if (cancelled) return;
-      restoreLockdownAfterSetup.current = lockdown.getSnapshot().mode === "locked";
-      // Even a confirmed windowed snapshot cannot prove the OS window is
-      // fully restored after a partial enter failure (`applied === null` in
-      // the lifecycle). Always request exit; the lifecycle de-duplicates the
-      // already-confirmed windowed case and retries the uncertain one.
-      await lockdown.exit();
-    })();
-    return () => {
-      cancelled = true;
-      const shouldRestore = restoreLockdownAfterSetup.current;
-      restoreLockdownAfterSetup.current = false;
-      if (shouldRestore) void lockdown.enter();
-    };
-  }, [lockdown, showSetup]);
 
   useEffect(() => {
     void loadSoundSettings(tauriExecutor).then(setSound);

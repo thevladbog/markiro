@@ -1064,8 +1064,10 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hw} {...defaultProps} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Windows printer" }), {
+      target: { value: "Zebra ZD421" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Test print" }));
     await waitFor(() =>
       expect(print).toHaveBeenCalledWith(
@@ -1075,7 +1077,7 @@ describe("WorkstationSetup", () => {
     );
   });
 
-  it("shows the empty hint and refreshes the USB list on demand", async () => {
+  it("keeps the Windows printer selector visible and refreshes its options on demand", async () => {
     const listUsbPrinters = vi
       .fn<() => Promise<{ name: string; port: string }[]>>()
       .mockResolvedValueOnce([])
@@ -1083,10 +1085,37 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hardware({ listUsbPrinters })} {...defaultProps} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    expect(await screen.findByText(/No USB printers found/)).toBeDefined();
+    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    const emptySelector = await screen.findByRole("combobox", { name: "Windows printer" });
+    expect((emptySelector as HTMLSelectElement).disabled).toBe(true);
+    expect(
+      screen.getByRole("option", { name: /No installed Windows printers found/ }),
+    ).toBeDefined();
     fireEvent.click(screen.getByRole("button", { name: "Refresh list" }));
-    expect(await screen.findByRole("radio", { name: "Zebra ZD421 · USB001" })).toBeDefined();
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("combobox", { name: "Windows printer" }) as HTMLSelectElement).disabled,
+      ).toBe(false),
+    );
+    expect(screen.getByRole("option", { name: "Zebra ZD421 · USB001" })).toBeDefined();
+  });
+
+  it("offers an installed printer whose Windows port is not named USB", async () => {
+    render(
+      <WorkstationSetup
+        hw={hardware({
+          listUsbPrinters: async () => [{ name: "TSC TE200", port: "TSC_DRIVER_PORT" }],
+        })}
+        {...defaultProps}
+      />,
+    );
+    await screen.findByText("COM3");
+    await selectSetupTab("Printer");
+    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+
+    expect(
+      await screen.findByRole("option", { name: "TSC TE200 · TSC_DRIVER_PORT" }),
+    ).toBeDefined();
   });
 
   it("keeps a configured USB printer selectable when detection no longer lists it", async () => {
@@ -1099,10 +1128,11 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hardware()} {...defaultProps} exec={storedExec} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    const missing = await screen.findByRole("radio", {
-      name: "Zebra ZD421 (configured, not detected)",
-    });
-    expect((missing as HTMLInputElement).checked).toBe(true);
+    const selector = await screen.findByRole("combobox", { name: "Windows printer" });
+    expect((selector as HTMLSelectElement).value).toBe("Zebra ZD421");
+    expect(
+      screen.getByRole("option", { name: "Zebra ZD421 (configured, not detected)" }),
+    ).toBeDefined();
   });
 
   it("saves the USB printer into the hardware config", async () => {
@@ -1113,8 +1143,10 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
-    fireEvent.click(await screen.findByRole("radio", { name: "TSC TE200 · USB002" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.change(await screen.findByRole("combobox", { name: "Windows printer" }), {
+      target: { value: "TSC TE200" },
+    });
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     await waitFor(() =>
       expect(onConfigChange).toHaveBeenCalledWith(
@@ -1127,7 +1159,7 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hardware()} {...defaultProps} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "USB" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(await screen.findByText(/Enter the required printer connection details/)).toBeDefined();
   });

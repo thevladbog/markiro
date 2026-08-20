@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { Button, Input } from "@markiro/ui";
+import { Button, Input, Select } from "@markiro/ui";
 import type { PrintTarget, UsbPrinterInfo } from "../../lib/hardware.js";
 import type { PrinterLanguage } from "../../lib/hardware-config.js";
 
@@ -61,6 +61,7 @@ export function PrinterSetupPanel({
   ];
 
   const usbChoices = [
+    { value: "", label: t("setup.usbNotFound"), disabled: true },
     ...(usbPrinter !== "" && !usbPrinters.some((p) => p.name === usbPrinter)
       ? [{ value: usbPrinter, label: t("setup.usbMissingSaved", { name: usbPrinter }) }]
       : []),
@@ -128,27 +129,15 @@ export function PrinterSetupPanel({
           </>
         ) : transport === "usb" ? (
           <>
-            {usbChoices.length > 0 ? (
-              <fieldset className="setup-choice-group">
-                <legend>{t("setup.usbPrinterList")}</legend>
-                <div className="setup-choice-group__options">
-                  {usbChoices.map((choice) => (
-                    <label className="setup-touch-choice" key={choice.value}>
-                      <input
-                        type="radio"
-                        name="usb-printer"
-                        checked={usbPrinter === choice.value}
-                        disabled={disabled}
-                        onChange={() => onUsbPrinterChange(choice.value)}
-                      />
-                      <span>{choice.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </fieldset>
-            ) : (
-              <p className="setup-panel__empty">{t("setup.usbNotFound")}</p>
-            )}
+            <Select
+              native
+              size="floor"
+              label={t("setup.usbPrinterList")}
+              value={usbPrinter}
+              options={usbChoices}
+              disabled={disabled || (usbPrinters.length === 0 && usbPrinter === "")}
+              onValueChange={onUsbPrinterChange}
+            />
             <Button
               size="floor"
               variant="secondary"

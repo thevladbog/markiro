@@ -310,5 +310,6 @@ and the browser gallery do not satisfy these checks.
       print queue — either way, the line must not block, and printing must
       recover after reconnecting without reconfiguration. If failures turn
       out silent, add a pre-flight `GetPrinterW` status check.
-- [ ] Detection filters out non-USB queues (network, PDF, etc.) — they do
-      not appear in the list of available printers.
+- [ ] The Windows printer selector includes every installed local or connected
+      queue, including a vendor-driver queue whose port is not named `USBnnn`;
+      queues on `USBnnn` ports appear first.
