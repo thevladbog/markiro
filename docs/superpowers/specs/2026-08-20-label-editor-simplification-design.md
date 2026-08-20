@@ -190,7 +190,7 @@ ZPL and TSPL with `sampleLabelData()` (unit-tested).
 ## 5. Station (`apps/station`)
 
 - `lib/shift-bundle.ts` / `lib/mirror.ts`: persist the two new product
-  attributes into `shifts_mirror`.
+  attributes into `product_mirror` as `egais_code` / `shelf_life_days`.
 - `lib/box-label.ts` `boxLabelFields()`: fill `product.egais` from the
   mirror (empty string when null) and compute
   `expiry = addDays(closedAt date, shelfLifeDays)` formatted like the
