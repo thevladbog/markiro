@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/readme/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/readme/logo.svg">
-    <img alt="Markiro" src="./docs/assets/readme/logo.svg" width="280" height="64">
+    <source media="(prefers-color-scheme: dark)" srcset="./docs/assets/readme/logo-en-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="./docs/assets/readme/logo-en.svg">
+    <img alt="Markiro" src="./docs/assets/readme/logo-en.svg" width="280" height="64">
   </picture>
 </p>
 
@@ -24,9 +24,9 @@
   <a href="./LICENSE"><img alt="Proprietary license" src="https://img.shields.io/badge/License-Proprietary-17161A"></a>
 </p>
 
-![Markiro line station product design preview](./docs/assets/readme/station.webp)
+![Markiro line station screenshot](./docs/assets/readme/station.webp)
 
-<p align="center"><em>Product design preview — aggregation mode on the offline-capable line station.</em></p>
+<p align="center"><em>Aggregation mode on the offline-capable line station — rendered by the app's built-in screen gallery with fixture data.</em></p>
 
 ## What is Markiro?
 
@@ -46,8 +46,8 @@ The platform is built for real production constraints: multiple terminals in one
 
 <table>
   <tr>
-    <td width="50%"><a href="./docs/assets/readme/admin.webp"><img alt="Markiro admin panel product design preview" src="./docs/assets/readme/admin.webp"></a></td>
-    <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Markiro pickup kiosk product design preview" src="./docs/assets/readme/kiosk.webp"></a></td>
+    <td width="50%"><a href="./docs/assets/readme/admin.webp"><img alt="Markiro admin panel screenshot" src="./docs/assets/readme/admin.webp"></a></td>
+    <td width="50%"><a href="./docs/assets/readme/kiosk.webp"><img alt="Markiro pickup kiosk screenshot" src="./docs/assets/readme/kiosk.webp"></a></td>
   </tr>
   <tr>
     <td><strong>Admin panel.</strong> Products, shifts, label templates, integrations, teams, pickup orders, and operational audit.</td>
@@ -55,7 +55,7 @@ The platform is built for real production constraints: multiple terminals in one
   </tr>
 </table>
 
-<p align="center"><em>Product design previews from the approved Markiro handoff; they are not screenshots of a verified live deployment.</em></p>
+<p align="center"><em>Screenshots of the live application running in a local development environment with demo data.</em></p>
 
 ## Core capabilities
 
