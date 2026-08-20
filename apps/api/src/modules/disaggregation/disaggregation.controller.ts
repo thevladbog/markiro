@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -10,9 +11,13 @@ import {
   Post,
   Query,
   Req,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { FileInterceptor } from "@nestjs/platform-express";
+import { memoryStorage } from "multer";
+import { ApiConsumes, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -34,6 +39,7 @@ import {
   type UpdateDocumentDto,
 } from "./dto";
 import { DisaggregationService } from "./disaggregation.service";
+import { parseSsccImport } from "./import-parser";
 
 @ApiTags("disaggregation")
 @Controller("disaggregation")
@@ -95,6 +101,25 @@ export class DisaggregationController {
     @Body(new ZodValidationPipe(addLinesSchema)) body: AddLinesDto,
   ) {
     return this.service.addLines(req.tenantId!, id, body.ssccs);
+  }
+
+  @Post(":id/import")
+  @HttpCode(201)
+  @RequireSubscriptionWrite()
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  @UseInterceptors(
+    FileInterceptor("file", { storage: memoryStorage(), limits: { fileSize: 1024 * 1024, files: 1 } }),
+  )
+  @ApiConsumes("multipart/form-data")
+  async importLines(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+  ) {
+    if (!file) throw new BadRequestException({ code: "file_required" });
+    const tokens = parseSsccImport(file.buffer.toString("utf8"));
+    if (tokens.length === 0) throw new BadRequestException({ code: "file_empty" });
+    return this.service.importLines(req.tenantId!, id, tokens);
   }
 
   @Delete(":id/lines/:lineId")

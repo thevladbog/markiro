@@ -237,6 +237,22 @@ export class DisaggregationService {
     return { lines: await this.listLines(tenantId, documentId) };
   }
 
+  async importLines(tenantId: string, documentId: string, tokens: string[]) {
+    for (let i = 0; i < tokens.length; i += 500) {
+      await this.addLines(tenantId, documentId, tokens.slice(i, i + 500));
+    }
+    await this.db
+      .update(schema.disaggregationDocuments)
+      .set({ source: "import", updatedAt: sql`now()` })
+      .where(
+        and(
+          eq(schema.disaggregationDocuments.tenantId, tenantId),
+          eq(schema.disaggregationDocuments.id, documentId),
+        ),
+      );
+    return { lines: await this.listLines(tenantId, documentId) };
+  }
+
   async removeLine(tenantId: string, documentId: string, lineId: string): Promise<void> {
     const doc = await this.findDocument(tenantId, documentId);
     this.assertDraft(doc);

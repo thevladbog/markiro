@@ -198,4 +198,16 @@ describe.skipIf(!ready)("disaggregation lines e2e", () => {
     await agent.post(`/disaggregation/${doc.id}/cancel`).expect(200);
     await agent.post(`/disaggregation/${doc.id}/lines`).send({ ssccs: [SSCC1] }).expect(409);
   });
+
+  it("imports a text file of SSCCs", async () => {
+    const doc = await createDraft();
+    const res = await agent
+      .post(`/disaggregation/${doc.id}/import`)
+      .attach("file", Buffer.from(`${SSCC1}\ngarbage;${SSCC1}`), "codes.txt")
+      .expect(201);
+    const lines = (res.body as { lines: LineDtoWire[] }).lines;
+    expect(lines.map((l) => l.status).sort()).toEqual(["duplicate", "not_found", "ok"].sort());
+    const detail = await agent.get(`/disaggregation/${doc.id}`).expect(200);
+    expect((detail.body as { source: string }).source).toBe("import");
+  });
 });

@@ -187,6 +187,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /disaggregation (DisaggregationController.create)",
       "POST /disaggregation-reasons (DisaggregationReasonsController.createReason)",
       "POST /disaggregation/:id/cancel (DisaggregationController.cancel)",
+      "POST /disaggregation/:id/import (DisaggregationController.importLines)",
       "POST /disaggregation/:id/lines (DisaggregationController.addLines)",
       "POST /employees (EmployeesController.createEmployee)",
       "POST /employees/:id/badges (EmployeesController.issueBadge)",
