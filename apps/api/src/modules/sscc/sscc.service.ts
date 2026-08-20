@@ -77,20 +77,23 @@ export function deriveIssuerPrefix(gln: string, ownerLabel: string): string {
 /**
  * The lowest `nextSerial` an admin may legally seed for (tenant, issuer
  * prefix, extension digit): one past the highest serial ever actually
- * handed to a device in `sscc_blocks`, or 0 if no block has ever been
- * issued under that triple (final review, finding 2).
+ * PRINTED under that triple, or the extension digit's own first serial when
+ * nothing has been.
+ *
+ * "Printed", not "handed out" (2026-08-20 reseed design): reseeding now
+ * revokes the blocks a device holds (`SsccService.seedCounter`), so a serial
+ * that was merely allocated is not a reason to burn the whole rest of the
+ * space -- the device is told to drop that range and will never emit it.
+ * What must never be reissued is a serial already on a physical box, and
+ * `consumedThroughSerial` -- advanced only by `recordConsumedSerial`, only
+ * when a box closure names a real SSCC -- is exactly that set.
+ *
+ * Deliberately scans REVOKED blocks too: revocation invalidates a range's
+ * unprinted remainder, never the record of what was printed from it.
  *
  * Exported as a plain function (rather than a method requiring
- * `SsccService` as an injected dependency) for the same reason
- * `deriveIssuerPrefix` above is: org-profile.service.ts's and
- * counterparties.service.ts's `putSscc` both need it, and neither module
- * currently depends on `SsccModule`.
- *
- * Without this floor, an admin re-seeding the counter below it (a stale
- * migration script re-run after production started, a typo) would let the
- * next `allocate` cut a range overlapping a block some device already
- * holds -- an SSCC collision ACROSS devices, the exact failure the prefix
- * keying and one-statement allocation exist to prevent.
+ * `SsccService` as an injected dependency) so `seedCounter` can call it on a
+ * transaction handle, and so the e2e suite can assert the floor directly.
  */
 export async function seedFloor(
   db: Pick<Db, "select">,
@@ -99,7 +102,7 @@ export async function seedFloor(
   extensionDigit: number,
 ): Promise<number> {
   const [row] = await db
-    .select({ highest: max(schema.ssccBlocks.toSerial) })
+    .select({ printed: max(schema.ssccBlocks.consumedThroughSerial) })
     .from(schema.ssccBlocks)
     .where(
       and(
@@ -108,14 +111,17 @@ export async function seedFloor(
         eq(schema.ssccBlocks.extensionDigit, extensionDigit),
       ),
     );
-  return row?.highest == null ? 0 : Number(row.highest) + 1;
+  const firstSerial = extensionDigit === 0 ? 1 : 0;
+  return row?.printed == null ? firstSerial : Math.max(Number(row.printed) + 1, firstSerial);
 }
 
 /**
  * Atomically seeds (tenant, issuer prefix, extension digit)'s counter to
  * `nextSerial`, in ONE statement that re-validates `seedFloor`'s condition
- * live against `sscc_blocks` at write time -- CodeRabbit PR33 review,
- * Finding 5.
+ * live against `sscc_blocks` at write time -- the highest serial actually
+ * PRINTED under this key, matching `seedFloor`'s own definition above. The
+ * two expressions must always say the same thing: if they drift, the
+ * pre-check and the write disagree and one of them is decorative.
  *
  * `putSscc` (org-profile.service.ts, counterparties.service.ts) used to read
  * `seedFloor` and then write `nextSerial` unconditionally in a SEPARATE
@@ -160,11 +166,11 @@ export async function atomicSeedSscc(
       ],
       set: { nextSerial, updatedAt: sql`now()` },
       setWhere: sql`${nextSerial} >= COALESCE((
-        SELECT MAX(${schema.ssccBlocks.toSerial}) + 1 FROM ${schema.ssccBlocks}
+        SELECT MAX(${schema.ssccBlocks.consumedThroughSerial}) + 1 FROM ${schema.ssccBlocks}
         WHERE ${schema.ssccBlocks.tenantId} = ${tenantId}
           AND ${schema.ssccBlocks.issuerPrefix} = ${issuerPrefix}
           AND ${schema.ssccBlocks.extensionDigit} = ${extensionDigit}
-      ), 0)`,
+      ), ${extensionDigit === 0 ? 1 : 0})`,
     })
     .returning({ nextSerial: schema.ssccCounters.nextSerial });
   return row !== undefined;

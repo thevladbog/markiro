@@ -3,7 +3,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { gs1CheckDigit } from "@markiro/domain";
+import { buildSscc, gs1CheckDigit } from "@markiro/domain";
 import { schema, type Db } from "@markiro/db";
 import { and, eq } from "drizzle-orm";
 import { AppModule } from "../src/app.module";
@@ -274,27 +274,25 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect(res.body).toEqual({ extensionDigit: 0, nextSerial: 777 });
     });
 
-    it("rejects seeding below the floor once a block has been issued, but allows seeding at or above it", async () => {
+    it("rejects seeding below the floor once a serial has been printed, but allows seeding at or above it", async () => {
       const gln = freshGln();
       await agent.put("/org/profile").send({ gln }).expect(200);
       const prefix = gln.slice(0, 9);
 
       // Cuts a real sscc_blocks row under this prefix, the same one-statement
       // path a shift bundle uses -- no HTTP route exposes raw allocation, so
-      // SsccService is called directly, same as sscc.e2e.test.ts does.
-      // `allocate` itself already advances `sscc_counters` to `1 + size` (51) as
-      // part of granting the block, so the floor -- one past the block's
-      // toSerial -- equals that same baseline here (fromSerial 1, size 50).
-      const block = await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
-      const floor = block.toSerial + 1;
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
+      // SsccService is called directly, same as sscc.e2e.test.ts does. The
+      // floor comes from the PRINTED serial recorded below, not from the
+      // block's bounds (2026-08-20 reseed design).
+      const service = app!.get(SsccService);
+      const block = await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, block.fromSerial + 9));
+      const floor = block.fromSerial + 10;
 
       await agent
         .put("/org/profile/sscc")
         .send({ extensionDigit: 0, nextSerial: floor - 1 })
         .expect(400);
-      // Untouched by the rejected attempt.
-      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(floor);
 
       await agent
         .put("/org/profile/sscc")
@@ -328,6 +326,35 @@ describe.skipIf(!ready)("sscc counter settings e2e", () => {
       expect((await agent.get(`/counterparties/${cpId}/sscc`).expect(200)).body.nextSerial).toBe(
         floor,
       );
+    });
+
+    it("floors on what was printed, not on what was handed out", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      const service = app!.get(SsccService);
+
+      // A block of 50 serials is handed to the device, but only serial 10 is
+      // ever reported as actually printed. The old floor (toSerial + 1 = 51)
+      // made every unprinted serial in the block permanently unusable; the
+      // floor is now one past what was really printed.
+      await service.allocate(tenantId, prefix, 0, deviceId, 50);
+      await service.recordConsumedSerial(tenantId, buildSscc(0, prefix, 10));
+
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 10 }).expect(400);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 11 }).expect(200);
+      expect((await agent.get("/org/profile/sscc").expect(200)).body.nextSerial).toBe(11);
+    });
+
+    it("floors at the box minimum when nothing was ever printed", async () => {
+      const gln = freshGln();
+      await agent.put("/org/profile").send({ gln }).expect(200);
+      const prefix = gln.slice(0, 9);
+      await app!.get(SsccService).allocate(tenantId, prefix, 0, deviceId, 50);
+
+      // Handed out but never printed -- serial 1 is still free.
+      expect(await seedFloor(db, tenantId, prefix, 0)).toBe(1);
+      await agent.put("/org/profile/sscc").send({ extensionDigit: 0, nextSerial: 1 }).expect(200);
     });
   });
 
