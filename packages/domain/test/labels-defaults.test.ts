@@ -313,9 +313,19 @@ describe("buildDefaultLabelTemplates", () => {
     expect(buildDefaultLabelTemplates()).toEqual(buildDefaultLabelTemplates());
   });
 
-  it("matches the jsonb inlined into db migration 0049 (drift guard)", async () => {
+  /**
+   * DRIFT GUARD, pointed at the CURRENT migration.
+   *
+   * It used to read `0049_default_label_templates.sql`, the INSERT that first
+   * seeded these five templates. That file's inlined JSON is now HISTORICAL —
+   * it is what already-migrated databases received, and rewriting it would
+   * rewrite history without changing a single production row. `0050` is the
+   * migration that force-overwrites those rows with the current specs, so it
+   * is the one that has to stay in step with this module.
+   */
+  it("matches the jsonb inlined into db migration 0050 (drift guard)", async () => {
     const sql = await readFile(
-      new URL("../../db/migrations/0049_default_label_templates.sql", import.meta.url),
+      new URL("../../db/migrations/0050_reseed_default_label_templates.sql", import.meta.url),
       "utf8",
     );
     const rows = [...sql.matchAll(/\('([^']+)', '([^']+)'\)/g)].map((m) => ({
