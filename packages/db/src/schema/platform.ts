@@ -668,6 +668,23 @@ export const ssccBlocks = pgTable(
      * `SsccService.allocateForBundle`.
      */
     consumedThroughSerial: bigint("consumed_through_serial", { mode: "number" }),
+    /**
+     * When an admin reseeding the counter (`SsccService.seedCounter`)
+     * invalidated this block, or null while it is still live.
+     *
+     * A revoked block is invisible to `allocateForBundle` -- the next bundle
+     * cuts a fresh block from the newly seeded counter instead of handing
+     * this one back, which is the entire point: without it, a device holding
+     * an unexhausted 2000-serial block would keep printing from it and the
+     * setting would appear to do nothing.
+     *
+     * It stays visible to `recordConsumedSerial`, deliberately: a box closure
+     * can arrive long after the block it drew from was revoked (an offline
+     * device syncing late), and the server must still record which serials
+     * really got printed. The row is never deleted for the same reason -- it
+     * is the only record of where a gap in the numbering came from.
+     */
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
     issuedAt: timestamp("issued_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
