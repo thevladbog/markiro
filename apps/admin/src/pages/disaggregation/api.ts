@@ -15,7 +15,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import { apiFetch } from "../../api/client.js";
+import { ApiRequestError, apiFetch } from "../../api/client.js";
 
 /** Mirrors `apps/api/src/modules/disaggregation/dto.ts`'s `LineDto`, `Date` fields as `string`. */
 export interface LineDto {
@@ -252,13 +252,26 @@ export function useRemoveLine(id: string): UseMutationResult<void, Error, string
   });
 }
 
-/** `POST /disaggregation/:id/apply`. Invalidates every disaggregation query variant on success. */
+/**
+ * `POST /disaggregation/:id/apply`. Invalidates every disaggregation query
+ * variant on success -- and also on a 409 `invalid_lines` rejection, since
+ * that response means one or more lines' statuses changed underneath the
+ * draft (e.g. a box got written off via a kiosk between page load and the
+ * apply click). Re-fetching there is what lets the detail page (Task 10)
+ * show the caller the fresh per-line statuses instead of the stale "ok"
+ * chips that made the apply button look enabled in the first place.
+ */
 export function useApplyDocument(id: string): UseMutationResult<DocumentDetailDto, Error, void> {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: () => postApply(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: DISAGGREGATION_QUERY_KEY });
+    },
+    onError: (error) => {
+      if (error instanceof ApiRequestError && error.status === 409 && error.code === "invalid_lines") {
+        void queryClient.invalidateQueries({ queryKey: DISAGGREGATION_QUERY_KEY });
+      }
     },
   });
 }

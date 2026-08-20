@@ -1233,6 +1233,60 @@
           "updateSuccess": "Причина обновлена",
           "archiveSuccess": "Причина удалена"
         }
+      },
+      "detail": {
+        "backAction": "← Дезагрегация",
+        "loadError": "Не удалось загрузить документ",
+        "reasonLabel": "Причина",
+        "reasonPlaceholder": "Не выбрана",
+        "commentLabel": "Комментарий",
+        "createdAtLabel": "Создан",
+        "appliedAtLabel": "Проведён",
+        "cancelledAtLabel": "Отменён",
+        "noReason": "—",
+        "noComment": "—",
+        "addPanelTitle": "Добавить строки",
+        "addLinesInputLabel": "SSCC коробов",
+        "addLinesPlaceholder": "Вставьте или отсканируйте SSCC — по одному на строку",
+        "addLines": "Добавить строки",
+        "importAction": "Импорт из файла",
+        "addLinesError": "Не удалось добавить строки. Попробуйте ещё раз.",
+        "importError": "Не удалось импортировать файл. Попробуйте ещё раз.",
+        "linesTitle": "Короба",
+        "linesEmpty": "Строки не добавлены",
+        "table": {
+          "sscc": "SSCC",
+          "productName": "Товар",
+          "codeCount": "Кодов",
+          "status": "Статус",
+          "actions": "Действия"
+        },
+        "deleteLine": "Удалить",
+        "deleteLineError": "Не удалось удалить строку. Попробуйте ещё раз.",
+        "applyAction": "Провести",
+        "applyConfirmTitle": "Провести документ?",
+        "applyConfirm": "Будет расформировано коробов: {{boxes}}, кодов: {{codes}}.",
+        "applyConfirmAction": "Провести",
+        "applyBlocked": "Часть строк изменила статус и не готова к проведению. Проверьте таблицу ниже.",
+        "applyError": "Не удалось провести документ. Попробуйте ещё раз.",
+        "applySuccess": "Документ проведён",
+        "cancelDocumentAction": "Отменить документ",
+        "cancelConfirmTitle": "Отменить документ?",
+        "cancelConfirmBody": "Документ будет отменён. Это действие нельзя отменить.",
+        "cancelConfirmAction": "Отменить документ",
+        "cancelError": "Не удалось отменить документ. Попробуйте ещё раз.",
+        "cancelSuccess": "Документ отменён",
+        "updateError": "Не удалось сохранить изменения. Попробуйте ещё раз.",
+        "dismissAction": "Отмена"
+      },
+      "lineStatus": {
+        "ok": "Готов к проведению",
+        "not_found": "Короб не найден",
+        "not_closed": "Короб не закрыт",
+        "shift_open": "Смена ещё открыта — доступно после закрытия смены",
+        "already_disassembled": "Уже расформирован",
+        "written_off": "Списан/выдан через киоск",
+        "duplicate": "Дубль в документе"
       }
     },
     "employees": {
@@ -1423,7 +1477,10 @@
       "allStatuses": "Все статусы",
       "emptyTitle": "Устройства не добавлены",
       "emptyHint": "Добавьте станцию или киоск для начала работы.",
-      "type": { "station": "Станция", "kiosk": "Киоск" },
+      "type": {
+        "station": "Станция",
+        "kiosk": "Киоск"
+      },
       "status": {
         "awaiting_pairing": "Ожидает привязки",
         "online": "В сети",
