@@ -350,12 +350,25 @@ function buildBoxLabelSpec(widthMm: number, heightMm: number, dpi: 203 | 300): L
         // the printer's own interpretation line — see this function's doc
         // comment. Not bold: it is a manual-fallback reading aid, not a
         // headline, and the bare 18 digits are what a warehouse types in.
+        //
+        // CENTRED, because the bars above it are. The second physical print
+        // came back with the SSCC block reading skewed, and the barcode was
+        // not the culprit: `barcodeX` above centres it to within 0.03 mm.
+        // This line was the one out of place — a left-flush `field` at the
+        // content margin, so its digits started 7.5 mm left of the bars they
+        // belong to. `align` centres it inside the SAME full-width content
+        // box the barcode is centred in (`m` … `m + contentW`, whose centre
+        // IS the label's centre), so the two share a centre line by
+        // construction at every one of the five sizes rather than by a
+        // hand-tuned x. All three renderers honour it identically — see
+        // `rasterAlignOffsetDots`.
         kind: "field",
         id: "val-sscc",
         xMm: m,
         yMm: digitsY,
         field: "sscc",
         fontSizePt: captionPt,
+        align: "center",
         maxWidthMm: contentW,
       },
     ],
