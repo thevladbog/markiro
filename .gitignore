@@ -17,6 +17,11 @@ deploy/production/.caddy-config/
 # Local Superpowers execution artifacts; reviewed specs and plans live under docs/.
 /.superpowers/
 
+# Local Graphify graph, caches, converted documents, and machine-specific paths.
+/graphify-out/
+/.claude/settings.json
+/.codex/hooks.json
+
 # Local Terraform artifacts; examples and dependency locks remain committed.
 .terraform/
 *.tfstate*
