@@ -12,6 +12,8 @@ import {
 } from "./remote-deploy.mjs";
 import { validateRuntimeSnapshot } from "./runtime-diagnostics-probe.mjs";
 
+const MAX_REMOTE_DIAGNOSTIC_BYTES = 16 * 1024;
+
 function requiredEnvironment(name, environment) {
   const value = environment[name];
   if (!value) throw new Error("runtime diagnostic configuration is incomplete");
@@ -19,6 +21,8 @@ function requiredEnvironment(name, environment) {
 }
 
 function parseRemoteResponse(output) {
+  if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > MAX_REMOTE_DIAGNOSTIC_BYTES)
+    throw new Error("runtime diagnostic response is invalid");
   const match = output.match(/^MARKIRO_RUNTIME_DIAGNOSTICS (\{[^\n]+\})\n$/);
   if (!match) throw new Error("runtime diagnostic response is invalid");
   try {
