@@ -24,6 +24,18 @@ import { latestHealthyVbtechRelease, validateVbtechSelector } from "./vbtech-rel
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
 const defaultVbtechReleaseDirectory = "/var/lib/markiro/vbtech/releases";
+const trustedVbtechDomain = "v-b.tech";
+const trustedVbtechWwwDomain = "www.v-b.tech";
+const vbtechInputKeys = [
+  "VBTECH_IMAGE_REF",
+  "VBTECH_IMAGE_TAG",
+  "VBTECH_RELEASE_SHA",
+  "VBTECH_DOMAIN",
+  "VBTECH_WWW_DOMAIN",
+  "VBTECH_FUNCTION_ORIGIN",
+  "VBTECH_FUNCTION_PATH",
+  "VBTECH_SUBMISSION_STATE",
+];
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 600_000;
@@ -261,27 +273,29 @@ function vbtechReleaseFromLifecycle(value) {
 const vbtechEnvironmentEntries = (vbtech) => [
   ["VBTECH_IMAGE_REF", vbtech.imageRef],
   ["VBTECH_RELEASE_SHA", vbtech.releaseSha],
+  ["VBTECH_DOMAIN", trustedVbtechDomain],
+  ["VBTECH_WWW_DOMAIN", trustedVbtechWwwDomain],
   ["VBTECH_FUNCTION_PATH", vbtech.functionPath],
   ["VBTECH_SUBMISSION_STATE", vbtech.submissionState],
 ];
 
 function environmentWithoutVbtechSelector(environment) {
   const value = { ...environment };
-  for (const key of [
-    "VBTECH_IMAGE_REF",
-    "VBTECH_RELEASE_SHA",
-    "VBTECH_FUNCTION_PATH",
-    "VBTECH_SUBMISSION_STATE",
-  ])
-    delete value[key];
+  for (const key of vbtechInputKeys) delete value[key];
   return value;
 }
 
 function environmentWithVbtech(environment, vbtech) {
+  if (environment.VBTECH_IMAGE_TAG !== undefined)
+    throw new Error("caller v-b selector conflicts with preserved release");
   if (!vbtech) return environment;
   const entries = vbtechEnvironmentEntries(vbtech);
-  const hasCallerSelector = entries.some(([key]) => environment[key] !== undefined);
-  if (hasCallerSelector && entries.some(([key, expected]) => environment[key] !== expected))
+  if (
+    environment.VBTECH_FUNCTION_ORIGIN !== undefined ||
+    entries.some(
+      ([key, expected]) => environment[key] !== undefined && environment[key] !== expected,
+    )
+  )
     throw new Error("caller v-b selector conflicts with preserved release");
   return {
     ...environmentWithoutVbtechSelector(environment),
@@ -564,6 +578,12 @@ export async function prepareRelease(options, supplied = {}) {
     ? await dependencies.latestHealthyVbtechRelease(options.vbtechReleaseDirectory)
     : undefined;
   const preserved = vbtechReleaseFromLifecycle(preservedLifecycle);
+  if (
+    options.vbtechReleaseDirectory &&
+    preserved === undefined &&
+    vbtechInputKeys.some((key) => options.environment[key] !== undefined)
+  )
+    throw new Error("caller v-b selector conflicts with preserved release");
   const effectiveEnvironment = environmentWithVbtech(options.environment, preserved);
   dependencies.log("preflight");
   const preflight = await dependencies.runPreflight(effectiveEnvironment);
@@ -775,6 +795,16 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     environment,
     dependencies.timeouts.pull,
   );
+  if (previous.vbtech) {
+    const previousVbtechImage = await mustRun(
+      dependencies,
+      "docker",
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", previous.vbtech.imageRef],
+      environment,
+      dependencies.timeouts.command,
+    );
+    requireApprovedDigest(previous.vbtech.imageRef, previousVbtechImage.stdout.trim());
+  }
   await mustRun(
     dependencies,
     "docker",

@@ -114,6 +114,48 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
   );
 });
 
+test("activates v-b smoke authorities only for the exact digest selector and ignores retired inputs", () => {
+  const markiroEnvironment = {
+    MARKIRO_DOMAIN: "admin.markiro.example",
+    MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
+    MARKIRO_LANDING_DOMAIN: "markiro.example",
+  };
+  const markiroUrls = {
+    admin: "https://admin.markiro.example",
+    kiosk: "https://kiosk.markiro.example",
+    landing: "https://markiro.example",
+  };
+
+  assert.deepEqual(
+    productionBaseUrls({
+      ...markiroEnvironment,
+      VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${"c".repeat(40)}`,
+    }),
+    markiroUrls,
+  );
+  assert.deepEqual(
+    productionBaseUrls({
+      ...markiroEnvironment,
+      VBTECH_DOMAIN: "v-b.tech",
+      VBTECH_WWW_DOMAIN: "www.v-b.tech",
+    }),
+    markiroUrls,
+  );
+  assert.deepEqual(
+    productionBaseUrls({
+      ...markiroEnvironment,
+      VBTECH_IMAGE_REF: `ghcr.io/thevladbog/vbtech-web@sha256:${"d".repeat(64)}`,
+      VBTECH_DOMAIN: "v-b.tech",
+      VBTECH_WWW_DOMAIN: "www.v-b.tech",
+    }),
+    {
+      ...markiroUrls,
+      vbtech: "https://v-b.tech",
+      vbtechWww: "https://www.v-b.tech",
+    },
+  );
+});
+
 test("rejects malformed and equal smoke authorities without disclosing their values", () => {
   const cases = [
     [

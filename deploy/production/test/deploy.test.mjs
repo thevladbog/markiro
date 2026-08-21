@@ -310,6 +310,29 @@ test("deploys and smokes an independently digest-pinned v-b service before switc
   assert.equal(smokeOptions.vbtechSubmissionState, "disabled");
 });
 
+test("rejects the retired v-b image tag before deployment mutation", async () => {
+  const { dependencies, releaseDirectory, runner } = await fixture({ priorTag: null });
+  const before = await readdir(releaseDirectory);
+
+  await assert.rejects(
+    deployRelease(
+      {
+        environment: {
+          ...environment,
+          VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${vbtechReleaseSha}`,
+        },
+        releaseDirectory,
+        readinessAttempts: 1,
+      },
+      dependencies,
+    ),
+    /caller v-b selector conflicts with preserved release/,
+  );
+
+  assert.deepEqual(runner.calls, []);
+  assert.deepEqual(await readdir(releaseDirectory), before);
+});
+
 test("uses only a structurally valid newest healthy release as the previous tag", async () => {
   const { dependencies, releaseDirectory } = await fixture({
     previous: {

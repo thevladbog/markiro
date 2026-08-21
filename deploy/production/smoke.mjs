@@ -214,11 +214,7 @@ export function productionBaseUrls(environment) {
     kiosk: productionBaseUrl(kioskDomain, port),
     landing: productionBaseUrl(landingDomain, port),
   };
-  const vbtechConfigured = [
-    environment.VBTECH_IMAGE_TAG,
-    environment.VBTECH_DOMAIN,
-    environment.VBTECH_WWW_DOMAIN,
-  ].some((value) => value !== undefined);
+  const vbtechConfigured = environment.VBTECH_IMAGE_REF !== undefined;
   if (!vbtechConfigured) return urls;
   const vbtech = validateVbtechDomains(environment.VBTECH_DOMAIN, environment.VBTECH_WWW_DOMAIN, [
     domain,
