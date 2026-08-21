@@ -13,6 +13,7 @@ import {
   labelFieldDisplayValue,
   mmToDots,
   parseLabelTemplate,
+  ptToMm,
   sampleLabelData,
   wrapTextToWidth,
   WRAP_ELLIPSIS,
@@ -134,6 +135,34 @@ describe("buildDefaultLabelTemplates", () => {
           `${name}: missing field ${field}`,
         ).toBe(true);
       }
+    }
+  });
+
+  /**
+   * A quantity such as `5 шт.` contains Cyrillic, so both printer languages
+   * rasterize it. The two dates are ASCII and stay on the printer's native
+   * text path. The shared rasterizer centres glyphs in a 1.5em bitmap, which
+   * puts their visible baseline about 0.25em below native text when both
+   * elements use the same y origin. The third value therefore needs to start
+   * one quarter-em earlier on the DATED stock labels; otherwise the physical
+   * print visibly drops «5 шт.» below the two dates.
+   */
+  it("aligns the rasterized quantity value with the two native date values", () => {
+    for (const { name, spec } of buildDatedBoxLabelTemplates()) {
+      const date = spec.elements.find((el) => el.id === "val-date");
+      const expiry = spec.elements.find((el) => el.id === "val-expiry");
+      const qty = spec.elements.find((el) => el.id === "val-qty");
+      if (date?.kind !== "field" || expiry?.kind !== "field" || qty?.kind !== "field") {
+        throw new Error(`${name}: missing dated value row`);
+      }
+
+      expect(expiry.yMm, `${name}: the two native dates share an origin`).toBe(date.yMm);
+      expect(qty.fontSizePt, `${name}: quantity/date type size`).toBe(date.fontSizePt);
+      expect(qty.yMm, `${name}: raster origin is raised`).toBeLessThan(date.yMm);
+      expect(
+        qty.yMm + ptToMm(qty.fontSizePt) * 0.25,
+        `${name}: visible quantity baseline`,
+      ).toBeCloseTo(date.yMm, 1);
     }
   });
 
@@ -288,15 +317,20 @@ describe("buildDefaultLabelTemplates", () => {
   it("stacked blocks do not overlap vertically", () => {
     const data = dataWithLongName();
     for (const { name, spec } of buildDefaultLabelTemplates()) {
+      const nativeDateRowY = spec.elements.find((el) => el.id === "val-date")?.yMm;
       // Elements sharing a `yMm` are one horizontal band (the three-column
-      // row); bands must not reach into the next band's top edge.
+      // row); bands must not reach into the next band's top edge. The dated
+      // quantity is the one exception at the coordinate level: its bitmap
+      // origin starts in the preceding raster box's transparent descent, but
+      // its visible content belongs to the native-date row (asserted above).
       const bands = new Map<number, { ids: string[]; bottom: number }>();
       for (const el of spec.elements) {
         const b = elementBoundsMm(el, data);
-        const band = bands.get(b.y) ?? { ids: [], bottom: b.y };
+        const visualY = el.id === "val-qty" && nativeDateRowY !== undefined ? nativeDateRowY : b.y;
+        const band = bands.get(visualY) ?? { ids: [], bottom: visualY };
         band.ids.push(el.id);
-        band.bottom = Math.max(band.bottom, b.y + b.h);
-        bands.set(b.y, band);
+        band.bottom = Math.max(band.bottom, visualY + b.h);
+        bands.set(visualY, band);
       }
       const ordered = [...bands.entries()].sort(([a], [b]) => a - b);
       for (let i = 0; i < ordered.length - 1; i++) {
@@ -745,15 +779,12 @@ describe("buildDefaultLabelTemplates", () => {
   /**
    * DRIFT GUARD, pointed at the CURRENT migration.
    *
-   * It has walked forward twice now — `0049_default_label_templates.sql` (the
-   * INSERT that first seeded these five templates), then
-   * `0050_reseed_default_label_templates.sql`. Both files' inlined JSON is
-   * HISTORICAL: it is what already-migrated databases received, and rewriting
-   * it would rewrite history without changing a single production row. `0051`
-   * is the migration that force-overwrites those rows with the current specs
-   * (the centred SSCC digit line and the fit-driven type sizes), so it is the
-   * one that has to stay in step with this module — and this test must be repointed again by whoever adds
-   * the next reseed.
+   * It has walked forward from the initial `0049` seed through the `0050` and
+   * `0052` force-overwrites. Those files' inlined JSON is HISTORICAL: changing
+   * it would rewrite history without updating a single production row. `0056`
+   * is the current force-overwrite (the raster/native baseline correction),
+   * so it is the one that must stay in step with this module. Whoever adds the
+   * next stock-template reseed must point this guard at that migration.
    */
   async function inlinedRows(file: string): Promise<Array<{ name: string; spec: unknown }>> {
     const sql = await readFile(new URL(`../../db/migrations/${file}`, import.meta.url), "utf8");
@@ -763,8 +794,8 @@ describe("buildDefaultLabelTemplates", () => {
     }));
   }
 
-  it("matches the jsonb inlined into db migration 0052 (drift guard)", async () => {
-    expect(await inlinedRows("0052_center_sscc_and_fit_label_templates.sql")).toEqual(
+  it("matches the jsonb inlined into db migration 0056 (drift guard)", async () => {
+    expect(await inlinedRows("0056_align_dated_label_quantity.sql")).toEqual(
       buildDatedBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
     );
   });

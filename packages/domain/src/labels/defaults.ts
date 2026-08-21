@@ -30,6 +30,14 @@ const CAPTION_GAP_MM = 0.15;
 /** Gap between the SSCC bars and their human-readable digits (58×40 base). */
 const BARCODE_TEXT_GAP_MM = 0.2;
 
+/**
+ * ZPL/TSPL render Cyrillic through the shared 1.5em bitmap canvas. Its glyphs
+ * sit about 0.25em below the printers' native ASCII text at the same origin.
+ * The dated value row mixes those paths (`5 шт.` versus numeric dates), so the
+ * bitmap origin needs this compensation to make the visible baselines agree.
+ */
+const RASTER_NATIVE_BASELINE_OFFSET_EM = 0.25;
+
 function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
@@ -248,7 +256,8 @@ type DateFields = "with-dates" | "without-dates";
  * | product name ×3     |  2.0  | 17.88  |
  * | separator 1         | 18.2  | 18.50  |
  * | captions (5pt)      | 18.8  | 21.45  |
- * | values (8pt)        | 21.6  | 25.83  |
+ * | quantity bitmap     | 20.9  | 25.13  |
+ * | native date values  | 21.6  | 25.83  |
  * | separator 2         | 26.2  | 26.50  |
  * | ЕГАИС caption+value | 26.8  | 31.03  |
  * | separator 3         | 31.4  | 31.70  |
@@ -379,6 +388,12 @@ function buildBoxLabelSpec(
   // remainder between that rule and the digit line — grows by exactly what
   // the caption row gave back (58×40: 4.8 mm of bars becomes 7.6 mm).
   const valRowY = withDates ? ceil1(capRowY + lineHeightMm(captionPt) + captionGap) : capRowY;
+  // Only the dated family compares the rasterized quantity against native
+  // ASCII on the same row. In the date-free family its caption is rasterized
+  // too, so moving the value alone would break that paired row instead.
+  const qtyValueY = withDates
+    ? round1(valRowY - ptToMm(valuePt) * RASTER_NATIVE_BASELINE_OFFSET_EM)
+    : valRowY;
   const sep2Y = ceil1(valRowY + lineHeightMm(valuePt) + blockGap);
   const egaisY = ceil1(sep2Y + thickness + blockGap);
   const sep3Y = ceil1(egaisY + lineHeightMm(valuePt) + blockGap);
@@ -479,7 +494,7 @@ function buildBoxLabelSpec(
       kind: "field",
       id: "val-qty",
       xMm: qtyValueX,
-      yMm: valRowY,
+      yMm: qtyValueY,
       field: "qty",
       fontSizePt: valuePt,
       bold: true,
