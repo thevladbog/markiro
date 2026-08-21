@@ -1,12 +1,23 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { load } from "js-yaml";
 
 const WORKFLOW_URL = new URL("../../../.github/workflows/deploy-production.yml", import.meta.url);
+const VBTECH_WORKFLOW_URL = new URL(
+  "../../../.github/workflows/deploy-vbtech-production.yml",
+  import.meta.url,
+);
+const REPOSITORY_ROOT = fileURLToPath(new URL("../../../", import.meta.url));
+const RELEASE_SHA = "0123456789abcdef0123456789abcdef01234567";
+const NEXT_RELEASE_SHA = "89abcdef0123456789abcdef0123456789abcdef";
+const IMAGE_DIGEST = `sha256:${"a".repeat(64)}`;
+const NEXT_IMAGE_DIGEST = `sha256:${"b".repeat(64)}`;
 
 function parseWorkflow(source) {
   const workflow = load(source);
@@ -77,6 +88,351 @@ function assertDirectDeployWorkflow(source) {
   );
 }
 
+function diagnosticService(release) {
+  return {
+    state: "running",
+    health: "healthy",
+    exitCode: 0,
+    oomKilled: false,
+    release,
+    errorClasses: [],
+    configurationIssues: [],
+  };
+}
+
+function diagnosticSnapshot({
+  activeRelease,
+  activeVbtech,
+  cpuBusyBasisPoints,
+  memoryAvailableBytes,
+  rootFilesystemAvailableBytes,
+}) {
+  return {
+    version: 3,
+    docker: "active",
+    runtimeEnv: "active",
+    activeRelease,
+    candidateRelease: "unknown",
+    composeNetwork: "markiro-production_default",
+    resources: {
+      cpuBusyBasisPoints,
+      memoryTotalBytes: 8_000,
+      memoryAvailableBytes,
+      rootFilesystemTotalBytes: 20_000,
+      rootFilesystemAvailableBytes,
+    },
+    activeVbtech,
+    api: diagnosticService(activeRelease),
+    edge: diagnosticService(activeRelease),
+    vbtechWeb: diagnosticService(activeVbtech?.releaseSha ?? "unknown"),
+  };
+}
+
+function heredoc(step, marker) {
+  const match = step.run.match(new RegExp(`<<'${marker}'\\n([\\s\\S]*?)\\n${marker}(?:\\n|$)`));
+  assert.ok(match, `${step.name} must contain the ${marker} program`);
+  return match[1];
+}
+
+async function assertDiagnosticCanonicalizer(step) {
+  const directory = await mkdtemp(join(tmpdir(), "markiro-vbtech-workflow-diagnostic-"));
+  try {
+    const input = join(directory, "diagnostic.line");
+    const output = join(directory, "diagnostic.json");
+    const snapshot = diagnosticSnapshot({
+      activeRelease: RELEASE_SHA,
+      activeVbtech: { releaseSha: RELEASE_SHA, imageDigest: IMAGE_DIGEST },
+      cpuBusyBasisPoints: 3_500,
+      memoryAvailableBytes: 4_000,
+      rootFilesystemAvailableBytes: 12_000,
+    });
+    await writeFile(input, `MARKIRO_RUNTIME_DIAGNOSTICS ${JSON.stringify(snapshot)}\n`);
+    const script = heredoc(step, "VALIDATE_RUNTIME_DIAGNOSTICS");
+    const valid = spawnSync(process.execPath, ["--input-type=module", "-", input, output], {
+      cwd: REPOSITORY_ROOT,
+      encoding: "utf8",
+      input: script,
+    });
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.equal(valid.stdout, "");
+    assert.equal(valid.stderr, "");
+    assert.deepEqual(JSON.parse(await readFile(output, "utf8")), snapshot);
+
+    const staleInput = join(directory, "stale.line");
+    const staleOutput = join(directory, "stale.json");
+    await writeFile(
+      staleInput,
+      `MARKIRO_RUNTIME_DIAGNOSTICS ${JSON.stringify({ ...snapshot, version: 2 })}\n`,
+    );
+    const stale = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-", staleInput, staleOutput],
+      {
+        cwd: REPOSITORY_ROOT,
+        encoding: "utf8",
+        input: script,
+      },
+    );
+    assert.equal(stale.status, 1);
+    assert.equal(stale.stdout, "");
+    assert.equal(stale.stderr, "MARKIRO_RUNTIME_DIAGNOSTICS_FAILURE\n");
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function emittedCapacityDelta(step) {
+  const directory = await mkdtemp(join(tmpdir(), "markiro-vbtech-workflow-capacity-"));
+  try {
+    const beforePath = join(directory, "before.json");
+    const afterPath = join(directory, "after.json");
+    await Promise.all([
+      writeFile(
+        beforePath,
+        `${JSON.stringify(
+          diagnosticSnapshot({
+            activeRelease: RELEASE_SHA,
+            activeVbtech: { releaseSha: RELEASE_SHA, imageDigest: IMAGE_DIGEST },
+            cpuBusyBasisPoints: 4_000,
+            memoryAvailableBytes: 3_000,
+            rootFilesystemAvailableBytes: 12_000,
+          }),
+        )}\n`,
+      ),
+      writeFile(
+        afterPath,
+        `${JSON.stringify(
+          diagnosticSnapshot({
+            activeRelease: NEXT_RELEASE_SHA,
+            activeVbtech: { releaseSha: NEXT_RELEASE_SHA, imageDigest: NEXT_IMAGE_DIGEST },
+            cpuBusyBasisPoints: 4_750,
+            memoryAvailableBytes: 2_500,
+            rootFilesystemAvailableBytes: 12_250,
+          }),
+        )}\n`,
+      ),
+    ]);
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "-", beforePath, afterPath],
+      {
+        cwd: REPOSITORY_ROOT,
+        encoding: "utf8",
+        input: heredoc(step, "EMIT_CAPACITY_DELTA"),
+      },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, "");
+    const match = result.stdout.match(/^MARKIRO_VBTECH_CAPACITY_DELTA (\{[^\n]+\})\n$/);
+    assert.ok(match, "capacity delta must be exactly one bounded JSON line");
+    assert.ok(Buffer.byteLength(match[1], "utf8") <= 4 * 1024);
+    return JSON.parse(match[1]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = true } = {}) {
+  const workflow = parseWorkflow(source);
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  const inputs = workflow.on.workflow_dispatch.inputs;
+  assert.deepEqual(Object.keys(inputs), [
+    "vbtech_release_sha",
+    "vbtech_image_digest",
+    "confirm_private_deploy",
+  ]);
+  assert.equal(inputs.vbtech_release_sha.required, true);
+  assert.equal(inputs.vbtech_release_sha.type, "string");
+  assert.equal(inputs.vbtech_image_digest.required, true);
+  assert.equal(inputs.vbtech_image_digest.type, "string");
+  assert.equal(inputs.confirm_private_deploy.required, true);
+  assert.equal(inputs.confirm_private_deploy.type, "boolean");
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(workflow.concurrency, {
+    group: "markiro-production-deployment",
+    "cancel-in-progress": false,
+  });
+  assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
+
+  const deploy = workflow.jobs.deploy;
+  assert.equal(deploy["runs-on"], "ubuntu-latest");
+  assert.equal(deploy.environment, "production-deploy");
+  assert.deepEqual(deploy.permissions, {
+    attestations: "read",
+    contents: "read",
+    packages: "read",
+  });
+  assert.ok(Number.isSafeInteger(deploy["timeout-minutes"]));
+  assert.ok(deploy["timeout-minutes"] > 0 && deploy["timeout-minutes"] <= 60);
+  assert.deepEqual(deploy.env, {
+    YC_APP_PUBLIC_ADDRESS: "${{ vars.YC_APP_PUBLIC_ADDRESS }}",
+    APP_SSH_HOST_KEYS_B64: "${{ vars.APP_SSH_HOST_KEYS_B64 }}",
+    MARKIRO_DOMAIN: "${{ vars.MARKIRO_DOMAIN }}",
+    MARKIRO_KIOSK_DOMAIN: "${{ vars.MARKIRO_KIOSK_DOMAIN }}",
+    MARKIRO_LANDING_DOMAIN: "${{ vars.MARKIRO_LANDING_DOMAIN }}",
+    YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+    YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "${{ runner.temp }}/vbtech-deploy-key",
+  });
+
+  for (const step of deploy.steps.filter((candidate) => candidate.uses))
+    assert.match(step.uses, /^[^@]+@[0-9a-f]{40}$/);
+  const checkouts = deploy.steps.filter((step) =>
+    String(step.uses || "").startsWith("actions/checkout@"),
+  );
+  assert.equal(checkouts.length, 2);
+  assert.deepEqual(checkouts[0].with, {
+    ref: "${{ github.sha }}",
+    "fetch-depth": 1,
+    "persist-credentials": false,
+  });
+  assert.deepEqual(checkouts[1].with, {
+    repository: "thevladbog/v-b",
+    ref: "${{ inputs.vbtech_release_sha }}",
+    path: "vbtech-source",
+    "fetch-depth": 1,
+    "persist-credentials": false,
+  });
+
+  const preflight = stepByName(deploy, "Validate private deploy request");
+  assert.deepEqual(preflight.env, {
+    CONFIRM_PRIVATE_DEPLOY: "${{ inputs.confirm_private_deploy }}",
+    VBTECH_RELEASE_SHA: "${{ inputs.vbtech_release_sha }}",
+    VBTECH_IMAGE_DIGEST: "${{ inputs.vbtech_image_digest }}",
+  });
+  assert.ok(
+    deploy.if === "${{ inputs.confirm_private_deploy == true }}" ||
+      /\[\[ "\$CONFIRM_PRIVATE_DEPLOY" == "true" \]\]/.test(preflight.run),
+  );
+  assert.match(preflight.run, /\[\[ "\$CONFIRM_PRIVATE_DEPLOY" == "true" \]\]/);
+  assert.match(preflight.run, /\[\[ "\$VBTECH_RELEASE_SHA" =~ \^\[0-9a-f\]\{40\}\$ \]\]/);
+  assert.match(preflight.run, /\[\[ "\$VBTECH_IMAGE_DIGEST" =~ \^sha256:\[0-9a-f\]\{64\}\$ \]\]/);
+
+  const verification = stepByName(deploy, "Verify exact attested v-b image");
+  const verificationIndex = deploy.steps.indexOf(verification);
+  assert.doesNotMatch(
+    deploy.steps
+      .slice(0, verificationIndex)
+      .map((step) => step.run ?? "")
+      .join("\n"),
+    /YC_APP_DEPLOY_SSH_PRIVATE_KEY|vbtech-deploy-key|chmod\s+600/,
+  );
+  assert.deepEqual(verification.env, {
+    DOCKER_CONFIG: "${{ runner.temp }}/vbtech-docker-config",
+    GH_TOKEN: "${{ github.token }}",
+    GHCR_TOKEN: "${{ github.token }}",
+    GHCR_USERNAME: "${{ github.actor }}",
+    VBTECH_IMAGE_DIGEST: "${{ inputs.vbtech_image_digest }}",
+    VBTECH_RELEASE_SHA: "${{ inputs.vbtech_release_sha }}",
+  });
+  assert.match(
+    verification.run,
+    /image_ref="ghcr[.]io\/thevladbog\/vbtech-web@\$VBTECH_IMAGE_DIGEST"/,
+  );
+  assert.match(verification.run, /gh attestation verify "oci:\/\/\$image_ref"/);
+  assert.match(verification.run, /--repo thevladbog\/v-b/);
+  assert.match(
+    verification.run,
+    /--signer-workflow thevladbog\/v-b\/.github\/workflows\/publish[.]yml/,
+  );
+  assert.match(verification.run, /--source-digest "\$VBTECH_RELEASE_SHA"/);
+  assert.match(verification.run, /--source-ref refs\/heads\/main/);
+  assert.match(verification.run, /docker manifest inspect "\$image_ref" > \/dev\/null/);
+  assert.ok(
+    verification.run.indexOf('gh attestation verify "oci://$image_ref"') <
+      verification.run.indexOf('docker manifest inspect "$image_ref"'),
+  );
+
+  const keyCreation = stepByName(deploy, "Create protected SSH identity");
+  assert.deepEqual(keyCreation.env, {
+    YC_APP_DEPLOY_SSH_PRIVATE_KEY: "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
+  });
+  assert.match(
+    keyCreation.run,
+    /printf '%s\\n' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"/,
+  );
+  assert.match(keyCreation.run, /chmod 600 "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"/);
+
+  const before = stepByName(deploy, "Capture before runtime diagnostics");
+  const delivery = stepByName(deploy, "Deploy private v-b image");
+  const after = stepByName(deploy, "Capture after runtime diagnostics");
+  const capacity = stepByName(deploy, "Emit bounded capacity delta");
+  const cleanup = stepByName(deploy, "Remove local deployment credentials");
+  const indexes = [preflight, verification, keyCreation, before, delivery, after, capacity].map(
+    (step) => deploy.steps.indexOf(step),
+  );
+  assert.deepEqual(
+    indexes,
+    indexes.toSorted((left, right) => left - right),
+  );
+
+  for (const diagnostic of [before, after]) {
+    assert.equal(
+      [...diagnostic.run.matchAll(/node deploy\/yandex\/runtime-diagnostics[.]mjs run/g)].length,
+      1,
+    );
+    assert.match(diagnostic.run, /validateRuntimeSnapshot/);
+    assert.match(diagnostic.run, /snapshot[.]version !== 3/);
+    assert.match(diagnostic.run, /16 \* 1024/);
+    if (executePrograms) await assertDiagnosticCanonicalizer(diagnostic);
+  }
+
+  assert.deepEqual(delivery.env, {
+    GHCR_USERNAME: "${{ github.actor }}",
+    GHCR_TOKEN: "${{ github.token }}",
+    VBTECH_RELEASE_SHA: "${{ inputs.vbtech_release_sha }}",
+    VBTECH_IMAGE_DIGEST: "${{ inputs.vbtech_image_digest }}",
+  });
+  assert.match(delivery.run, /submission_state=disabled/);
+  assert.deepEqual(
+    [...delivery.run.matchAll(/node deploy\/yandex\/[a-z-]+[.]mjs run/g)].map((match) => match[0]),
+    ["node deploy/yandex/remote-vbtech-deploy.mjs run"],
+  );
+  assert.equal(
+    [...source.matchAll(/node deploy\/yandex\/remote-vbtech-deploy[.]mjs run/g)].length,
+    1,
+  );
+  assert.doesNotMatch(delivery.run, /remote-deploy[.]mjs|scp|rsync|tar\s|ssh\s|curl\s/i);
+
+  assert.match(capacity.run, /beforeRelease:/);
+  assert.match(capacity.run, /afterRelease:/);
+  assert.match(capacity.run, /cpuBusyBasisPointsDelta(?:,|:)/);
+  assert.match(capacity.run, /memoryAvailableBytesDelta(?:,|:)/);
+  assert.match(capacity.run, /rootFilesystemAvailableBytesDelta(?:,|:)/);
+  assert.doesNotMatch(
+    capacity.run,
+    /threshold|recommendation|automaticDecision|rawSnapshot|ipAddress|containerLogs|processArguments|environmentInventory/i,
+  );
+  if (executePrograms) {
+    assert.deepEqual(await emittedCapacityDelta(capacity), {
+      beforeRelease: {
+        markiroReleaseSha: RELEASE_SHA,
+        vbtechReleaseSha: RELEASE_SHA,
+        vbtechImageDigest: IMAGE_DIGEST,
+      },
+      afterRelease: {
+        markiroReleaseSha: NEXT_RELEASE_SHA,
+        vbtechReleaseSha: NEXT_RELEASE_SHA,
+        vbtechImageDigest: NEXT_IMAGE_DIGEST,
+      },
+      cpuBusyBasisPointsDelta: 750,
+      memoryAvailableBytesDelta: -500,
+      rootFilesystemAvailableBytesDelta: 250,
+    });
+  }
+
+  assert.equal(cleanup.if, "always()");
+  assert.match(cleanup.run, /rm -f --[\s\S]*"\$RUNNER_TEMP\/vbtech-deploy-key"/);
+  assert.match(cleanup.run, /rm -rf -- "\$RUNNER_TEMP\/vbtech-docker-config"/);
+  assert.match(cleanup.run, /vbtech-before[.]json/);
+  assert.match(cleanup.run, /vbtech-after[.]json/);
+
+  const withoutComments = source.replace(/^\s*#.*$/gm, "");
+  assert.doesNotMatch(
+    withoutComments,
+    /workflow_run|self-hosted|id-token:\s*write|\byc\s+(?:compute|dns|iam|lockbox|vpc|serverless|storage)|terraform|psql|postgres(?:ql)?|cloud function|function create|lockbox|bucket|service-account|smartcaptcha|postbox|external form|hosted-deploy-context|\bserial\b|scp|rsync/i,
+  );
+}
+
 test("production deploy is one ordinary protected SSH job without Yandex control plane", async () => {
   assertDirectDeployWorkflow(await readFile(WORKFLOW_URL, "utf8"));
 });
@@ -103,6 +459,173 @@ test("direct deploy workflow rejects automatic, unpinned and credential-unsafe m
   for (const [name, mutation] of mutations) {
     assert.notEqual(mutation, source, `${name} mutation must change the workflow`);
     assert.throws(() => assertDirectDeployWorkflow(mutation), undefined, name);
+  }
+});
+
+test("private v-b deploy verifies one attested image before protected SSH execution", async () => {
+  await assertPrivateVbtechDeployWorkflow(await readFile(VBTECH_WORKFLOW_URL, "utf8"));
+});
+
+test("private v-b deploy rejects trust, evidence, and mutation-boundary regressions", async () => {
+  const source = await readFile(VBTECH_WORKFLOW_URL, "utf8");
+  const mutations = [
+    [
+      "automatic trigger",
+      (value) => value.replace("  workflow_dispatch:", "  workflow_run:\n  workflow_dispatch:"),
+    ],
+    ["renamed input", (value) => value.replace("vbtech_image_digest:", "image_digest:")],
+    [
+      "optional confirmation",
+      (value) =>
+        value
+          .replace("confirm_private_deploy:\n", "confirm_private_deploy:\n")
+          .replace(/(confirm_private_deploy:\n(?:.*\n){0,4}?\s+required:) true/, "$1 false"),
+    ],
+    [
+      "ignored confirmation",
+      (value) =>
+        value
+          .replace("    if: ${{ inputs.confirm_private_deploy == true }}\n", "")
+          .replace('[[ "$CONFIRM_PRIVATE_DEPLOY" == "true" ]]', "true"),
+    ],
+    [
+      "top-level write permission",
+      (value) => value.replace("permissions: {}", "permissions:\n  contents: write"),
+    ],
+    [
+      "self-hosted runner",
+      (value) => value.replace("runs-on: ubuntu-latest", "runs-on: self-hosted"),
+    ],
+    [
+      "unprotected environment",
+      (value) => value.replace("environment: production-deploy", "environment: staging"),
+    ],
+    [
+      "attestation write permission",
+      (value) => value.replace("attestations: read", "attestations: write"),
+    ],
+    [
+      "different concurrency",
+      (value) => value.replace("group: markiro-production-deployment", "group: vbtech-deployment"),
+    ],
+    [
+      "cancellable deployment",
+      (value) => value.replace("cancel-in-progress: false", "cancel-in-progress: true"),
+    ],
+    [
+      "unbounded timeout",
+      (value) => value.replace(/timeout-minutes: [0-9]+/, "timeout-minutes: 0"),
+    ],
+    [
+      "unpinned action",
+      (value) => value.replace(/actions\/checkout@[0-9a-f]{40}/, "actions/checkout@main"),
+    ],
+    [
+      "foreign source repository",
+      (value) => value.replace("repository: thevladbog/v-b", "repository: attacker/v-b"),
+    ],
+    [
+      "wrong source checkout",
+      (value) => value.replace("ref: ${{ inputs.vbtech_release_sha }}", "ref: refs/heads/main"),
+    ],
+    ["uppercase SHA accepted", (value) => value.replace("^[0-9a-f]{40}$", "^[0-9A-Fa-f]{40}$")],
+    [
+      "uppercase digest accepted",
+      (value) => value.replace("^sha256:[0-9a-f]{64}$", "^sha256:[0-9A-Fa-f]{64}$"),
+    ],
+    [
+      "foreign image",
+      (value) => value.replace("ghcr.io/thevladbog/vbtech-web", "ghcr.io/attacker/vbtech-web"),
+    ],
+    [
+      "foreign signer",
+      (value) =>
+        value.replace(
+          "thevladbog/v-b/.github/workflows/publish.yml",
+          "attacker/v-b/.github/workflows/publish.yml",
+        ),
+    ],
+    [
+      "unbound source digest",
+      (value) =>
+        value.replace('--source-digest "$VBTECH_RELEASE_SHA"', '--source-digest "$GITHUB_SHA"'),
+    ],
+    [
+      "unbound source ref",
+      (value) => value.replace("--source-ref refs/heads/main", "--source-ref refs/heads/dev"),
+    ],
+    ["non-OCI subject", (value) => value.replace('"oci://$image_ref"', '"$image_ref"')],
+    [
+      "tag-style availability",
+      (value) => value.replace("docker manifest inspect", "docker image inspect"),
+    ],
+    [
+      "early SSH key",
+      (value) =>
+        value.replace(
+          "      - name: Verify exact attested v-b image",
+          '      - name: Create early SSH identity\n        run: printf x > "$RUNNER_TEMP/vbtech-deploy-key"\n\n      - name: Verify exact attested v-b image',
+        ),
+    ],
+    [
+      "stale diagnostics",
+      (value) => value.replace("snapshot.version !== 3", "snapshot.version !== 2"),
+    ],
+    [
+      "wrong diagnostic command",
+      (value) => value.replace("runtime-diagnostics.mjs run", "runtime-diagnostics.mjs inspect"),
+    ],
+    [
+      "generic remote deploy",
+      (value) => value.replace("remote-vbtech-deploy.mjs run", "remote-deploy.mjs run"),
+    ],
+    [
+      "enabled submission",
+      (value) => value.replace("submission_state=disabled", "submission_state=enabled"),
+    ],
+    [
+      "capacity recommendation",
+      (value) =>
+        value.replace(
+          "rootFilesystemAvailableBytesDelta,",
+          'rootFilesystemAvailableBytesDelta,\n        recommendation: "resize",',
+        ),
+    ],
+    ["conditional cleanup", (value) => value.replace("if: always()", "if: success()")],
+    [
+      "SSH key retained",
+      (value) => value.replace('            "$RUNNER_TEMP/vbtech-deploy-key" \\\n', ""),
+    ],
+    [
+      "registry auth retained",
+      (value) =>
+        value.replace('          rm -rf -- "$RUNNER_TEMP/vbtech-docker-config"', "          true"),
+    ],
+    [
+      "Yandex control plane",
+      (value) =>
+        value.replace(
+          "node deploy/yandex/remote-vbtech-deploy.mjs run",
+          "yc dns zone list\n          node deploy/yandex/remote-vbtech-deploy.mjs run",
+        ),
+    ],
+    [
+      "code transfer bypass",
+      (value) =>
+        value.replace(
+          "node deploy/yandex/remote-vbtech-deploy.mjs run",
+          "scp deploy/production/vbtech-deploy.mjs host:/tmp/\n          node deploy/yandex/remote-vbtech-deploy.mjs run",
+        ),
+    ],
+  ];
+  for (const [name, mutate] of mutations) {
+    const mutation = mutate(source);
+    assert.notEqual(mutation, source, `${name} mutation must change the workflow`);
+    await assert.rejects(
+      () => assertPrivateVbtechDeployWorkflow(mutation, { executePrograms: false }),
+      undefined,
+      name,
+    );
   }
 });
 

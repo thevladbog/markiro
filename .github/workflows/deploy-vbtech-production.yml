@@ -1,0 +1,275 @@
+name: Deploy v-b.tech private web
+
+on:
+  workflow_dispatch:
+    inputs:
+      vbtech_release_sha:
+        description: Exact lowercase 40-character v-b.tech source commit
+        required: true
+        type: string
+      vbtech_image_digest:
+        description: Exact lowercase sha256 v-b.tech image digest
+        required: true
+        type: string
+      confirm_private_deploy:
+        description: Confirm the private disabled v-b.tech deployment
+        required: true
+        type: boolean
+
+permissions: {}
+
+concurrency:
+  group: markiro-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ inputs.confirm_private_deploy == true }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production-deploy
+    permissions:
+      attestations: read
+      contents: read
+      packages: read
+    env:
+      YC_APP_PUBLIC_ADDRESS: ${{ vars.YC_APP_PUBLIC_ADDRESS }}
+      APP_SSH_HOST_KEYS_B64: ${{ vars.APP_SSH_HOST_KEYS_B64 }}
+      MARKIRO_DOMAIN: ${{ vars.MARKIRO_DOMAIN }}
+      MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
+      MARKIRO_LANDING_DOMAIN: ${{ vars.MARKIRO_LANDING_DOMAIN }}
+      YC_APP_DEPLOY_LOGIN: markiro-deploy
+      YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/vbtech-deploy-key
+    steps:
+      - name: Validate private deploy request
+        env:
+          CONFIRM_PRIVATE_DEPLOY: ${{ inputs.confirm_private_deploy }}
+          VBTECH_RELEASE_SHA: ${{ inputs.vbtech_release_sha }}
+          VBTECH_IMAGE_DIGEST: ${{ inputs.vbtech_image_digest }}
+        run: |
+          set -euo pipefail
+          [[ "$CONFIRM_PRIVATE_DEPLOY" == "true" ]]
+          [[ "$VBTECH_RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$VBTECH_IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]
+
+      - name: Checkout protected Markiro executor
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Checkout exact v-b source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: thevladbog/v-b
+          ref: ${{ inputs.vbtech_release_sha }}
+          path: vbtech-source
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact attested v-b image
+        env:
+          DOCKER_CONFIG: ${{ runner.temp }}/vbtech-docker-config
+          GH_TOKEN: ${{ github.token }}
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USERNAME: ${{ github.actor }}
+          VBTECH_IMAGE_DIGEST: ${{ inputs.vbtech_image_digest }}
+          VBTECH_RELEASE_SHA: ${{ inputs.vbtech_release_sha }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test ! -e "$DOCKER_CONFIG"
+          mkdir -m 0700 -- "$DOCKER_CONFIG"
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USERNAME" --password-stdin > /dev/null
+          image_ref="ghcr.io/thevladbog/vbtech-web@$VBTECH_IMAGE_DIGEST"
+          gh attestation verify "oci://$image_ref" \
+            --repo thevladbog/v-b \
+            --signer-workflow thevladbog/v-b/.github/workflows/publish.yml \
+            --source-digest "$VBTECH_RELEASE_SHA" \
+            --source-ref refs/heads/main > /dev/null
+          docker manifest inspect "$image_ref" > /dev/null
+
+      - name: Create protected SSH identity
+        env:
+          YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test ! -e "$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"
+          printf '%s\n' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"
+          chmod 600 "$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"
+
+      - name: Capture before runtime diagnostics
+        run: |
+          set -euo pipefail
+          umask 077
+          raw_path="$RUNNER_TEMP/vbtech-before.line"
+          snapshot_path="$RUNNER_TEMP/vbtech-before.json"
+          test ! -e "$raw_path"
+          test ! -e "$snapshot_path"
+          node deploy/yandex/runtime-diagnostics.mjs run > "$raw_path"
+          node --input-type=module - "$raw_path" "$snapshot_path" <<'VALIDATE_RUNTIME_DIAGNOSTICS'
+          import { readFile, stat, writeFile } from "node:fs/promises";
+          import process from "node:process";
+
+          import { validateRuntimeSnapshot } from "./deploy/yandex/runtime-diagnostics-probe.mjs";
+
+          const MAX_DIAGNOSTIC_BYTES = 16 * 1024;
+          const [sourcePath, destinationPath] = process.argv.slice(2);
+
+          try {
+            const metadata = await stat(sourcePath);
+            if (!metadata.isFile() || metadata.size > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            const source = await readFile(sourcePath, "utf8");
+            if (Buffer.byteLength(source, "utf8") > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            const match = source.match(/^MARKIRO_RUNTIME_DIAGNOSTICS (\{[^\n]+\})\n$/);
+            if (!match) throw new Error();
+            const snapshot = validateRuntimeSnapshot(JSON.parse(match[1]));
+            if (snapshot.version !== 3) throw new Error();
+            const canonical = `${JSON.stringify(snapshot)}\n`;
+            if (Buffer.byteLength(canonical, "utf8") > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            await writeFile(destinationPath, canonical, {
+              encoding: "utf8",
+              flag: "wx",
+              mode: 0o600,
+            });
+          } catch {
+            process.stderr.write("MARKIRO_RUNTIME_DIAGNOSTICS_FAILURE\n");
+            process.exitCode = 1;
+          }
+          VALIDATE_RUNTIME_DIAGNOSTICS
+          rm -f -- "$raw_path"
+
+      - name: Deploy private v-b image
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+          VBTECH_RELEASE_SHA: ${{ inputs.vbtech_release_sha }}
+          VBTECH_IMAGE_DIGEST: ${{ inputs.vbtech_image_digest }}
+        run: |
+          set -euo pipefail
+          submission_state=disabled
+          [[ "$submission_state" == "disabled" ]]
+          node deploy/yandex/remote-vbtech-deploy.mjs run
+
+      - name: Capture after runtime diagnostics
+        run: |
+          set -euo pipefail
+          umask 077
+          raw_path="$RUNNER_TEMP/vbtech-after.line"
+          snapshot_path="$RUNNER_TEMP/vbtech-after.json"
+          test ! -e "$raw_path"
+          test ! -e "$snapshot_path"
+          node deploy/yandex/runtime-diagnostics.mjs run > "$raw_path"
+          node --input-type=module - "$raw_path" "$snapshot_path" <<'VALIDATE_RUNTIME_DIAGNOSTICS'
+          import { readFile, stat, writeFile } from "node:fs/promises";
+          import process from "node:process";
+
+          import { validateRuntimeSnapshot } from "./deploy/yandex/runtime-diagnostics-probe.mjs";
+
+          const MAX_DIAGNOSTIC_BYTES = 16 * 1024;
+          const [sourcePath, destinationPath] = process.argv.slice(2);
+
+          try {
+            const metadata = await stat(sourcePath);
+            if (!metadata.isFile() || metadata.size > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            const source = await readFile(sourcePath, "utf8");
+            if (Buffer.byteLength(source, "utf8") > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            const match = source.match(/^MARKIRO_RUNTIME_DIAGNOSTICS (\{[^\n]+\})\n$/);
+            if (!match) throw new Error();
+            const snapshot = validateRuntimeSnapshot(JSON.parse(match[1]));
+            if (snapshot.version !== 3) throw new Error();
+            const canonical = `${JSON.stringify(snapshot)}\n`;
+            if (Buffer.byteLength(canonical, "utf8") > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            await writeFile(destinationPath, canonical, {
+              encoding: "utf8",
+              flag: "wx",
+              mode: 0o600,
+            });
+          } catch {
+            process.stderr.write("MARKIRO_RUNTIME_DIAGNOSTICS_FAILURE\n");
+            process.exitCode = 1;
+          }
+          VALIDATE_RUNTIME_DIAGNOSTICS
+          rm -f -- "$raw_path"
+
+      - name: Emit bounded capacity delta
+        run: |
+          set -euo pipefail
+          node --input-type=module - "$RUNNER_TEMP/vbtech-before.json" "$RUNNER_TEMP/vbtech-after.json" <<'EMIT_CAPACITY_DELTA'
+          import { readFile, stat } from "node:fs/promises";
+          import process from "node:process";
+
+          import { validateRuntimeSnapshot } from "./deploy/yandex/runtime-diagnostics-probe.mjs";
+
+          const MAX_DIAGNOSTIC_BYTES = 16 * 1024;
+          const MAX_DELTA_BYTES = 4 * 1024;
+          const [beforePath, afterPath] = process.argv.slice(2);
+
+          async function readSnapshot(path) {
+            const metadata = await stat(path);
+            if (!metadata.isFile() || metadata.size > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            const source = await readFile(path, "utf8");
+            if (Buffer.byteLength(source, "utf8") > MAX_DIAGNOSTIC_BYTES) throw new Error();
+            const snapshot = validateRuntimeSnapshot(JSON.parse(source));
+            if (snapshot.version !== 3) throw new Error();
+            return snapshot;
+          }
+
+          function releaseIdentity(snapshot) {
+            return {
+              markiroReleaseSha: snapshot.activeRelease,
+              vbtechReleaseSha: snapshot.activeVbtech?.releaseSha ?? null,
+              vbtechImageDigest: snapshot.activeVbtech?.imageDigest ?? null,
+            };
+          }
+
+          try {
+            const [before, after] = await Promise.all([
+              readSnapshot(beforePath),
+              readSnapshot(afterPath),
+            ]);
+            const cpuBusyBasisPointsDelta =
+              after.resources.cpuBusyBasisPoints - before.resources.cpuBusyBasisPoints;
+            const memoryAvailableBytesDelta =
+              after.resources.memoryAvailableBytes - before.resources.memoryAvailableBytes;
+            const rootFilesystemAvailableBytesDelta =
+              after.resources.rootFilesystemAvailableBytes -
+              before.resources.rootFilesystemAvailableBytes;
+            if (
+              !Number.isSafeInteger(cpuBusyBasisPointsDelta) ||
+              !Number.isSafeInteger(memoryAvailableBytesDelta) ||
+              !Number.isSafeInteger(rootFilesystemAvailableBytesDelta)
+            )
+              throw new Error();
+            const delta = {
+              beforeRelease: releaseIdentity(before),
+              afterRelease: releaseIdentity(after),
+              cpuBusyBasisPointsDelta,
+              memoryAvailableBytesDelta,
+              rootFilesystemAvailableBytesDelta,
+            };
+            const serialized = JSON.stringify(delta);
+            if (Buffer.byteLength(serialized, "utf8") > MAX_DELTA_BYTES) throw new Error();
+            process.stdout.write(`MARKIRO_VBTECH_CAPACITY_DELTA ${serialized}\n`);
+          } catch {
+            process.stderr.write("MARKIRO_VBTECH_CAPACITY_DELTA_FAILURE\n");
+            process.exitCode = 1;
+          }
+          EMIT_CAPACITY_DELTA
+
+      - name: Remove local deployment credentials
+        if: always()
+        run: |
+          set -euo pipefail
+          if [[ -d "$RUNNER_TEMP/vbtech-docker-config" ]]; then
+            DOCKER_CONFIG="$RUNNER_TEMP/vbtech-docker-config" docker logout ghcr.io > /dev/null 2>&1 || true
+          fi
+          rm -f -- \
+            "$RUNNER_TEMP/vbtech-deploy-key" \
+            "$RUNNER_TEMP/vbtech-before.line" \
+            "$RUNNER_TEMP/vbtech-before.json" \
+            "$RUNNER_TEMP/vbtech-after.line" \
+            "$RUNNER_TEMP/vbtech-after.json"
+          rm -rf -- "$RUNNER_TEMP/vbtech-docker-config"

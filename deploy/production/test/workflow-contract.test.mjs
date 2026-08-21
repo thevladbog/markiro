@@ -223,6 +223,67 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   );
 });
 
+test("v-b deploy is a protected manual digest-bound private executor", async () => {
+  const [workflow, source] = await Promise.all([
+    parse(".github/workflows/deploy-vbtech-production.yml"),
+    read(".github/workflows/deploy-vbtech-production.yml"),
+  ]);
+  assert.deepEqual(Object.keys(workflow.on), ["workflow_dispatch"]);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), [
+    "vbtech_release_sha",
+    "vbtech_image_digest",
+    "confirm_private_deploy",
+  ]);
+  assert.equal(workflow.on.workflow_dispatch.inputs.confirm_private_deploy.required, true);
+  assert.equal(workflow.on.workflow_dispatch.inputs.confirm_private_deploy.type, "boolean");
+  assert.deepEqual(workflow.permissions, {});
+  assert.deepEqual(workflow.concurrency, {
+    group: "markiro-production-deployment",
+    "cancel-in-progress": false,
+  });
+  assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
+  const deploy = workflow.jobs.deploy;
+  assert.equal(deploy["runs-on"], "ubuntu-latest");
+  assert.equal(deploy.environment, "production-deploy");
+  assert.deepEqual(deploy.permissions, {
+    attestations: "read",
+    contents: "read",
+    packages: "read",
+  });
+  assert.ok(Number.isSafeInteger(deploy["timeout-minutes"]));
+  assert.ok(deploy["timeout-minutes"] > 0 && deploy["timeout-minutes"] <= 60);
+
+  const preflight = namedStep(workflow, "deploy", "Validate private deploy request");
+  assert.ok(
+    deploy.if === "${{ inputs.confirm_private_deploy == true }}" ||
+      /\[\[ "\$CONFIRM_PRIVATE_DEPLOY" == "true" \]\]/.test(preflight.run),
+  );
+  const verification = namedStep(workflow, "deploy", "Verify exact attested v-b image");
+  const keyCreation = namedStep(workflow, "deploy", "Create protected SSH identity");
+  const before = namedStep(workflow, "deploy", "Capture before runtime diagnostics");
+  const delivery = namedStep(workflow, "deploy", "Deploy private v-b image");
+  const after = namedStep(workflow, "deploy", "Capture after runtime diagnostics");
+  assert.ok(deploy.steps.indexOf(verification) < deploy.steps.indexOf(keyCreation));
+  assert.ok(deploy.steps.indexOf(keyCreation) < deploy.steps.indexOf(before));
+  assert.ok(deploy.steps.indexOf(before) < deploy.steps.indexOf(delivery));
+  assert.ok(deploy.steps.indexOf(delivery) < deploy.steps.indexOf(after));
+  assert.match(verification.run, /gh attestation verify "oci:\/\/\$image_ref"/);
+  assert.match(verification.run, /docker manifest inspect "\$image_ref" > \/dev\/null/);
+  assert.match(delivery.run, /remote-vbtech-deploy[.]mjs run/);
+  assert.doesNotMatch(delivery.run, /remote-deploy[.]mjs run/);
+  assert.match(before.run, /runtime-diagnostics[.]mjs run/);
+  assert.match(after.run, /runtime-diagnostics[.]mjs run/);
+  assert.match(source, /ghcr[.]io\/thevladbog\/vbtech-web/);
+  assert.match(source, /thevladbog\/v-b\/.github\/workflows\/publish[.]yml/);
+  assert.match(source, /refs\/heads\/main/);
+  assert.match(source, /submission_state=disabled/);
+  assert.match(source, /if:\s*always\(\)/);
+  assert.doesNotMatch(
+    source,
+    /workflow_run|self-hosted|id-token:\s*write|\byc\s|terraform|psql|postgres(?:ql)?|cloud function|function create|\bvpc\b|lockbox|bucket|service-account|smartcaptcha|postbox|external form|scp|rsync/i,
+  );
+});
+
 test("infrastructure workflow passes the landing domain to Terraform", async () => {
   const source = await read(".github/workflows/yandex-infrastructure.yml");
   assert.match(source, /TF_VAR_landing_domain:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
@@ -241,6 +302,7 @@ test("all third-party actions in active production workflows are commit pinned",
     ".github/workflows/ci.yml",
     ".github/workflows/release-images.yml",
     ".github/workflows/deploy-production.yml",
+    ".github/workflows/deploy-vbtech-production.yml",
     ".github/workflows/yandex-infrastructure.yml",
     ".github/workflows/station-beta-release.yml",
   ]) {
