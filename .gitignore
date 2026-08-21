@@ -40,4 +40,4 @@ docs/design-briefs/landing.pen
 docs/design-briefs/screenshot-*.png
 
 # Private first-customer evidence packages; tooling remains tracked under tools/.
-evidence/
+/evidence/

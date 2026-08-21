@@ -1,28 +1,17 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { EvidencePackageError, sealEvidencePackage } from "./evidence-package.mjs";
-
-function invalid(message) {
-  throw new EvidencePackageError(message);
-}
-
-async function main() {
-  const rawArgs = process.argv.slice(2);
-  const args = rawArgs[0] === "--" ? rawArgs.slice(1) : rawArgs;
-  if (args.length !== 1) invalid("usage: evidence:seal <root>");
-  const result = await sealEvidencePackage(args[0]);
-  process.stdout.write(
-    `Sealed evidence package: ${result.artifactCount} artifacts, ${result.checksumCount} checksums\n`,
-  );
-}
+import { runCli } from "./cli.mjs";
+import { sealEvidencePackage } from "./evidence-package.mjs";
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    await main();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "unexpected failure";
-    process.stderr.write(`evidence:seal: ${message}\n`);
-    process.exitCode = 1;
-  }
+  process.exitCode = await runCli({
+    action: ([root]) => sealEvidencePackage(root),
+    args: process.argv.slice(2),
+    command: "evidence:seal",
+    expectedArgs: 1,
+    formatSuccess: (result) =>
+      `Sealed evidence package: ${result.artifactCount} artifacts, ${result.checksumCount} checksums\n`,
+    usage: "usage: evidence:seal <root>",
+  });
 }

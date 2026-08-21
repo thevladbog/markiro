@@ -1,7 +1,19 @@
 import { createHash, randomUUID } from "node:crypto";
-import { constants as fsConstants } from "node:fs";
-import { lstat, open, readdir, realpath, rename, rm } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, posix, resolve, sep, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
+
+import {
+  assertEvidenceRootStable,
+  bindEvidenceRoot,
+  closeEvidenceRoot,
+  EvidencePackageError,
+  hashBoundRegularFile,
+  invalid,
+  lstatBoundPath,
+  readBoundDirectory,
+  readBoundRegularFile,
+} from "./secure-filesystem.mjs";
+
+export { EvidencePackageError } from "./secure-filesystem.mjs";
 
 export const MAX_EVIDENCE_FILE_COUNT = 10_000;
 export const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
@@ -14,21 +26,19 @@ const SHA256 = /^[0-9a-f]{64}$/;
 const OPERATION_ID = /^INV-\d{8}-[a-z0-9-]{2,40}-\d{2}$/;
 const directCodePointCompare = (left, right) => (left < right ? -1 : left > right ? 1 : 0);
 
-export class EvidencePackageError extends Error {
-  constructor(message, options) {
-    super(message, options);
-    this.name = "EvidencePackageError";
-  }
-}
-
-function invalid(message, options) {
-  throw new EvidencePackageError(message, options);
-}
-
 function isPlainObject(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
+}
+
+function defineOwn(target, key, value) {
+  Object.defineProperty(target, key, {
+    configurable: true,
+    enumerable: true,
+    value,
+    writable: true,
+  });
 }
 
 function normalizeJson(value, context = "manifest") {
@@ -40,7 +50,7 @@ function normalizeJson(value, context = "manifest") {
   const normalized = {};
   for (const key of Object.keys(value).sort(directCodePointCompare)) {
     if (value[key] === undefined) invalid(`${context} contains an undefined value`);
-    normalized[key] = normalizeJson(value[key], context);
+    defineOwn(normalized, key, normalizeJson(value[key], context));
   }
   return normalized;
 }
@@ -83,113 +93,31 @@ function normalizeRelativePath(relativePath, label = "artifact path") {
   return normalized;
 }
 
-function isContained(root, target) {
-  return target !== root && target.startsWith(`${root}${sep}`);
-}
-
-function assertContained(root, target, relativePath) {
-  if (!isContained(root, target)) {
-    invalid(`artifact path escapes operation root: ${displayPath(relativePath)}`);
-  }
-}
-
-async function resolveExistingRoot(root) {
-  if (typeof root !== "string" || root.length === 0) invalid("evidence root is required");
-  const absolute = resolve(root);
-  let information;
-  try {
-    information = await lstat(absolute);
-  } catch (error) {
-    if (error?.code === "ENOENT") invalid("evidence root does not exist", { cause: error });
-    throw error;
-  }
-  if (information.isSymbolicLink()) invalid("evidence root must not be a symlink");
-  if (!information.isDirectory()) invalid("evidence root must be a directory");
-  return realpath(absolute);
-}
-
-async function safeExistingFile(root, relativePath, missingMessage) {
-  const normalized = normalizeRelativePath(relativePath);
-  const segments = normalized.split("/");
-  let current = root;
-
-  for (const [index, segment] of segments.entries()) {
-    current = resolve(current, segment);
-    assertContained(root, current, normalized);
-    let information;
-    try {
-      information = await lstat(current);
-    } catch (error) {
-      if (error?.code === "ENOENT" && missingMessage) invalid(missingMessage, { cause: error });
-      throw error;
-    }
-    if (information.isSymbolicLink()) invalid(`symlink is not allowed: ${displayPath(normalized)}`);
-    if (index < segments.length - 1 && !information.isDirectory()) {
-      invalid(`artifact parent is not a directory: ${displayPath(normalized)}`);
-    }
-    if (index === segments.length - 1 && !information.isFile()) {
-      invalid(`artifact is not a regular file: ${displayPath(normalized)}`);
-    }
-  }
-
-  const resolvedFile = await realpath(current);
-  assertContained(root, resolvedFile, normalized);
-  return resolvedFile;
-}
-
-async function hashOpenFile(filePath) {
-  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
-  const handle = await open(filePath, fsConstants.O_RDONLY | noFollow);
-  try {
-    const information = await handle.stat();
-    if (!information.isFile()) invalid("path is not a regular file");
-    const hash = createHash("sha256");
-    const stream = handle.createReadStream({ autoClose: false });
-    for await (const chunk of stream) hash.update(chunk);
-    return { byteSize: information.size, sha256: hash.digest("hex") };
-  } finally {
-    await handle.close().catch(() => undefined);
-  }
-}
-
-async function inspectArtifact(root, relativePath, missingMessage) {
-  const filePath = await safeExistingFile(root, relativePath, missingMessage);
-  return hashOpenFile(filePath);
-}
-
 function shouldExclude(relativePath, includeManifest) {
   if (relativePath === CHECKSUMS_NAME) return true;
   if (!includeManifest && relativePath === MANIFEST_NAME) return true;
   return basename(relativePath).endsWith(".tmp");
 }
 
-async function enumerateRegularFiles(root, { includeManifest = false } = {}) {
+async function enumerateRegularFiles(session, { includeManifest = false } = {}) {
   const files = [];
-  const directories = [{ absolute: root, relative: "" }];
+  const directories = [{ identity: session.rootIdentity, relative: "" }];
 
   while (directories.length > 0) {
     const directory = directories.pop();
-    const entries = await readdir(directory.absolute, { withFileTypes: true });
+    const { entries } = await readBoundDirectory(session, directory.relative, directory.identity);
     entries.sort((left, right) => directCodePointCompare(left.name, right.name));
 
     for (const entry of entries) {
       const relativePath = normalizeRelativePath(
         directory.relative ? `${directory.relative}/${entry.name}` : entry.name,
       );
-      const absolutePath = resolve(directory.absolute, entry.name);
-      assertContained(root, absolutePath, relativePath);
-      const information = await lstat(absolutePath);
-      if (information.isSymbolicLink()) {
-        invalid(`symlink is not allowed: ${displayPath(relativePath)}`);
-      }
-
-      const resolvedPath = await realpath(absolutePath);
-      assertContained(root, resolvedPath, relativePath);
+      const information = await lstatBoundPath(session, relativePath);
       if (information.isDirectory()) {
-        directories.push({ absolute: resolvedPath, relative: relativePath });
+        directories.push({ identity: information, relative: relativePath });
       } else if (information.isFile()) {
         if (!shouldExclude(relativePath, includeManifest)) {
-          files.push(relativePath);
+          files.push({ identity: information, path: relativePath });
           const allowed = MAX_EVIDENCE_FILE_COUNT + (includeManifest ? 1 : 0);
           if (files.length > allowed) {
             invalid(`evidence file count limit exceeded (${MAX_EVIDENCE_FILE_COUNT})`);
@@ -201,27 +129,25 @@ async function enumerateRegularFiles(root, { includeManifest = false } = {}) {
     }
   }
 
-  return files.sort(directCodePointCompare);
+  return files.sort((left, right) => directCodePointCompare(left.path, right.path));
 }
 
-async function readBoundedUtf8(root, relativePath, limit, sizeLabel, missingMessage) {
-  const filePath = await safeExistingFile(root, relativePath, missingMessage);
-  const noFollow = fsConstants.O_NOFOLLOW ?? 0;
-  const handle = await open(filePath, fsConstants.O_RDONLY | noFollow);
+async function readBoundedBytes(session, relativePath, limit, sizeLabel, expected) {
   try {
-    const information = await handle.stat();
-    if (!information.isFile()) invalid(`${relativePath} is not a regular file`);
-    if (information.size > limit) invalid(`${sizeLabel} size limit exceeded`);
-    return await handle.readFile("utf8");
-  } finally {
-    await handle.close().catch(() => undefined);
+    return await readBoundRegularFile(session, relativePath, { expected, maxBytes: limit });
+  } catch (error) {
+    if (error instanceof EvidencePackageError && error.message === "file size limit exceeded") {
+      invalid(`${sizeLabel} size limit exceeded`, { cause: error });
+    }
+    if (error?.code === "ENOENT") invalid(`${relativePath} is missing`, { cause: error });
+    throw error;
   }
 }
 
-function parseManifest(text) {
+function parseManifest(bytes) {
   let manifest;
   try {
-    manifest = JSON.parse(text);
+    manifest = JSON.parse(bytes.toString("utf8"));
   } catch (error) {
     invalid("manifest.json is not valid JSON", { cause: error });
   }
@@ -246,7 +172,7 @@ function priorArtifactsByPath(draft) {
   return priorByPath;
 }
 
-async function buildManifestAtRoot(root, draft) {
+async function buildManifestInSession(session, draft) {
   if (!isPlainObject(draft)) invalid("manifest draft must be an object");
   if (!OPERATION_ID.test(draft.operationId)) invalid("manifest has an invalid operation id");
   if (draft.artifacts !== undefined && !Array.isArray(draft.artifacts)) {
@@ -254,23 +180,21 @@ async function buildManifestAtRoot(root, draft) {
   }
 
   const priorByPath = priorArtifactsByPath(draft);
-  const paths = await enumerateRegularFiles(root);
+  const files = await enumerateRegularFiles(session);
   const artifacts = [];
-  for (const relativePath of paths) {
-    const { byteSize, sha256 } = await inspectArtifact(
-      root,
-      relativePath,
-      `artifact disappeared while sealing: ${displayPath(relativePath)}`,
-    );
-    const prior = priorByPath.get(relativePath);
+  for (const file of files) {
+    const { byteSize, sha256 } = await hashBoundRegularFile(session, file.path, {
+      expected: file.identity,
+    });
+    const prior = priorByPath.get(file.path);
     const physicalBoxRefs = prior?.physicalBoxRefs ?? [];
     const evidenceRefs = prior?.evidenceRefs ?? [];
     if (!Array.isArray(physicalBoxRefs) || !Array.isArray(evidenceRefs)) {
-      invalid(`manifest references must be arrays: ${displayPath(relativePath)}`);
+      invalid(`manifest references must be arrays: ${displayPath(file.path)}`);
     }
     artifacts.push({
-      path: relativePath,
-      category: relativePath.split("/", 1)[0],
+      path: file.path,
+      category: file.path.split("/", 1)[0],
       byteSize,
       sha256,
       capturedAt: normalizeJson(prior?.capturedAt ?? draft.updatedAt ?? null),
@@ -285,9 +209,9 @@ async function buildManifestAtRoot(root, draft) {
     .filter((key) => key !== "artifacts")
     .sort(directCodePointCompare)) {
     if (draft[key] === undefined) invalid("manifest contains an undefined value");
-    normalized[key] = normalizeJson(draft[key]);
+    defineOwn(normalized, key, normalizeJson(draft[key]));
   }
-  normalized.artifacts = artifacts;
+  defineOwn(normalized, "artifacts", artifacts);
   return normalized;
 }
 
@@ -297,29 +221,35 @@ function serializeManifest(manifest) {
   return text;
 }
 
-async function writeSiblingTemporary(target, contents) {
+async function writeSiblingTemporary(session, target, contents) {
   const temporary = join(dirname(target), `${basename(target)}.${process.pid}.${randomUUID()}.tmp`);
   let handle;
   try {
-    handle = await open(temporary, "wx", 0o600);
+    await assertEvidenceRootStable(session);
+    handle = await session.filesystem.open(temporary, "wx", 0o600);
     await handle.writeFile(contents, "utf8");
     await handle.sync();
     await handle.close();
     handle = undefined;
+    await assertEvidenceRootStable(session);
     return temporary;
   } catch (error) {
     await handle?.close().catch(() => undefined);
-    await rm(temporary, { force: true }).catch(() => undefined);
+    try {
+      await session.filesystem.rm(temporary, { force: true });
+    } catch (cleanupError) {
+      invalid("temporary output cleanup failed; manual recovery is required", {
+        cause: cleanupError,
+      });
+    }
     throw error;
   }
 }
 
-async function existingGeneratedFile(target) {
+async function existingGeneratedFile(session, relativePath) {
   try {
-    const information = await lstat(target);
-    if (information.isSymbolicLink() || !information.isFile()) {
-      invalid(`generated output is not a regular file: ${basename(target)}`);
-    }
+    const information = await lstatBoundPath(session, relativePath);
+    if (!information.isFile()) invalid(`generated output is not a regular file: ${relativePath}`);
     return true;
   } catch (error) {
     if (error?.code === "ENOENT") return false;
@@ -327,47 +257,79 @@ async function existingGeneratedFile(target) {
   }
 }
 
-async function installGeneratedPair(staged) {
+function transactionFailureMessage(failure) {
+  if (failure.phase === "backup") return `generated output backup failed: ${failure.item.path}`;
+  return `generated output install failed: ${failure.item.path}`;
+}
+
+async function installGeneratedPair(session, staged) {
   const backups = [];
   const installed = [];
-  try {
-    for (const item of staged) {
-      if (await existingGeneratedFile(item.target)) {
-        const backup = join(
-          dirname(item.target),
-          `${basename(item.target)}.${process.pid}.${randomUUID()}.backup.tmp`,
-        );
-        await rename(item.target, backup);
-        backups.push({ backup, target: item.target });
-      }
+  let failure;
+
+  for (const item of staged) {
+    if (!(await existingGeneratedFile(session, item.path))) continue;
+    const backup = join(
+      dirname(item.target),
+      `${basename(item.target)}.${process.pid}.${randomUUID()}.backup.tmp`,
+    );
+    try {
+      await assertEvidenceRootStable(session);
+      await session.filesystem.rename(item.target, backup);
+      backups.push({ backup, item });
+      await assertEvidenceRootStable(session);
+    } catch (error) {
+      failure = { error, item, phase: "backup" };
+      break;
     }
-    for (const item of staged) {
-      await rename(item.temporary, item.target);
-      installed.push(item.target);
-    }
-  } catch (error) {
-    const rollbackFailures = [];
-    for (const target of installed.reverse()) {
-      await rm(target, { force: true }).catch((rollbackError) =>
-        rollbackFailures.push(rollbackError),
-      );
-    }
-    for (const item of backups.reverse()) {
-      await rename(item.backup, item.target).catch((rollbackError) =>
-        rollbackFailures.push(rollbackError),
-      );
-    }
-    if (rollbackFailures.length > 0) {
-      invalid("seal failed and previous generated files could not be fully restored", {
-        cause: error,
-      });
-    }
-    throw error;
   }
 
-  await Promise.all(
-    backups.map(({ backup }) => rm(backup, { force: true }).catch(() => undefined)),
-  );
+  if (!failure) {
+    for (const item of staged) {
+      try {
+        await assertEvidenceRootStable(session);
+        await session.filesystem.rename(item.temporary, item.target);
+        installed.push(item);
+        await assertEvidenceRootStable(session);
+      } catch (error) {
+        failure = { error, item, phase: "install" };
+        break;
+      }
+    }
+  }
+
+  if (failure) {
+    const rollbackFailures = [];
+    for (const item of [...installed].reverse()) {
+      await session.filesystem
+        .rm(item.target, { force: true })
+        .catch((error) => rollbackFailures.push(error));
+    }
+    for (const { backup, item } of [...backups].reverse()) {
+      await session.filesystem
+        .rename(backup, item.target)
+        .catch((error) => rollbackFailures.push(error));
+    }
+    if (rollbackFailures.length > 0) {
+      invalid(
+        "generated outputs could not be fully restored; manual recovery from sibling .backup.tmp files is required",
+        { cause: failure.error },
+      );
+    }
+    invalid(transactionFailureMessage(failure), { cause: failure.error });
+  }
+
+  const cleanupFailures = [];
+  for (const { backup } of backups) {
+    await session.filesystem
+      .rm(backup, { force: true })
+      .catch((error) => cleanupFailures.push(error));
+  }
+  if (cleanupFailures.length > 0) {
+    invalid("backup cleanup failed; manual removal of sibling .backup.tmp files is required", {
+      cause: cleanupFailures[0],
+    });
+  }
 }
 
 function checksumTextFor(manifestText, artifacts) {
@@ -381,7 +343,8 @@ function checksumTextFor(manifestText, artifacts) {
   };
 }
 
-function parseChecksums(text) {
+function parseChecksums(bytes) {
+  const text = bytes.toString("utf8");
   if (text.includes("\r")) invalid("malformed checksum line");
   const lines = text.endsWith("\n") ? text.slice(0, -1).split("\n") : text.split("\n");
   if (lines.length === 0 || (lines.length === 1 && lines[0] === "")) {
@@ -395,15 +358,13 @@ function parseChecksums(text) {
   const seen = new Set();
   for (const line of lines) {
     const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
-    if (!match) invalid("malformed checksum line");
-    const sha256 = match[1];
-    if (!SHA256.test(sha256)) invalid("malformed checksum line");
+    if (!match || !SHA256.test(match[1])) invalid("malformed checksum line");
     const relativePath = normalizeRelativePath(match[2], "checksum path");
     if (seen.has(relativePath)) {
       invalid(`duplicate checksum path: ${displayPath(relativePath)}`);
     }
     seen.add(relativePath);
-    entries.push({ path: relativePath, sha256 });
+    entries.push({ path: relativePath, sha256: match[1] });
   }
   return entries;
 }
@@ -421,7 +382,8 @@ function validateManifestConsistency(manifest, artifactFiles, artifactInformatio
     metadataByPath.set(relativePath, metadata);
     paths.push(relativePath);
   }
-  if (paths.some((path, index) => path !== [...paths].sort(directCodePointCompare)[index])) {
+  const sorted = [...paths].sort(directCodePointCompare);
+  if (paths.some((path, index) => path !== sorted[index])) {
     invalid("manifest artifact paths are not deterministically sorted");
   }
   if (
@@ -444,113 +406,159 @@ function validateManifestConsistency(manifest, artifactFiles, artifactInformatio
   }
 }
 
-export async function listEvidenceFiles(root) {
-  return enumerateRegularFiles(await resolveExistingRoot(root));
+async function withEvidenceRoot(root, options, action) {
+  const session = await bindEvidenceRoot(root, options);
+  try {
+    const result = await action(session);
+    await assertEvidenceRootStable(session);
+    return result;
+  } finally {
+    await closeEvidenceRoot(session);
+  }
 }
 
-export async function sha256File(filePath) {
+export async function listEvidenceFiles(root, options = {}) {
+  return withEvidenceRoot(root, options, async (session) =>
+    (await enumerateRegularFiles(session)).map(({ path }) => path),
+  );
+}
+
+export async function sha256File(filePath, options = {}) {
   if (typeof filePath !== "string" || filePath.length === 0) invalid("file path is required");
   const absolute = resolve(filePath);
-  const information = await lstat(absolute);
-  if (information.isSymbolicLink()) invalid("symlink files cannot be hashed");
-  if (!information.isFile()) invalid("path is not a regular file");
-  return (await hashOpenFile(await realpath(absolute))).sha256;
-}
-
-export async function buildManifest(root, draft) {
-  return buildManifestAtRoot(await resolveExistingRoot(root), draft);
-}
-
-export async function sealEvidencePackage(root) {
-  const resolvedRoot = await resolveExistingRoot(root);
-  const draftText = await readBoundedUtf8(
-    resolvedRoot,
-    MANIFEST_NAME,
-    MAX_MANIFEST_BYTES,
-    "manifest",
-    "manifest.json is missing",
+  return withEvidenceRoot(
+    dirname(absolute),
+    options,
+    async (session) => (await hashBoundRegularFile(session, basename(absolute))).sha256,
   );
-  const draft = parseManifest(draftText);
-  const manifest = await buildManifestAtRoot(resolvedRoot, draft);
-  const manifestText = serializeManifest(manifest);
-  const checksums = checksumTextFor(manifestText, manifest.artifacts);
-  if (Buffer.byteLength(checksums.text) > MAX_CHECKSUM_BYTES) {
-    invalid("SHA256SUMS size limit exceeded");
-  }
+}
 
-  const confirmation = serializeManifest(await buildManifestAtRoot(resolvedRoot, draft));
-  if (confirmation !== manifestText) invalid("artifacts changed while sealing");
+export async function buildManifest(root, draft, options = {}) {
+  return withEvidenceRoot(root, options, (session) => buildManifestInSession(session, draft));
+}
 
-  const targets = [
-    { target: join(resolvedRoot, MANIFEST_NAME), contents: manifestText },
-    { target: join(resolvedRoot, CHECKSUMS_NAME), contents: checksums.text },
-  ];
-  const staged = [];
-  try {
-    for (const item of targets) {
-      staged.push({
-        target: item.target,
-        temporary: await writeSiblingTemporary(item.target, item.contents),
+export async function sealEvidencePackage(root, options = {}) {
+  return withEvidenceRoot(root, options, async (session) => {
+    const draftBytes = await readBoundedBytes(
+      session,
+      MANIFEST_NAME,
+      MAX_MANIFEST_BYTES,
+      "manifest",
+    );
+    const draft = parseManifest(draftBytes.bytes);
+    const manifest = await buildManifestInSession(session, draft);
+    const manifestText = serializeManifest(manifest);
+    const checksums = checksumTextFor(manifestText, manifest.artifacts);
+    if (Buffer.byteLength(checksums.text) > MAX_CHECKSUM_BYTES) {
+      invalid("SHA256SUMS size limit exceeded");
+    }
+
+    const confirmation = serializeManifest(await buildManifestInSession(session, draft));
+    if (confirmation !== manifestText) invalid("artifacts changed while sealing");
+
+    const staged = [];
+    let result;
+    let transactionError;
+    try {
+      for (const item of [
+        { contents: manifestText, path: MANIFEST_NAME },
+        { contents: checksums.text, path: CHECKSUMS_NAME },
+      ]) {
+        const target = join(session.rootPath, item.path);
+        staged.push({
+          path: item.path,
+          target,
+          temporary: await writeSiblingTemporary(session, target, item.contents),
+        });
+      }
+      await installGeneratedPair(session, staged);
+      result = {
+        artifactCount: manifest.artifacts.length,
+        checksumCount: checksums.entries.length,
+      };
+    } catch (error) {
+      transactionError = error;
+    }
+
+    const cleanupFailures = [];
+    for (const { temporary } of staged) {
+      await session.filesystem
+        .rm(temporary, { force: true })
+        .catch((error) => cleanupFailures.push(error));
+    }
+    if (transactionError && cleanupFailures.length > 0) {
+      invalid("seal failed and temporary output cleanup also failed; manual recovery is required", {
+        cause: transactionError,
       });
     }
-    await installGeneratedPair(staged);
-  } finally {
-    await Promise.all(
-      staged.map(({ temporary }) => rm(temporary, { force: true }).catch(() => undefined)),
-    );
-  }
-
-  return { artifactCount: manifest.artifacts.length, checksumCount: checksums.entries.length };
+    if (transactionError) throw transactionError;
+    if (cleanupFailures.length > 0) {
+      invalid("temporary output cleanup failed; manual recovery is required", {
+        cause: cleanupFailures[0],
+      });
+    }
+    return result;
+  });
 }
 
-export async function verifyEvidencePackage(root) {
-  const resolvedRoot = await resolveExistingRoot(root);
-  const checksumText = await readBoundedUtf8(
-    resolvedRoot,
-    CHECKSUMS_NAME,
-    MAX_CHECKSUM_BYTES,
-    "SHA256SUMS",
-    "SHA256SUMS is missing",
-  );
-  const checksumEntries = parseChecksums(checksumText);
-  const checksumByPath = new Map(checksumEntries.map((entry) => [entry.path, entry.sha256]));
-  const actualFiles = await enumerateRegularFiles(resolvedRoot, { includeManifest: true });
-  const actualSet = new Set(actualFiles);
-
-  for (const { path } of checksumEntries) {
-    if (!actualSet.has(path)) invalid(`missing checksummed file: ${displayPath(path)}`);
-  }
-  for (const relativePath of actualFiles) {
-    if (!checksumByPath.has(relativePath)) {
-      invalid(`unlisted regular file: ${displayPath(relativePath)}`);
-    }
-  }
-
-  const artifactInformation = new Map();
-  for (const relativePath of actualFiles) {
-    const information = await inspectArtifact(
-      resolvedRoot,
-      relativePath,
-      `missing checksummed file: ${displayPath(relativePath)}`,
+export async function verifyEvidencePackage(root, options = {}) {
+  return withEvidenceRoot(root, options, async (session) => {
+    const checksumFile = await readBoundedBytes(
+      session,
+      CHECKSUMS_NAME,
+      MAX_CHECKSUM_BYTES,
+      "SHA256SUMS",
     );
-    if (information.sha256 !== checksumByPath.get(relativePath)) {
-      invalid(`checksum mismatch: ${displayPath(relativePath)}`);
-    }
-    if (relativePath !== MANIFEST_NAME) artifactInformation.set(relativePath, information);
-  }
+    const checksumEntries = parseChecksums(checksumFile.bytes);
+    const checksumByPath = new Map(checksumEntries.map((entry) => [entry.path, entry.sha256]));
+    const actualFiles = await enumerateRegularFiles(session, { includeManifest: true });
+    const actualPaths = actualFiles.map(({ path }) => path);
+    const actualSet = new Set(actualPaths);
 
-  const manifestText = await readBoundedUtf8(
-    resolvedRoot,
-    MANIFEST_NAME,
-    MAX_MANIFEST_BYTES,
-    "manifest",
-    "manifest.json is missing",
-  );
-  const manifest = parseManifest(manifestText);
-  validateManifestConsistency(
-    manifest,
-    actualFiles.filter((relativePath) => relativePath !== MANIFEST_NAME),
-    artifactInformation,
-  );
-  return { checkedCount: checksumEntries.length };
+    for (const { path } of checksumEntries) {
+      if (!actualSet.has(path)) invalid(`missing checksummed file: ${displayPath(path)}`);
+    }
+    for (const relativePath of actualPaths) {
+      if (!checksumByPath.has(relativePath)) {
+        invalid(`unlisted regular file: ${displayPath(relativePath)}`);
+      }
+    }
+
+    const artifactInformation = new Map();
+    let manifestBytes;
+    for (const file of actualFiles) {
+      let information;
+      if (file.path === MANIFEST_NAME) {
+        const manifestFile = await readBoundedBytes(
+          session,
+          MANIFEST_NAME,
+          MAX_MANIFEST_BYTES,
+          "manifest",
+          file.identity,
+        );
+        manifestBytes = manifestFile.bytes;
+        information = {
+          byteSize: manifestFile.byteSize,
+          sha256: createHash("sha256").update(manifestBytes).digest("hex"),
+        };
+      } else {
+        information = await hashBoundRegularFile(session, file.path, {
+          expected: file.identity,
+        });
+        artifactInformation.set(file.path, information);
+      }
+      if (information.sha256 !== checksumByPath.get(file.path)) {
+        invalid(`checksum mismatch: ${displayPath(file.path)}`);
+      }
+    }
+
+    if (!manifestBytes) invalid("manifest.json is missing");
+    const manifest = parseManifest(manifestBytes);
+    validateManifestConsistency(
+      manifest,
+      actualPaths.filter((relativePath) => relativePath !== MANIFEST_NAME),
+      artifactInformation,
+    );
+    return { checkedCount: checksumEntries.length };
+  });
 }
