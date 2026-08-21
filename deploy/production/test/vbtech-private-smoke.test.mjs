@@ -100,6 +100,34 @@ test("private v-b request client maps the www authority and rejects untrusted ro
   }
 });
 
+test("private v-b request client rejects unsafe request options before crossing the TLS boundary", async (t) => {
+  let calls = 0;
+  const client = privateVbtechRequestClient({
+    transportOrigin,
+    apexAuthority: "v-b.tech",
+    wwwAuthority: "www.v-b.tech",
+    request: async () => {
+      calls += 1;
+      return vbtechResponse();
+    },
+  });
+
+  for (const [name, init] of [
+    ["dispatcher", { method: "GET", dispatcher: {} }],
+    ["agent", { method: "GET", agent: {} }],
+    ["rejectUnauthorized", { method: "GET", rejectUnauthorized: false }],
+    ["arbitrary option", { method: "GET", privateResolver: "127.0.0.1" }],
+  ]) {
+    await t.test(name, async () => {
+      await assert.rejects(
+        () => client.request("https://v-b.tech/legal/", init),
+        /private v-b request is invalid/,
+      );
+      assert.equal(calls, 0);
+    });
+  }
+});
+
 test("private v-b request client rejects unsafe transport and logical authorities before network activity", async (t) => {
   const base = {
     apexAuthority: "v-b.tech",
@@ -109,12 +137,14 @@ test("private v-b request client rejects unsafe transport and logical authoritie
     "http://app.markiro.example",
     "https://127.0.0.1",
     "https://[::1]",
+    "https://app.markiro.example:443",
     "https://app.markiro.example:8443",
     "https://user:pass@app.markiro.example",
     "https://app.markiro.example/private",
     "https://app.markiro.example?private=value",
     "https://app.markiro.example#private",
     "https://v-b.tech",
+    "https://v-b.tech.",
   ];
 
   for (const transportOrigin of unsafeTransports) {
@@ -158,6 +188,28 @@ test("private v-b request client rejects unsafe transport and logical authoritie
       );
       assert.equal(calls, 0);
     });
+  }
+
+  const client = privateVbtechRequestClient({
+    ...base,
+    transportOrigin,
+    request: async () => {
+      throw new Error("network must not run");
+    },
+  });
+  for (const logicalUrl of [
+    "https://user:pass@v-b.tech/legal/",
+    "https://v-b.tech/legal/#private",
+    "https://v-b.tech:443/legal/",
+    "https://v-b.tech./legal/",
+    "https://www.v-b.tech./canonical-check",
+  ]) {
+    await t.test(`logical URL ${logicalUrl}`, async () =>
+      assert.rejects(
+        () => client.request(logicalUrl, { method: "GET" }),
+        /private v-b request is invalid/,
+      ),
+    );
   }
 });
 

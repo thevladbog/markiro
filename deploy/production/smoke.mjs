@@ -267,7 +267,7 @@ function dockerRunner(environment, timeoutMs) {
 }
 
 function requestClient() {
-  return { request: (url, init) => fetch(url, init) };
+  return { request: (url, init, signal) => fetch(url, { ...init, signal }) };
 }
 
 function assertHeaders(response, requiresHsts, routeLabel, expectedCsp = APPLICATION_CSP) {
@@ -661,7 +661,7 @@ async function getText(response) {
 
 async function publicRequest(client, url, init) {
   const signal = AbortSignal.timeout(5_000);
-  return client.request(url, { ...init, signal });
+  return client.request(url, init, signal);
 }
 
 function assertRoute(check, response, body, signature) {

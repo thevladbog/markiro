@@ -4,27 +4,14 @@ import { runVbtechSmoke } from "./smoke.mjs";
 
 const apexHost = "v-b.tech";
 const wwwHost = "www.v-b.tech";
+const SAFE_REQUEST_INIT_KEYS = new Set(["method", "body", "headers", "redirect"]);
 
 function privateRequestError() {
   return new Error("private v-b request is invalid");
 }
 
 function validateLogicalAuthority(value, expected) {
-  if (value === expected) return expected;
-  try {
-    const url = new URL(value);
-    if (
-      url.protocol === "https:" &&
-      url.hostname === expected &&
-      !url.port &&
-      url.pathname === "/" &&
-      !url.search &&
-      !url.hash &&
-      !url.username &&
-      !url.password
-    )
-      return expected;
-  } catch {}
+  if (value === expected || value === `https://${expected}`) return expected;
   throw new Error("private v-b logical authority is invalid");
 }
 
@@ -37,8 +24,11 @@ function validateTransportOrigin(value) {
   }
   const hostname = transport.hostname.replace(/^\[|\]$/g, "");
   if (
+    typeof value !== "string" ||
+    value !== transport.origin ||
     transport.protocol !== "https:" ||
     !hostname ||
+    hostname.endsWith(".") ||
     isIP(hostname) !== 0 ||
     !transport.origin ||
     hostname === apexHost ||
@@ -55,23 +45,49 @@ function validateTransportOrigin(value) {
 }
 
 function logicalRequest(url, apexAuthority, wwwAuthority) {
+  const rawAuthority =
+    typeof url === "string"
+      ? /^https:\/\/(v-b\.tech|www\.v-b\.tech)(?=[/?#]|$)/.exec(url)?.[1]
+      : undefined;
   let logical;
   try {
     logical = new URL(url);
   } catch {
     throw privateRequestError();
   }
-  if (logical.origin === `https://${apexAuthority}`) return { logical, host: apexAuthority };
-  if (logical.origin === `https://${wwwAuthority}`) return { logical, host: wwwAuthority };
+  if (
+    logical.protocol !== "https:" ||
+    logical.username ||
+    logical.password ||
+    logical.hash ||
+    logical.port ||
+    (typeof url === "string" && rawAuthority === undefined)
+  )
+    throw privateRequestError();
+  const authority = rawAuthority || logical.hostname;
+  if (authority === apexAuthority && logical.origin === `https://${apexAuthority}`)
+    return { logical, host: apexAuthority };
+  if (authority === wwwAuthority && logical.origin === `https://${wwwAuthority}`)
+    return { logical, host: wwwAuthority };
   throw privateRequestError();
 }
 
 function privateRequestInit(init, host) {
-  const { headers: suppliedHeaders, ...options } = init ?? {};
+  if (init !== undefined && (init === null || typeof init !== "object"))
+    throw privateRequestError();
+  const options = init || {};
+  if (Reflect.ownKeys(options).some((key) => !SAFE_REQUEST_INIT_KEYS.has(key)))
+    throw privateRequestError();
+  const suppliedHeaders = options.headers;
   const headers = new Headers(suppliedHeaders);
   if (headers.has("host") && headers.get("host") !== host) throw privateRequestError();
   headers.set("host", host);
-  return { ...options, headers };
+  return {
+    ...(Object.hasOwn(options, "method") ? { method: options.method } : {}),
+    ...(Object.hasOwn(options, "body") ? { body: options.body } : {}),
+    ...(Object.hasOwn(options, "redirect") ? { redirect: options.redirect } : {}),
+    headers,
+  };
 }
 
 export function privateVbtechRequestClient({
@@ -86,17 +102,17 @@ export function privateVbtechRequestClient({
   if (typeof request !== "function") throw privateRequestError();
 
   return {
-    async request(url, init) {
+    async request(url, init, signal) {
       const { logical, host } = logicalRequest(url, apex, www);
       const target = new URL(`${logical.pathname}${logical.search}`, transport);
-      return request(target, privateRequestInit(init, host));
+      return request(target, privateRequestInit(init, host), signal);
     },
   };
 }
 
 export async function runPrivateVbtechSmoke(
   { transportOrigin, expectedVbtechReleaseSha },
-  client = { request: fetch },
+  client = { request: (url, init, signal) => fetch(url, { ...init, signal }) },
 ) {
   if (typeof client?.request !== "function") throw privateRequestError();
   const privateClient = privateVbtechRequestClient({
