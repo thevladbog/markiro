@@ -812,6 +812,8 @@
         "modeAggregation": "Агрегация",
         "plannedQtyLabel": "Плановое количество, шт",
         "plannedDateLabel": "Дата смены",
+        "productionDateLabel": "Дата производства (для отчётов)",
+        "productionDateHint": "Если не указана, этикетки и отчёты используют прежнее правило.",
         "lineLabel": "Линия",
         "noLine": "Не выбрана",
         "noLinesHint": "Линии не заведены — создайте через API или в настройках.",

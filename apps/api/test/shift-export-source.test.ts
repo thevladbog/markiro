@@ -19,6 +19,7 @@ interface ShiftRow {
   tenantId: string;
   shiftId: string;
   status: "planned" | "active" | "closed";
+  productionDate: string | null;
   plannedDate: string | null;
   productName: string | null;
 }
@@ -160,6 +161,7 @@ function closedShift(overrides: Partial<ShiftRow> = {}): ShiftRow {
     tenantId: "tenant-1",
     shiftId: "shift-1",
     status: "closed",
+    productionDate: null,
     plannedDate: "2026-08-13",
     productName: "Вода газированная",
     ...overrides,
@@ -300,8 +302,34 @@ describe("ShiftExportSourceService", () => {
     );
   });
 
-  it("rejects a closed shift without a planned date", async () => {
-    const fake = fakeDb({ shifts: [closedShift({ plannedDate: null })] });
+  it("uses the declared production date instead of the planned date in exports", async () => {
+    const fake = fakeDb({
+      shifts: [closedShift({ productionDate: "2026-08-20", plannedDate: "2026-08-21" })],
+      registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+      codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+    });
+
+    await expect(
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
+    ).resolves.toMatchObject({ shiftDate: "2026-08-20" });
+  });
+
+  it("falls back to the planned date when a closed shift has no declared production date", async () => {
+    const fake = fakeDb({
+      shifts: [closedShift({ productionDate: null, plannedDate: "2026-08-21" })],
+      registry: [registryRow(HASH_A, "2026-08-13T10:00:00.000Z")],
+      codeHistory: [codeRow(HASH_A, "2026-08-13T10:00:00.000Z", "code-a")],
+    });
+
+    await expect(
+      new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),
+    ).resolves.toMatchObject({ shiftDate: "2026-08-21" });
+  });
+
+  it("rejects a closed shift without a declared or planned date", async () => {
+    const fake = fakeDb({
+      shifts: [closedShift({ productionDate: null, plannedDate: null })],
+    });
 
     await expectSourceError(
       new ShiftExportSourceService(fake.db).load("tenant-1", "shift-1", FLAT),

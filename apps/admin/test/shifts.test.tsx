@@ -118,6 +118,11 @@ async function chooseOption(
   expect(trigger.textContent).toContain(option);
 }
 
+async function chooseDate(label: string, date: string) {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  fireEvent.click(await screen.findByRole("button", { name: date }));
+}
+
 const PRODUCT_A: ProductDto = {
   id: "p1",
   gtin14: "04006381333931",
@@ -178,6 +183,7 @@ const INITIAL_SHIFT_FORM_VALUES: ShiftFormValues = {
   mode: "validation",
   plannedQty: "500",
   plannedDate: "2026-08-06",
+  productionDate: "",
   lineId: "",
   counterpartyId: "",
   ssccIssuerCounterpartyId: "",
@@ -286,6 +292,7 @@ const PLANNED_SHIFT = {
   boxLabelTemplateId: null,
   plannedQty: 500,
   plannedDate: "2026-07-25",
+  productionDate: null,
   boxCapacity: null,
   palletCapacity: null,
   palletsEnabled: false,
@@ -546,6 +553,192 @@ describe("ShiftsPage", () => {
       });
     });
     expect(await screen.findByText(/Изменения сохранены.*войдите в смену повторно/)).toBeDefined();
+  });
+
+  it("sends a chosen production date when creating a shift", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date("2026-08-21T12:00:00.000Z"));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const created = { ...PLANNED_SHIFT, id: "new-production-date", productionDate: "2026-08-20" };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts" && init?.method === "POST") return jsonResponse(201, created);
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_A] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Смены не запланированы");
+    fireEvent.click(screen.getAllByRole("button", { name: "Запланировать смену" })[0]!);
+    await chooseOption(user, "Продукт", PRODUCT_A.name);
+    await chooseDate("Дата производства (для отчётов)", "20 августа 2026");
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать" }));
+
+    await waitFor(() => {
+      const postCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts" && init?.method === "POST",
+      );
+      const body = JSON.parse(postCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.productionDate).toBe("2026-08-20");
+    });
+  });
+
+  it("initializes a null production date as blank instead of inferring it from the shift dates", async () => {
+    const shiftWithNullProductionDate = {
+      ...ACTIVE_TOLLING_SHIFT,
+      plannedDate: "2026-07-23",
+      openedAt: "2026-07-24T08:00:00.000Z",
+      productionDate: null,
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        const path = String(url);
+        if (path.startsWith("/api/shifts")) {
+          return jsonResponse(200, { items: [shiftWithNullProductionDate] });
+        }
+        return jsonResponse(200, { items: [] });
+      }),
+    );
+
+    renderPage();
+    const row = (await screen.findByText("Сыр Российский")).closest("tr");
+    fireEvent.click(within(row!).getByRole("button", { name: "Изменить" }));
+
+    expect(
+      screen.getByRole("button", { name: "Дата производства (для отчётов)" }).textContent,
+    ).toContain("Выберите дату");
+    expect(
+      screen.queryByRole("button", { name: "Очистить дату: Дата производства (для отчётов)" }),
+    ).toBeNull();
+  });
+
+  it("clears a production date to null in the edit payload", async () => {
+    const user = userEvent.setup();
+    const shiftWithProductionDate = { ...PLANNED_SHIFT, productionDate: "2026-07-24" };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s1" && init?.method === "PATCH") {
+        return jsonResponse(200, { ...shiftWithProductionDate, productionDate: null });
+      }
+      if (path.startsWith("/api/shifts"))
+        return jsonResponse(200, { items: [shiftWithProductionDate] });
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    await screen.findByText("Молоко 1л");
+    fireEvent.click(screen.getByRole("button", { name: "Изменить" }));
+    await user.click(
+      screen.getByRole("button", { name: "Очистить дату: Дата производства (для отчётов)" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts/s1" && init?.method === "PATCH",
+      );
+      const body = JSON.parse(patchCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.productionDate).toBeNull();
+    });
+  });
+
+  it("does not stale-overwrite an unchanged production date on an active shift", async () => {
+    const user = userEvent.setup();
+    const activeShift = {
+      ...ACTIVE_TOLLING_SHIFT,
+      boxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
+      productionDate: "2026-07-24",
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s2" && init?.method === "PATCH") {
+        return jsonResponse(200, { ...activeShift, plannedQty: 1200 });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [activeShift] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    const row = (await screen.findByText("Сыр Российский")).closest("tr");
+    fireEvent.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену · AUG26-002/S");
+    expect((screen.getByRole("radio", { name: "Валидация" }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    fireEvent.change(screen.getByLabelText("Плановое количество, шт"), {
+      target: { value: "1200" },
+    });
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Критическое изменение активной смены",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts/s2" && init?.method === "PATCH",
+      );
+      const body = JSON.parse(patchCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.plannedQty).toBe(1200);
+      expect(body).not.toHaveProperty("productionDate");
+    });
+  });
+
+  it("sends a changed production date for an active shift and keeps its panel open when locked", async () => {
+    const user = userEvent.setup();
+    const activeShift = {
+      ...ACTIVE_TOLLING_SHIFT,
+      boxLabelTemplateId: DEFAULT_BOX_LABEL_TEMPLATE.id,
+      productionDate: "2026-07-24",
+    };
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const path = String(url);
+      if (path === "/api/shifts/s2" && init?.method === "PATCH") {
+        return jsonResponse(409, {
+          code: "PRODUCTION_DATE_LOCKED",
+          message: "Production date cannot change after the first box closure",
+        });
+      }
+      if (path.startsWith("/api/shifts")) return jsonResponse(200, { items: [activeShift] });
+      if (path === "/api/products") return jsonResponse(200, { items: [PRODUCT_B] });
+      if (path === "/api/label-templates") {
+        return jsonResponse(200, { items: [DEFAULT_BOX_LABEL_TEMPLATE] });
+      }
+      return jsonResponse(200, { items: [] });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPage();
+    const row = (await screen.findByText("Сыр Российский")).closest("tr");
+    fireEvent.click(within(row!).getByRole("button", { name: "Изменить" }));
+    await screen.findByText("Изменить смену · AUG26-002/S");
+    await chooseDate("Дата производства (для отчётов)", "25 июля 2026");
+    await user.click(screen.getByRole("button", { name: "Сохранить" }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: "Критическое изменение активной смены",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Сохранить изменения" }));
+
+    await waitFor(() => {
+      const patchCall = fetchMock.mock.calls.find(
+        ([url, init]) => url === "/api/shifts/s2" && init?.method === "PATCH",
+      );
+      const body = JSON.parse(patchCall?.[1]?.body as string) as Record<string, unknown>;
+      expect(body.productionDate).toBe("2026-07-25");
+    });
+    expect(
+      await screen.findByText("Production date cannot change after the first box closure"),
+    ).toBeDefined();
+    expect(screen.getByText("Изменить смену · AUG26-002/S")).toBeDefined();
   });
 
   it("shows the opening date when an existing shift has no planned date", async () => {

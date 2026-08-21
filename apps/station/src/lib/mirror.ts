@@ -24,6 +24,8 @@ export interface StationBundle {
     labelTemplateName: string | null;
     plannedQty: number | null;
     plannedDate: string | null;
+    /** Current API sends date or null; pre-upgrade API omits the field. */
+    productionDate?: string | null;
     boxCapacity: number | null;
     palletCapacity: number | null;
     palletsEnabled: boolean;
@@ -180,14 +182,24 @@ async function upsertBundleBody(
   // erase a number an upgraded server already mirrored (server rollback
   // mid-fleet). An explicit `null` from the server still applies.
   const numberUpdate = s.number === undefined ? "" : ", number=excluded.number";
+  const productionDateUpdate =
+    s.productionDate === undefined
+      ? ""
+      : `, production_date=CASE
+           WHEN EXISTS (
+             SELECT 1 FROM boxes_mirror
+             WHERE shift_id=excluded.id AND closed_at IS NOT NULL
+           ) THEN shift_mirror.production_date
+           ELSE excluded.production_date
+         END`;
   await exec.run(
     `INSERT INTO shift_mirror (
        id, status, mode, product_id, product_name, line_id, line_name,
        counterparty_id, counterparty_name, counterparty_gln,
        label_template_id, label_template_name, label_template_spec,
-       planned_qty, planned_date, box_capacity, pallet_capacity, pallets_enabled, opened_at,
-       issuer_prefix, box_label_template_spec, number
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       planned_qty, planned_date, production_date, box_capacity, pallet_capacity, pallets_enabled,
+       opened_at, issuer_prefix, box_label_template_spec, number
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=excluded.status, mode=excluded.mode, product_id=excluded.product_id,
        product_name=excluded.product_name,
@@ -199,7 +211,7 @@ async function upsertBundleBody(
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        pallets_enabled=excluded.pallets_enabled, opened_at=excluded.opened_at,
        issuer_prefix=${preserveIssuerPrefix ? "shift_mirror.issuer_prefix" : "excluded.issuer_prefix"},
-       box_label_template_spec=excluded.box_label_template_spec${numberUpdate}`,
+       box_label_template_spec=excluded.box_label_template_spec${numberUpdate}${productionDateUpdate}`,
     [
       s.id,
       s.status,
@@ -216,6 +228,7 @@ async function upsertBundleBody(
       bundle.labelTemplate ? JSON.stringify(bundle.labelTemplate.spec) : null,
       s.plannedQty,
       s.plannedDate,
+      s.productionDate ?? null,
       s.boxCapacity,
       s.palletCapacity,
       b(s.palletsEnabled),
@@ -516,6 +529,7 @@ export interface ShiftContextRow {
   plannedQty: number | null;
   egaisCode: string | null;
   shelfLifeDays: number | null;
+  productionDate: string | null;
   image?: StationProductImageDescriptor | null | undefined;
   /** Human-readable shift number (`AUG26-003/S`); null until a post-upgrade bundle sync. */
   number: string | null;
@@ -538,6 +552,7 @@ export async function readShiftContext(
     planned_qty: number | null;
     egais_code: string | null;
     shelf_life_days: number | null;
+    production_date: string | null;
     image_checksum: string | null;
     image_content_type: "image/webp" | null;
     image_byte_size: number | null;
@@ -546,7 +561,7 @@ export async function readShiftContext(
     number: string | null;
   }>(
     `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
-       s.planned_qty, s.number AS number, p.egais_code, p.shelf_life_days,
+       s.planned_qty, s.number AS number, s.production_date, p.egais_code, p.shelf_life_days,
        p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
      WHERE s.id = ?`,
@@ -561,6 +576,7 @@ export async function readShiftContext(
     counterpartyName: row.counterparty_name,
     plannedQty: row.planned_qty,
     number: row.number ?? null,
+    productionDate: row.production_date ?? null,
     egaisCode: row.egais_code ?? null,
     shelfLifeDays: row.shelf_life_days ?? null,
     image:

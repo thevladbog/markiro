@@ -224,6 +224,20 @@ describe("platform schema", () => {
     ).toEqual(["tenant_id", "number_month_key", "number_seq"]);
   });
 
+  it("stores an optional production date on a shift without a default", () => {
+    expect(shifts.productionDate).toBeDefined();
+    expect(shifts.productionDate.notNull).toBe(false);
+    expect(shifts.productionDate.default).toBeUndefined();
+    expect(shifts.productionDate.dataType).toBe("string");
+  });
+
+  it("stores the first accepted box-closure receipt as a nullable marker without a default", () => {
+    expect(shifts.firstBoxClosureAt).toBeDefined();
+    expect(shifts.firstBoxClosureAt.notNull).toBe(false);
+    expect(shifts.firstBoxClosureAt.default).toBeUndefined();
+    expect(shifts.firstBoxClosureAt.dataType).toBe("date");
+  });
+
   it("keys the shift number counter by tenant and month", () => {
     expect(getTableName(shiftNumberCounters)).toBe("shift_number_counters");
     const cols = Object.keys(shiftNumberCounters);

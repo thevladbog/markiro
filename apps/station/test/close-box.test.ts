@@ -194,6 +194,7 @@ describe("boxLabelFields", () => {
       operatorName: "Иванов",
       counterpartyName: "Клиент",
       closedAt: "2026-07-29T10:15:00.000Z",
+      productionDate: null,
       shiftNumber: "AUG26-003/S",
     });
     expect(fields).toEqual({
@@ -222,6 +223,7 @@ describe("boxLabelFields", () => {
       operatorName: null,
       counterpartyName: null,
       closedAt: ISO,
+      productionDate: null,
       shiftNumber: null,
     });
     expect(fields.operator).toBe("");
@@ -240,6 +242,7 @@ describe("boxLabelFields", () => {
       operatorName: null,
       counterpartyName: null,
       closedAt: ISO,
+      productionDate: null,
       shiftNumber: null,
     });
     expect(fields.sscc).toHaveLength(18);

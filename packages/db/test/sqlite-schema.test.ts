@@ -55,6 +55,45 @@ describe("STATION_MIGRATIONS", () => {
     expect(shiftMirror.number.notNull).toBe(false);
   });
 
+  it("mirrors a nullable shift production date", () => {
+    expect(shiftMirror.productionDate).toBeDefined();
+    expect(shiftMirror.productionDate.notNull).toBe(false);
+  });
+
+  it("migrates a legacy shift row to nullable production_date and survives a second migration run", () => {
+    const db = new DatabaseSync(":memory:");
+    const productionDateMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ALTER TABLE shift_mirror ADD COLUMN production_date"),
+    );
+    expect(productionDateMigration).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, productionDateMigration));
+    db.prepare(
+      `INSERT INTO shift_mirror (id, status, mode, product_id)
+       VALUES (?, ?, ?, ?)`,
+    ).run("legacy-shift", "active", "validation", "p1");
+
+    applyStatements(db, STATION_MIGRATIONS.slice(productionDateMigration));
+
+    const columns = db.prepare("PRAGMA table_info(shift_mirror)").all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    expect(columns).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "production_date", notnull: 0 })]),
+    );
+    expect(
+      db.prepare("SELECT production_date FROM shift_mirror WHERE id = ?").get("legacy-shift"),
+    ).toEqual({ production_date: null });
+
+    expect(() =>
+      db.exec(STATION_MIGRATIONS[productionDateMigration] ?? "missing migration"),
+    ).toThrow(/duplicate column name/i);
+    expect(() => applyStationMigrations(db)).not.toThrow();
+    expect(
+      db.prepare("SELECT production_date FROM shift_mirror WHERE id = ?").get("legacy-shift"),
+    ).toEqual({ production_date: null });
+  });
+
   it("adds shift_mirror.number via the trailing ALTER and survives a second migration run", () => {
     const db = new DatabaseSync(":memory:");
     applyStationMigrations(db);

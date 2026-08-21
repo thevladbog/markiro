@@ -10,6 +10,7 @@ export interface BoxLabelInput {
   operatorName: string | null;
   counterpartyName: string | null;
   closedAt: string;
+  productionDate: string | null;
   /** `AUG26-003/S`; null when the mirror predates the shift-number sync. */
   shiftNumber: string | null;
 }
@@ -53,28 +54,48 @@ export function addCalendarDays(isoDate: string, days: number): string {
   const parts = ISO_DATE.exec(isoDate);
   if (!parts) return "";
   const [, year, month, day] = parts;
+  const yearNumber = Number(year);
+  if (yearNumber < 1 || yearNumber > 9999) return "";
   const base = new Date(0);
-  base.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  base.setUTCFullYear(yearNumber, Number(month) - 1, Number(day));
   if (Number.isNaN(base.getTime())) return "";
   // Reject dates that do not exist and silently rolled over (2025-02-30).
   if (base.getUTCMonth() !== Number(month) - 1 || base.getUTCDate() !== Number(day)) return "";
   base.setUTCDate(base.getUTCDate() + days);
   if (Number.isNaN(base.getTime())) return "";
+  if (base.getUTCFullYear() < 1 || base.getUTCFullYear() > 9999) return "";
   return `${pad(base.getUTCFullYear(), 4)}-${pad(base.getUTCMonth() + 1, 2)}-${pad(base.getUTCDate(), 2)}`;
 }
 
 /**
- * «Годен до» = production date (the box's LOCAL close date) + the product's
- * shelf life in days, as a `YYYY-MM-DD` calendar date.
- *
- * Composed from the two pure pieces above: instant → local day, then a
- * calendar-day addition that no timezone can perturb. It stays ISO on
- * purpose — this is the ARITHMETIC layer, and `boxLabelFields` below is the
- * one place that turns it into the printed `дд.мм.гггг`.
+ * The declared production date when present; otherwise the box's LOCAL
+ * calendar close date. An invalid declared date returns "" rather than
+ * falling back and hiding corrupt mirrored data.
  */
-export function expiryIsoDate(closedAt: string, shelfLifeDays: number | null): string {
+export function effectiveProductionIsoDate(
+  closedAt: string,
+  productionDate: string | null,
+): string {
+  if (productionDate !== null) return addCalendarDays(productionDate, 0);
+  return localIsoDate(closedAt);
+}
+
+/**
+ * «Годен до» = the effective production date + the product's shelf life in
+ * days, as a `YYYY-MM-DD` calendar date.
+ *
+ * The effective date is either a validated declared day or instant → local
+ * day, followed by a calendar-day addition that no timezone can perturb. It
+ * stays ISO on purpose — this is the ARITHMETIC layer, and `boxLabelFields`
+ * below is the one place that turns it into the printed `дд.мм.гггг`.
+ */
+export function expiryIsoDate(
+  closedAt: string,
+  shelfLifeDays: number | null,
+  productionDate: string | null = null,
+): string {
   if (shelfLifeDays === null || !Number.isInteger(shelfLifeDays) || shelfLifeDays <= 0) return "";
-  return addCalendarDays(localIsoDate(closedAt), shelfLifeDays);
+  return addCalendarDays(effectiveProductionIsoDate(closedAt, productionDate), shelfLifeDays);
 }
 
 /**
@@ -84,8 +105,8 @@ export function expiryIsoDate(closedAt: string, shelfLifeDays: number | null): s
  * by the emitter and nowhere else: storing or transporting it would get an
  * export to «Честный знак» rejected.
  *
- * `date`/`expiry` are the human-readable LOCAL calendar dates of the box's
- * close instant, in the printed `дд.мм.гггг` form — this is the BOUNDARY
+ * `date`/`expiry` are the human-readable effective production date and its
+ * shelf-life expiry, in the printed `дд.мм.гггг` form — this is the BOUNDARY
  * where `@markiro/domain`'s `formatLabelDate` is applied, and the admin
  * preview's `sampleLabelData()` applies the same function to its own samples
  * so the two can never disagree. Everything upstream (`localIsoDate`,
@@ -95,6 +116,12 @@ export function expiryIsoDate(closedAt: string, shelfLifeDays: number | null): s
  * no machine-readable export reads these two fields.
  */
 export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string> {
+  const effectiveDate = effectiveProductionIsoDate(input.closedAt, input.productionDate);
+  const effectiveExpiry =
+    input.shelfLifeDays !== null && Number.isInteger(input.shelfLifeDays) && input.shelfLifeDays > 0
+      ? addCalendarDays(effectiveDate, input.shelfLifeDays)
+      : "";
+
   return {
     "product.name": input.productName,
     "product.gtin": input.gtin14,
@@ -102,8 +129,8 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
     "km.code": "",
     sscc: input.sscc,
     "shift.no": input.shiftNumber ?? "",
-    date: formatLabelDate(localIsoDate(input.closedAt)),
-    expiry: formatLabelDate(expiryIsoDate(input.closedAt, input.shelfLifeDays)),
+    date: formatLabelDate(effectiveDate),
+    expiry: formatLabelDate(effectiveExpiry),
     qty: String(input.itemCount),
     operator: input.operatorName ?? "",
     "counterparty.name": input.counterpartyName ?? "",

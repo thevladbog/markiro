@@ -293,4 +293,8 @@ export const STATION_MIGRATIONS: string[] = [
   // (spec 2026-08-20). Same re-runnable idempotency as the `login` ALTER above.
   `ALTER TABLE product_mirror ADD COLUMN egais_code TEXT;`,
   `ALTER TABLE product_mirror ADD COLUMN shelf_life_days INTEGER;`,
+  // Optional shift production date. This must remain a trailing ALTER:
+  // deployed stations already have shift_mirror, and CREATE TABLE IF NOT
+  // EXISTS cannot upgrade their existing database.
+  `ALTER TABLE shift_mirror ADD COLUMN production_date TEXT;`,
 ];

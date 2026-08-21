@@ -73,6 +73,7 @@ export const shiftMirror = sqliteTable("shift_mirror", {
   labelTemplateSpec: text("label_template_spec"),
   plannedQty: integer("planned_qty"),
   plannedDate: text("planned_date"),
+  productionDate: text("production_date"),
   boxCapacity: integer("box_capacity"),
   palletCapacity: integer("pallet_capacity"),
   palletsEnabled: integer("pallets_enabled", { mode: "boolean" }).notNull().default(false),

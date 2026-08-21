@@ -1,0 +1,7 @@
+surface,expectedProductionDate,observedProductionDate,actorNameOrId,actorRole,capturedAt,evidencePath,result,scopeBinding
+DB,,,,,,exports/system/rehearsal-date/db-production-date.json,,tenantId+shiftId
+API,,,,,,exports/system/rehearsal-date/api-shift.json,,server-derived tenant+shiftId
+Admin,,,,,,exports/system/rehearsal-date/admin-production-date.png,,visible tenant+shiftId
+Station mirror,,,,,,exports/system/rehearsal-date/station-production-date.json,,manifest customer/site+device.id+shiftId
+Label,,,,,,exports/system/rehearsal-date/label-production-date.jpg,,physical rehearsal box+shiftId
+Export,,,,,,exports/system/rehearsal-date/shift-export.csv,,original filename+shiftId

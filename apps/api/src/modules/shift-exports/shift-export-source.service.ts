@@ -96,6 +96,7 @@ export class ShiftExportSourceService {
         tenantId: schema.shifts.tenantId,
         shiftId: schema.shifts.id,
         status: schema.shifts.status,
+        productionDate: schema.shifts.productionDate,
         plannedDate: schema.shifts.plannedDate,
         productName: schema.products.name,
       })
@@ -118,7 +119,8 @@ export class ShiftExportSourceService {
     ) {
       throw new ShiftExportSourceError("SHIFT_NOT_CLOSED");
     }
-    if (shift.plannedDate === null) {
+    const shiftDate = shift.productionDate ?? shift.plannedDate;
+    if (shiftDate === null) {
       throw new ShiftExportSourceError("SHIFT_DATE_MISSING");
     }
 
@@ -172,7 +174,7 @@ export class ShiftExportSourceService {
     return {
       sourceSnapshotStartedAt,
       productName: shift.productName ?? "Продукция",
-      shiftDate: shift.plannedDate,
+      shiftDate,
       organizationInn,
       source,
     };

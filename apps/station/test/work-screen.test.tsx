@@ -323,6 +323,7 @@ interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   onOpenPrinterSetup?: () => void;
   onPrintRecoveryChange?: (blocked: boolean) => void;
   productShelfLifeDays?: number | null;
+  productionDate?: string | null;
 }
 
 // A label spec whose only element resolves to ASCII-only text (the box's
@@ -416,6 +417,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
     onOpenPrinterSetup,
     onPrintRecoveryChange,
     productShelfLifeDays,
+    productionDate,
   } = overrides;
 
   // Seeded regardless of `issuerPrefix`: the "no sscc block" test needs a
@@ -470,6 +472,7 @@ function renderWork(overrides: RenderWorkOverrides = {}) {
       {...(onOpenPrinterSetup ? { onOpenPrinterSetup } : {})}
       {...(onPrintRecoveryChange ? { onPrintRecoveryChange } : {})}
       {...(productShelfLifeDays !== undefined ? { productShelfLifeDays } : {})}
+      {...(productionDate !== undefined ? { productionDate } : {})}
     />
   );
   const view = render(screenForRevision(bundleRevision));
@@ -2414,6 +2417,41 @@ describe("WorkScreen box progress, closing and printing", () => {
     expect(zpl).toContain("20.01.2027"); // + 180 days of shelf life
     expect(zpl).not.toContain("30.09.2026"); // never today's date
     expect(zpl).not.toMatch(/\d{4}-\d{2}-\d{2}/); // never the ISO form the first print shipped
+  });
+
+  it("prints the declared production date and derives expiry from it through WorkScreen", async () => {
+    useTimeZone("Europe/Moscow");
+    const close = vi
+      .fn<(shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>>()
+      .mockResolvedValue({
+        status: "closed",
+        sscc: SSCC,
+        itemCount: 10,
+        closedAt: "2026-07-23T21:40:00.000Z",
+      });
+    const print = vi.fn(async (_target: PrintTarget, _bytes: Uint8Array) => {});
+    const exec = makeExec();
+    await exec.run(
+      `INSERT INTO shift_mirror (id, status, mode, product_id, box_label_template_spec)
+       VALUES (?,?,?,?,?)`,
+      ["s1", "active", "aggregation", "p1", JSON.stringify(DATE_LABEL_SPEC)],
+    );
+    renderWorkTracked({
+      exec,
+      boxCapacity: 10,
+      boxItemCount: 9,
+      closeCurrentBox: close,
+      productionDate: "2024-02-28",
+      productShelfLifeDays: 1,
+      printing: { target: PRINT_TARGET, language: "zpl", print },
+    });
+    act(() => scan(KM));
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+
+    const zpl = new TextDecoder("latin1").decode(print.mock.calls[0]![1]);
+    expect(zpl).toContain("28.02.2024");
+    expect(zpl).toContain("29.02.2024");
+    expect(zpl).not.toContain("24.07.2026");
   });
 
   it("reprints a recovered box with the SAME dates the original label carried", async () => {

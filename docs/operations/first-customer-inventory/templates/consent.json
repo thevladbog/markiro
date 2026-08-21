@@ -1,0 +1,16 @@
+{
+  "consentVersion": 1,
+  "operationId": "REQUIRED_COPY_FROM_MANIFEST_OPERATION_ID",
+  "customerNaming": {
+    "decision": null,
+    "scope": "",
+    "signer": { "name": "", "role": "" },
+    "decidedAt": null
+  },
+  "anonymizedBenchmark": {
+    "decision": null,
+    "scope": "",
+    "signer": { "name": "", "role": "" },
+    "decidedAt": null
+  }
+}

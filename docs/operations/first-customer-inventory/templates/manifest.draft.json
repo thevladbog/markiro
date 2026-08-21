@@ -1,0 +1,17 @@
+{
+  "manifestVersion": 1,
+  "operationId": "INV-20260824-pilot-01",
+  "protocolVersion": "inventory-recovery-v1",
+  "customer": { "legalName": "", "site": "" },
+  "operator": { "name": "", "role": "founder" },
+  "device": { "id": "", "stationVersion": "", "apiVersion": "" },
+  "timezone": "Europe/Moscow",
+  "newSscc": { "threshold": "", "range": "" },
+  "scorecardEligibility": {
+    "eligible": false,
+    "reason": "founder_led_inventory_recovery"
+  },
+  "startedAt": null,
+  "completedAt": null,
+  "artifacts": []
+}

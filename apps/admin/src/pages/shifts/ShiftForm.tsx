@@ -48,6 +48,7 @@ const shiftFormSchema = z.object({
     .optional()
     .refine((v) => !v || /^[1-9]\d*$/.test(v), "pages.shifts.form.errors.qtyInvalid"),
   plannedDate: z.string().trim().optional(),
+  productionDate: z.string().trim().optional(),
   lineId: z.string().trim().optional(),
   counterpartyId: z.string().trim().optional(),
   ssccIssuerCounterpartyId: z.string().trim().optional(),
@@ -100,6 +101,7 @@ const EMPTY_VALUES: ShiftFormValues = {
   mode: "validation",
   plannedQty: "",
   plannedDate: "",
+  productionDate: "",
   lineId: "",
   counterpartyId: "",
   ssccIssuerCounterpartyId: "",
@@ -267,6 +269,7 @@ export function ShiftForm({
           lineId: dirtyFields.lineId === true,
           plannedQty: dirtyFields.plannedQty === true,
           plannedDate: dirtyFields.plannedDate === true,
+          productionDate: dirtyFields.productionDate === true,
           boxLabelTemplate: dirtyFields.boxLabelTemplateSelection === true,
         },
       ),
@@ -443,6 +446,24 @@ export function ShiftForm({
                 />
               )}
             />
+            <Controller
+              control={control}
+              name="productionDate"
+              render={({ field }) => (
+                <DatePicker
+                  label={t("pages.shifts.form.productionDateLabel")}
+                  hint={t("pages.shifts.form.productionDateHint")}
+                  placeholder={t("common.datePicker.placeholder")}
+                  clearLabel={t("common.datePicker.clear")}
+                  calendarLabel={t("common.datePicker.calendar")}
+                  previousMonthLabel={t("common.datePicker.previousMonth")}
+                  nextMonthLabel={t("common.datePicker.nextMonth")}
+                  locale={i18n.language}
+                  {...(field.value ? { value: field.value } : {})}
+                  onValueChange={(value) => field.onChange(value ?? "")}
+                />
+              )}
+            />
           </div>
         </section>
 
@@ -581,9 +602,10 @@ export function ShiftForm({
  *   omitted, touched or not), because the user can see a concrete number in
  *   the input and expects that exact value to be saved. They're omitted only
  *   when hidden (`mode === "validation"`), where they're not applicable.
- * - Active-shift edits send `lineId`, `plannedQty`, and `plannedDate` only
- *   when their final value differs from the form default. This prevents a
- *   stale edit panel from overwriting a concurrent correction.
+ * - Active-shift edits send `lineId`, `plannedQty`, `plannedDate`, and
+ *   `productionDate` only when their final value differs from the form
+ *   default. This prevents a stale edit panel from overwriting a concurrent
+ *   correction.
  * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`,
  *   `palletsEnabled`) is always sent as shown, matching the simpler
  *   full-form-resend convention `ProductForm`/`CounterpartyForm` already use.
@@ -605,16 +627,19 @@ function toPayload(
     lineId: boolean;
     plannedQty: boolean;
     plannedDate: boolean;
+    productionDate: boolean;
     boxLabelTemplate: boolean;
   } = {
     lineId: true,
     plannedQty: true,
     plannedDate: true,
+    productionDate: true,
     boxLabelTemplate: true,
   },
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
+  const productionDate = values.productionDate?.trim();
   const lineId = values.lineId?.trim();
   const counterpartyId = values.counterpartyId?.trim();
   const ssccIssuerCounterpartyId = values.ssccIssuerCounterpartyId?.trim();
@@ -633,6 +658,9 @@ function toPayload(
     if (changed.lineId) activePayload.lineId = lineId ? lineId : null;
     if (changed.plannedQty) activePayload.plannedQty = plannedQty ? Number(plannedQty) : null;
     if (changed.plannedDate) activePayload.plannedDate = plannedDate ? plannedDate : null;
+    if (changed.productionDate) {
+      activePayload.productionDate = productionDate ? productionDate : null;
+    }
     if (changed.boxLabelTemplate) {
       activePayload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
     }
@@ -659,11 +687,13 @@ function toPayload(
     return {
       ...payload,
       productId: values.productId.trim(),
+      ...(productionDate ? { productionDate } : {}),
       ...(resolvedBoxLabelTemplateId === null
         ? {}
         : { boxLabelTemplateId: resolvedBoxLabelTemplateId }),
     };
   }
+  payload.productionDate = productionDate ? productionDate : null;
   payload.boxLabelTemplateId = resolvedBoxLabelTemplateId;
   return payload;
 }

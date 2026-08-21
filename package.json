@@ -23,7 +23,12 @@
     "test:production-docs:browser": "pnpm --dir tools/production-browser --ignore-workspace test",
     "test:landing:browser": "pnpm --dir tools/production-browser --ignore-workspace test:landing",
     "test:landing:lighthouse": "pnpm --dir tools/production-browser --ignore-workspace test:landing:lighthouse",
-    "test:yandex-infra:contract": "node --test infra/yandex/test/*.test.mjs"
+    "test:yandex-infra:contract": "node --test infra/yandex/test/*.test.mjs",
+    "evidence:init": "node tools/evidence-package/init.mjs",
+    "evidence:seal": "node tools/evidence-package/seal.mjs",
+    "evidence:station-date": "node tools/evidence-package/station-date.mjs",
+    "evidence:verify": "node tools/evidence-package/verify.mjs",
+    "test:evidence-package": "node --test tools/evidence-package/test/*.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

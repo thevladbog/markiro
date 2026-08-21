@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, Input, Pager } from "@markiro/ui";
+import { Alert, Button, Card, DatePicker, Input, Pager } from "@markiro/ui";
 import { classifyScan, DomainError, normalizeToGtin14 } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
 import { paginate } from "../lib/pagination.js";
@@ -46,13 +46,14 @@ function currentLocalDate(now = new Date()): string {
 }
 
 export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
-  const { t } = useTranslation();
+  const { i18n, t } = useTranslation();
   const [raw, setRaw] = useState("");
   const [view, setView] = useState<NewShiftView>("input");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [product, setProduct] = useState<ResolvedProduct | null>(null);
   const [mode, setMode] = useState<NewShiftMode>("validation");
+  const [productionDate, setProductionDate] = useState("");
   const [unknownGtin, setUnknownGtin] = useState<string>("");
   const [templates, setTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
@@ -155,14 +156,23 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
     setError(null);
     setBusy(true);
     try {
-      const created = await client.post<{ id: string }>("/shifts", {
+      const requestedProductionDate = productionDate || null;
+      const created = await client.post<{
+        id: string;
+        productionDate?: string | null;
+      }>("/shifts", {
         productId: product.id,
         mode,
         plannedDate: currentLocalDate(),
-        // Validation shifts print nothing and keep the legacy payload; an
-        // aggregation shift snapshots exactly the template the operator saw.
+        productionDate: requestedProductionDate,
+        // Validation shifts print nothing; an aggregation shift snapshots
+        // exactly the template the operator saw.
         ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
       });
+      if (requestedProductionDate !== null && created.productionDate !== requestedProductionDate) {
+        setError(t("shifts.productionDateNotConfirmed"));
+        return;
+      }
       const opened = await client.post<{ id: string; status: string; mode: string }>(
         `/shifts/${created.id}/open`,
       );
@@ -360,6 +370,19 @@ export function NewShift({ client, source, onStarted, onBack }: NewShiftProps) {
               {t("shifts.modeAggregation")}
             </Button>
           </div>
+          <DatePicker
+            label={t("shifts.productionDate")}
+            hint={t("shifts.productionDateHint")}
+            placeholder={t("shifts.productionDatePlaceholder")}
+            clearLabel={t("shifts.productionDateClear")}
+            calendarLabel={t("shifts.productionDateCalendar")}
+            previousMonthLabel={t("shifts.productionDatePreviousMonth")}
+            nextMonthLabel={t("shifts.productionDateNextMonth")}
+            locale={i18n.resolvedLanguage ?? i18n.language}
+            {...(productionDate ? { value: productionDate } : {})}
+            disabled={busy}
+            onValueChange={(value) => setProductionDate(value ?? "")}
+          />
           {messageSlot}
         </section>
       </StationScreen>

@@ -36,6 +36,7 @@ export interface ShiftDto {
   boxLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
+  productionDate: string | null;
   boxCapacity: number | null;
   palletCapacity: number | null;
   palletsEnabled: boolean;
@@ -61,6 +62,7 @@ export interface CreateShiftInput {
   boxLabelTemplateId?: string | null;
   plannedQty?: number | null;
   plannedDate?: string | null;
+  productionDate?: string | null;
   boxCapacity?: number | null;
   palletCapacity?: number | null;
   palletsEnabled?: boolean;
