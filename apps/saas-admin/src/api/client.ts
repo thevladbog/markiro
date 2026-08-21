@@ -12,7 +12,29 @@ export class ApiRequestError extends Error {
   }
 }
 
-export async function platformApiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+interface PlatformResponseSchema<T> {
+  parse(value: unknown): T;
+}
+
+export function platformApiFetch<T>(path: string, init?: RequestInit): Promise<T>;
+export function platformApiFetch<T>(
+  path: string,
+  responseSchema: PlatformResponseSchema<T>,
+  init?: RequestInit,
+): Promise<T>;
+export async function platformApiFetch<T>(
+  path: string,
+  responseSchemaOrInit: PlatformResponseSchema<T> | RequestInit = {},
+  schemaInit: RequestInit = {},
+): Promise<T> {
+  let responseSchema: PlatformResponseSchema<T> | undefined;
+  let init: RequestInit;
+  if (isPlatformResponseSchema(responseSchemaOrInit)) {
+    responseSchema = responseSchemaOrInit;
+    init = schemaInit;
+  } else {
+    init = responseSchemaOrInit;
+  }
   const response = await fetch(`${PLATFORM_API_BASE}${path}`, {
     ...init,
     credentials: "include",
@@ -23,8 +45,14 @@ export async function platformApiFetch<T>(path: string, init: RequestInit = {}):
   });
 
   if (!response.ok) throw await apiErrorFromResponse(response);
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
+  const value: unknown = response.status === 204 ? undefined : await response.json();
+  return responseSchema ? responseSchema.parse(value) : (value as T);
+}
+
+function isPlatformResponseSchema<T>(
+  value: PlatformResponseSchema<T> | RequestInit,
+): value is PlatformResponseSchema<T> {
+  return "parse" in value && typeof value.parse === "function";
 }
 
 async function apiErrorFromResponse(response: Response): Promise<ApiRequestError> {

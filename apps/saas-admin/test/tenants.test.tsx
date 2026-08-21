@@ -1,7 +1,9 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { platformTenantContracts } from "@markiro/platform-contracts";
 
+import { platformApiFetch } from "../src/api/client.js";
 import {
   ACCOUNTANT_ME,
   SUPPORT_ME,
@@ -26,6 +28,36 @@ async function chooseOption(
 }
 
 describe("platform tenants", () => {
+  it("lets the platform client parse a supplied shared response schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          items: [
+            {
+              ...structuredClone(TENANT_LIST_ITEM),
+              id: "legacy_better_auth_org",
+              createdAt: "2026-08-11 18:08:42.158",
+            },
+          ],
+          page: 1,
+          limit: 50,
+          total: 1,
+        }),
+      ),
+    );
+
+    const result = await platformApiFetch(
+      "/tenants?page=1&limit=50",
+      platformTenantContracts.list.response,
+    );
+
+    expect(result.items[0]).toMatchObject({
+      id: "legacy_better_auth_org",
+      createdAt: "2026-08-11T18:08:42.158Z",
+    });
+  });
+
   it("accepts the PostgreSQL timestamp shape returned by the production tenant list", async () => {
     const productionTenant = {
       ...structuredClone(TENANT_LIST_ITEM),
