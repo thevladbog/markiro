@@ -321,7 +321,7 @@
     "statuses": {
       "active": "Активен",
       "suspended": "Приостановлен",
-      "pending_activation": "Ожидает активации"
+      "invited": "Ожидает активации"
     }
   },
   "audit": {
@@ -553,7 +553,8 @@
     "sources": {
       "demo": "Демо-подключение",
       "manual": "Ручное назначение",
-      "paid_offer_line": "Оплаченное предложение"
+      "paid_offer_line": "Оплаченное предложение",
+      "paid_invoice_line": "Оплаченный счёт"
     },
     "createForm": {
       "title": "Новый тенант",

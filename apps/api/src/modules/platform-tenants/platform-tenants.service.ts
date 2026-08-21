@@ -18,17 +18,38 @@ interface TenantListRow {
   id: string;
   name: string;
   slug: string;
-  createdAt: Date;
+  createdAt: Date | string;
   subscriptionId: string | null;
   subscriptionStatus: string | null;
-  startsAt: Date | null;
-  endsAt: Date | null;
+  startsAt: Date | string | null;
+  endsAt: Date | string | null;
   planVersionId: string | null;
   planVersion: number | null;
   planNameRu: string | null;
   planNameEn: string | null;
   unitPrice: string | null;
   total: number;
+}
+
+export function serializeTenantListTimestamp(value: null): null;
+export function serializeTenantListTimestamp(value: Date | string): string;
+export function serializeTenantListTimestamp(value: unknown): string | null;
+export function serializeTenantListTimestamp(value: unknown): string | null {
+  if (value === null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value !== "string") {
+    throw new TypeError("tenant_list_timestamp_invalid");
+  }
+
+  let normalized = value.replace(" ", "T");
+  if (!/[zZ]|[+-]\d{2}(?::?\d{2})?$/.test(normalized)) {
+    normalized += "Z";
+  } else if (/[+-]\d{2}$/.test(normalized)) {
+    normalized += ":00";
+  } else if (/[+-]\d{4}$/.test(normalized)) {
+    normalized = `${normalized.slice(0, -2)}:${normalized.slice(-2)}`;
+  }
+  return new Date(normalized).toISOString();
 }
 
 @Injectable()
@@ -92,15 +113,15 @@ export class PlatformTenantsService {
         id: row.id,
         name: row.name,
         slug: row.slug,
-        createdAt: row.createdAt,
+        createdAt: serializeTenantListTimestamp(row.createdAt),
         subscriptionStatus: row.subscriptionStatus ?? "unmanaged",
         ...(row.subscriptionId
           ? {
               subscription: {
                 id: row.subscriptionId,
                 status: row.subscriptionStatus,
-                startsAt: row.startsAt,
-                endsAt: row.endsAt,
+                startsAt: serializeTenantListTimestamp(row.startsAt),
+                endsAt: serializeTenantListTimestamp(row.endsAt),
                 planVersion: {
                   id: row.planVersionId,
                   version: row.planVersion,

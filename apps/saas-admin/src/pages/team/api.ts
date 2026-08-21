@@ -6,7 +6,7 @@ export type PlatformUser = {
   name: string | null;
   email: string;
   role: PlatformRole;
-  status: "active" | "suspended" | "pending_activation";
+  status: "active" | "suspended" | "invited";
   twoFactorReady: boolean;
   createdAt: string;
 };

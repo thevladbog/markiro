@@ -35,6 +35,18 @@ const PRODUCTION_PLAN = "Производственный · plan-production · 
 const STATION_ADDON = "Дополнительная станция · addon-station · версия 1";
 
 describe("tenant subscription detail", () => {
+  it("accepts subscriptions and add-ons created from a paid invoice line", async () => {
+    const detail = structuredClone(TENANT_DETAIL);
+    detail.currentSubscription.source = "paid_invoice_line";
+    detail.activeAddons[0]!.source = "paid_invoice_line";
+    installTenantApi({ detail });
+
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    expect(screen.getAllByText("Оплаченный счёт")).toHaveLength(2);
+  });
+
   it("renders exact current, scheduled, add-on, usage, and reasoned history facts", async () => {
     installTenantApi();
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
@@ -512,13 +524,16 @@ describe("tenant subscription detail", () => {
     );
   });
 
-  it("rejects an invalid route UUID at the client boundary without a tenant request", async () => {
+  it("rejects an overlong tenant reference at the client boundary without a tenant request", async () => {
+    const overlongTenantReference = "t".repeat(129);
     installTenantApi();
-    renderSaasApp({ initialEntry: "/tenants/not-a-uuid" });
+    renderSaasApp({ initialEntry: `/tenants/${overlongTenantReference}` });
 
     expect(await screen.findByText("Некорректный идентификатор тенанта")).toBeDefined();
     expect(
-      vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes("not-a-uuid")),
+      vi
+        .mocked(fetch)
+        .mock.calls.some(([input]) => String(input).includes(overlongTenantReference)),
     ).toBe(false);
   });
 });

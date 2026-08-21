@@ -26,6 +26,37 @@ async function chooseOption(
 }
 
 describe("platform tenants", () => {
+  it("accepts the PostgreSQL timestamp shape returned by the production tenant list", async () => {
+    const productionTenant = {
+      ...structuredClone(TENANT_LIST_ITEM),
+      createdAt: "2026-08-11 18:08:42.158",
+      subscription: {
+        ...structuredClone(TENANT_LIST_ITEM.subscription),
+        startsAt: "2026-08-11 18:08:42.158+00",
+        endsAt: "2026-09-11 18:08:42.158+00",
+      },
+    };
+    installTenantApi({ me: SUPPORT_ME, items: [productionTenant] });
+
+    renderSaasApp({ initialEntry: "/tenants" });
+
+    expect(await screen.findByText("Первый завод")).toBeDefined();
+    expect(screen.queryByText("Не удалось загрузить тенантов.")).toBeNull();
+  });
+
+  it("keeps legacy opaque tenant references navigable", async () => {
+    const legacyTenant = {
+      ...structuredClone(TENANT_LIST_ITEM),
+      id: "legacy-better-auth-tenant-01",
+    };
+    installTenantApi({ me: SUPPORT_ME, items: [legacyTenant] });
+
+    renderSaasApp({ initialEntry: "/tenants" });
+
+    const tenantLink = await screen.findByRole("link", { name: /Первый завод/ });
+    expect(tenantLink.getAttribute("href")).toBe("/tenants/legacy-better-auth-tenant-01");
+  });
+
   it("renders distinct loading, empty, and error list states", async () => {
     vi.stubGlobal(
       "fetch",
