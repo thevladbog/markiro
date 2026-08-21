@@ -861,7 +861,7 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
             <WorkCounters
               accepted={waiting ? 0 : 1248}
               rejected={waiting ? 0 : 3}
-              pendingSync={waiting ? 0 : 7}
+              pendingSync={mode === "offline" ? 7 : 0}
               locale={workLabels.locale}
               labels={workLabels.counters}
             />
