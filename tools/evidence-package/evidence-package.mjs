@@ -383,7 +383,7 @@ function parseChecksums(bytes) {
   const entries = [];
   const seen = new Set();
   for (const line of lines) {
-    const match = /^([0-9a-f]{64})  (.+)$/.exec(line);
+    const match = /^([0-9a-f]{64}) {2}(.+)$/.exec(line);
     if (!match || !SHA256.test(match[1])) invalid("malformed checksum line");
     const relativePath = normalizeRelativePath(match[2], "checksum path");
     if (seen.has(relativePath)) {

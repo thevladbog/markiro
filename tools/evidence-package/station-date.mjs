@@ -10,6 +10,13 @@ import {
   invalid,
 } from "./secure-filesystem.mjs";
 
+function hasControlCharacters(value) {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
+  });
+}
+
 function capturedAt(now = new Date()) {
   return now.toISOString().replace(/\.\d{3}Z$/u, "+00:00");
 }
@@ -19,7 +26,7 @@ function validateArgument(value, label) {
     typeof value !== "string" ||
     value.length === 0 ||
     value.length > 512 ||
-    /[\u0000-\u001f\u007f-\u009f]/u.test(value)
+    hasControlCharacters(value)
   ) {
     invalid(`${label} is invalid`);
   }
@@ -56,7 +63,7 @@ function validateOutputName(relativePath) {
     relativePath === ".." ||
     relativePath.includes("/") ||
     relativePath.includes("\\") ||
-    /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath) ||
+    hasControlCharacters(relativePath) ||
     Buffer.byteLength(relativePath) > 180
   ) {
     invalid("evidence output filename is invalid");

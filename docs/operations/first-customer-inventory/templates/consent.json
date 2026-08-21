@@ -1,6 +1,6 @@
 {
   "consentVersion": 1,
-  "operationId": "INV-20260824-pilot-01",
+  "operationId": "REQUIRED_COPY_FROM_MANIFEST_OPERATION_ID",
   "customerNaming": {
     "decision": null,
     "scope": "",

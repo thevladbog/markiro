@@ -411,17 +411,20 @@ export class ShiftsService {
           // New ingests set `firstBoxClosureAt` even when an accepted
           // physical closure has no matching box row. The historical box
           // lookup remains for closures accepted before that marker existed.
-          const [closedBox] = await tx
-            .select({ id: schema.boxes.id })
-            .from(schema.boxes)
-            .where(
-              and(
-                eq(schema.boxes.tenantId, tenantId),
-                eq(schema.boxes.shiftId, id),
-                isNotNull(schema.boxes.closedAt),
-              ),
-            )
-            .limit(1);
+          let closedBox: { id: string } | undefined;
+          if (current.firstBoxClosureAt === null) {
+            [closedBox] = await tx
+              .select({ id: schema.boxes.id })
+              .from(schema.boxes)
+              .where(
+                and(
+                  eq(schema.boxes.tenantId, tenantId),
+                  eq(schema.boxes.shiftId, id),
+                  isNotNull(schema.boxes.closedAt),
+                ),
+              )
+              .limit(1);
+          }
           if (current.firstBoxClosureAt !== null || closedBox) {
             await this.writeProductionDateAudit(tx, {
               tenantId,

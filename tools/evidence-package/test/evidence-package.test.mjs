@@ -200,7 +200,7 @@ test("seals deterministically and includes the manifest in SHA256SUMS", async (t
   assert.match(firstChecksums, new RegExp(`^${sha256Bytes(firstManifest)}  manifest\\.json$`, "m"));
   assert.match(
     firstChecksums,
-    /^ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad  baseline\/old-sscc\.raw\.txt$/m,
+    /^ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad {2}baseline\/old-sscc\.raw\.txt$/m,
   );
 
   assert.deepEqual(await sealEvidencePackage(root), { artifactCount: 2, checksumCount: 3 });
@@ -288,7 +288,7 @@ test("rejects manifest metadata inconsistent with the sealed artifacts", async (
   await writeFile(
     checksumPath,
     checksums.replace(
-      /^[0-9a-f]{64}  manifest\.json$/m,
+      /^[0-9a-f]{64} {2}manifest\.json$/m,
       `${sha256Bytes(manifestText)}  manifest.json`,
     ),
   );

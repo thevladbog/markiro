@@ -530,6 +530,31 @@ describe("ShiftsService.updateShift production-date lock and audit", () => {
     ]);
   });
 
+  it("rejects from the durable closure marker without requiring a historical box row", async () => {
+    const before = "2026-08-20";
+    const after = "2026-08-21";
+    const harness = productionDateUpdateDb({
+      ...SHIFT_ROW,
+      productionDate: before,
+      firstBoxClosureAt: new Date("2026-08-20T10:00:00.000Z"),
+    });
+    const service = serviceForUpdate(harness.db);
+
+    await expect(
+      callProductionDateUpdate(service, { productionDate: after }),
+    ).rejects.toMatchObject({
+      response: {
+        code: "PRODUCTION_DATE_LOCKED",
+        message: "Production date cannot change after the first box closure",
+      },
+    });
+    expect(harness.boxQueries).toEqual([]);
+    expect(harness.stored().productionDate).toBe(before);
+    expect(harness.audits).toEqual([
+      productionDateAudit("failure", before, after, "box_already_closed"),
+    ]);
+  });
+
   it("keeps the existing closed-shift conflict and records the attempted date", async () => {
     const before = "2026-08-20";
     const after = "2026-08-21";

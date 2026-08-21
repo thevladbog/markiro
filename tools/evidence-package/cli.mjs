@@ -3,9 +3,15 @@ import { EvidencePackageError } from "./secure-filesystem.mjs";
 const MAX_ERROR_BYTES = 320;
 const SAFE_CODE = /^[A-Z0-9_]{1,20}$/;
 
+function replaceControlCharacters(value) {
+  return Array.from(String(value), (character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) ? " " : character;
+  }).join("");
+}
+
 function sanitizeText(value) {
-  return String(value)
-    .replace(/[\u0000-\u001f\u007f-\u009f]/gu, " ")
+  return replaceControlCharacters(value)
     .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\s]+/gu, "[path]")
     .replace(/\/(?:[^/\s]+\/)*[^/\s]*/gu, "[path]")
     .replace(/\s+/gu, " ")

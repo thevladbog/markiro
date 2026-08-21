@@ -110,7 +110,7 @@ Expected: PASS. If `DATABASE_URL` is available, also run `corepack pnpm --filter
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/db/src/schema/platform.ts packages/db/test/schema.test.ts packages/db/migrations/0054_* packages/db/migrations/meta/_journal.json
+git add packages/db/src/schema/platform.ts packages/db/test/schema.test.ts packages/db/migrations/0054_* packages/db/migrations/meta/0054_snapshot.json packages/db/migrations/meta/_journal.json
 git commit -m "feat(db): add shift production date"
 ```
 
@@ -189,7 +189,7 @@ const productionDateSchema = z
   }, "productionDate must be a real calendar date");
 ```
 
-Add `productionDate: productionDateSchema.nullable().optional()` to create/update schemas and `productionDate: string | null` to `ShiftDto`. Because Station bundles extend/contain `ShiftDto`, confirm their public types now require the current server field.
+Add `productionDate: productionDateSchema.nullable().optional()` to create/update schemas and `productionDate: string | null` to `ShiftDto`. Current API bundle responses use that required `ShiftDto` field. Keep backward compatibility at the Station consumer boundary, where the parsed legacy bundle field remains optional so an old server's omission preserves the mirrored value; do not weaken the current server response type.
 
 - [ ] **Step 4: Thread the field through every service selection and mapper**
 
@@ -310,7 +310,18 @@ Change the service signature and all direct test calls to `(tenantId, actorUserI
 
 - [ ] **Step 4: Detect a meaningful production-date change and lock after closure**
 
-Import `isNotNull`. After loading the tenant-scoped current shift:
+Inside one transaction, lock the tenant-scoped shift row with `FOR UPDATE` before
+checking or changing the date. Station closure ingest takes the same row lock
+before accepting a closure and sets `shifts.firstBoxClosureAt` with server time
+in that transaction, including zero-item and orphan closures without a `boxes`
+row. Treat that durable marker as the primary lock. Retain a tenant-scoped
+historical `boxes.closedAt IS NOT NULL` lookup as the rolling-upgrade fallback
+for closures accepted before the marker existed. Either path returns the same
+audited `PRODUCTION_DATE_LOCKED` conflict. Hold the row lock through the guarded
+shift update and success audit so a closure cannot commit between validation and
+mutation.
+
+The core decision is:
 
 ```ts
 const requestedProductionDate = data.productionDate;
@@ -318,19 +329,22 @@ const productionDateChanged =
   requestedProductionDate !== undefined && requestedProductionDate !== current.productionDate;
 
 if (productionDateChanged) {
-  const [closedBox] = await this.db
-    .select({ id: schema.boxes.id })
-    .from(schema.boxes)
-    .where(
-      and(
-        eq(schema.boxes.tenantId, tenantId),
-        eq(schema.boxes.shiftId, id),
-        isNotNull(schema.boxes.closedAt),
-      ),
-    )
-    .limit(1);
-  if (closedBox) {
-    await this.writeProductionDateAudit(this.db, {
+  let closedBox;
+  if (current.firstBoxClosureAt === null) {
+    [closedBox] = await tx
+      .select({ id: schema.boxes.id })
+      .from(schema.boxes)
+      .where(
+        and(
+          eq(schema.boxes.tenantId, tenantId),
+          eq(schema.boxes.shiftId, id),
+          isNotNull(schema.boxes.closedAt),
+        ),
+      )
+      .limit(1);
+  }
+  if (current.firstBoxClosureAt !== null || closedBox) {
+    await this.writeProductionDateAudit(tx, {
       tenantId,
       actorUserId,
       shiftId: id,
@@ -347,7 +361,9 @@ if (productionDateChanged) {
 }
 ```
 
-The query is tenant-scoped and checks historical closure, not current box state alone.
+Add focused tests for both marker-only and legacy-box-only paths. The marker-only
+fixture has `firstBoxClosureAt` set and no historical box row; the fallback
+fixture has a historical closed box and a null marker.
 
 - [ ] **Step 5: Make successful update plus audit atomic**
 
@@ -823,7 +839,15 @@ Manifest artifact entries are:
 }
 ```
 
-Use write-to-sibling-temp plus `rename` for both generated files. `SHA256SUMS` includes the newly written `manifest.json` and every artifact except itself.
+Stage both generated files as owned sibling temporaries, back up both previous
+outputs, and install the pair as one rollback-capable transaction. A failure at
+either rename restores both previous outputs; ownership changes or incomplete
+rollback fail closed and preserve recovery files for manual inspection. A crash
+between the two renames may expose a mixed pair, so verification must reject it
+and the runbook must require preserving any `*.backup.tmp` files for recovery.
+Tests cover backup, first-install, second-install, rollback, cleanup, ownership,
+and post-crash verification behavior. `SHA256SUMS` includes the newly written
+`manifest.json` and every artifact except itself.
 
 - [ ] **Step 4: Implement initializer and verifier**
 
@@ -1007,7 +1031,13 @@ corepack pnpm evidence:seal -- evidence/INV-20260824-pilot-01
 corepack pnpm evidence:verify -- evidence/INV-20260824-pilot-01
 ```
 
-Copy to two controlled private locations, record non-secret location labels in `backup-locations.txt`, and independently run verification against both copies.
+Transfer the final package over an encrypted channel to two controlled private
+locations encrypted at rest. Before sealing, record only non-secret location
+labels, the named key custodian, key-management method, encryption method, and
+transport method in `backup-locations.txt`; never place keys or credentials in
+the package. Independently decrypt/open each copy, run verification, and record
+`PASS`/`FAIL` for decryption, evidence verification, and detached-digest match in
+the external custody record.
 
 - [ ] **Step 6: Final completion report**
 

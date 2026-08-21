@@ -117,6 +117,9 @@ export async function initializeEvidencePackage(root, operationId, options = {})
   }
 
   const session = await bindEvidenceRoot(root, options, { create: true });
+  let result;
+  let operationFailed = false;
+  let operationError;
   try {
     // Refuse populated source data before creating any scaffold entries.
     await validateBaseline(session);
@@ -144,10 +147,21 @@ export async function initializeEvidencePackage(root, operationId, options = {})
     await validateBaseline(session);
     await validateManifest(session, operationId);
     await assertEvidenceRootStable(session);
-    return { operationId, root: session.rootPath };
-  } finally {
-    await closeEvidenceRoot(session);
+    result = { operationId, root: session.rootPath };
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
   }
+
+  try {
+    await closeEvidenceRoot(session);
+  } catch (closeError) {
+    // Cleanup must remain observable after success, but must not replace the
+    // primary validation or scaffold failure.
+    if (!operationFailed) throw closeError;
+  }
+  if (operationFailed) throw operationError;
+  return result;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

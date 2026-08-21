@@ -127,30 +127,37 @@ This avoids doubling the largest scan dataset while still giving projectors one 
 
 Every canonical business event exposes the following logical fields, whether they are stored directly or supplied by an adapter over an existing ledger.
 
-| Group            | Fields                                                                           | Rules                                                                                                                            |
-| ---------------- | -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Identity         | `tenantId`, `eventId` or deterministic `sourceKey`, `eventName`, `schemaVersion` | Tenant is derived from the authenticated/authoritative source, never trusted from a device body.                                 |
-| Business context | nullable `operationId`, `shiftId`, `productId`, `lineId`, `boxId`                | References must resolve inside the same tenant.                                                                                  |
-| Actor            | `actorType`, nullable `actorId`, nullable `operatorId`, `deviceId`/`terminalId`  | Cabinet users, station operators, devices, systems, founders, and customer signers remain distinct trust domains.                |
-| Time             | `occurredAt`, `recordedAt`, optional timezone offset                             | Both timestamps are retained. The device clock is bounded by existing scan-window validation.                                    |
-| Ordering         | optional `deviceSeq`/`sourceSeq`, `sessionId`, `correlationId`, `causationId`    | Required when the source can retry or arrive out of order.                                                                       |
-| Provenance       | `source`, optional `appVersion`, `payloadDigest`, evidence class                 | Payload digest binds retries to identical normalized content.                                                                    |
-| Payload          | schema-specific typed payload                                                    | Bounded and validated. Raw KM/GS1 values are not copied merely for analytics; hashes and authoritative references are preferred. |
-| Evidence         | zero or more artifact references                                                 | A reference contains a private object pointer and SHA-256, never public object URLs.                                             |
+| Group            | Fields                                                                                                   | Rules                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Identity         | `tenantId`, persisted deterministic `sourceKey`, optional native `eventId`, `eventName`, `schemaVersion` | Tenant is derived from the authenticated/authoritative source, never trusted from a device body.                                 |
+| Business context | nullable `operationId`, `shiftId`, `productId`, `lineId`, `boxId`                                        | References must resolve inside the same tenant.                                                                                  |
+| Actor            | `actorType`, nullable `actorId`, nullable `operatorId`, `deviceId`/`terminalId`                          | Cabinet users, station operators, devices, systems, founders, and customer signers remain distinct trust domains.                |
+| Time             | `occurredAt`, `recordedAt`, optional timezone offset                                                     | Both timestamps are retained. The device clock is bounded by existing scan-window validation.                                    |
+| Ordering         | optional `deviceSeq`/`sourceSeq`, `sessionId`, `correlationId`, `causationId`                            | Required when the source can retry or arrive out of order.                                                                       |
+| Provenance       | `source`, optional `appVersion`, `payloadDigest`, evidence class                                         | Payload digest binds retries to identical normalized content.                                                                    |
+| Payload          | schema-specific typed payload                                                                            | Bounded and validated. Raw KM/GS1 values are not copied merely for analytics; hashes and authoritative references are preferred. |
+| Evidence         | zero or more artifact references                                                                         | A reference contains a private object pointer and SHA-256, never public object URLs.                                             |
 
 `eventName` and `schemaVersion` are immutable. Unknown future versions are quarantined or ignored by older projectors without blocking production ingest.
 
 ### 6.2 Source identity and idempotency
 
-Different sources use different durable identities:
+Every event persists one canonical `sourceKey`; uniqueness is enforced by
+`(tenantId, source, sourceKey)`. A source with a native `eventId` also stores it
+for traceability and deterministically maps it to `sourceKey` as
+`event:<eventId>`. `payloadDigest` is always stored separately from identity.
 
-- station scan/box/exception records: authenticated terminal + `batchId` + `recordKind` + `recordIndex` + normalized payload digest;
-- station shift close: native `eventId` + payload digest;
-- mutable server lifecycle transition: generated event UUID inserted in the same Postgres transaction as the domain mutation;
-- evidence artifact: operation id + artifact id + content SHA-256;
-- imported baseline: operation id + manifest version + file SHA-256.
+Different sources derive the canonical key as follows:
 
-Exact redelivery is an acknowledged no-op. Reuse of the same identity with a different digest is a conflict, is retained, and is never silently overwritten.
+- station scan/box/exception records: authenticated terminal + `batchId` + `recordKind` + `recordIndex`;
+- station shift close: `event:<eventId>`;
+- mutable server lifecycle transition: `event:<generated UUID>`, inserted in the same Postgres transaction as the domain mutation;
+- evidence artifact: operation id + artifact id;
+- imported baseline: operation id + manifest version + stable file identifier.
+
+Exact redelivery of the same canonical key and digest is an acknowledged no-op.
+Reuse of the same canonical key with a different digest is a conflict, is
+retained, and is never silently overwritten.
 
 ### 6.3 Initial event families
 

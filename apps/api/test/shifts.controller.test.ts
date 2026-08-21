@@ -57,6 +57,16 @@ describe("shift production date DTO boundary", () => {
   });
 
   it("rejects impossible and malformed production dates", () => {
+    expect(
+      createShiftSchema.parse({
+        productId,
+        mode: "aggregation",
+        productionDate: "2024-02-29",
+      }),
+    ).toMatchObject({ productionDate: "2024-02-29" });
+    expect(updateShiftSchema.parse({ productionDate: "2024-02-29" })).toEqual({
+      productionDate: "2024-02-29",
+    });
     expect(() =>
       createShiftSchema.parse({
         productId,

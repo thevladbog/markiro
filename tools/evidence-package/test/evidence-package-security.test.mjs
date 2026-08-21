@@ -17,7 +17,6 @@ import {
 import { initializeEvidencePackage } from "../init.mjs";
 
 const execFile = promisify(execFileCallback);
-const toolRoot = fileURLToPath(new URL("..", import.meta.url));
 const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
 const manifestName = "manifest.json";
 const checksumsName = "SHA256SUMS";
@@ -57,6 +56,34 @@ async function packageFixture(t) {
 
 function filesystem(overrides = {}) {
   return { ...fsPromises, constants: fsConstants, ...overrides };
+}
+
+function filesystemWithRootCloseFailure(root) {
+  return filesystem({
+    async open(path, ...args) {
+      const handle = await fsPromises.open(path, ...args);
+      if (path !== root) return handle;
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property !== "close") {
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return async () => {
+            await target.close();
+            throw Object.assign(new Error("injected root close failure"), { code: "EIO" });
+          };
+        },
+      });
+    },
+  });
+}
+
+function hasControlCharacters(value) {
+  return Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0);
+    return codePoint <= 0x1f || codePoint === 0x7f;
+  });
 }
 
 async function generatedBytes(root) {
@@ -313,6 +340,33 @@ test("initializer revalidates when a concurrent different operation wins install
   );
   const installed = JSON.parse(await readFile(join(root, manifestName), "utf8"));
   assert.equal(installed.operationId, competingId);
+});
+
+test("initializer preserves its primary failure when root cleanup also fails", async (t) => {
+  const root = await temporaryDirectory(t);
+  const competingId = "INV-20260824-competing-02";
+  await writeArtifact(root, "baseline/old-sscc.raw.txt", "");
+  await writeFile(join(root, manifestName), `${JSON.stringify(draft(competingId), null, 2)}\n`);
+
+  await assert.rejects(
+    initializeEvidencePackage(root, operationId, {
+      filesystem: filesystemWithRootCloseFailure(root),
+    }),
+    /different operation/i,
+  );
+});
+
+test("initializer surfaces a root cleanup failure after successful scaffolding", async (t) => {
+  const parent = await temporaryDirectory(t);
+  const root = join(parent, "operation");
+
+  await assert.rejects(
+    initializeEvidencePackage(root, operationId, {
+      filesystem: filesystemWithRootCloseFailure(root),
+    }),
+    /injected root close failure/i,
+  );
+  assert.equal((await stat(join(root, manifestName))).isFile(), true);
 });
 
 test("initializer removes an owned partial temporary file after a write failure", async (t) => {
@@ -756,8 +810,9 @@ test("central CLI error handling bounds and sanitizes injected errors", async ()
 
   assert.equal(exitCode, 1);
   assert.ok(Buffer.byteLength(stderr) <= 320, stderr);
-  assert.doesNotMatch(stderr, /private bytes|customer|secret|\u001b|\x1b/i);
-  assert.doesNotMatch(stderr.slice(0, -1), /[\u0000-\u001f\u007f]/);
+  assert.doesNotMatch(stderr, /private bytes|customer|secret/i);
+  assert.equal(stderr.includes("\u001b"), false);
+  assert.equal(hasControlCharacters(stderr.slice(0, -1)), false);
 });
 
 async function gitIgnored(relativePath) {

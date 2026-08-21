@@ -515,7 +515,6 @@ export async function installBoundFileIfMissing(session, relativePath, contents,
         if (identity) ownership = { identity, relativePath: temporaryRelativePath };
       }
       await handle.close().catch((cleanupError) => cleanupFailures.push(cleanupError));
-      handle = undefined;
     }
     if (ownership) {
       await removeOwnedRegularPath(session, ownership).catch((cleanupError) =>

@@ -1,5 +1,5 @@
 # Complete this file outside the source package and both copy roots after final seal.
-# Final statuses: PASS or FAIL. Times: YYYY-MM-DDTHH:mm:ss+03:00 with a numeric offset.
+# Final statuses: PASS or FAIL. Times use the actual numeric offset as YYYY-MM-DDTHH:mm:ss±HH:mm; +03:00 is only an example.
 operationId=
 detachedCustodyRecordId=
 finalSHA256SUMSFileSha256=
@@ -13,6 +13,7 @@ sourceSignatureOrReference=
 copyId=copy-a
 controlledLocationLabel=
 copyOpenStatus=
+decryptionVerifiedStatus=
 evidenceVerifyStatus=
 checkedFileCount=
 copySHA256SUMSFileSha256=
@@ -25,6 +26,7 @@ signatureOrReference=
 copyId=copy-b
 controlledLocationLabel=
 copyOpenStatus=
+decryptionVerifiedStatus=
 evidenceVerifyStatus=
 checkedFileCount=
 copySHA256SUMSFileSha256=

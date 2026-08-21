@@ -5,8 +5,16 @@ copyId=copy-a
 controlledLocationLabel=
 custodianNameOrId=
 custodianRole=
+encryptionMethod=
+keyCustodianNameOrId=
+keyManagementMethod=
+encryptedTransportMethod=
 
 copyId=copy-b
 controlledLocationLabel=
 custodianNameOrId=
 custodianRole=
+encryptionMethod=
+keyCustodianNameOrId=
+keyManagementMethod=
+encryptedTransportMethod=
