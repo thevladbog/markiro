@@ -4,6 +4,8 @@ export interface BoxLabelInput {
   sscc: string;
   itemCount: number;
   productName: string;
+  /** The catalog's short print name; null falls back to `productName`. */
+  productPrintName: string | null;
   gtin14: string;
   egaisCode: string | null;
   shelfLifeDays: number | null;
@@ -124,6 +126,7 @@ export function boxLabelFields(input: BoxLabelInput): Record<LabelField, string>
 
   return {
     "product.name": input.productName,
+    "product.printName": input.productPrintName ?? input.productName,
     "product.gtin": input.gtin14,
     "product.egais": input.egaisCode ?? "",
     "km.code": "",

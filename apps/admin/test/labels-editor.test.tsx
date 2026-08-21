@@ -592,6 +592,7 @@ describe("Import is the only content path", () => {
     expect(screen.getByRole("dialog", { name: "Импорт кода" })).toBeDefined();
     for (const placeholder of [
       "{{product.name}}",
+      "{{product.printName}}",
       "{{product.gtin}}",
       "{{km.code}}",
       "{{sscc}}",

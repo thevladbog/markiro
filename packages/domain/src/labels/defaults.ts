@@ -313,6 +313,7 @@ function buildBoxLabelSpec(
   heightMm: number,
   dpi: 203 | 300,
   dates: DateFields,
+  nameField: "product.name" | "product.printName" = "product.name",
 ): LabelTemplateSpec {
   const withDates = dates === "with-dates";
   const s = Math.min(widthMm / BASE_WIDTH_MM, heightMm / BASE_HEIGHT_MM);
@@ -420,7 +421,7 @@ function buildBoxLabelSpec(
       id: "name",
       xMm: m,
       yMm: nameY,
-      field: "product.name",
+      field: nameField,
       fontSizePt: namePt,
       bold: true,
       maxWidthMm: contentW,
@@ -620,9 +621,34 @@ export function buildDateFreeBoxLabelTemplates(): DefaultLabelTemplate[] {
 }
 
 /**
- * Every stock box label a tenant is seeded with: the dated five followed by
- * the date-free five. Provisioning inserts exactly this list.
+ * PRINT-NAME duplicates of both families: identical geometry, but the
+ * headline binds `product.printName` — the catalog's short operator-facing
+ * name (the station substitutes the full name when a product has none). The
+ * ` [Назв. для печати]` suffix is part of the seed identity, same rules as
+ * the families above.
+ */
+export function buildPrintNameBoxLabelTemplates(): DefaultLabelTemplate[] {
+  return [
+    ...BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
+      name: `Коробка ${w}×${h} (${dpi} dpi) [Назв. для печати]`,
+      spec: buildBoxLabelSpec(w, h, dpi, "with-dates", "product.printName"),
+    })),
+    ...BOX_LABEL_SIZES.map(({ w, h, dpi }) => ({
+      name: `Коробка ${w}×${h} без дат (${dpi} dpi) [Назв. для печати]`,
+      spec: buildBoxLabelSpec(w, h, dpi, "without-dates", "product.printName"),
+    })),
+  ];
+}
+
+/**
+ * Every stock box label a tenant is seeded with: the dated five, the
+ * date-free five, then their ten print-name duplicates. Provisioning inserts
+ * exactly this list.
  */
 export function buildDefaultLabelTemplates(): DefaultLabelTemplate[] {
-  return [...buildDatedBoxLabelTemplates(), ...buildDateFreeBoxLabelTemplates()];
+  return [
+    ...buildDatedBoxLabelTemplates(),
+    ...buildDateFreeBoxLabelTemplates(),
+    ...buildPrintNameBoxLabelTemplates(),
+  ];
 }

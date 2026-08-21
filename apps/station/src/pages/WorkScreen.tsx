@@ -64,6 +64,8 @@ export interface WorkScreenProps {
   operatorId: string;
   expectedGtin14: string;
   productName: string;
+  /** The catalog's short print name for the label's `product.printName` field; null = full name. */
+  productPrintName?: string | null;
   productId?: string;
   productImage?: StationProductImageDescriptor | null | undefined;
   counterpartyName?: string | null;
@@ -146,6 +148,7 @@ export function WorkScreen({
   operatorId,
   expectedGtin14,
   productName,
+  productPrintName,
   productId,
   productImage,
   counterpartyName,
@@ -854,6 +857,7 @@ export function WorkScreen({
       sscc: result.sscc,
       itemCount: result.itemCount,
       productName,
+      productPrintName: productPrintName ?? null,
       gtin14: expectedGtin14,
       egaisCode: productEgaisCode ?? null,
       shelfLifeDays: productShelfLifeDays ?? null,

@@ -269,6 +269,7 @@ describe("sampleLabelData", () => {
     const data = sampleLabelData();
     expect(data).toEqual({
       "product.name": "Пиво светлое 0,5 л",
+      "product.printName": "Пиво светлое",
       "product.gtin": "04600682000013",
       "product.egais": "0101234567890123456",
       "km.code": "010460068200001321abcDEF1234567",

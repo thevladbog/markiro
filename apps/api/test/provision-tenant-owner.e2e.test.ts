@@ -290,6 +290,16 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         "Коробка 75×120 без дат (203 dpi)",
         "Коробка 100×100 без дат (203 dpi)",
         "Коробка 100×150 без дат (203 dpi)",
+        "Коробка 58×40 (203 dpi) [Назв. для печати]",
+        "Коробка 58×40 (300 dpi) [Назв. для печати]",
+        "Коробка 75×120 (203 dpi) [Назв. для печати]",
+        "Коробка 100×100 (203 dpi) [Назв. для печати]",
+        "Коробка 100×150 (203 dpi) [Назв. для печати]",
+        "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 58×40 без дат (300 dpi) [Назв. для печати]",
+        "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
+        "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
       ].sort(),
     );
 
@@ -313,7 +323,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    expect(after).toHaveLength(10);
+    expect(after).toHaveLength(20);
   });
 
   it("renews an expired unused activation only when explicitly requested", async () => {
