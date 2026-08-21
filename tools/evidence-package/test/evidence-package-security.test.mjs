@@ -354,6 +354,29 @@ test("initializer removes an owned partial temporary file after a write failure"
   );
 });
 
+test("initializer reports an unavailable atomic no-clobber capability", async (t) => {
+  const root = await temporaryDirectory(t);
+  const injected = filesystem({
+    async link() {
+      throw Object.assign(new Error("injected hard-link capability failure"), {
+        code: "ENOTSUP",
+      });
+    },
+  });
+
+  await assert.rejects(
+    initializeEvidencePackage(root, operationId, { filesystem: injected }),
+    /atomic no-clobber installation is unavailable/i,
+  );
+  await assert.rejects(stat(join(root, "baseline", "old-sscc.raw.txt")), {
+    code: "ENOENT",
+  });
+  assert.equal(
+    (await readdir(join(root, "baseline"))).some((name) => name.endsWith(".tmp")),
+    false,
+  );
+});
+
 test("seal and reseal preserve own __proto__ operation and provenance metadata", async (t) => {
   const root = await temporaryDirectory(t);
   await writeArtifact(root, "baseline/old-sscc.raw.txt", "prototype fixture");
@@ -491,6 +514,222 @@ test("backup cleanup failure is surfaced as actionable seal failure", async (t) 
     (await readdir(root)).some((name) => name.endsWith(".backup.tmp")),
     true,
   );
+});
+
+test("persistent root replacement stops rollback before touching the replacement root", async (t) => {
+  const { root } = await sealedChangedFixture(t);
+  const parked = `${root}.owned-operation-root`;
+  const replacement = await temporaryDirectory(t, "markiro-evidence-rollback-root-");
+  const replacementManifest = "replacement-root manifest sentinel";
+  const replacementChecksums = "replacement-root checksum sentinel";
+  await writeFile(join(replacement, manifestName), replacementManifest);
+  await writeFile(join(replacement, checksumsName), replacementChecksums);
+  t.after(() => rm(parked, { force: true, recursive: true }));
+  let swapped = false;
+  const destructiveCallsAfterSwap = [];
+  const checksumPath = join(root, checksumsName);
+  const injected = filesystem({
+    async rename(source, destination) {
+      if (!swapped && destination === checksumPath && !source.includes(".backup.tmp")) {
+        swapped = true;
+        await fsPromises.rename(root, parked);
+        await fsPromises.rename(replacement, root);
+        throw Object.assign(new Error("injected install failure after root replacement"), {
+          code: "EIO",
+        });
+      }
+      if (swapped) destructiveCallsAfterSwap.push(["rename", source, destination]);
+      return fsPromises.rename(source, destination);
+    },
+    async rm(path, options) {
+      if (swapped) destructiveCallsAfterSwap.push(["rm", path]);
+      return fsPromises.rm(path, options);
+    },
+  });
+
+  await assert.rejects(
+    sealEvidencePackage(root, { filesystem: injected }),
+    /filesystem identity changed.*root|manual recovery/i,
+  );
+  assert.deepEqual(destructiveCallsAfterSwap, []);
+  assert.equal(await readFile(join(root, manifestName), "utf8"), replacementManifest);
+  assert.equal(await readFile(join(root, checksumsName), "utf8"), replacementChecksums);
+});
+
+test("staged temporary replacement is preserved instead of deleted during cleanup", async (t) => {
+  const { previous, root } = await sealedChangedFixture(t);
+  const foreignBytes = "foreign staged-path replacement";
+  let stagedManifest;
+  let ownedRecovery;
+  const injected = filesystem({
+    async open(path, ...args) {
+      if (
+        basename(path).startsWith(`${manifestName}.`) &&
+        basename(path).endsWith(".tmp") &&
+        !basename(path).endsWith(".backup.tmp")
+      ) {
+        stagedManifest = path;
+      }
+      return fsPromises.open(path, ...args);
+    },
+    async rename(source, destination) {
+      if (destination.includes(".backup.tmp") && stagedManifest) {
+        ownedRecovery = `${stagedManifest}.owned-recovery`;
+        await fsPromises.rename(stagedManifest, ownedRecovery);
+        await writeFile(stagedManifest, foreignBytes);
+        throw Object.assign(new Error("injected backup failure after staged replacement"), {
+          code: "EIO",
+        });
+      }
+      return fsPromises.rename(source, destination);
+    },
+  });
+
+  await assert.rejects(
+    sealEvidencePackage(root, { filesystem: injected }),
+    /ownership changed|manual recovery/i,
+  );
+  assert.equal(await readFile(stagedManifest, "utf8"), foreignBytes);
+  assert.equal((await stat(ownedRecovery)).isFile(), true);
+  await assertGeneratedBytes(root, previous);
+});
+
+test("installed output replacement is preserved instead of deleted during rollback", async (t) => {
+  const { previous, root } = await sealedChangedFixture(t);
+  const manifestPath = join(root, manifestName);
+  const checksumPath = join(root, checksumsName);
+  const installedRecovery = join(root, "manifest.installed-owned-recovery.tmp");
+  const foreignBytes = "foreign installed-path replacement";
+  const injected = filesystem({
+    async rename(source, destination) {
+      if (destination === checksumPath && !source.includes(".backup.tmp")) {
+        await fsPromises.rename(manifestPath, installedRecovery);
+        await writeFile(manifestPath, foreignBytes);
+        throw Object.assign(new Error("injected checksum failure after installed replacement"), {
+          code: "EIO",
+        });
+      }
+      return fsPromises.rename(source, destination);
+    },
+  });
+
+  await assert.rejects(
+    sealEvidencePackage(root, { filesystem: injected }),
+    /ownership changed|manual recovery/i,
+  );
+  assert.equal(await readFile(manifestPath, "utf8"), foreignBytes);
+  assert.equal((await stat(installedRecovery)).isFile(), true);
+  assert.equal(await readFile(checksumPath, "utf8"), previous.checksums);
+  const manifestBackups = (await readdir(root)).filter(
+    (name) => name.startsWith(`${manifestName}.`) && name.endsWith(".backup.tmp"),
+  );
+  assert.equal(manifestBackups.length, 1);
+  assert.equal(await readFile(join(root, manifestBackups[0]), "utf8"), previous.manifest);
+});
+
+test("backup replacement is preserved instead of restored during rollback", async (t) => {
+  const { previous, root } = await sealedChangedFixture(t);
+  const manifestPath = join(root, manifestName);
+  const checksumPath = join(root, checksumsName);
+  const foreignBytes = "foreign backup-path replacement";
+  let manifestBackup;
+  let backupRecovery;
+  const injected = filesystem({
+    async rename(source, destination) {
+      if (source === manifestPath && destination.includes(".backup.tmp")) {
+        manifestBackup = destination;
+      }
+      if (destination === checksumPath && !source.includes(".backup.tmp")) {
+        backupRecovery = `${manifestBackup}.owned-recovery`;
+        await fsPromises.rename(manifestBackup, backupRecovery);
+        await writeFile(manifestBackup, foreignBytes);
+        throw Object.assign(new Error("injected checksum failure after backup replacement"), {
+          code: "EIO",
+        });
+      }
+      return fsPromises.rename(source, destination);
+    },
+  });
+
+  await assert.rejects(
+    sealEvidencePackage(root, { filesystem: injected }),
+    /ownership changed|manual recovery/i,
+  );
+  assert.equal(await readFile(manifestBackup, "utf8"), foreignBytes);
+  assert.equal(await readFile(backupRecovery, "utf8"), previous.manifest);
+  await assert.rejects(stat(manifestPath), { code: "ENOENT" });
+  assert.equal(await readFile(checksumPath, "utf8"), previous.checksums);
+});
+
+test("backup replacement is preserved instead of deleted during successful cleanup", async (t) => {
+  const { previous, root } = await sealedChangedFixture(t);
+  const manifestPath = join(root, manifestName);
+  const checksumPath = join(root, checksumsName);
+  const foreignBytes = "foreign backup cleanup replacement";
+  let manifestBackup;
+  let backupRecovery;
+  const injected = filesystem({
+    async rename(source, destination) {
+      if (source === manifestPath && destination.includes(".backup.tmp")) {
+        manifestBackup = destination;
+      }
+      const result = await fsPromises.rename(source, destination);
+      if (destination === checksumPath && !source.includes(".backup.tmp")) {
+        backupRecovery = `${manifestBackup}.owned-recovery`;
+        await fsPromises.rename(manifestBackup, backupRecovery);
+        await writeFile(manifestBackup, foreignBytes);
+      }
+      return result;
+    },
+  });
+
+  await assert.rejects(
+    sealEvidencePackage(root, { filesystem: injected }),
+    /ownership changed|backup cleanup failed.*manual/i,
+  );
+  assert.equal(await readFile(manifestBackup, "utf8"), foreignBytes);
+  assert.equal(await readFile(backupRecovery, "utf8"), previous.manifest);
+});
+
+test("successful enumeration surfaces a directory close failure after closing later handles", async (t) => {
+  const root = await packageFixture(t);
+  await writeArtifact(root, "photos/duplicates/close-fixture.bin", "close fixture bytes");
+  const photosPath = join(root, "photos");
+  const duplicatesPath = join(photosPath, "duplicates");
+  let injectedCloseFailure = false;
+  let ancestorClosedAfterFailure = false;
+  let rootClosedAfterFailure = false;
+  const injected = filesystem({
+    async open(path, ...args) {
+      const handle = await fsPromises.open(path, ...args);
+      if (![root, photosPath, duplicatesPath].includes(path)) return handle;
+      return new Proxy(handle, {
+        get(target, property) {
+          if (property !== "close") {
+            const value = Reflect.get(target, property, target);
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return async () => {
+            await target.close();
+            if (path === duplicatesPath && !injectedCloseFailure) {
+              injectedCloseFailure = true;
+              throw Object.assign(new Error("injected directory close failure"), { code: "EIO" });
+            }
+            if (path === photosPath && injectedCloseFailure) ancestorClosedAfterFailure = true;
+            if (path === root && injectedCloseFailure) rootClosedAfterFailure = true;
+          };
+        },
+      });
+    },
+  });
+
+  await assert.rejects(
+    listEvidenceFiles(root, { filesystem: injected }),
+    /filesystem descriptor cleanup failed/i,
+  );
+  assert.equal(injectedCloseFailure, true);
+  assert.equal(ancestorClosedAfterFailure, true);
+  assert.equal(rootClosedAfterFailure, true);
 });
 
 test("central CLI error handling bounds and sanitizes injected errors", async () => {

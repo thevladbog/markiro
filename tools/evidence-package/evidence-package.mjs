@@ -3,6 +3,7 @@ import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node
 
 import {
   assertEvidenceRootStable,
+  assertOwnedRegularPath,
   bindEvidenceRoot,
   closeEvidenceRoot,
   EvidencePackageError,
@@ -11,6 +12,8 @@ import {
   lstatBoundPath,
   readBoundDirectory,
   readBoundRegularFile,
+  removeOwnedRegularPath,
+  renameOwnedRegularPath,
 } from "./secure-filesystem.mjs";
 
 export { EvidencePackageError } from "./secure-filesystem.mjs";
@@ -221,25 +224,36 @@ function serializeManifest(manifest) {
   return text;
 }
 
-async function writeSiblingTemporary(session, target, contents) {
-  const temporary = join(dirname(target), `${basename(target)}.${process.pid}.${randomUUID()}.tmp`);
+async function writeSiblingTemporary(session, targetRelativePath, contents) {
+  const temporaryRelativePath = `${targetRelativePath}.${process.pid}.${randomUUID()}.tmp`;
+  const temporary = join(session.rootPath, ...temporaryRelativePath.split("/"));
   let handle;
+  let ownership;
   try {
     await assertEvidenceRootStable(session);
     handle = await session.filesystem.open(temporary, "wx", 0o600);
+    ownership = {
+      identity: await handle.stat({ bigint: true }),
+      relativePath: temporaryRelativePath,
+    };
     await handle.writeFile(contents, "utf8");
     await handle.sync();
+    ownership.identity = await handle.stat({ bigint: true });
     await handle.close();
     handle = undefined;
-    await assertEvidenceRootStable(session);
-    return temporary;
+    await assertOwnedRegularPath(session, ownership);
+    return ownership;
   } catch (error) {
-    await handle?.close().catch(() => undefined);
-    try {
-      await session.filesystem.rm(temporary, { force: true });
-    } catch (cleanupError) {
+    const cleanupFailures = [];
+    await handle?.close().catch((cleanupError) => cleanupFailures.push(cleanupError));
+    if (ownership) {
+      await removeOwnedRegularPath(session, ownership).catch((cleanupError) =>
+        cleanupFailures.push(cleanupError),
+      );
+    }
+    if (cleanupFailures.length > 0) {
       invalid("temporary output cleanup failed; manual recovery is required", {
-        cause: cleanupError,
+        cause: cleanupFailures[0],
       });
     }
     throw error;
@@ -250,9 +264,9 @@ async function existingGeneratedFile(session, relativePath) {
   try {
     const information = await lstatBoundPath(session, relativePath);
     if (!information.isFile()) invalid(`generated output is not a regular file: ${relativePath}`);
-    return true;
+    return { identity: information, relativePath };
   } catch (error) {
-    if (error?.code === "ENOENT") return false;
+    if (error?.code === "ENOENT") return undefined;
     throw error;
   }
 }
@@ -268,16 +282,14 @@ async function installGeneratedPair(session, staged) {
   let failure;
 
   for (const item of staged) {
-    if (!(await existingGeneratedFile(session, item.path))) continue;
-    const backup = join(
-      dirname(item.target),
-      `${basename(item.target)}.${process.pid}.${randomUUID()}.backup.tmp`,
-    );
+    const ownership = await existingGeneratedFile(session, item.path);
+    if (!ownership) continue;
+    const backupRelativePath = `${item.path}.${process.pid}.${randomUUID()}.backup.tmp`;
+    const record = { item, ownership };
     try {
-      await assertEvidenceRootStable(session);
-      await session.filesystem.rename(item.target, backup);
-      backups.push({ backup, item });
-      await assertEvidenceRootStable(session);
+      await renameOwnedRegularPath(session, ownership, backupRelativePath, () => {
+        backups.push(record);
+      });
     } catch (error) {
       failure = { error, item, phase: "backup" };
       break;
@@ -286,11 +298,12 @@ async function installGeneratedPair(session, staged) {
 
   if (!failure) {
     for (const item of staged) {
+      const record = { item, ownership: item.temporary };
       try {
-        await assertEvidenceRootStable(session);
-        await session.filesystem.rename(item.temporary, item.target);
-        installed.push(item);
-        await assertEvidenceRootStable(session);
+        await renameOwnedRegularPath(session, item.temporary, item.path, () => {
+          item.state = "installed";
+          installed.push(record);
+        });
       } catch (error) {
         failure = { error, item, phase: "install" };
         break;
@@ -300,19 +313,24 @@ async function installGeneratedPair(session, staged) {
 
   if (failure) {
     const rollbackFailures = [];
-    for (const item of [...installed].reverse()) {
-      await session.filesystem
-        .rm(item.target, { force: true })
-        .catch((error) => rollbackFailures.push(error));
+    for (const record of [...installed].reverse()) {
+      try {
+        await removeOwnedRegularPath(session, record.ownership);
+        record.item.state = "removed";
+      } catch (error) {
+        rollbackFailures.push(error);
+      }
     }
-    for (const { backup, item } of [...backups].reverse()) {
-      await session.filesystem
-        .rename(backup, item.target)
-        .catch((error) => rollbackFailures.push(error));
+    for (const record of [...backups].reverse()) {
+      try {
+        await renameOwnedRegularPath(session, record.ownership, record.item.path);
+      } catch (error) {
+        rollbackFailures.push(error);
+      }
     }
     if (rollbackFailures.length > 0) {
       invalid(
-        "generated outputs could not be fully restored; manual recovery from sibling .backup.tmp files is required",
+        "generated output ownership changed or rollback was incomplete; manual recovery from sibling .tmp files is required",
         { cause: failure.error },
       );
     }
@@ -320,13 +338,13 @@ async function installGeneratedPair(session, staged) {
   }
 
   const cleanupFailures = [];
-  for (const { backup } of backups) {
-    await session.filesystem
-      .rm(backup, { force: true })
-      .catch((error) => cleanupFailures.push(error));
+  for (const record of backups) {
+    await removeOwnedRegularPath(session, record.ownership).catch((error) =>
+      cleanupFailures.push(error),
+    );
   }
   if (cleanupFailures.length > 0) {
-    invalid("backup cleanup failed; manual removal of sibling .backup.tmp files is required", {
+    invalid("backup cleanup failed after an ownership change; manual recovery is required", {
       cause: cleanupFailures[0],
     });
   }
@@ -408,13 +426,36 @@ function validateManifestConsistency(manifest, artifactFiles, artifactInformatio
 
 async function withEvidenceRoot(root, options, action) {
   const session = await bindEvidenceRoot(root, options);
+  let operationError;
+  let result;
   try {
-    const result = await action(session);
-    await assertEvidenceRootStable(session);
-    return result;
-  } finally {
-    await closeEvidenceRoot(session);
+    result = await action(session);
+  } catch (error) {
+    operationError = error;
   }
+
+  let stabilityError;
+  try {
+    await assertEvidenceRootStable(session);
+  } catch (error) {
+    stabilityError = error;
+  }
+
+  let closeError;
+  try {
+    await closeEvidenceRoot(session);
+  } catch (error) {
+    closeError = error;
+  }
+
+  if (closeError) invalid("filesystem descriptor cleanup failed", { cause: closeError });
+  if (stabilityError) {
+    invalid("filesystem identity changed: root; manual recovery is required", {
+      cause: operationError ?? stabilityError,
+    });
+  }
+  if (operationError) throw operationError;
+  return result;
 }
 
 export async function listEvidenceFiles(root, options = {}) {
@@ -464,11 +505,10 @@ export async function sealEvidencePackage(root, options = {}) {
         { contents: manifestText, path: MANIFEST_NAME },
         { contents: checksums.text, path: CHECKSUMS_NAME },
       ]) {
-        const target = join(session.rootPath, item.path);
         staged.push({
           path: item.path,
-          target,
-          temporary: await writeSiblingTemporary(session, target, item.contents),
+          state: "staged",
+          temporary: await writeSiblingTemporary(session, item.path, item.contents),
         });
       }
       await installGeneratedPair(session, staged);
@@ -481,10 +521,11 @@ export async function sealEvidencePackage(root, options = {}) {
     }
 
     const cleanupFailures = [];
-    for (const { temporary } of staged) {
-      await session.filesystem
-        .rm(temporary, { force: true })
-        .catch((error) => cleanupFailures.push(error));
+    for (const item of staged) {
+      if (item.state !== "staged") continue;
+      await removeOwnedRegularPath(session, item.temporary).catch((error) =>
+        cleanupFailures.push(error),
+      );
     }
     if (transactionError && cleanupFailures.length > 0) {
       invalid("seal failed and temporary output cleanup also failed; manual recovery is required", {

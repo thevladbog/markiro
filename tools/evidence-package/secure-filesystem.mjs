@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import { link, lstat, mkdir, open, readdir, rename, rm } from "node:fs/promises";
-import { basename, join, posix, resolve, sep } from "node:path";
+import { basename, posix, resolve, sep } from "node:path";
 
 const defaultFilesystem = {
   constants: fsConstants,
@@ -109,6 +109,16 @@ async function assertPathIdentity(filesystem, path, expected, type, label) {
   assertIdentity(expected, current, label);
 }
 
+async function closeHandleBindings(bindings) {
+  const failures = [];
+  for (const binding of [...bindings].filter(Boolean).reverse()) {
+    await binding.handle.close().catch((error) => failures.push(error));
+  }
+  if (failures.length > 0) {
+    invalid("filesystem descriptor cleanup failed", { cause: failures[0] });
+  }
+}
+
 export async function bindEvidenceRoot(root, options = {}, { create = false } = {}) {
   if (typeof root !== "string" || root.length === 0) invalid("evidence root is required");
   const filesystem = evidenceFilesystem(options);
@@ -144,7 +154,11 @@ export async function bindEvidenceRoot(root, options = {}, { create = false } = 
       rootPath,
     };
   } catch (error) {
-    await handle.close().catch(() => undefined);
+    try {
+      await closeHandleBindings([{ handle }]);
+    } catch (cleanupError) {
+      invalid("filesystem descriptor cleanup failed", { cause: cleanupError });
+    }
     throw error;
   }
 }
@@ -166,11 +180,7 @@ export async function assertEvidenceRootStable(session) {
 }
 
 async function closeBindings(bindings) {
-  const failures = [];
-  for (const binding of [...bindings].reverse()) {
-    await binding.handle.close().catch((error) => failures.push(error));
-  }
-  if (failures.length > 0) invalid("filesystem descriptor cleanup failed");
+  await closeHandleBindings(bindings);
 }
 
 async function bindDirectory(session, relativePath, expected) {
@@ -189,7 +199,11 @@ async function bindDirectory(session, relativePath, expected) {
     await assertEvidenceRootStable(session);
     return { handle, identity: opened, label, path };
   } catch (error) {
-    await handle.close().catch(() => undefined);
+    try {
+      await closeHandleBindings([{ handle }]);
+    } catch (cleanupError) {
+      invalid("filesystem descriptor cleanup failed", { cause: cleanupError });
+    }
     throw error;
   }
 }
@@ -206,7 +220,11 @@ async function bindAncestorDirectories(session, relativePath) {
     }
     return bindings;
   } catch (error) {
-    await closeBindings(bindings).catch(() => undefined);
+    try {
+      await closeBindings(bindings);
+    } catch (cleanupError) {
+      invalid("filesystem descriptor cleanup failed", { cause: cleanupError });
+    }
     throw error;
   }
 }
@@ -242,8 +260,7 @@ export async function readBoundDirectory(session, relativePath = "", expected) {
     await assertBindingsStable(session, [...ancestors, directory]);
     return { entries, identity: directory.identity };
   } finally {
-    await directory?.handle.close().catch(() => undefined);
-    await closeBindings(ancestors);
+    await closeBindings([...ancestors, directory]);
   }
 }
 
@@ -289,8 +306,11 @@ async function openBoundRegular(session, relativePath, expected) {
       path,
     };
   } catch (error) {
-    await handle?.close().catch(() => undefined);
-    await closeBindings(ancestors).catch(() => undefined);
+    try {
+      await closeBindings([...ancestors, handle ? { handle } : undefined]);
+    } catch (cleanupError) {
+      invalid("filesystem descriptor cleanup failed", { cause: cleanupError });
+    }
     throw error;
   }
 }
@@ -308,10 +328,7 @@ async function assertRegularBindingStable(session, binding) {
 }
 
 async function closeRegularBinding(binding) {
-  const failures = [];
-  await binding.handle.close().catch((error) => failures.push(error));
-  await closeBindings(binding.ancestors).catch((error) => failures.push(error));
-  if (failures.length > 0) invalid("filesystem descriptor cleanup failed");
+  await closeBindings([...binding.ancestors, binding]);
 }
 
 export async function readBoundRegularFile(session, relativePath, { expected, maxBytes } = {}) {
@@ -350,6 +367,70 @@ export async function hashBoundRegularFile(session, relativePath, { expected } =
   }
 }
 
+async function assertBoundPathAbsent(session, relativePath) {
+  await assertEvidenceRootStable(session);
+  try {
+    await lstatBoundPath(session, relativePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      await assertEvidenceRootStable(session);
+      return;
+    }
+    throw error;
+  }
+  invalid(`generated output destination already exists: ${displayLabel(relativePath)}`);
+}
+
+export async function assertOwnedRegularPath(session, ownership) {
+  let information;
+  try {
+    information = await lstatBoundPath(session, ownership.relativePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      invalid(`filesystem ownership changed or missing: ${displayLabel(ownership.relativePath)}`, {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  assertType(information, "file", displayLabel(ownership.relativePath));
+  if (!sameIdentity(ownership.identity, information)) {
+    invalid(`filesystem ownership changed: ${displayLabel(ownership.relativePath)}`);
+  }
+  await assertEvidenceRootStable(session);
+  return information;
+}
+
+export async function removeOwnedRegularPath(session, ownership) {
+  await assertOwnedRegularPath(session, ownership);
+  await assertEvidenceRootStable(session);
+  await session.filesystem.rm(containedPath(session, ownership.relativePath));
+  await assertEvidenceRootStable(session);
+  await assertBoundPathAbsent(session, ownership.relativePath);
+}
+
+export async function renameOwnedRegularPath(
+  session,
+  ownership,
+  destinationRelativePath,
+  onRenamed,
+) {
+  const sourceRelativePath = ownership.relativePath;
+  await assertOwnedRegularPath(session, ownership);
+  await assertBoundPathAbsent(session, destinationRelativePath);
+  await assertEvidenceRootStable(session);
+  await session.filesystem.rename(
+    containedPath(session, sourceRelativePath),
+    containedPath(session, destinationRelativePath),
+  );
+  ownership.relativePath = destinationRelativePath;
+  onRenamed?.();
+  await assertEvidenceRootStable(session);
+  await assertOwnedRegularPath(session, ownership);
+  await assertBoundPathAbsent(session, sourceRelativePath);
+  return ownership;
+}
+
 export async function ensureBoundDirectory(session, relativePath) {
   let current = "";
   for (const segment of relativePath.split("/")) {
@@ -371,7 +452,7 @@ export async function ensureBoundDirectory(session, relativePath) {
         if (error?.code !== "EEXIST") throw error;
       }
       const created = await bindDirectory(session, current);
-      await created.handle.close();
+      await closeBindings([created]);
       await assertBindingsStable(session, ancestors);
     } finally {
       await closeBindings(ancestors);
@@ -379,66 +460,72 @@ export async function ensureBoundDirectory(session, relativePath) {
   }
 }
 
-async function removeOwnedTemporary(session, path, expected) {
-  try {
-    const current = await bigintLstat(session.filesystem, path);
-    assertIdentity(expected, current, basename(path));
-    await session.filesystem.rm(path, { force: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return;
-    throw error;
-  }
-}
-
 export async function installBoundFileIfMissing(session, relativePath, contents, validateExisting) {
   const parent = posix.dirname(relativePath);
   const parentBindings = await bindAncestorDirectories(session, relativePath);
   const target = containedPath(session, relativePath);
-  const temporary = join(
-    containedPath(session, parent === "." ? "" : parent),
-    `${basename(relativePath)}.${process.pid}.${randomUUID()}.tmp`,
-  );
+  const temporaryName = `${basename(relativePath)}.${process.pid}.${randomUUID()}.tmp`;
+  const temporaryRelativePath = parent === "." ? temporaryName : `${parent}/${temporaryName}`;
+  const temporary = containedPath(session, temporaryRelativePath);
   let handle;
-  let ownedIdentity;
+  let ownership;
   try {
     await assertBindingsStable(session, parentBindings);
     handle = await session.filesystem.open(temporary, "wx", 0o600);
-    ownedIdentity = await bigintFstat(handle);
-    assertType(ownedIdentity, "file", basename(temporary));
+    ownership = {
+      identity: await bigintFstat(handle),
+      relativePath: temporaryRelativePath,
+    };
+    assertType(ownership.identity, "file", basename(temporary));
     await handle.writeFile(contents);
     await handle.sync();
-    ownedIdentity = await bigintFstat(handle);
+    ownership.identity = await bigintFstat(handle);
     await assertBindingsStable(session, parentBindings);
     try {
       await session.filesystem.link(temporary, target);
     } catch (error) {
-      if (error?.code !== "EEXIST") throw error;
+      if (error?.code !== "EEXIST") {
+        if (["ENOTSUP", "EOPNOTSUPP", "EPERM", "EXDEV"].includes(error?.code)) {
+          invalid(
+            "atomic no-clobber installation is unavailable; use a filesystem with hard-link support",
+            { cause: error },
+          );
+        }
+        throw error;
+      }
       await handle.close();
       handle = undefined;
-      await removeOwnedTemporary(session, temporary, ownedIdentity);
+      await removeOwnedRegularPath(session, ownership);
+      ownership = undefined;
       await validateExisting();
       return false;
     }
     await assertBindingsStable(session, parentBindings);
-    const installed = await openBoundRegular(session, relativePath, ownedIdentity);
+    const installed = await openBoundRegular(session, relativePath, ownership.identity);
     await closeRegularBinding(installed);
     await handle.close();
     handle = undefined;
-    await removeOwnedTemporary(session, temporary, ownedIdentity);
+    await removeOwnedRegularPath(session, ownership);
     return true;
   } catch (error) {
+    const cleanupFailures = [];
     if (handle) {
-      if (!ownedIdentity) ownedIdentity = await bigintFstat(handle).catch(() => undefined);
-      await handle.close().catch(() => undefined);
-    }
-    if (ownedIdentity) {
-      try {
-        await removeOwnedTemporary(session, temporary, ownedIdentity);
-      } catch (cleanupError) {
-        invalid("owned temporary file cleanup failed; manual recovery is required", {
-          cause: cleanupError,
-        });
+      if (!ownership) {
+        const identity = await bigintFstat(handle).catch(() => undefined);
+        if (identity) ownership = { identity, relativePath: temporaryRelativePath };
       }
+      await handle.close().catch((cleanupError) => cleanupFailures.push(cleanupError));
+      handle = undefined;
+    }
+    if (ownership) {
+      await removeOwnedRegularPath(session, ownership).catch((cleanupError) =>
+        cleanupFailures.push(cleanupError),
+      );
+    }
+    if (cleanupFailures.length > 0) {
+      invalid("owned temporary or descriptor cleanup failed; manual recovery is required", {
+        cause: cleanupFailures[0],
+      });
     }
     throw error;
   } finally {
