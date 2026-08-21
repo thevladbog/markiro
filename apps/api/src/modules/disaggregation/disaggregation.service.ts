@@ -270,6 +270,52 @@ export class DisaggregationService {
         .from(schema.boxes)
         .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
 
+      const activeItems = await tx
+        .select({
+          codeHash: schema.boxItems.codeHash,
+          scannedAt: schema.boxItems.addedAt,
+          shiftId: schema.boxes.shiftId,
+          terminalId: schema.boxes.terminalId,
+        })
+        .from(schema.boxItems)
+        .innerJoin(
+          schema.boxes,
+          and(
+            eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+            eq(schema.boxes.id, schema.boxItems.boxId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.boxItems.tenantId, tenantId),
+            inArray(schema.boxItems.boxId, boxIds),
+            isNull(schema.boxItems.displacedAt),
+            isNull(schema.boxItems.removedAt),
+          ),
+        )
+        .orderBy(schema.boxItems.codeHash);
+
+      // Match station-side disassembly: release only the exact scan that
+      // still owns this hash. If ownership moved to another terminal in the
+      // meantime, the precise predicate is a harmless no-op.
+      for (const item of activeItems) {
+        const terminalCondition =
+          item.terminalId === null
+            ? isNull(schema.codeRegistry.terminalId)
+            : eq(schema.codeRegistry.terminalId, item.terminalId);
+        await tx
+          .delete(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              eq(schema.codeRegistry.codeHash, item.codeHash),
+              eq(schema.codeRegistry.shiftId, item.shiftId),
+              terminalCondition,
+              eq(schema.codeRegistry.scannedAt, item.scannedAt),
+            ),
+          );
+      }
+
       // Same mechanics as the station's "disassemble" branch
       // (station-scans.service.ts): retire the box, release its live items.
       await tx
