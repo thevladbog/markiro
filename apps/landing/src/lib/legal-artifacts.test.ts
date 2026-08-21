@@ -42,8 +42,8 @@ describe("loadLegalArtifacts", () => {
   it("loads the complete release set and verifies current bytes and hashes", async () => {
     const artifacts = await loadLegalArtifacts(publicRoot);
 
-    expect(artifacts).toHaveLength(12);
-    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(8);
+    expect(artifacts).toHaveLength(13);
+    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(9);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
     expect(artifacts.every(({ fileName }) => /_2026\.08-01_(?:ru|en)\./.test(fileName))).toBe(true);
