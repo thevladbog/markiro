@@ -81,7 +81,7 @@ export class ProductsService {
     private readonly storage: ObjectStorageService,
   ) {}
 
-  /** List a tenant's products, optionally filtered by name/gtin14-prefix search and/or status. */
+  /** List a tenant's products, optionally filtered by name/gtin14 substring search and/or status. */
   async listProducts(
     tenantId: string,
     query: ListProductsQueryDto,
@@ -94,8 +94,8 @@ export class ProductsService {
 
     if (query.search) {
       const nameCondition = ilike(schema.products.name, `%${query.search}%`);
-      const gtinPrefixCondition = ilike(schema.products.gtin14, `${query.search}%`);
-      const searchCondition = or(nameCondition, gtinPrefixCondition);
+      const gtinCondition = ilike(schema.products.gtin14, `%${query.search}%`);
+      const searchCondition = or(nameCondition, gtinCondition);
       if (searchCondition) conditions.push(searchCondition);
     }
 
