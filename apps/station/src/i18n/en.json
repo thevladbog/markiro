@@ -145,6 +145,7 @@
     "modeAggregation": "Aggregation",
     "modeLabel": "Shift mode",
     "productionDate": "Production date",
+    "productionShort": "Produced",
     "productionDateHint": "Optional. Use the date printed on the product.",
     "productionDatePlaceholder": "Select date",
     "productionDateClear": "Clear production date",

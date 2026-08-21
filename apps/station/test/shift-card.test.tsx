@@ -54,6 +54,55 @@ describe("ShiftCard", () => {
     expect(container.querySelector(".shift-card__meta")?.children).toHaveLength(2);
   });
 
+  it("shows the labeled production date beside the planned date and hides it when absent", () => {
+    const { container, rerender } = render(
+      <ShiftCard
+        productName="Пиво светлое"
+        plannedDate="2026-08-21"
+        productionDate="2026-08-15"
+        productionDateLabel="Производство"
+        locale="ru"
+        counterpartyName={null}
+        counterpartyLabel="Для"
+        actionLabel="Открыть"
+        active={false}
+        disabled={false}
+        onSelect={vi.fn()}
+        productId="product-1"
+        image={null}
+      />,
+    );
+
+    const date = container.querySelector(".shift-card__date");
+    expect(date).not.toBeNull();
+    const parts = [...(date?.querySelectorAll(".shift-card__date-part") ?? [])].map(
+      (part) => part.textContent,
+    );
+    // Separate parts so the production date wraps whole on narrow cards
+    // instead of ellipsizing the middle of one combined line.
+    expect(parts).toEqual(["21.08.2026", "Производство: 15.08.2026"]);
+
+    rerender(
+      <ShiftCard
+        productName="Пиво светлое"
+        plannedDate="2026-08-21"
+        productionDate={null}
+        productionDateLabel="Производство"
+        locale="ru"
+        counterpartyName={null}
+        counterpartyLabel="Для"
+        actionLabel="Открыть"
+        active={false}
+        disabled={false}
+        onSelect={vi.fn()}
+        productId="product-1"
+        image={null}
+      />,
+    );
+    expect(container.querySelector(".shift-card__date")?.textContent).toBe("21.08.2026");
+    expect(container.textContent).not.toContain("Производство");
+  });
+
   it("formats a calendar date without exposing the API ISO representation", () => {
     expect(formatShiftPlannedDate("2026-08-21", "ru")).toBe("21.08.2026");
     expect(formatShiftPlannedDate("2026-08-21", "en")).toBe("08/21/2026");

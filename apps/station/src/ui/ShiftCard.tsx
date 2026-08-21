@@ -6,6 +6,8 @@ import { ProductImage } from "./ProductImage.js";
 export interface ShiftCardProps {
   number?: string | null;
   plannedDate?: string | null;
+  productionDate?: string | null;
+  productionDateLabel?: string;
   locale?: string;
   plannedQty?: number | null;
   mode?: "validation" | "aggregation";
@@ -32,6 +34,8 @@ export function ShiftCard({
   number,
   productName,
   plannedDate,
+  productionDate,
+  productionDateLabel,
   locale = "ru",
   plannedQty,
   mode,
@@ -52,6 +56,7 @@ export function ShiftCard({
   imageRefreshKey,
 }: ShiftCardProps) {
   const formattedDate = formatShiftPlannedDate(plannedDate, locale);
+  const formattedProductionDate = formatShiftPlannedDate(productionDate, locale);
   const formattedQuantity =
     plannedQty !== null && plannedQty !== undefined
       ? new Intl.NumberFormat(stationDisplayLocale(locale)).format(plannedQty)
@@ -81,7 +86,18 @@ export function ShiftCard({
           </div>
           <div className="shift-card__product">{productName ?? "—"}</div>
           <div className="shift-card__meta">
-            {formattedDate ? <div className="shift-card__date">{formattedDate}</div> : null}
+            {formattedDate || formattedProductionDate ? (
+              <div className="shift-card__date">
+                {formattedDate ? (
+                  <span className="shift-card__date-part">{formattedDate}</span>
+                ) : null}
+                {formattedProductionDate ? (
+                  <span className="shift-card__date-part">
+                    {`${productionDateLabel ?? "Производство"}: ${formattedProductionDate}`}
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="shift-card__plan">
               {modeLabel ?? mode}
               {formattedQuantity !== null

@@ -51,6 +51,34 @@ describe("ShiftSelection", () => {
     expect(screen.queryByText("Waiting for close sync")).toBeNull();
   });
 
+  it("renders the shift's production date from the server list", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "bottled-shift",
+              status: "planned",
+              mode: "aggregation",
+              productName: "Sparkling water",
+              plannedQty: 500,
+              plannedDate: "2026-08-21",
+              productionDate: "2026-08-15",
+              productId: "product-bottled",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+
+    await waitFor(() => expect(screen.getAllByText("Sparkling water").length).toBeGreaterThan(0));
+    expect(screen.getByText("Produced: 08/15/2026")).toBeDefined();
+    expect(screen.getByText("08/21/2026")).toBeDefined();
+  });
+
   it("refreshes an open empty list and shows a shift created in the cabinet", async () => {
     vi.useFakeTimers();
     vi.spyOn(globalThis, "fetch")
