@@ -103,9 +103,11 @@ const formatBytes = (bytes: number) => `${(bytes / 1024).toFixed(1)} KB`;
     </div>
   )}
 
-  <a class="legal-artifacts__translation" href={release.routes[otherLocale]} hreflang={otherLocale} lang={otherLocale}>
-    {locale === "ru" ? "Matching English translation" : "Соответствующая русская редакция"}
-  </a>
+  {release.routes[otherLocale] && (
+    <a class="legal-artifacts__translation" href={release.routes[otherLocale]} hreflang={otherLocale} lang={otherLocale}>
+      {locale === "ru" ? "Matching English translation" : "Соответствующая русская редакция"}
+    </a>
+  )}
 </section>
 
 <script>

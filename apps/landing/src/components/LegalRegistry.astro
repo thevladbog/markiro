@@ -1,5 +1,10 @@
 ---
-import { findLegalDocument, formatLegalEffectiveDate } from "@markiro/legal-documents";
+import {
+  findLegalDocument,
+  formatLegalEffectiveDate,
+  legalDocumentKind,
+  requireLegalContent,
+} from "@markiro/legal-documents";
 
 import { ACTIVE_LEGAL_RELEASES } from "../content/legal-pages";
 import { buildLegalPageGraph, type PageMetadata } from "../lib/seo";
@@ -18,6 +23,14 @@ const { metadata } = Astro.props;
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
 const graph = buildLegalPageGraph(metadata);
 const publishedArtifacts = await loadLegalArtifacts();
+
+const documentReleases = ACTIVE_LEGAL_RELEASES.filter(
+  ({ code }) => legalDocumentKind(code) !== "instruction",
+);
+const instructionReleases =
+  metadata.locale === "ru"
+    ? ACTIVE_LEGAL_RELEASES.filter(({ code }) => legalDocumentKind(code) === "instruction")
+    : [];
 ---
 
 <BaseLayout metadata={metadata} graph={graph}>
@@ -47,11 +60,15 @@ const publishedArtifacts = await loadLegalArtifacts();
         <h2>{metadata.locale === "ru" ? "Действующие редакции" : "Active revisions"}</h2>
       </div>
       <div class="legal-registry__list">
-        {ACTIVE_LEGAL_RELEASES.map((release) => {
-          const content = findLegalDocument(release.code).content[metadata.locale];
+        {documentReleases.map((release) => {
+          const content = requireLegalContent(findLegalDocument(release.code), metadata.locale);
+          const href =
+            metadata.locale === "en" && "en" in release.routes
+              ? release.routes.en
+              : release.routes.ru;
           return (
             <article class="legal-registry__entry" data-legal-status={release.status}>
-              <a class="legal-registry__item" href={release.routes[metadata.locale]}>
+              <a class="legal-registry__item" href={href}>
                 <span class="legal-registry__code" data-registry-code data-legal-code>{release.code}</span>
                 <span class="legal-registry__title">{content.title}</span>
                 <span class="legal-registry__meta">
@@ -77,6 +94,40 @@ const publishedArtifacts = await loadLegalArtifacts();
           : "PDF/A files are published as immutable releases. DOCX is available only for template documents."}
       </p>
     </article>
+
+    {instructionReleases.length > 0 && (
+      <article class="container legal-registry" data-legal-document data-legal-kind="instruction-registry">
+        <div class="legal-registry__heading">
+          <p class="section-index">Инструкции</p>
+          <h2>Печатные инструкции</h2>
+        </div>
+        <div class="legal-registry__list">
+          {instructionReleases.map((release) => {
+            const content = requireLegalContent(findLegalDocument(release.code), "ru");
+            return (
+              <article class="legal-registry__entry" data-legal-status={release.status}>
+                <a class="legal-registry__item" href={release.routes.ru}>
+                  <span class="legal-registry__code" data-registry-code data-legal-code>{release.code}</span>
+                  <span class="legal-registry__title">{content.title}</span>
+                  <span class="legal-registry__meta">
+                    <span data-legal-revision>{release.revision}</span>
+                    <span aria-hidden="true">·</span>
+                    <time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, "ru")}</time>
+                  </span>
+                  <span class="legal-registry__arrow" aria-hidden="true">→</span>
+                </a>
+                <LegalArtifactControls
+                  release={release}
+                  locale="ru"
+                  artifacts={artifactsForRelease(publishedArtifacts, release.code, release.revision, "ru")}
+                  compact
+                />
+              </article>
+            );
+          })}
+        </div>
+      </article>
+    )}
   </main>
   <LandingFooter page={metadata} />
 

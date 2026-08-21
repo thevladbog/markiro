@@ -15,7 +15,8 @@
     "./artifacts": {
       "types": "./dist/artifacts/index.d.ts",
       "default": "./dist/artifacts/index.js"
-    }
+    },
+    "./assets/*": "./assets/*"
   },
   "scripts": {
     "artifacts:generate": "tsc -p tsconfig.json && node dist/cli/generate-artifacts.js --out-dir ../../apps/landing/public/legal",
