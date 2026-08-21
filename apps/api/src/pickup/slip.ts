@@ -83,32 +83,31 @@ function money(value: string | null): string {
   return value === null ? "—" : value;
 }
 
-const REGULAR_PAGE_ITEM_CAPACITY = 10;
+// 13 rows of 14.5mm plus the 7mm table head fill the ~210mm content column
+// of a regular page; the final page additionally hosts the totals/operation/
+// QR/signature blocks, which is what caps it at 8 rows.
+const REGULAR_PAGE_ITEM_CAPACITY = 13;
 const FINAL_PAGE_ITEM_CAPACITY = 8;
 
+/**
+ * Greedy top-down packing (same approach as the disaggregation report's
+ * paginateUnits): every regular page fills to capacity and only the
+ * remainder flows onto the final page, instead of the old even balancing
+ * that left every page half-empty. `remaining - 1` keeps at least one item
+ * on the final page so the closing blocks never sit on an empty table.
+ */
 function paginatePickupSlipItems(items: PickupSlipItem[]): PickupSlipItem[][] {
   if (items.length === 0) return [[]];
   if (items.length <= FINAL_PAGE_ITEM_CAPACITY) return [items];
 
-  const pageCount =
-    1 + Math.ceil((items.length - FINAL_PAGE_ITEM_CAPACITY) / REGULAR_PAGE_ITEM_CAPACITY);
-  const finalPageSize = Math.min(FINAL_PAGE_ITEM_CAPACITY, Math.ceil(items.length / pageCount));
-  const regularItemCount = items.length - finalPageSize;
-  const regularPageCount = pageCount - 1;
   const pages: PickupSlipItem[][] = [];
   let offset = 0;
-
-  for (let pageIndex = 0; pageIndex < regularPageCount; pageIndex += 1) {
-    const remainingPages = regularPageCount - pageIndex;
-    const remainingItems = regularItemCount - offset;
-    const pageSize = Math.min(
-      REGULAR_PAGE_ITEM_CAPACITY,
-      Math.ceil(remainingItems / remainingPages),
-    );
-    pages.push(items.slice(offset, offset + pageSize));
-    offset += pageSize;
+  while (items.length - offset > FINAL_PAGE_ITEM_CAPACITY) {
+    const remaining = items.length - offset;
+    const take = Math.min(REGULAR_PAGE_ITEM_CAPACITY, remaining - 1);
+    pages.push(items.slice(offset, offset + take));
+    offset += take;
   }
-
   pages.push(items.slice(offset));
   return pages;
 }
@@ -132,10 +131,22 @@ function brandLogo(data: PickupSlipData): string {
   if (organizationLogo) {
     return `<img class="brand-logo brand-logo--organization" src="${escapeHtml(organizationLogo)}" alt="${escapeHtml(data.org?.name ?? "Логотип организации")}">`;
   }
-  return `<svg class="brand-logo brand-logo--markiro" data-brand-logo="markiro" viewBox="0 0 150 34" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
-    <rect x="0" y="5" width="24" height="24" rx="5" fill="#17161A"/>
-    <path d="M6 23V11h3.8l2.2 5.6 2.2-5.6H18v12h-3v-6.8l-2 4.8h-2l-2-4.8V23H6Z" fill="#fff"/>
-    <text x="32" y="24" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#17161A">маркиро</text>
+  // The brand lockup from apps/admin/src/assets/markiro-logo-on-light.svg,
+  // inlined because this HTML must be self-contained for printing. Same
+  // fallback the disaggregation report uses (modules/disaggregation/report.ts).
+  return `<svg class="brand-logo brand-logo--markiro" data-brand-logo="markiro" viewBox="0 0 280 64" preserveAspectRatio="xMinYMid meet" role="img" aria-label="Маркиро" xmlns="http://www.w3.org/2000/svg">
+    <rect x="4" y="4" width="56" height="56" fill="#17161A"/>
+    <g fill="#FAFAF8">
+      <rect x="14" y="14" width="8" height="8"/>
+      <rect x="14" y="26" width="8" height="8"/>
+      <rect x="14" y="38" width="8" height="8"/>
+      <rect x="26" y="22" width="8" height="8"/>
+      <rect x="38" y="14" width="8" height="8"/>
+      <rect x="38" y="26" width="8" height="8"/>
+      <rect x="38" y="38" width="8" height="8"/>
+      <rect x="26" y="42" width="8" height="8" fill="#3DDC7A"/>
+    </g>
+    <text x="76" y="45" font-family="IBM Plex Mono, monospace" font-weight="600" font-size="34" letter-spacing="-0.5" fill="#17161A">маркиро</text>
   </svg>`;
 }
 

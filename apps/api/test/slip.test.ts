@@ -120,7 +120,9 @@ describe("renderPickupSlipHtml", () => {
       Array.from(page.matchAll(/21 SERIAL(\d+)/g), (match) => Number(match[1])),
     );
     expect(renderedSerials).toEqual(Array.from({ length: 17 }, (_, index) => index + 1));
-    expect(pages.map((page) => page.match(/class="slip-item-row"/g)?.length ?? 0)).toEqual([9, 8]);
+    // Greedy fill: the regular page packs to capacity, only the remainder
+    // flows to the final page (which also hosts the closing blocks).
+    expect(pages.map((page) => page.match(/class="slip-item-row"/g)?.length ?? 0)).toEqual([13, 4]);
   });
 
   it("uses organization branding when safe and falls back to Markiro for unsafe sources", () => {
