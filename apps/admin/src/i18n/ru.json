@@ -428,6 +428,12 @@
       "resultCount_many": "{{count}} продуктов",
       "resultCount_other": "{{count}} продукта",
       "statusFilterLabel": "Статус",
+      "pageSizeLabel": "На странице",
+      "pager": {
+        "label": "Страницы каталога",
+        "previous": "Предыдущая страница",
+        "next": "Следующая страница"
+      },
       "statusFilter": {
         "all": "Все статусы",
         "draft": "Черновик",
