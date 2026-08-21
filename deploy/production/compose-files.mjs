@@ -7,7 +7,7 @@ export const PRODUCTION_COMPOSE_PROJECT = "markiro-production";
  * Every validation and lifecycle command must consume this list unchanged.
  */
 export function productionComposeFiles(environment) {
-  return environment.VBTECH_IMAGE_TAG
+  return environment.VBTECH_IMAGE_REF
     ? [BASE_COMPOSE_FILE, VBTECH_COMPOSE_FILE]
     : [BASE_COMPOSE_FILE];
 }

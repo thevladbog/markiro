@@ -15,12 +15,15 @@ const release = {
   ACME_EMAIL: "ops@example.test",
 };
 
+const vbtechDigest = `sha256:${"d".repeat(64)}`;
+const vbtechImageRef = `ghcr.io/thevladbog/vbtech-web@${vbtechDigest}`;
+
 const vbtechRelease = {
   ...release,
-  VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${"c".repeat(40)}`,
+  VBTECH_IMAGE_REF: vbtechImageRef,
+  VBTECH_RELEASE_SHA: "c".repeat(40),
   VBTECH_DOMAIN: "v-b.tech",
   VBTECH_WWW_DOMAIN: "www.v-b.tech",
-  VBTECH_FUNCTION_ORIGIN: "https://functions.yandexcloud.net/d4example",
   VBTECH_SUBMISSION_STATE: "disabled",
 };
 
@@ -100,7 +103,7 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
   });
 });
 
-test("accepts a complete isolated v-b overlay and derives only bounded Caddy inputs", async () => {
+test("accepts a disabled isolated v-b overlay without a function origin", async () => {
   let validatedEnvironment;
   const result = await runPreflight(vbtechRelease, {
     ...dependencies(),
@@ -109,23 +112,61 @@ test("accepts a complete isolated v-b overlay and derives only bounded Caddy inp
     },
   });
 
-  assert.equal(result.vbtechImageTag, vbtechRelease.VBTECH_IMAGE_TAG);
+  assert.equal(result.vbtechImageRef, vbtechImageRef);
+  assert.equal(result.vbtechImageDigest, vbtechDigest);
   assert.equal(result.vbtechReleaseSha, "c".repeat(40));
   assert.equal(result.vbtechDomain, "v-b.tech");
   assert.equal(result.vbtechWwwDomain, "www.v-b.tech");
-  assert.equal(result.vbtechFunctionPath, "/d4example");
+  assert.equal(result.vbtechFunctionPath, "");
   assert.equal(result.vbtechSubmissionState, "disabled");
   assert.equal(validatedEnvironment.VBTECH_RELEASE_SHA, "c".repeat(40));
-  assert.equal(validatedEnvironment.VBTECH_FUNCTION_PATH, "/d4example");
+  assert.equal(validatedEnvironment.VBTECH_IMAGE_REF, vbtechImageRef);
+  assert.equal(Object.hasOwn(validatedEnvironment, "VBTECH_IMAGE_TAG"), false);
+  assert.equal(validatedEnvironment.VBTECH_FUNCTION_PATH, "");
   assert.equal(validatedEnvironment.VBTECH_SUBMISSION_STATE, "disabled");
 });
 
+test("accepts an enabled isolated v-b overlay only with a Yandex function origin", async () => {
+  const result = await runPreflight(
+    {
+      ...vbtechRelease,
+      VBTECH_FUNCTION_ORIGIN: "https://functions.yandexcloud.net/d4example",
+      VBTECH_SUBMISSION_STATE: "enabled",
+    },
+    dependencies(),
+  );
+
+  assert.equal(result.vbtechFunctionPath, "/d4example");
+  assert.equal(result.vbtechSubmissionState, "enabled");
+});
+
 for (const [name, overrides, expected] of [
-  ["partial overlay", { VBTECH_FUNCTION_ORIGIN: undefined }, "VBTECH_FUNCTION_ORIGIN is invalid"],
+  ["partial overlay", { VBTECH_RELEASE_SHA: undefined }, "VBTECH_RELEASE_SHA is invalid"],
+  [
+    "SHA-tagged image",
+    { VBTECH_IMAGE_REF: `ghcr.io/thevladbog/vbtech-web:${"c".repeat(40)}` },
+    "VBTECH_IMAGE_REF is invalid",
+  ],
   [
     "mutable image",
-    { VBTECH_IMAGE_TAG: "ghcr.io/thevladbog/vbtech-web:latest" },
-    "VBTECH_IMAGE_TAG is invalid",
+    { VBTECH_IMAGE_REF: "ghcr.io/thevladbog/vbtech-web:latest" },
+    "VBTECH_IMAGE_REF is invalid",
+  ],
+  [
+    "uppercase image digest",
+    { VBTECH_IMAGE_REF: `ghcr.io/thevladbog/vbtech-web@sha256:${"D".repeat(64)}` },
+    "VBTECH_IMAGE_REF is invalid",
+  ],
+  [
+    "foreign image repository",
+    { VBTECH_IMAGE_REF: `ghcr.io/example/vbtech-web@${vbtechDigest}` },
+    "VBTECH_IMAGE_REF is invalid",
+  ],
+  ["digest-only image", { VBTECH_IMAGE_REF: vbtechDigest }, "VBTECH_IMAGE_REF is invalid"],
+  [
+    "mismatched explicit digest",
+    { VBTECH_IMAGE_REF: `ghcr.io/thevladbog/vbtech-web@sha512:${"d".repeat(64)}` },
+    "VBTECH_IMAGE_REF is invalid",
   ],
   ["wrong apex", { VBTECH_DOMAIN: "vb.tech" }, "VBTECH_DOMAIN is invalid"],
   ["wrong www", { VBTECH_WWW_DOMAIN: "www2.v-b.tech" }, "VBTECH_WWW_DOMAIN is invalid"],
@@ -142,6 +183,11 @@ for (const [name, overrides, expected] of [
   [
     "function query",
     { VBTECH_FUNCTION_ORIGIN: "https://functions.yandexcloud.net/d4example?token=private" },
+    "VBTECH_FUNCTION_ORIGIN is invalid",
+  ],
+  [
+    "enabled state without a function origin",
+    { VBTECH_SUBMISSION_STATE: "enabled", VBTECH_FUNCTION_ORIGIN: undefined },
     "VBTECH_FUNCTION_ORIGIN is invalid",
   ],
   ["unknown state", { VBTECH_SUBMISSION_STATE: "private" }, "VBTECH_SUBMISSION_STATE is invalid"],

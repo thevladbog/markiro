@@ -1,6 +1,6 @@
 services:
   vbtech-web:
-    image: ${VBTECH_IMAGE_TAG:?VBTECH_IMAGE_TAG is required}
+    image: ${VBTECH_IMAGE_REF:?VBTECH_IMAGE_REF is required}
     restart: unless-stopped
     environment:
       VBTECH_RELEASE_SHA: ${VBTECH_RELEASE_SHA:?VBTECH_RELEASE_SHA is required}

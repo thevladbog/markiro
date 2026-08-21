@@ -4,12 +4,16 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { load as loadYaml } from "js-yaml";
 
+import { productionComposeFiles } from "../compose-files.mjs";
+
 const productionCompose = "compose.production.yml";
 const ciCompose = "deploy/production/compose.ci.yml";
 const vbtechCompose = "deploy/production/compose.vbtech.yml";
 const envExample = ".env.production.example";
 const apiDigest = `sha256:${"a".repeat(64)}`;
 const edgeDigest = `sha256:${"b".repeat(64)}`;
+const vbtechDigest = `sha256:${"d".repeat(64)}`;
+const vbtechImageRef = `ghcr.io/thevladbog/vbtech-web@${vbtechDigest}`;
 
 function renderCompose(files) {
   return JSON.parse(
@@ -182,7 +186,7 @@ test("v-b overlay adds one isolated internal web service without publishing host
   assert.deepEqual(services, ["vbtech-web", "edge"]);
   assert.equal(
     model.services["vbtech-web"].image,
-    "${VBTECH_IMAGE_TAG:?VBTECH_IMAGE_TAG is required}",
+    "${VBTECH_IMAGE_REF:?VBTECH_IMAGE_REF is required}",
   );
   assert.equal(model.services["vbtech-web"].restart, "unless-stopped");
   assert.deepEqual(model.services["vbtech-web"].expose, ["8080"]);
@@ -199,6 +203,15 @@ test("v-b overlay adds one isolated internal web service without publishing host
     model.services.edge.environment.VBTECH_SUBMISSION_STATE,
     "${VBTECH_SUBMISSION_STATE}",
   );
+});
+
+test("selects the v-b overlay only for an immutable image reference", () => {
+  assert.deepEqual(productionComposeFiles({}), [productionCompose]);
+  assert.deepEqual(productionComposeFiles({ VBTECH_IMAGE_REF: vbtechImageRef }), [
+    productionCompose,
+    vbtechCompose,
+  ]);
+  assert.deepEqual(productionComposeFiles({ VBTECH_IMAGE_TAG: "retired" }), [productionCompose]);
 });
 
 test("merged v-b Compose preserves Markiro services and wires only bounded edge inputs", () => {
@@ -229,9 +242,9 @@ test("merged v-b Compose preserves Markiro services and wires only bounded edge 
         MARKIRO_IMAGE_TAG: "a".repeat(40),
         MARKIRO_API_IMAGE_DIGEST: apiDigest,
         MARKIRO_EDGE_IMAGE_DIGEST: edgeDigest,
-        VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${releaseSha}`,
+        VBTECH_IMAGE_REF: vbtechImageRef,
         VBTECH_RELEASE_SHA: releaseSha,
-        VBTECH_FUNCTION_PATH: "/d4example",
+        VBTECH_FUNCTION_PATH: "",
         VBTECH_SUBMISSION_STATE: "disabled",
       },
     },
@@ -239,10 +252,10 @@ test("merged v-b Compose preserves Markiro services and wires only bounded edge 
   const model = JSON.parse(configured);
 
   assert.deepEqual(Object.keys(model.services).sort(), ["api", "edge", "migrate", "vbtech-web"]);
-  assert.equal(model.services["vbtech-web"].image, `ghcr.io/thevladbog/vbtech-web:${releaseSha}`);
+  assert.equal(model.services["vbtech-web"].image, vbtechImageRef);
   assert.equal(model.services["vbtech-web"].ports, undefined);
   assert.equal(model.services.edge.environment.VBTECH_RELEASE_SHA, releaseSha);
-  assert.equal(model.services.edge.environment.VBTECH_FUNCTION_PATH, "/d4example");
+  assert.equal(model.services.edge.environment.VBTECH_FUNCTION_PATH, "");
   assert.equal(model.services.edge.environment.VBTECH_SUBMISSION_STATE, "disabled");
   assert.deepEqual(model.services.edge.depends_on["vbtech-web"], {
     condition: "service_healthy",
