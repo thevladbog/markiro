@@ -1041,6 +1041,7 @@ test("v-b smoke verifies independent release identity, canonical redirect and ex
     client,
   );
 
+  assert.equal(requests.length, VBTECH_ROUTE_CHECKS.length + 1);
   assert.deepEqual(requests.at(-1), ["GET", "www.v-b.tech", "/canonical-check"]);
   assert.equal(
     requests.filter(([, host, path]) => host === "v-b.tech" && path === "/api/contact").length,

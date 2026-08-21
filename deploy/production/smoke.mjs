@@ -1203,6 +1203,10 @@ async function runLandingSmoke(options, client) {
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
 }
 
+/**
+ * Run the shared v-b route assertions through an injectable request client.
+ * The caller owns transport; this function always asserts the logical v-b authorities.
+ */
 export async function runVbtechSmoke(options, client = requestClient()) {
   const baseUrl = options.vbtechBaseUrl.replace(/\/$/, "");
   const wwwBaseUrl = options.vbtechWwwBaseUrl.replace(/\/$/, "");
