@@ -5,7 +5,7 @@
 
 1. Убедитесь, что target SHA равен текущему `main`.
 2. Запустите **Yandex infrastructure** вручную с `enable_public_dns=true` только
-   для прямого переключения обоих доменов на app VM.
+   для прямого переключения customer admin, SaaS admin, kiosk и landing на app VM.
 3. Approve `production-infrastructure`.
 4. Просмотрите напечатанный список Terraform address/actions. Запрещены замена
    `module.compute.yandex_compute_instance.app` и delete PostgreSQL, базы,

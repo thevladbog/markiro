@@ -43,6 +43,11 @@ output "admin_domain" {
   value       = var.domain
 }
 
+output "saas_admin_domain" {
+  description = "Exact platform SaaS administration authority served directly by the app VM."
+  value       = var.saas_admin_domain
+}
+
 output "kiosk_domain" {
   description = "Exact kiosk authority served directly by the app VM."
   value       = var.kiosk_domain
@@ -56,8 +61,9 @@ output "landing_domain" {
 output "approved_a_records" {
   description = "Direct-VM A records approved for gated publication."
   value = var.public_dns_enabled ? {
-    (local.admin_dns_name)   = module.compute.app_public_ip
-    (local.kiosk_dns_name)   = module.compute.app_public_ip
-    (local.landing_dns_name) = module.compute.app_public_ip
+    (local.admin_dns_name)      = module.compute.app_public_ip
+    (local.saas_admin_dns_name) = module.compute.app_public_ip
+    (local.kiosk_dns_name)      = module.compute.app_public_ip
+    (local.landing_dns_name)    = module.compute.app_public_ip
   } : {}
 }

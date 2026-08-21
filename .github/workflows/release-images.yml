@@ -21,6 +21,7 @@ jobs:
       MARKIRO_API_IMAGE_DIGEST: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       MARKIRO_EDGE_IMAGE_DIGEST: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
       MARKIRO_DOMAIN: localhost
+      MARKIRO_SAAS_ADMIN_DOMAIN: saas-admin.localhost
       MARKIRO_KIOSK_DOMAIN: kiosk.localhost
       MARKIRO_LANDING_DOMAIN: landing.localhost
       MARKIRO_HTTP_PORT: "18080"

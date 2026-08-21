@@ -73,16 +73,18 @@ function parseVbtechConfig(environment, reservedDomains) {
   };
 }
 
-function validateKioskOrigin(envText, kioskDomain, httpsPort) {
+function validateRuntimeOrigin(envText, key, domain, httpsPort) {
   const origins = envText
     .split(/\r?\n/)
-    .filter((line) => line.startsWith("KIOSK_ORIGIN="))
-    .map((line) => line.slice("KIOSK_ORIGIN=".length));
+    .filter((line) => line.startsWith(`${key}=`))
+    .map((line) => line.slice(`${key}=`.length));
   const port = httpsPort !== undefined && httpsPort !== "443" ? `:${httpsPort}` : "";
-  const expectedOrigin = `https://${kioskDomain}${port}`;
+  const expectedOrigin = `https://${domain}${port}`;
 
   if (origins.length !== 1 || origins[0] !== expectedOrigin)
-    throw new Error("KIOSK_ORIGIN does not match MARKIRO_KIOSK_DOMAIN");
+    throw new Error(
+      `${key} does not match MARKIRO_${key === "KIOSK_ORIGIN" ? "KIOSK" : "SAAS_ADMIN"}_DOMAIN`,
+    );
 }
 
 /**
@@ -111,6 +113,7 @@ export async function composeQuiet(environment, supplied = {}) {
     MARKIRO_API_IMAGE_DIGEST: environment.MARKIRO_API_IMAGE_DIGEST,
     MARKIRO_EDGE_IMAGE_DIGEST: environment.MARKIRO_EDGE_IMAGE_DIGEST,
     MARKIRO_DOMAIN: environment.MARKIRO_DOMAIN,
+    MARKIRO_SAAS_ADMIN_DOMAIN: environment.MARKIRO_SAAS_ADMIN_DOMAIN,
     MARKIRO_KIOSK_DOMAIN: environment.MARKIRO_KIOSK_DOMAIN,
     MARKIRO_LANDING_DOMAIN: environment.MARKIRO_LANDING_DOMAIN,
     MARKIRO_EDGE_MODE: environment.MARKIRO_EDGE_MODE,
@@ -210,6 +213,7 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} MARKIRO_API_IMAGE_DIGEST
  * @property {string | undefined} MARKIRO_EDGE_IMAGE_DIGEST
  * @property {string | undefined} MARKIRO_DOMAIN
+ * @property {string | undefined} MARKIRO_SAAS_ADMIN_DOMAIN
  * @property {string | undefined} MARKIRO_KIOSK_DOMAIN
  * @property {string | undefined} MARKIRO_LANDING_DOMAIN
  * @property {string | undefined} MARKIRO_EDGE_MODE
@@ -230,6 +234,7 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string} apiImageDigest
  * @property {string} edgeImageDigest
  * @property {string} domain
+ * @property {string} saasAdminDomain
  * @property {string} kioskDomain
  * @property {string} landingDomain
  * @property {string | undefined} acmeEmail
@@ -264,6 +269,7 @@ export async function runPreflight(
   const apiImageDigest = environment.MARKIRO_API_IMAGE_DIGEST;
   const edgeImageDigest = environment.MARKIRO_EDGE_IMAGE_DIGEST;
   const domain = environment.MARKIRO_DOMAIN;
+  const saasAdminDomain = environment.MARKIRO_SAAS_ADMIN_DOMAIN;
   const kioskDomain = environment.MARKIRO_KIOSK_DOMAIN;
   const landingDomain = environment.MARKIRO_LANDING_DOMAIN;
   const edgeMode = environment.MARKIRO_EDGE_MODE || "direct";
@@ -275,17 +281,25 @@ export async function runPreflight(
     throw invalid("MARKIRO_API_IMAGE_DIGEST");
   if (!edgeImageDigest || !IMAGE_DIGEST_PATTERN.test(edgeImageDigest))
     throw invalid("MARKIRO_EDGE_IMAGE_DIGEST");
-  validateProductionDomains(domain, kioskDomain, landingDomain);
+  validateProductionDomains(domain, saasAdminDomain, kioskDomain, landingDomain);
   if (edgeMode !== "direct") throw invalid("MARKIRO_EDGE_MODE");
   const isDirectLocalSet =
     domain === "localhost" &&
+    saasAdminDomain === "saas-admin.localhost" &&
     kioskDomain === "kiosk.localhost" &&
     landingDomain === "landing.localhost";
   if (domain === "localhost" && !isDirectLocalSet) throw invalid("MARKIRO_DOMAIN");
+  if (saasAdminDomain === "saas-admin.localhost" && !isDirectLocalSet)
+    throw invalid("MARKIRO_SAAS_ADMIN_DOMAIN");
   if (kioskDomain === "kiosk.localhost" && !isDirectLocalSet) throw invalid("MARKIRO_KIOSK_DOMAIN");
   if (landingDomain === "landing.localhost" && !isDirectLocalSet)
     throw invalid("MARKIRO_LANDING_DOMAIN");
-  const vbtech = parseVbtechConfig(environment, [domain, kioskDomain, landingDomain]);
+  const vbtech = parseVbtechConfig(environment, [
+    domain,
+    saasAdminDomain,
+    kioskDomain,
+    landingDomain,
+  ]);
   if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
 
   try {
@@ -303,7 +317,13 @@ export async function runPreflight(
   } catch {
     throw new Error("MARKIRO_ENV_FILE is inaccessible");
   }
-  validateKioskOrigin(envText, kioskDomain, environment.MARKIRO_HTTPS_PORT);
+  validateRuntimeOrigin(envText, "KIOSK_ORIGIN", kioskDomain, environment.MARKIRO_HTTPS_PORT);
+  validateRuntimeOrigin(
+    envText,
+    "SAAS_ADMIN_ORIGIN",
+    saasAdminDomain,
+    environment.MARKIRO_HTTPS_PORT,
+  );
 
   try {
     const composeEnvironment = {
@@ -311,6 +331,7 @@ export async function runPreflight(
       MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
       MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
       MARKIRO_DOMAIN: domain,
+      MARKIRO_SAAS_ADMIN_DOMAIN: saasAdminDomain,
       MARKIRO_KIOSK_DOMAIN: kioskDomain,
       MARKIRO_LANDING_DOMAIN: landingDomain,
       MARKIRO_EDGE_MODE: edgeMode,
@@ -340,6 +361,7 @@ export async function runPreflight(
     apiImageDigest,
     edgeImageDigest,
     domain,
+    saasAdminDomain,
     kioskDomain,
     landingDomain,
     acmeEmail,

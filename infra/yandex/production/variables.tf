@@ -140,14 +140,34 @@ variable "kiosk_domain" {
   }
 }
 
+variable "saas_admin_domain" {
+  description = "Exact platform SaaS administration authority served directly by Caddy."
+  type        = string
+  nullable    = false
+
+  validation {
+    condition = (
+      can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.saas_admin_domain)) &&
+      var.saas_admin_domain != var.domain &&
+      var.saas_admin_domain != var.kiosk_domain
+    )
+    error_message = "saas_admin_domain must be a lowercase fully-qualified domain name distinct from admin and kiosk."
+  }
+}
+
 variable "landing_domain" {
   description = "Exact public landing authority served directly by Caddy."
   type        = string
   nullable    = false
 
   validation {
-    condition     = can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.landing_domain)) && var.landing_domain != var.domain && var.landing_domain != var.kiosk_domain
-    error_message = "landing_domain must be a lowercase fully-qualified domain name distinct from admin and kiosk."
+    condition = (
+      can(regex("^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$", var.landing_domain)) &&
+      var.landing_domain != var.domain &&
+      var.landing_domain != var.saas_admin_domain &&
+      var.landing_domain != var.kiosk_domain
+    )
+    error_message = "landing_domain must be a lowercase fully-qualified domain name distinct from admin, SaaS admin, and kiosk."
   }
 }
 

@@ -64,6 +64,7 @@ test("the preflight CLI fails closed when the kiosk domain is absent", () => {
       MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
       MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
       MARKIRO_DOMAIN: "app.markiro.example",
+      MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
       ACME_EMAIL: "ops@example.test",
     },
   });
