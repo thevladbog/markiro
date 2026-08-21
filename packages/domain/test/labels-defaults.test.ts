@@ -866,8 +866,8 @@ describe("buildDefaultLabelTemplates", () => {
    * The PRINT-NAME family's drift guard — insert-if-absent like 0053's, and
    * generated the same way: whoever changes the layout regenerates the SQL.
    */
-  it("matches the jsonb inlined into db migration 0058 (drift guard)", async () => {
-    expect(await inlinedRows("0058_print_name_label_templates.sql")).toEqual(
+  it("matches the jsonb inlined into db migration 0059 (drift guard)", async () => {
+    expect(await inlinedRows("0059_print_name_label_templates.sql")).toEqual(
       buildPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
     );
   });

@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 
-/** The print-name duplicates — the names 0058 keys its insert-if-absent on. */
+/** The print-name duplicates — the names 0059 keys its insert-if-absent on. */
 const PRINT_NAME_NAMES = [
   "Коробка 58×40 (203 dpi) [Назв. для печати]",
   "Коробка 58×40 (300 dpi) [Назв. для печати]",
@@ -42,10 +42,10 @@ describe.skipIf(!databaseUrl)("print-name label templates migration", () => {
   let created = false;
 
   // Same shape as the 0053 test: migrate() sees no organizations, the test
-  // creates them afterward and re-runs 0058's SQL directly as the backfill.
+  // creates them afterward and re-runs 0059's SQL directly as the backfill.
   async function runBackfill(): Promise<void> {
     const sql = await readFile(
-      join(migrationsFolder, "0058_print_name_label_templates.sql"),
+      join(migrationsFolder, "0059_print_name_label_templates.sql"),
       "utf8",
     );
     for (const stmt of sql.split("--> statement-breakpoint")) {

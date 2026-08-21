@@ -36,7 +36,7 @@ binding and the name differ (pinned by a dedicated twin test).
   `buildPrintNameBoxLabelTemplates()` returns the ten duplicates and
   `buildDefaultLabelTemplates()` appends them, so **new tenants** are seeded
   automatically by provisioning (20 stock templates total).
-- **Existing tenants**: migration `0058_print_name_label_templates` —
+- **Existing tenants**: migration `0059_print_name_label_templates` —
   insert-if-absent on `(tenant_id, name)`, modeled on 0053, with generated
   JSON pinned by a drift guard in `labels-defaults.test.ts`.
 
