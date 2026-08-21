@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
+import { constants as fsConstants } from "node:fs";
+import * as fsPromises from "node:fs/promises";
 import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +10,9 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+
+import { runCli as executeCli } from "../cli.mjs";
+import { captureStationProductionDate } from "../station-date.mjs";
 
 const execFile = promisify(execFileCallback);
 const toolRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -32,6 +37,23 @@ function seedDatabase(path, rows, schema = "id TEXT PRIMARY KEY, production_date
 
 function sha256(bytes) {
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+function filesystem(overrides = {}) {
+  return { ...fsPromises, constants: fsConstants, ...overrides };
+}
+
+function outputCollector() {
+  let value = "";
+  return {
+    stream: {
+      write(chunk) {
+        value += chunk;
+        return true;
+      },
+    },
+    value: () => value,
+  };
 }
 
 async function runCli(args) {
@@ -183,6 +205,64 @@ test("refuses an existing evidence output without changing its bytes", async (t)
   assert.equal(result.code, 1);
   assert.match(result.stderr, /evidence output already exists/i);
   assert.equal(await readFile(outputPath, "utf8"), "existing evidence\n");
+});
+
+test("rejects an unsafe evidence output basename before staging", async (t) => {
+  const root = await temporaryDirectory(t);
+  const databasePath = join(root, "station-mirror.db");
+  const unsafeOutputPath = join(root, `${"a".repeat(252)}.json`);
+  seedDatabase(databasePath, [{ id: "shift-1", productionDate: "2026-08-24" }]);
+
+  await assert.rejects(
+    captureStationProductionDate(databasePath, "shift-1", unsafeOutputPath),
+    /evidence output filename is invalid/i,
+  );
+  assert.deepEqual(
+    (await readdir(root)).filter((name) => name.endsWith(".tmp")),
+    [],
+  );
+});
+
+test("atomically refuses an evidence output created after staging", async (t) => {
+  const root = await temporaryDirectory(t);
+  const databasePath = join(root, "station-mirror.db");
+  const outputPath = join(root, "station-production-date.json");
+  const foreignBytes = Buffer.from("foreign concurrent evidence\n");
+  seedDatabase(databasePath, [{ id: "shift-1", productionDate: "2026-08-24" }]);
+  let interleaved = false;
+  const injectedFilesystem = filesystem({
+    async link(existingPath, newPath) {
+      interleaved = true;
+      await writeFile(newPath, foreignBytes, { flag: "wx" });
+      return fsPromises.link(existingPath, newPath);
+    },
+  });
+  const stdout = outputCollector();
+  const stderr = outputCollector();
+
+  const code = await executeCli({
+    action: () =>
+      captureStationProductionDate(databasePath, "shift-1", outputPath, {
+        filesystem: injectedFilesystem,
+      }),
+    args: [],
+    command: "evidence:station-date",
+    expectedArgs: 0,
+    formatSuccess: () => "Captured Station production date evidence: 1 row\n",
+    stderr: stderr.stream,
+    stdout: stdout.stream,
+    usage: "unused",
+  });
+
+  assert.equal(code, 1);
+  assert.equal(stdout.value(), "");
+  assert.match(stderr.value(), /evidence output already exists/i);
+  assert.equal(interleaved, true);
+  assert.deepEqual(await readFile(outputPath), foreignBytes);
+  assert.deepEqual(
+    (await readdir(root)).filter((name) => name.endsWith(".tmp")),
+    [],
+  );
 });
 
 test("sanitizes and bounds a missing database path failure", async (t) => {

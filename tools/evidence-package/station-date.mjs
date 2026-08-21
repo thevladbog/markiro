@@ -1,11 +1,14 @@
-import { randomUUID } from "node:crypto";
-import { open, rename, rm, stat } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 
 import { runCli } from "./cli.mjs";
-import { invalid } from "./secure-filesystem.mjs";
+import {
+  bindEvidenceRoot,
+  closeEvidenceRoot,
+  installBoundFileIfMissing,
+  invalid,
+} from "./secure-filesystem.mjs";
 
 function capturedAt(now = new Date()) {
   return now.toISOString().replace(/\.\d{3}Z$/u, "+00:00");
@@ -43,30 +46,41 @@ function validateProductionDate(value) {
   }
 }
 
-async function writeNewJson(outputPath, contents) {
-  const target = resolve(outputPath);
-  const temporary = join(dirname(target), `${basename(target)}.${process.pid}.${randomUUID()}.tmp`);
-  let temporaryHandle;
-  try {
-    temporaryHandle = await open(temporary, "wx", 0o600);
-    await temporaryHandle.writeFile(contents);
-    await temporaryHandle.sync();
-    await temporaryHandle.close();
-    temporaryHandle = undefined;
-
-    const existing = await stat(target).catch((error) => {
-      if (error?.code === "ENOENT") return undefined;
-      throw error;
-    });
-    if (existing) invalid("evidence output already exists");
-    await rename(temporary, target);
-  } finally {
-    await temporaryHandle?.close().catch(() => undefined);
-    await rm(temporary, { force: true }).catch(() => undefined);
+function validateOutputName(relativePath) {
+  if (
+    relativePath.length === 0 ||
+    relativePath === "." ||
+    relativePath === ".." ||
+    relativePath.includes("/") ||
+    relativePath.includes("\\") ||
+    /[\u0000-\u001f\u007f-\u009f]/u.test(relativePath) ||
+    Buffer.byteLength(relativePath) > 180
+  ) {
+    invalid("evidence output filename is invalid");
   }
 }
 
-export async function captureStationProductionDate(databasePath, shiftId, outputPath) {
+async function writeNewJson(outputPath, contents, options) {
+  const target = resolve(outputPath);
+  const parent = dirname(target);
+  const relativePath = basename(target);
+  validateOutputName(relativePath);
+  const session = await bindEvidenceRoot(parent, options);
+  try {
+    await installBoundFileIfMissing(session, relativePath, contents, async () => {
+      invalid("evidence output already exists");
+    });
+  } finally {
+    await closeEvidenceRoot(session);
+  }
+}
+
+export async function captureStationProductionDate(
+  databasePath,
+  shiftId,
+  outputPath,
+  options = {},
+) {
   validateArgument(databasePath, "Station database path");
   validateArgument(shiftId, "shift id");
   validateArgument(outputPath, "evidence output path");
@@ -97,7 +111,7 @@ export async function captureStationProductionDate(databasePath, shiftId, output
     productionDate: rows[0].production_date,
     capturedAt: capturedAt(),
   };
-  await writeNewJson(outputPath, Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`));
+  await writeNewJson(outputPath, Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`), options);
   return evidence;
 }
 
