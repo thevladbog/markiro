@@ -61,10 +61,14 @@ export async function runHostedRuntimeDiagnostics(environment = process.env, sup
     const output = await system.run(
       "ssh",
       [
+        "-F",
+        "/dev/null",
         "-i",
         identity,
         "-o",
         `UserKnownHostsFile=${knownHostsPath}`,
+        "-o",
+        "GlobalKnownHostsFile=/dev/null",
         "-o",
         "StrictHostKeyChecking=yes",
         "-o",

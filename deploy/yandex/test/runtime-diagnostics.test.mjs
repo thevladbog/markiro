@@ -640,6 +640,47 @@ test("hosted diagnostic validates and canonicalizes the remote probe response", 
   ]);
 });
 
+test("hosted diagnostic makes configured host keys the exclusive SSH trust source", async () => {
+  const snapshot = await validSnapshot();
+  const commands = [];
+  await runHostedRuntimeDiagnostics(
+    HOSTED_ENVIRONMENT,
+    hostedDependencies(`MARKIRO_RUNTIME_DIAGNOSTICS ${JSON.stringify(snapshot)}\n`, commands),
+  );
+
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].command, "ssh");
+  const remoteTarget = "markiro-deploy@203.0.113.42";
+  const remoteTargetIndex = commands[0].args.indexOf(remoteTarget);
+  assert.deepEqual(commands[0].args.slice(0, remoteTargetIndex + 1), [
+    "-F",
+    "/dev/null",
+    "-i",
+    "/runner/private-key",
+    "-o",
+    "UserKnownHostsFile=/runner/known-hosts-dir/known_hosts",
+    "-o",
+    "GlobalKnownHostsFile=/dev/null",
+    "-o",
+    "StrictHostKeyChecking=yes",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=15",
+    remoteTarget,
+  ]);
+  assert.equal(commands[0].args.filter((value) => value === "-F").length, 1);
+  assert.equal(commands[0].args.filter((value) => value === "/dev/null").length, 1);
+  assert.equal(
+    commands[0].args.filter((value) => value.startsWith("UserKnownHostsFile=")).length,
+    1,
+  );
+  assert.equal(
+    commands[0].args.filter((value) => value.startsWith("GlobalKnownHostsFile=")).length,
+    1,
+  );
+});
+
 test("hosted parser rejects stale, widened, and non-canonical remote responses", async () => {
   const snapshot = await validSnapshot();
   const stale = structuredClone(snapshot);
