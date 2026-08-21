@@ -12,7 +12,8 @@ const edgeImageDigest = `sha256:${"b".repeat(64)}`;
 const apiImage = `ghcr.io/thevladbog/markiro-api@${apiImageDigest}`;
 const edgeImage = `ghcr.io/thevladbog/markiro-edge@${edgeImageDigest}`;
 const vbtechReleaseSha = "e".repeat(40);
-const vbtechImage = `ghcr.io/thevladbog/vbtech-web:${vbtechReleaseSha}`;
+const vbtechImageDigest = `sha256:${"d".repeat(64)}`;
+const vbtechImageRef = `ghcr.io/thevladbog/vbtech-web@${vbtechImageDigest}`;
 const environment = {
   MARKIRO_IMAGE_TAG: tag,
   MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
@@ -242,7 +243,7 @@ test("passes all configured authorities and the immutable tag to public smoke", 
   assert.equal(readinessUrl, "https://app.markiro.example:18443/health/live");
 });
 
-test("deploys and smokes an independently tagged v-b service before switching the shared edge", async () => {
+test("deploys and smokes an independently digest-pinned v-b service before switching the shared edge", async () => {
   const { dependencies, releaseDirectory, runner } = await fixture();
   let smokeOptions;
   dependencies.runPreflight = async () => ({
@@ -250,11 +251,12 @@ test("deploys and smokes an independently tagged v-b service before switching th
     apiImageDigest,
     edgeImageDigest,
     envFile: environment.MARKIRO_ENV_FILE,
-    vbtechImageTag: vbtechImage,
+    vbtechImageRef,
+    vbtechImageDigest,
     vbtechReleaseSha,
     vbtechDomain: "v-b.tech",
     vbtechWwwDomain: "www.v-b.tech",
-    vbtechFunctionPath: "/d4example",
+    vbtechFunctionPath: "",
     vbtechSubmissionState: "disabled",
   });
   dependencies.runSmoke = async (options) => {
@@ -265,7 +267,10 @@ test("deploys and smokes an independently tagged v-b service before switching th
     {
       environment: {
         ...environment,
-        VBTECH_IMAGE_TAG: vbtechImage,
+        VBTECH_IMAGE_REF: vbtechImageRef,
+        VBTECH_RELEASE_SHA: vbtechReleaseSha,
+        VBTECH_FUNCTION_PATH: "",
+        VBTECH_SUBMISSION_STATE: "disabled",
         VBTECH_DOMAIN: "v-b.tech",
         VBTECH_WWW_DOMAIN: "www.v-b.tech",
       },
@@ -277,13 +282,28 @@ test("deploys and smokes an independently tagged v-b service before switching th
 
   const commands = runner.calls.map(({ args }) => args);
   assert.ok(commands.some((args) => args.includes("pull") && args.includes("vbtech-web")));
-  assert.ok(commands.some((args) => args.at(-1) === vbtechImage && args.includes("inspect")));
+  assert.ok(
+    commands.some(
+      (args) =>
+        args.at(-1) === vbtechImageRef &&
+        args.includes("inspect") &&
+        args.includes("{{json .RepoDigests}}"),
+    ),
+  );
   assert.ok(commands.some((args) => args.at(-1) === "vbtech-web" && args.includes("up")));
   assert.ok(
     commands.findIndex((args) => args.at(-1) === "vbtech-web" && args.includes("up")) <
       commands.findIndex((args) => args.at(-1) === "edge" && args.includes("up")),
   );
-  assert.equal(release.vbtech.imageTag, vbtechImage);
+  assert.deepEqual(release.vbtech, {
+    imageRef: vbtechImageRef,
+    imageDigest: vbtechImageDigest,
+    releaseSha: vbtechReleaseSha,
+    functionPath: "",
+    submissionState: "disabled",
+  });
+  assert.equal(smokeOptions.environment.VBTECH_IMAGE_REF, vbtechImageRef);
+  assert.equal(Object.hasOwn(smokeOptions.environment, "VBTECH_IMAGE_TAG"), false);
   assert.equal(smokeOptions.vbtechBaseUrl, "https://v-b.tech");
   assert.equal(smokeOptions.vbtechWwwBaseUrl, "https://www.v-b.tech");
   assert.equal(smokeOptions.expectedVbtechReleaseSha, vbtechReleaseSha);
