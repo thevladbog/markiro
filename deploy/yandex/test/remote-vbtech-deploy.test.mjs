@@ -101,6 +101,8 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
     "-o",
     "UserKnownHostsFile=/tmp/markiro-vbtech-ssh-test/known_hosts",
     "-o",
+    "GlobalKnownHostsFile=/dev/null",
+    "-o",
     "StrictHostKeyChecking=yes",
     "-o",
     "BatchMode=yes",
@@ -214,9 +216,33 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
   assert.equal(deployment.args.includes("-A"), false);
   assert.equal(deployment.args.includes("StrictHostKeyChecking=no"), false);
   assert.equal(deployment.args.includes("UserKnownHostsFile=/dev/null"), false);
+  assert.equal(deployment.args.includes("GlobalKnownHostsFile=/dev/null"), true);
   assert.equal(deployment.args.includes("/usr/bin/bash"), false);
   assert.equal(deployment.args.includes("-c"), false);
   assert.equal(deployment.args.includes("printenv"), false);
+});
+
+test("hosted wrapper disables the global known-host store for contract and deploy", async () => {
+  const fixture = systemFixture();
+
+  await runHostedVbtechDeploy(environment(), fixture.system);
+
+  assert.equal(fixture.commands.length, 2);
+  for (const [stage, command] of ["contract", "deploy"].map((stage, index) => [
+    stage,
+    fixture.commands[index],
+  ])) {
+    const globalKnownHosts = command.args.indexOf("GlobalKnownHostsFile=/dev/null");
+    const remoteTarget = command.args.indexOf("markiro-deploy@203.0.113.55");
+    assert.ok(globalKnownHosts > 0, `${stage}: global known hosts must be disabled`);
+    assert.equal(command.args[globalKnownHosts - 1], "-o", stage);
+    assert.ok(globalKnownHosts < remoteTarget, `${stage}: trust option must precede remote target`);
+    assert.equal(
+      command.args.filter((argument) => argument === "GlobalKnownHostsFile=/dev/null").length,
+      1,
+      stage,
+    );
+  }
 });
 
 test("hosted wrapper accepts only a matching optional image reference", async () => {

@@ -130,6 +130,8 @@ function sshArguments(input, knownHostsPath) {
     "-o",
     `UserKnownHostsFile=${knownHostsPath}`,
     "-o",
+    "GlobalKnownHostsFile=/dev/null",
+    "-o",
     "StrictHostKeyChecking=yes",
     "-o",
     "BatchMode=yes",
