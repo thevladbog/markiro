@@ -191,6 +191,65 @@ describe.skipIf(!ready)("employees e2e", () => {
     expect(badge.revokedAt).toBeNull();
   });
 
+  async function ownerMemberId(orgId: string): Promise<string> {
+    const [owner] = await setup.db
+      .select({ id: schema.member.id })
+      .from(schema.member)
+      .where(and(eq(schema.member.organizationId, orgId), eq(schema.member.role, "owner")));
+    if (!owner) throw new Error(`Expected owner member for organization ${orgId}`);
+    return owner.id;
+  }
+
+  it("lists linkable members, links on create, and hides linked members", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const memberId = await ownerMemberId(tenantId);
+
+    const before = await agent.get("/employees/linkable-members").expect(200);
+    const beforeItems = before.body.items as Array<{ memberId: string; email: string }>;
+    expect(beforeItems.map((m) => m.memberId)).toContain(memberId);
+
+    const created = await agent
+      .post("/employees")
+      .send({ fullName: "Из Кабинета", role: "оператор", memberId })
+      .expect(201);
+
+    const [link] = await setup.db
+      .select({ employeeId: schema.cabinetEmployeeLinks.employeeId })
+      .from(schema.cabinetEmployeeLinks)
+      .where(
+        and(
+          eq(schema.cabinetEmployeeLinks.organizationId, tenantId),
+          eq(schema.cabinetEmployeeLinks.memberId, memberId),
+        ),
+      );
+    expect(link?.employeeId).toBe(created.body.id);
+
+    const after = await agent.get("/employees/linkable-members").expect(200);
+    const afterItems = after.body.items as Array<{ memberId: string }>;
+    expect(afterItems.map((m) => m.memberId)).not.toContain(memberId);
+
+    // The member is already linked → a second create with the same member must
+    // conflict and must not leave an orphan employee behind.
+    await agent.post("/employees").send({ fullName: "Дубль", memberId }).expect(409);
+    const listed = await agent.get("/employees").expect(200);
+    const names = (listed.body.items as Array<{ fullName: string }>).map((e) => e.fullName);
+    expect(names).not.toContain("Дубль");
+  });
+
+  it("rejects creating an employee linked to another tenant's member", async () => {
+    const a = request.agent(app!.getHttpServer());
+    const tenantA = await signUpAndActivate(a);
+    const b = request.agent(app!.getHttpServer());
+    await signUpAndActivate(b);
+
+    const foreignMemberId = await ownerMemberId(tenantA);
+    await b
+      .post("/employees")
+      .send({ fullName: "Чужой участник", memberId: foreignMemberId })
+      .expect(404);
+  });
+
   it("returns the employee unchanged on an empty PATCH body, and 404 for a missing id", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
