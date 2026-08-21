@@ -11,6 +11,7 @@ import {
   SERVICE,
   SUPPORT_ME,
   installCatalogApi,
+  jsonResponse,
   renderSaasApp,
 } from "./render.js";
 
@@ -29,6 +30,30 @@ async function chooseOption(
 }
 
 describe("commercial catalog", () => {
+  it("rejects a malformed catalog success body at the browser boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/settings/demo-plan")) {
+          return jsonResponse(200, { catalogVersionId: null });
+        }
+        if (url.endsWith("/api/platform/catalog/items")) {
+          return jsonResponse(200, {
+            items: [{ ...DRAFT_PLAN, status: "active" }],
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp();
+
+    expect(await screen.findByText("Не удалось загрузить каталог.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Открыть Базовый, версия 2" })).toBeNull();
+  });
+
   it("groups the platform catalog into plans, add-ons, and services", async () => {
     installCatalogApi();
     renderSaasApp();
@@ -42,8 +67,8 @@ describe("commercial catalog", () => {
   it("paginates large catalog groups instead of rendering every row", async () => {
     const plans = Array.from({ length: 55 }, (_, index) => ({
       ...structuredClone(PUBLISHED_PLAN),
-      id: `plan-version-${index + 1}`,
-      catalogItemId: `plan-item-${index + 1}`,
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      catalogItemId: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       catalogItemCode: `plan-${index + 1}`,
       nameRu: `Тариф ${index + 1}`,
       nameEn: `Plan ${index + 1}`,

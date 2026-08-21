@@ -1,4 +1,4 @@
-import type { CatalogVersionDto } from "../catalog/api.js";
+import type { CatalogVersion } from "@markiro/platform-contracts";
 
 export type DocumentKind = "invoice" | "offer";
 export type ActivationPolicy = "immediate" | "after_current" | "manual";
@@ -33,7 +33,7 @@ export interface DocumentDraft {
 
 export type DocumentDraftAction =
   | { type: "tenant.selected"; tenantId: string }
-  | { type: "catalog.added"; version: CatalogVersionDto; separate?: boolean; id: string }
+  | { type: "catalog.added"; version: CatalogVersion; separate?: boolean; id: string }
   | { type: "line.quantityChanged"; id: string; quantity: number }
   | { type: "line.priceChanged"; id: string; price: string }
   | { type: "line.priceOverrideReasonChanged"; id: string; reason: string }

@@ -15,6 +15,35 @@ export type {
   PlatformUuid,
 } from "./primitives.js";
 export {
+  addonEffectSchema,
+  archiveCatalogItemResponseSchema,
+  catalogItemParamsSchema,
+  catalogItemReferenceSchema,
+  catalogMachineCodeParamsSchema,
+  catalogMachineCodeSchema,
+  catalogVersionCreateSchema,
+  catalogVersionIdSchema,
+  catalogVersionListResponseSchema,
+  catalogVersionParamsSchema,
+  catalogVersionPatchSchema,
+  catalogVersionSchema,
+  defaultDemoPlanResponseSchema,
+  planEntitlementsSchema,
+  platformCatalogContracts,
+  setDefaultDemoPlanSchema,
+} from "./catalog.js";
+export type {
+  AddonEffect,
+  ArchiveCatalogItemResponse,
+  CatalogVersion,
+  CatalogVersionCreate,
+  CatalogVersionListResponse,
+  CatalogVersionPatch,
+  DefaultDemoPlanResponse,
+  PlanEntitlements,
+  SetDefaultDemoPlan,
+} from "./catalog.js";
+export {
   addonAssignmentResponseSchema,
   assignableCatalogResponseSchema,
   assignableCatalogVersionSchema,
