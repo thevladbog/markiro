@@ -1377,6 +1377,7 @@ export function App() {
             operatorId={operator.operatorId}
             expectedGtin14={shiftContext.gtin14}
             productName={shiftContext.productName}
+            productPrintName={shiftContext.productPrintName}
             productId={shiftContext.productId}
             productImage={shiftContext.image}
             counterpartyName={shiftContext.counterpartyName}

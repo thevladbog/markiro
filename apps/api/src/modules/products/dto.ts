@@ -12,6 +12,7 @@ export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 export const createProductSchema = z.object({
   gtin: z.string().min(1),
   name: z.string().min(1).max(200),
+  printName: z.string().trim().min(1).max(200).nullable().optional(),
   productGroup: z.string().min(1).max(200).nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
@@ -31,6 +32,7 @@ export type CreateProductDto = z.infer<typeof createProductSchema>;
 export const updateProductSchema = z.object({
   gtin: z.string().min(1).optional(),
   name: z.string().min(1).max(200).optional(),
+  printName: z.string().trim().min(1).max(200).nullable().optional(),
   productGroup: z.string().min(1).max(200).nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
@@ -72,6 +74,8 @@ export interface ProductDto {
   id: string;
   gtin14: string;
   name: string;
+  /** Short operator-facing name for the station shift card; null = use `name`. */
+  printName: string | null;
   productGroup: string | null;
   boxCapacity: number | null;
   palletCapacity: number | null;

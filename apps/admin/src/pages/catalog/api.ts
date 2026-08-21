@@ -30,6 +30,7 @@ export interface ProductDto {
   boxCapacity: number | null;
   palletCapacity: number | null;
   unitPrice: string | null;
+  printName: string | null;
   egaisCode: string | null;
   shelfLifeDays: number | null;
   /**
@@ -57,6 +58,7 @@ export interface CreateProductInput {
   boxCapacity?: number | null;
   palletCapacity?: number | null;
   unitPrice?: string | null;
+  printName?: string | null;
   egaisCode?: string | null;
   shelfLifeDays?: number | null;
   defaultCounterpartyId?: string | null;

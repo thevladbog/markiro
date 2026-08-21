@@ -21,6 +21,7 @@ function renderCompose(files) {
         env: {
           ...process.env,
           MARKIRO_DOMAIN: "localhost",
+          MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
           MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
           MARKIRO_LANDING_DOMAIN: "landing.localhost",
           MARKIRO_ENV_FILE: ".env.production.example",
@@ -66,12 +67,16 @@ test("production edge receives the immutable release SHA used by its public iden
   );
 });
 
-test("production edge requires separate admin, kiosk and landing production domains", async () => {
+test("production edge requires separate customer admin, SaaS admin, kiosk and landing domains", async () => {
   const model = loadYaml(await readFile(productionCompose, "utf8"));
 
   assert.equal(
     model.services.edge.environment.MARKIRO_DOMAIN,
     "${MARKIRO_DOMAIN:?MARKIRO_DOMAIN is required}",
+  );
+  assert.equal(
+    model.services.edge.environment.MARKIRO_SAAS_ADMIN_DOMAIN,
+    "${MARKIRO_SAAS_ADMIN_DOMAIN:?MARKIRO_SAAS_ADMIN_DOMAIN is required}",
   );
   assert.equal(
     model.services.edge.environment.MARKIRO_KIOSK_DOMAIN,
@@ -104,6 +109,7 @@ test("merged CI Compose config preserves production restart policies", () => {
         ...process.env,
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
+        MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
         MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
         MARKIRO_LANDING_DOMAIN: "landing.localhost",
         MARKIRO_ENV_FILE: envExample,
@@ -223,6 +229,7 @@ test("merged v-b Compose preserves Markiro services and wires only bounded edge 
         ...process.env,
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
+        MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
         MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
         MARKIRO_LANDING_DOMAIN: "landing.localhost",
         MARKIRO_ENV_FILE: envExample,
@@ -316,6 +323,7 @@ test("merged CI Compose uses local SHA-tagged images while validating dummy base
         ...process.env,
         ACME_EMAIL: "ops@example.test",
         MARKIRO_DOMAIN: "localhost",
+        MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
         MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
         MARKIRO_LANDING_DOMAIN: "landing.localhost",
         MARKIRO_ENV_FILE: envExample,

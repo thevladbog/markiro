@@ -28,6 +28,7 @@ interface Analysis {
 
 const FIELD_COPY_KEYS: Record<LabelField, string> = {
   "product.name": "product.name",
+  "product.printName": "product.printName",
   "product.gtin": "product.gtin",
   "product.egais": "product.egais",
   "km.code": "km.code",

@@ -77,6 +77,7 @@ const shiftProperties = [
   "mode",
   "productId",
   "productName",
+  "productPrintName",
   "image",
   "lineId",
   "lineName",

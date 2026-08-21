@@ -63,6 +63,9 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0054_shift_production_date.sql"));
     await rm(join(legacyMigrations, "0055_brief_mole_man.sql"));
     await rm(join(legacyMigrations, "0056_align_dated_label_quantity.sql"));
+    await rm(join(legacyMigrations, "0057_product_print_name.sql"));
+    await rm(join(legacyMigrations, "0058_remarkable_pyro.sql"));
+    await rm(join(legacyMigrations, "0059_print_name_label_templates.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -90,6 +93,9 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "meta", "0054_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0055_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0056_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0057_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0058_snapshot.json"));
+    await rm(join(legacyMigrations, "meta", "0059_snapshot.json"));
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -122,7 +128,10 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0053_date_free_label_templates" &&
         entry.tag !== "0054_shift_production_date" &&
         entry.tag !== "0055_brief_mole_man" &&
-        entry.tag !== "0056_align_dated_label_quantity",
+        entry.tag !== "0056_align_dated_label_quantity" &&
+        entry.tag !== "0057_product_print_name" &&
+        entry.tag !== "0058_remarkable_pyro" &&
+        entry.tag !== "0059_print_name_label_templates",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));

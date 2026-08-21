@@ -41,6 +41,7 @@ function assertDirectDeployWorkflow(source) {
   assert.equal(deploy.env.YC_APP_PUBLIC_ADDRESS, "${{ vars.YC_APP_PUBLIC_ADDRESS }}");
   assert.equal(deploy.env.APP_SSH_HOST_KEYS_B64, "${{ vars.APP_SSH_HOST_KEYS_B64 }}");
   assert.equal(deploy.env.ACME_EMAIL, "${{ vars.ACME_EMAIL }}");
+  assert.equal(deploy.env.MARKIRO_SAAS_ADMIN_DOMAIN, "${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}");
 
   const checkout = deploy.steps.find((step) =>
     String(step.uses || "").startsWith("actions/checkout@"),

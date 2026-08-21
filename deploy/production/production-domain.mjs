@@ -11,13 +11,14 @@ export function validateProductionDomain(value, variable = "MARKIRO_DOMAIN") {
   return value;
 }
 
-export function validateProductionDomains(domain, kioskDomain, landingDomain) {
+export function validateProductionDomains(domain, saasAdminDomain, kioskDomain, landingDomain) {
   validateProductionDomain(domain);
+  validateProductionDomain(saasAdminDomain, "MARKIRO_SAAS_ADMIN_DOMAIN");
   validateProductionDomain(kioskDomain, "MARKIRO_KIOSK_DOMAIN");
   validateProductionDomain(landingDomain, "MARKIRO_LANDING_DOMAIN");
-  if (new Set([domain, kioskDomain, landingDomain]).size !== 3)
+  if (new Set([domain, saasAdminDomain, kioskDomain, landingDomain]).size !== 4)
     throw new Error("production domains must be distinct");
-  return { domain, kioskDomain, landingDomain };
+  return { domain, saasAdminDomain, kioskDomain, landingDomain };
 }
 
 export function validateVbtechDomains(domain, wwwDomain, reservedDomains = []) {

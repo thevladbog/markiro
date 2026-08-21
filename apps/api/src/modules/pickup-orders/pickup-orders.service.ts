@@ -1094,7 +1094,7 @@ export class PickupOrdersService {
    * `organization` name + `orgProfiles` INN (the profile row may not exist
    * yet — org comes back null in that case, not a 404).
    */
-  async slipData(tenantId: string, id: string): Promise<PickupSlipData> {
+  async slipData(tenantId: string, id: string, printedByUserId: string): Promise<PickupSlipData> {
     const [row] = await this.db
       .select({
         orderNo: schema.pickupOrders.orderNo,
@@ -1140,6 +1140,13 @@ export class PickupOrdersService {
       .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
       .where(eq(schema.organization.id, tenantId));
 
+    // The cabinet user who opened the slip — their name pre-fills the
+    // "Администратор" signature.
+    const [printedBy] = await this.db
+      .select({ name: schema.user.name })
+      .from(schema.user)
+      .where(eq(schema.user.id, printedByUserId));
+
     const itemRows = await this.db
       .select({
         gtin14: schema.pickupOrderItems.gtin14,
@@ -1179,6 +1186,7 @@ export class PickupOrdersService {
       // next to an empty table) for a cancelled order. This keeps "Итого"
       // consistent with the table for every status.
       total: computeTotalPrice(itemRows),
+      printedByName: printedBy?.name ?? null,
       items: itemRows.map((item, index) => ({
         n: index + 1,
         productName: item.productName ?? "",

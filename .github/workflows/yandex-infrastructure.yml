@@ -10,7 +10,7 @@ on:
         required: true
         type: string
       enable_public_dns:
-        description: Point admin, kiosk, and landing directly to the app VM
+        description: Point admin, SaaS admin, kiosk, and landing directly to the app VM
         required: true
         default: false
         type: boolean
@@ -107,6 +107,7 @@ jobs:
       TF_VAR_media_bucket_name: ${{ vars.YC_MEDIA_BUCKET_NAME }}
       TF_VAR_audit_bucket_name: ${{ vars.YC_AUDIT_BUCKET_NAME }}
       TF_VAR_domain: ${{ vars.MARKIRO_DOMAIN }}
+      TF_VAR_saas_admin_domain: ${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}
       TF_VAR_kiosk_domain: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       TF_VAR_landing_domain: ${{ vars.MARKIRO_LANDING_DOMAIN }}
       TF_VAR_dns_zone_id: ${{ vars.YC_DNS_ZONE_ID }}

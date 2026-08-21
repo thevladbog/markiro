@@ -42,6 +42,7 @@ export {
   buildDateFreeBoxLabelTemplates,
   buildDatedBoxLabelTemplates,
   buildDefaultLabelTemplates,
+  buildPrintNameBoxLabelTemplates,
 } from "./labels/defaults.js";
 export type { DefaultLabelTemplate } from "./labels/defaults.js";
 export type {

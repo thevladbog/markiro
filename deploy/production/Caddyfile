@@ -185,6 +185,46 @@
 	}
 }
 
+(saas_admin_routes) {
+	root * /srv/saas-admin
+	route {
+		@platformAuth path /api/platform-auth/*
+		handle @platformAuth {
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@platformApi path /api/platform/*
+		handle @platformApi {
+			uri strip_prefix /api
+			reverse_proxy api:3000 {
+				import standard_api_transport
+			}
+		}
+
+		@platformReserved path /api /api/* /1c_exchange /station /station/* /kiosk /kiosk/* /health* /openapi.json /docs*
+		handle @platformReserved {
+			respond 404
+		}
+
+		@saasAdminAssets path /assets/*
+		handle @saasAdminAssets {
+			header Cache-Control "public, max-age=31536000, immutable"
+			file_server
+		}
+
+		@saasAdminSpa method GET HEAD
+		handle @saasAdminSpa {
+			header Cache-Control "no-cache"
+			try_files {path} /index.html
+			file_server
+		}
+
+		respond 404
+	}
+}
+
 (kiosk_routes) {
 	root * /srv/kiosk
 	route {
@@ -317,6 +357,10 @@ http://{$MARKIRO_DOMAIN}:8080 {
 	redir https://{$MARKIRO_DOMAIN}{uri} permanent
 }
 
+http://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8080 {
+	redir https://{$MARKIRO_SAAS_ADMIN_DOMAIN}{uri} permanent
+}
+
 http://{$MARKIRO_KIOSK_DOMAIN}:8080 {
 	redir https://{$MARKIRO_KIOSK_DOMAIN}{uri} permanent
 }
@@ -337,6 +381,12 @@ https://{$MARKIRO_DOMAIN}:8443 {
 	import common_headers
 	import application_csp
 	import admin_routes
+}
+
+https://{$MARKIRO_SAAS_ADMIN_DOMAIN}:8443 {
+	import common_headers
+	import application_csp
+	import saas_admin_routes
 }
 
 https://{$MARKIRO_KIOSK_DOMAIN}:8443 {

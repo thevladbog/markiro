@@ -115,6 +115,18 @@ export const ROUTE_CHECKS = Object.freeze([
   Object.freeze({ method: "POST", path: "/unknown", kind: "not-found", expected: "404, not HTML" }),
 ]);
 
+export const SAAS_ADMIN_ROUTE_CHECKS = Object.freeze([
+  Object.freeze(["GET", "/", "saas-shell"]),
+  Object.freeze(["GET", "/login", "saas-shell"]),
+  Object.freeze(["GET", "/assets/${assetName}", "asset"]),
+  Object.freeze(["GET", "/api/platform-auth/get-session", "platform-proxy"]),
+  Object.freeze(["GET", "/api/platform/catalog", "platform-proxy"]),
+  Object.freeze(["GET", "/api/auth/get-session", "not-found"]),
+  Object.freeze(["GET", "/api/health/ready", "not-found"]),
+  Object.freeze(["GET", "/station/bootstrap", "not-found"]),
+  Object.freeze(["POST", "/unknown", "not-found"]),
+]);
+
 export const KIOSK_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/", "kiosk-shell"]),
   Object.freeze(["GET", "/assets/${assetName}", "asset"]),
@@ -194,16 +206,20 @@ export function vbtechSubmissionState(value) {
 }
 
 export function productionBaseUrls(environment) {
-  const { domain, kioskDomain, landingDomain } = validateProductionDomains(
+  const { domain, saasAdminDomain, kioskDomain, landingDomain } = validateProductionDomains(
     environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_SAAS_ADMIN_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
     environment.MARKIRO_LANDING_DOMAIN,
   );
   const isLocalSet =
     domain === "localhost" &&
+    saasAdminDomain === "saas-admin.localhost" &&
     kioskDomain === "kiosk.localhost" &&
     landingDomain === "landing.localhost";
   if (domain === "localhost" && !isLocalSet) throw new Error("MARKIRO_DOMAIN is invalid");
+  if (saasAdminDomain === "saas-admin.localhost" && !isLocalSet)
+    throw new Error("MARKIRO_SAAS_ADMIN_DOMAIN is invalid");
   if (kioskDomain === "kiosk.localhost" && !isLocalSet)
     throw new Error("MARKIRO_KIOSK_DOMAIN is invalid");
   if (landingDomain === "landing.localhost" && !isLocalSet)
@@ -211,6 +227,7 @@ export function productionBaseUrls(environment) {
   const port = environment.MARKIRO_HTTPS_PORT;
   const urls = {
     admin: productionBaseUrl(domain, port),
+    saasAdmin: productionBaseUrl(saasAdminDomain, port),
     kiosk: productionBaseUrl(kioskDomain, port),
     landing: productionBaseUrl(landingDomain, port),
   };
@@ -222,6 +239,7 @@ export function productionBaseUrls(environment) {
   if (!vbtechConfigured) return urls;
   const vbtech = validateVbtechDomains(environment.VBTECH_DOMAIN, environment.VBTECH_WWW_DOMAIN, [
     domain,
+    saasAdminDomain,
     kioskDomain,
     landingDomain,
   ]);
@@ -1044,6 +1062,58 @@ async function runAdminSmoke(options, client) {
   };
 }
 
+async function runSaasAdminSmoke(options, client, admin) {
+  const baseUrl = options.saasAdminBaseUrl.replace(/\/$/, "");
+  const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
+  if (
+    options.expectedReleaseSha &&
+    root.headers.get("x-markiro-release-sha") !== options.expectedReleaseSha
+  )
+    throw new Error("live release identity does not match the expected release");
+  const rootHtml = await getText(root);
+  assertHeaders(root, new URL(baseUrl).protocol === "https:", "SaaS admin /");
+  const signature = shellSignature(rootHtml);
+  if (root.status !== 200 || !signature)
+    throw new Error("SaaS admin root did not return the built platform shell");
+  if (
+    signature.title === admin.signature.title &&
+    signature.modulePath === admin.signature.modulePath
+  )
+    throw new Error("SaaS admin root returned the customer admin shell");
+  assertNoExternalOrigins(rootHtml, baseUrl);
+
+  for (const [method, contractPath, kind] of SAAS_ADMIN_ROUTE_CHECKS) {
+    const path = contractPath.replace(
+      "${assetName}",
+      options.saasAdminAssetName || signature.modulePath.slice("/assets/".length),
+    );
+    const response =
+      contractPath === "/" ? root : await publicRequest(client, new URL(path, baseUrl), { method });
+    const body = contractPath === "/" ? rootHtml : await getText(response);
+    assertHeaders(response, new URL(baseUrl).protocol === "https:", `SaaS admin ${path}`);
+    const contentType = response.headers.get("content-type") || "";
+    if (kind === "saas-shell") {
+      if (response.status !== 200 || !shellSignature(body))
+        throw new Error(`SaaS admin ${path} did not return the platform shell`);
+      continue;
+    }
+    if (kind === "asset") {
+      if (response.status !== 200 || /text\/html/i.test(contentType))
+        throw new Error("SaaS admin asset is unavailable");
+      continue;
+    }
+    if (kind === "platform-proxy") {
+      if (response.status >= 500 || /text\/html/i.test(contentType))
+        throw new Error(`SaaS admin ${path} did not reach the platform API`);
+      continue;
+    }
+    if (response.status !== 404 || /text\/html/i.test(contentType))
+      throw new Error(`SaaS admin ${path} did not return a plain 404`);
+  }
+
+  return { releaseSha: root.headers.get("x-markiro-release-sha") };
+}
+
 async function runKioskSmoke(options, client, admin) {
   const baseUrl = options.kioskBaseUrl.replace(/\/$/, "");
   const root = await publicRequest(client, new URL("/", baseUrl), { method: "GET" });
@@ -1272,12 +1342,19 @@ export async function runPublicSmoke(options, client = requestClient()) {
   const landingState = landingDemoSubmissionState(options.landingDemoSubmissionState ?? "disabled");
   const smokeOptions = { ...options, landingDemoSubmissionState: landingState };
   const admin = await runAdminSmoke(smokeOptions, client);
+  const saasAdmin = options.saasAdminBaseUrl
+    ? await runSaasAdminSmoke(smokeOptions, client, admin)
+    : undefined;
   const kiosk = await runKioskSmoke(smokeOptions, client, admin);
   const landing = await runLandingSmoke(smokeOptions, client);
   if (options.vbtechBaseUrl) await runVbtechSmoke(options, client);
-  if (!options.expectedReleaseSha && (admin.releaseSha || kiosk.releaseSha || landing.releaseSha)) {
+  if (
+    !options.expectedReleaseSha &&
+    (admin.releaseSha || saasAdmin?.releaseSha || kiosk.releaseSha || landing.releaseSha)
+  ) {
     if (
       !admin.releaseSha ||
+      (saasAdmin && admin.releaseSha !== saasAdmin.releaseSha) ||
       admin.releaseSha !== kiosk.releaseSha ||
       admin.releaseSha !== landing.releaseSha
     )
@@ -1286,7 +1363,7 @@ export async function runPublicSmoke(options, client = requestClient()) {
 }
 
 /**
- * @param {{adminBaseUrl: string, kioskBaseUrl: string, landingBaseUrl: string, vbtechBaseUrl?: string, vbtechWwwBaseUrl?: string, assetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, expectedVbtechReleaseSha?: string, vbtechSubmissionState?: "disabled" | "enabled", environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
+ * @param {{adminBaseUrl: string, saasAdminBaseUrl?: string, kioskBaseUrl: string, landingBaseUrl: string, vbtechBaseUrl?: string, vbtechWwwBaseUrl?: string, assetName?: string, saasAdminAssetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, expectedVbtechReleaseSha?: string, vbtechSubmissionState?: "disabled" | "enabled", environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
  * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
  * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
  */
@@ -1308,9 +1385,10 @@ export async function runSmoke(options, client = requestClient(), docker) {
 
 if (isMainModule(import.meta.url)) {
   try {
-    const { admin, kiosk, landing } = productionBaseUrls(process.env);
+    const { admin, saasAdmin, kiosk, landing } = productionBaseUrls(process.env);
     await runSmoke({
       adminBaseUrl: admin,
+      saasAdminBaseUrl: saasAdmin,
       kioskBaseUrl: kiosk,
       landingBaseUrl: landing,
       expectedReleaseSha: process.env.MARKIRO_IMAGE_TAG,
