@@ -15,7 +15,13 @@ import type {
 
 export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08/01" as const;
 
-const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01", "MKR-INS-01"] as const;
+const LEGAL_DOCUMENT_CODES = [
+  "MKR-PD-01",
+  "MKR-PD-02",
+  "MKR-DPA-01",
+  "MKR-BRD-01",
+  "MKR-INS-01",
+] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
 
 export const LEGAL_DOCUMENT_KIND_BY_CODE = {
@@ -103,10 +109,7 @@ function compareLegalRevisions(left: LegalRevision, right: LegalRevision): numbe
   );
 }
 
-function assertLocaleRoutes(
-  code: LegalDocumentCode,
-  routes: LegalDocumentRelease["routes"],
-): void {
+function assertLocaleRoutes(code: LegalDocumentCode, routes: LegalDocumentRelease["routes"]): void {
   const expectedLocales = legalReleaseLocales(code);
   const entries = Object.entries(routes) as [LegalLocale, string][];
   if (
