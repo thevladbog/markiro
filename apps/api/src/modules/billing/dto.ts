@@ -30,3 +30,24 @@ export const createInvoiceSchema = z
 export type CreateInvoiceDto = z.infer<typeof createInvoiceSchema>;
 
 export const invoiceIdSchema = z.uuid();
+
+export const applyInvoiceSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(1_000),
+    lines: z
+      .array(
+        z
+          .object({
+            lineId: z.uuid(),
+            activationPolicy: z.enum(["immediate", "after_current"]).optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(100)
+      .refine((lines) => new Set(lines.map((line) => line.lineId)).size === lines.length, {
+        message: "Invoice application lines must be unique",
+      }),
+  })
+  .strict();
+export type ApplyInvoiceDto = z.infer<typeof applyInvoiceSchema>;

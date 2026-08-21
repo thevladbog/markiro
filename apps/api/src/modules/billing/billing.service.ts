@@ -151,12 +151,63 @@ export class BillingService {
     const lines = await this.db
       .select()
       .from(schema.invoiceLines)
-      .where(eq(schema.invoiceLines.invoiceId, id));
+      .where(eq(schema.invoiceLines.invoiceId, id))
+      .orderBy(schema.invoiceLines.position);
     const documents = await this.db
       .select()
       .from(schema.invoiceDocuments)
-      .where(eq(schema.invoiceDocuments.invoiceId, id));
-    return { ...invoice, lines, documents };
+      .where(eq(schema.invoiceDocuments.invoiceId, id))
+      .orderBy(desc(schema.invoiceDocuments.revision));
+    const [payment] = await this.db
+      .select()
+      .from(schema.billingPayments)
+      .where(
+        and(
+          eq(schema.billingPayments.tenantId, invoice.tenantId),
+          eq(schema.billingPayments.invoiceId, id),
+        ),
+      )
+      .limit(1);
+    const attempts = await this.db
+      .select()
+      .from(schema.invoiceApplicationEvents)
+      .where(
+        and(
+          eq(schema.invoiceApplicationEvents.tenantId, invoice.tenantId),
+          eq(schema.invoiceApplicationEvents.invoiceId, id),
+        ),
+      )
+      .orderBy(schema.invoiceApplicationEvents.createdAt, schema.invoiceApplicationEvents.attempt);
+    const latestAttempts = new Map<string, (typeof attempts)[number]>();
+    for (const attempt of attempts) {
+      const previous = latestAttempts.get(attempt.invoiceLineId);
+      if (!previous || attempt.attempt >= previous.attempt) {
+        latestAttempts.set(attempt.invoiceLineId, attempt);
+      }
+    }
+    const latestByLine = lines.flatMap((line) => {
+      const event = latestAttempts.get(line.id);
+      return event ? [event] : [];
+    });
+    const applicationStatus = !payment
+      ? "not_paid"
+      : latestByLine.some((event) => event.status === "failed")
+        ? "partial_failure"
+        : latestByLine.length < lines.length ||
+            latestByLine.some((event) => event.status === "pending")
+          ? "pending"
+          : "applied";
+    return {
+      ...invoice,
+      lines,
+      documents,
+      payment: payment ?? null,
+      application: {
+        status: applicationStatus,
+        latestByLine,
+        attempts,
+      },
+    };
   }
 
   async issue(principal: PlatformPrincipal, id: string) {

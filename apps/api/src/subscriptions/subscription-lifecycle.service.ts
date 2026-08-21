@@ -19,6 +19,16 @@ type SubscriptionTransaction = Parameters<Db["transaction"]>[0] extends (arg: in
   : never;
 type SubscriptionRow = typeof schema.tenantSubscriptions.$inferSelect;
 type EndedSubscriptionRow = SubscriptionRow & { endsAt: Date };
+type PaidInvoiceAssignment = {
+  sourceInvoiceLineId: string;
+  reason: string;
+};
+type AssignmentContext = {
+  subscriptionSource: "manual" | "paid_invoice_line";
+  sourceInvoiceLineId: string | null;
+  eventSource: "platform_manual" | "paid_invoice_line";
+  auditScope: "platform" | "billing";
+};
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const MAX_MANUAL_TERM_MS = 10 * 366 * DAY_MS;
@@ -116,187 +126,229 @@ export class SubscriptionLifecycleService {
     input: AssignPlanDto,
   ): Promise<SubscriptionRow> {
     assertPlatformAdmin(actor);
-    return this.db.transaction(async (tx) => {
-      await this.lockTenantTimeline(tx, tenantId);
-      const operationAt = new Date();
-      validateEffectiveAt(input.effectiveAt, operationAt);
-      if (input.activationPolicy === "immediate") {
-        const startsAt = resolveImmediateStart(input.effectiveAt, operationAt);
-        validateTerm(startsAt, input.endsAt);
-        validateActiveEnd(input.endsAt, operationAt);
+    return this.db.transaction((tx) =>
+      this.assignPlanInTransaction(tx, actor, tenantId, input, {
+        subscriptionSource: "manual",
+        sourceInvoiceLineId: null,
+        eventSource: "platform_manual",
+        auditScope: "platform",
+      }),
+    );
+  }
+
+  assignPaidInvoicePlan(
+    tx: SubscriptionTransaction,
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: AssignPlanDto & PaidInvoiceAssignment,
+  ): Promise<SubscriptionRow> {
+    return this.assignPlanInTransaction(tx, actor, tenantId, input, {
+      subscriptionSource: "paid_invoice_line",
+      sourceInvoiceLineId: input.sourceInvoiceLineId,
+      eventSource: "paid_invoice_line",
+      auditScope: "billing",
+    });
+  }
+
+  private async assignPlanInTransaction(
+    tx: SubscriptionTransaction,
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: AssignPlanDto,
+    context: AssignmentContext,
+  ): Promise<SubscriptionRow> {
+    await this.lockTenantTimeline(tx, tenantId);
+    const operationAt = new Date();
+    validateEffectiveAt(input.effectiveAt, operationAt);
+    if (input.activationPolicy === "immediate") {
+      const startsAt = resolveImmediateStart(input.effectiveAt, operationAt);
+      validateTerm(startsAt, input.endsAt);
+      validateActiveEnd(input.endsAt, operationAt);
+    }
+    await requireTenant(tx, tenantId);
+    const candidate = await requirePublishedVersion(tx, input.catalogVersionId, "plan");
+
+    const lockedTimeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
+    const expiredCurrent = isEndedSubscription(lockedTimeline.current, operationAt)
+      ? lockedTimeline.current
+      : undefined;
+    const current = expiredCurrent ? undefined : lockedTimeline.current;
+    const existingScheduled = lockedTimeline.scheduled;
+
+    if (input.activationPolicy === "after_current" && !current) {
+      throw new ConflictException({ code: "subscription_timeline_changed" });
+    }
+
+    const before = current ? subscriptionSnapshot(current) : null;
+    let startsAt: Date;
+    let status: "active" | "scheduled";
+    if (input.activationPolicy === "after_current" && current) {
+      if (existingScheduled) {
+        throw new ConflictException({ code: "subscription_schedule_exists" });
       }
-      await requireTenant(tx, tenantId);
-      const candidate = await requirePublishedVersion(tx, input.catalogVersionId, "plan");
+      if (!current.endsAt) {
+        throw new ConflictException({ code: "subscription_current_end_required" });
+      }
+      startsAt = current.endsAt;
+      status = "scheduled";
+    } else {
+      startsAt = resolveImmediateStart(input.effectiveAt, operationAt);
+      status = "active";
+    }
+    validateTerm(startsAt, input.endsAt);
+    if (status === "active") validateActiveEnd(input.endsAt, operationAt);
 
-      const lockedTimeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
-      const expiredCurrent = isEndedSubscription(lockedTimeline.current, operationAt)
-        ? lockedTimeline.current
-        : undefined;
-      const current = expiredCurrent ? undefined : lockedTimeline.current;
-      const existingScheduled = lockedTimeline.scheduled;
-
-      if (input.activationPolicy === "after_current" && !current) {
+    if (expiredCurrent) {
+      const expired = await tx
+        .update(schema.tenantSubscriptions)
+        .set({ status: "expired", updatedAt: operationAt })
+        .where(
+          and(
+            eq(schema.tenantSubscriptions.id, expiredCurrent.id),
+            eq(schema.tenantSubscriptions.tenantId, tenantId),
+            eq(schema.tenantSubscriptions.status, expiredCurrent.status),
+          ),
+        )
+        .returning({ id: schema.tenantSubscriptions.id });
+      if (expired.length !== 1) {
         throw new ConflictException({ code: "subscription_timeline_changed" });
       }
+      await this.retireSubscriptionAddons(
+        tx,
+        actor,
+        expiredCurrent,
+        input.reason,
+        operationAt,
+        context,
+      );
+      await tx.insert(schema.subscriptionEvents).values({
+        tenantId,
+        subscriptionId: expiredCurrent.id,
+        eventKind: "plan.expired",
+        effectiveAt: expiredCurrent.endsAt,
+        actorPlatformUserId: actor.userId,
+        source: context.eventSource,
+        reason: input.reason,
+        before: subscriptionSnapshot(expiredCurrent),
+        after: { ...subscriptionSnapshot(expiredCurrent), status: "expired" },
+      });
+    }
 
-      const before = current ? subscriptionSnapshot(current) : null;
-      let startsAt: Date;
-      let status: "active" | "scheduled";
-      if (input.activationPolicy === "after_current" && current) {
-        if (existingScheduled) {
-          throw new ConflictException({ code: "subscription_schedule_exists" });
-        }
-        if (!current.endsAt) {
-          throw new ConflictException({ code: "subscription_current_end_required" });
-        }
-        startsAt = current.endsAt;
-        status = "scheduled";
-      } else {
-        startsAt = resolveImmediateStart(input.effectiveAt, operationAt);
-        status = "active";
-      }
-      validateTerm(startsAt, input.endsAt);
-      if (status === "active") validateActiveEnd(input.endsAt, operationAt);
-
-      if (expiredCurrent) {
-        const expired = await tx
+    if (status === "active") {
+      if (existingScheduled) {
+        const cancelled = await tx
           .update(schema.tenantSubscriptions)
-          .set({ status: "expired", updatedAt: operationAt })
+          .set({ status: "cancelled", updatedAt: operationAt })
           .where(
             and(
-              eq(schema.tenantSubscriptions.id, expiredCurrent.id),
+              eq(schema.tenantSubscriptions.id, existingScheduled.id),
               eq(schema.tenantSubscriptions.tenantId, tenantId),
-              eq(schema.tenantSubscriptions.status, expiredCurrent.status),
+              eq(schema.tenantSubscriptions.status, "scheduled"),
             ),
           )
           .returning({ id: schema.tenantSubscriptions.id });
-        if (expired.length !== 1) {
+        if (cancelled.length !== 1) {
           throw new ConflictException({ code: "subscription_timeline_changed" });
         }
-        await this.retireSubscriptionAddons(tx, actor, expiredCurrent, input.reason, operationAt);
+        await this.retireSubscriptionAddons(
+          tx,
+          actor,
+          existingScheduled,
+          input.reason,
+          operationAt,
+          context,
+        );
         await tx.insert(schema.subscriptionEvents).values({
           tenantId,
-          subscriptionId: expiredCurrent.id,
-          eventKind: "plan.expired",
-          effectiveAt: expiredCurrent.endsAt,
+          subscriptionId: existingScheduled.id,
+          eventKind: "plan.schedule_cancelled",
+          effectiveAt: operationAt,
           actorPlatformUserId: actor.userId,
-          source: "platform_manual",
+          source: context.eventSource,
           reason: input.reason,
-          before: subscriptionSnapshot(expiredCurrent),
-          after: { ...subscriptionSnapshot(expiredCurrent), status: "expired" },
+          before: subscriptionSnapshot(existingScheduled),
+          after: { ...subscriptionSnapshot(existingScheduled), status: "cancelled" },
         });
       }
-
-      if (status === "active") {
-        if (existingScheduled) {
-          const cancelled = await tx
-            .update(schema.tenantSubscriptions)
-            .set({ status: "cancelled", updatedAt: operationAt })
-            .where(
-              and(
-                eq(schema.tenantSubscriptions.id, existingScheduled.id),
-                eq(schema.tenantSubscriptions.tenantId, tenantId),
-                eq(schema.tenantSubscriptions.status, "scheduled"),
-              ),
-            )
-            .returning({ id: schema.tenantSubscriptions.id });
-          if (cancelled.length !== 1) {
-            throw new ConflictException({ code: "subscription_timeline_changed" });
-          }
-          await this.retireSubscriptionAddons(
-            tx,
-            actor,
-            existingScheduled,
-            input.reason,
-            operationAt,
-          );
-          await tx.insert(schema.subscriptionEvents).values({
-            tenantId,
-            subscriptionId: existingScheduled.id,
-            eventKind: "plan.schedule_cancelled",
-            effectiveAt: operationAt,
-            actorPlatformUserId: actor.userId,
-            source: "platform_manual",
-            reason: input.reason,
-            before: subscriptionSnapshot(existingScheduled),
-            after: { ...subscriptionSnapshot(existingScheduled), status: "cancelled" },
-          });
+      if (current) {
+        const superseded = await tx
+          .update(schema.tenantSubscriptions)
+          .set({ status: "superseded", updatedAt: operationAt })
+          .where(
+            and(
+              eq(schema.tenantSubscriptions.id, current.id),
+              eq(schema.tenantSubscriptions.tenantId, tenantId),
+              eq(schema.tenantSubscriptions.status, current.status),
+            ),
+          )
+          .returning({ id: schema.tenantSubscriptions.id });
+        if (superseded.length !== 1) {
+          throw new ConflictException({ code: "subscription_timeline_changed" });
         }
-        if (current) {
-          const superseded = await tx
-            .update(schema.tenantSubscriptions)
-            .set({ status: "superseded", updatedAt: operationAt })
-            .where(
-              and(
-                eq(schema.tenantSubscriptions.id, current.id),
-                eq(schema.tenantSubscriptions.tenantId, tenantId),
-                eq(schema.tenantSubscriptions.status, current.status),
-              ),
-            )
-            .returning({ id: schema.tenantSubscriptions.id });
-          if (superseded.length !== 1) {
-            throw new ConflictException({ code: "subscription_timeline_changed" });
-          }
-          await this.retireSubscriptionAddons(tx, actor, current, input.reason, operationAt);
-          await tx.insert(schema.subscriptionEvents).values({
-            tenantId,
-            subscriptionId: current.id,
-            eventKind: "plan.superseded",
-            effectiveAt: startsAt,
-            actorPlatformUserId: actor.userId,
-            source: "platform_manual",
-            reason: input.reason,
-            before,
-            after: { ...before, status: "superseded" },
-          });
-        }
-      }
-
-      const [created] = await tx
-        .insert(schema.tenantSubscriptions)
-        .values({
+        await this.retireSubscriptionAddons(tx, actor, current, input.reason, operationAt, context);
+        await tx.insert(schema.subscriptionEvents).values({
           tenantId,
-          planVersionId: candidate.id,
-          status,
-          startsAt,
-          endsAt: input.endsAt ?? null,
-          source: "manual",
-          createdByPlatformUserId: actor.userId,
-          createdAt: operationAt,
-          updatedAt: operationAt,
-        })
-        .returning();
-      if (!created) throw new ConflictException({ code: "subscription_assignment_failed" });
-      const after = subscriptionSnapshot(created);
-      await tx.insert(schema.subscriptionEvents).values({
+          subscriptionId: current.id,
+          eventKind: "plan.superseded",
+          effectiveAt: startsAt,
+          actorPlatformUserId: actor.userId,
+          source: context.eventSource,
+          reason: input.reason,
+          before,
+          after: { ...before, status: "superseded" },
+        });
+      }
+    }
+
+    const [created] = await tx
+      .insert(schema.tenantSubscriptions)
+      .values({
         tenantId,
-        subscriptionId: created.id,
-        eventKind: status === "scheduled" ? "plan.scheduled" : "plan.assigned",
-        effectiveAt: startsAt,
-        actorPlatformUserId: actor.userId,
-        source: "platform_manual",
-        reason: input.reason,
-        before,
-        after,
-      });
-      await this.requireAudit().record(tx, {
-        actorPlatformUserId: actor.userId,
-        actorRole: actor.role,
-        action:
-          status === "scheduled"
+        planVersionId: candidate.id,
+        status,
+        startsAt,
+        endsAt: input.endsAt ?? null,
+        source: context.subscriptionSource,
+        sourceInvoiceLineId: context.sourceInvoiceLineId,
+        createdByPlatformUserId: actor.userId,
+        createdAt: operationAt,
+        updatedAt: operationAt,
+      })
+      .returning();
+    if (!created) throw new ConflictException({ code: "subscription_assignment_failed" });
+    const after = subscriptionSnapshot(created);
+    await tx.insert(schema.subscriptionEvents).values({
+      tenantId,
+      subscriptionId: created.id,
+      eventKind: status === "scheduled" ? "plan.scheduled" : "plan.assigned",
+      effectiveAt: startsAt,
+      actorPlatformUserId: actor.userId,
+      source: context.eventSource,
+      reason: input.reason,
+      before,
+      after,
+    });
+    await this.requireAudit().record(tx, {
+      actorPlatformUserId: actor.userId,
+      actorRole: actor.role,
+      action:
+        context.auditScope === "billing"
+          ? status === "scheduled"
+            ? "billing.invoice.plan_scheduled"
+            : "billing.invoice.plan_applied"
+          : status === "scheduled"
             ? "platform.tenant.subscription.plan_scheduled"
             : "platform.tenant.subscription.plan_assigned",
-        outcome: "success",
-        tenantId,
-        targetType: "tenant_subscription",
-        targetId: created.id,
-        reason: input.reason,
-        before,
-        after,
-        requestId: null,
-      });
-      return created;
+      outcome: "success",
+      tenantId,
+      targetType: "tenant_subscription",
+      targetId: created.id,
+      reason: input.reason,
+      before,
+      after,
+      requestId: null,
     });
+    return created;
   }
 
   async assignAddon(
@@ -305,108 +357,142 @@ export class SubscriptionLifecycleService {
     input: AssignAddonDto,
   ): Promise<typeof schema.subscriptionAddons.$inferSelect> {
     assertPlatformAdmin(actor);
-    return this.db.transaction(async (tx) => {
-      await this.lockTenantTimeline(tx, tenantId);
-      const operationAt = new Date();
-      validateEffectiveAt(input.effectiveAt, operationAt);
-      await requireTenant(tx, tenantId);
-      const candidate = await requirePublishedVersion(tx, input.catalogVersionId, "addon");
-      const effects = await tx
-        .select()
-        .from(schema.addonEntitlements)
-        .where(eq(schema.addonEntitlements.catalogVersionId, candidate.id));
-      if (
-        effects.length === 0 ||
-        effects.some(
-          (effect) =>
-            !(
-              (effect.quotaIncrement !== null && effect.quotaIncrement > 0) ||
-              (effect.quotaIncrement === null && effect.featureEnabled)
-            ),
-        )
-      ) {
-        throw new ConflictException({ code: "addon_entitlements_invalid" });
-      }
+    return this.db.transaction((tx) =>
+      this.assignAddonInTransaction(tx, actor, tenantId, input, {
+        subscriptionSource: "manual",
+        sourceInvoiceLineId: null,
+        eventSource: "platform_manual",
+        auditScope: "platform",
+      }),
+    );
+  }
 
-      const timeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
-      const target =
-        input.activationPolicy === "after_current" ? timeline.scheduled : timeline.current;
-      if (!target || target.id !== input.expectedSubscriptionId) {
-        throw new ConflictException({ code: "subscription_addon_timeline_changed" });
-      }
-      if (
-        input.activationPolicy === "immediate" &&
-        (target.status === "pending_activation" ||
-          target.startsAt === null ||
-          target.startsAt > operationAt ||
-          (target.endsAt !== null && target.endsAt <= operationAt))
-      ) {
-        throw new ConflictException({ code: "subscription_compatible_plan_required" });
-      }
-      const startsAt =
-        input.activationPolicy === "after_current"
-          ? target.startsAt
-          : resolveImmediateStart(input.effectiveAt, operationAt);
-      if (!startsAt) throw new ConflictException({ code: "subscription_start_required" });
-      if (target.startsAt && startsAt < target.startsAt) {
-        throw new BadRequestException({ code: "addon_precedes_subscription_term" });
-      }
-      const endsAt = input.endsAt ?? target.endsAt;
-      validateTerm(startsAt, endsAt ?? undefined);
-      if (input.activationPolicy === "immediate") {
-        validateActiveEnd(endsAt ?? undefined, operationAt);
-      }
-      if (target.endsAt && endsAt && endsAt > target.endsAt) {
-        throw new BadRequestException({ code: "addon_exceeds_subscription_term" });
-      }
-      const status = input.activationPolicy === "after_current" ? "scheduled" : "active";
-      const [created] = await tx
-        .insert(schema.subscriptionAddons)
-        .values({
-          tenantId,
-          subscriptionId: target.id,
-          addonVersionId: candidate.id,
-          quantity: input.quantity,
-          startsAt,
-          endsAt: endsAt ?? null,
-          status,
-          source: "manual",
-          createdByPlatformUserId: actor.userId,
-          createdAt: operationAt,
-          updatedAt: operationAt,
-        })
-        .returning();
-      if (!created) throw new ConflictException({ code: "addon_assignment_failed" });
-      const after = addonSnapshot(created);
-      await tx.insert(schema.subscriptionEvents).values({
+  assignPaidInvoiceAddon(
+    tx: SubscriptionTransaction,
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: AssignAddonDto & PaidInvoiceAssignment,
+  ): Promise<typeof schema.subscriptionAddons.$inferSelect> {
+    return this.assignAddonInTransaction(tx, actor, tenantId, input, {
+      subscriptionSource: "paid_invoice_line",
+      sourceInvoiceLineId: input.sourceInvoiceLineId,
+      eventSource: "paid_invoice_line",
+      auditScope: "billing",
+    });
+  }
+
+  private async assignAddonInTransaction(
+    tx: SubscriptionTransaction,
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: AssignAddonDto,
+    context: AssignmentContext,
+  ): Promise<typeof schema.subscriptionAddons.$inferSelect> {
+    await this.lockTenantTimeline(tx, tenantId);
+    const operationAt = new Date();
+    validateEffectiveAt(input.effectiveAt, operationAt);
+    await requireTenant(tx, tenantId);
+    const candidate = await requirePublishedVersion(tx, input.catalogVersionId, "addon");
+    const effects = await tx
+      .select()
+      .from(schema.addonEntitlements)
+      .where(eq(schema.addonEntitlements.catalogVersionId, candidate.id));
+    if (
+      effects.length === 0 ||
+      effects.some(
+        (effect) =>
+          !(
+            (effect.quotaIncrement !== null && effect.quotaIncrement > 0) ||
+            (effect.quotaIncrement === null && effect.featureEnabled)
+          ),
+      )
+    ) {
+      throw new ConflictException({ code: "addon_entitlements_invalid" });
+    }
+
+    const timeline = await lockAndFindTimelineSubscriptions(tx, tenantId);
+    const target =
+      input.activationPolicy === "after_current" ? timeline.scheduled : timeline.current;
+    if (!target || target.id !== input.expectedSubscriptionId) {
+      throw new ConflictException({ code: "subscription_addon_timeline_changed" });
+    }
+    if (
+      input.activationPolicy === "immediate" &&
+      (target.status === "pending_activation" ||
+        target.startsAt === null ||
+        target.startsAt > operationAt ||
+        (target.endsAt !== null && target.endsAt <= operationAt))
+    ) {
+      throw new ConflictException({ code: "subscription_compatible_plan_required" });
+    }
+    const startsAt =
+      input.activationPolicy === "after_current"
+        ? target.startsAt
+        : resolveImmediateStart(input.effectiveAt, operationAt);
+    if (!startsAt) throw new ConflictException({ code: "subscription_start_required" });
+    if (target.startsAt && startsAt < target.startsAt) {
+      throw new BadRequestException({ code: "addon_precedes_subscription_term" });
+    }
+    const endsAt = input.endsAt ?? target.endsAt;
+    validateTerm(startsAt, endsAt ?? undefined);
+    if (input.activationPolicy === "immediate") {
+      validateActiveEnd(endsAt ?? undefined, operationAt);
+    }
+    if (target.endsAt && endsAt && endsAt > target.endsAt) {
+      throw new BadRequestException({ code: "addon_exceeds_subscription_term" });
+    }
+    const status = input.activationPolicy === "after_current" ? "scheduled" : "active";
+    const [created] = await tx
+      .insert(schema.subscriptionAddons)
+      .values({
         tenantId,
         subscriptionId: target.id,
-        eventKind: status === "scheduled" ? "addon.scheduled" : "addon.activated",
-        effectiveAt: startsAt,
-        actorPlatformUserId: actor.userId,
-        source: "platform_manual",
-        reason: input.reason,
-        before: null,
-        after,
-      });
-      await this.requireAudit().record(tx, {
-        actorPlatformUserId: actor.userId,
-        actorRole: actor.role,
-        action:
-          status === "scheduled"
+        addonVersionId: candidate.id,
+        quantity: input.quantity,
+        startsAt,
+        endsAt: endsAt ?? null,
+        status,
+        source: context.subscriptionSource,
+        sourceInvoiceLineId: context.sourceInvoiceLineId,
+        createdByPlatformUserId: actor.userId,
+        createdAt: operationAt,
+        updatedAt: operationAt,
+      })
+      .returning();
+    if (!created) throw new ConflictException({ code: "addon_assignment_failed" });
+    const after = addonSnapshot(created);
+    await tx.insert(schema.subscriptionEvents).values({
+      tenantId,
+      subscriptionId: target.id,
+      eventKind: status === "scheduled" ? "addon.scheduled" : "addon.activated",
+      effectiveAt: startsAt,
+      actorPlatformUserId: actor.userId,
+      source: context.eventSource,
+      reason: input.reason,
+      before: null,
+      after,
+    });
+    await this.requireAudit().record(tx, {
+      actorPlatformUserId: actor.userId,
+      actorRole: actor.role,
+      action:
+        context.auditScope === "billing"
+          ? status === "scheduled"
+            ? "billing.invoice.addon_scheduled"
+            : "billing.invoice.addon_applied"
+          : status === "scheduled"
             ? "platform.tenant.subscription.addon_scheduled"
             : "platform.tenant.subscription.addon_assigned",
-        outcome: "success",
-        tenantId,
-        targetType: "subscription_addon",
-        targetId: created.id,
-        reason: input.reason,
-        before: null,
-        after,
-        requestId: null,
-      });
-      return created;
+      outcome: "success",
+      tenantId,
+      targetType: "subscription_addon",
+      targetId: created.id,
+      reason: input.reason,
+      before: null,
+      after,
+      requestId: null,
     });
+    return created;
   }
 
   private requireAudit(): PlatformAuditService {
@@ -420,6 +506,7 @@ export class SubscriptionLifecycleService {
     subscription: SubscriptionRow,
     reason: string,
     operationAt: Date,
+    context: AssignmentContext,
   ): Promise<void> {
     await tx.execute(
       sql`select id from subscription_addons where tenant_id = ${subscription.tenantId} and subscription_id = ${subscription.id} and status in ('active', 'scheduled') order by id for update`,
@@ -461,7 +548,7 @@ export class SubscriptionLifecycleService {
         eventKind,
         effectiveAt: nextStatus === "expired" ? (addon.endsAt ?? operationAt) : operationAt,
         actorPlatformUserId: actor.userId,
-        source: "platform_manual",
+        source: context.eventSource,
         reason,
         before,
         after,
@@ -469,7 +556,10 @@ export class SubscriptionLifecycleService {
       await this.requireAudit().record(tx, {
         actorPlatformUserId: actor.userId,
         actorRole: actor.role,
-        action: `platform.tenant.subscription.${eventKind.replace(".", "_")}`,
+        action:
+          context.auditScope === "billing"
+            ? `billing.invoice.${eventKind.replace(".", "_")}`
+            : `platform.tenant.subscription.${eventKind.replace(".", "_")}`,
         outcome: "success",
         tenantId: subscription.tenantId,
         targetType: "subscription_addon",

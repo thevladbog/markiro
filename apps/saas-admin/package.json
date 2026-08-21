@@ -21,6 +21,7 @@
     "better-auth": "1.6.23",
     "i18next": "26.3.6",
     "js-yaml": "5.2.2",
+    "qrcode.react": "4.2.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "7.85.0",
