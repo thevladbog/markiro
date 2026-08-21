@@ -202,10 +202,32 @@ describe("expiryIsoDate", () => {
 });
 
 describe("boxLabelFields — egais/expiry", () => {
+  it("binds product.printName to the catalog print name and falls back to the full name", () => {
+    const withPrint = boxLabelFields({
+      ...base,
+      productName: "Сидр сухой газированный Дикий Крест Особый 5%",
+      productPrintName: "Дикий Крест Особый 5%",
+      egaisCode: null,
+      shelfLifeDays: null,
+    });
+    expect(withPrint["product.name"]).toBe("Сидр сухой газированный Дикий Крест Особый 5%");
+    expect(withPrint["product.printName"]).toBe("Дикий Крест Особый 5%");
+
+    const withoutPrint = boxLabelFields({
+      ...base,
+      productName: "Сидр сухой газированный Дикий Крест Особый 5%",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
+    });
+    expect(withoutPrint["product.printName"]).toBe("Сидр сухой газированный Дикий Крест Особый 5%");
+  });
+
   const base = {
     sscc: "346006820000000014",
     itemCount: 24,
     productName: "Сидр",
+    productPrintName: null,
     gtin14: "04600682000013",
     operatorName: null,
     counterpartyName: null,

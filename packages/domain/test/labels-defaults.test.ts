@@ -6,6 +6,7 @@ import {
   buildDateFreeBoxLabelTemplates,
   buildDatedBoxLabelTemplates,
   buildDefaultLabelTemplates,
+  buildPrintNameBoxLabelTemplates,
   elementBoundsMm,
   estimatedTextWidthMm,
   generateTspl,
@@ -39,7 +40,13 @@ const FAKE_RASTER: RasterResult = {
 const LONG_CYRILLIC_NAME = "Пиво светлое пастеризованное Жигулёвское Оригинальное 0,5 л";
 
 function dataWithLongName(): Record<LabelField, string> {
-  return { ...sampleLabelData(), "product.name": LONG_CYRILLIC_NAME };
+  // Both headline bindings get the long fixture so the print-name duplicates
+  // exercise the same wrap/width budget as the originals.
+  return {
+    ...sampleLabelData(),
+    "product.name": LONG_CYRILLIC_NAME,
+    "product.printName": LONG_CYRILLIC_NAME,
+  };
 }
 
 /**
@@ -87,12 +94,23 @@ describe("buildDefaultLabelTemplates", () => {
       "Коробка 75×120 без дат (203 dpi)",
       "Коробка 100×100 без дат (203 dpi)",
       "Коробка 100×150 без дат (203 dpi)",
+      "Коробка 58×40 (203 dpi) [Назв. для печати]",
+      "Коробка 58×40 (300 dpi) [Назв. для печати]",
+      "Коробка 75×120 (203 dpi) [Назв. для печати]",
+      "Коробка 100×100 (203 dpi) [Назв. для печати]",
+      "Коробка 100×150 (203 dpi) [Назв. для печати]",
+      "Коробка 58×40 без дат (203 dpi) [Назв. для печати]",
+      "Коробка 58×40 без дат (300 dpi) [Назв. для печати]",
+      "Коробка 75×120 без дат (203 dpi) [Назв. для печати]",
+      "Коробка 100×100 без дат (203 dpi) [Назв. для печати]",
+      "Коробка 100×150 без дат (203 dpi) [Назв. для печати]",
     ]);
-    // ...and the whole list is exactly the two families, in that order, so
-    // provisioning (which consumes this one function) seeds all ten.
+    // ...and the whole list is exactly the three groups, in that order, so
+    // provisioning (which consumes this one function) seeds all twenty.
     expect(templates).toEqual([
       ...buildDatedBoxLabelTemplates(),
       ...buildDateFreeBoxLabelTemplates(),
+      ...buildPrintNameBoxLabelTemplates(),
     ]);
     // The tenant default is still the DATED 58×40 @203 — adding a family must
     // not move it.
@@ -108,13 +126,42 @@ describe("buildDefaultLabelTemplates", () => {
     }
   });
 
+  it("print-name duplicates differ from their originals ONLY in the headline field and the name", () => {
+    const originals = [...buildDatedBoxLabelTemplates(), ...buildDateFreeBoxLabelTemplates()];
+    const printName = buildPrintNameBoxLabelTemplates();
+    expect(printName).toHaveLength(originals.length);
+    for (const [index, original] of originals.entries()) {
+      const twin = printName[index]!;
+      expect(twin.name).toBe(`${original.name} [Назв. для печати]`);
+      const twinName = twin.spec.elements.find((e) => e.id === "name");
+      expect(twinName).toMatchObject({ kind: "field", field: "product.printName" });
+      // Same geometry: swapping the headline binding back must reproduce the
+      // original spec byte for byte.
+      const normalized = {
+        ...twin.spec,
+        elements: twin.spec.elements.map((e) =>
+          e.id === "name" && e.kind === "field" ? { ...e, field: "product.name" as const } : e,
+        ),
+      };
+      expect(normalized).toEqual(original.spec);
+    }
+  });
+
   it("every spec validates and mirrors the approved mock-up layout", () => {
     for (const { spec } of buildDefaultLabelTemplates()) {
       expect(() => parseLabelTemplate(spec)).not.toThrow();
       const kindsByField = new Map(
         spec.elements.filter((el) => el.kind === "field").map((el) => [el.field, el] as const),
       );
-      for (const field of ["product.name", "qty", "product.egais"] as const) {
+      // The headline is product.name in the two original families and
+      // product.printName in their duplicates — exactly one of the two.
+      const headline = spec.elements.find((el) => el.id === "name");
+      expect(headline?.kind).toBe("field");
+      expect(
+        headline?.kind === "field" &&
+          (headline.field === "product.name" || headline.field === "product.printName"),
+      ).toBe(true);
+      for (const field of ["qty", "product.egais"] as const) {
         expect(kindsByField.has(field), `missing field ${field}`).toBe(true);
       }
       const barcode = spec.elements.find((el) => el.kind === "barcode");
@@ -448,8 +495,11 @@ describe("buildDefaultLabelTemplates", () => {
     for (const { name, spec } of buildDefaultLabelTemplates()) {
       const barcode = spec.elements.find((el) => el.kind === "barcode");
       if (barcode?.kind !== "barcode") throw new Error(`${name}: no barcode`);
-      expect(barcode.moduleWidthMm, `${name}: module width`).toBe(expected[name]!.moduleWidthMm);
-      expect(barcode.xMm, `${name}: centred x`).toBe(expected[name]!.xMm);
+      // The print-name duplicates share their original's geometry, so they
+      // share its expectation row too.
+      const expectation = expected[name.replace(" [Назв. для печати]", "")]!;
+      expect(barcode.moduleWidthMm, `${name}: module width`).toBe(expectation.moduleWidthMm);
+      expect(barcode.xMm, `${name}: centred x`).toBe(expectation.xMm);
 
       // Whole dots, or the printer rounds the template's intent away.
       const moduleDots = (barcode.moduleWidthMm! * spec.dpi) / 25.4;
@@ -809,6 +859,16 @@ describe("buildDefaultLabelTemplates", () => {
   it("matches the jsonb inlined into db migration 0053 (drift guard)", async () => {
     expect(await inlinedRows("0053_date_free_label_templates.sql")).toEqual(
       buildDateFreeBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
+    );
+  });
+
+  /**
+   * The PRINT-NAME family's drift guard — insert-if-absent like 0053's, and
+   * generated the same way: whoever changes the layout regenerates the SQL.
+   */
+  it("matches the jsonb inlined into db migration 0058 (drift guard)", async () => {
+    expect(await inlinedRows("0058_print_name_label_templates.sql")).toEqual(
+      buildPrintNameBoxLabelTemplates().map((t) => ({ name: t.name, spec: t.spec })),
     );
   });
 });

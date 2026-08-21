@@ -14,6 +14,7 @@ describe("label code import contract", () => {
   it("exports one canonical ordered label-field inventory", () => {
     expect(LABEL_FIELDS).toEqual([
       "product.name",
+      "product.printName",
       "product.gtin",
       "product.egais",
       "km.code",

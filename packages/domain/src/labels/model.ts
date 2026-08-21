@@ -6,6 +6,9 @@ import { formatLabelDate } from "./date.js";
 /** Data sources a text/field element on a label can be bound to. */
 export const LABEL_FIELDS = [
   "product.name",
+  // The catalog's optional short print name; the station substitutes the full
+  // name when a product has none, so the field never renders blank.
+  "product.printName",
   "product.gtin",
   "product.egais",
   "km.code",
@@ -208,6 +211,7 @@ export function ptToDots(pt: number, dpi: number): number {
 export function sampleLabelData(): Record<LabelField, string> {
   return {
     "product.name": "Пиво светлое 0,5 л",
+    "product.printName": "Пиво светлое",
     "product.gtin": "04600682000013",
     "product.egais": "0101234567890123456",
     "km.code": "010460068200001321abcDEF1234567",
