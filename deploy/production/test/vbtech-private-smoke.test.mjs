@@ -200,9 +200,11 @@ test("private v-b request client rejects unsafe transport and logical authoritie
   for (const logicalUrl of [
     "https://user:pass@v-b.tech/legal/",
     "https://v-b.tech/legal/#private",
+    "https://v-b.tech/legal/#",
     "https://v-b.tech:443/legal/",
     "https://v-b.tech./legal/",
     "https://www.v-b.tech./canonical-check",
+    "https://www.v-b.tech/canonical-check#",
   ]) {
     await t.test(`logical URL ${logicalUrl}`, async () =>
       assert.rejects(
@@ -210,6 +212,35 @@ test("private v-b request client rejects unsafe transport and logical authoritie
         /private v-b request is invalid/,
       ),
     );
+  }
+});
+
+test("private v-b request client cannot replace the approved transport authority through a logical path", async (t) => {
+  const calls = [];
+  const client = privateVbtechRequestClient({
+    transportOrigin,
+    apexAuthority: "v-b.tech",
+    wwwAuthority: "www.v-b.tech",
+    request: async (url, init) => {
+      calls.push({ url: new URL(url), init });
+      return vbtechResponse();
+    },
+  });
+
+  for (const logicalUrl of [
+    "https://v-b.tech//attacker.example/path",
+    "https://www.v-b.tech//attacker.example/path",
+    "https://v-b.tech/\\attacker.example/path",
+    "https://www.v-b.tech/\\attacker.example/path",
+    "https://v-b.tech/%2f%2fattacker.example/path",
+  ]) {
+    await t.test(logicalUrl, async () => {
+      const before = calls.length;
+      await client.request(logicalUrl, { method: "GET" });
+      assert.equal(calls.length, before + 1);
+      assert.equal(calls.at(-1).url.origin, transportOrigin);
+      assert.equal(calls.at(-1).url.hostname, "app.markiro.example");
+    });
   }
 });
 

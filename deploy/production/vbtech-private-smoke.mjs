@@ -45,6 +45,7 @@ function validateTransportOrigin(value) {
 }
 
 function logicalRequest(url, apexAuthority, wwwAuthority) {
+  if (typeof url === "string" && url.includes("#")) throw privateRequestError();
   const rawAuthority =
     typeof url === "string"
       ? /^https:\/\/(v-b\.tech|www\.v-b\.tech)(?=[/?#]|$)/.exec(url)?.[1]
@@ -70,6 +71,13 @@ function logicalRequest(url, apexAuthority, wwwAuthority) {
   if (authority === wwwAuthority && logical.origin === `https://${wwwAuthority}`)
     return { logical, host: wwwAuthority };
   throw privateRequestError();
+}
+
+function transportTarget(transport, logical) {
+  const target = new URL(transport);
+  target.pathname = logical.pathname;
+  target.search = logical.search;
+  return target;
 }
 
 function privateRequestInit(init, host) {
@@ -104,7 +112,7 @@ export function privateVbtechRequestClient({
   return {
     async request(url, init, signal) {
       const { logical, host } = logicalRequest(url, apex, www);
-      const target = new URL(`${logical.pathname}${logical.search}`, transport);
+      const target = transportTarget(transport, logical);
       return request(target, privateRequestInit(init, host), signal);
     },
   };
