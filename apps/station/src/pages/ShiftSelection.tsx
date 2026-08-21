@@ -24,6 +24,7 @@ interface ShiftListItem {
   productName: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
+  productionDate?: string | null;
   counterpartyName?: string | null;
   productId: string;
   image?: {
@@ -294,6 +295,8 @@ export function ShiftSelection({
                   number={shift.number ?? null}
                   productName={shift.productName}
                   plannedDate={shift.plannedDate}
+                  productionDate={shift.productionDate ?? null}
+                  productionDateLabel={t("shifts.productionShort")}
                   locale={i18n.resolvedLanguage ?? i18n.language}
                   plannedQty={shift.plannedQty}
                   mode={shift.mode}

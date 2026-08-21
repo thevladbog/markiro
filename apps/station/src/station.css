@@ -1149,8 +1149,23 @@ body,
   gap: 2px;
 }
 
-.shift-card__date,
 .shift-card__plan {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* One line when both dates fit; the production date wraps whole otherwise. */
+.shift-card__date {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-wrap: wrap;
+  column-gap: var(--sp-3);
+}
+
+.shift-card__date-part {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

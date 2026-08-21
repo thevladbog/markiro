@@ -145,6 +145,7 @@
     "modeAggregation": "Агрегация",
     "modeLabel": "Режим смены",
     "productionDate": "Дата производства",
+    "productionShort": "Производство",
     "productionDateHint": "Необязательно. Берите с продукции.",
     "productionDatePlaceholder": "Выберите дату",
     "productionDateClear": "Очистить дату производства",
