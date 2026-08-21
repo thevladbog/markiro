@@ -192,9 +192,7 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "0057_product_print_name.sql"), {
       force: true,
     });
-    await rm(join(legacyMigrationsFolder, "0058_print_name_label_templates.sql"), {
-      force: true,
-    });
+    await rm(join(legacyMigrationsFolder, "0058_remarkable_pyro.sql"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0044_snapshot.json"), { force: true });
@@ -234,7 +232,7 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
         entry.tag !== "0055_brief_mole_man" &&
         entry.tag !== "0056_align_dated_label_quantity" &&
         entry.tag !== "0057_product_print_name" &&
-        entry.tag !== "0058_print_name_label_templates",
+        entry.tag !== "0058_remarkable_pyro",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
     await writeFile(journalPath, JSON.stringify(journal));

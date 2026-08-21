@@ -6,15 +6,21 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
+import { BillingApplicationService } from "../billing/billing-application.service";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
+import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { ImportBankFileDto, ManualPaymentDto } from "./dto";
 
 @Injectable()
 export class BillingPaymentsService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly application: BillingApplicationService,
+    private readonly audit: PlatformAuditService,
+  ) {}
 
   async list(tenantId?: string) {
     const query = this.db
@@ -30,15 +36,41 @@ export class BillingPaymentsService {
 
   async recordManual(principal: PlatformPrincipal, invoiceId: string, input: ManualPaymentDto) {
     return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`billing-payment:${input.idempotencyKey}`}, 0))`,
+      );
+      const [existing] = await tx
+        .select()
+        .from(schema.billingPayments)
+        .where(eq(schema.billingPayments.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (existing) {
+        if (
+          existing.invoiceId === invoiceId &&
+          existing.amount === input.amount &&
+          existing.bankReference === input.bankReference &&
+          existing.paidAt.getTime() === input.paidAt.getTime()
+        ) {
+          return existing;
+        }
+        throw new ConflictException({ code: "payment_idempotency_key_reused" });
+      }
+      await tx.execute(sql`select id from invoices where id = ${invoiceId} for update`);
       const [invoice] = await tx
         .select()
         .from(schema.invoices)
         .where(eq(schema.invoices.id, invoiceId))
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
-      if (invoice.status === "cancelled")
-        throw new ConflictException({ code: "invoice_cancelled" });
-      if (invoice.status === "paid") throw new ConflictException({ code: "invoice_already_paid" });
+      if (invoice.status !== "issued")
+        throw new ConflictException({
+          code:
+            invoice.status === "cancelled"
+              ? "invoice_cancelled"
+              : invoice.status === "paid"
+                ? "invoice_already_paid"
+                : "invoice_not_issued",
+        });
       if (input.amount !== invoice.total)
         throw new BadRequestException({ code: "payment_amount_mismatch" });
       const [payment] = await tx
@@ -62,7 +94,7 @@ export class BillingPaymentsService {
         .select()
         .from(schema.invoiceLines)
         .where(eq(schema.invoiceLines.invoiceId, invoiceId));
-      if (invoice.applicationMode === "automatic") {
+      if (lines.length > 0) {
         await tx.insert(schema.invoiceApplicationEvents).values(
           lines.map((line) => ({
             tenantId: invoice.tenantId,
@@ -79,6 +111,33 @@ export class BillingPaymentsService {
           })),
         );
       }
+      if (invoice.applicationMode === "automatic" && payment) {
+        await this.application.applyAutomaticInTransaction(
+          tx,
+          principal,
+          { ...invoice, status: "paid", paidAt: input.paidAt },
+          payment,
+          lines,
+        );
+      }
+      if (!payment) throw new ConflictException({ code: "payment_recording_failed" });
+      await this.audit.record(tx, {
+        actorPlatformUserId: principal.userId,
+        actorRole: principal.role,
+        action: "billing.payment.recorded",
+        outcome: "success",
+        tenantId: invoice.tenantId,
+        targetType: "billing_payment",
+        targetId: payment.id,
+        reason: null,
+        before: { invoiceStatus: invoice.status },
+        after: {
+          invoiceStatus: "paid",
+          applicationMode: invoice.applicationMode,
+          lineCount: lines.length,
+        },
+        requestId: null,
+      });
       return payment;
     });
   }

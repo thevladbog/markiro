@@ -73,7 +73,7 @@ export class PickupOrdersController {
     @Param("id") id: string,
     @Res({ passthrough: true }) res: Response,
   ): Promise<string> {
-    const data = await this.pickupOrdersService.slipData(req.tenantId!, id);
+    const data = await this.pickupOrdersService.slipData(req.tenantId!, id, req.userId!);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     return renderPickupSlipHtml(data);
   }

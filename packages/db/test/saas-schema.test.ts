@@ -130,6 +130,7 @@ describe("SaaS catalog and subscription schema", () => {
   });
 
   it("keeps immutable subscription source facts as typed columns", () => {
+    expect(schema.subscriptionSource.enumValues).toContain("paid_invoice_line");
     expect(Object.keys(schema.tenantSubscriptions)).toEqual(
       expect.arrayContaining([
         "tenantId",
@@ -139,6 +140,7 @@ describe("SaaS catalog and subscription schema", () => {
         "endsAt",
         "source",
         "sourceOfferLineId",
+        "sourceInvoiceLineId",
         "createdByPlatformUserId",
       ]),
     );
@@ -151,7 +153,25 @@ describe("SaaS catalog and subscription schema", () => {
         "status",
         "source",
         "sourceOfferLineId",
+        "sourceInvoiceLineId",
       ]),
+    );
+  });
+
+  it("keeps invoice-backed ordered services distinct from offer fulfilment", () => {
+    expect(Object.keys(schema.orderedServices)).toEqual(
+      expect.arrayContaining([
+        "offerLineId",
+        "paymentId",
+        "invoiceId",
+        "invoiceLineId",
+        "billingPaymentId",
+      ]),
+    );
+    expect(schema.orderedServices.offerLineId.notNull).toBe(false);
+    expect(schema.orderedServices.paymentId.notNull).toBe(false);
+    expect(getTableConfig(schema.orderedServices).checks.map((item) => item.name)).toContain(
+      "ordered_services_source_check",
     );
   });
 
