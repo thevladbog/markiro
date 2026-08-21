@@ -59,6 +59,10 @@ function fileName(value) {
   return `${value.createdAt.replace(/[:.]/g, "-")}-${value.releaseSha}-${value.imageDigest.slice(7)}.${value.state}.json`;
 }
 
+function claimFileName(kind, generation, releaseSha = firstSha, imageDigest = firstDigest) {
+  return `.vbtech-release-state.${releaseSha}-${imageDigest.slice(7)}.${kind}-${generation}.claim`;
+}
+
 function dependencies(createdAt = "2026-08-21T10:20:30.000Z") {
   return {
     now: () => new Date(createdAt),
@@ -201,6 +205,97 @@ test("permits a new pending generation after a failed terminal", async () => {
   );
 });
 
+test("rejects a release chain with a fully deleted middle generation", async () => {
+  const releases = await directory();
+  const first = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:30.000Z"),
+  );
+  await markVbtechReleaseFailed(releases, first, dependencies());
+  const second = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:31.000Z"),
+  );
+  const secondFailed = await markVbtechReleaseFailed(releases, second, dependencies());
+  await writePendingVbtechRelease(releases, selector(), dependencies("2026-08-21T10:20:32.000Z"));
+
+  for (const file of [
+    fileName(second),
+    fileName(secondFailed),
+    claimFileName("pending", 2),
+    claimFileName("terminal", 2),
+  ])
+    unlinkSync(join(releases, file));
+
+  await assertStateRejected(() => latestHealthyVbtechRelease(releases));
+});
+
+test("rejects a forged first claim generation", async () => {
+  const releases = await directory();
+  await writePendingVbtechRelease(releases, selector(), dependencies());
+  const originalPath = join(releases, claimFileName("pending", 1));
+  const claim = JSON.parse(await readFile(originalPath, "utf8"));
+  unlinkSync(originalPath);
+  await writeFile(
+    join(releases, claimFileName("pending", 7)),
+    `${JSON.stringify({ ...claim, generation: 7 })}\n`,
+    { mode: 0o600 },
+  );
+
+  await assertStateRejected(() => latestHealthyVbtechRelease(releases));
+});
+
+test("rejects a later generation after a non-failed terminal", async () => {
+  const releases = await directory();
+  const first = await writePendingVbtechRelease(releases, selector(), dependencies());
+  const healthy = await markVbtechReleaseHealthy(releases, first, dependencies());
+  const forgedPending = record({ createdAt: "2026-08-21T10:20:31.000Z" });
+  await writeRecord(releases, forgedPending);
+  await writeFile(
+    join(releases, claimFileName("pending", 2)),
+    `${JSON.stringify({ kind: "pending", generation: 2, record: forgedPending })}\n`,
+    { mode: 0o600 },
+  );
+
+  assert.deepEqual(healthy, record({ state: "healthy" }));
+  await assertStateRejected(() => latestHealthyVbtechRelease(releases));
+});
+
+test("rejects a forged generation gap before the raw failed-count claim can collide", async () => {
+  const releases = await directory();
+  const first = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:30.000Z"),
+  );
+  await markVbtechReleaseFailed(releases, first, dependencies());
+  const second = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:31.000Z"),
+  );
+  await markVbtechReleaseFailed(releases, second, dependencies());
+
+  for (const kind of ["pending", "terminal"]) {
+    const originalPath = join(releases, claimFileName(kind, 2));
+    const claim = JSON.parse(await readFile(originalPath, "utf8"));
+    unlinkSync(originalPath);
+    await writeFile(
+      join(releases, claimFileName(kind, 3)),
+      `${JSON.stringify({ ...claim, generation: 3 })}\n`,
+      { mode: 0o600 },
+    );
+  }
+  const filesBefore = (await readdir(releases)).sort();
+
+  await assertStateRejected(() =>
+    writePendingVbtechRelease(releases, selector(), dependencies("2026-08-21T10:20:32.000Z")),
+  );
+  assert.deepEqual((await readdir(releases)).sort(), filesBefore);
+});
+
 test("rejects a colliding retry timestamp without leaving an orphaned claim", async () => {
   const releases = await directory();
   const first = await writePendingVbtechRelease(releases, selector(), dependencies());
@@ -240,10 +335,8 @@ test("serializes concurrent pending writes for one release identity", async () =
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   assert.equal(
-    ["v-b release transition rejected", "v-b release state recovery required"].includes(
-      results.find((result) => result.status === "rejected")?.reason.message,
-    ),
-    true,
+    results.find((result) => result.status === "rejected")?.reason.message,
+    "v-b release transition rejected",
   );
 });
 
@@ -285,10 +378,7 @@ test("atomically fences a concurrent pending write after its claim publishes", a
     },
   });
 
-  await assert.rejects(
-    competing,
-    (error) => error.message === "v-b release state recovery required",
-  );
+  await assert.rejects(competing, (error) => error.message === "v-b release transition rejected");
   assert.deepEqual(pending, record());
   assert.equal(
     (await readdir(releases)).filter((file) => file.endsWith(".pending.json")).length,
@@ -311,15 +401,85 @@ test("serializes mutually exclusive concurrent terminal transitions", async () =
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   assert.equal(
-    ["v-b release transition rejected", "v-b release state recovery required"].includes(
-      results.find((result) => result.status === "rejected")?.reason.message,
-    ),
-    true,
+    results.find((result) => result.status === "rejected")?.reason.message,
+    "v-b release transition rejected",
   );
   const terminals = (await readdir(releases)).filter(
     (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),
   );
   assert.equal(terminals.length, 1);
+});
+
+test("recovers a healthy terminal claim after a crash before the record link", async () => {
+  const releases = await directory();
+  const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
+  const expected = record({ state: "healthy" });
+  const terminalClaim = join(
+    releases,
+    `.vbtech-release-state.${firstSha}-${firstDigest.slice(7)}.terminal-1.claim`,
+  );
+
+  await assert.rejects(
+    markVbtechReleaseHealthy(releases, pending, {
+      randomUUID: () => {
+        assert.equal(existsSync(terminalClaim), true);
+        throw new Error("simulated crash before healthy record publication");
+      },
+    }),
+    (error) => error.message === "v-b release transition rejected",
+  );
+
+  assert.equal(existsSync(join(releases, fileName(expected))), false);
+  assert.deepEqual(await latestHealthyVbtechRelease(releases), expected);
+  await assert.rejects(
+    markVbtechReleaseFailed(releases, pending, dependencies()),
+    (error) => error.message === "v-b release transition rejected",
+  );
+  assert.deepEqual(await markVbtechReleaseHealthy(releases, pending, dependencies()), expected);
+  assert.equal(existsSync(join(releases, fileName(expected))), true);
+});
+
+test("recovers a failed terminal claim after a crash before the record link", async () => {
+  const releases = await directory();
+  const previousPending = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:29.000Z"),
+  );
+  const previousHealthy = await markVbtechReleaseHealthy(releases, previousPending, dependencies());
+  const failedSelector = selector({
+    releaseSha: "c".repeat(40),
+    imageDigest: `sha256:${"d".repeat(64)}`,
+  });
+  const pending = await writePendingVbtechRelease(releases, failedSelector, dependencies());
+  const expected = record({
+    releaseSha: failedSelector.releaseSha,
+    imageDigest: failedSelector.imageDigest,
+    state: "failed",
+  });
+  const terminalClaim = join(
+    releases,
+    `.vbtech-release-state.${failedSelector.releaseSha}-${failedSelector.imageDigest.slice(7)}.terminal-1.claim`,
+  );
+
+  await assert.rejects(
+    markVbtechReleaseFailed(releases, pending, {
+      randomUUID: () => {
+        assert.equal(existsSync(terminalClaim), true);
+        throw new Error("simulated crash before failed record publication");
+      },
+    }),
+    (error) => error.message === "v-b release transition rejected",
+  );
+
+  assert.equal(existsSync(join(releases, fileName(expected))), false);
+  assert.deepEqual(await latestHealthyVbtechRelease(releases), previousHealthy);
+  await assert.rejects(
+    markVbtechReleaseHealthy(releases, pending, dependencies()),
+    (error) => error.message === "v-b release transition rejected",
+  );
+  assert.deepEqual(await markVbtechReleaseFailed(releases, pending, dependencies()), expected);
+  assert.equal(existsSync(join(releases, fileName(expected))), true);
 });
 
 test("preserves a valid legacy lock while publishing independent claims", async () => {
@@ -375,10 +535,7 @@ test("atomically fences terminal outcomes after a former lock owner is replaced"
     },
   });
 
-  await assert.rejects(
-    competing,
-    (error) => error.message === "v-b release state recovery required",
-  );
+  await assert.rejects(competing, (error) => error.message === "v-b release transition rejected");
   assert.deepEqual(healthy, record({ state: "healthy" }));
   const terminalFiles = (await readdir(releases)).filter(
     (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),

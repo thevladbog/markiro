@@ -13,7 +13,7 @@ const SELECTOR_KEYS = "functionPath,imageDigest,imageRef,releaseSha,submissionSt
 const RECORD_KEYS = "createdAt,imageDigest,imageRef,releaseSha,state,submissionState";
 const LOCK_FILE = ".vbtech-release-state.lock";
 const LOCK_KEYS = "owner,pid";
-const CLAIM_KEYS = "createdAt,generation,imageDigest,kind,releaseSha";
+const CLAIM_KEYS = "generation,kind,record";
 const TEMPORARY_FILE_PATTERN =
   /^\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{40}-[0-9a-f]{64}\.(?:pending|healthy|failed)\.json\.[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.tmp$/;
 const LOCK_TEMPORARY_FILE_PATTERN =
@@ -31,10 +31,6 @@ function stateError() {
 
 function transitionError() {
   return new Error("v-b release transition rejected");
-}
-
-function recoveryError() {
-  return new Error("v-b release state recovery required");
 }
 
 function hasExactKeys(value, keys) {
@@ -63,15 +59,6 @@ function isImageIdentity(value) {
   );
 }
 
-function isDigestIdentity(value) {
-  return (
-    typeof value.releaseSha === "string" &&
-    RELEASE_SHA_PATTERN.test(value.releaseSha) &&
-    typeof value.imageDigest === "string" &&
-    DIGEST_PATTERN.test(value.imageDigest)
-  );
-}
-
 function sameIdentity(left, right) {
   return (
     left.releaseSha === right.releaseSha &&
@@ -82,8 +69,16 @@ function sameIdentity(left, right) {
   );
 }
 
+function sameRecord(left, right) {
+  return sameIdentity(left, right) && left.state === right.state;
+}
+
 function recordIdentity(value) {
   return `${value.createdAt}\n${value.releaseSha}\n${value.imageDigest}`;
+}
+
+function releaseIdentity(value) {
+  return `${value.releaseSha}\n${value.imageDigest}`;
 }
 
 function recordFileName(value) {
@@ -118,24 +113,22 @@ function isLifecycleClaim(value) {
     hasExactKeys(value, CLAIM_KEYS) &&
     typeof value.kind === "string" &&
     (value.kind === "pending" || value.kind === "terminal") &&
-    isDigestIdentity(value) &&
-    isCanonicalIsoDate(value.createdAt) &&
     Number.isSafeInteger(value.generation) &&
-    value.generation > 0
+    value.generation > 0 &&
+    isLifecycleRecord(value.record) &&
+    ((value.kind === "pending" && value.record.state === "pending") ||
+      (value.kind === "terminal" &&
+        (value.record.state === "healthy" || value.record.state === "failed")))
   );
 }
 
 function claimFileName(value) {
-  const identity = `${value.releaseSha}-${value.imageDigest.slice(7)}`;
+  const identity = `${value.record.releaseSha}-${value.record.imageDigest.slice(7)}`;
   return `.vbtech-release-state.${identity}.${value.kind}-${value.generation}.claim`;
 }
 
 function sameClaimIdentity(left, right) {
-  return (
-    left.releaseSha === right.releaseSha &&
-    left.imageDigest === right.imageDigest &&
-    left.createdAt === right.createdAt
-  );
+  return sameIdentity(left.record, right.record);
 }
 
 function assertRecordTransitions(records) {
@@ -263,21 +256,67 @@ async function assertAllowedTransientEntry(directory, file) {
 }
 
 function sameClaimRecord(claim, record) {
-  return (
-    claim.releaseSha === record.releaseSha &&
-    claim.imageDigest === record.imageDigest &&
-    claim.createdAt === record.createdAt
-  );
+  return sameRecord(claim.record, record);
+}
+
+function validatedClaimChains(claims) {
+  const claimsByRelease = new Map();
+  for (const claim of claims) {
+    const identity = releaseIdentity(claim.record);
+    const values = claimsByRelease.get(identity) ?? [];
+    values.push(claim);
+    claimsByRelease.set(identity, values);
+  }
+
+  const chains = new Map();
+  for (const [identity, releaseClaims] of claimsByRelease) {
+    const pendingByGeneration = new Map();
+    const terminalByGeneration = new Map();
+    for (const claim of releaseClaims) {
+      const claimsByGeneration =
+        claim.kind === "pending" ? pendingByGeneration : terminalByGeneration;
+      if (claimsByGeneration.has(claim.generation)) throw stateError();
+      claimsByGeneration.set(claim.generation, claim);
+    }
+
+    const generations = [...pendingByGeneration.keys()].sort((left, right) => left - right);
+    if (generations.length === 0) throw stateError();
+    for (let index = 0; index < generations.length; index += 1) {
+      if (generations[index] !== index + 1) throw stateError();
+    }
+    for (const generation of terminalByGeneration.keys()) {
+      if (!pendingByGeneration.has(generation)) throw stateError();
+    }
+
+    const chain = generations.map((generation) => ({
+      generation,
+      pendingClaim: pendingByGeneration.get(generation),
+      terminalClaim: terminalByGeneration.get(generation),
+    }));
+    for (let index = 0; index < chain.length; index += 1) {
+      const current = chain[index];
+      if (
+        current.terminalClaim !== undefined &&
+        !sameClaimIdentity(current.pendingClaim, current.terminalClaim)
+      )
+        throw stateError();
+      if (index > 0 && chain[index - 1].terminalClaim?.record.state !== "failed")
+        throw stateError();
+    }
+    chains.set(identity, chain);
+  }
+  return chains;
 }
 
 function assertClaimConsistency(records, claims) {
+  const chains = validatedClaimChains(claims);
   const pendingClaims = claims.filter((claim) => claim.kind === "pending");
   const terminalClaims = claims.filter((claim) => claim.kind === "terminal");
   for (const pendingClaim of pendingClaims) {
     const matches = records.filter(
       (record) => record.state === "pending" && sameClaimRecord(pendingClaim, record),
     );
-    if (matches.length !== 1) throw recoveryError();
+    if (matches.length > 1) throw stateError();
   }
   for (const terminalClaim of terminalClaims) {
     const pending = pendingClaims.filter(
@@ -287,17 +326,18 @@ function assertClaimConsistency(records, claims) {
     const terminals = records.filter(
       (record) => record.state !== "pending" && sameClaimRecord(terminalClaim, record),
     );
-    if (pending.length !== 1 || terminals.length !== 1) throw recoveryError();
+    if (pending.length !== 1 || terminals.length > 1) throw stateError();
   }
   for (const pending of records.filter((record) => record.state === "pending")) {
     if (pendingClaims.filter((claim) => sameClaimRecord(claim, pending)).length !== 1)
-      throw recoveryError();
+      throw stateError();
   }
   for (const terminal of records.filter((record) => record.state !== "pending")) {
-    const matchingPending = pendingClaims.filter((claim) => sameClaimRecord(claim, terminal));
+    const matchingPending = pendingClaims.filter((claim) => sameIdentity(claim.record, terminal));
     const matchingTerminal = terminalClaims.filter((claim) => sameClaimRecord(claim, terminal));
-    if (matchingPending.length !== 1 || matchingTerminal.length !== 1) throw recoveryError();
+    if (matchingPending.length !== 1 || matchingTerminal.length !== 1) throw stateError();
   }
+  return { chains, logicalRecords: claims.map((claim) => claim.record) };
 }
 
 async function readReleaseState(directory) {
@@ -359,9 +399,9 @@ async function readReleaseState(directory) {
     if (!isLifecycleRecord(value) || file !== recordFileName(value)) throw stateError();
     records.push(value);
   }
-  assertRecordTransitions(records);
-  assertClaimConsistency(records, claims);
-  return { claims, records };
+  const { chains, logicalRecords } = assertClaimConsistency(records, claims);
+  assertRecordTransitions(logicalRecords);
+  return { chains, claims, persistedRecords: records, records: logicalRecords };
 }
 
 async function readReleaseRecords(directory) {
@@ -492,16 +532,25 @@ async function pendingForTransition(directory, pending) {
     (claim) => claim.kind === "pending" && sameClaimRecord(claim, pending),
   );
   const terminalClaims = state.claims.filter(
-    (claim) => claim.kind === "terminal" && sameClaimRecord(claim, pending),
+    (claim) => claim.kind === "terminal" && sameIdentity(claim.record, pending),
   );
   if (
     persisted.length !== 1 ||
-    terminals.length !== 0 ||
     pendingClaims.length !== 1 ||
-    terminalClaims.length !== 0
+    terminals.length > 1 ||
+    terminalClaims.length !== terminals.length
   )
     throw transitionError();
-  return { generation: pendingClaims[0].generation, record: persisted[0] };
+  const terminalClaim = terminalClaims[0];
+  const terminalPersisted =
+    terminalClaim !== undefined &&
+    state.persistedRecords.some((record) => sameClaimRecord(terminalClaim, record));
+  return {
+    generation: pendingClaims[0].generation,
+    record: persisted[0],
+    terminalClaim,
+    terminalPersisted,
+  };
 }
 
 export function validateVbtechSelector(value) {
@@ -540,20 +589,11 @@ export async function writePendingVbtechRelease(directory, selector, supplied = 
   const validatedSelector = validateVbtechSelector(selector);
   const state = await readReleaseState(directory);
   const records = state?.records ?? [];
-  const matchingRecords = records.filter(
-    (value) =>
-      value.releaseSha === validatedSelector.releaseSha &&
-      value.imageDigest === validatedSelector.imageDigest,
-  );
+  const chain = state?.chains.get(releaseIdentity(validatedSelector));
+  const previousGeneration = chain?.[chain.length - 1];
   if (
-    matchingRecords.some((value) => value.state === "healthy") ||
-    matchingRecords.some(
-      (value) =>
-        value.state === "pending" &&
-        !matchingRecords.some(
-          (terminal) => terminal.state !== "pending" && sameIdentity(terminal, value),
-        ),
-    )
+    previousGeneration !== undefined &&
+    previousGeneration.terminalClaim?.record.state !== "failed"
   )
     throw transitionError();
 
@@ -566,7 +606,7 @@ export async function writePendingVbtechRelease(directory, selector, supplied = 
   }
   if (!isCanonicalIsoDate(createdAt)) throw transitionError();
 
-  const generation = matchingRecords.filter((value) => value.state === "failed").length + 1;
+  const generation = (previousGeneration?.generation ?? 0) + 1;
   const pending = {
     releaseSha: validatedSelector.releaseSha,
     imageRef: validatedSelector.imageRef,
@@ -579,10 +619,8 @@ export async function writePendingVbtechRelease(directory, selector, supplied = 
     throw transitionError();
   const claim = {
     kind: "pending",
-    releaseSha: pending.releaseSha,
-    imageDigest: pending.imageDigest,
-    createdAt: pending.createdAt,
     generation,
+    record: pending,
   };
   await ensurePrivateDirectory(directory);
   if (!(await publishLifecycleClaim(directory, claim))) throw transitionError();
@@ -591,26 +629,34 @@ export async function writePendingVbtechRelease(directory, selector, supplied = 
 
 export async function markVbtechReleaseHealthy(directory, pending, supplied = {}) {
   const persisted = await pendingForTransition(directory, pending);
+  const healthy = { ...persisted.record, state: "healthy" };
+  if (persisted.terminalClaim !== undefined) {
+    if (!sameClaimRecord(persisted.terminalClaim, healthy) || persisted.terminalPersisted)
+      throw transitionError();
+    return publishRecord(directory, healthy, supplied);
+  }
   const claim = {
     kind: "terminal",
-    releaseSha: persisted.record.releaseSha,
-    imageDigest: persisted.record.imageDigest,
-    createdAt: persisted.record.createdAt,
     generation: persisted.generation,
+    record: healthy,
   };
   if (!(await publishLifecycleClaim(directory, claim))) throw transitionError();
-  return publishRecord(directory, { ...persisted.record, state: "healthy" }, supplied);
+  return publishRecord(directory, healthy, supplied);
 }
 
 export async function markVbtechReleaseFailed(directory, pending, supplied = {}) {
   const persisted = await pendingForTransition(directory, pending);
+  const failed = { ...persisted.record, state: "failed" };
+  if (persisted.terminalClaim !== undefined) {
+    if (!sameClaimRecord(persisted.terminalClaim, failed) || persisted.terminalPersisted)
+      throw transitionError();
+    return publishRecord(directory, failed, supplied);
+  }
   const claim = {
     kind: "terminal",
-    releaseSha: persisted.record.releaseSha,
-    imageDigest: persisted.record.imageDigest,
-    createdAt: persisted.record.createdAt,
     generation: persisted.generation,
+    record: failed,
   };
   if (!(await publishLifecycleClaim(directory, claim))) throw transitionError();
-  return publishRecord(directory, { ...persisted.record, state: "failed" }, supplied);
+  return publishRecord(directory, failed, supplied);
 }
