@@ -178,6 +178,8 @@ export const shifts = pgTable(
     // while atomically promoting a second participant to admin_only.
     stationCloseOwnerDeviceId: uuid("station_close_owner_device_id"),
     plannedDate: date("planned_date"),
+    /** Declared civil production day; null keeps the close/planned-date fallback behavior. */
+    productionDate: date("production_date"),
     openedAt: timestamp("opened_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     closeReason: text("close_reason"),
