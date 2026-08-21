@@ -119,6 +119,7 @@ import { applyMigrations, readShiftContext } from "../src/lib/mirror.js";
 import { tauriExecutor } from "../src/lib/sqlite.js";
 import { BACKOFF_START_MS } from "../src/lib/sync.js";
 import { OPERATOR_IDLE_TIMEOUT_MS } from "../src/lib/operator-idle-lock.js";
+import * as WorkScreenModule from "../src/pages/WorkScreen.js";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 beforeAll(async () => {
@@ -694,7 +695,10 @@ async function renderAtFloorStage(
   return outbox;
 }
 
-async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
+async function renderActiveShiftForOperatorSwitch(
+  pendingBoxPrint = false,
+  productionDate: string | null = null,
+) {
   lockdownMock.snapshot = { mode: "locked", pending: false, error: null };
   lockdownMock.getSnapshot.mockImplementation(() => lockdownMock.snapshot);
   const firstPinHash = await hashSecret(OPERATOR_PIN);
@@ -761,7 +765,12 @@ async function renderActiveShiftForOperatorSwitch(pendingBoxPrint = false) {
       if (query.includes("FROM boxes_mirror")) return Promise.resolve([]);
       if (query.includes("product_mirror")) {
         return Promise.resolve([
-          { gtin14: "04600000000015", name: "Cola", counterparty_name: null },
+          {
+            gtin14: "04600000000015",
+            name: "Cola",
+            counterparty_name: null,
+            production_date: productionDate,
+          },
         ]);
       }
       if (query.includes("FROM shift_mirror WHERE")) {
@@ -1157,6 +1166,22 @@ describe("App", () => {
       expect(invokeMock.mock.calls.some(([cmd]) => cmd === "clear_credential")).toBe(false);
     } finally {
       consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it("forwards the mirrored production date from App into WorkScreen", async () => {
+    const ActualWorkScreen = WorkScreenModule.WorkScreen;
+    const observedProductionDates: Array<string | null | undefined> = [];
+    const workScreenSpy = vi.spyOn(WorkScreenModule, "WorkScreen").mockImplementation((props) => {
+      observedProductionDates.push(props.productionDate);
+      return <ActualWorkScreen {...props} />;
+    });
+
+    try {
+      await renderActiveShiftForOperatorSwitch(false, "2026-08-20");
+      await waitFor(() => expect(observedProductionDates).toContain("2026-08-20"));
+    } finally {
+      workScreenSpy.mockRestore();
     }
   });
 
