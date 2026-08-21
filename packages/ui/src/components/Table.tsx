@@ -17,6 +17,8 @@ export interface TableColumn<Row> {
   align?: "left" | "right" | "center";
   /** Plex Mono + tabular-nums — числа и коды */
   mono?: boolean;
+  /** Разрешить перенос строк в ячейках (по умолчанию nowrap) */
+  wrap?: boolean;
   sortable?: boolean;
   render?: (row: Row) => ReactNode;
 }
@@ -176,7 +178,8 @@ export function Table<Row>({
                       font: column.mono ? "var(--text-code)" : "var(--text-body)",
                       fontVariantNumeric: "tabular-nums",
                       color: "var(--fg-1)",
-                      whiteSpace: "nowrap",
+                      whiteSpace: column.wrap ? "normal" : "nowrap",
+                      overflowWrap: column.wrap ? "anywhere" : undefined,
                     }}
                   >
                     {column.render ? column.render(row) : cellValue(row, column.key)}
