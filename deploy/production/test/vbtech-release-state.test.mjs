@@ -7,10 +7,9 @@ import {
   readdir,
   stat,
   symlink,
-  utimes,
   writeFile,
 } from "node:fs/promises";
-import { unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -127,7 +126,11 @@ test("writes pending and healthy records with private modes and immutable filena
   assert.equal((await stat(releases)).mode & 0o777, 0o700);
 
   const files = await readdir(releases);
-  assert.deepEqual(files.sort(), [fileName(pending), fileName(healthy)].sort());
+  assert.deepEqual(
+    files.filter((file) => file.endsWith(".json")).sort(),
+    [fileName(pending), fileName(healthy)].sort(),
+  );
+  assert.equal(files.filter((file) => file.endsWith(".claim")).length, 2);
   for (const file of files) assert.equal((await stat(join(releases, file))).mode & 0o777, 0o600);
   assert.equal(
     files.some((file) => file.includes("00000000-0000-4000-8000-000000000000")),
@@ -175,6 +178,47 @@ test("excludes a failed terminal candidate from active selection", async () => {
   assert.deepEqual(await latestHealthyVbtechRelease(releases), healthy);
 });
 
+test("permits a new pending generation after a failed terminal", async () => {
+  const releases = await directory();
+  const first = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:30.000Z"),
+  );
+  await markVbtechReleaseFailed(releases, first, dependencies("2026-08-21T10:20:30.000Z"));
+  const retry = await writePendingVbtechRelease(
+    releases,
+    selector(),
+    dependencies("2026-08-21T10:20:31.000Z"),
+  );
+
+  assert.deepEqual(retry, record({ createdAt: "2026-08-21T10:20:31.000Z" }));
+  assert.equal(
+    (await readdir(releases)).includes(
+      `.vbtech-release-state.${firstSha}-${firstDigest.slice(7)}.pending-2.claim`,
+    ),
+    true,
+  );
+});
+
+test("rejects a colliding retry timestamp without leaving an orphaned claim", async () => {
+  const releases = await directory();
+  const first = await writePendingVbtechRelease(releases, selector(), dependencies());
+  await markVbtechReleaseFailed(releases, first, dependencies());
+
+  await assert.rejects(
+    writePendingVbtechRelease(releases, selector(), dependencies()),
+    (error) => error.message === "v-b release transition rejected",
+  );
+  assert.equal(await latestHealthyVbtechRelease(releases), undefined);
+  assert.equal(
+    (await readdir(releases)).includes(
+      `.vbtech-release-state.${firstSha}-${firstDigest.slice(7)}.pending-2.claim`,
+    ),
+    false,
+  );
+});
+
 test("rejects a repeated effective healthy SHA and digest before creating a pending record", async () => {
   const releases = await directory();
   const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
@@ -196,9 +240,64 @@ test("serializes concurrent pending writes for one release identity", async () =
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   assert.equal(
-    results.find((result) => result.status === "rejected")?.reason.message,
-    "v-b release transition rejected",
+    ["v-b release transition rejected", "v-b release state recovery required"].includes(
+      results.find((result) => result.status === "rejected")?.reason.message,
+    ),
+    true,
   );
+});
+
+test("atomically fences a concurrent pending write after its claim publishes", async () => {
+  const releases = await directory();
+  await mkdir(releases, { mode: 0o700 });
+  const lock = join(releases, ".vbtech-release-state.lock");
+  const successorOwner = "00000000-0000-4000-8000-000000000002";
+  await writeFile(
+    lock,
+    `${JSON.stringify({ owner: "00000000-0000-4000-8000-000000000001", pid: process.pid })}\n`,
+    { mode: 0o600 },
+  );
+  let competing;
+
+  const pending = await writePendingVbtechRelease(releases, selector(), {
+    now: () => new Date("2026-08-21T10:20:30.000Z"),
+    randomUUID: () => {
+      assert.equal(
+        existsSync(
+          join(
+            releases,
+            `.vbtech-release-state.${firstSha}-${firstDigest.slice(7)}.pending-1.claim`,
+          ),
+        ),
+        true,
+      );
+      unlinkSync(lock);
+      writeFileSync(lock, `${JSON.stringify({ owner: successorOwner, pid: process.pid })}\n`, {
+        mode: 0o600,
+      });
+      competing = writePendingVbtechRelease(
+        releases,
+        selector(),
+        dependencies("2026-08-21T10:20:31.000Z"),
+      );
+      competing.catch(() => undefined);
+      return "00000000-0000-4000-8000-000000000003";
+    },
+  });
+
+  await assert.rejects(
+    competing,
+    (error) => error.message === "v-b release state recovery required",
+  );
+  assert.deepEqual(pending, record());
+  assert.equal(
+    (await readdir(releases)).filter((file) => file.endsWith(".pending.json")).length,
+    1,
+  );
+  assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), {
+    owner: successorOwner,
+    pid: process.pid,
+  });
 });
 
 test("serializes mutually exclusive concurrent terminal transitions", async () => {
@@ -212,8 +311,10 @@ test("serializes mutually exclusive concurrent terminal transitions", async () =
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal(results.filter((result) => result.status === "rejected").length, 1);
   assert.equal(
-    results.find((result) => result.status === "rejected")?.reason.message,
-    "v-b release transition rejected",
+    ["v-b release transition rejected", "v-b release state recovery required"].includes(
+      results.find((result) => result.status === "rejected")?.reason.message,
+    ),
+    true,
   );
   const terminals = (await readdir(releases)).filter(
     (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),
@@ -221,7 +322,7 @@ test("serializes mutually exclusive concurrent terminal transitions", async () =
   assert.equal(terminals.length, 1);
 });
 
-test("fails closed for a stale lifecycle lock that cannot be safely recovered", async () => {
+test("preserves a valid legacy lock while publishing independent claims", async () => {
   const releases = await directory();
   await mkdir(releases, { mode: 0o700 });
   const lock = join(releases, ".vbtech-release-state.lock");
@@ -230,53 +331,59 @@ test("fails closed for a stale lifecycle lock that cannot be safely recovered", 
     `${JSON.stringify({ owner: "00000000-0000-4000-8000-000000000000", pid: process.pid })}\n`,
     { mode: 0o600 },
   );
-  await utimes(lock, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
+  const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
 
-  await assert.rejects(
-    writePendingVbtechRelease(releases, selector(), {
-      ...dependencies(),
-      lockTimeoutMs: 0,
-    }),
-    (error) => error.message === "v-b release state recovery required",
-  );
+  assert.deepEqual(pending, record());
   assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), {
     owner: "00000000-0000-4000-8000-000000000000",
     pid: process.pid,
   });
-  assert.deepEqual(await readdir(releases), [".vbtech-release-state.lock"]);
+  assert.equal((await readdir(releases)).includes(".vbtech-release-state.lock"), true);
 });
 
-test("fences a paused former owner without deleting its successor lock", async () => {
+test("atomically fences terminal outcomes after a former lock owner is replaced", async () => {
   const releases = await directory();
   const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
   const lock = join(releases, ".vbtech-release-state.lock");
-  const formerOwner = "00000000-0000-4000-8000-000000000001";
   const successorOwner = "00000000-0000-4000-8000-000000000002";
-  let uuidCalls = 0;
+  await writeFile(
+    lock,
+    `${JSON.stringify({ owner: "00000000-0000-4000-8000-000000000001", pid: process.pid })}\n`,
+    { mode: 0o600 },
+  );
+  let competing;
+
+  const healthy = await markVbtechReleaseHealthy(releases, pending, {
+    now: () => new Date("2026-08-21T10:20:30.000Z"),
+    randomUUID: () => {
+      assert.equal(
+        existsSync(
+          join(
+            releases,
+            `.vbtech-release-state.${firstSha}-${firstDigest.slice(7)}.terminal-1.claim`,
+          ),
+        ),
+        true,
+      );
+      unlinkSync(lock);
+      writeFileSync(lock, `${JSON.stringify({ owner: successorOwner, pid: process.pid })}\n`, {
+        mode: 0o600,
+      });
+      competing = markVbtechReleaseFailed(releases, pending, dependencies());
+      competing.catch(() => undefined);
+      return "00000000-0000-4000-8000-000000000003";
+    },
+  });
 
   await assert.rejects(
-    markVbtechReleaseHealthy(releases, pending, {
-      now: () => new Date("2026-08-21T10:20:30.000Z"),
-      randomUUID: () => {
-        uuidCalls += 1;
-        if (uuidCalls === 2) {
-          unlinkSync(lock);
-          writeFileSync(lock, `${JSON.stringify({ owner: successorOwner, pid: process.pid })}\n`, {
-            mode: 0o600,
-          });
-        }
-        return uuidCalls === 1 ? formerOwner : "00000000-0000-4000-8000-000000000003";
-      },
-    }),
-    (error) => error.message === "v-b release lock ownership lost",
+    competing,
+    (error) => error.message === "v-b release state recovery required",
   );
-
-  assert.equal(
-    (await readdir(releases)).some(
-      (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),
-    ),
-    false,
+  assert.deepEqual(healthy, record({ state: "healthy" }));
+  const terminalFiles = (await readdir(releases)).filter(
+    (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),
   );
+  assert.deepEqual(terminalFiles, [fileName(healthy)]);
   assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), {
     owner: successorOwner,
     pid: process.pid,

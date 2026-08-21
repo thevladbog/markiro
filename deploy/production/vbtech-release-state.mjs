@@ -12,13 +12,14 @@ const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const SELECTOR_KEYS = "functionPath,imageDigest,imageRef,releaseSha,submissionState";
 const RECORD_KEYS = "createdAt,imageDigest,imageRef,releaseSha,state,submissionState";
 const LOCK_FILE = ".vbtech-release-state.lock";
-const LOCK_RETRY_MS = 10;
-const LOCK_TIMEOUT_MS = 5 * 1000;
 const LOCK_KEYS = "owner,pid";
+const CLAIM_KEYS = "createdAt,generation,imageDigest,kind,releaseSha";
 const TEMPORARY_FILE_PATTERN =
   /^\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{40}-[0-9a-f]{64}\.(?:pending|healthy|failed)\.json\.[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.tmp$/;
 const LOCK_TEMPORARY_FILE_PATTERN =
   /^\.vbtech-release-state\.lock\.[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.tmp$/;
+const CLAIM_TEMPORARY_FILE_PATTERN =
+  /^\.vbtech-release-state\.[0-9a-f]{40}-[0-9a-f]{64}\.(?:pending|terminal)-[1-9][0-9]*\.claim\.[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.tmp$/;
 
 function selectorError() {
   return new Error("v-b release selector is invalid");
@@ -34,10 +35,6 @@ function transitionError() {
 
 function recoveryError() {
   return new Error("v-b release state recovery required");
-}
-
-function ownershipError() {
-  return new Error("v-b release lock ownership lost");
 }
 
 function hasExactKeys(value, keys) {
@@ -63,6 +60,15 @@ function isImageIdentity(value) {
     DIGEST_PATTERN.test(value.imageDigest) &&
     typeof value.imageRef === "string" &&
     value.imageRef === `${REPOSITORY}@${value.imageDigest}`
+  );
+}
+
+function isDigestIdentity(value) {
+  return (
+    typeof value.releaseSha === "string" &&
+    RELEASE_SHA_PATTERN.test(value.releaseSha) &&
+    typeof value.imageDigest === "string" &&
+    DIGEST_PATTERN.test(value.imageDigest)
   );
 }
 
@@ -107,6 +113,31 @@ function isLifecycleLock(value) {
   );
 }
 
+function isLifecycleClaim(value) {
+  return (
+    hasExactKeys(value, CLAIM_KEYS) &&
+    typeof value.kind === "string" &&
+    (value.kind === "pending" || value.kind === "terminal") &&
+    isDigestIdentity(value) &&
+    isCanonicalIsoDate(value.createdAt) &&
+    Number.isSafeInteger(value.generation) &&
+    value.generation > 0
+  );
+}
+
+function claimFileName(value) {
+  const identity = `${value.releaseSha}-${value.imageDigest.slice(7)}`;
+  return `.vbtech-release-state.${identity}.${value.kind}-${value.generation}.claim`;
+}
+
+function sameClaimIdentity(left, right) {
+  return (
+    left.releaseSha === right.releaseSha &&
+    left.imageDigest === right.imageDigest &&
+    left.createdAt === right.createdAt
+  );
+}
+
 function assertRecordTransitions(records) {
   const pending = new Map();
   const terminals = new Map();
@@ -132,14 +163,8 @@ function dependencies(supplied = {}) {
   return {
     now: () => new Date(),
     randomUUID: nodeRandomUUID,
-    lockRetryMs: LOCK_RETRY_MS,
-    lockTimeoutMs: LOCK_TIMEOUT_MS,
     ...supplied,
   };
-}
-
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 async function syncDirectory(directory) {
@@ -181,11 +206,41 @@ async function readLifecycleLock(directory, createError) {
   return value;
 }
 
+async function readLifecycleClaim(directory, file, createError) {
+  const path = join(directory, file);
+  let linkMetadata;
+  let metadata;
+  let contents;
+  try {
+    linkMetadata = await lstat(path);
+    metadata = await stat(path);
+    if (
+      !linkMetadata.isFile() ||
+      !metadata.isFile() ||
+      (metadata.mode & 0o777) !== PRIVATE_FILE_MODE ||
+      metadata.size > MAX_RECORD_BYTES
+    )
+      throw createError();
+    contents = await readFile(path, "utf8");
+  } catch {
+    throw createError();
+  }
+  let value;
+  try {
+    value = JSON.parse(contents);
+  } catch {
+    throw createError();
+  }
+  if (!isLifecycleClaim(value) || file !== claimFileName(value)) throw createError();
+  return value;
+}
+
 async function assertAllowedTransientEntry(directory, file) {
   if (file === LOCK_FILE) {
     await readLifecycleLock(directory, stateError);
     return;
   }
+  if (file.endsWith(".claim")) return readLifecycleClaim(directory, file, stateError);
 
   const path = join(directory, file);
   let linkMetadata;
@@ -199,13 +254,53 @@ async function assertAllowedTransientEntry(directory, file) {
   if (!linkMetadata.isFile() || !metadata.isFile() || (metadata.mode & 0o777) !== PRIVATE_FILE_MODE)
     throw stateError();
   if (
-    (!TEMPORARY_FILE_PATTERN.test(file) && !LOCK_TEMPORARY_FILE_PATTERN.test(file)) ||
+    (!TEMPORARY_FILE_PATTERN.test(file) &&
+      !LOCK_TEMPORARY_FILE_PATTERN.test(file) &&
+      !CLAIM_TEMPORARY_FILE_PATTERN.test(file)) ||
     metadata.size > MAX_RECORD_BYTES
   )
     throw stateError();
 }
 
-async function readReleaseRecords(directory) {
+function sameClaimRecord(claim, record) {
+  return (
+    claim.releaseSha === record.releaseSha &&
+    claim.imageDigest === record.imageDigest &&
+    claim.createdAt === record.createdAt
+  );
+}
+
+function assertClaimConsistency(records, claims) {
+  const pendingClaims = claims.filter((claim) => claim.kind === "pending");
+  const terminalClaims = claims.filter((claim) => claim.kind === "terminal");
+  for (const pendingClaim of pendingClaims) {
+    const matches = records.filter(
+      (record) => record.state === "pending" && sameClaimRecord(pendingClaim, record),
+    );
+    if (matches.length !== 1) throw recoveryError();
+  }
+  for (const terminalClaim of terminalClaims) {
+    const pending = pendingClaims.filter(
+      (claim) =>
+        claim.generation === terminalClaim.generation && sameClaimIdentity(claim, terminalClaim),
+    );
+    const terminals = records.filter(
+      (record) => record.state !== "pending" && sameClaimRecord(terminalClaim, record),
+    );
+    if (pending.length !== 1 || terminals.length !== 1) throw recoveryError();
+  }
+  for (const pending of records.filter((record) => record.state === "pending")) {
+    if (pendingClaims.filter((claim) => sameClaimRecord(claim, pending)).length !== 1)
+      throw recoveryError();
+  }
+  for (const terminal of records.filter((record) => record.state !== "pending")) {
+    const matchingPending = pendingClaims.filter((claim) => sameClaimRecord(claim, terminal));
+    const matchingTerminal = terminalClaims.filter((claim) => sameClaimRecord(claim, terminal));
+    if (matchingPending.length !== 1 || matchingTerminal.length !== 1) throw recoveryError();
+  }
+}
+
+async function readReleaseState(directory) {
   let directoryLinkMetadata;
   let directoryMetadata;
   try {
@@ -228,10 +323,12 @@ async function readReleaseRecords(directory) {
   } catch {
     throw stateError();
   }
+  const claims = [];
   const records = [];
   for (const file of files.sort()) {
     if (!file.endsWith(".json")) {
-      await assertAllowedTransientEntry(directory, file);
+      const claim = await assertAllowedTransientEntry(directory, file);
+      if (claim) claims.push(claim);
       continue;
     }
     const path = join(directory, file);
@@ -263,7 +360,13 @@ async function readReleaseRecords(directory) {
     records.push(value);
   }
   assertRecordTransitions(records);
-  return records;
+  assertClaimConsistency(records, claims);
+  return { claims, records };
+}
+
+async function readReleaseRecords(directory) {
+  const state = await readReleaseState(directory);
+  return state?.records;
 }
 
 async function ensurePrivateDirectory(directory) {
@@ -300,33 +403,25 @@ function boundedRecordJson(value) {
   return boundedJson(value, transitionError);
 }
 
-function lockOwner(supplied) {
-  const { randomUUID } = dependencies(supplied);
-  let owner;
-  try {
-    owner = randomUUID();
-  } catch {
-    throw transitionError();
-  }
-  if (!isUuid(owner)) throw transitionError();
-  return owner;
+function claimTemporaryFileName(value, uuid) {
+  return `${claimFileName(value)}.${uuid}.tmp`;
 }
 
-async function publishLifecycleLock(directory, owner) {
-  const path = join(directory, LOCK_FILE);
+async function publishLifecycleClaim(directory, value) {
   const temporaryUuid = nodeRandomUUID();
   if (!isUuid(temporaryUuid)) throw transitionError();
-  const temporary = join(directory, `.${LOCK_FILE}.${temporaryUuid}.tmp`);
+  const destination = join(directory, claimFileName(value));
+  const temporary = join(directory, claimTemporaryFileName(value, temporaryUuid));
   let file;
   let temporaryExists = true;
   try {
     file = await open(temporary, "wx", PRIVATE_FILE_MODE);
     await file.chmod(PRIVATE_FILE_MODE);
-    await file.writeFile(boundedJson({ owner, pid: process.pid }, transitionError), "utf8");
+    await file.writeFile(boundedJson(value, transitionError), "utf8");
     await file.sync();
     await file.close();
     file = undefined;
-    await link(temporary, path);
+    await link(temporary, destination);
     await syncDirectory(directory);
     await unlink(temporary);
     temporaryExists = false;
@@ -344,57 +439,7 @@ async function publishLifecycleLock(directory, owner) {
   }
 }
 
-async function assertLifecycleLockOwner(directory, owner) {
-  let lock;
-  try {
-    lock = await readLifecycleLock(directory, transitionError);
-  } catch {
-    throw ownershipError();
-  }
-  if (lock.owner !== owner) throw ownershipError();
-}
-
-async function acquireLifecycleLock(directory, supplied) {
-  await ensurePrivateDirectory(directory);
-  const { lockRetryMs, lockTimeoutMs } = dependencies(supplied);
-  if (
-    !Number.isSafeInteger(lockRetryMs) ||
-    lockRetryMs <= 0 ||
-    !Number.isSafeInteger(lockTimeoutMs) ||
-    lockTimeoutMs < 0
-  )
-    throw transitionError();
-  const owner = lockOwner(supplied);
-  const deadline = Date.now() + lockTimeoutMs;
-  while (true) {
-    if (await publishLifecycleLock(directory, owner)) return owner;
-    await readLifecycleLock(directory, transitionError);
-    if (Date.now() >= deadline) throw recoveryError();
-    await sleep(lockRetryMs);
-  }
-}
-
-async function releaseLifecycleLock(directory, owner) {
-  const path = join(directory, LOCK_FILE);
-  await assertLifecycleLockOwner(directory, owner);
-  try {
-    await unlink(path);
-    await syncDirectory(directory);
-  } catch {
-    throw transitionError();
-  }
-}
-
-async function withLifecycleLock(directory, supplied, operation) {
-  const owner = await acquireLifecycleLock(directory, supplied);
-  try {
-    return await operation(owner);
-  } finally {
-    await releaseLifecycleLock(directory, owner);
-  }
-}
-
-async function publishRecord(directory, value, supplied, owner) {
+async function publishRecord(directory, value, supplied) {
   const { randomUUID } = dependencies(supplied);
   let uuid;
   try {
@@ -402,14 +447,12 @@ async function publishRecord(directory, value, supplied, owner) {
   } catch {
     throw transitionError();
   }
-  if (!isUuid(uuid) || !isUuid(owner)) throw transitionError();
+  if (!isUuid(uuid)) throw transitionError();
 
-  await assertLifecycleLockOwner(directory, owner);
   await ensurePrivateDirectory(directory);
   const destination = join(directory, recordFileName(value));
   const temporary = join(directory, `.${recordFileName(value)}.${uuid}.tmp`);
   let file;
-  let directoryHandle;
   let temporaryExists = true;
   try {
     file = await open(temporary, "wx", PRIVATE_FILE_MODE);
@@ -419,25 +462,16 @@ async function publishRecord(directory, value, supplied, owner) {
     await file.close();
     file = undefined;
 
-    await assertLifecycleLockOwner(directory, owner);
     await link(temporary, destination);
-    directoryHandle = await open(directory, "r");
-    await directoryHandle.sync();
-    await directoryHandle.close();
-    directoryHandle = undefined;
+    await syncDirectory(directory);
 
     await unlink(temporary);
     temporaryExists = false;
-    directoryHandle = await open(directory, "r");
-    await directoryHandle.sync();
-    await directoryHandle.close();
-    directoryHandle = undefined;
+    await syncDirectory(directory);
   } catch (error) {
-    if (error?.message === "v-b release lock ownership lost") throw error;
     throw transitionError();
   } finally {
     await file?.close().catch(() => undefined);
-    await directoryHandle?.close().catch(() => undefined);
     if (temporaryExists) await unlink(temporary).catch(() => undefined);
   }
   return value;
@@ -445,17 +479,29 @@ async function publishRecord(directory, value, supplied, owner) {
 
 async function pendingForTransition(directory, pending) {
   if (!isLifecycleRecord(pending) || pending.state !== "pending") throw transitionError();
-  const records = await readReleaseRecords(directory);
-  if (records === undefined) throw transitionError();
+  const state = await readReleaseState(directory);
+  if (state === undefined) throw transitionError();
 
-  const persisted = records.filter(
+  const persisted = state.records.filter(
     (value) => value.state === "pending" && sameIdentity(value, pending),
   );
-  const terminals = records.filter(
+  const terminals = state.records.filter(
     (value) => value.state !== "pending" && sameIdentity(value, pending),
   );
-  if (persisted.length !== 1 || terminals.length !== 0) throw transitionError();
-  return persisted[0];
+  const pendingClaims = state.claims.filter(
+    (claim) => claim.kind === "pending" && sameClaimRecord(claim, pending),
+  );
+  const terminalClaims = state.claims.filter(
+    (claim) => claim.kind === "terminal" && sameClaimRecord(claim, pending),
+  );
+  if (
+    persisted.length !== 1 ||
+    terminals.length !== 0 ||
+    pendingClaims.length !== 1 ||
+    terminalClaims.length !== 0
+  )
+    throw transitionError();
+  return { generation: pendingClaims[0].generation, record: persisted[0] };
 }
 
 export function validateVbtechSelector(value) {
@@ -492,53 +538,79 @@ export async function latestHealthyVbtechRelease(directory) {
 
 export async function writePendingVbtechRelease(directory, selector, supplied = {}) {
   const validatedSelector = validateVbtechSelector(selector);
-  return withLifecycleLock(directory, supplied, async (owner) => {
-    const records = await readReleaseRecords(directory);
-    if (
-      records?.some(
-        (value) =>
-          (value.state === "pending" || value.state === "healthy") &&
-          value.releaseSha === validatedSelector.releaseSha &&
-          value.imageDigest === validatedSelector.imageDigest,
-      )
+  const state = await readReleaseState(directory);
+  const records = state?.records ?? [];
+  const matchingRecords = records.filter(
+    (value) =>
+      value.releaseSha === validatedSelector.releaseSha &&
+      value.imageDigest === validatedSelector.imageDigest,
+  );
+  if (
+    matchingRecords.some((value) => value.state === "healthy") ||
+    matchingRecords.some(
+      (value) =>
+        value.state === "pending" &&
+        !matchingRecords.some(
+          (terminal) => terminal.state !== "pending" && sameIdentity(terminal, value),
+        ),
     )
-      throw transitionError();
+  )
+    throw transitionError();
 
-    let createdAt;
-    try {
-      const date = dependencies(supplied).now();
-      createdAt = date.toISOString();
-    } catch {
-      throw transitionError();
-    }
-    if (!isCanonicalIsoDate(createdAt)) throw transitionError();
+  let createdAt;
+  try {
+    const date = dependencies(supplied).now();
+    createdAt = date.toISOString();
+  } catch {
+    throw transitionError();
+  }
+  if (!isCanonicalIsoDate(createdAt)) throw transitionError();
 
-    return publishRecord(
-      directory,
-      {
-        releaseSha: validatedSelector.releaseSha,
-        imageRef: validatedSelector.imageRef,
-        imageDigest: validatedSelector.imageDigest,
-        submissionState: validatedSelector.submissionState,
-        createdAt,
-        state: "pending",
-      },
-      supplied,
-      owner,
-    );
-  });
+  const generation = matchingRecords.filter((value) => value.state === "failed").length + 1;
+  const pending = {
+    releaseSha: validatedSelector.releaseSha,
+    imageRef: validatedSelector.imageRef,
+    imageDigest: validatedSelector.imageDigest,
+    submissionState: validatedSelector.submissionState,
+    createdAt,
+    state: "pending",
+  };
+  if (records.some((value) => recordFileName(value) === recordFileName(pending)))
+    throw transitionError();
+  const claim = {
+    kind: "pending",
+    releaseSha: pending.releaseSha,
+    imageDigest: pending.imageDigest,
+    createdAt: pending.createdAt,
+    generation,
+  };
+  await ensurePrivateDirectory(directory);
+  if (!(await publishLifecycleClaim(directory, claim))) throw transitionError();
+  return publishRecord(directory, pending, supplied);
 }
 
 export async function markVbtechReleaseHealthy(directory, pending, supplied = {}) {
-  return withLifecycleLock(directory, supplied, async (owner) => {
-    const persisted = await pendingForTransition(directory, pending);
-    return publishRecord(directory, { ...persisted, state: "healthy" }, supplied, owner);
-  });
+  const persisted = await pendingForTransition(directory, pending);
+  const claim = {
+    kind: "terminal",
+    releaseSha: persisted.record.releaseSha,
+    imageDigest: persisted.record.imageDigest,
+    createdAt: persisted.record.createdAt,
+    generation: persisted.generation,
+  };
+  if (!(await publishLifecycleClaim(directory, claim))) throw transitionError();
+  return publishRecord(directory, { ...persisted.record, state: "healthy" }, supplied);
 }
 
 export async function markVbtechReleaseFailed(directory, pending, supplied = {}) {
-  return withLifecycleLock(directory, supplied, async (owner) => {
-    const persisted = await pendingForTransition(directory, pending);
-    return publishRecord(directory, { ...persisted, state: "failed" }, supplied, owner);
-  });
+  const persisted = await pendingForTransition(directory, pending);
+  const claim = {
+    kind: "terminal",
+    releaseSha: persisted.record.releaseSha,
+    imageDigest: persisted.record.imageDigest,
+    createdAt: persisted.record.createdAt,
+    generation: persisted.generation,
+  };
+  if (!(await publishLifecycleClaim(directory, claim))) throw transitionError();
+  return publishRecord(directory, { ...persisted.record, state: "failed" }, supplied);
 }
