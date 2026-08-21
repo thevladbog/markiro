@@ -38,3 +38,6 @@ docs/design-briefs/landing.pen
 .playwright-mcp/
 /*.png
 docs/design-briefs/screenshot-*.png
+
+# Private first-customer evidence packages; tooling remains tracked under tools/.
+evidence/
