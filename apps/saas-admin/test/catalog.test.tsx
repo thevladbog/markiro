@@ -2,7 +2,10 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { CatalogVersionDto } from "../src/pages/catalog/api.js";
+import {
+  catalogVersionToCreateInput,
+  type CatalogVersionDto,
+} from "../src/pages/catalog/api.js";
 import {
   DRAFT_PLAN,
   ADDON,
@@ -238,6 +241,16 @@ describe("commercial catalog", () => {
       plan: PUBLISHED_PLAN.plan,
     });
     expect(await screen.findByRole("region", { name: "Версия 2 · Базовый" })).toBeDefined();
+  });
+
+  it("refuses to invent missing financial terms while cloning", () => {
+    const partiallyRedactedPlan: CatalogVersionDto = structuredClone(PUBLISHED_PLAN);
+    delete partiallyRedactedPlan.vatRateBps;
+    delete partiallyRedactedPlan.vatIncluded;
+
+    expect(() => catalogVersionToCreateInput(partiallyRedactedPlan)).toThrow(
+      "catalog_version_financial_terms_missing",
+    );
   });
 
   it("clones add-on effects and one-time service terms", async () => {

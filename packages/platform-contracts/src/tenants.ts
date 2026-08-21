@@ -224,33 +224,48 @@ const featureAddonEffectSchema = z.object({
   featureEnabled: z.literal(true),
 });
 
-export const assignableCatalogVersionSchema = z.object({
-  id: platformUuidSchema,
-  catalogItemId: platformUuidSchema,
-  catalogItemCode: z.string().min(1).max(128),
-  kind: catalogKindSchema,
-  version: z.number().int().positive(),
-  status: catalogStatusSchema,
-  nameRu: z.string().min(1).max(300),
-  nameEn: z.string().min(1).max(300),
-  descriptionRu: z.string().max(10_000).nullable(),
-  descriptionEn: z.string().max(10_000).nullable(),
-  unit: z.string().min(1).max(100),
-  billingMode: billingModeSchema,
-  billingPeriod: billingPeriodSchema,
-  unitPrice: platformMoneySchema.optional(),
-  vatRateBps: z.number().int().min(0).max(10_000).nullable().optional(),
-  vatIncluded: z.boolean().optional(),
-  publishedAt: nullableResponseTimestampSchema,
-  publishedByPlatformUserId: z.string().nullable(),
-  plan: planEntitlementsSchema.optional(),
-  addon: z
-    .object({
-      effects: z.array(z.union([quotaAddonEffectSchema, featureAddonEffectSchema])).min(1),
-    })
-    .optional(),
-  service: z.object({}).optional(),
-});
+export const assignableCatalogVersionSchema = z
+  .object({
+    id: platformUuidSchema,
+    catalogItemId: platformUuidSchema,
+    catalogItemCode: z.string().min(1).max(128),
+    kind: catalogKindSchema,
+    version: z.number().int().positive(),
+    status: catalogStatusSchema,
+    nameRu: z.string().min(1).max(300),
+    nameEn: z.string().min(1).max(300),
+    descriptionRu: z.string().max(10_000).nullable(),
+    descriptionEn: z.string().max(10_000).nullable(),
+    unit: z.string().min(1).max(100),
+    billingMode: billingModeSchema,
+    billingPeriod: billingPeriodSchema,
+    unitPrice: platformMoneySchema.optional(),
+    vatRateBps: z.number().int().min(0).max(10_000).nullable().optional(),
+    vatIncluded: z.boolean().optional(),
+    publishedAt: nullableResponseTimestampSchema,
+    publishedByPlatformUserId: z.string().nullable(),
+    plan: planEntitlementsSchema.optional(),
+    addon: z
+      .object({
+        effects: z.array(z.union([quotaAddonEffectSchema, featureAddonEffectSchema])).min(1),
+      })
+      .optional(),
+    service: z.object({}).strict().optional(),
+  })
+  .superRefine((value, context) => {
+    const disclosedFinancialFields = [
+      value.unitPrice,
+      value.vatRateBps,
+      value.vatIncluded,
+    ].filter((field) => field !== undefined).length;
+    if (disclosedFinancialFields !== 0 && disclosedFinancialFields !== 3) {
+      context.addIssue({
+        code: "custom",
+        path: ["unitPrice"],
+        message: "Financial terms must be fully disclosed or fully omitted",
+      });
+    }
+  });
 
 export const assignableCatalogResponseSchema = z.object({
   items: z.array(assignableCatalogVersionSchema),

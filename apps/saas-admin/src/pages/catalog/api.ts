@@ -19,7 +19,13 @@ export function listCatalogVersions() {
 }
 
 export function catalogVersionToCreateInput(item: CatalogVersion): CatalogVersionCreate {
-  if (!item.unitPrice) throw new Error("catalog_version_financial_terms_missing");
+  if (
+    item.unitPrice === undefined ||
+    item.vatRateBps === undefined ||
+    item.vatIncluded === undefined
+  ) {
+    throw new Error("catalog_version_financial_terms_missing");
+  }
   const common = {
     nameRu: item.nameRu,
     nameEn: item.nameEn,
@@ -29,8 +35,8 @@ export function catalogVersionToCreateInput(item: CatalogVersion): CatalogVersio
     billingMode: item.billingMode,
     billingPeriod: item.billingPeriod,
     unitPrice: item.unitPrice,
-    vatRateBps: item.vatRateBps ?? null,
-    vatIncluded: item.vatRateBps !== null && item.vatIncluded === true,
+    vatRateBps: item.vatRateBps,
+    vatIncluded: item.vatIncluded,
   } as const;
   if (item.kind === "plan") {
     return platformCatalogContracts.createVersion.body.parse({

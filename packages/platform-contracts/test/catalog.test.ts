@@ -188,6 +188,54 @@ describe("platform catalog contracts", () => {
     expect(parsed.items[2]?.publishedAt).toBe("2026-08-12T10:00:00.000Z");
   });
 
+  it("requires the endpoint-specific status after catalog transitions", () => {
+    const draftPlan = {
+      ...responseBase,
+      id: PLAN_VERSION_ID,
+      kind: "plan",
+      status: "draft",
+      publishedAt: null,
+      plan: planCreate.plan,
+    } as const;
+
+    expect(platformCatalogContracts.createVersion.response.safeParse(draftPlan).success).toBe(true);
+    expect(platformCatalogContracts.updateVersion.response.safeParse(draftPlan).success).toBe(true);
+    expect(
+      platformCatalogContracts.createVersion.response.safeParse({
+        ...draftPlan,
+        status: "published",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCatalogContracts.updateVersion.response.safeParse({
+        ...draftPlan,
+        status: "retired",
+      }).success,
+    ).toBe(false);
+    expect(
+      platformCatalogContracts.publishVersion.response.safeParse({
+        ...draftPlan,
+        status: "published",
+        publishedAt: "2026-08-22T10:00:00.000Z",
+      }).success,
+    ).toBe(true);
+    expect(platformCatalogContracts.publishVersion.response.safeParse(draftPlan).success).toBe(
+      false,
+    );
+    expect(
+      platformCatalogContracts.retireVersion.response.safeParse({
+        ...draftPlan,
+        status: "retired",
+      }).success,
+    ).toBe(true);
+    expect(
+      platformCatalogContracts.retireVersion.response.safeParse({
+        ...draftPlan,
+        status: "published",
+      }).success,
+    ).toBe(false);
+  });
+
   it("rejects response effects that do not match the discriminated catalog kind", () => {
     expect(
       platformCatalogContracts.getVersion.response.safeParse({
@@ -235,6 +283,51 @@ describe("platform catalog contracts", () => {
     expect(parsed).not.toHaveProperty("unitPrice");
     expect(parsed).not.toHaveProperty("vatRateBps");
     expect(parsed).not.toHaveProperty("vatIncluded");
+  });
+
+  it("rejects partial financial disclosure in catalog responses", () => {
+    const planResponse = {
+      ...responseBase,
+      id: PLAN_VERSION_ID,
+      kind: "plan",
+      status: "published",
+      publishedAt: "2026-08-22T10:00:00.000Z",
+      plan: planCreate.plan,
+    } as const;
+
+    const { vatRateBps: _vatRateBps, ...withoutVatRate } = planResponse;
+    void _vatRateBps;
+    expect(platformCatalogContracts.getVersion.response.safeParse(withoutVatRate).success).toBe(
+      false,
+    );
+
+    const { vatIncluded: _vatIncluded, ...withoutVatIncluded } = planResponse;
+    void _vatIncluded;
+    expect(platformCatalogContracts.getVersion.response.safeParse(withoutVatIncluded).success).toBe(
+      false,
+    );
+
+    const { unitPrice: _unitPrice, ...withoutUnitPrice } = planResponse;
+    void _unitPrice;
+    expect(platformCatalogContracts.getVersion.response.safeParse(withoutUnitPrice).success).toBe(
+      false,
+    );
+  });
+
+  it("rejects nested fields on the empty service response payload", () => {
+    expect(
+      platformCatalogContracts.getVersion.response.safeParse({
+        ...responseBase,
+        id: SERVICE_VERSION_ID,
+        catalogItemCode: "service-launch",
+        kind: "service",
+        status: "published",
+        billingMode: "one_time",
+        billingPeriod: null,
+        publishedAt: "2026-08-22T10:00:00.000Z",
+        service: { effects: [{ key: "stations", quotaIncrement: 1 }] },
+      }).success,
+    ).toBe(false);
   });
 
   it("parses nullable demo-plan reads and non-null writes", () => {

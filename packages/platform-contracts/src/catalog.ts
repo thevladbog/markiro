@@ -128,7 +128,7 @@ const assignableAddonSchema = assignableCatalogVersionSchema.shape.addon.unwrap(
 const assignableServiceSchema = assignableCatalogVersionSchema.shape.service.unwrap();
 
 const planVersionResponseSchema = assignableCatalogVersionSchema
-  .extend({
+  .safeExtend({
     kind: z.literal("plan"),
     billingMode: z.literal("recurring"),
     billingPeriod: z.enum(["month", "year"]),
@@ -139,7 +139,7 @@ const planVersionResponseSchema = assignableCatalogVersionSchema
   .strict();
 
 const addonVersionResponseSchema = assignableCatalogVersionSchema
-  .extend({
+  .safeExtend({
     kind: z.literal("addon"),
     billingMode: z.literal("recurring"),
     billingPeriod: z.enum(["month", "year"]),
@@ -150,7 +150,7 @@ const addonVersionResponseSchema = assignableCatalogVersionSchema
   .strict();
 
 const serviceVersionResponseSchema = assignableCatalogVersionSchema
-  .extend({
+  .safeExtend({
     kind: z.literal("service"),
     billingMode: z.literal("one_time"),
     billingPeriod: z.null(),
@@ -165,6 +165,19 @@ export const catalogVersionSchema = z.discriminatedUnion("kind", [
   addonVersionResponseSchema,
   serviceVersionResponseSchema,
 ]);
+
+const draftCatalogVersionSchema = catalogVersionSchema.refine(
+  (version) => version.status === "draft",
+  { path: ["status"], message: "Expected a draft catalog version" },
+);
+const publishedCatalogVersionSchema = catalogVersionSchema.refine(
+  (version) => version.status === "published",
+  { path: ["status"], message: "Expected a published catalog version" },
+);
+const retiredCatalogVersionSchema = catalogVersionSchema.refine(
+  (version) => version.status === "retired",
+  { path: ["status"], message: "Expected a retired catalog version" },
+);
 
 export const catalogVersionListResponseSchema = assignableCatalogResponseSchema
   .extend({ items: z.array(catalogVersionSchema) })
@@ -192,15 +205,15 @@ export const platformCatalogContracts = {
   createVersion: {
     params: catalogMachineCodeParamsSchema,
     body: catalogVersionCreateSchema,
-    response: catalogVersionSchema,
+    response: draftCatalogVersionSchema,
   },
   updateVersion: {
     params: catalogVersionParamsSchema,
     body: catalogVersionPatchSchema,
-    response: catalogVersionSchema,
+    response: draftCatalogVersionSchema,
   },
-  publishVersion: { params: catalogVersionParamsSchema, response: catalogVersionSchema },
-  retireVersion: { params: catalogVersionParamsSchema, response: catalogVersionSchema },
+  publishVersion: { params: catalogVersionParamsSchema, response: publishedCatalogVersionSchema },
+  retireVersion: { params: catalogVersionParamsSchema, response: retiredCatalogVersionSchema },
   archiveItem: { params: catalogItemParamsSchema, response: archiveCatalogItemResponseSchema },
   getDefaultDemo: { response: defaultDemoPlanResponseSchema },
   setDefaultDemo: {
