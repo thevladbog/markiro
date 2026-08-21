@@ -108,54 +108,20 @@ input:focus-visible {
 }
 
 .brand-mark__symbol {
-  display: grid;
-  grid-template-columns: repeat(3, 0.25rem);
-  grid-template-rows: repeat(5, 0.25rem);
-  gap: 0.0625rem;
-  width: 0.875rem;
+  width: 1.5rem;
   height: 1.5rem;
 }
 
+.brand-mark__tile {
+  fill: var(--fg-1);
+}
+
 .brand-mark__module {
-  width: 0.25rem;
-  height: 0.25rem;
-  background: var(--fg-1);
-}
-
-.brand-mark__module[data-position="0-0"] {
-  grid-area: 1 / 1;
-}
-
-.brand-mark__module[data-position="0-2"] {
-  grid-area: 1 / 3;
-}
-
-.brand-mark__module[data-position="1-1"] {
-  grid-area: 2 / 2;
-}
-
-.brand-mark__module[data-position="2-0"] {
-  grid-area: 3 / 1;
-}
-
-.brand-mark__module[data-position="2-2"] {
-  grid-area: 3 / 3;
-}
-
-.brand-mark__module[data-position="3-0"] {
-  grid-area: 4 / 1;
-}
-
-.brand-mark__module[data-position="3-2"] {
-  grid-area: 4 / 3;
-}
-
-.brand-mark__module[data-position="4-1"] {
-  grid-area: 5 / 2;
+  fill: var(--surface-page);
 }
 
 .brand-mark__module--accent {
-  background: var(--accent);
+  fill: var(--accent);
 }
 
 .brand-mark__word {

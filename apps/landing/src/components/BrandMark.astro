@@ -8,19 +8,38 @@ interface Props {
 const { locale } = Astro.props;
 const label = locale === "ru" ? "Маркиро" : "Markiro";
 const word = locale === "ru" ? "маркиро" : "MARKIRO";
-const modules = ["0-0", "0-2", "1-1", "2-0", "2-2", "3-0", "3-2", "4-1"];
+const modules = [
+  { x: 14, y: 14 },
+  { x: 14, y: 26 },
+  { x: 14, y: 38 },
+  { x: 26, y: 22 },
+  { x: 38, y: 14 },
+  { x: 38, y: 26 },
+  { x: 38, y: 38 },
+  { x: 26, y: 42 },
+];
 ---
 
 <span class="brand-mark" aria-label={label} translate="no">
-  <span class="brand-mark__symbol" data-brand-symbol aria-hidden="true">
-    {modules.map((position, index) => (
-      <span
+  <svg
+    class="brand-mark__symbol"
+    data-brand-symbol
+    aria-hidden="true"
+    viewBox="0 0 64 64"
+    xmlns="http://www.w3.org/2000/svg"
+  >
+    <rect class="brand-mark__tile" x="4" y="4" width="56" height="56" />
+    {modules.map(({ x, y }, index) => (
+      <rect
         class:list={["brand-mark__module", { "brand-mark__module--accent": index === 7 }]}
-        data-position={position}
+        x={x}
+        y={y}
+        width="8"
+        height="8"
         data-brand-module
         data-brand-accent={index === 7 ? "" : undefined}
       />
     ))}
-  </span>
+  </svg>
   <span class="brand-mark__word" lang={locale}>{word}</span>
 </span>
