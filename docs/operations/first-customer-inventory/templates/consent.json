@@ -1,0 +1,16 @@
+{
+  "consentVersion": 1,
+  "operationId": "INV-20260824-pilot-01",
+  "customerNaming": {
+    "decision": null,
+    "scope": "",
+    "signer": { "name": "", "role": "" },
+    "decidedAt": null
+  },
+  "anonymizedBenchmark": {
+    "decision": null,
+    "scope": "",
+    "signer": { "name": "", "role": "" },
+    "decidedAt": null
+  }
+}
