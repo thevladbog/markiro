@@ -82,7 +82,7 @@ describe("legal document registry", () => {
       ...missing[0]!,
       routes: { ru: missing[0]!.routes.ru },
     } as LegalDocumentRelease;
-    expect(() => validateLegalRegistry(missing)).toThrow(/locale routes/i);
+    expect(() => validateLegalRegistry(missing)).toThrow(/must define routes exactly for/i);
 
     const mismatched = cloneReleases();
     mismatched[0] = {
@@ -125,5 +125,41 @@ describe("legal document registry", () => {
     const releases = cloneReleases();
     releases[1] = { ...releases[1]!, revision: "2026.08/02" };
     expect(() => validateLegalRegistry(releases)).toThrow(/consent identifier/i);
+  });
+
+  it("classifies document kinds and release locales", async () => {
+    const { legalDocumentKind, legalReleaseLocales } = await import("../src/index.js");
+    expect(legalDocumentKind("MKR-PD-01")).toBe("legal");
+    expect(legalDocumentKind("MKR-DPA-01")).toBe("template");
+    expect(legalDocumentKind("MKR-INS-01")).toBe("instruction");
+    expect(legalReleaseLocales("MKR-BRD-01")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-01")).toEqual(["ru"]);
+  });
+
+  it("accepts a Russian-only instruction release and rejects Russian-only legal releases", () => {
+    const instructionRelease = {
+      code: "MKR-INS-01",
+      revision: "2026.08/01",
+      effectiveDate: "2026-08-21",
+      status: "draft",
+      operatorProfileId: "operator-2026-08-15",
+      routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/" },
+    } as unknown as LegalDocumentRelease;
+    expect(() => validateLegalRegistry([...cloneReleases(), instructionRelease])).not.toThrow();
+
+    const ruOnlyLegal = cloneReleases();
+    delete (ruOnlyLegal[0] as { routes: { en?: string } }).routes.en;
+    expect(() => validateLegalRegistry(ruOnlyLegal)).toThrow(/must define routes exactly for/);
+
+    const instructionWithEn = {
+      ...instructionRelease,
+      routes: {
+        ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/",
+        en: "/en/instructions/station-shift-start/",
+      },
+    } as unknown as LegalDocumentRelease;
+    expect(() => validateLegalRegistry([...cloneReleases(), instructionWithEn])).toThrow(
+      /must define routes exactly for/,
+    );
   });
 });
