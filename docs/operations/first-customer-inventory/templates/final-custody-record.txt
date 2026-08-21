@@ -1,0 +1,35 @@
+# Complete this file outside the source package and both copy roots after final seal.
+# Final statuses: PASS or FAIL. Times: YYYY-MM-DDTHH:mm:ss+03:00 with a numeric offset.
+operationId=
+detachedCustodyRecordId=
+finalSHA256SUMSFileSha256=
+sourceVerificationStatus=
+sourceCheckedFileCount=
+sourceVerifiedAt=
+sourceVerifierNameOrId=
+sourceVerifierRole=
+sourceSignatureOrReference=
+
+copyId=copy-a
+controlledLocationLabel=
+copyOpenStatus=
+evidenceVerifyStatus=
+checkedFileCount=
+copySHA256SUMSFileSha256=
+digestMatchStatus=
+verifiedAt=
+verifierNameOrId=
+verifierRole=
+signatureOrReference=
+
+copyId=copy-b
+controlledLocationLabel=
+copyOpenStatus=
+evidenceVerifyStatus=
+checkedFileCount=
+copySHA256SUMSFileSha256=
+digestMatchStatus=
+verifiedAt=
+verifierNameOrId=
+verifierRole=
+signatureOrReference=
