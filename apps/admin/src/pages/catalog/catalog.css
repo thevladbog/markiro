@@ -9,6 +9,9 @@
 .mk-catalog-filters__status {
   width: 200px;
 }
+.mk-catalog-filters__page-size {
+  width: 120px;
+}
 .mk-catalog-panel-section {
   display: flex;
   flex-direction: column;
@@ -53,7 +56,8 @@
 
 @media (max-width: 767px) {
   .mk-catalog-filters__search,
-  .mk-catalog-filters__status {
+  .mk-catalog-filters__status,
+  .mk-catalog-filters__page-size {
     width: 100%;
     max-width: none;
   }

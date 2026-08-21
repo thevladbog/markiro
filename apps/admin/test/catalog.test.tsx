@@ -232,6 +232,49 @@ describe("CatalogPage", () => {
     expect(screen.getByText("2 продукта")).toBeDefined();
   });
 
+  it("paginates the list with a default page size of 10 and a selectable size", async () => {
+    const products = Array.from({ length: 12 }, (_, index) => ({
+      ...DRAFT_PRODUCT,
+      id: `page-p${index + 1}`,
+      gtin14: `0460000000${String(index + 10)}`,
+      name: `Продукт ${index + 1}`,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/candidates")) return jsonResponse(200, { candidates: [] });
+        return jsonResponse(200, { items: products });
+      }),
+    );
+    const user = userEvent.setup();
+
+    renderPage();
+
+    // Page 1: first 10 products, total count still reflects the full list.
+    expect(await screen.findByText("Продукт 1")).toBeDefined();
+    expect(screen.getByText("Продукт 10")).toBeDefined();
+    expect(screen.queryByText("Продукт 11")).toBeNull();
+    expect(screen.getByText("12 продуктов")).toBeDefined();
+
+    const pager = within(screen.getByRole("navigation", { name: "Страницы каталога" }));
+    expect(pager.getByText("1 / 2")).toBeDefined();
+
+    await user.click(pager.getByRole("button", { name: "Следующая страница" }));
+    expect(screen.getByText("Продукт 11")).toBeDefined();
+    expect(screen.getByText("Продукт 12")).toBeDefined();
+    expect(screen.queryByText("Продукт 10")).toBeNull();
+    expect(pager.getByText("2 / 2")).toBeDefined();
+
+    // Raising the page size to 25 shows everything and hides the pager.
+    // `Select` is a Radix listbox (combobox button + portalled options), not a
+    // native `<select>` -- open it and click the option.
+    await user.click(screen.getByRole("combobox", { name: "На странице" }));
+    await user.click(await screen.findByRole("option", { name: "25" }));
+    expect(screen.getByText("Продукт 1")).toBeDefined();
+    expect(screen.getByText("Продукт 12")).toBeDefined();
+    expect(screen.queryByRole("navigation", { name: "Страницы каталога" })).toBeNull();
+  });
+
   it("renders the aligned catalog and panel controls in English", async () => {
     await i18n.changeLanguage("en");
     vi.stubGlobal(

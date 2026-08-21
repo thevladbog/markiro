@@ -428,6 +428,12 @@
       "resultCount_many": "{{count}} products",
       "resultCount_other": "{{count}} products",
       "statusFilterLabel": "Status",
+      "pageSizeLabel": "Per page",
+      "pager": {
+        "label": "Catalog pages",
+        "previous": "Previous page",
+        "next": "Next page"
+      },
       "statusFilter": {
         "all": "All statuses",
         "draft": "Draft",

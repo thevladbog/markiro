@@ -69,6 +69,56 @@ function ProductThumbnail({ product }: { product: ProductDto }) {
 /** Debounce delay (ms) between the last keystroke in the search box and the refetch. */
 const SEARCH_DEBOUNCE_MS = 300;
 
+const DEFAULT_PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
+
+type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
+
+function CatalogPager({
+  page,
+  pageCount,
+  onPage,
+  label,
+  previousLabel,
+  nextLabel,
+}: {
+  page: number;
+  pageCount: number;
+  onPage: (page: number) => void;
+  label: string;
+  previousLabel: string;
+  nextLabel: string;
+}) {
+  return (
+    <nav
+      aria-label={label}
+      style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}
+    >
+      <Button
+        aria-label={previousLabel}
+        size="compact"
+        variant="secondary"
+        disabled={page <= 1}
+        onClick={() => onPage(page - 1)}
+      >
+        ‹
+      </Button>
+      <span style={{ font: "var(--text-meta)", color: "var(--fg-2)" }}>
+        {page} / {pageCount}
+      </span>
+      <Button
+        aria-label={nextLabel}
+        size="compact"
+        variant="secondary"
+        disabled={page >= pageCount}
+        onClick={() => onPage(page + 1)}
+      >
+        ›
+      </Button>
+    </nav>
+  );
+}
+
 function AuthorizedCreateProductAction() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -195,6 +245,8 @@ export function CatalogPage() {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState<PageSize>(DEFAULT_PAGE_SIZE);
 
   // Debounce the free-text search so typing doesn't refetch on every keystroke.
   useEffect(() => {
@@ -220,11 +272,26 @@ export function CatalogPage() {
   const items = data ?? [];
   const counterparties = useMemo(() => counterpartiesData ?? [], [counterpartiesData]);
 
+  // Snap back to the first page whenever the visible set changes shape.
+  useEffect(() => {
+    setPage(1);
+  }, [debouncedSearch, statusFilter, pageSize]);
+
+  const pageCount = Math.max(1, Math.ceil(items.length / pageSize));
+  // Clamp instead of an effect: deletions on the last page must not flash an empty table.
+  const currentPage = Math.min(page, pageCount);
+  const pageItems = items.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   const statusFilterOptions: SelectOption<StatusFilter>[] = [
     { value: "all", label: t("pages.catalog.statusFilter.all") },
     { value: "draft", label: t("pages.catalog.statusFilter.draft") },
     { value: "active", label: t("pages.catalog.statusFilter.active") },
   ];
+
+  const pageSizeOptions: SelectOption<`${PageSize}`>[] = PAGE_SIZE_OPTIONS.map((size) => ({
+    value: `${size}`,
+    label: `${size}`,
+  }));
 
   const columns: TableColumn<ProductDto>[] = useMemo(
     () => [
@@ -309,6 +376,14 @@ export function CatalogPage() {
             onValueChange={setStatusFilter}
           />
         </div>
+        <div className="mk-catalog-filters__page-size">
+          <Select
+            label={t("pages.catalog.pageSizeLabel")}
+            options={pageSizeOptions}
+            value={`${pageSize}`}
+            onValueChange={(value) => setPageSize(Number(value) as PageSize)}
+          />
+        </div>
       </FilterBar>
 
       {isPending ? (
@@ -324,7 +399,19 @@ export function CatalogPage() {
           action={canWrite ? <AuthorizedCreateProductAction /> : null}
         />
       ) : (
-        <Table columns={columns} rows={items} />
+        <>
+          <Table columns={columns} rows={pageItems} />
+          {pageCount > 1 ? (
+            <CatalogPager
+              page={currentPage}
+              pageCount={pageCount}
+              onPage={setPage}
+              label={t("pages.catalog.pager.label")}
+              previousLabel={t("pages.catalog.pager.previous")}
+              nextLabel={t("pages.catalog.pager.next")}
+            />
+          ) : null}
+        </>
       )}
       <Outlet
         context={
