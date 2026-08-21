@@ -5,11 +5,13 @@ import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode } from "../lib/boxes.js";
 import type { RecentOperation } from "../lib/journal.js";
+import type { ScanSource } from "../lib/scan-source.js";
 import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
 import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
+import { PrintVerification } from "../ui/PrintVerification.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
 import { StationBrand } from "../ui/StationBrand.js";
 import { StationScreen } from "../ui/StationScreen.js";
@@ -104,8 +106,14 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
+  // "offline" renders the real work screen mid-shift (see WorkFixture's
+  // "offline" mode below), so it gets the same always-present operator/window
+  // controls App.tsx renders for every authenticated screen with a shift.
   const withActiveShiftControls =
-    headerVariant !== null || fixture.kind === "shift" || fixture.kind === "work";
+    headerVariant !== null ||
+    fixture.kind === "shift" ||
+    fixture.kind === "work" ||
+    syncVariant === "offline";
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -192,7 +200,15 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
     case "signal":
       return <SignalFixture tone={fixture.variant} locale={locale} />;
     case "box":
-      return <BoxFixture full={fixture.variant === "full"} locale={locale} />;
+      // A full box is a moment inside an otherwise ordinary scanning shift --
+      // the real BoxFillInstrument never renders on its own screen the way
+      // "empty" does here for isolated component review; it always sits
+      // inside the full work screen next to the scan result and counters.
+      return fixture.variant === "full" ? (
+        <WorkFixture mode="box-full" locale={locale} />
+      ) : (
+        <BoxFixture locale={locale} />
+      );
     case "box-print-recovery":
       return <BoxPrintRecoveryFixture variant={fixture.variant} />;
     case "serial-recovery":
@@ -204,9 +220,20 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
     case "setup":
       return <SetupFixture tab={fixture.variant} locale={locale} />;
     case "sync":
-      return <SyncFixture stuck={fixture.variant === "stuck"} locale={locale} />;
+      // "offline" is not a dedicated interstitial screen in production --
+      // App.tsx never navigates away from the active work screen when the
+      // server becomes unreachable; it stays on WorkScreen and only the
+      // status bar's "Сервер"/"Синхронизация" indicators and the counters'
+      // "Не отправлено" line change (see the design spec's "Работа без
+      // сети" section). Only the genuinely stuck-queue interstitial
+      // (`sync-stuck`) is its own screen.
+      return fixture.variant === "offline" ? (
+        <WorkFixture mode="offline" locale={locale} />
+      ) : (
+        <SyncFixture locale={locale} />
+      );
     case "print":
-      return <PrintFixture variant={fixture.variant} locale={locale} />;
+      return <PrintFixture variant={fixture.variant} />;
     case "updates":
       return <UpdateFixture variant={fixture.variant} locale={locale} />;
     case "floor-header":
@@ -766,7 +793,11 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
   const t = i18n.getFixedT(locale);
-  const aggregation = mode.startsWith("aggregation");
+  // "box-full" is a filled box moments before it closes -- still an ordinary
+  // scanning shift, just with the box panel at capacity, so it shares the
+  // aggregation branch's box panel below.
+  const boxFull = mode === "box-full";
+  const aggregation = mode.startsWith("aggregation") || boxFull;
   // "waiting" is a freshly opened shift: no scan has landed yet, so the
   // journal-backed counters and recent-operations list must be empty too --
   // not the mid-shift numbers a screen with an actual scan history would show.
@@ -777,6 +808,11 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
   // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
   // shifts in this gallery have no plan, matching the shift list there too.
   const plannedQty = mode === "validation" ? 10_000 : undefined;
+  // A grouped, >100-capacity box (see BoxFillInstrument's own `grouped` rule)
+  // exercises the same viewport-review case the standalone "box-empty"
+  // fixture already covers for the empty end of the range.
+  const boxCapacity = boxFull ? 120 : 20;
+  const boxItemCount = boxFull ? 120 : 2;
   return (
     <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
       <div className="work-screen__content">
@@ -795,10 +831,10 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
             />
             {aggregation ? (
               <BoxFillInstrument
-                box={{ boxId: "gallery-box-1", itemCount: 2 }}
+                box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}
                 ordinal={1}
-                acceptedToken="gallery-accepted-2"
-                capacity={20}
+                acceptedToken={boxFull ? "gallery-box-full" : "gallery-accepted-2"}
+                capacity={boxCapacity}
                 canUndo
                 labels={workLabels.box}
                 onClose={() => undefined}
@@ -904,44 +940,52 @@ function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: Gall
   );
 }
 
+/**
+ * Mirrors WorkScreen's own `toneOf`/`showTimedSignal` wiring: the title
+ * always comes from the same `signal.*` keys the real verdict flash uses, and
+ * -- like production -- only "duplicate" carries a detail line (the
+ * `signal.firstSeen` first-scan time); an error verdict never has a second
+ * line (see `onOutcome`'s `detail` computation, which stays `undefined` for
+ * every non-duplicate status).
+ */
 function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
+  const t = i18n.getFixedT(locale);
   if (tone === "duplicate") {
+    const time = locale === "ru" ? "14:31:52" : "2:31:52 PM";
     return (
       <SignalOverlay
         tone="duplicate"
-        title={ru ? "ДУБЛИКАТ" : "DUPLICATE"}
-        detail={ru ? "Первое сканирование 14:31:52" : "First scanned 14:31:52"}
+        title={t("signal.duplicate")}
+        detail={t("signal.firstSeen", { time })}
       />
     );
   }
   if (tone === "error") {
-    return (
-      <SignalOverlay
-        tone="error"
-        title={ru ? "КОД ОТКЛОНЁН" : "CODE REJECTED"}
-        detail={ru ? "Неверный GTIN" : "Invalid GTIN"}
-      />
-    );
+    // Any of signal.wrongCode/wrongGtin/systemError is a faithful "red
+    // verdict" -- this picks the wrong-GTIN case (a scan for a different,
+    // known product) as the representative example.
+    return <SignalOverlay tone="error" title={t("signal.wrongGtin")} />;
   }
-  return (
-    <SignalOverlay tone="ok" title={ru ? "ПРИНЯТО" : "ACCEPTED"} detail="TEST-SERIAL-000128" />
-  );
+  return <SignalOverlay tone="ok" title={t("signal.ok")} detail="DEMO-SERIAL-000128" />;
 }
 
-function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) {
+/**
+ * "box-empty" only -- an isolated component review of an unstarted box,
+ * never a real production screen (the box panel only ever renders inside the
+ * work screen; see "box-full" above, which now goes through `WorkFixture`
+ * instead of this wrapper for exactly that reason).
+ */
+function BoxFixture({ locale }: { locale: GalleryLocale }) {
   const ru = locale === "ru";
-  const capacity = full ? 120 : 20;
-  const itemCount = full ? capacity : 0;
   const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
   return (
     <StationScreen title={ru ? "Текущий короб" : "Current box"}>
       <BoxFillInstrument
-        box={{ boxId: "gallery-box-standalone", itemCount }}
+        box={{ boxId: "gallery-box-standalone", itemCount: 0 }}
         ordinal={1}
-        acceptedToken={full ? "gallery-full" : null}
-        capacity={capacity}
-        canUndo={itemCount > 0}
+        acceptedToken={null}
+        capacity={20}
+        canUndo={false}
         labels={workLabels.box}
         onClose={() => undefined}
         onUndo={() => undefined}
@@ -1181,38 +1225,22 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
   );
 }
 
-function SyncFixture({ stuck, locale }: { stuck: boolean; locale: GalleryLocale }) {
+/**
+ * "sync-stuck" only -- the queue-stopped interstitial. Plain "offline" is not
+ * a dedicated screen in production (see the "sync" case in `GalleryState`
+ * above), so this component no longer needs an "offline" branch.
+ */
+function SyncFixture({ locale }: { locale: GalleryLocale }) {
   const ru = locale === "ru";
   return (
     <StationScreen
-      title={
-        stuck
-          ? ru
-            ? "Синхронизация остановилась"
-            : "Sync stopped"
-          : ru
-            ? "Работа без сети"
-            : "Working offline"
-      }
-      actions={
-        <GalleryFooter
-          locale={locale}
-          {...(stuck ? { primary: ru ? "Повторить" : "Retry" } : {})}
-        />
-      }
+      title={ru ? "Синхронизация остановилась" : "Sync stopped"}
+      actions={<GalleryFooter locale={locale} primary={ru ? "Повторить" : "Retry"} />}
     >
       <div className="gallery-centered-card">
         <Alert
           tone="warn"
-          title={
-            stuck
-              ? ru
-                ? "18 операций ожидают отправки"
-                : "18 operations are waiting"
-              : ru
-                ? "7 операций сохранены на устройстве"
-                : "7 operations are saved on this device"
-          }
+          title={ru ? "18 операций ожидают отправки" : "18 operations are waiting"}
         >
           <p>
             {ru
@@ -1225,39 +1253,44 @@ function SyncFixture({ stuck, locale }: { stuck: boolean; locale: GalleryLocale 
   );
 }
 
-function PrintFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const mismatch = variant === "mismatch";
-  const notSscc = variant === "not-sscc";
+/** A valid, but different-from-`expected`, SSCC -- exercises PrintVerification's
+ * own "mismatch" branch (a real, checksum-valid box label, just the wrong one). */
+const GALLERY_PRINT_VERIFICATION_EXPECTED_SSCC = "046012345600000016";
+const GALLERY_PRINT_VERIFICATION_OTHER_SSCC = "046012345600000023";
+
+/** Delivers one fixed raw payload (or none) the instant PrintVerification
+ * subscribes, reproducing its "mismatch"/"notSscc" feedback without a real
+ * scanner -- `start` runs synchronously inside the component's own mount
+ * effect, so the listener fires before that effect's `active` flag could
+ * ever be stale. */
+function galleryPrintScanSource(raw: string | null): ScanSource {
+  return {
+    start(listener) {
+      if (raw !== null) listener(raw);
+      return () => undefined;
+    },
+  };
+}
+
+/** Mirrors PrintVerification.tsx's own render tree (the real component, not
+ * hand-copied markup) so the captured screen matches the current box-label
+ * verification dialog -- title, instruction copy, SSCC formatting, and
+ * footer button placement -- stage for stage. */
+function PrintFixture({ variant }: { variant: string }) {
+  const raw =
+    variant === "mismatch"
+      ? GALLERY_PRINT_VERIFICATION_OTHER_SSCC
+      : variant === "not-sscc"
+        ? "NOT-A-VALID-SSCC"
+        : null;
   return (
-    <StationScreen
-      title={ru ? "Проверьте напечатанную этикетку" : "Verify the printed label"}
-      actions={
-        <GalleryFooter
-          locale={locale}
-          primary={ru ? "Повторить печать" : "Reprint"}
-          secondary={ru ? "Пропустить" : "Skip"}
-        />
-      }
-    >
-      <div className="gallery-print">
-        <p>{ru ? "Отсканируйте SSCC с этикетки короба" : "Scan the SSCC on the box label"}</p>
-        <strong className="gallery-code">000000000000000000</strong>
-        <Alert tone={mismatch || notSscc ? "error" : "info"}>
-          {mismatch
-            ? ru
-              ? "Отсканирован SSCC другого короба"
-              : "The scanned SSCC belongs to another box"
-            : notSscc
-              ? ru
-                ? "На этикетке не распознан SSCC"
-                : "No SSCC was recognized on the label"
-              : ru
-                ? "Ожидание сканирования"
-                : "Waiting for scan"}
-        </Alert>
-      </div>
-    </StationScreen>
+    <PrintVerification
+      expected={GALLERY_PRINT_VERIFICATION_EXPECTED_SSCC}
+      onVerified={() => undefined}
+      onReprint={() => undefined}
+      onSkip={() => undefined}
+      scanSource={galleryPrintScanSource(raw)}
+    />
   );
 }
 
