@@ -444,19 +444,9 @@ export class DisaggregationService {
         ...new Set(printable.map((line) => line.boxId).filter((b): b is string => b !== null)),
       ];
       if (boxIds.length > 0) {
-        // Joined to `codes` on (tenant, hash) alone — deliberately NOT
-        // through `code_registry` the way code-search resolves a hash:
-        // applyDocument (via releaseAggregatedCodes) DELETES the registry
-        // row when a box is disassembled, so an applied document's contents
-        // would inner-join to nothing. `codes` is the append-only scan
-        // archive and may hold several rows per hash (partitioned by
-        // scanned_at), but hash = kmHash(canonicalRaw), so every row for a
-        // hash carries the same gtin14/serial/canonicalRaw — dedupe below
-        // by (boxId, codeHash) and any surviving row is equally correct.
         const codeRows = await this.db
           .select({
             boxId: schema.boxItems.boxId,
-            codeHash: schema.boxItems.codeHash,
             gtin14: schema.codes.gtin14,
             serial: schema.codes.serial,
             rawKm: schema.codes.canonicalRaw,
@@ -469,11 +459,18 @@ export class DisaggregationService {
               eq(schema.boxes.id, schema.boxItems.boxId),
             ),
           )
+          // Join the hot code rows through the box item's own (codeHash,
+          // addedAt == the owning scan's scannedAt), NOT through
+          // code_registry: applying the document
+          // releases ownership by DELETING the registry rows (see
+          // applyDocument), so a registry join would silently drop the
+          // contents of every disassembled box from the printed report.
           .innerJoin(
             schema.codes,
             and(
               eq(schema.codes.tenantId, schema.boxItems.tenantId),
               eq(schema.codes.codeHash, schema.boxItems.codeHash),
+              eq(schema.codes.scannedAt, schema.boxItems.addedAt),
             ),
           )
           .where(
@@ -488,11 +485,7 @@ export class DisaggregationService {
             ),
           )
           .orderBy(schema.codes.gtin14, schema.codes.serial);
-        const seen = new Set<string>();
         for (const code of codeRows) {
-          const key = `${code.boxId}|${code.codeHash}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
           const bucket = codesByBoxId.get(code.boxId);
           const entry = { gtin14: code.gtin14, serial: code.serial, rawKm: code.rawKm };
           if (bucket) bucket.push(entry);

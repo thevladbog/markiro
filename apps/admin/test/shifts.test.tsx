@@ -127,6 +127,7 @@ const PRODUCT_A: ProductDto = {
   id: "p1",
   gtin14: "04006381333931",
   name: "Молоко 1л",
+  printName: null,
   productGroup: "Молочные продукты",
   boxCapacity: 12,
   palletCapacity: 48,

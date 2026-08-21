@@ -463,6 +463,8 @@
         "discardAction": "Discard",
         "gtinLabel": "GTIN",
         "nameLabel": "Name",
+        "printNameLabel": "Print name",
+        "printNameHint": "Short name for the station and label. Blank — the full name is used.",
         "productGroupLabel": "Product group",
         "boxCapacityLabel": "Box capacity, units",
         "palletCapacityLabel": "Pallet capacity, units",
@@ -498,7 +500,8 @@
           "productGroupTooLong": "200 characters or fewer",
           "capacityInvalid": "Enter a positive whole number",
           "unitPriceInvalid": "Enter price in format 0.00 or leave blank",
-          "shelfLifeInvalid": "Enter a whole number from 1 to 3650"
+          "shelfLifeInvalid": "Enter a whole number from 1 to 3650",
+          "printNameTooLong": "200 characters max"
         },
         "externalLink": {
           "linkedText": "Linked to 1C: {{ref}}",

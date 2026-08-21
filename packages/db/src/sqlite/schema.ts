@@ -98,6 +98,7 @@ export const productMirror = sqliteTable("product_mirror", {
   id: text("id").primaryKey(),
   gtin14: text("gtin14").notNull(),
   name: text("name").notNull(),
+  printName: text("print_name"),
   productGroup: text("product_group"),
   boxCapacity: integer("box_capacity"),
   palletCapacity: integer("pallet_capacity"),

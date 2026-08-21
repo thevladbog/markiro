@@ -107,6 +107,22 @@ describe("mirror", () => {
     expect(ctx?.shelfLifeDays).toBe(184);
   });
 
+  it("round-trips, defaults, and clears the product printName like the other optional product fields", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      product: { ...bundle.product, printName: "Дикий Крест Особый 5%" },
+    });
+    expect((await readShiftContext(exec, "s1"))?.productPrintName).toBe("Дикий Крест Особый 5%");
+
+    // A later bundle omitting the field (older server mid-rollout) clears it.
+    await upsertBundle(exec, bundle);
+    const cleared = await readShiftContext(exec, "s1");
+    expect(cleared?.productPrintName).toBeNull();
+    expect(cleared?.productName).toBe(bundle.product.name);
+  });
+
   it("round-trips an explicit shift production date through readShiftContext", async () => {
     const exec = nodeExecutor();
     await applyMigrations(exec);

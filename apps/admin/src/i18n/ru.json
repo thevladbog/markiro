@@ -463,6 +463,8 @@
         "discardAction": "Не сохранять",
         "gtinLabel": "ГТИН",
         "nameLabel": "Название",
+        "printNameLabel": "Наименование для печати",
+        "printNameHint": "Короткое имя для станции и этикетки. Пусто — используется полное наименование.",
         "productGroupLabel": "Группа продукции",
         "boxCapacityLabel": "Вместимость короба, шт",
         "palletCapacityLabel": "Вместимость поддона, шт",
@@ -498,7 +500,8 @@
           "productGroupTooLong": "Не более 200 символов",
           "capacityInvalid": "Введите положительное целое число",
           "unitPriceInvalid": "Укажите цену в формате 0.00 или оставьте пустым",
-          "shelfLifeInvalid": "Введите целое число от 1 до 3650"
+          "shelfLifeInvalid": "Введите целое число от 1 до 3650",
+          "printNameTooLong": "Не более 200 символов"
         },
         "externalLink": {
           "linkedText": "Связано с 1С: {{ref}}",
