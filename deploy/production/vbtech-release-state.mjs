@@ -12,11 +12,13 @@ const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 const SELECTOR_KEYS = "functionPath,imageDigest,imageRef,releaseSha,submissionState";
 const RECORD_KEYS = "createdAt,imageDigest,imageRef,releaseSha,state,submissionState";
 const LOCK_FILE = ".vbtech-release-state.lock";
-const LOCK_STALE_MS = 2 * 60 * 1000;
 const LOCK_RETRY_MS = 10;
 const LOCK_TIMEOUT_MS = 5 * 1000;
+const LOCK_KEYS = "owner,pid";
 const TEMPORARY_FILE_PATTERN =
   /^\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[0-9a-f]{40}-[0-9a-f]{64}\.(?:pending|healthy|failed)\.json\.[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.tmp$/;
+const LOCK_TEMPORARY_FILE_PATTERN =
+  /^\.vbtech-release-state\.lock\.[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.tmp$/;
 
 function selectorError() {
   return new Error("v-b release selector is invalid");
@@ -28,6 +30,14 @@ function stateError() {
 
 function transitionError() {
   return new Error("v-b release transition rejected");
+}
+
+function recoveryError() {
+  return new Error("v-b release state recovery required");
+}
+
+function ownershipError() {
+  return new Error("v-b release lock ownership lost");
 }
 
 function hasExactKeys(value, keys) {
@@ -84,6 +94,19 @@ function isLifecycleRecord(value) {
   );
 }
 
+function isUuid(value) {
+  return typeof value === "string" && UUID_PATTERN.test(value);
+}
+
+function isLifecycleLock(value) {
+  return (
+    hasExactKeys(value, LOCK_KEYS) &&
+    isUuid(value.owner) &&
+    Number.isSafeInteger(value.pid) &&
+    value.pid > 0
+  );
+}
+
 function assertRecordTransitions(records) {
   const pending = new Map();
   const terminals = new Map();
@@ -109,6 +132,8 @@ function dependencies(supplied = {}) {
   return {
     now: () => new Date(),
     randomUUID: nodeRandomUUID,
+    lockRetryMs: LOCK_RETRY_MS,
+    lockTimeoutMs: LOCK_TIMEOUT_MS,
     ...supplied,
   };
 }
@@ -127,7 +152,41 @@ async function syncDirectory(directory) {
   }
 }
 
+async function readLifecycleLock(directory, createError) {
+  const path = join(directory, LOCK_FILE);
+  let linkMetadata;
+  let metadata;
+  let contents;
+  try {
+    linkMetadata = await lstat(path);
+    metadata = await stat(path);
+    if (
+      !linkMetadata.isFile() ||
+      !metadata.isFile() ||
+      (metadata.mode & 0o777) !== PRIVATE_FILE_MODE ||
+      metadata.size > MAX_RECORD_BYTES
+    )
+      throw createError();
+    contents = await readFile(path, "utf8");
+  } catch {
+    throw createError();
+  }
+  let value;
+  try {
+    value = JSON.parse(contents);
+  } catch {
+    throw createError();
+  }
+  if (!isLifecycleLock(value)) throw createError();
+  return value;
+}
+
 async function assertAllowedTransientEntry(directory, file) {
+  if (file === LOCK_FILE) {
+    await readLifecycleLock(directory, stateError);
+    return;
+  }
+
   const path = join(directory, file);
   let linkMetadata;
   let metadata;
@@ -139,11 +198,11 @@ async function assertAllowedTransientEntry(directory, file) {
   }
   if (!linkMetadata.isFile() || !metadata.isFile() || (metadata.mode & 0o777) !== PRIVATE_FILE_MODE)
     throw stateError();
-  if (file === LOCK_FILE) {
-    if (metadata.size !== 0) throw stateError();
-    return;
-  }
-  if (!TEMPORARY_FILE_PATTERN.test(file) || metadata.size > MAX_RECORD_BYTES) throw stateError();
+  if (
+    (!TEMPORARY_FILE_PATTERN.test(file) && !LOCK_TEMPORARY_FILE_PATTERN.test(file)) ||
+    metadata.size > MAX_RECORD_BYTES
+  )
+    throw stateError();
 }
 
 async function readReleaseRecords(directory) {
@@ -231,70 +290,94 @@ async function ensurePrivateDirectory(directory) {
     throw transitionError();
 }
 
-function boundedRecordJson(value) {
+function boundedJson(value, createError) {
   const contents = `${JSON.stringify(value)}\n`;
-  if (Buffer.byteLength(contents, "utf8") > MAX_RECORD_BYTES) throw transitionError();
+  if (Buffer.byteLength(contents, "utf8") > MAX_RECORD_BYTES) throw createError();
   return contents;
 }
 
-async function inspectLifecycleLock(directory) {
-  const path = join(directory, LOCK_FILE);
-  let linkMetadata;
-  let metadata;
+function boundedRecordJson(value) {
+  return boundedJson(value, transitionError);
+}
+
+function lockOwner(supplied) {
+  const { randomUUID } = dependencies(supplied);
+  let owner;
   try {
-    linkMetadata = await lstat(path);
-    metadata = await stat(path);
+    owner = randomUUID();
   } catch {
     throw transitionError();
   }
-  if (
-    !linkMetadata.isFile() ||
-    !metadata.isFile() ||
-    (metadata.mode & 0o777) !== PRIVATE_FILE_MODE ||
-    metadata.size !== 0
-  )
-    throw transitionError();
-  return metadata;
+  if (!isUuid(owner)) throw transitionError();
+  return owner;
 }
 
-async function acquireLifecycleLock(directory) {
-  await ensurePrivateDirectory(directory);
+async function publishLifecycleLock(directory, owner) {
   const path = join(directory, LOCK_FILE);
-  const deadline = Date.now() + LOCK_TIMEOUT_MS;
-  while (true) {
-    let file;
-    try {
-      file = await open(path, "wx", PRIVATE_FILE_MODE);
-      await file.chmod(PRIVATE_FILE_MODE);
-      await file.sync();
-      await file.close();
-      file = undefined;
-      await syncDirectory(directory);
-      return;
-    } catch (error) {
-      await file?.close().catch(() => undefined);
-      if (error?.code !== "EEXIST") throw transitionError();
-    }
-
-    const metadata = await inspectLifecycleLock(directory);
-    if (Date.now() - metadata.mtimeMs >= LOCK_STALE_MS) {
-      try {
-        await unlink(path);
-        await syncDirectory(directory);
-      } catch {
-        throw transitionError();
-      }
-      continue;
-    }
-    if (Date.now() >= deadline) throw transitionError();
-    await sleep(LOCK_RETRY_MS);
+  const temporaryUuid = nodeRandomUUID();
+  if (!isUuid(temporaryUuid)) throw transitionError();
+  const temporary = join(directory, `.${LOCK_FILE}.${temporaryUuid}.tmp`);
+  let file;
+  let temporaryExists = true;
+  try {
+    file = await open(temporary, "wx", PRIVATE_FILE_MODE);
+    await file.chmod(PRIVATE_FILE_MODE);
+    await file.writeFile(boundedJson({ owner, pid: process.pid }, transitionError), "utf8");
+    await file.sync();
+    await file.close();
+    file = undefined;
+    await link(temporary, path);
+    await syncDirectory(directory);
+    await unlink(temporary);
+    temporaryExists = false;
+    await syncDirectory(directory);
+    return true;
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    throw transitionError();
+  } finally {
+    await file?.close().catch(() => undefined);
+    if (temporaryExists)
+      await unlink(temporary)
+        .then(() => syncDirectory(directory))
+        .catch(() => undefined);
   }
 }
 
-async function releaseLifecycleLock(directory) {
-  const path = join(directory, LOCK_FILE);
+async function assertLifecycleLockOwner(directory, owner) {
+  let lock;
   try {
-    await inspectLifecycleLock(directory);
+    lock = await readLifecycleLock(directory, transitionError);
+  } catch {
+    throw ownershipError();
+  }
+  if (lock.owner !== owner) throw ownershipError();
+}
+
+async function acquireLifecycleLock(directory, supplied) {
+  await ensurePrivateDirectory(directory);
+  const { lockRetryMs, lockTimeoutMs } = dependencies(supplied);
+  if (
+    !Number.isSafeInteger(lockRetryMs) ||
+    lockRetryMs <= 0 ||
+    !Number.isSafeInteger(lockTimeoutMs) ||
+    lockTimeoutMs < 0
+  )
+    throw transitionError();
+  const owner = lockOwner(supplied);
+  const deadline = Date.now() + lockTimeoutMs;
+  while (true) {
+    if (await publishLifecycleLock(directory, owner)) return owner;
+    await readLifecycleLock(directory, transitionError);
+    if (Date.now() >= deadline) throw recoveryError();
+    await sleep(lockRetryMs);
+  }
+}
+
+async function releaseLifecycleLock(directory, owner) {
+  const path = join(directory, LOCK_FILE);
+  await assertLifecycleLockOwner(directory, owner);
+  try {
     await unlink(path);
     await syncDirectory(directory);
   } catch {
@@ -302,16 +385,16 @@ async function releaseLifecycleLock(directory) {
   }
 }
 
-async function withLifecycleLock(directory, operation) {
-  await acquireLifecycleLock(directory);
+async function withLifecycleLock(directory, supplied, operation) {
+  const owner = await acquireLifecycleLock(directory, supplied);
   try {
-    return await operation();
+    return await operation(owner);
   } finally {
-    await releaseLifecycleLock(directory);
+    await releaseLifecycleLock(directory, owner);
   }
 }
 
-async function publishRecord(directory, value, supplied) {
+async function publishRecord(directory, value, supplied, owner) {
   const { randomUUID } = dependencies(supplied);
   let uuid;
   try {
@@ -319,8 +402,9 @@ async function publishRecord(directory, value, supplied) {
   } catch {
     throw transitionError();
   }
-  if (typeof uuid !== "string" || !UUID_PATTERN.test(uuid)) throw transitionError();
+  if (!isUuid(uuid) || !isUuid(owner)) throw transitionError();
 
+  await assertLifecycleLockOwner(directory, owner);
   await ensurePrivateDirectory(directory);
   const destination = join(directory, recordFileName(value));
   const temporary = join(directory, `.${recordFileName(value)}.${uuid}.tmp`);
@@ -335,6 +419,7 @@ async function publishRecord(directory, value, supplied) {
     await file.close();
     file = undefined;
 
+    await assertLifecycleLockOwner(directory, owner);
     await link(temporary, destination);
     directoryHandle = await open(directory, "r");
     await directoryHandle.sync();
@@ -347,7 +432,8 @@ async function publishRecord(directory, value, supplied) {
     await directoryHandle.sync();
     await directoryHandle.close();
     directoryHandle = undefined;
-  } catch {
+  } catch (error) {
+    if (error?.message === "v-b release lock ownership lost") throw error;
     throw transitionError();
   } finally {
     await file?.close().catch(() => undefined);
@@ -406,7 +492,7 @@ export async function latestHealthyVbtechRelease(directory) {
 
 export async function writePendingVbtechRelease(directory, selector, supplied = {}) {
   const validatedSelector = validateVbtechSelector(selector);
-  return withLifecycleLock(directory, async () => {
+  return withLifecycleLock(directory, supplied, async (owner) => {
     const records = await readReleaseRecords(directory);
     if (
       records?.some(
@@ -438,20 +524,21 @@ export async function writePendingVbtechRelease(directory, selector, supplied = 
         state: "pending",
       },
       supplied,
+      owner,
     );
   });
 }
 
 export async function markVbtechReleaseHealthy(directory, pending, supplied = {}) {
-  return withLifecycleLock(directory, async () => {
+  return withLifecycleLock(directory, supplied, async (owner) => {
     const persisted = await pendingForTransition(directory, pending);
-    return publishRecord(directory, { ...persisted, state: "healthy" }, supplied);
+    return publishRecord(directory, { ...persisted, state: "healthy" }, supplied, owner);
   });
 }
 
 export async function markVbtechReleaseFailed(directory, pending, supplied = {}) {
-  return withLifecycleLock(directory, async () => {
+  return withLifecycleLock(directory, supplied, async (owner) => {
     const persisted = await pendingForTransition(directory, pending);
-    return publishRecord(directory, { ...persisted, state: "failed" }, supplied);
+    return publishRecord(directory, { ...persisted, state: "failed" }, supplied, owner);
   });
 }

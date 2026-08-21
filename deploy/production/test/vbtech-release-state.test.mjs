@@ -1,5 +1,16 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
+import {
+  readFile,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  stat,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
+import { unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -210,15 +221,66 @@ test("serializes mutually exclusive concurrent terminal transitions", async () =
   assert.equal(terminals.length, 1);
 });
 
-test("recovers a private stale lifecycle lock from a terminated writer", async () => {
+test("fails closed for a stale lifecycle lock that cannot be safely recovered", async () => {
   const releases = await directory();
   await mkdir(releases, { mode: 0o700 });
   const lock = join(releases, ".vbtech-release-state.lock");
-  await writeFile(lock, "", { mode: 0o600 });
+  await writeFile(
+    lock,
+    `${JSON.stringify({ owner: "00000000-0000-4000-8000-000000000000", pid: process.pid })}\n`,
+    { mode: 0o600 },
+  );
   await utimes(lock, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
 
-  assert.deepEqual(await writePendingVbtechRelease(releases, selector(), dependencies()), record());
-  assert.equal((await readdir(releases)).includes(".vbtech-release-state.lock"), false);
+  await assert.rejects(
+    writePendingVbtechRelease(releases, selector(), {
+      ...dependencies(),
+      lockTimeoutMs: 0,
+    }),
+    (error) => error.message === "v-b release state recovery required",
+  );
+  assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), {
+    owner: "00000000-0000-4000-8000-000000000000",
+    pid: process.pid,
+  });
+  assert.deepEqual(await readdir(releases), [".vbtech-release-state.lock"]);
+});
+
+test("fences a paused former owner without deleting its successor lock", async () => {
+  const releases = await directory();
+  const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
+  const lock = join(releases, ".vbtech-release-state.lock");
+  const formerOwner = "00000000-0000-4000-8000-000000000001";
+  const successorOwner = "00000000-0000-4000-8000-000000000002";
+  let uuidCalls = 0;
+
+  await assert.rejects(
+    markVbtechReleaseHealthy(releases, pending, {
+      now: () => new Date("2026-08-21T10:20:30.000Z"),
+      randomUUID: () => {
+        uuidCalls += 1;
+        if (uuidCalls === 2) {
+          unlinkSync(lock);
+          writeFileSync(lock, `${JSON.stringify({ owner: successorOwner, pid: process.pid })}\n`, {
+            mode: 0o600,
+          });
+        }
+        return uuidCalls === 1 ? formerOwner : "00000000-0000-4000-8000-000000000003";
+      },
+    }),
+    (error) => error.message === "v-b release lock ownership lost",
+  );
+
+  assert.equal(
+    (await readdir(releases)).some(
+      (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),
+    ),
+    false,
+  );
+  assert.deepEqual(JSON.parse(await readFile(lock, "utf8")), {
+    owner: successorOwner,
+    pid: process.pid,
+  });
 });
 
 test("fails closed for every malformed or oversized JSON state input", async () => {
