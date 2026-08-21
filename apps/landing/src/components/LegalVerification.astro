@@ -36,6 +36,8 @@ const graph = buildLegalPageGraph(metadata, {
   modified: release.effectiveDate,
 });
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE });
+const enContent = source.content.en;
+const enRoute = release.routes.en;
 ---
 
 <BaseLayout metadata={metadata} graph={graph}>
@@ -68,20 +70,22 @@ const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_P
         />
       </section>
 
-      <section lang="en" aria-labelledby="verification-en">
-        <div class="legal-verification__copy">
-          <p class="section-index">EN / PUBLISHED</p>
-          <h2 id="verification-en">{source.content.en.title}</h2>
-          <p>The code, revision, date, and checksums match the Markiro public registry. The English text is an informational translation.</p>
-          <a href={release.routes.en}>Read the English translation →</a>
-        </div>
-        <LegalArtifactControls
-          release={release}
-          locale="en"
-          artifacts={artifactsForRelease(artifacts, release.code, release.revision, "en")}
-          showVerificationLink={false}
-        />
-      </section>
+      {enContent && enRoute && (
+        <section lang="en" aria-labelledby="verification-en">
+          <div class="legal-verification__copy">
+            <p class="section-index">EN / PUBLISHED</p>
+            <h2 id="verification-en">{enContent.title}</h2>
+            <p>The code, revision, date, and checksums match the Markiro public registry. The English text is an informational translation.</p>
+            <a href={enRoute}>Read the English translation →</a>
+          </div>
+          <LegalArtifactControls
+            release={release}
+            locale="en"
+            artifacts={artifactsForRelease(artifacts, release.code, release.revision, "en")}
+            showVerificationLink={false}
+          />
+        </section>
+      )}
     </article>
   </main>
   <LandingFooter page={metadata} />

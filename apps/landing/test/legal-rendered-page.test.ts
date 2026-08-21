@@ -84,7 +84,11 @@ describe("rendered legal pages", () => {
       const codes = [...(documents.get(route)?.querySelectorAll("[data-registry-code]") ?? [])].map(
         (element) => element.textContent?.trim(),
       );
-      expect(codes).toEqual(["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"]);
+      const expectedCodes =
+        route === "/legal/"
+          ? ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01", "MKR-INS-01"]
+          : ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"];
+      expect(codes).toEqual(expectedCodes);
     }
   });
 
@@ -153,9 +157,11 @@ describe("rendered legal pages", () => {
   it("lists all localized immutable artifacts in each registry", () => {
     for (const route of ["/legal/", "/en/legal/"] as const) {
       const document = documents.get(route);
-      expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(4);
+      const pdfCount = route === "/legal/" ? 5 : 4;
+      const shaCount = route === "/legal/" ? 7 : 6;
+      expect(document?.querySelectorAll('a[download$=".pdf"]')).toHaveLength(pdfCount);
       expect(document?.querySelectorAll('a[download$=".docx"]')).toHaveLength(2);
-      expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(6);
+      expect(document?.querySelectorAll("[data-artifact-sha256]")).toHaveLength(shaCount);
     }
   });
 

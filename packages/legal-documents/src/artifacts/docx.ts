@@ -27,8 +27,13 @@ import { unzipSync, zipSync } from "fflate";
 
 import { OPERATOR_PROFILES } from "../operator.js";
 import { formatLegalEffectiveDate } from "../identity.js";
-import { findLegalDocument, findLegalRelease } from "../registry.js";
-import type { LegalBlock } from "../types.js";
+import {
+  findLegalDocument,
+  findLegalRelease,
+  legalDocumentKind,
+  requireLegalContent,
+} from "../registry.js";
+import type { LegalBlock, LegalLocale } from "../types.js";
 import {
   MARKIRO_COLORS,
   prepareDataMatrixMedia,
@@ -61,6 +66,15 @@ const TABLE_BORDERS = {
   insideVertical: NO_BORDER,
 } as const;
 
+export interface LegalDocxAssets {
+  readonly images?: ReadonlyMap<string, Uint8Array>;
+}
+
+// Instruction screenshots render at the full text column: the A4 content
+// width (11906 - 2 * 1134 twips) is ~642 px at 96 DPI; 600 px leaves slack
+// for LibreOffice rounding during PDF export.
+const INSTRUCTION_IMAGE_WIDTH = 600;
+
 const copy = {
   ru: {
     documentClass: "ПУБЛИЧНЫЙ ДОКУМЕНТ",
@@ -72,6 +86,11 @@ const copy = {
     contacts: "Контакты",
     verification: "Проверка редакции",
     page: "Страница",
+    instructionClass: "РАБОЧАЯ ИНСТРУКЦИЯ",
+    step: "Шаг",
+    expected: "Ожидаемый результат",
+    calloutInfo: "Примечание",
+    calloutWarning: "Важно",
   },
   en: {
     documentClass: "PUBLIC DOCUMENT",
@@ -83,17 +102,29 @@ const copy = {
     contacts: "Contacts",
     verification: "Revision verification",
     page: "Page",
+    instructionClass: "WORK INSTRUCTION",
+    step: "Step",
+    expected: "Expected result",
+    calloutInfo: "Note",
+    calloutWarning: "Important",
   },
 } as const;
 
-export async function renderLegalDocx(input: LegalArtifactRequest): Promise<Uint8Array> {
+export async function renderLegalDocx(
+  input: LegalArtifactRequest,
+  assets: LegalDocxAssets = {},
+): Promise<Uint8Array> {
   assertLegalArtifactRequest(input);
   const release = findLegalRelease(input.code, input.revision);
-  const source = findLegalDocument(input.code, input.revision).content[input.locale];
+  const source = requireLegalContent(findLegalDocument(input.code, input.revision), input.locale);
   const operator = OPERATOR_PROFILES[release.operatorProfileId];
   const markSvg = renderMarkiroSymbolSvg();
   const markPng = renderMarkiroSymbolPng();
   const dataMatrix = prepareDataMatrixMedia(renderLiteralDataMatrixSvg(input.verificationUrl));
+  const classLabel =
+    legalDocumentKind(input.code) === "instruction"
+      ? copy[input.locale].instructionClass
+      : copy[input.locale].documentClass;
 
   const document = new Document({
     title: source.title,
@@ -151,27 +182,11 @@ export async function renderLegalDocx(input: LegalArtifactRequest): Promise<Uint
         },
         headers: {
           first: new Header({
-            children: [
-              createHeader(
-                input,
-                markSvg,
-                markPng,
-                FIRST_HEADER_HEIGHT,
-                24,
-                copy[input.locale].documentClass,
-              ),
-            ],
+            children: [createHeader(input, markSvg, markPng, FIRST_HEADER_HEIGHT, 24, classLabel)],
           }),
           default: new Header({
             children: [
-              createHeader(
-                input,
-                markSvg,
-                markPng,
-                DEFAULT_HEADER_HEIGHT,
-                20,
-                copy[input.locale].documentClass,
-              ),
+              createHeader(input, markSvg, markPng, DEFAULT_HEADER_HEIGHT, 20, classLabel),
             ],
           }),
         },
@@ -195,13 +210,22 @@ export async function renderLegalDocx(input: LegalArtifactRequest): Promise<Uint
             spacing: { after: 220 },
           }),
           createMetadataTable(input, operator),
-          ...source.sections.flatMap((section) => [
-            new Paragraph({
-              heading: HeadingLevel.HEADING_1,
-              children: [new TextRun(section.heading)],
-            }),
-            ...section.blocks.flatMap((block) => renderBlock(block)),
-          ]),
+          ...source.sections.flatMap((section) => {
+            let stepNumber = 0;
+            return [
+              new Paragraph({
+                heading: HeadingLevel.HEADING_1,
+                children: [new TextRun(section.heading)],
+              }),
+              ...section.blocks.flatMap((block) => {
+                if (block.kind === "step") {
+                  stepNumber += 1;
+                  return renderStep(block, stepNumber, input.locale, assets);
+                }
+                return renderBlock(block, input.locale);
+              }),
+            ];
+          }),
         ],
       },
     ],
@@ -458,7 +482,7 @@ function createMetadataTable(
   });
 }
 
-function renderBlock(block: LegalBlock): readonly FileChild[] {
+function renderBlock(block: LegalBlock, locale: LegalLocale): readonly FileChild[] {
   switch (block.kind) {
     case "paragraph":
       return [new Paragraph({ children: [new TextRun(block.text)] })];
@@ -486,7 +510,100 @@ function renderBlock(block: LegalBlock): readonly FileChild[] {
             ],
           }),
       );
+    case "callout":
+      return [
+        new Paragraph({
+          children: [
+            new TextRun({
+              text: `${block.tone === "warning" ? copy[locale].calloutWarning : copy[locale].calloutInfo}: `,
+              bold: true,
+            }),
+            new TextRun(block.text),
+          ],
+        }),
+      ];
+    case "step":
+      throw new Error("Step blocks are rendered with their section-scoped number");
   }
+}
+
+function renderStep(
+  block: Extract<LegalBlock, { kind: "step" }>,
+  stepNumber: number,
+  locale: LegalLocale,
+  assets: LegalDocxAssets,
+): readonly FileChild[] {
+  const children: FileChild[] = [
+    new Paragraph({
+      spacing: { before: 160, after: 60 },
+      keepNext: true,
+      children: [
+        new TextRun({ text: `${copy[locale].step} ${stepNumber}. ${block.title}`, bold: true }),
+      ],
+    }),
+    new Paragraph({ children: [new TextRun(block.text)] }),
+  ];
+
+  if (block.image) {
+    const data = assets.images?.get(block.image.id);
+    if (!data) {
+      throw new Error(`Missing instruction image: ${block.image.id}`);
+    }
+    const { width, height } = readPngDimensions(data, block.image.id);
+    const displayHeight = Math.max(1, Math.round((height / width) * INSTRUCTION_IMAGE_WIDTH));
+    children.push(
+      new Paragraph({
+        keepNext: true,
+        spacing: { before: 60, after: 40 },
+        children: [
+          new ImageRun({
+            type: "png",
+            data,
+            transformation: { width: INSTRUCTION_IMAGE_WIDTH, height: displayHeight },
+            altText: {
+              name: block.image.id,
+              description: block.image.caption,
+              title: block.image.caption,
+            },
+          }),
+        ],
+      }),
+      new Paragraph({
+        style: "DocumentSummary",
+        spacing: { after: 120 },
+        children: [new TextRun(block.image.caption)],
+      }),
+    );
+  }
+
+  if (block.expected) {
+    children.push(
+      new Paragraph({
+        children: [
+          new TextRun({ text: `${copy[locale].expected}: `, bold: true }),
+          new TextRun(block.expected),
+        ],
+      }),
+    );
+  }
+  return children;
+}
+
+function readPngDimensions(
+  data: Uint8Array,
+  imageId: string,
+): { readonly width: number; readonly height: number } {
+  const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (data.length < 24 || PNG_SIGNATURE.some((byte, index) => data[index] !== byte)) {
+    throw new Error(`Instruction image is not a PNG: ${imageId}`);
+  }
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const width = view.getUint32(16);
+  const height = view.getUint32(20);
+  if (width <= 0 || height <= 0) {
+    throw new Error(`Instruction image has invalid dimensions: ${imageId}`);
+  }
+  return { width, height };
 }
 
 function normalizeDocx(bytes: Uint8Array, effectiveDate: string): Uint8Array {

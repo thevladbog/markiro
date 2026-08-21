@@ -19,6 +19,7 @@ describe("legal document registry", () => {
       "MKR-PD-02",
       "MKR-DPA-01",
       "MKR-BRD-01",
+      "MKR-INS-01",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -35,8 +36,13 @@ describe("legal document registry", () => {
   it("pins paired, unique public routes and valid initial metadata", () => {
     expect(() => validateLegalRegistry(LEGAL_RELEASES)).not.toThrow();
     expect(LEGAL_RELEASES.every(({ revision }) => revision === "2026.08/01")).toBe(true);
-    expect(LEGAL_RELEASES.every(({ effectiveDate }) => effectiveDate === "2026-08-15")).toBe(true);
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(8);
+    expect(
+      LEGAL_RELEASES.filter(({ code }) => code !== "MKR-INS-01").every(
+        ({ effectiveDate }) => effectiveDate === "2026-08-15",
+      ),
+    ).toBe(true);
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-08-21");
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(9);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -82,13 +88,13 @@ describe("legal document registry", () => {
       ...missing[0]!,
       routes: { ru: missing[0]!.routes.ru },
     } as LegalDocumentRelease;
-    expect(() => validateLegalRegistry(missing)).toThrow(/locale routes/i);
+    expect(() => validateLegalRegistry(missing)).toThrow(/must define routes exactly for/i);
 
     const mismatched = cloneReleases();
     mismatched[0] = {
       ...mismatched[0]!,
       routes: { ...mismatched[0]!.routes, en: "/privacy/" },
-    };
+    } as unknown as LegalDocumentRelease;
     expect(() => validateLegalRegistry(mismatched)).toThrow(/English route/i);
   });
 
@@ -125,5 +131,41 @@ describe("legal document registry", () => {
     const releases = cloneReleases();
     releases[1] = { ...releases[1]!, revision: "2026.08/02" };
     expect(() => validateLegalRegistry(releases)).toThrow(/consent identifier/i);
+  });
+
+  it("classifies document kinds and release locales", async () => {
+    const { legalDocumentKind, legalReleaseLocales } = await import("../src/index.js");
+    expect(legalDocumentKind("MKR-PD-01")).toBe("legal");
+    expect(legalDocumentKind("MKR-DPA-01")).toBe("template");
+    expect(legalDocumentKind("MKR-INS-01")).toBe("instruction");
+    expect(legalReleaseLocales("MKR-BRD-01")).toEqual(["ru", "en"]);
+    expect(legalReleaseLocales("MKR-INS-01")).toEqual(["ru"]);
+  });
+
+  it("accepts a Russian-only instruction release and rejects Russian-only legal releases", () => {
+    const instructionRelease = {
+      code: "MKR-INS-01",
+      revision: "2026.08/02",
+      effectiveDate: "2026-08-22",
+      status: "draft",
+      operatorProfileId: "operator-2026-08-15",
+      routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny-chernovik/" },
+    } as unknown as LegalDocumentRelease;
+    expect(() => validateLegalRegistry([...cloneReleases(), instructionRelease])).not.toThrow();
+
+    const ruOnlyLegal = cloneReleases();
+    delete (ruOnlyLegal[0] as { routes: { en?: string } }).routes.en;
+    expect(() => validateLegalRegistry(ruOnlyLegal)).toThrow(/must define routes exactly for/);
+
+    const instructionWithEn = {
+      ...instructionRelease,
+      routes: {
+        ru: "/instruktsii/stantsiya-vkhod-i-start-smeny-chernovik/",
+        en: "/en/instructions/station-shift-start/",
+      },
+    } as unknown as LegalDocumentRelease;
+    expect(() => validateLegalRegistry([...cloneReleases(), instructionWithEn])).toThrow(
+      /must define routes exactly for/,
+    );
   });
 });

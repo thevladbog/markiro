@@ -2569,3 +2569,87 @@ input:focus-visible {
     gap: var(--sp-4) var(--sp-6);
   }
 }
+
+/* Instruction documents (MKR-INS-*) */
+.instruction-step {
+  margin: var(--sp-7) 0;
+  padding-left: var(--sp-4);
+  border-left: 3px solid var(--line);
+}
+
+.instruction-step__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  font: 500 1.0625rem / 1.3 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.instruction-step__number {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--r-round);
+  background: var(--fg-1);
+  color: var(--surface-page);
+  font: 600 0.8125rem / 1 var(--font-mono);
+}
+
+.instruction-step__figure {
+  margin: var(--sp-4) 0;
+}
+
+.instruction-step__figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.instruction-step__figure figcaption {
+  margin-top: var(--sp-2);
+  color: var(--fg-3);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.instruction-step__expected {
+  color: var(--fg-2);
+  font-size: 0.95rem;
+}
+
+.instruction-callout {
+  margin: var(--sp-5) 0;
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.instruction-callout--warning {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.instruction-callout strong {
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--fg-3);
+  font: 600 0.75rem / 1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.instruction-callout--warning strong {
+  color: var(--warn-fg);
+}
+
+@media print {
+  .instruction-step {
+    break-inside: avoid;
+  }
+}

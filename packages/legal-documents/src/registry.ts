@@ -1,11 +1,14 @@
 import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
 import { CONSENT_CONTENT } from "./documents/consent.js";
 import { PRIVACY_CONTENT } from "./documents/privacy.js";
+import { STATION_OPERATOR_SHIFT_CONTENT } from "./documents/station-operator-shift.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
 import { formatLegalEffectiveDate, parseLegalRevision } from "./identity.js";
 import type { LegalRevision } from "./identity.js";
 import type {
   LegalDocumentCode,
+  LegalDocumentKind,
+  LegalDocumentLocaleContent,
   LegalDocumentRelease,
   LegalDocumentSource,
   LegalLocale,
@@ -13,8 +16,39 @@ import type {
 
 export const CURRENT_DEMO_CONSENT_ID = "MKR-PD-02/2026.08/01" as const;
 
-const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"] as const;
+const LEGAL_DOCUMENT_CODES = [
+  "MKR-PD-01",
+  "MKR-PD-02",
+  "MKR-DPA-01",
+  "MKR-BRD-01",
+  "MKR-INS-01",
+] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
+
+export const LEGAL_DOCUMENT_KIND_BY_CODE = {
+  "MKR-PD-01": "legal",
+  "MKR-PD-02": "legal",
+  "MKR-DPA-01": "template",
+  "MKR-BRD-01": "template",
+  "MKR-INS-01": "instruction",
+} as const satisfies Record<LegalDocumentCode, LegalDocumentKind>;
+
+export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
+  return LEGAL_DOCUMENT_KIND_BY_CODE[code];
+}
+
+export function legalReleaseLocales(code: LegalDocumentCode): readonly LegalLocale[] {
+  return legalDocumentKind(code) === "instruction" ? ["ru"] : ["ru", "en"];
+}
+
+export function requireLegalContent(
+  source: LegalDocumentSource,
+  locale: LegalLocale,
+): LegalDocumentLocaleContent {
+  const content = source.content[locale];
+  if (!content) throw new Error(`Legal document has no ${locale} content: ${source.releaseKey}`);
+  return content;
+}
 
 export const LEGAL_RELEASES = [
   {
@@ -52,14 +86,23 @@ export const LEGAL_RELEASES = [
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/legal/brand-letterhead/", en: "/en/legal/brand-letterhead/" },
   },
+  {
+    code: "MKR-INS-01",
+    revision: "2026.08/01",
+    effectiveDate: "2026-08-21",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/" },
+  },
 ] as const satisfies readonly LegalDocumentRelease[];
 
-export const LEGAL_DOCUMENTS = [
+export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-PD-01/2026.08/01", content: PRIVACY_CONTENT },
   { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
   { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
-] as const satisfies readonly LegalDocumentSource[];
+  { releaseKey: "MKR-INS-01/2026.08/01", content: STATION_OPERATOR_SHIFT_CONTENT },
+];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {
   const leftParts = parseLegalRevision(left);
@@ -76,13 +119,19 @@ function compareLegalRevisions(left: LegalRevision, right: LegalRevision): numbe
   );
 }
 
-function assertLocaleRoutes(routes: LegalDocumentRelease["routes"]): void {
-  const entries = Object.entries(routes);
-  if (entries.length !== 2 || !("ru" in routes) || !("en" in routes)) {
-    throw new Error("Legal release must define paired RU and EN locale routes");
+function assertLocaleRoutes(code: LegalDocumentCode, routes: LegalDocumentRelease["routes"]): void {
+  const expectedLocales = legalReleaseLocales(code);
+  const entries = Object.entries(routes) as [LegalLocale, string][];
+  if (
+    entries.length !== expectedLocales.length ||
+    expectedLocales.some((locale) => !(locale in routes))
+  ) {
+    throw new Error(
+      `Legal release ${code} must define routes exactly for: ${expectedLocales.join(", ")}`,
+    );
   }
 
-  for (const [locale, route] of entries as [LegalLocale, string][]) {
+  for (const [locale, route] of entries) {
     if (!route.startsWith("/") || !route.endsWith("/") || route.includes("://")) {
       throw new Error(`Invalid external legal route: ${route}`);
     }
@@ -125,7 +174,7 @@ export function validateLegalRegistry(releases: readonly LegalDocumentRelease[])
     if (releaseKeys.has(releaseKey)) throw new Error(`Duplicate release: ${releaseKey}`);
     releaseKeys.add(releaseKey);
 
-    assertLocaleRoutes(release.routes);
+    assertLocaleRoutes(release.code, release.routes);
     for (const route of Object.values(release.routes)) {
       if (routes.has(route)) throw new Error(`Duplicate route: ${route}`);
       routes.add(route);

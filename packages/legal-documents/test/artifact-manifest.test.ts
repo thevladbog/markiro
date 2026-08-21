@@ -16,10 +16,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { zlibSync } from "fflate";
 
+import { artifactFileName } from "../src/artifacts/names.js";
 import type { LegalArtifactRequest } from "../src/artifacts/names.js";
+import { findLegalRelease, legalVerificationUrl } from "../src/index.js";
 import {
+  MAX_INSTRUCTION_PDF_BYTES,
   MAX_LEGAL_PDF_BYTES,
   canonicalArtifactManifest,
+  maxLegalPdfBytes,
   parseVerificationArguments,
   verifyArtifactManifest,
   type PublishedLegalArtifact,
@@ -295,7 +299,7 @@ function artifactEntry(
     entry: {
       code,
       revision: "2026.08/01",
-      effectiveDate: "2026-08-15",
+      effectiveDate: code === "MKR-INS-01" ? "2026-08-21" : "2026-08-15",
       locale,
       kind,
       fileName,
@@ -324,6 +328,7 @@ function validArtifacts(): {
           : []),
       ]),
   );
+  artifacts.push(artifactEntry("MKR-INS-01", "ru", "pdfa-2b"));
   return {
     entries: artifacts.map(({ entry }) => entry),
     bytesByFile: new Map(artifacts.map(({ entry, bytes }) => [entry.fileName, bytes])),
@@ -630,7 +635,7 @@ describe("published legal artifact manifest verification", () => {
         manifestPath: fixture.manifestPath,
         pdfaValidatedFiles: fixture.pdfaValidatedFiles,
       }),
-    ).rejects.toThrow("five MiB");
+    ).rejects.toThrow("release size bound");
   });
 
   it("requires canonical filename order, indentation, and a final newline", async () => {
@@ -1159,9 +1164,9 @@ describe("legal artifact release generation", () => {
     );
 
     expect(beforePublishCalls).toBe(1);
-    expect(entries).toHaveLength(12);
-    expect(dependencies.converted).toHaveLength(8);
-    expect(dependencies.requests).toHaveLength(12);
+    expect(entries).toHaveLength(13);
+    expect(dependencies.converted).toHaveLength(9);
+    expect(dependencies.requests).toHaveLength(13);
     expect(
       dependencies.requests.map(
         ({ code, locale, kind, verificationUrl }) => `${code}|${locale}|${kind}|${verificationUrl}`,
@@ -1179,15 +1184,16 @@ describe("legal artifact release generation", () => {
       "MKR-BRD-01|ru|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|legal-pdf|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
       "MKR-BRD-01|en|template-docx|https://markiro.app/d/MKR-BRD-01/2026.08/01/15.08.2026",
+      "MKR-INS-01|ru|legal-pdf|https://markiro.app/d/MKR-INS-01/2026.08/01/21.08.2026",
     ]);
     expect(new Set(entries.map(({ revision }) => revision))).toEqual(new Set(["2026.08/01"]));
     expect(new Set(entries.map(({ effectiveDate }) => effectiveDate))).toEqual(
-      new Set(["2026-08-15"]),
+      new Set(["2026-08-15", "2026-08-21"]),
     );
-    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(8);
+    expect(entries.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(9);
     expect(await readdir(path.dirname(outDir))).toEqual(["legal"]);
     expect(await readdir(outDir)).toEqual(["artifacts.json", "files"]);
-    expect(await readdir(path.join(outDir, "files"))).toHaveLength(12);
+    expect(await readdir(path.join(outDir, "files"))).toHaveLength(13);
     expect(await readFile(path.join(outDir, "artifacts.json"), "utf8")).toBe(
       canonicalArtifactManifest(entries),
     );
@@ -1303,12 +1309,54 @@ describe("legal artifact release generation", () => {
     );
     await expect(
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),
-    ).resolves.toHaveLength(12);
+    ).resolves.toHaveLength(13);
 
     const changed = path.join(outDir, "files", "markiro_mkr-pd-01_2026.08-01_ru.pdf");
     await writeFile(changed, "%PDF-1.7\nchanged\n%%EOF\n");
     await expect(
       generateLegalArtifacts({ ...generation, check: true }, fakeGenerationDependencies()),
     ).rejects.toThrow("not byte-identical");
+  });
+});
+
+describe("instruction artifact bounds", () => {
+  it("expects a Russian-only PDF for MKR-INS-01", () => {
+    const release = findLegalRelease("MKR-INS-01");
+    expect(
+      artifactFileName({
+        code: "MKR-INS-01",
+        revision: release.revision,
+        effectiveDate: release.effectiveDate,
+        locale: "ru",
+        kind: "legal-pdf",
+        verificationUrl: legalVerificationUrl(release),
+      }),
+    ).toBe("markiro_mkr-ins-01_2026.08-01_ru.pdf");
+    expect(() =>
+      artifactFileName({
+        code: "MKR-INS-01",
+        revision: release.revision,
+        effectiveDate: release.effectiveDate,
+        locale: "en",
+        kind: "legal-pdf",
+        verificationUrl: legalVerificationUrl(release),
+      }),
+    ).toThrow(/locale/i);
+    expect(() =>
+      artifactFileName({
+        code: "MKR-INS-01",
+        revision: release.revision,
+        effectiveDate: release.effectiveDate,
+        locale: "ru",
+        kind: "template-docx",
+        verificationUrl: legalVerificationUrl(release),
+      }),
+    ).toThrow(/not a downloadable template/);
+  });
+
+  it("gives instructions a wider PDF bound", () => {
+    expect(maxLegalPdfBytes("MKR-PD-01")).toBe(MAX_LEGAL_PDF_BYTES);
+    expect(maxLegalPdfBytes("MKR-INS-01")).toBe(MAX_INSTRUCTION_PDF_BYTES);
+    expect(MAX_INSTRUCTION_PDF_BYTES).toBe(12 * 1024 * 1024);
   });
 });

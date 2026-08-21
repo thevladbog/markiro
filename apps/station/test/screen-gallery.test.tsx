@@ -294,13 +294,22 @@ describe("development screen gallery", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     for (const state of EXPECTED_GALLERY_STATE_IDS) {
+      const fixture = GALLERY_FIXTURES.find((candidate) => candidate.id === state);
       const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
 
       expect(screen.getByTestId("station-screen-gallery").getAttribute("data-gallery-state")).toBe(
         state,
       );
-      expect(view.container.querySelector(".station-root")).not.toBeNull();
-      expect(view.container.querySelector(".station-screen-slot")).not.toBeNull();
+      if (fixture?.kind === "login") {
+        // Sign-in has no station/operator/shift identity yet, so -- exactly
+        // like the production `stage === "login"` branch in App.tsx -- it
+        // renders without the shared FloorShell status bar.
+        expect(view.container.querySelector(".operator-login")).not.toBeNull();
+        expect(view.container.querySelector(".station-root")).toBeNull();
+      } else {
+        expect(view.container.querySelector(".station-root")).not.toBeNull();
+        expect(view.container.querySelector(".station-screen-slot")).not.toBeNull();
+      }
 
       view.unmount();
     }

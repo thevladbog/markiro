@@ -26,13 +26,19 @@ import type { LegalArtifactRequest } from "../artifacts/names.js";
 import { artifactFileName } from "../artifacts/names.js";
 import { legalVerificationUrl } from "../identity.js";
 import { OPERATOR_PROFILES } from "../operator.js";
-import { findLegalDocument, LEGAL_RELEASES } from "../registry.js";
+import {
+  findLegalDocument,
+  LEGAL_RELEASES,
+  legalDocumentKind,
+  legalReleaseLocales,
+  requireLegalContent,
+} from "../registry.js";
 import type { LegalBlock, LegalDocumentCode } from "../types.js";
 import {
-  MAX_LEGAL_PDF_BYTES,
   VERAPDF_RELEASE_IMAGE,
   VERAPDF_VERSION,
   canonicalArtifactManifest,
+  maxLegalPdfBytes,
   parseVeraPdfValidationResult,
   verifyArtifactManifest,
   type PublishedLegalArtifact,
@@ -43,7 +49,6 @@ export { VERAPDF_RELEASE_IMAGE, parseVeraPdfValidationResult } from "./verify-ar
 const execFile = promisify(execFileCallback);
 const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
-const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const RELEASE_LIBREOFFICE_VERSION = "26.2.5";
 export const LIBREOFFICE_PDF_EXPORT_FILTER =
   'pdf:writer_pdf_Export:{"SelectPdfVersion":{"type":"long","value":"2"},"UseTaggedPDF":{"type":"boolean","value":"true"},"EnableTextAccessForAccessibilityTools":{"type":"boolean","value":"true"},"ExportBookmarks":{"type":"boolean","value":"true"}}';
@@ -857,11 +862,20 @@ function blockText(block: LegalBlock): string {
       return block.items.join(" ");
     case "definition-list":
       return block.items.map(({ term, detail }) => `${term}. ${detail}`).join(" ");
+    case "step":
+      return [block.title, block.text, block.image?.caption, block.expected]
+        .filter((part): part is string => Boolean(part))
+        .join(" ");
+    case "callout":
+      return block.text;
   }
 }
 
 function requiredPdfText(request: LegalArtifactRequest): readonly string[] {
-  const source = findLegalDocument(request.code, request.revision).content[request.locale];
+  const source = requireLegalContent(
+    findLegalDocument(request.code, request.revision),
+    request.locale,
+  );
   const release = LEGAL_RELEASES.find(
     ({ code, revision }) => code === request.code && revision === request.revision,
   );
@@ -908,6 +922,32 @@ function requireContainerRuntime(): string {
   return runtime;
 }
 
+// dist/cli/../../assets and src/cli/../../assets both resolve to the package
+// root, so the loader works compiled and under vitest alike.
+const INSTRUCTION_ASSETS_ROOT = fileURLToPath(
+  new URL("../../assets/instructions/", import.meta.url),
+);
+
+async function loadInstructionImages(
+  code: LegalDocumentCode,
+): Promise<ReadonlyMap<string, Uint8Array> | undefined> {
+  if (legalDocumentKind(code) !== "instruction") return undefined;
+  const directory = path.join(INSTRUCTION_ASSETS_ROOT, code.toLowerCase());
+  const entries = await readdir(directory, { withFileTypes: true });
+  const images = new Map<string, Uint8Array>();
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".png")) {
+      throw new Error(`Unexpected instruction asset entry: ${entry.name}`);
+    }
+    images.set(
+      entry.name.slice(0, -".png".length),
+      await readFile(path.join(directory, entry.name)),
+    );
+  }
+  if (images.size === 0) throw new Error(`Instruction assets are missing for ${code}`);
+  return images;
+}
+
 function createDefaultDependencies(): ArtifactGenerationDependencies {
   let veraPdfVersionCheck: Promise<void> | undefined;
   const ensureVeraPdfVersion = (): Promise<void> => {
@@ -934,7 +974,10 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
   return {
     getLibreOfficeVersion: async (sofficeBin) =>
       (await runTextCommand(sofficeBin, ["--version"])).stdout,
-    renderDocx: renderLegalDocx,
+    renderDocx: async (request) => {
+      const images = await loadInstructionImages(request.code);
+      return renderLegalDocx(request, images ? { images } : {});
+    },
     convertPdf: async ({ sofficeBin, sourcePath, outputDirectory }) => {
       const profileDirectory = libreOfficeProfileDirectory(outputDirectory, sourcePath);
       await mkdir(profileDirectory, { recursive: true });
@@ -955,8 +998,8 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
       const pdfStats = await stat(pdfPath);
       if (!pdfStats.isFile() || pdfStats.size <= 0)
         throw new Error(`Generated PDF is empty: ${pdfPath}`);
-      if (pdfStats.size > MAX_LEGAL_PDF_BYTES) {
-        throw new Error(`Generated PDF exceeds the five MiB release bound: ${pdfPath}`);
+      if (pdfStats.size > maxLegalPdfBytes(request.code)) {
+        throw new Error(`Generated PDF exceeds its release size bound: ${pdfPath}`);
       }
 
       const pdfInfo = await runTextCommand("pdfinfo", [pdfPath]);
@@ -990,7 +1033,7 @@ function createDefaultDependencies(): ArtifactGenerationDependencies {
 
 function currentRequests(): readonly LegalArtifactRequest[] {
   return LEGAL_RELEASES.filter(({ status }) => status === "active").flatMap((release) =>
-    (["ru", "en"] as const).flatMap((locale) => [
+    legalReleaseLocales(release.code).flatMap((locale) => [
       {
         code: release.code,
         revision: release.revision,
@@ -999,7 +1042,7 @@ function currentRequests(): readonly LegalArtifactRequest[] {
         kind: "legal-pdf" as const,
         verificationUrl: legalVerificationUrl(release),
       },
-      ...(TEMPLATE_CODES.has(release.code)
+      ...(legalDocumentKind(release.code) === "template"
         ? [
             {
               code: release.code,

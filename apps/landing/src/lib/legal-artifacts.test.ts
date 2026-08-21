@@ -42,8 +42,8 @@ describe("loadLegalArtifacts", () => {
   it("loads the complete release set and verifies current bytes and hashes", async () => {
     const artifacts = await loadLegalArtifacts(publicRoot);
 
-    expect(artifacts).toHaveLength(12);
-    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(8);
+    expect(artifacts).toHaveLength(13);
+    expect(artifacts.filter(({ kind }) => kind === "pdfa-2b")).toHaveLength(9);
     expect(artifacts.filter(({ kind }) => kind === "template-docx")).toHaveLength(4);
     expect(artifacts.every(({ href }) => href.startsWith("/legal/files/"))).toBe(true);
     expect(artifacts.every(({ fileName }) => /_2026\.08-01_(?:ru|en)\./.test(fileName))).toBe(true);
@@ -123,4 +123,24 @@ describe("loadLegalArtifacts", () => {
       await expect(loadLegalArtifacts(root)).rejects.toThrow(/unlisted|entry|manifest/i);
     },
   );
+
+  it("rejects an English artifact for a Russian-only instruction", async () => {
+    const root = await copiedPublicRoot();
+    await editManifest(root, (manifest) => {
+      manifest.push({
+        code: "MKR-INS-01",
+        revision: "2026.08/01",
+        effectiveDate: "2026-08-21",
+        locale: "en",
+        kind: "pdfa-2b",
+        fileName: "markiro_mkr-ins-01_2026.08-01_en.pdf",
+        bytes: 1,
+        sha256: "0".repeat(64),
+        mediaType: "application/pdf",
+        generator: { docx: "9.7.1", libreOffice: "26.2.5", veraPdf: "1.30.2" },
+      });
+    });
+
+    await expect(loadLegalArtifacts(root)).rejects.toThrow(/locale is not published/);
+  });
 });
