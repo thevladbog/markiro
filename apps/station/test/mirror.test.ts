@@ -1,4 +1,7 @@
 import { DatabaseSync } from "node:sqlite";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   applyMigrations,
@@ -11,8 +14,7 @@ import {
   type StationBundle,
 } from "../src/lib/mirror.js";
 
-function nodeExecutor(): SqlExecutor {
-  const db = new DatabaseSync(":memory:");
+function nodeExecutor(db = new DatabaseSync(":memory:")): SqlExecutor {
   return {
     async run(sql, params = []) {
       db.prepare(sql).run(...(params as never[]));
@@ -103,6 +105,145 @@ describe("mirror", () => {
     const ctx = await readShiftContext(exec, "s1");
     expect(ctx?.egaisCode).toBe("0101234567890123456");
     expect(ctx?.shelfLifeDays).toBe(184);
+  });
+
+  it("round-trips an explicit shift production date through readShiftContext", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-20" },
+    });
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBe("2026-08-20");
+  });
+
+  it("inserts null when a legacy bundle omits productionDate", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, bundle);
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBeNull();
+  });
+
+  it("clears a mirrored production date on explicit null before any box closes", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-20" },
+    });
+
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: null },
+    });
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBeNull();
+  });
+
+  it("replaces a mirrored production date while the local box remains open", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-20" },
+    });
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at)
+       VALUES (?, ?, ?)`,
+      ["b1", "s1", "2026-08-20T08:00:00.000Z"],
+    );
+
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-21" },
+    });
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBe("2026-08-21");
+  });
+
+  it("preserves a mirrored production date when a later legacy bundle omits it", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-20" },
+    });
+
+    await upsertBundle(exec, bundle);
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBe("2026-08-20");
+  });
+
+  it("preserves a changed production date after a historical closed box was disassembled", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-20" },
+    });
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, closed_at, disassembled_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [
+        "b1",
+        "s1",
+        "2026-08-20T08:00:00.000Z",
+        "2026-08-20T08:05:00.000Z",
+        "2026-08-20T08:10:00.000Z",
+      ],
+    );
+
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-21" },
+    });
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBe("2026-08-20");
+  });
+
+  it("preserves a production date from explicit null after a box closes", async () => {
+    const exec = nodeExecutor();
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: "2026-08-20" },
+    });
+    await exec.run(
+      `INSERT INTO boxes_mirror (box_id, shift_id, opened_at, closed_at)
+       VALUES (?, ?, ?, ?)`,
+      ["b1", "s1", "2026-08-20T08:00:00.000Z", "2026-08-20T08:05:00.000Z"],
+    );
+
+    await upsertBundle(exec, {
+      ...bundle,
+      shift: { ...bundle.shift, productionDate: null },
+    });
+
+    expect((await readShiftContext(exec, "s1"))?.productionDate).toBe("2026-08-20");
+  });
+
+  it("retains the mirrored production date after closing and reopening SQLite", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "markiro-station-mirror-"));
+    const databasePath = join(directory, "station.sqlite");
+    let db: DatabaseSync | undefined = new DatabaseSync(databasePath);
+
+    try {
+      const exec = nodeExecutor(db);
+      await applyMigrations(exec);
+      await upsertBundle(exec, {
+        ...bundle,
+        shift: { ...bundle.shift, productionDate: "2026-08-20" },
+      });
+      db.close();
+      db = new DatabaseSync(databasePath);
+
+      expect((await readShiftContext(nodeExecutor(db), "s1"))?.productionDate).toBe("2026-08-20");
+    } finally {
+      db?.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   // Rolling-deployment case: an older server's bundle omits both fields
