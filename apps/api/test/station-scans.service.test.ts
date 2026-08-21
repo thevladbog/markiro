@@ -173,6 +173,126 @@ describe("StationScansService box registry versioning", () => {
     );
     expect(execute).not.toHaveBeenCalled();
   });
+
+  it("locks every closure shift in sorted tenant-scoped order before updating a box", async () => {
+    const firstShiftId = "11111111-1111-4111-8111-111111111111";
+    const secondShiftId = "22222222-2222-4222-8222-222222222222";
+    const events: string[] = [];
+    const shiftQueries: Array<{ sql: string; params: unknown[] }> = [];
+    let boxSequence = 0;
+    const tx = {
+      insert: (_table: unknown) => ({
+        values: () => ({
+          onConflictDoNothing: () => ({
+            returning: () => Promise.resolve([{ batchId: "sorted-shift-locks" }]),
+          }),
+          onConflictDoUpdate: () => ({
+            returning: () => Promise.resolve([{ currentVersion: 1n }]),
+          }),
+        }),
+      }),
+      select: () => ({
+        from: (table: unknown) => {
+          if (table !== schema.shifts) throw new Error("Unexpected select table");
+          return {
+            where: (condition: SQL) => {
+              const query = new PgDialect().sqlToQuery(condition);
+              shiftQueries.push({ sql: query.sql, params: query.params });
+              events.push("shift-where");
+              return {
+                orderBy: (column: unknown) => {
+                  expect(column).toBe(schema.shifts.id);
+                  events.push("shift-order");
+                  return {
+                    for: (mode: string) => {
+                      events.push(`shift-for-${mode}`);
+                      return Promise.resolve([
+                        { id: firstShiftId, openedAt: new Date() },
+                        { id: secondShiftId, openedAt: new Date() },
+                      ]);
+                    },
+                  };
+                },
+              };
+            },
+          };
+        },
+      }),
+      execute: () => Promise.resolve(),
+      update: (table: unknown) => ({
+        set: () => {
+          if (table === schema.boxes) events.push("box-update");
+          return {
+            where: () => ({
+              returning: () => Promise.resolve([{ id: `box-${++boxSequence}` }]),
+            }),
+          };
+        },
+      }),
+    };
+    const dbStub = {
+      transaction: (run: (writer: typeof tx) => Promise<unknown>) => run(tx),
+    } as unknown as Db;
+    const ssccService = {
+      recordConsumedSerial: vi.fn().mockResolvedValue(undefined),
+    } as unknown as SsccService;
+    const service = new StationScansService(dbStub, ssccService, entitlementsServiceStub);
+
+    await service.applyBatch(
+      "tenant-1",
+      {
+        batchId: "sorted-shift-locks",
+        items: [],
+        boxes: [
+          {
+            boxId: "box-b",
+            shiftId: secondShiftId,
+            terminalId: "ignored",
+            sscc: "223456789012345674",
+            closedAt: "2026-08-21T10:00:00.000Z",
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+          {
+            boxId: "box-a",
+            shiftId: firstShiftId,
+            terminalId: "ignored",
+            sscc: "123456789012345675",
+            closedAt: "2026-08-21T10:00:01.000Z",
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+          {
+            boxId: "box-c",
+            shiftId: firstShiftId,
+            terminalId: "ignored",
+            sscc: "323456789012345673",
+            closedAt: "2026-08-21T10:00:02.000Z",
+            operatorId: null,
+            printVerifiedAt: null,
+            printSkippedAt: null,
+          },
+        ],
+        exceptions: [],
+      },
+      "terminal-1",
+    );
+
+    expect(shiftQueries).toEqual([
+      {
+        sql: '("shifts"."tenant_id" = $1 and "shifts"."id" in ($2, $3))',
+        params: ["tenant-1", firstShiftId, secondShiftId],
+      },
+    ]);
+    expect(events.slice(0, 4)).toEqual([
+      "shift-where",
+      "shift-order",
+      "shift-for-update",
+      "box-update",
+    ]);
+  });
 });
 
 /**

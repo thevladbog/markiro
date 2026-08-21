@@ -8,7 +8,7 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
-import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatShiftNumber, shiftMonthKey } from "@markiro/domain";
 import type { LabelTemplateSpec } from "@markiro/domain";
@@ -53,6 +53,22 @@ type JoinedShiftRow = Omit<ShiftDto, "image" | "number"> & {
   stationCloseOwnerDeviceId: string | null;
 };
 export type EffectiveListShiftsQuery = ListShiftsQueryDto & { includeUnassigned?: boolean };
+
+type ProductionDateChange = {
+  before: string | null;
+  after: string | null;
+};
+
+type ProductionDateAuditReason =
+  "changed" | "box_already_closed" | "shift_closed" | "status_changed";
+
+type ShiftUpdateTransactionResult =
+  | { kind: "updated"; id: string }
+  | { kind: "not_found" }
+  | {
+      kind: "conflict";
+      response: string | { code: "PRODUCTION_DATE_LOCKED"; message: string };
+    };
 
 const CURRENT_SHIFT_STORAGE_SELECTION = {
   id: schema.shifts.id,
@@ -320,129 +336,259 @@ export class ShiftsService {
    * product-derived rules, or other print semantics after stations have
    * mirrored a bundle would split the line across incompatible local state.
    */
-  async updateShift(tenantId: string, id: string, data: UpdateShiftDto): Promise<ShiftDto> {
-    const current = await this.findRow(tenantId, id);
-    if (!current) {
-      throw new NotFoundException();
-    }
-    if (current.status === "closed") {
-      throw new ConflictException("Closed shifts cannot be edited");
-    }
-    if (current.status === "active") {
-      return this.updateActiveShift(tenantId, id, data);
-    }
-    if (data.palletsEnabled === true || data.palletCapacity !== undefined) {
-      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
-    }
-
-    const mode = data.mode !== undefined ? data.mode : current.mode;
-    const lineId = data.lineId !== undefined ? data.lineId : current.lineId;
-    const counterpartyId =
-      data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
-    const ssccIssuerCounterpartyId =
-      data.ssccIssuerCounterpartyId !== undefined
-        ? data.ssccIssuerCounterpartyId
-        : current.ssccIssuerCounterpartyId;
-    const boxLabelTemplateId =
-      data.boxLabelTemplateId !== undefined ? data.boxLabelTemplateId : current.boxLabelTemplateId;
-    const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
-    const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
-    const productionDate =
-      data.productionDate !== undefined ? data.productionDate : current.productionDate;
-    const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
-    const palletCapacity =
-      data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
-    const palletsEnabled =
-      data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
-
-    this.assertCapacityRules(mode, boxCapacity, palletsEnabled, palletCapacity);
-    this.assertBoxTemplateRule(mode, boxLabelTemplateId);
-
-    try {
-      const [row] = await this.db
-        .update(schema.shifts)
-        .set({
-          mode,
-          lineId,
-          counterpartyId,
-          ssccIssuerCounterpartyId,
-          boxLabelTemplateId,
-          plannedQty,
-          plannedDate,
-          productionDate,
-          boxCapacity,
-          palletCapacity,
-          palletsEnabled,
-        })
-        .where(
-          and(
-            eq(schema.shifts.tenantId, tenantId),
-            eq(schema.shifts.id, id),
-            eq(schema.shifts.status, "planned"),
-          ),
-        )
-        .returning({ id: schema.shifts.id });
-
-      if (!row) {
-        throw new ConflictException("Shift can only be edited while planned");
-      }
-      return this.getShift(tenantId, row.id);
-    } catch (error) {
-      this.handleWriteError(error);
-    }
-  }
-
-  private async updateActiveShift(
+  async updateShift(
     tenantId: string,
+    actorUserId: string,
     id: string,
     data: UpdateShiftDto,
   ): Promise<ShiftDto> {
-    const allowedFields = new Set<keyof UpdateShiftDto>([
-      "lineId",
-      "plannedQty",
-      "plannedDate",
-      "productionDate",
-      "boxLabelTemplateId",
-    ]);
-    const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
-      (field) => !allowedFields.has(field),
-    );
-    if (forbiddenField) {
-      throw new ConflictException(`Active shift field cannot be edited: ${String(forbiddenField)}`);
+    const preflightCurrent = await this.findRow(tenantId, id);
+    if (!preflightCurrent) {
+      throw new NotFoundException();
+    }
+    const preflightProductionDateChange: ProductionDateChange | null =
+      data.productionDate !== undefined && data.productionDate !== preflightCurrent.productionDate
+        ? { before: preflightCurrent.productionDate, after: data.productionDate }
+        : null;
+    if (
+      preflightCurrent.status !== "closed" &&
+      data.productionDate !== undefined &&
+      preflightProductionDateChange === null &&
+      Object.keys(data).length === 1
+    ) {
+      return this.getShift(tenantId, id);
+    }
+    if (
+      preflightCurrent.status === "planned" &&
+      (data.palletsEnabled === true || data.palletCapacity !== undefined)
+    ) {
+      await this.entitlements.assertFeatureAccess(tenantId, "pallets");
     }
 
-    const changes: Partial<
-      Pick<
-        ShiftRow,
-        "lineId" | "plannedQty" | "plannedDate" | "productionDate" | "boxLabelTemplateId"
-      >
-    > = {};
-    if (data.lineId !== undefined) changes.lineId = data.lineId;
-    if (data.plannedQty !== undefined) changes.plannedQty = data.plannedQty;
-    if (data.plannedDate !== undefined) changes.plannedDate = data.plannedDate;
-    if (data.productionDate !== undefined) changes.productionDate = data.productionDate;
-    if (data.boxLabelTemplateId !== undefined) {
-      changes.boxLabelTemplateId = data.boxLabelTemplateId;
-    }
-    if (Object.keys(changes).length === 0) return this.getShift(tenantId, id);
-
+    let result: ShiftUpdateTransactionResult;
     try {
-      const [row] = await this.db
-        .update(schema.shifts)
-        .set(changes)
-        .where(
-          and(
-            eq(schema.shifts.tenantId, tenantId),
-            eq(schema.shifts.id, id),
-            eq(schema.shifts.status, "active"),
-          ),
-        )
-        .returning();
-      if (!row) throw new ConflictException("Shift is no longer active");
-      return this.getShift(tenantId, row.id);
+      result = await this.db.transaction(async (tx): Promise<ShiftUpdateTransactionResult> => {
+        // Station closure ingest acquires these same tenant-scoped shift-row
+        // locks (sorted by shift id for multi-shift batches) before updating
+        // boxes. Holding this row through the historical-box read and shift
+        // update makes "first closure wins" linearizable in both directions.
+        const [current] = await tx
+          .select(CURRENT_SHIFT_STORAGE_SELECTION)
+          .from(schema.shifts)
+          .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, id)))
+          .for("update");
+        if (!current) return { kind: "not_found" };
+
+        const productionDateChange: ProductionDateChange | null =
+          data.productionDate !== undefined && data.productionDate !== current.productionDate
+            ? { before: current.productionDate, after: data.productionDate }
+            : null;
+
+        if (current.status === "closed") {
+          if (productionDateChange) {
+            await this.writeProductionDateAudit(tx, {
+              tenantId,
+              actorUserId,
+              shiftId: id,
+              ...productionDateChange,
+              outcome: "failure",
+              reason: "shift_closed",
+            });
+          }
+          return { kind: "conflict", response: "Closed shifts cannot be edited" };
+        }
+
+        if (
+          data.productionDate !== undefined &&
+          productionDateChange === null &&
+          Object.keys(data).length === 1
+        ) {
+          return { kind: "updated", id };
+        }
+
+        if (productionDateChange) {
+          const [closedBox] = await tx
+            .select({ id: schema.boxes.id })
+            .from(schema.boxes)
+            .where(
+              and(
+                eq(schema.boxes.tenantId, tenantId),
+                eq(schema.boxes.shiftId, id),
+                isNotNull(schema.boxes.closedAt),
+              ),
+            )
+            .limit(1);
+          if (closedBox) {
+            await this.writeProductionDateAudit(tx, {
+              tenantId,
+              actorUserId,
+              shiftId: id,
+              ...productionDateChange,
+              outcome: "failure",
+              reason: "box_already_closed",
+            });
+            return {
+              kind: "conflict",
+              response: {
+                code: "PRODUCTION_DATE_LOCKED",
+                message: "Production date cannot change after the first box closure",
+              },
+            };
+          }
+        }
+
+        if (current.status === "active") {
+          const allowedFields = new Set<keyof UpdateShiftDto>([
+            "lineId",
+            "plannedQty",
+            "plannedDate",
+            "productionDate",
+            "boxLabelTemplateId",
+          ]);
+          const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
+            (field) => !allowedFields.has(field),
+          );
+          if (forbiddenField) {
+            throw new ConflictException(
+              `Active shift field cannot be edited: ${String(forbiddenField)}`,
+            );
+          }
+
+          const changes: Partial<
+            Pick<
+              ShiftRow,
+              "lineId" | "plannedQty" | "plannedDate" | "productionDate" | "boxLabelTemplateId"
+            >
+          > = {};
+          if (data.lineId !== undefined) changes.lineId = data.lineId;
+          if (data.plannedQty !== undefined) changes.plannedQty = data.plannedQty;
+          if (data.plannedDate !== undefined) changes.plannedDate = data.plannedDate;
+          if (productionDateChange) changes.productionDate = productionDateChange.after;
+          if (data.boxLabelTemplateId !== undefined) {
+            changes.boxLabelTemplateId = data.boxLabelTemplateId;
+          }
+          if (Object.keys(changes).length === 0) return { kind: "updated", id };
+
+          const [updated] = await tx
+            .update(schema.shifts)
+            .set(changes)
+            .where(
+              and(
+                eq(schema.shifts.tenantId, tenantId),
+                eq(schema.shifts.id, id),
+                eq(schema.shifts.status, "active"),
+              ),
+            )
+            .returning({ id: schema.shifts.id });
+          if (!updated) {
+            if (productionDateChange) {
+              await this.writeProductionDateAudit(tx, {
+                tenantId,
+                actorUserId,
+                shiftId: id,
+                ...productionDateChange,
+                outcome: "failure",
+                reason: "status_changed",
+              });
+              return { kind: "conflict", response: "Shift is no longer active" };
+            }
+            throw new ConflictException("Shift is no longer active");
+          }
+          if (productionDateChange) {
+            await this.writeProductionDateAudit(tx, {
+              tenantId,
+              actorUserId,
+              shiftId: id,
+              ...productionDateChange,
+              outcome: "success",
+              reason: "changed",
+            });
+          }
+          return { kind: "updated", id: updated.id };
+        }
+
+        const mode = data.mode !== undefined ? data.mode : current.mode;
+        const lineId = data.lineId !== undefined ? data.lineId : current.lineId;
+        const counterpartyId =
+          data.counterpartyId !== undefined ? data.counterpartyId : current.counterpartyId;
+        const ssccIssuerCounterpartyId =
+          data.ssccIssuerCounterpartyId !== undefined
+            ? data.ssccIssuerCounterpartyId
+            : current.ssccIssuerCounterpartyId;
+        const boxLabelTemplateId =
+          data.boxLabelTemplateId !== undefined
+            ? data.boxLabelTemplateId
+            : current.boxLabelTemplateId;
+        const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
+        const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
+        const productionDate =
+          data.productionDate !== undefined ? data.productionDate : current.productionDate;
+        const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
+        const palletCapacity =
+          data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
+        const palletsEnabled =
+          data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
+
+        this.assertCapacityRules(mode, boxCapacity, palletsEnabled, palletCapacity);
+        this.assertBoxTemplateRule(mode, boxLabelTemplateId);
+
+        const [updated] = await tx
+          .update(schema.shifts)
+          .set({
+            mode,
+            lineId,
+            counterpartyId,
+            ssccIssuerCounterpartyId,
+            boxLabelTemplateId,
+            plannedQty,
+            plannedDate,
+            productionDate,
+            boxCapacity,
+            palletCapacity,
+            palletsEnabled,
+          })
+          .where(
+            and(
+              eq(schema.shifts.tenantId, tenantId),
+              eq(schema.shifts.id, id),
+              eq(schema.shifts.status, "planned"),
+            ),
+          )
+          .returning({ id: schema.shifts.id });
+
+        if (!updated) {
+          if (productionDateChange) {
+            await this.writeProductionDateAudit(tx, {
+              tenantId,
+              actorUserId,
+              shiftId: id,
+              ...productionDateChange,
+              outcome: "failure",
+              reason: "status_changed",
+            });
+            return { kind: "conflict", response: "Shift can only be edited while planned" };
+          }
+          throw new ConflictException("Shift can only be edited while planned");
+        }
+        if (productionDateChange) {
+          await this.writeProductionDateAudit(tx, {
+            tenantId,
+            actorUserId,
+            shiftId: id,
+            ...productionDateChange,
+            outcome: "success",
+            reason: "changed",
+          });
+        }
+        return { kind: "updated", id: updated.id };
+      });
     } catch (error) {
       this.handleWriteError(error);
     }
+
+    if (result.kind === "not_found") throw new NotFoundException();
+    if (result.kind === "conflict") throw new ConflictException(result.response);
+    return this.getShift(tenantId, result.id);
   }
 
   /** Delete a shift, allowed only while `status === "planned"` (409 otherwise). */
@@ -1010,6 +1156,30 @@ export class ShiftsService {
           }
         : null,
     };
+  }
+
+  private async writeProductionDateAudit(
+    writer: Pick<Db, "insert">,
+    input: {
+      tenantId: string;
+      actorUserId: string;
+      shiftId: string;
+      before: string | null;
+      after: string | null;
+      outcome: "success" | "failure";
+      reason: ProductionDateAuditReason;
+    },
+  ): Promise<void> {
+    await writer.insert(schema.tenantAuditEvents).values({
+      organizationId: input.tenantId,
+      actorUserId: input.actorUserId,
+      action: "shift.production_date.changed",
+      outcome: input.outcome,
+      targetType: "shift",
+      targetId: input.shiftId,
+      before: { productionDate: input.before },
+      after: { productionDate: input.after, reason: input.reason },
+    });
   }
 
   /**

@@ -148,6 +148,39 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .where(eq(schema.shifts.tenantId, tenantId));
   }
 
+  async function tenantOwnerUserId(tenantId: string): Promise<string> {
+    const [row] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId))
+      .limit(1);
+    if (!row) throw new Error(`Missing owner member fixture for tenant ${tenantId}`);
+    return row.userId;
+  }
+
+  async function productionDateAuditRows(tenantId: string, shiftId: string) {
+    return db
+      .select({
+        organizationId: schema.tenantAuditEvents.organizationId,
+        actorUserId: schema.tenantAuditEvents.actorUserId,
+        action: schema.tenantAuditEvents.action,
+        outcome: schema.tenantAuditEvents.outcome,
+        targetType: schema.tenantAuditEvents.targetType,
+        targetId: schema.tenantAuditEvents.targetId,
+        before: schema.tenantAuditEvents.before,
+        after: schema.tenantAuditEvents.after,
+      })
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.targetId, shiftId),
+          eq(schema.tenantAuditEvents.action, "shift.production_date.changed"),
+        ),
+      )
+      .orderBy(schema.tenantAuditEvents.createdAt);
+  }
+
   it("lets a manager read only the box-template default needed for shift planning", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
@@ -359,9 +392,10 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     },
   );
 
-  it("PATCH /shifts/:id propagates production date for current planned and active updates", async () => {
+  it("PATCH /shifts/:id set/change/clear audits exact planned and active mutations but not no-ops", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
+    const actorUserId = await tenantOwnerUserId(orgId);
     const productId = await seedProduct(orgId, {
       status: "active",
       productGroup: "Beverages",
@@ -377,12 +411,233 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
       .expect(200);
     expect(planned.body.productionDate).toBe("2026-08-20");
 
-    await agent.post(`/shifts/${id}/open`).expect(200);
-    const active = await agent
+    const plannedChanged = await agent
       .patch(`/shifts/${id}`)
       .send({ productionDate: "2026-08-21" })
       .expect(200);
-    expect(active.body.productionDate).toBe("2026-08-21");
+    expect(plannedChanged.body.productionDate).toBe("2026-08-21");
+
+    const plannedCleared = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: null })
+      .expect(200);
+    expect(plannedCleared.body.productionDate).toBeNull();
+
+    await agent.post(`/shifts/${id}/open`).expect(200);
+    const activeSet = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-22" })
+      .expect(200);
+    expect(activeSet.body.productionDate).toBe("2026-08-22");
+
+    const activeChanged = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-23" })
+      .expect(200);
+    expect(activeChanged.body.productionDate).toBe("2026-08-23");
+
+    const identical = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-23" })
+      .expect(200);
+    expect(identical.body.productionDate).toBe("2026-08-23");
+
+    const activeCleared = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: null })
+      .expect(200);
+    expect(activeCleared.body.productionDate).toBeNull();
+
+    expect(await productionDateAuditRows(orgId, id)).toEqual([
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: null },
+        after: { productionDate: "2026-08-20", reason: "changed" },
+      },
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-20" },
+        after: { productionDate: "2026-08-21", reason: "changed" },
+      },
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-21" },
+        after: { productionDate: null, reason: "changed" },
+      },
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: null },
+        after: { productionDate: "2026-08-22", reason: "changed" },
+      },
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-22" },
+        after: { productionDate: "2026-08-23", reason: "changed" },
+      },
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-23" },
+        after: { productionDate: null, reason: "changed" },
+      },
+    ]);
+  });
+
+  it("locks a production-date change on a historically closed same-tenant box, not a foreign box", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const actorUserId = await tenantOwnerUserId(orgId);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", productionDate: "2026-08-20" })
+      .expect(201);
+    const id = created.body.id as string;
+    await agent.post(`/shifts/${id}/open`).expect(200);
+
+    const foreignAgent = request.agent(app!.getHttpServer());
+    const foreignOrgId = await signUpAndActivate(foreignAgent);
+    const foreignProductId = await seedProduct(foreignOrgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const foreignShift = await foreignAgent
+      .post("/shifts")
+      .send({ productId: foreignProductId, mode: "validation" })
+      .expect(201);
+    await db.insert(schema.boxes).values({
+      tenantId: foreignOrgId,
+      shiftId: foreignShift.body.id as string,
+      deviceBoxId: `foreign-${randomUUID()}`,
+      closedAt: new Date("2026-08-20T10:00:00.000Z"),
+    });
+
+    const beforeClosure = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-21" })
+      .expect(200);
+    expect(beforeClosure.body.productionDate).toBe("2026-08-21");
+
+    await db.insert(schema.boxes).values({
+      tenantId: orgId,
+      shiftId: id,
+      deviceBoxId: `retired-${randomUUID()}`,
+      closedAt: new Date("2026-08-20T11:00:00.000Z"),
+      disassembledAt: new Date("2026-08-20T12:00:00.000Z"),
+    });
+
+    const rejected = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-22" })
+      .expect(409);
+    expect(rejected.body).toMatchObject({
+      code: "PRODUCTION_DATE_LOCKED",
+      message: "Production date cannot change after the first box closure",
+    });
+
+    const unchanged = await agent.get(`/shifts/${id}`).expect(200);
+    expect(unchanged.body.productionDate).toBe("2026-08-21");
+    expect(await productionDateAuditRows(orgId, id)).toEqual([
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "success",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-20" },
+        after: { productionDate: "2026-08-21", reason: "changed" },
+      },
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "failure",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-21" },
+        after: { productionDate: "2026-08-22", reason: "box_already_closed" },
+      },
+    ]);
+  });
+
+  it("retains the closed-shift 409 and writes one exact failure audit", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const actorUserId = await tenantOwnerUserId(orgId);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", productionDate: "2026-08-20" })
+      .expect(201);
+    const id = created.body.id as string;
+    await agent.post(`/shifts/${id}/open`).expect(200);
+    await agent
+      .post(`/shifts/${id}/close`)
+      .send({ reason: "Production completed for audit test" })
+      .expect(200);
+
+    const rejected = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-21" })
+      .expect(409);
+    expect(rejected.body.message).toBe("Closed shifts cannot be edited");
+
+    const unchanged = await agent.get(`/shifts/${id}`).expect(200);
+    expect(unchanged.body.productionDate).toBe("2026-08-20");
+    expect(await productionDateAuditRows(orgId, id)).toEqual([
+      {
+        organizationId: orgId,
+        actorUserId,
+        action: "shift.production_date.changed",
+        outcome: "failure",
+        targetType: "shift",
+        targetId: id,
+        before: { productionDate: "2026-08-20" },
+        after: { productionDate: "2026-08-21", reason: "shift_closed" },
+      },
+    ]);
   });
 
   it("POST /shifts: explicit counterpartyId null overrides the product default", async () => {

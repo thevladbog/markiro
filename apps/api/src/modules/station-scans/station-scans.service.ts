@@ -317,7 +317,10 @@ export class StationScansService {
           ...body.boxes.map((box) => box.shiftId),
           ...body.exceptions.map((exception) => exception.shiftId),
         ]),
-      ];
+      ].sort();
+      // Cabinet production-date changes lock this same tenant-scoped shift
+      // row before checking closed boxes. Sorting every multi-shift batch gives
+      // both paths one deterministic row-lock order before any box mutation.
       const shiftRows =
         allShiftIds.length === 0
           ? []

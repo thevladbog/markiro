@@ -127,7 +127,7 @@ export class ShiftsController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateShiftSchema)) body: UpdateShiftDto,
   ): Promise<ShiftDto> {
-    return this.shiftsService.updateShift(req.tenantId!, id, body);
+    return this.shiftsService.updateShift(req.tenantId!, req.userId!, id, body);
   }
 
   @Delete(":id")
