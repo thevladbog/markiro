@@ -99,7 +99,14 @@ function normalizeRelativePath(relativePath, label = "artifact path") {
 function shouldExclude(relativePath, includeManifest) {
   if (relativePath === CHECKSUMS_NAME) return true;
   if (!includeManifest && relativePath === MANIFEST_NAME) return true;
-  return basename(relativePath).endsWith(".tmp");
+  return false;
+}
+
+function assertNoTemporaryFiles(files) {
+  const temporary = files.find(({ path }) => basename(path).endsWith(".tmp"));
+  if (temporary) {
+    invalid(`unlisted temporary file: ${displayPath(temporary.path)}`);
+  }
 }
 
 async function enumerateRegularFiles(session, { includeManifest = false } = {}) {
@@ -184,6 +191,7 @@ async function buildManifestInSession(session, draft) {
 
   const priorByPath = priorArtifactsByPath(draft);
   const files = await enumerateRegularFiles(session);
+  assertNoTemporaryFiles(files);
   const artifacts = [];
   for (const file of files) {
     const { byteSize, sha256 } = await hashBoundRegularFile(session, file.path, {
@@ -459,9 +467,11 @@ async function withEvidenceRoot(root, options, action) {
 }
 
 export async function listEvidenceFiles(root, options = {}) {
-  return withEvidenceRoot(root, options, async (session) =>
-    (await enumerateRegularFiles(session)).map(({ path }) => path),
-  );
+  return withEvidenceRoot(root, options, async (session) => {
+    const files = await enumerateRegularFiles(session);
+    assertNoTemporaryFiles(files);
+    return files.map(({ path }) => path);
+  });
 }
 
 export async function sha256File(filePath, options = {}) {
@@ -553,6 +563,7 @@ export async function verifyEvidencePackage(root, options = {}) {
     const checksumEntries = parseChecksums(checksumFile.bytes);
     const checksumByPath = new Map(checksumEntries.map((entry) => [entry.path, entry.sha256]));
     const actualFiles = await enumerateRegularFiles(session, { includeManifest: true });
+    assertNoTemporaryFiles(actualFiles);
     const actualPaths = actualFiles.map(({ path }) => path);
     const actualSet = new Set(actualPaths);
 

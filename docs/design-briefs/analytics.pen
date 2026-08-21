@@ -6659,7 +6659,7 @@
                       "fill": "#425B64",
                       "textGrowth": "fixed-width",
                       "width": "fill_container",
-                      "content": "Подписать методику; создать operation_id; зафиксировать часы, версию приложения и пустой SHA256SUMS.",
+                      "content": "Подписать методику; создать operation_id; зафиксировать часы и версию приложения. Первый seal создаст заполненный SHA256SUMS.",
                       "lineHeight": 1.22,
                       "fontFamily": "Geist",
                       "fontSize": 11

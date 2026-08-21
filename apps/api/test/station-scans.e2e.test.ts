@@ -1760,6 +1760,77 @@ describe.skipIf(!ready)("station-scans e2e", () => {
       }
     });
 
+    it("freezes productionDate after an accepted zero-item closure, tenant-scoped and idempotent", async () => {
+      await agent.patch(`/shifts/${shiftId}`).send({ productionDate: "2026-08-20" }).expect(200);
+      const closure: ClosureFixture = {
+        boxId: "empty-freeze-box",
+        shiftId,
+        terminalId: "t1",
+        sscc: SSCC,
+        closedAt: ISO,
+        operatorId: null,
+      };
+
+      await postBatchWithBoxes([], [closure]);
+      // A fresh batch ID carrying the same closure is a supported recovery
+      // delivery. It must remain accepted and must not unfreeze the shift.
+      await postBatchWithBoxes([], [closure]);
+
+      const rejected = await agent
+        .patch(`/shifts/${shiftId}`)
+        .send({ productionDate: "2026-08-21" })
+        .expect(409);
+      expect(rejected.body).toMatchObject({
+        code: "PRODUCTION_DATE_LOCKED",
+        message: "Production date cannot change after the first box closure",
+      });
+
+      const [actor] = await db
+        .select({ userId: schema.member.userId })
+        .from(schema.member)
+        .where(eq(schema.member.organizationId, tenantId))
+        .limit(1);
+      const auditRows = await db
+        .select({
+          organizationId: schema.tenantAuditEvents.organizationId,
+          actorUserId: schema.tenantAuditEvents.actorUserId,
+          action: schema.tenantAuditEvents.action,
+          outcome: schema.tenantAuditEvents.outcome,
+          targetType: schema.tenantAuditEvents.targetType,
+          targetId: schema.tenantAuditEvents.targetId,
+          before: schema.tenantAuditEvents.before,
+          after: schema.tenantAuditEvents.after,
+        })
+        .from(schema.tenantAuditEvents)
+        .where(
+          and(
+            eq(schema.tenantAuditEvents.organizationId, tenantId),
+            eq(schema.tenantAuditEvents.targetId, shiftId),
+            eq(schema.tenantAuditEvents.action, "shift.production_date.changed"),
+          ),
+        )
+        .orderBy(schema.tenantAuditEvents.createdAt);
+      expect(auditRows.filter((row) => row.outcome === "failure")).toEqual([
+        {
+          organizationId: tenantId,
+          actorUserId: actor?.userId,
+          action: "shift.production_date.changed",
+          outcome: "failure",
+          targetType: "shift",
+          targetId: shiftId,
+          before: { productionDate: "2026-08-20" },
+          after: { productionDate: "2026-08-21", reason: "box_already_closed" },
+        },
+      ]);
+
+      const foreignAgent = request.agent(app!.getHttpServer());
+      await signUpAndActivate(foreignAgent);
+      await foreignAgent
+        .patch(`/shifts/${shiftId}`)
+        .send({ productionDate: "2026-08-22" })
+        .expect(404);
+    });
+
     // shiftId's presence in the closure match was previously undiscriminated
     // by this suite: every other test here uses exactly one shift, so a
     // closure match missing `eq(boxes.shiftId, closure.shiftId)` would still

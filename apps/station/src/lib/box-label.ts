@@ -54,13 +54,16 @@ export function addCalendarDays(isoDate: string, days: number): string {
   const parts = ISO_DATE.exec(isoDate);
   if (!parts) return "";
   const [, year, month, day] = parts;
+  const yearNumber = Number(year);
+  if (yearNumber < 1 || yearNumber > 9999) return "";
   const base = new Date(0);
-  base.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
+  base.setUTCFullYear(yearNumber, Number(month) - 1, Number(day));
   if (Number.isNaN(base.getTime())) return "";
   // Reject dates that do not exist and silently rolled over (2025-02-30).
   if (base.getUTCMonth() !== Number(month) - 1 || base.getUTCDate() !== Number(day)) return "";
   base.setUTCDate(base.getUTCDate() + days);
   if (Number.isNaN(base.getTime())) return "";
+  if (base.getUTCFullYear() < 1 || base.getUTCFullYear() > 9999) return "";
   return `${pad(base.getUTCFullYear(), 4)}-${pad(base.getUTCMonth() + 1, 2)}-${pad(base.getUTCDate(), 2)}`;
 }
 

@@ -71,6 +71,14 @@ describe("shift production date DTO boundary", () => {
         productionDate: "21.08.2026",
       }),
     ).toThrow();
+    expect(() =>
+      createShiftSchema.parse({
+        productId,
+        mode: "aggregation",
+        productionDate: "0000-01-01",
+      }),
+    ).toThrow();
+    expect(() => updateShiftSchema.parse({ productionDate: "0000-01-01" })).toThrow();
   });
 });
 

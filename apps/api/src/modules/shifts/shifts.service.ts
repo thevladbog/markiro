@@ -83,6 +83,7 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   plannedQty: schema.shifts.plannedQty,
   plannedDate: schema.shifts.plannedDate,
   productionDate: schema.shifts.productionDate,
+  firstBoxClosureAt: schema.shifts.firstBoxClosureAt,
   boxCapacity: schema.shifts.boxCapacity,
   palletCapacity: schema.shifts.palletCapacity,
   palletsEnabled: schema.shifts.palletsEnabled,
@@ -407,6 +408,9 @@ export class ShiftsService {
         }
 
         if (productionDateChange) {
+          // New ingests set `firstBoxClosureAt` even when an accepted
+          // physical closure has no matching box row. The historical box
+          // lookup remains for closures accepted before that marker existed.
           const [closedBox] = await tx
             .select({ id: schema.boxes.id })
             .from(schema.boxes)
@@ -418,7 +422,7 @@ export class ShiftsService {
               ),
             )
             .limit(1);
-          if (closedBox) {
+          if (current.firstBoxClosureAt !== null || closedBox) {
             await this.writeProductionDateAudit(tx, {
               tenantId,
               actorUserId,

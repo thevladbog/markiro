@@ -180,6 +180,14 @@ export const shifts = pgTable(
     plannedDate: date("planned_date"),
     /** Declared civil production day; null keeps the close/planned-date fallback behavior. */
     productionDate: date("production_date"),
+    /**
+     * Server receipt time of the first accepted physical box closure for
+     * this shift. Set once while holding the tenant-scoped shift row lock,
+     * including for zero-item/orphan closures that have no `boxes` row.
+     * This is the durable production-date freeze marker; existing closed
+     * box rows remain the rolling-upgrade fallback for pre-migration facts.
+     */
+    firstBoxClosureAt: timestamp("first_box_closure_at", { withTimezone: true }),
     openedAt: timestamp("opened_at", { withTimezone: true }),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     closeReason: text("close_reason"),

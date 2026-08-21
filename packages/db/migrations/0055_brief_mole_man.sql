@@ -1,0 +1,1 @@
+ALTER TABLE "shifts" ADD COLUMN "first_box_closure_at" timestamp with time zone;

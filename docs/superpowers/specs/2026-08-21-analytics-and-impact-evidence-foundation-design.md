@@ -1,10 +1,10 @@
 # Analytics and Impact Evidence Foundation — Design Spec
 
-**Date:** 2026-08-21  
-**Status:** Approved by owner on 2026-08-21; P0 implementation planned in `docs/superpowers/plans/2026-08-21-analytics-p0-first-customer.md`  
+**Date:** 2026-08-21
+**Status:** Approved by owner on 2026-08-21; P0 implementation planned in `docs/superpowers/plans/2026-08-21-analytics-p0-first-customer.md`
 **P0 runbook:** [`docs/operations/first-customer-inventory/`](../../operations/first-customer-inventory/README.md); evidence tooling: [`tools/evidence-package/`](../../../tools/evidence-package/)
 
-**Visual companion:** `docs/design-briefs/analytics.pen`  
+**Visual companion:** `docs/design-briefs/analytics.pen`
 **Related:** `docs/architecture.md`, `docs/superpowers/specs/2026-07-28-station-sync-design.md`, `docs/superpowers/specs/2026-07-30-station-exceptions-design.md`, `docs/superpowers/specs/2026-08-14-station-shift-close-and-line-presence-design.md`
 
 ## 1. Purpose

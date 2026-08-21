@@ -373,7 +373,7 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(omitted.body.productionDate).toBeNull();
   });
 
-  it.each(["2026-02-30", "21.08.2026"])(
+  it.each(["2026-02-30", "21.08.2026", "0000-01-01"])(
     "POST /shifts rejects invalid production date %s",
     async (productionDate) => {
       const agent = request.agent(app!.getHttpServer());
@@ -391,6 +391,29 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
         .expect(400);
     },
   );
+
+  it("PATCH /shifts/:id rejects year zero before persistence", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", productionDate: "2026-08-20" })
+      .expect(201);
+
+    await agent
+      .patch(`/shifts/${created.body.id as string}`)
+      .send({ productionDate: "0000-01-01" })
+      .expect(400);
+
+    const unchanged = await agent.get(`/shifts/${created.body.id as string}`).expect(200);
+    expect(unchanged.body.productionDate).toBe("2026-08-20");
+  });
 
   it("PATCH /shifts/:id set/change/clear audits exact planned and active mutations but not no-ops", async () => {
     const agent = request.agent(app!.getHttpServer());

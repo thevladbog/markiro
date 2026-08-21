@@ -231,6 +231,13 @@ describe("platform schema", () => {
     expect(shifts.productionDate.dataType).toBe("string");
   });
 
+  it("stores the first accepted box-closure receipt as a nullable marker without a default", () => {
+    expect(shifts.firstBoxClosureAt).toBeDefined();
+    expect(shifts.firstBoxClosureAt.notNull).toBe(false);
+    expect(shifts.firstBoxClosureAt.default).toBeUndefined();
+    expect(shifts.firstBoxClosureAt.dataType).toBe("date");
+  });
+
   it("keys the shift number counter by tenant and month", () => {
     expect(getTableName(shiftNumberCounters)).toBe("shift_number_counters");
     const cols = Object.keys(shiftNumberCounters);

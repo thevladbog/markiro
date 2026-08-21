@@ -337,4 +337,17 @@ describe("boxLabelFields — egais/expiry", () => {
     expect(fields.date).toBe("");
     expect(fields.expiry).toBe("");
   });
+
+  it("prints blank dates for year zero instead of emitting a Postgres-incompatible day", () => {
+    const fields = withTimeZone("Europe/Moscow", () =>
+      boxLabelFields({
+        ...base,
+        productionDate: "0000-01-01",
+        egaisCode: null,
+        shelfLifeDays: 184,
+      }),
+    );
+    expect(fields.date).toBe("");
+    expect(fields.expiry).toBe("");
+  });
 });

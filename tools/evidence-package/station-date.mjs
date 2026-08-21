@@ -35,6 +35,9 @@ function validateProductionDate(value) {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
+  if (year < 1 || year > 9999) {
+    invalid("Station production date must be null or a real YYYY-MM-DD date");
+  }
   const date = new Date(0);
   date.setUTCFullYear(year, month - 1, day);
   if (

@@ -1089,6 +1089,28 @@ export class StationScansService {
       // every row sharing it and write the same sscc to all of them,
       // raising boxes_tenant_sscc_uq's 23505.
       if (body.boxes.length > 0) {
+        // The tenant-scoped shift rows named by these closures were locked
+        // above, before any box mutation. Set the durable freeze marker once
+        // for every accepted physical closure, including zero-item/orphan
+        // closures whose UPDATE below matches no `boxes` row. COALESCE makes
+        // a fresh-batch redelivery idempotent and preserves the first server
+        // receipt time. The transaction boundary means a later failure does
+        // not leave a marker for a closure the endpoint did not accept.
+        await tx
+          .update(schema.shifts)
+          .set({
+            firstBoxClosureAt: sql`coalesce(${schema.shifts.firstBoxClosureAt}, now())`,
+          })
+          .where(
+            and(
+              eq(schema.shifts.tenantId, tenantId),
+              inArray(
+                schema.shifts.id,
+                [...new Set(body.boxes.map((closure) => closure.shiftId))].sort(),
+              ),
+            ),
+          );
+
         // Sorted by boxId -- same 40P01 reason as the box upsert above,
         // even though each closure is its own statement rather than one
         // multi-row write: two overlapping batches closing the same boxes

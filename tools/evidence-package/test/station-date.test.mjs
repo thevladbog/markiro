@@ -178,7 +178,7 @@ test("rejects an incompatible Station schema with an operator-safe error", async
   await assert.rejects(readFile(outputPath), { code: "ENOENT" });
 });
 
-for (const productionDate of ["2026-02-30", "24.08.2026", 20260824]) {
+for (const productionDate of ["2026-02-30", "24.08.2026", "0000-01-01", 20260824]) {
   test(`rejects invalid Station production date ${JSON.stringify(productionDate)}`, async (t) => {
     const root = await temporaryDirectory(t);
     const databasePath = join(root, "station-mirror.db");

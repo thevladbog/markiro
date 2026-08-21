@@ -69,6 +69,7 @@ const SHIFT_ROW: typeof schema.shifts.$inferSelect = {
   plannedQty: null,
   plannedDate: null,
   productionDate: null,
+  firstBoxClosureAt: null,
   boxCapacity: 10,
   palletCapacity: null,
   palletsEnabled: false,

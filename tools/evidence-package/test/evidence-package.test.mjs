@@ -1,7 +1,17 @@
 import assert from "node:assert/strict";
 import { execFile as execFileCallback } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -99,7 +109,7 @@ test("lists evidence files in direct code-point order with POSIX paths", async (
   ]);
 });
 
-test("excludes generated and transient files from artifact enumeration", async (t) => {
+test("rejects arbitrary transient files during artifact enumeration", async (t) => {
   const { listEvidenceFiles } = await loadCore();
   const root = await temporaryDirectory(t);
   await writeArtifact(root, "baseline/kept.txt", "kept");
@@ -107,7 +117,7 @@ test("excludes generated and transient files from artifact enumeration", async (
   await writeFile(join(root, checksumsName), "checksums");
   await writeFile(join(root, "manifest.json.interrupted.tmp"), "temporary");
 
-  assert.deepEqual(await listEvidenceFiles(root), ["baseline/kept.txt"]);
+  await assert.rejects(listEvidenceFiles(root), /unlisted temporary file.*interrupted\.tmp/i);
 });
 
 test("hashes real file bytes with SHA-256", async (t) => {
@@ -235,6 +245,33 @@ test("rejects a regular artifact omitted from SHA256SUMS", async (t) => {
   await writeArtifact(root, "exports/system/unlisted.csv", "not sealed");
 
   await assert.rejects(verifyEvidencePackage(root), /unlisted regular file.*unlisted\.csv/i);
+});
+
+test("rejects an arbitrary temporary file before sealing", async (t) => {
+  const { sealEvidencePackage } = await loadCore();
+  const root = await packageFixture(t);
+  await writeFile(join(root, "manifest.json.recovery.tmp"), "recovery bytes");
+
+  await assert.rejects(
+    sealEvidencePackage(root),
+    /unlisted temporary file.*manifest\.json\.recovery\.tmp/i,
+  );
+});
+
+test("rejects an arbitrary temporary file added after sealing", async (t) => {
+  const { sealEvidencePackage, verifyEvidencePackage } = await loadCore();
+  const root = await packageFixture(t);
+  await sealEvidencePackage(root);
+  const copyParent = await temporaryDirectory(t, "markiro-evidence-copy-");
+  const divergentCopy = join(copyParent, "copy");
+  await cp(root, divergentCopy, { recursive: true });
+  await writeFile(join(divergentCopy, "copy-divergence.tmp"), "unsealed bytes");
+
+  assert.deepEqual(await verifyEvidencePackage(root), { checkedCount: 3 });
+  await assert.rejects(
+    verifyEvidencePackage(divergentCopy),
+    /unlisted temporary file.*copy-divergence\.tmp/i,
+  );
 });
 
 test("rejects manifest metadata inconsistent with the sealed artifacts", async (t) => {

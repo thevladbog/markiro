@@ -202,8 +202,10 @@ test("rejects a root replaced between lstat and descriptor binding", async (t) =
 test("rejects an artifact replaced between lstat and descriptor open", async (t) => {
   const root = await packageFixture(t);
   const artifact = join(root, "baseline", "old-sscc.raw.txt");
-  const parked = join(root, "baseline", "old-sscc.raw.txt.original.tmp");
-  const replacement = join(root, "baseline", "old-sscc.raw.txt.replacement.tmp");
+  const parked = `${root}.original-artifact`;
+  const replacement = `${root}.replacement-artifact`;
+  t.after(() => rm(parked, { force: true }));
+  t.after(() => rm(replacement, { force: true }));
   await writeFile(replacement, "attacker-controlled replacement bytes");
   let swapped = false;
   const injected = filesystem({

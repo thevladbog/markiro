@@ -19,26 +19,30 @@ export type BoxTemplateResolution =
 export type StationCloseAccess =
   { kind: "single_device"; ownerDeviceId: string } | { kind: "admin_only" };
 
-/** `YYYY-MM-DD`, matches the `date` column's string mode. */
-const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");
+/** PostgreSQL-compatible civil day in the `date` column's string mode. */
+function civilDateSchema(field: "plannedDate" | "productionDate") {
+  return z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, `${field} must be YYYY-MM-DD`)
+    .refine((value) => {
+      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+      if (!match) return false;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      if (year < 1 || year > 9999) return false;
+      const parsed = new Date(0);
+      parsed.setUTCFullYear(year, month - 1, day);
+      return (
+        parsed.getUTCFullYear() === year &&
+        parsed.getUTCMonth() === month - 1 &&
+        parsed.getUTCDate() === day
+      );
+    }, `${field} must be a real calendar date`);
+}
 
-const productionDateSchema = z
-  .string()
-  .regex(/^\d{4}-\d{2}-\d{2}$/, "productionDate must be YYYY-MM-DD")
-  .refine((value) => {
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-    if (!match) return false;
-    const year = Number(match[1]);
-    const month = Number(match[2]);
-    const day = Number(match[3]);
-    const parsed = new Date(0);
-    parsed.setUTCFullYear(year, month - 1, day);
-    return (
-      parsed.getUTCFullYear() === year &&
-      parsed.getUTCMonth() === month - 1 &&
-      parsed.getUTCDate() === day
-    );
-  }, "productionDate must be a real calendar date");
+const plannedDateSchema = civilDateSchema("plannedDate");
+const productionDateSchema = civilDateSchema("productionDate");
 
 /**
  * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`
