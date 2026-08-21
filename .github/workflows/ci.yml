@@ -12,10 +12,40 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# The verification gate is split into three isolated jobs so they run on
+# separate runners in parallel. Each job still executes its own Turbo slice
+# with `--concurrency=1 --force`: the serialization decision from
+# "fix(ci): serialize the full verification gate" is preserved inside every
+# runner — only process-isolated jobs overlap, so the API e2e suite keeps a
+# whole runner (and the only Postgres) to itself. The local full gate stays
+# `pnpm turbo lint typecheck test build --concurrency=1 --force`.
 jobs:
-  verify:
+  verify-static:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm format:check
+      # Manifests pin exact versions, so a sweep has to use `pnpm update
+      # --latest`, which crosses majors indiscriminately. These two steps are
+      # what make that safe: the guard fails on a breaking version change
+      # against `tools/dependency-baseline.json`, and its own tests keep the
+      # guard from silently degrading into one that always passes.
+      - run: pnpm check:deps
+      - run: pnpm test:dependency-guard
+      - run: pnpm turbo lint typecheck build --concurrency=1 --force
+
+  verify-api-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17-alpine
@@ -47,16 +77,28 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm format:check
-      # Manifests pin exact versions, so a sweep has to use `pnpm update
-      # --latest`, which crosses majors indiscriminately. These two steps are
-      # what make that safe: the guard fails on a breaking version change
-      # against `tools/dependency-baseline.json`, and its own tests keep the
-      # guard from silently degrading into one that always passes.
-      - run: pnpm check:deps
-      - run: pnpm test:dependency-guard
       - run: pnpm --filter @markiro/db db:migrate
-      - run: pnpm turbo lint typecheck test build --concurrency=1 --force
+      # `api#test` already declares `dependsOn: @markiro/db#test`, so the two
+      # Postgres consumers stay serialized against the single database here.
+      - run: pnpm turbo test --filter=@markiro/db --filter=@markiro/api --concurrency=1 --force
+
+  verify-app-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # No Postgres and no DATABASE_URL on purpose: every suite in this slice
+      # is database-free, and a suite that grows a database dependency must
+      # move to verify-api-tests instead of silently skipping here.
+      - run: pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --concurrency=1 --force
 
   tenant-team-infrastructure:
     runs-on: ubuntu-latest
