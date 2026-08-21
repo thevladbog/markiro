@@ -8,6 +8,7 @@ import {
   parseProvisionResult,
   provisionEmail,
   runHostedPlatformAdminProvision,
+  runPlatformAdminProvisionCli,
 } from "../platform-admin-provision.mjs";
 
 const PRIVATE_FRAGMENTS = ["private-key-material", "activation-token", "database-password"];
@@ -40,7 +41,7 @@ test("platform admin provisioning accepts identifiers only", () => {
   }
 });
 
-test("hosted platform admin provisioning pins SSH and invokes only the existing container CLI", async () => {
+test("hosted platform admin provisioning pins SSH and delegates container discovery to the probe", async () => {
   const commands = [];
   const removed = [];
   const result = await runHostedPlatformAdminProvision(
@@ -58,9 +59,10 @@ test("hosted platform admin provisioning pins SSH and invokes only the existing 
       writeFile: async () => undefined,
       rm: async (path) => removed.push(path),
       validatePrivateKey: async () => undefined,
-      run: async (command, args) => {
-        commands.push({ command, args });
-        return '{"userId":"user-123","deliveryId":"delivery-456"}\n';
+      readProbe: async () => "probe-source",
+      run: async (command, args, options) => {
+        commands.push({ command, args, options });
+        return 'MARKIRO_PLATFORM_ADMIN_PROVISIONED {"userId":"user-123","deliveryId":"delivery-456"}\n';
       },
     },
   );
@@ -73,14 +75,79 @@ test("hosted platform admin provisioning pins SSH and invokes only the existing 
   assert.ok(commands[0].args.includes("BatchMode=yes"));
   assert.ok(commands[0].args.includes("markiro-deploy@203.0.113.42"));
   assert.ok(commands[0].args.includes("/runner/private-key"));
-  assert.ok(commands[0].args.includes("/usr/bin/systemd-run"));
-  assert.ok(commands[0].args.includes("/usr/bin/docker"));
-  assert.ok(commands[0].args.includes("dist/cli/provision-platform-admin.js"));
-  assert.ok(commands[0].args.includes("vladislav.bogatyrev@gmail.com"));
+  assert.ok(commands[0].args.includes("MARKIRO_PLATFORM_ADMIN_PROVISION_PROBE=1"));
+  assert.ok(commands[0].args.includes("PLATFORM_ADMIN_EMAIL=vladislav.bogatyrev@gmail.com"));
+  assert.ok(commands[0].args.includes("--input-type=module"));
+  assert.ok(commands[0].args.includes("-"));
+  assert.equal(commands[0].options.input, "probe-source");
+  assert.equal(commands[0].args.includes("markiro-production-api-1"), false);
+  assert.equal(commands[0].args.includes("/usr/bin/docker"), false);
   assert.equal(
     commands[0].args.some((arg) => /password|token|DATABASE_URL/.test(arg)),
     false,
   );
+});
+
+test("hosted provisioning exposes only the closed remote stage returned by the probe", async () => {
+  let stdout = "";
+  let stderr = "";
+  const exitCode = await runPlatformAdminProvisionCli({
+    environment: {
+      PLATFORM_ADMIN_EMAIL: "vladislav.bogatyrev@gmail.com",
+      YC_APP_PUBLIC_ADDRESS: "203.0.113.42",
+      YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+      YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner/private-key",
+      APP_SSH_HOST_KEYS_B64: Buffer.from(
+        `ssh-ed25519 ${Buffer.alloc(32, 1).toString("base64")}\n`,
+      ).toString("base64"),
+    },
+    supplied: {
+      mkdtemp: async () => "/tmp/platform-admin-provision",
+      writeFile: async () => undefined,
+      rm: async () => undefined,
+      validatePrivateKey: async () => undefined,
+      readProbe: async () => "probe-source",
+      run: async () => "MARKIRO_PLATFORM_ADMIN_PROVISION_FAILURE container\n",
+    },
+    argv: ["run"],
+    stdout: { write: (value) => (stdout += value) },
+    stderr: { write: (value) => (stderr += value) },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(stdout, "");
+  assert.equal(stderr, "MARKIRO_PLATFORM_ADMIN_PROVISION_FAILURE container\n");
+});
+
+test("hosted provisioning classifies a malformed success payload as response", async () => {
+  let stderr = "";
+  const exitCode = await runPlatformAdminProvisionCli({
+    environment: {
+      PLATFORM_ADMIN_EMAIL: "vladislav.bogatyrev@gmail.com",
+      YC_APP_PUBLIC_ADDRESS: "203.0.113.42",
+      YC_APP_DEPLOY_LOGIN: "markiro-deploy",
+      YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "/runner/private-key",
+      APP_SSH_HOST_KEYS_B64: Buffer.from(
+        `ssh-ed25519 ${Buffer.alloc(32, 1).toString("base64")}\n`,
+      ).toString("base64"),
+    },
+    supplied: {
+      mkdtemp: async () => "/tmp/platform-admin-provision",
+      writeFile: async () => undefined,
+      rm: async () => undefined,
+      validatePrivateKey: async () => undefined,
+      readProbe: async () => "probe-source",
+      run: async () =>
+        'MARKIRO_PLATFORM_ADMIN_PROVISIONED {"userId":"user-123","deliveryId":"delivery-456","token":"activation-token"}\n',
+    },
+    argv: ["run"],
+    stdout: { write: () => undefined },
+    stderr: { write: (value) => (stderr += value) },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(stderr, "MARKIRO_PLATFORM_ADMIN_PROVISION_FAILURE response\n");
+  assert.equal(stderr.includes("activation-token"), false);
 });
 
 test("production provisioning workflow is protected, serialized and cleans its SSH key", async () => {
