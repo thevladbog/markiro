@@ -1,13 +1,17 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type CSSProperties } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode } from "../lib/boxes.js";
 import type { RecentOperation } from "../lib/journal.js";
+import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
+import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
+import { StationBrand } from "../ui/StationBrand.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
@@ -76,6 +80,27 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   useLayoutEffect(() => {
     void i18n.changeLanguage(request.locale);
   }, [request.locale]);
+
+  if (fixture.kind === "login") {
+    // The real OperatorLogin never renders inside the FloorShell station
+    // chrome -- App.tsx's `stage === "login"` branch mounts it directly
+    // under `withWindowChrome`, not `<FloorShell>`, because there is no
+    // station/operator/shift identity yet to show in a status bar. Wrapping
+    // it in the shared status bar the way every other fixture is wrapped
+    // would steal ~80px from this fixed, non-scrolling screen and visibly
+    // clip the PIN keypad's last row -- a capture artifact the real screen
+    // never has.
+    return (
+      <div
+        className="station-gallery-capture station-window-frame"
+        data-testid="station-screen-gallery"
+        data-gallery-state={fixture.id}
+        data-gallery-locale={request.locale}
+      >
+        <GalleryState fixture={fixture} locale={request.locale} />
+      </div>
+    );
+  }
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
@@ -329,68 +354,185 @@ function PairingFixture({ variant, locale }: { variant: string; locale: GalleryL
   );
 }
 
+const RU_SEARCH_ROSTER_NAMES = [
+  "Александрова-Романовская Екатерина Владимировна",
+  "Иванов Алексей Сергеевич",
+  "Петрова Мария Андреевна",
+  "Смирнов Александр Олегович",
+  "Фёдорова Елена Викторовна",
+];
+const EN_SEARCH_ROSTER_NAMES = [
+  "Alexandria Montgomery-Wellington the Third",
+  "Alex Johnson",
+  "Alice Peterson",
+  "Alicia Smith",
+  "Alison Foster",
+];
+
+/** Every entry matches the fixed query below through the real `searchOperatorsByName`. */
+function galleryOperatorRoster(locale: GalleryLocale): OperatorMirrorRecord[] {
+  const names = locale === "ru" ? RU_SEARCH_ROSTER_NAMES : EN_SEARCH_ROSTER_NAMES;
+  return names.map((name, index) => ({
+    operatorId: `gallery-search-operator-${index}`,
+    name,
+    login: String(100234001 + index),
+    role: "packer",
+    pinHash: "gallery-demo-pin-hash",
+    badgeHash: null,
+    active: true,
+  }));
+}
+
+/** Mirrors OperatorLogin.tsx's own render tree (composed from the same real
+ * sub-components) instead of hand-copied markup, so the captured screenshot
+ * matches the current badge-first sign-in flow stage for stage. */
 function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const isSearch = variant === "name-search";
-  const searchNames = ru
-    ? [
-        "Александрова-Романовская Екатерина Владимировна",
-        "Иванов Алексей Сергеевич",
-        "Петрова Мария Андреевна",
-        "Смирнов Александр Олегович",
-        "Фёдорова Елена Викторовна",
-      ]
-    : [
-        "Alexandria Montgomery-Wellington the Third",
-        "Alex Johnson",
-        "Alice Peterson",
-        "Alicia Smith",
-        "Alison Foster",
-      ];
-  const title = ru ? "Вход оператора" : "Operator sign-in";
-  const prompt =
+  const t = i18n.getFixedT(locale);
+  const stage: "badge" | "login" | "pin" | "search" =
     variant === "badge"
-      ? ru
-        ? "Приложите пропуск"
-        : "Present badge"
-      : variant === "number"
-        ? ru
-          ? "Введите логин"
-          : "Enter login"
-        : variant === "pin"
-          ? ru
-            ? "Введите PIN"
-            : "Enter PIN"
-          : ru
-            ? "Найдите себя по имени"
-            : "Find your name";
+      ? "badge"
+      : variant === "pin"
+        ? "pin"
+        : variant === "name-search"
+          ? "search"
+          : "login";
+  const prompt =
+    stage === "badge"
+      ? t("login.badgePrimary")
+      : stage === "login"
+        ? t("login.loginPrompt")
+        : stage === "search"
+          ? t("login.nameSearchPrompt")
+          : t("login.pinPrompt");
+  const loginValue = "0042";
+  const pinValue = "1234";
+  const roster = galleryOperatorRoster(locale);
+  const searchQuery = locale === "ru" ? "ов" : "Al";
+
   return (
-    <StationScreen title={title} header={<p className="gallery-subtitle">{prompt}</p>}>
-      {isSearch ? (
-        <div className="gallery-search-grid" data-testid="gallery-name-search-results">
-          <div className="gallery-search-field">{ru ? "Але" : "Ale"}</div>
-          {searchNames.map((name) => (
-            <Button key={name} size="floor" variant="secondary" fullWidth>
-              <span className="operator-name-search__result-label">{name}</span>
+    <main className="operator-login" aria-labelledby="gallery-operator-login-title">
+      <header className="operator-login__header">
+        <StationBrand
+          compact
+          className="operator-login__brand"
+          descriptor={t("app.stationDescriptor")}
+        />
+        <div className="operator-login__prompt">
+          <h1 id="gallery-operator-login-title">{t("login.title")}</h1>
+          <p>{prompt}</p>
+        </div>
+      </header>
+
+      <div
+        className="operator-login__message"
+        aria-live="polite"
+        style={{ minHeight: 64, overflow: "hidden" }}
+      />
+
+      {stage === "badge" ? (
+        <div
+          className="operator-login__scanner-status"
+          role="status"
+          aria-label={t("login.badgeReady")}
+        >
+          <span className="operator-login__scanner-status-icon" aria-hidden="true">
+            ✓
+          </span>
+          <span>{t("login.badgeReady")}</span>
+        </div>
+      ) : null}
+
+      <div
+        className={`operator-login__body${stage === "badge" ? " operator-login__body--badge" : ""}`}
+      >
+        {stage === "search" ? (
+          // `display: contents` keeps this wrapper (added only to give the
+          // capture a stable query hook) out of the box model, so
+          // `.operator-name-search` still lands directly in
+          // `.operator-login__body`'s grid the way production's untouched
+          // JSX does -- required for its `grid-row: 1 / -1; height: 100%`.
+          <div data-testid="gallery-name-search-results" style={{ display: "contents" }}>
+            <OperatorNameSearch
+              operators={roster}
+              query={searchQuery}
+              onQueryChange={() => undefined}
+              onSelect={() => undefined}
+              disabled={false}
+            />
+          </div>
+        ) : (
+          <>
+            {stage !== "badge" ? (
+              <div
+                className="operator-login__readout"
+                aria-label={stage === "login" ? "login" : "pin"}
+              >
+                {stage === "login" ? loginValue : "•".repeat(pinValue.length)}
+              </div>
+            ) : null}
+            <div className="operator-login__keypad-zone">
+              {stage === "badge" ? (
+                <div className="operator-login__badge-panel">
+                  <BadgeScanIllustration />
+                  <div className="operator-login__badge-copy">
+                    <h2>{t("login.badgeInstruction")}</h2>
+                    <p>{t("login.badgeExplanation")}</p>
+                  </div>
+                </div>
+              ) : (
+                <PinPad
+                  value={stage === "login" ? loginValue : pinValue}
+                  onChange={() => undefined}
+                  maxLength={stage === "login" ? 12 : 6}
+                  size="floor"
+                  ariaLabel={stage === "login" ? t("login.loginKeypad") : t("login.pinKeypad")}
+                  backspaceLabel={t("login.backspace")}
+                  clearLabel={t("login.clear")}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div
+        className="operator-login__actions"
+        style={{ "--operator-login-action-columns": stage === "login" ? 3 : 2 } as CSSProperties}
+      >
+        {stage === "badge" ? (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.findByName")}
             </Button>
-          ))}
-        </div>
-      ) : variant === "badge" ? (
-        <div className="gallery-badge" aria-hidden="true">
-          ▣
-        </div>
-      ) : (
-        <div className="gallery-keypad">
-          <div className="gallery-code">{variant === "pin" ? "••••" : "0042"}</div>
-          <PinPad
-            value={variant === "pin" ? "1234" : "0042"}
-            maxLength={12}
-            size="floor"
-            onChange={() => undefined}
-          />
-        </div>
-      )}
-    </StationScreen>
+            <Button size="floor">{t("login.useLogin")}</Button>
+          </>
+        ) : stage === "login" ? (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.back")}
+            </Button>
+            <Button size="floor" variant="secondary">
+              {t("login.findByName")}
+            </Button>
+            <Button size="floor">{t("login.next")}</Button>
+          </>
+        ) : stage === "pin" ? (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.back")}
+            </Button>
+            <Button size="floor">{t("login.submit")}</Button>
+          </>
+        ) : (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.back")}
+            </Button>
+            <Button size="floor">{t("login.useLogin")}</Button>
+          </>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -623,10 +765,18 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const t = i18n.getFixedT(locale);
   const aggregation = mode.startsWith("aggregation");
+  // "waiting" is a freshly opened shift: no scan has landed yet, so the
+  // journal-backed counters and recent-operations list must be empty too --
+  // not the mid-shift numbers a screen with an actual scan history would show.
   const waiting = mode === "validation" || mode === "aggregation-waiting";
-  const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
-  const operations = galleryRecentOperations();
+  const workLabels = buildWorkLabels(t, locale, 1);
+  const operations = waiting ? [] : galleryRecentOperations();
+  // Validation-mode shifts carry a plan target the way the shift list's own
+  // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
+  // shifts in this gallery have no plan, matching the shift list there too.
+  const plannedQty = mode === "validation" ? 10_000 : undefined;
   return (
     <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
       <div className="work-screen__content">
@@ -638,6 +788,8 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               image={galleryProductImage}
               productName={ru ? "Тестовый товар А" : "Sample product A"}
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
+              plannedQty={plannedQty}
+              planLabel={t("work.plan")}
               operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
             />
@@ -657,9 +809,9 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
           </div>
           <aside className="work-screen__secondary" aria-label={workLabels.summary}>
             <WorkCounters
-              accepted={1248}
-              rejected={3}
-              pendingSync={7}
+              accepted={waiting ? 0 : 1248}
+              rejected={waiting ? 0 : 3}
+              pendingSync={waiting ? 0 : 7}
               locale={workLabels.locale}
               labels={workLabels.counters}
             />
