@@ -2,6 +2,7 @@ import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
 import { CONSENT_CONTENT } from "./documents/consent.js";
 import { PRIVACY_CONTENT } from "./documents/privacy.js";
 import { STATION_OPERATOR_SHIFT_CONTENT } from "./documents/station-operator-shift.js";
+import { STATION_WORK_CYCLE_CONTENT } from "./documents/station-work-cycle.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
 import { formatLegalEffectiveDate, parseLegalRevision } from "./identity.js";
 import type { LegalRevision } from "./identity.js";
@@ -22,6 +23,7 @@ const LEGAL_DOCUMENT_CODES = [
   "MKR-DPA-01",
   "MKR-BRD-01",
   "MKR-INS-01",
+  "MKR-INS-02",
 ] as const;
 const LEGAL_DOCUMENT_STATUSES = ["draft", "active", "superseded", "withdrawn"] as const;
 
@@ -31,6 +33,7 @@ export const LEGAL_DOCUMENT_KIND_BY_CODE = {
   "MKR-DPA-01": "template",
   "MKR-BRD-01": "template",
   "MKR-INS-01": "instruction",
+  "MKR-INS-02": "instruction",
 } as const satisfies Record<LegalDocumentCode, LegalDocumentKind>;
 
 export function legalDocumentKind(code: LegalDocumentCode): LegalDocumentKind {
@@ -94,6 +97,14 @@ export const LEGAL_RELEASES = [
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/" },
   },
+  {
+    code: "MKR-INS-02",
+    revision: "2026.08/01",
+    effectiveDate: "2026-08-21",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: { ru: "/instruktsii/rabochiy-tsikl-skanirovaniya-i-agregatsii/" },
+  },
 ] as const satisfies readonly LegalDocumentRelease[];
 
 export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
@@ -102,6 +113,7 @@ export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
   { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
   { releaseKey: "MKR-INS-01/2026.08/01", content: STATION_OPERATOR_SHIFT_CONTENT },
+  { releaseKey: "MKR-INS-02/2026.08/01", content: STATION_WORK_CYCLE_CONTENT },
 ];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {
