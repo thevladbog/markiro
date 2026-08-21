@@ -194,6 +194,10 @@ export function Combobox<TValue extends string = string>({
               ref={inputRef}
               role="searchbox"
               autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
+              data-bwignore
+              data-form-type="other"
               aria-label={searchPlaceholder}
               aria-controls={listboxId}
               aria-activedescendant={
