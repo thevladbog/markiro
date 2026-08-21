@@ -63,6 +63,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /disaggregation (DisaggregationController.list)",
       "GET /disaggregation-reasons (DisaggregationReasonsController.listReasons)",
       "GET /disaggregation/:id (DisaggregationController.get)",
+      "GET /disaggregation/:id/report (DisaggregationController.report)",
       "GET /employees (EmployeesController.listEmployees)",
       "GET /integrations (IntegrationsController.list)",
       "GET /integrations/:type (IntegrationsController.detail)",
