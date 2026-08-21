@@ -287,6 +287,7 @@ export function Select<TValue extends string = string>({
                 <input
                   ref={searchRef}
                   type="search"
+                  autoComplete="off"
                   aria-label={searchLabel ?? "Search"}
                   placeholder={searchPlaceholder}
                   value={search}

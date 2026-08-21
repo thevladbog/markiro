@@ -260,6 +260,17 @@ describe("Input", () => {
     expect(document.getElementById(describedBy!)?.textContent).toBe("Больше остатка");
   });
 
+  it("disables browser autofill by default but keeps it overridable", () => {
+    render(
+      <>
+        <Input label="ФИО" />
+        <Input label="Email" autoComplete="email" />
+      </>,
+    );
+    expect(screen.getByLabelText("ФИО").getAttribute("autocomplete")).toBe("off");
+    expect(screen.getByLabelText("Email").getAttribute("autocomplete")).toBe("email");
+  });
+
   it("supports mono styling for codes and quantities", () => {
     render(<Input label="GTIN" mono />);
     const input = screen.getByLabelText("GTIN");
