@@ -65,6 +65,9 @@ export const products = pgTable(
     tenantId: tenantId(),
     gtin14: char("gtin14", { length: 14 }).notNull(),
     name: text("name").notNull(),
+    // Short operator-facing name for the station shift card and, in a
+    // follow-up slice, label rendering. Null = use the full `name` everywhere.
+    printName: text("print_name"),
     productGroup: text("product_group"),
     boxCapacity: integer("box_capacity"),
     palletCapacity: integer("pallet_capacity"),
