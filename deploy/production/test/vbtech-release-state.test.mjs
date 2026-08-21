@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readdir, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, stat, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -175,6 +175,52 @@ test("rejects a repeated effective healthy SHA and digest before creating a pend
   );
 });
 
+test("serializes concurrent pending writes for one release identity", async () => {
+  const releases = await directory();
+  const results = await Promise.allSettled([
+    writePendingVbtechRelease(releases, selector(), dependencies("2026-08-21T10:20:30.000Z")),
+    writePendingVbtechRelease(releases, selector(), dependencies("2026-08-21T10:20:31.000Z")),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(
+    results.find((result) => result.status === "rejected")?.reason.message,
+    "v-b release transition rejected",
+  );
+});
+
+test("serializes mutually exclusive concurrent terminal transitions", async () => {
+  const releases = await directory();
+  const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
+  const results = await Promise.allSettled([
+    markVbtechReleaseHealthy(releases, pending, dependencies()),
+    markVbtechReleaseFailed(releases, pending, dependencies()),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
+  assert.equal(results.filter((result) => result.status === "rejected").length, 1);
+  assert.equal(
+    results.find((result) => result.status === "rejected")?.reason.message,
+    "v-b release transition rejected",
+  );
+  const terminals = (await readdir(releases)).filter(
+    (file) => file.endsWith(".healthy.json") || file.endsWith(".failed.json"),
+  );
+  assert.equal(terminals.length, 1);
+});
+
+test("recovers a private stale lifecycle lock from a terminated writer", async () => {
+  const releases = await directory();
+  await mkdir(releases, { mode: 0o700 });
+  const lock = join(releases, ".vbtech-release-state.lock");
+  await writeFile(lock, "", { mode: 0o600 });
+  await utimes(lock, new Date("2000-01-01T00:00:00.000Z"), new Date("2000-01-01T00:00:00.000Z"));
+
+  assert.deepEqual(await writePendingVbtechRelease(releases, selector(), dependencies()), record());
+  assert.equal((await readdir(releases)).includes(".vbtech-release-state.lock"), false);
+});
+
 test("fails closed for every malformed or oversized JSON state input", async () => {
   const releases = await directory();
   const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
@@ -184,6 +230,21 @@ test("fails closed for every malformed or oversized JSON state input", async () 
   await assertStateRejected(() => latestHealthyVbtechRelease(releases));
   await writeFile(join(releases, "malformed.json"), "x".repeat(16 * 1024 + 1), { mode: 0o600 });
   await assertStateRejected(() => latestHealthyVbtechRelease(releases));
+});
+
+test("fails closed for unexpected non-JSON regular files and symbolic links", async () => {
+  const regularFileDirectory = await directory();
+  await writePendingVbtechRelease(regularFileDirectory, selector(), dependencies());
+  await writeFile(join(regularFileDirectory, "unexpected"), "private value", { mode: 0o600 });
+  await assertStateRejected(() => latestHealthyVbtechRelease(regularFileDirectory));
+
+  const symlinkDirectory = await directory();
+  await writePendingVbtechRelease(symlinkDirectory, selector(), dependencies());
+  const externalDirectory = await mkdtemp(join(tmpdir(), "vbtech-release-state-external-"));
+  const externalFile = join(externalDirectory, "record");
+  await writeFile(externalFile, "private value", { mode: 0o600 });
+  await symlink(externalFile, join(symlinkDirectory, "unexpected-link"));
+  await assertStateRejected(() => latestHealthyVbtechRelease(symlinkDirectory));
 });
 
 test("fails closed for invalid record dates, filenames, modes, and unreadable records", async () => {
