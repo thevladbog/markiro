@@ -123,14 +123,12 @@ export class CodeSearchService {
       return { type: "box" as const, boxId: box.id };
     }
     const [code] = await this.db
-      .select({ codeHash: schema.codeRegistry.codeHash })
-      .from(schema.codeRegistry)
+      .select({ codeHash: schema.codes.codeHash })
+      .from(schema.codes)
       .where(
-        and(
-          eq(schema.codeRegistry.tenantId, tenantId),
-          eq(schema.codeRegistry.codeHash, classified.codeHash),
-        ),
-      );
+        and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, classified.codeHash)),
+      )
+      .limit(1);
     if (!code) throw new NotFoundException({ code: "not_found" });
     return { type: "code" as const, codeHash: code.codeHash };
   }
@@ -270,7 +268,7 @@ export class CodeSearchService {
       when ${this.aggregatedSql} then 'aggregated'
       else 'free' end`;
 
-    const [row] = await this.db
+    const [ownedRow] = await this.db
       .select({
         codeHash: schema.codeRegistry.codeHash,
         gtin14: schema.codes.gtin14,
@@ -299,6 +297,34 @@ export class CodeSearchService {
         and(eq(schema.codeRegistry.tenantId, tenantId), eq(schema.codeRegistry.codeHash, codeHash)),
       );
 
+    // `code_registry` contains the current owner claim, not the immutable
+    // scan history. Disaggregation deliberately removes that claim so the
+    // code can be scanned again; keep the admin card available from the
+    // latest historical `codes` row and report it as free (or written off).
+    const [historicalRow] = ownedRow
+      ? []
+      : await this.db
+          .select({
+            codeHash: schema.codes.codeHash,
+            gtin14: schema.codes.gtin14,
+            serial: schema.codes.serial,
+            productId: schema.products.id,
+            productName: schema.products.name,
+            status: sql<string>`case when ${this.writtenOffSql} then 'written_off' else 'free' end`,
+          })
+          .from(schema.codes)
+          .leftJoin(
+            schema.products,
+            and(
+              eq(schema.products.tenantId, schema.codes.tenantId),
+              eq(schema.products.gtin14, schema.codes.gtin14),
+            ),
+          )
+          .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, codeHash)))
+          .orderBy(desc(schema.codes.scannedAt))
+          .limit(1);
+
+    const row = ownedRow ?? historicalRow;
     if (!row) throw new NotFoundException();
 
     const [currentBoxRow] = await this.db

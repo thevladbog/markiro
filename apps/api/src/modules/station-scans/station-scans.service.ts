@@ -15,9 +15,12 @@ import { sortExceptions, type ExceptionDto } from "./box-exceptions";
 import { SsccService } from "../sscc/sscc.service";
 import { advanceBoxRegistryVersion } from "../boxes/box-registry-version";
 import { lockTenantBoxRegistry } from "../boxes/box-registry-lock";
+import { loadCodeReleasePage } from "./code-releases";
 import type {
   BatchConflictDto,
   DeniedStationRecordDto,
+  StationCodeReleasesDto,
+  StationCodeReleasesResponseDto,
   StationConflictStatusResponseDto,
   SyncBatchDto,
   SyncBatchResponseDto,
@@ -159,6 +162,13 @@ export class StationScansService {
       )
       .orderBy(asc(schema.codeConflicts.codeHash));
     return { reviewedCodeHashes: rows.map((row) => row.codeHash) };
+  }
+
+  async codeReleases(
+    tenantId: string,
+    request: StationCodeReleasesDto,
+  ): Promise<StationCodeReleasesResponseDto> {
+    return loadCodeReleasePage(this.db, tenantId, request);
   }
 
   /**

@@ -68,6 +68,45 @@ async function seedInstallId(exec: SqlExecutor, id: string): Promise<void> {
 }
 
 describe("sync engine", () => {
+  it("removes server-released codes and advances the durable release revision", async () => {
+    const exec = await migratedExec();
+    const releasedHash = "a".repeat(64);
+    const retainedHash = "b".repeat(64);
+    for (const codeHash of [releasedHash, retainedHash]) {
+      await exec.run(
+        `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        [codeHash, "closed-shift", "04600000000017", codeHash[0], "2026-08-20T10:00:00.000Z"],
+      );
+    }
+    const post = vi.fn().mockResolvedValue({
+      until: "7",
+      releasedCodeHashes: [releasedHash],
+    });
+    const engine = createSyncEngine({
+      exec,
+      client: { post },
+      machineId: "m1",
+      onState: () => {},
+    });
+
+    engine.nudge();
+    await engine.idle();
+
+    expect(post).toHaveBeenCalledWith("/station/codes/releases", { since: "0" });
+    expect(
+      await exec.all<{ code_hash: string }>(
+        "SELECT code_hash FROM codes_mirror ORDER BY code_hash",
+      ),
+    ).toEqual([{ code_hash: retainedHash }]);
+    expect(
+      await exec.all<{ value: string }>(
+        "SELECT value FROM station_meta WHERE key = 'code_release_revision'",
+      ),
+    ).toEqual([{ value: "7" }]);
+    engine.stop();
+  });
+
   it("removes only conflicts the server confirms were reviewed", async () => {
     const exec = await migratedExec();
     const reviewedHash = "a".repeat(64);

@@ -668,6 +668,36 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(400);
   });
 
+  it("POST /products accepts a printName, trims it, PATCH null clears it, and blank is rejected", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    await signUpAndActivate(agent);
+
+    const createRes = await agent
+      .post("/products")
+      .send({
+        gtin: EAN13_CANONICAL,
+        name: "Сидр сухой газированный Дикий Крест Особый 5%",
+        printName: "  Дикий Крест Особый 5%  ",
+      })
+      .expect(201);
+    expect(createRes.body).toMatchObject({
+      name: "Сидр сухой газированный Дикий Крест Особый 5%",
+      printName: "Дикий Крест Особый 5%",
+    });
+    const id = createRes.body.id as string;
+
+    // Omitted on create means null; untouched on PATCH stays put.
+    const patched = await agent.patch(`/products/${id}`).send({ boxCapacity: 6 }).expect(200);
+    expect(patched.body).toMatchObject({ printName: "Дикий Крест Особый 5%" });
+
+    // Explicit null clears the short name.
+    const cleared = await agent.patch(`/products/${id}`).send({ printName: null }).expect(200);
+    expect(cleared.body).toMatchObject({ printName: null });
+
+    // Whitespace-only is a 400, never an empty-string value.
+    await agent.patch(`/products/${id}`).send({ printName: "   " }).expect(400);
+  });
+
   it("uploads, enriches, replaces, reads, and idempotently deletes a private product image", async () => {
     const agent = request.agent(app!.getHttpServer());
     const tenantId = await signUpAndActivate(agent);

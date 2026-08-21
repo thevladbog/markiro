@@ -1,6 +1,6 @@
 {
-  "id": "d61a0fea-ba68-4172-896b-99722078014f",
-  "prevId": "69e4a029-8b85-4754-9423-9122f8285d3f",
+  "id": "027aed47-16f9-4e75-a81b-0f72cdfeb5ce",
+  "prevId": "d61a0fea-ba68-4172-896b-99722078014f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -9267,13 +9267,31 @@
           "name": "offer_line_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "payment_id": {
           "name": "payment_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
+        },
+        "invoice_id": {
+          "name": "invoice_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "invoice_line_id": {
+          "name": "invoice_line_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "billing_payment_id": {
+          "name": "billing_payment_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
         },
         "catalog_version_id": {
           "name": "catalog_version_id",
@@ -9347,7 +9365,30 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "ordered_services_invoice_line_uq": {
+          "name": "ordered_services_invoice_line_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "invoice_line_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"ordered_services\".\"invoice_line_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "ordered_services_tenant_offer_line_fk": {
           "name": "ordered_services_tenant_offer_line_fk",
@@ -9423,6 +9464,10 @@
         "ordered_services_quantity_positive": {
           "name": "ordered_services_quantity_positive",
           "value": "\"ordered_services\".\"quantity\" > 0"
+        },
+        "ordered_services_source_check": {
+          "name": "ordered_services_source_check",
+          "value": "(\"ordered_services\".\"offer_line_id\" is not null and \"ordered_services\".\"payment_id\" is not null and \"ordered_services\".\"invoice_id\" is null and \"ordered_services\".\"invoice_line_id\" is null and \"ordered_services\".\"billing_payment_id\" is null)\n        or (\"ordered_services\".\"offer_line_id\" is null and \"ordered_services\".\"payment_id\" is null and \"ordered_services\".\"invoice_id\" is not null and \"ordered_services\".\"invoice_line_id\" is not null and \"ordered_services\".\"billing_payment_id\" is not null)"
         }
       },
       "isRLSEnabled": false
@@ -9984,6 +10029,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "source_invoice_line_id": {
+          "name": "source_invoice_line_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by_platform_user_id": {
           "name": "created_by_platform_user_id",
           "type": "text",
@@ -10005,7 +10056,30 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "subscription_addons_invoice_line_uq": {
+          "name": "subscription_addons_invoice_line_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_invoice_line_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"subscription_addons\".\"source_invoice_line_id\" is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "subscription_addons_created_by_platform_user_id_platform_users_id_fk": {
           "name": "subscription_addons_created_by_platform_user_id_platform_users_id_fk",
@@ -10091,9 +10165,9 @@
           "name": "subscription_addons_time_order_check",
           "value": "\"subscription_addons\".\"starts_at\" is null or \"subscription_addons\".\"ends_at\" is null or \"subscription_addons\".\"ends_at\" > \"subscription_addons\".\"starts_at\""
         },
-        "subscription_addons_source_offer_check": {
-          "name": "subscription_addons_source_offer_check",
-          "value": "(\"subscription_addons\".\"source\" = 'paid_offer_line') = (\"subscription_addons\".\"source_offer_line_id\" is not null)"
+        "subscription_addons_commercial_source_check": {
+          "name": "subscription_addons_commercial_source_check",
+          "value": "((\"subscription_addons\".\"source\" = 'paid_offer_line') = (\"subscription_addons\".\"source_offer_line_id\" is not null))\n        and ((\"subscription_addons\".\"source\" = 'paid_invoice_line') = (\"subscription_addons\".\"source_invoice_line_id\" is not null))"
         }
       },
       "isRLSEnabled": false
@@ -10293,6 +10367,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "source_invoice_line_id": {
+          "name": "source_invoice_line_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_by_platform_user_id": {
           "name": "created_by_platform_user_id",
           "type": "text",
@@ -10343,6 +10423,28 @@
           ],
           "isUnique": true,
           "where": "\"tenant_subscriptions\".\"status\" = 'scheduled'",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "tenant_subscriptions_invoice_line_uq": {
+          "name": "tenant_subscriptions_invoice_line_uq",
+          "columns": [
+            {
+              "expression": "tenant_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "source_invoice_line_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "\"tenant_subscriptions\".\"source_invoice_line_id\" is not null",
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -10431,9 +10533,9 @@
           "name": "tenant_subscriptions_pending_dates_check",
           "value": "\"tenant_subscriptions\".\"status\" <> 'pending_activation' or (\"tenant_subscriptions\".\"starts_at\" is null and \"tenant_subscriptions\".\"ends_at\" is null)"
         },
-        "tenant_subscriptions_source_offer_check": {
-          "name": "tenant_subscriptions_source_offer_check",
-          "value": "(\"tenant_subscriptions\".\"source\" = 'paid_offer_line') = (\"tenant_subscriptions\".\"source_offer_line_id\" is not null)"
+        "tenant_subscriptions_commercial_source_check": {
+          "name": "tenant_subscriptions_commercial_source_check",
+          "value": "((\"tenant_subscriptions\".\"source\" = 'paid_offer_line') = (\"tenant_subscriptions\".\"source_offer_line_id\" is not null))\n        and ((\"tenant_subscriptions\".\"source\" = 'paid_invoice_line') = (\"tenant_subscriptions\".\"source_invoice_line_id\" is not null))"
         }
       },
       "isRLSEnabled": false
@@ -10579,6 +10681,15 @@
           "columns": [
             "tenant_id",
             "invoice_id"
+          ]
+        },
+        "billing_payments_tenant_invoice_id_uq": {
+          "name": "billing_payments_tenant_invoice_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "invoice_id",
+            "id"
           ]
         },
         "billing_payments_idempotency_uq": {
@@ -11098,6 +11209,15 @@
           "nullsNotDistinct": false,
           "columns": [
             "tenant_id",
+            "id"
+          ]
+        },
+        "invoice_lines_tenant_invoice_id_uq": {
+          "name": "invoice_lines_tenant_invoice_id_uq",
+          "nullsNotDistinct": false,
+          "columns": [
+            "tenant_id",
+            "invoice_id",
             "id"
           ]
         },
@@ -13188,7 +13308,8 @@
       "values": [
         "demo",
         "manual",
-        "paid_offer_line"
+        "paid_offer_line",
+        "paid_invoice_line"
       ]
     },
     "public.subscription_status": {

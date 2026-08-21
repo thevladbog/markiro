@@ -225,6 +225,18 @@ describe("DisaggregationDocumentPage", () => {
     expect(screen.getByRole("button", { name: "Провести" }).hasAttribute("disabled")).toBe(true);
   });
 
+  it("opens both print report variants in a new tab", async () => {
+    const openMock = vi.fn();
+    vi.stubGlobal("open", openMock);
+    const { user } = renderPage(DOC_DRAFT_READY);
+
+    await screen.findByText("DSG-26-0001");
+    await user.click(screen.getByRole("button", { name: "Печать: короба" }));
+    expect(openMock).toHaveBeenLastCalledWith("/api/disaggregation/d1/report?variant=boxes");
+    await user.click(screen.getByRole("button", { name: "Печать: короба и содержимое" }));
+    expect(openMock).toHaveBeenLastCalledWith("/api/disaggregation/d1/report?variant=full");
+  });
+
   it("deletes a line via DELETE /api/disaggregation/d1/lines/l1", async () => {
     const { fetchMock, user } = renderPage(DOC_DRAFT_READY);
 

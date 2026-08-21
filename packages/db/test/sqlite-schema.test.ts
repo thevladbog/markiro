@@ -60,6 +60,37 @@ describe("STATION_MIGRATIONS", () => {
     expect(shiftMirror.productionDate.notNull).toBe(false);
   });
 
+  it("migrates a legacy product row to a nullable print_name and survives a second migration run", () => {
+    const db = new DatabaseSync(":memory:");
+    const printNameMigration = STATION_MIGRATIONS.findIndex((statement) =>
+      statement.includes("ALTER TABLE product_mirror ADD COLUMN print_name"),
+    );
+    expect(printNameMigration).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, printNameMigration));
+    db.prepare(
+      `INSERT INTO product_mirror (id, gtin14, name, status)
+       VALUES (?, ?, ?, ?)`,
+    ).run("legacy-product", "04600000000015", "Сидр сухой газированный", "active");
+
+    applyStatements(db, STATION_MIGRATIONS.slice(printNameMigration));
+
+    const columns = db.prepare("PRAGMA table_info(product_mirror)").all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    expect(columns).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: "print_name", notnull: 0 })]),
+    );
+    expect(
+      db.prepare("SELECT print_name FROM product_mirror WHERE id = ?").get("legacy-product"),
+    ).toEqual({ print_name: null });
+
+    expect(() => db.exec(STATION_MIGRATIONS[printNameMigration] ?? "missing migration")).toThrow(
+      /duplicate column name/i,
+    );
+    expect(() => applyStationMigrations(db)).not.toThrow();
+  });
+
   it("migrates a legacy shift row to nullable production_date and survives a second migration run", () => {
     const db = new DatabaseSync(":memory:");
     const productionDateMigration = STATION_MIGRATIONS.findIndex((statement) =>

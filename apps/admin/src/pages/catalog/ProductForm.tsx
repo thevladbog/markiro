@@ -48,6 +48,7 @@ const productFormSchema = z.object({
     .trim()
     .min(1, "pages.catalog.form.errors.nameRequired")
     .max(200, "pages.catalog.form.errors.nameTooLong"),
+  printName: z.string().trim().max(200, "pages.catalog.form.errors.printNameTooLong").optional(),
   productGroup: z
     .string()
     .trim()
@@ -120,6 +121,7 @@ export interface ProductFormProps {
 const EMPTY_VALUES: ProductFormValues = {
   gtin: "",
   name: "",
+  printName: "",
   productGroup: "",
   boxCapacity: "",
   palletCapacity: "",
@@ -421,6 +423,12 @@ export function ProductForm({
             {...register("name")}
           />
           <Input
+            label={t("pages.catalog.form.printNameLabel")}
+            hint={t("pages.catalog.form.printNameHint")}
+            {...errorProp(translateFieldError(t, errors.printName?.message))}
+            {...register("printName")}
+          />
+          <Input
             label={t("pages.catalog.form.productGroupLabel")}
             {...errorProp(translateFieldError(t, errors.productGroup?.message))}
             {...register("productGroup")}
@@ -524,6 +532,7 @@ export function ProductForm({
 
 /** Normalizes raw form values into the API's create/update payload shape. */
 function toCreateInput(values: ProductFormValues): CreateProductInput {
+  const printName = values.printName?.trim();
   const productGroup = values.productGroup?.trim();
   const boxCapacity = values.boxCapacity?.trim();
   const palletCapacity = values.palletCapacity?.trim();
@@ -534,6 +543,7 @@ function toCreateInput(values: ProductFormValues): CreateProductInput {
   return {
     gtin: values.gtin.trim(),
     name: values.name.trim(),
+    printName: printName ? printName : null,
     productGroup: productGroup ? productGroup : null,
     boxCapacity: boxCapacity ? Number(boxCapacity) : null,
     palletCapacity: palletCapacity ? Number(palletCapacity) : null,

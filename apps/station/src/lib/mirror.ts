@@ -45,6 +45,7 @@ export interface StationBundle {
     /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
     defaultLabelTemplateId: string | null;
     /** Optional: older servers (or a replayed older cached bundle) omit these during a rolling deploy. */
+    printName?: string | null;
     egaisCode?: string | null;
     shelfLifeDays?: number | null;
     image?: StationProductImageDescriptor | null;
@@ -262,11 +263,12 @@ async function upsertBundleBody(
        image_pointer_checksum=CASE WHEN excluded.image_checksum IS NULL THEN NULL ELSE product_mirror.image_pointer_checksum END`;
   await exec.run(
     `INSERT INTO product_mirror (
-       id, gtin14, name, product_group, box_capacity, pallet_capacity, status,
+       id, gtin14, name, print_name, product_group, box_capacity, pallet_capacity, status,
        default_counterparty_id, default_label_template_id, egais_code, shelf_life_days${imageColumns}
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?${imageValues})
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?${imageValues})
      ON CONFLICT(id) DO UPDATE SET
-       gtin14=excluded.gtin14, name=excluded.name, product_group=excluded.product_group,
+       gtin14=excluded.gtin14, name=excluded.name, print_name=excluded.print_name,
+       product_group=excluded.product_group,
        box_capacity=excluded.box_capacity, pallet_capacity=excluded.pallet_capacity,
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
        default_label_template_id=excluded.default_label_template_id,
@@ -275,6 +277,7 @@ async function upsertBundleBody(
       p.id,
       p.gtin14,
       p.name,
+      p.printName ?? null,
       p.productGroup,
       p.boxCapacity,
       p.palletCapacity,
@@ -525,6 +528,8 @@ export interface ShiftContextRow {
   productId: string;
   gtin14: string;
   productName: string;
+  /** Short operator-facing name; null = use `productName`. */
+  productPrintName: string | null;
   counterpartyName: string | null;
   plannedQty: number | null;
   egaisCode: string | null;
@@ -548,6 +553,7 @@ export async function readShiftContext(
     product_id: string;
     gtin14: string;
     name: string;
+    print_name: string | null;
     counterparty_name: string | null;
     planned_qty: number | null;
     egais_code: string | null;
@@ -560,7 +566,8 @@ export async function readShiftContext(
     image_height: number | null;
     number: string | null;
   }>(
-    `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, s.counterparty_name AS counterparty_name,
+    `SELECT p.id AS product_id, p.gtin14 AS gtin14, p.name AS name, p.print_name AS print_name,
+       s.counterparty_name AS counterparty_name,
        s.planned_qty, s.number AS number, s.production_date, p.egais_code, p.shelf_life_days,
        p.image_checksum, p.image_content_type, p.image_byte_size, p.image_width, p.image_height
      FROM shift_mirror s JOIN product_mirror p ON p.id = s.product_id
@@ -573,6 +580,7 @@ export async function readShiftContext(
     productId: row.product_id,
     gtin14: row.gtin14,
     productName: row.name,
+    productPrintName: row.print_name ?? null,
     counterpartyName: row.counterparty_name,
     plannedQty: row.planned_qty,
     number: row.number ?? null,

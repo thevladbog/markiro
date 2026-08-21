@@ -15,8 +15,11 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
+  stationCodeReleasesSchema,
   stationConflictStatusSchema,
   syncBatchSchema,
+  type StationCodeReleasesDto,
+  type StationCodeReleasesResponseDto,
   type StationConflictStatusDto,
   type StationConflictStatusResponseDto,
   type SyncBatchDto,
@@ -47,6 +50,19 @@ export class StationScansController {
       throw new ForbiddenException("Station device authentication required");
     }
     return this.service.reviewedConflictHashes(req.tenantId!, req.deviceId, body.codeHashes);
+  }
+
+  @Post("codes/releases")
+  @HttpCode(200)
+  @AllowSubscriptionRecovery("station")
+  async codeReleases(
+    @Req() req: RequestWithTenant,
+    @Body(new ZodValidationPipe(stationCodeReleasesSchema)) body: StationCodeReleasesDto,
+  ): Promise<StationCodeReleasesResponseDto> {
+    if (!req.deviceId) {
+      throw new ForbiddenException("Station device authentication required");
+    }
+    return this.service.codeReleases(req.tenantId!, body);
   }
 
   @Post("scans")

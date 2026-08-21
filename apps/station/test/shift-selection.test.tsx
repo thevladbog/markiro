@@ -51,6 +51,46 @@ describe("ShiftSelection", () => {
     expect(screen.queryByText("Waiting for close sync")).toBeNull();
   });
 
+  it("prefers the catalog print name on the card and falls back to the full name", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              id: "with-print-name",
+              status: "planned",
+              mode: "validation",
+              productName: "Сидр сухой газированный Дикий Крест Особый 5%",
+              productPrintName: "Дикий Крест Особый 5%",
+              plannedQty: 100,
+              productId: "product-print-name",
+            },
+            {
+              id: "without-print-name",
+              status: "planned",
+              mode: "validation",
+              productName: "Квас хлебный фильтрованный, 1,5 л",
+              productPrintName: null,
+              plannedQty: 100,
+              productId: "product-full-name",
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+
+    render(<ShiftSelection client={client} onSelected={() => {}} onNew={() => {}} />);
+
+    await waitFor(() =>
+      expect(screen.getAllByText("Дикий Крест Особый 5%").length).toBeGreaterThan(0),
+    );
+    // The full name never renders when a print name exists…
+    expect(screen.queryByText("Сидр сухой газированный Дикий Крест Особый 5%")).toBeNull();
+    // …and the fallback keeps the full name when it does not.
+    expect(screen.getAllByText("Квас хлебный фильтрованный, 1,5 л").length).toBeGreaterThan(0);
+  });
+
   it("renders the shift's production date from the server list", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(

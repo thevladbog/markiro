@@ -297,4 +297,7 @@ export const STATION_MIGRATIONS: string[] = [
   // deployed stations already have shift_mirror, and CREATE TABLE IF NOT
   // EXISTS cannot upgrade their existing database.
   `ALTER TABLE shift_mirror ADD COLUMN production_date TEXT;`,
+  // Optional short product name for the shift card and, in a follow-up,
+  // label rendering (spec 2026-08-21). Trailing ALTER for the same reason.
+  `ALTER TABLE product_mirror ADD COLUMN print_name TEXT;`,
 ];

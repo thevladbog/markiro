@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, count, desc, eq, gte, ilike, inArray, isNull, sql, sum } from "drizzle-orm";
+import { and, count, desc, eq, gte, ilike, inArray, isNull, or, sql, sum } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { formatSsccWithAi, parseScannedSscc } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -22,6 +22,7 @@ import type {
   UpdateDocumentDto,
 } from "./dto";
 import { validateBoxCandidates } from "./line-validation";
+import type { DisaggregationReportCode, DisaggregationReportData } from "./report";
 
 const PAGE_SIZE = 50;
 
@@ -270,6 +271,52 @@ export class DisaggregationService {
         .from(schema.boxes)
         .where(and(eq(schema.boxes.tenantId, tenantId), inArray(schema.boxes.id, boxIds)));
 
+      const activeItems = await tx
+        .select({
+          codeHash: schema.boxItems.codeHash,
+          scannedAt: schema.boxItems.addedAt,
+          shiftId: schema.boxes.shiftId,
+          terminalId: schema.boxes.terminalId,
+        })
+        .from(schema.boxItems)
+        .innerJoin(
+          schema.boxes,
+          and(
+            eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+            eq(schema.boxes.id, schema.boxItems.boxId),
+          ),
+        )
+        .where(
+          and(
+            eq(schema.boxItems.tenantId, tenantId),
+            inArray(schema.boxItems.boxId, boxIds),
+            isNull(schema.boxItems.displacedAt),
+            isNull(schema.boxItems.removedAt),
+          ),
+        )
+        .orderBy(schema.boxItems.codeHash);
+
+      // Match station-side disassembly: release only the exact scan that
+      // still owns this hash. If ownership moved to another terminal in the
+      // meantime, the precise predicate is a harmless no-op.
+      for (const item of activeItems) {
+        const terminalCondition =
+          item.terminalId === null
+            ? isNull(schema.codeRegistry.terminalId)
+            : eq(schema.codeRegistry.terminalId, item.terminalId);
+        await tx
+          .delete(schema.codeRegistry)
+          .where(
+            and(
+              eq(schema.codeRegistry.tenantId, tenantId),
+              eq(schema.codeRegistry.codeHash, item.codeHash),
+              eq(schema.codeRegistry.shiftId, item.shiftId),
+              terminalCondition,
+              eq(schema.codeRegistry.scannedAt, item.scannedAt),
+            ),
+          );
+      }
+
       // Same mechanics as the station's "disassemble" branch
       // (station-scans.service.ts): retire the box, release its live items.
       await tx
@@ -334,6 +381,138 @@ export class DisaggregationService {
       });
     }
     return this.getDocument(tenantId, documentId);
+  }
+
+  /**
+   * Everything the printed "Акт дезагрегации" needs (see `report.ts`). Only
+   * lines with a parseable SSCC make it onto the paper — unparseable input
+   * and duplicate markers are screen-only validation artifacts. With
+   * `includeContents`, each box's unit codes are resolved through
+   * `code_registry` (the winner row) into the partitioned `codes` table on
+   * all three PK columns. For a box disassembled BY this document the items
+   * were released with `removed_at = boxes.disassembled_at` (both stamped
+   * `now()` in the apply transaction), so contents are: live items OR items
+   * removed at the disassembly instant.
+   */
+  async reportData(
+    tenantId: string,
+    id: string,
+    includeContents: boolean,
+  ): Promise<DisaggregationReportData> {
+    const row = await this.findDocument(tenantId, id);
+    const lines = await this.listLines(tenantId, id);
+    const printable = lines.filter(
+      (line): line is (typeof lines)[number] & { sscc: string } => line.sscc !== null,
+    );
+
+    let reasonName: string | null = null;
+    if (row.reasonId) {
+      const [reason] = await this.db
+        .select({ name: schema.disaggregationReasons.name })
+        .from(schema.disaggregationReasons)
+        .where(
+          and(
+            eq(schema.disaggregationReasons.tenantId, tenantId),
+            eq(schema.disaggregationReasons.id, row.reasonId),
+          ),
+        );
+      reasonName = reason?.name ?? null;
+    }
+
+    const userIds = [
+      ...new Set([row.createdByUserId, ...(row.appliedByUserId ? [row.appliedByUserId] : [])]),
+    ];
+    const userRows = await this.db
+      .select({ id: schema.user.id, name: schema.user.name })
+      .from(schema.user)
+      .where(inArray(schema.user.id, userIds));
+    const userNameById = new Map(userRows.map((u) => [u.id, u.name]));
+
+    const [org] = await this.db
+      .select({
+        name: schema.organization.name,
+        inn: schema.orgProfiles.inn,
+        logo: schema.organization.logo,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .where(eq(schema.organization.id, tenantId));
+
+    const codesByBoxId = new Map<string, DisaggregationReportCode[]>();
+    if (includeContents) {
+      const boxIds = [
+        ...new Set(printable.map((line) => line.boxId).filter((b): b is string => b !== null)),
+      ];
+      if (boxIds.length > 0) {
+        const codeRows = await this.db
+          .select({
+            boxId: schema.boxItems.boxId,
+            gtin14: schema.codes.gtin14,
+            serial: schema.codes.serial,
+            rawKm: schema.codes.canonicalRaw,
+          })
+          .from(schema.boxItems)
+          .innerJoin(
+            schema.boxes,
+            and(
+              eq(schema.boxes.tenantId, schema.boxItems.tenantId),
+              eq(schema.boxes.id, schema.boxItems.boxId),
+            ),
+          )
+          // Join the hot code rows through the box item's own (codeHash,
+          // addedAt == the owning scan's scannedAt), NOT through
+          // code_registry: applying the document
+          // releases ownership by DELETING the registry rows (see
+          // applyDocument), so a registry join would silently drop the
+          // contents of every disassembled box from the printed report.
+          .innerJoin(
+            schema.codes,
+            and(
+              eq(schema.codes.tenantId, schema.boxItems.tenantId),
+              eq(schema.codes.codeHash, schema.boxItems.codeHash),
+              eq(schema.codes.scannedAt, schema.boxItems.addedAt),
+            ),
+          )
+          .where(
+            and(
+              eq(schema.boxItems.tenantId, tenantId),
+              inArray(schema.boxItems.boxId, boxIds),
+              isNull(schema.boxItems.displacedAt),
+              or(
+                isNull(schema.boxItems.removedAt),
+                eq(schema.boxItems.removedAt, schema.boxes.disassembledAt),
+              ),
+            ),
+          )
+          .orderBy(schema.codes.gtin14, schema.codes.serial);
+        for (const code of codeRows) {
+          const bucket = codesByBoxId.get(code.boxId);
+          const entry = { gtin14: code.gtin14, serial: code.serial, rawKm: code.rawKm };
+          if (bucket) bucket.push(entry);
+          else codesByBoxId.set(code.boxId, [entry]);
+        }
+      }
+    }
+
+    return {
+      docNo: row.docNo,
+      status: row.status,
+      createdAt: row.createdAt,
+      appliedAt: row.appliedAt,
+      org: org ? { name: org.name, inn: org.inn, logo: org.logo } : null,
+      createdByName: userNameById.get(row.createdByUserId) ?? null,
+      appliedByName: row.appliedByUserId ? (userNameById.get(row.appliedByUserId) ?? null) : null,
+      reasonName,
+      comment: row.comment,
+      includeContents,
+      lines: printable.map((line, index) => ({
+        n: index + 1,
+        sscc: line.sscc,
+        productName: line.productName,
+        codeCount: line.codeCount,
+        codes: line.boxId ? (codesByBoxId.get(line.boxId) ?? []) : [],
+      })),
+    };
   }
 
   // ---- shared helpers (Tasks 4-6 reuse these) ----

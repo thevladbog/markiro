@@ -119,6 +119,8 @@ export interface ShiftDto {
   mode: ShiftMode;
   productId: string;
   productName: string | null;
+  /** Short operator-facing product name; null = use `productName`. */
+  productPrintName: string | null;
   image?: ProductImageDescriptor | null;
   lineId: string | null;
   lineName: string | null;
@@ -337,6 +339,7 @@ const shiftRequiredFields = [
   "mode",
   "productId",
   "productName",
+  "productPrintName",
   "lineId",
   "lineName",
   "counterpartyId",
@@ -368,6 +371,7 @@ export const shiftOpenApiSchema = {
     mode: { type: "string", enum: [...SHIFT_MODES] },
     productId: { type: "string", format: "uuid" },
     productName: { type: "string", nullable: true },
+    productPrintName: { type: "string", nullable: true },
     image: productImageOpenApiSchema,
     lineId: nullableUuidOpenApiSchema,
     lineName: { type: "string", nullable: true },
@@ -422,6 +426,7 @@ const stationBundleProductOpenApiSchema = {
     "defaultCounterpartyId",
     "defaultLabelTemplateId",
     "unitPrice",
+    "printName",
     "egaisCode",
     "shelfLifeDays",
     "externalRef",
@@ -439,6 +444,7 @@ const stationBundleProductOpenApiSchema = {
     defaultCounterpartyId: nullableUuidOpenApiSchema,
     defaultLabelTemplateId: { type: "string", nullable: true, enum: [null] },
     unitPrice: { type: "string", nullable: true },
+    printName: { type: "string", nullable: true },
     egaisCode: { type: "string", nullable: true },
     shelfLifeDays: nullablePositiveIntegerOpenApiSchema,
     externalRef: { type: "string", nullable: true },
