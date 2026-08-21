@@ -460,6 +460,10 @@ The start gate requires:
 
 Automated tests do not replace this physical gate.
 
+The implemented P0 runbook uses the bundled read-only
+[`evidence:station-date`](../../../tools/evidence-package/station-date.mjs)
+diagnostic and a six-surface proof matrix for the Station mirror check.
+
 ### 12.2 Legacy baseline capture
 
 The legacy scan file remains deliberately simple:
@@ -478,6 +482,10 @@ A separate `baseline/old-box-index.csv` maps raw line number to:
 - duplicate photo references.
 
 Every repeated SSCC is photographed with the relevant physical box numbers. Photos preserve original metadata where available and receive content hashes. Public or shared copies may later be redacted, but originals remain private evidence under retention policy.
+
+For P0, “scanner payload” means the character string delivered by the configured
+HID or serial integration. The first controlled hash makes the stored UTF-8 file
+immutable; it does not claim proof of scanner-wire bytes.
 
 ### 12.3 Controlled transformation
 

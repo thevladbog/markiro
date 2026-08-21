@@ -9,11 +9,17 @@
 
 ## Используйте однозначные термины и форматы
 
-- **Payload сканера** — последовательность байтов одного считывания между
-  настроенными терминаторами сканера. Программа захвата удаляет только
-  терминатор `CR`, `LF` или `CRLF`, записывает остальные байты без изменений и
-  разделяет записи одним байтом `LF`. Файл использует UTF-8 и сохраняет все
-  остальные управляющие байты, включая GS1-разделитель `0x1D`.
+- **Payload сканера** — строка символов перед терминатором `CR`, `LF` или
+  `CRLF`, которую настроенная HID- или serial-интеграция передала потребителю.
+  HID-путь собирает `KeyboardEvent.key`. Текущий serial-путь применяет
+  `String::from_utf8_lossy`, находит терминатор и вызывает `trim()` до отправки
+  события. Поэтому payload уже может отличаться от транспортных байтов.
+- **Исходный файл** — текст UTF-8 с одной захваченной строкой на запись.
+  Выбранный путь захвата записывает полученный payload без дополнительного
+  изменения и добавляет один разделитель `LF`. Сохраните GS1-символ `U+001D`,
+  если он присутствует в полученной строке. При первом контрольном хеше байты
+  файла становятся неизменяемыми; последующие хеши подтверждают эти сохранённые
+  байты, а не байты сканера или serial-линии.
 - **Сопроводительная таблица (sidecar)** — CSV-файл, который ссылается на номер
   строки исходного файла и добавляет номер коробки, товар, дату и ссылки на
   доказательства. Он не копирует и не заменяет авторитетный старый SSCC.
@@ -46,10 +52,13 @@ corepack pnpm evidence:init -- evidence/INV-20260824-pilot-01 INV-20260824-pilot
 с поддерживаемой атомарной установкой файлов. Сначала выполните отдельную
 одноразовую репетицию на том же Windows-устройстве и носителе по воротам 5.
 
-Скопируйте рабочие шаблоны в созданный каталог, сохранив эти имена:
+Создайте каталог `exports/system/rehearsal-date/`. Скопируйте рабочие шаблоны в
+созданный каталог операции, сохранив эти имена:
 
 - `templates/old-box-index.csv` → `baseline/old-box-index.csv`;
 - `templates/reconciliation.csv` → `metrics/reconciliation.csv`;
+- `templates/production-date-proof.csv` →
+  `exports/system/rehearsal-date/production-date-proof.csv`;
 - `templates/customer-act.md` → `attestation/customer-act.md`;
 - `templates/consent.json` → `attestation/consent.json`;
 - `templates/backup-locations.txt` → `backup-locations.txt`.
@@ -70,6 +79,39 @@ corepack pnpm evidence:init -- evidence/INV-20260824-pilot-01 INV-20260824-pilot
 Оставьте `artifacts` пустым до начального запечатывания. Если `updatedAt`
 заполнено, инструмент использует его как время захвата нового артефакта; иначе
 запишет `capturedAt: null`.
+
+## Получите дату из зеркала Station без записи в базу
+
+Текущая Station загружает `sqlite:station-mirror.db`. Закреплённый в Cargo.lock
+`tauri-plugin-sql` 2.4.0 разрешает этот относительный URL от app-scoped каталога
+конфигурации Tauri `BaseDirectory::AppConfig`. Идентификатор приложения равен
+`app.markiro.station`, поэтому ожидаемый путь в Windows:
+
+```text
+%APPDATA%\app.markiro.station\station-mirror.db
+```
+
+Этот путь выведен из текущего кода и зависимости. Он не проверен на рабочем
+Windows-устройстве. Перед чтением закройте Station, чтобы зафиксировать снимок.
+В PowerShell задайте выбранные значения, проверьте файл и запустите диагностику:
+
+```powershell
+$operationRoot = 'D:\private-evidence\INV-20260824-pilot-01'
+$shiftId = '00000000-0000-0000-0000-000000000001'
+$stationDb = Join-Path $env:APPDATA 'app.markiro.station\station-mirror.db'
+$output = Join-Path $operationRoot 'exports\system\rehearsal-date\station-production-date.json'
+if (-not (Test-Path -LiteralPath $stationDb -PathType Leaf)) { throw 'Station DB not found' }
+corepack pnpm evidence:station-date -- $stationDb $shiftId $output
+```
+
+Замените только примерные корень операции и ID смены. Команда открывает SQLite
+в режиме `readOnly`, выполняет параметризованный запрос
+`SELECT id, production_date FROM shift_mirror WHERE id = ?`, требует ровно одну
+строку и отказывается перезаписывать существующий результат. Она записывает
+новый JSON через соседний временный файл и атомарную замену. Вывод содержит
+только версию, источник, ID смены, дату или `null` и время захвата. Команда не
+печатает путь к базе и не извлекает другие таблицы или поля. После `PASS`
+запустите Station снова.
 
 ## Свяжите фото с манифестом
 
@@ -197,6 +239,15 @@ rawLineNumber,physicalBoxNumber,product,printedProductionDate,note,duplicateGrou
 `rawLineNumber` — единственная авторитетная связь со старым SSCC. Сам SSCC в
 сопроводительной таблице не повторяется.
 
+`production-date-proof.csv`:
+
+```text
+surface,expectedProductionDate,observedProductionDate,actorNameOrId,actorRole,capturedAt,evidencePath,result,scopeBinding
+```
+
+Сохраните шесть строк шаблона в порядке DB, API, Admin, Station mirror, Label,
+Export. Не меняйте пути доказательств или заголовок.
+
 `reconciliation.csv`:
 
 ```text
@@ -209,11 +260,13 @@ recordType,counterId,value,unit,formula,evidenceSource,delta,explanation,accepte
 `acceptedByNameOrId`, `acceptedByRole` и `acceptedAt`. Не исправляйте исходные
 материалы, чтобы получить ноль.
 
-Вспомогательные строки `duplicate_group_first_occurrences`,
-`unique_legacy_first_occurrences` и `new_sscc_box_assignments` переводят число
-групп или уникальных идентификаторов в число соответствующих наблюдений либо
-назначений коробок. Поэтому каждый примитивный контроль вычитает величины в
-одной единице.
+Вспомогательные строки `physical_legacy_box_observations`,
+`legacy_scan_line_observations`, `duplicate_group_physical_box_observations`,
+`duplicate_group_first_occurrences`, `unique_legacy_first_occurrences` и
+`new_sscc_box_assignments` переводят физические коробки, строки, группы или
+уникальные идентификаторы в названные наблюдения либо назначения. Каждый
+примитивный контроль использует только операнды с одной буквальной единицей из
+столбца `unit`.
 
 Примитивный контроль — одна размерно согласованная проверочная дельта.
 `reconciliation_delta` считает только эти шесть примитивных контролей:
