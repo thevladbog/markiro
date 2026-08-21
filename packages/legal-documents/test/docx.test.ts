@@ -4,6 +4,12 @@ import { describe, expect, it } from "vitest";
 
 import * as legalDocuments from "../src/index.js";
 import {
+  findLegalDocument,
+  findLegalRelease,
+  legalVerificationUrl,
+  requireLegalContent,
+} from "../src/index.js";
+import {
   artifactFileName,
   renderLegalDocx,
   type LegalArtifactRequest,
@@ -446,5 +452,67 @@ describe("deterministic branded DOCX", () => {
 
     expect(() => normalizeZipDates(archive, "2026-08-15")).toThrow("local header signature");
     expect(archive).toEqual(malformedBytes);
+  });
+});
+
+describe("instruction rendering", () => {
+  const instructionRequest = {
+    code: "MKR-INS-01",
+    revision: "2026.08/01",
+    effectiveDate: "2026-08-21",
+    locale: "ru",
+    kind: "legal-pdf",
+    verificationUrl: legalVerificationUrl(findLegalRelease("MKR-INS-01")),
+  } as const satisfies LegalArtifactRequest;
+
+  // Minimal valid 1x1 PNG (89 PNG header + IHDR/IDAT/IEND).
+  const onePxPng = Uint8Array.from(
+    atob(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+    ),
+    (char) => char.charCodeAt(0),
+  );
+
+  // docx keys embedded media by a content hash of the image bytes
+  // (see ImageRun's `hashedId(options.data)`), so byte-identical fixtures
+  // across step images would collapse into a single media part regardless
+  // of how many blocks reference them. Append a per-id suffix to keep the
+  // fixtures distinct while still starting with a valid PNG payload that
+  // readPngDimensions can parse (it only inspects the leading signature and
+  // the fixed-offset IHDR width/height fields).
+  const instructionImages = () => {
+    const content = requireLegalContent(findLegalDocument("MKR-INS-01"), "ru");
+    const ids = content.sections
+      .flatMap(({ blocks }) => blocks)
+      .flatMap((block) => (block.kind === "step" && block.image ? [block.image.id] : []));
+    return new Map(
+      ids.map((id) => {
+        const suffix = new TextEncoder().encode(id);
+        const bytes = new Uint8Array(onePxPng.length + suffix.length);
+        bytes.set(onePxPng, 0);
+        bytes.set(suffix, onePxPng.length);
+        return [id, bytes];
+      }),
+    );
+  };
+
+  it("embeds one PNG media part per referenced step image", async () => {
+    const images = instructionImages();
+    const bytes = await renderLegalDocx(instructionRequest, { images });
+    const entries = docxEntries(bytes);
+    const media = Object.keys(entries).filter((name) => /^word\/media\/.*\.png$/.test(name));
+    // Header brand mark ships as SVG with a PNG fallback, so at least
+    // every instruction image adds a distinct PNG part.
+    expect(media.length).toBeGreaterThanOrEqual(images.size);
+    const documentXml = xml(entries, "word/document.xml");
+    expect(documentXml).toContain("Шаг 1.");
+    expect(documentXml).toContain("Ожидаемый результат");
+    expect(documentXml).toContain("Важно");
+  });
+
+  it("rejects rendering when a step image is missing", async () => {
+    await expect(renderLegalDocx(instructionRequest, { images: new Map() })).rejects.toThrow(
+      /Missing instruction image/,
+    );
   });
 });
