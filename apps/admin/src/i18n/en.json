@@ -447,7 +447,6 @@
         "name": "Name",
         "productGroup": "Group",
         "boxCapacity": "Per box",
-        "palletCapacity": "Per pallet",
         "status": "Status",
         "actions": "Actions"
       },

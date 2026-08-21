@@ -234,7 +234,7 @@ export function CatalogPage() {
         title: t("pages.catalog.table.image"),
         render: (row) => <ProductThumbnail product={row} />,
       },
-      { key: "name", title: t("pages.catalog.table.name") },
+      { key: "name", title: t("pages.catalog.table.name"), wrap: true },
       {
         key: "productGroup",
         title: t("pages.catalog.table.productGroup"),
@@ -246,13 +246,6 @@ export function CatalogPage() {
         align: "right",
         mono: true,
         render: (row) => row.boxCapacity ?? "—",
-      },
-      {
-        key: "palletCapacity",
-        title: t("pages.catalog.table.palletCapacity"),
-        align: "right",
-        mono: true,
-        render: (row) => row.palletCapacity ?? "—",
       },
       {
         key: "status",
