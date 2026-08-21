@@ -33,6 +33,10 @@ export function Input({
   prefix,
   suffix,
   size = "md",
+  // Почти все поля админки — данные других людей (ФИО сотрудника, номер бейджа),
+  // и браузерный автофилл подставляет туда email владельца. Поля, где автофилл
+  // уместен (логин, пароли, свой профиль), задают autoComplete явно.
+  autoComplete = "off",
   disabled,
   className,
   style,
@@ -108,6 +112,7 @@ export function Input({
         <input
           ref={inputRef}
           id={inputId}
+          autoComplete={autoComplete}
           disabled={disabled}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}
