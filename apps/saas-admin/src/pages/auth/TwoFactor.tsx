@@ -2,6 +2,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
+import { QRCodeSVG } from "qrcode.react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { z } from "zod";
 
@@ -104,6 +105,15 @@ export function TwoFactor() {
       {enrollment ? (
         <section className="enrollment-secrets" aria-label={t("auth.twoFactor.secretSurface")}>
           <p>{t("auth.twoFactor.secretWarning")}</p>
+          <QRCodeSVG
+            className="enrollment-qr"
+            value={enrollment.totpURI}
+            size={240}
+            level="M"
+            marginSize={4}
+            role="img"
+            aria-label={t("auth.twoFactor.qrAlt")}
+          />
           <code className="enrollment-uri">{enrollment.totpURI}</code>
           <h2>{t("auth.twoFactor.backupTitle")}</h2>
           <ul className="backup-codes">

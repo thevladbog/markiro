@@ -108,6 +108,26 @@ describe("platform authentication", () => {
     expect(screen.queryByRole("heading", { name: "Каталог" })).toBeNull();
   });
 
+  it("renders a scannable QR code and keeps the manual TOTP key during enrollment", async () => {
+    const state = authState({ session: readySession(false) });
+    renderSaasApp({
+      initialEntry: "/two-factor?mode=enroll",
+      state,
+      client: fakeAuthClient(state),
+    });
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Пароль"), "password-value");
+    await user.click(screen.getByRole("button", { name: "Создать ключ 2FA" }));
+
+    const qrCode = await screen.findByRole("img", {
+      name: "QR-код для настройки двухфакторной аутентификации",
+    });
+    expect(qrCode.tagName).toBe("svg");
+    expect(qrCode.querySelectorAll("path").length).toBeGreaterThan(0);
+    expect(screen.getByText(state.enrollment.totpURI)).toBeDefined();
+  });
+
   it("accepts a TOTP challenge and opens the protected catalog", async () => {
     window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");
     installCatalogApi();
