@@ -15,6 +15,15 @@ const release = {
   ACME_EMAIL: "ops@example.test",
 };
 
+const vbtechRelease = {
+  ...release,
+  VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${"c".repeat(40)}`,
+  VBTECH_DOMAIN: "v-b.tech",
+  VBTECH_WWW_DOMAIN: "www.v-b.tech",
+  VBTECH_FUNCTION_ORIGIN: "https://functions.yandexcloud.net/d4example",
+  VBTECH_SUBMISSION_STATE: "disabled",
+};
+
 test("documents every digest selector input and output in the preflight interface", async () => {
   const source = await readFile(new URL("../preflight.mjs", import.meta.url), "utf8");
 
@@ -90,6 +99,56 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
     edgeMode: "direct",
   });
 });
+
+test("accepts a complete isolated v-b overlay and derives only bounded Caddy inputs", async () => {
+  let validatedEnvironment;
+  const result = await runPreflight(vbtechRelease, {
+    ...dependencies(),
+    composeQuiet: async (environment) => {
+      validatedEnvironment = environment;
+    },
+  });
+
+  assert.equal(result.vbtechImageTag, vbtechRelease.VBTECH_IMAGE_TAG);
+  assert.equal(result.vbtechReleaseSha, "c".repeat(40));
+  assert.equal(result.vbtechDomain, "v-b.tech");
+  assert.equal(result.vbtechWwwDomain, "www.v-b.tech");
+  assert.equal(result.vbtechFunctionPath, "/d4example");
+  assert.equal(result.vbtechSubmissionState, "disabled");
+  assert.equal(validatedEnvironment.VBTECH_RELEASE_SHA, "c".repeat(40));
+  assert.equal(validatedEnvironment.VBTECH_FUNCTION_PATH, "/d4example");
+  assert.equal(validatedEnvironment.VBTECH_SUBMISSION_STATE, "disabled");
+});
+
+for (const [name, overrides, expected] of [
+  ["partial overlay", { VBTECH_FUNCTION_ORIGIN: undefined }, "VBTECH_FUNCTION_ORIGIN is invalid"],
+  [
+    "mutable image",
+    { VBTECH_IMAGE_TAG: "ghcr.io/thevladbog/vbtech-web:latest" },
+    "VBTECH_IMAGE_TAG is invalid",
+  ],
+  ["wrong apex", { VBTECH_DOMAIN: "vb.tech" }, "VBTECH_DOMAIN is invalid"],
+  ["wrong www", { VBTECH_WWW_DOMAIN: "www2.v-b.tech" }, "VBTECH_WWW_DOMAIN is invalid"],
+  [
+    "insecure function",
+    { VBTECH_FUNCTION_ORIGIN: "http://functions.yandexcloud.net/d4example" },
+    "VBTECH_FUNCTION_ORIGIN is invalid",
+  ],
+  [
+    "foreign function host",
+    { VBTECH_FUNCTION_ORIGIN: "https://example.test/d4example" },
+    "VBTECH_FUNCTION_ORIGIN is invalid",
+  ],
+  [
+    "function query",
+    { VBTECH_FUNCTION_ORIGIN: "https://functions.yandexcloud.net/d4example?token=private" },
+    "VBTECH_FUNCTION_ORIGIN is invalid",
+  ],
+  ["unknown state", { VBTECH_SUBMISSION_STATE: "private" }, "VBTECH_SUBMISSION_STATE is invalid"],
+]) {
+  test(`rejects ${name} v-b configuration without disclosing it`, () =>
+    assertRejected({ ...vbtechRelease, ...overrides }, expected));
+}
 
 test("requires ACME email for the only supported direct edge mode", async () => {
   await assertRejected({ ...release, ACME_EMAIL: undefined }, "ACME_EMAIL is invalid");

@@ -10,6 +10,8 @@ const expectedApplicationCsp =
 const smartCaptchaOrigin = "https://smartcaptcha.cloud.yandex.ru";
 const expectedLandingCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+const expectedVbtechCsp =
+  "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const publicLandingBuildVariables = Object.freeze([
   "PUBLIC_DEMO_SUBMISSION_ENABLED",
   "PUBLIC_SMARTCAPTCHA_CLIENT_KEY",
@@ -31,6 +33,8 @@ const commerceMlProxyTimeouts = Object.freeze({
 const adminHost = "admin.example.test";
 const kioskHost = "kiosk.example.test";
 const landingHost = "markiro.example.test";
+const vbtechHost = "v-b.tech";
+const vbtechWwwHost = "www.v-b.tech";
 const kioskReservedPatterns = Object.freeze([
   "/api",
   "/api/auth/*",
@@ -382,7 +386,7 @@ function assertAuthorityContract(adapted, { alb }) {
         .flatMap((candidate) => candidate.host),
     ),
   ].sort();
-  assert.deepEqual(hosts, [adminHost, kioskHost, landingHost].sort());
+  assert.deepEqual(hosts, [adminHost, kioskHost, landingHost, vbtechHost, vbtechWwwHost].sort());
 
   const admin = applicationRoute(adapted, adminHost);
   const kiosk = applicationRoute(adapted, kioskHost);
@@ -674,6 +678,28 @@ function dockerfileInstructions(dockerfile) {
   assert.equal(logicalLine, "", "Dockerfile must not end with an unterminated continuation");
   return instructions;
 }
+
+test("v-b authorities are exact, isolated, canonical and expose only the approved contact proxy", async () => {
+  const caddy = await readFile("deploy/production/Caddyfile", "utf8");
+
+  assert.match(caddy, /^http:\/\/v-b\.tech:8080 \{$/m);
+  assert.match(caddy, /^http:\/\/www\.v-b\.tech:8080 \{$/m);
+  assert.match(caddy, /^https:\/\/v-b\.tech:8443 \{$/m);
+  assert.match(caddy, /^https:\/\/www\.v-b\.tech:8443 \{$/m);
+  assert.match(caddy, /redir https:\/\/v-b\.tech\{uri\} permanent/);
+  assert.match(caddy, /reverse_proxy vbtech-web:8080/);
+  assert.match(caddy, /method POST[\s\S]*path \/api\/contact/);
+  assert.match(caddy, /request_body \{[\s\S]*max_size 16KB/);
+  assert.match(caddy, /rewrite \* \{env\.VBTECH_FUNCTION_PATH\}/);
+  assert.match(caddy, /reverse_proxy https:\/\/functions\.yandexcloud\.net/);
+  assert.match(caddy, /@vbtechReserved path \/api \/api\/\*/);
+  assert.match(caddy, /Content-Security-Policy "([^"]+)"/);
+  assert.ok(caddy.includes(expectedVbtechCsp));
+  const apexBlock = caddy.match(/^https:\/\/v-b\.tech:8443 \{\n([\s\S]*?)^\}/m)?.[1] ?? "";
+  assert.match(apexBlock, /import vbtech_headers/);
+  assert.match(apexBlock, /import vbtech_routes/);
+  assert.doesNotMatch(apexBlock, /admin_routes|kiosk_routes|landing_routes|common_headers/);
+});
 
 function dockerfileStageInstructions(dockerfile, stageName) {
   const instructions = dockerfileInstructions(dockerfile);
@@ -1015,7 +1041,7 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
   }
 });
 
-test("direct Caddy adapter isolates the admin, kiosk and landing authorities", async () => {
+test("direct Caddy adapter isolates the Markiro and v-b authorities", async () => {
   const directSource = await readFile("deploy/production/Caddyfile", "utf8");
   const direct = assertAuthorityContract(await adaptCaddy(directSource), { alb: false });
   assert.deepEqual(direct.adminTransports, [

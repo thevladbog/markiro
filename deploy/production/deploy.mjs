@@ -22,6 +22,7 @@ import { landingDemoSubmissionState, productionBaseUrls, runSmoke } from "./smok
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
+const vbtechRepository = "ghcr.io/thevladbog/vbtech-web";
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 600_000;
@@ -217,6 +218,63 @@ function requireApprovedDigest(expected, output) {
   return expected;
 }
 
+function requireApprovedTag(expected, output) {
+  let repoTags;
+  try {
+    repoTags = JSON.parse(output);
+  } catch {
+    throw new Error("approved image tag is not present");
+  }
+  if (
+    !Array.isArray(repoTags) ||
+    !repoTags.every((value) => typeof value === "string") ||
+    !repoTags.includes(expected)
+  )
+    throw new Error("approved image tag is not present");
+  return expected;
+}
+
+function isVbtechRelease(value) {
+  return (
+    value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    typeof value.imageTag === "string" &&
+    value.imageTag.startsWith(`${vbtechRepository}:`) &&
+    /^[0-9a-f]{40}$/.test(value.imageTag.slice(`${vbtechRepository}:`.length)) &&
+    typeof value.releaseSha === "string" &&
+    /^[0-9a-f]{40}$/.test(value.releaseSha) &&
+    value.imageTag === `${vbtechRepository}:${value.releaseSha}` &&
+    typeof value.functionPath === "string" &&
+    /^\/[A-Za-z0-9_-]+$/.test(value.functionPath) &&
+    (value.submissionState === "disabled" || value.submissionState === "enabled") &&
+    Object.keys(value).sort().join(",") === "functionPath,imageTag,releaseSha,submissionState"
+  );
+}
+
+function vbtechReleaseFromPreflight(preflight) {
+  if (preflight.vbtechImageTag === undefined) return undefined;
+  const value = {
+    imageTag: preflight.vbtechImageTag,
+    releaseSha: preflight.vbtechReleaseSha,
+    functionPath: preflight.vbtechFunctionPath,
+    submissionState: preflight.vbtechSubmissionState,
+  };
+  if (!isVbtechRelease(value)) throw new Error("approved v-b release is invalid");
+  return value;
+}
+
+function environmentWithVbtech(environment, vbtech) {
+  if (!vbtech) return environment;
+  return {
+    ...environment,
+    VBTECH_IMAGE_TAG: vbtech.imageTag,
+    VBTECH_RELEASE_SHA: vbtech.releaseSha,
+    VBTECH_FUNCTION_PATH: vbtech.functionPath,
+    VBTECH_SUBMISSION_STATE: vbtech.submissionState,
+  };
+}
+
 function isValidIsoDate(value) {
   if (typeof value !== "string") return false;
   const date = new Date(value);
@@ -232,6 +290,7 @@ function isHealthyRelease(release, filename, metadata) {
     (release.previousTag === null || /^[0-9a-f]{40}$/.test(release.previousTag)) &&
     isDigestFor(apiRepository, release.apiDigest) &&
     isDigestFor(edgeRepository, release.edgeDigest) &&
+    (release.vbtech === undefined || isVbtechRelease(release.vbtech)) &&
     isValidIsoDate(release.createdAt) &&
     (filename === releaseFileName(release.createdAt, release.tag) ||
       filename === stagedReleaseFileName(release, "healthy")) &&
@@ -246,6 +305,7 @@ function sameRelease(left, right) {
     left?.previousTag === right?.previousTag &&
     left?.apiDigest === right?.apiDigest &&
     left?.edgeDigest === right?.edgeDigest &&
+    JSON.stringify(left?.vbtech) === JSON.stringify(right?.vbtech) &&
     left?.state === right?.state &&
     left?.createdAt === right?.createdAt
   );
@@ -260,8 +320,12 @@ function isStagedRelease(release, state) {
     (release.previousTag === null || /^[0-9a-f]{40}$/.test(release.previousTag)) &&
     isDigestFor(apiRepository, release.apiDigest) &&
     isDigestFor(edgeRepository, release.edgeDigest) &&
+    (release.vbtech === undefined || isVbtechRelease(release.vbtech)) &&
     isValidIsoDate(release.createdAt) &&
-    Object.keys(release).sort().join(",") === "apiDigest,createdAt,edgeDigest,previousTag,state,tag"
+    Object.keys(release).sort().join(",") ===
+      (release.vbtech === undefined
+        ? "apiDigest,createdAt,edgeDigest,previousTag,state,tag"
+        : "apiDigest,createdAt,edgeDigest,previousTag,state,tag,vbtech")
   );
 }
 
@@ -472,15 +536,20 @@ export async function prepareRelease(options, supplied = {}) {
   const dependencies = deploymentDependencies(options, supplied);
   dependencies.log("preflight");
   const preflight = await dependencies.runPreflight(options.environment);
-  const environment = {
-    ...process.env,
-    ...options.environment,
-    MARKIRO_ENV_FILE: preflight.envFile,
-  };
+  const vbtech = vbtechReleaseFromPreflight(preflight);
+  const environment = environmentWithVbtech(
+    {
+      ...process.env,
+      ...options.environment,
+      MARKIRO_ENV_FILE: preflight.envFile,
+    },
+    vbtech,
+  );
   const releaseDirectory = options.releaseDirectory || ".markiro-releases";
   const compose = productionComposeArgs(environment);
   const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
   const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
+  const services = ["api", "edge", ...(vbtech ? ["vbtech-web"] : [])];
   let candidate;
   let switched = false;
 
@@ -498,7 +567,7 @@ export async function prepareRelease(options, supplied = {}) {
     await mustRun(
       dependencies,
       "docker",
-      [...compose, "pull", "api", "edge"],
+      [...compose, "pull", ...services],
       environment,
       dependencies.timeouts.pull,
     );
@@ -516,11 +585,28 @@ export async function prepareRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.command,
     );
+    const vbtechImage = vbtech
+      ? await mustRun(
+          dependencies,
+          "docker",
+          ["image", "inspect", "--format", "{{json .RepoTags}}", vbtech.imageTag],
+          environment,
+          dependencies.timeouts.command,
+        )
+      : undefined;
     candidate = {
       tag: preflight.imageTag,
       previousTag: previous?.tag ?? null,
       apiDigest: requireApprovedDigest(approvedApiImage, api.stdout.trim()),
       edgeDigest: requireApprovedDigest(approvedEdgeImage, edge.stdout.trim()),
+      ...(vbtech
+        ? {
+            vbtech: {
+              ...vbtech,
+              imageTag: requireApprovedTag(vbtech.imageTag, vbtechImage.stdout.trim()),
+            },
+          }
+        : {}),
       state: "pending",
       createdAt: dependencies.now().toISOString(),
     };
@@ -543,10 +629,18 @@ export async function prepareRelease(options, supplied = {}) {
       dependencies.timeouts.service,
     );
     await waitForApi(dependencies, options, compose, environment);
+    if (vbtech)
+      await mustRun(
+        dependencies,
+        "docker",
+        [...compose, "up", "-d", "--no-deps", "vbtech-web"],
+        environment,
+        dependencies.timeouts.service,
+      );
     await mustRun(
       dependencies,
       "docker",
-      [...compose, "up", "-d", "--no-deps", "edge"],
+      [...compose, "up", "-d", ...(vbtech ? [] : ["--no-deps"]), "edge"],
       environment,
       dependencies.timeouts.service,
     );
@@ -597,7 +691,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
       await mustRun(
         dependencies,
         "docker",
-        [...compose, "stop", "api", "edge"],
+        [...compose, "stop", "api", "edge", ...(candidate.vbtech ? ["vbtech-web"] : [])],
         environment,
         dependencies.timeouts.service,
       );
@@ -615,18 +709,27 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     return failed;
   }
   const previous = await healthyReleaseByTag(options.releaseDirectory, candidate.previousTag);
-  const environment = {
-    ...process.env,
-    ...options.environment,
-    MARKIRO_IMAGE_TAG: previous.tag,
-    MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
-    MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
-  };
+  const candidateVbtechEnvironment = candidate.vbtech
+    ? environmentWithVbtech({ ...process.env, ...options.environment }, candidate.vbtech)
+    : undefined;
+  const candidateVbtechCompose = candidateVbtechEnvironment
+    ? productionComposeArgs(candidateVbtechEnvironment)
+    : undefined;
+  const environment = environmentWithVbtech(
+    {
+      ...process.env,
+      ...options.environment,
+      MARKIRO_IMAGE_TAG: previous.tag,
+      MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
+      MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
+    },
+    previous.vbtech,
+  );
   const compose = productionComposeArgs(environment);
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "pull", "api", "edge"],
+    [...compose, "pull", "api", "edge", ...(previous.vbtech ? ["vbtech-web"] : [])],
     environment,
     dependencies.timeouts.pull,
   );
@@ -638,14 +741,30 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     dependencies.timeouts.service,
   );
   await waitForApi(dependencies, options, compose, environment);
+  if (previous.vbtech)
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "up", "-d", "--no-deps", "vbtech-web"],
+      environment,
+      dependencies.timeouts.service,
+    );
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "up", "-d", "--no-deps", "edge"],
+    [...compose, "up", "-d", ...(previous.vbtech ? [] : ["--no-deps"]), "edge"],
     environment,
     dependencies.timeouts.service,
   );
   await waitForEdgeTls(dependencies, options);
+  if (candidate.vbtech && !previous.vbtech)
+    await mustRun(
+      dependencies,
+      "docker",
+      [...candidateVbtechCompose, "stop", "vbtech-web"],
+      candidateVbtechEnvironment,
+      dependencies.timeouts.service,
+    );
   dependencies.log("release rolled back");
   return markPreparedReleaseFailed(options.releaseDirectory, candidate);
 }
@@ -656,6 +775,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
  * @property {string | null} previousTag
  * @property {string} apiDigest
  * @property {string} edgeDigest
+ * @property {{imageTag: string, releaseSha: string, functionPath: string, submissionState: "disabled" | "enabled"}=} vbtech
  * @property {"pending" | "healthy" | "failed"} state
  * @property {string} createdAt
  */
@@ -703,26 +823,31 @@ export async function deployRelease(options, supplied = {}) {
   };
   dependencies.log("preflight");
   const preflight = await dependencies.runPreflight(options.environment);
+  const vbtech = vbtechReleaseFromPreflight(preflight);
   const demoSubmissionState = landingDemoSubmissionState(
     options.environment.MARKIRO_LANDING_DEMO_SUBMISSION_STATE ?? "disabled",
   );
-  const environment = {
-    ...process.env,
-    ...options.environment,
-    MARKIRO_ENV_FILE: preflight.envFile,
-  };
+  const environment = environmentWithVbtech(
+    {
+      ...process.env,
+      ...options.environment,
+      MARKIRO_ENV_FILE: preflight.envFile,
+    },
+    vbtech,
+  );
   const releaseDirectory = options.releaseDirectory || ".markiro-releases";
   const compose = productionComposeArgs(environment);
   const tag = preflight.imageTag;
   const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
   const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
+  const services = ["api", "edge", ...(vbtech ? ["vbtech-web"] : [])];
   let release;
 
   try {
     await mustRun(
       dependencies,
       "docker",
-      [...compose, "pull", "api", "edge"],
+      [...compose, "pull", ...services],
       environment,
       dependencies.timeouts.pull,
     );
@@ -740,11 +865,28 @@ export async function deployRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.command,
     );
+    const vbtechImage = vbtech
+      ? await mustRun(
+          dependencies,
+          "docker",
+          ["image", "inspect", "--format", "{{json .RepoTags}}", vbtech.imageTag],
+          environment,
+          dependencies.timeouts.command,
+        )
+      : undefined;
     release = {
       tag,
       previousTag: await latestHealthyRelease(releaseDirectory),
       apiDigest: requireApprovedDigest(approvedApiImage, api.stdout.trim()),
       edgeDigest: requireApprovedDigest(approvedEdgeImage, edge.stdout.trim()),
+      ...(vbtech
+        ? {
+            vbtech: {
+              ...vbtech,
+              imageTag: requireApprovedTag(vbtech.imageTag, vbtechImage.stdout.trim()),
+            },
+          }
+        : {}),
       state: "pending",
       createdAt: dependencies.now().toISOString(),
     };
@@ -792,10 +934,19 @@ export async function deployRelease(options, supplied = {}) {
     }
     if (!ready) throw new Error("API readiness failed");
 
+    if (vbtech)
+      await mustRun(
+        dependencies,
+        "docker",
+        [...compose, "up", "-d", "--no-deps", "vbtech-web"],
+        environment,
+        dependencies.timeouts.service,
+      );
+
     await mustRun(
       dependencies,
       "docker",
-      [...compose, "up", "-d", "--no-deps", "edge"],
+      [...compose, "up", "-d", ...(vbtech ? [] : ["--no-deps"]), "edge"],
       environment,
       dependencies.timeouts.service,
     );
@@ -807,6 +958,14 @@ export async function deployRelease(options, supplied = {}) {
         adminBaseUrl: baseUrls.admin,
         kioskBaseUrl: baseUrls.kiosk,
         landingBaseUrl: baseUrls.landing,
+        ...(vbtech
+          ? {
+              vbtechBaseUrl: baseUrls.vbtech,
+              vbtechWwwBaseUrl: baseUrls.vbtechWww,
+              expectedVbtechReleaseSha: vbtech.releaseSha,
+              vbtechSubmissionState: vbtech.submissionState,
+            }
+          : {}),
         expectedReleaseSha: tag,
         landingDemoSubmissionState: demoSubmissionState,
       });

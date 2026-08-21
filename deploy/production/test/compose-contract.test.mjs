@@ -6,6 +6,7 @@ import { load as loadYaml } from "js-yaml";
 
 const productionCompose = "compose.production.yml";
 const ciCompose = "deploy/production/compose.ci.yml";
+const vbtechCompose = "deploy/production/compose.vbtech.yml";
 const envExample = ".env.production.example";
 const apiDigest = `sha256:${"a".repeat(64)}`;
 const edgeDigest = `sha256:${"b".repeat(64)}`;
@@ -171,6 +172,82 @@ test("production Compose contains only hardened application services", async () 
   ]) {
     assert.doesNotMatch(compose, forbidden);
   }
+});
+
+test("v-b overlay adds one isolated internal web service without publishing host ports", async () => {
+  const compose = await readFile(vbtechCompose, "utf8");
+  const model = loadYaml(compose);
+  const services = Object.keys(model.services);
+
+  assert.deepEqual(services, ["vbtech-web", "edge"]);
+  assert.equal(
+    model.services["vbtech-web"].image,
+    "${VBTECH_IMAGE_TAG:?VBTECH_IMAGE_TAG is required}",
+  );
+  assert.equal(model.services["vbtech-web"].restart, "unless-stopped");
+  assert.deepEqual(model.services["vbtech-web"].expose, ["8080"]);
+  assert.equal(model.services["vbtech-web"].ports, undefined);
+  assert.equal(model.services["vbtech-web"].read_only, true);
+  assert.deepEqual(model.services["vbtech-web"].cap_drop, ["ALL"]);
+  assert.deepEqual(model.services["vbtech-web"].security_opt, ["no-new-privileges:true"]);
+  assert.deepEqual(model.services.edge.depends_on["vbtech-web"], {
+    condition: "service_healthy",
+  });
+  assert.equal(model.services.edge.environment.VBTECH_RELEASE_SHA, "${VBTECH_RELEASE_SHA}");
+  assert.equal(model.services.edge.environment.VBTECH_FUNCTION_PATH, "${VBTECH_FUNCTION_PATH}");
+  assert.equal(
+    model.services.edge.environment.VBTECH_SUBMISSION_STATE,
+    "${VBTECH_SUBMISSION_STATE}",
+  );
+});
+
+test("merged v-b Compose preserves Markiro services and wires only bounded edge inputs", () => {
+  const releaseSha = "d".repeat(40);
+  const configured = execFileSync(
+    "docker",
+    [
+      "compose",
+      "--env-file",
+      envExample,
+      "-f",
+      productionCompose,
+      "-f",
+      vbtechCompose,
+      "config",
+      "--format",
+      "json",
+    ],
+    {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        ACME_EMAIL: "ops@example.test",
+        MARKIRO_DOMAIN: "localhost",
+        MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
+        MARKIRO_LANDING_DOMAIN: "landing.localhost",
+        MARKIRO_ENV_FILE: envExample,
+        MARKIRO_IMAGE_TAG: "a".repeat(40),
+        MARKIRO_API_IMAGE_DIGEST: apiDigest,
+        MARKIRO_EDGE_IMAGE_DIGEST: edgeDigest,
+        VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${releaseSha}`,
+        VBTECH_RELEASE_SHA: releaseSha,
+        VBTECH_FUNCTION_PATH: "/d4example",
+        VBTECH_SUBMISSION_STATE: "disabled",
+      },
+    },
+  );
+  const model = JSON.parse(configured);
+
+  assert.deepEqual(Object.keys(model.services).sort(), ["api", "edge", "migrate", "vbtech-web"]);
+  assert.equal(model.services["vbtech-web"].image, `ghcr.io/thevladbog/vbtech-web:${releaseSha}`);
+  assert.equal(model.services["vbtech-web"].ports, undefined);
+  assert.equal(model.services.edge.environment.VBTECH_RELEASE_SHA, releaseSha);
+  assert.equal(model.services.edge.environment.VBTECH_FUNCTION_PATH, "/d4example");
+  assert.equal(model.services.edge.environment.VBTECH_SUBMISSION_STATE, "disabled");
+  assert.deepEqual(model.services.edge.depends_on["vbtech-web"], {
+    condition: "service_healthy",
+    required: true,
+  });
 });
 
 test("production Compose contract rejects a SHA-tag fallback mutation", async () => {

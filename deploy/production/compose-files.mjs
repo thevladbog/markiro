@@ -1,4 +1,5 @@
 const BASE_COMPOSE_FILE = "compose.production.yml";
+const VBTECH_COMPOSE_FILE = "deploy/production/compose.vbtech.yml";
 export const PRODUCTION_COMPOSE_PROJECT = "markiro-production";
 
 /**
@@ -6,7 +7,9 @@ export const PRODUCTION_COMPOSE_PROJECT = "markiro-production";
  * Every validation and lifecycle command must consume this list unchanged.
  */
 export function productionComposeFiles(environment) {
-  return [BASE_COMPOSE_FILE];
+  return environment.VBTECH_IMAGE_TAG
+    ? [BASE_COMPOSE_FILE, VBTECH_COMPOSE_FILE]
+    : [BASE_COMPOSE_FILE];
 }
 
 export function productionComposeArgs(environment, { includeCiOverlay = false } = {}) {

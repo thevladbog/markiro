@@ -7,8 +7,10 @@ import {
   LANDING_ROUTE_CHECKS,
   productionBaseUrls,
   ROUTE_CHECKS,
+  VBTECH_ROUTE_CHECKS,
   runPublicSmoke,
   runSmoke,
+  runVbtechSmoke,
 } from "../smoke.mjs";
 
 const csp =
@@ -211,6 +213,21 @@ function response({ status = 200, body = "{}", headers = {}, cspPolicy = csp } =
 
 function landingResponse(options = {}) {
   return response({ ...options, cspPolicy: landingCsp });
+}
+
+function vbtechResponse({ status = 200, body = "{}", headers = {} } = {}) {
+  return response({
+    status,
+    body,
+    cspPolicy:
+      "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests",
+    headers: {
+      "x-frame-options": "DENY",
+      "permissions-policy": "camera=(), geolocation=(), microphone=(), payment=(), usb=()",
+      "x-vbtech-release-sha": "c".repeat(40),
+      ...headers,
+    },
+  });
 }
 
 function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
@@ -927,6 +944,66 @@ test("defines the complete immutable public-route smoke contract", () => {
     ["GET", "/missing/", "branded-not-found"],
   ]);
   for (const check of LANDING_ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
+
+  assert.ok(Object.isFrozen(VBTECH_ROUTE_CHECKS));
+  assert.deepEqual(VBTECH_ROUTE_CHECKS, [
+    ["GET", "/", "vbtech-page"],
+    ["GET", "/en/", "vbtech-page"],
+    ["GET", "/legal/", "vbtech-page"],
+    ["GET", "/privacy/", "vbtech-page"],
+    ["GET", "/personal-data-consent/", "vbtech-page"],
+    ["GET", "/api/contact", "not-found"],
+    ["POST", "/api/contact/", "not-found"],
+    ["POST", "/api/other", "not-found"],
+    ["GET", "/api/auth/get-session", "not-found"],
+    ["GET", "/station/bootstrap", "vbtech-not-found"],
+    ["GET", "/kiosk/bootstrap", "vbtech-not-found"],
+    ["POST", "/api/contact", "contact-state"],
+  ]);
+  for (const check of VBTECH_ROUTE_CHECKS) assert.ok(Object.isFrozen(check));
+});
+
+test("v-b smoke verifies independent release identity, canonical redirect and exact API surface", async () => {
+  const releaseSha = "c".repeat(40);
+  const requests = [];
+  const html = `<!doctype html><html data-theme="light"><head><meta name="vbtech-release-sha" content="${releaseSha}"></head><body></body></html>`;
+  const client = {
+    async request(url, init) {
+      const target = new URL(url);
+      requests.push([init.method, target.hostname, target.pathname]);
+      if (target.hostname === "www.v-b.tech")
+        return vbtechResponse({
+          status: 308,
+          headers: { location: `https://v-b.tech${target.pathname}` },
+        });
+      if (target.pathname === "/api/contact" && init.method === "POST")
+        return vbtechResponse({ status: 404, body: '{"code":"submission_disabled"}' });
+      if (target.pathname.startsWith("/api/")) return vbtechResponse({ status: 404 });
+      if (target.pathname === "/station/bootstrap" || target.pathname === "/kiosk/bootstrap")
+        return vbtechResponse({
+          status: 404,
+          body: html,
+          headers: { "content-type": "text/html" },
+        });
+      return vbtechResponse({ body: html, headers: { "content-type": "text/html" } });
+    },
+  };
+
+  await runVbtechSmoke(
+    {
+      vbtechBaseUrl: "https://v-b.tech",
+      vbtechWwwBaseUrl: "https://www.v-b.tech",
+      expectedVbtechReleaseSha: releaseSha,
+      vbtechSubmissionState: "disabled",
+    },
+    client,
+  );
+
+  assert.deepEqual(requests.at(-1), ["GET", "www.v-b.tech", "/canonical-check"]);
+  assert.equal(
+    requests.filter(([, host, path]) => host === "v-b.tech" && path === "/api/contact").length,
+    2,
+  );
 });
 
 test("smokes public routing, headers, and unprivileged runtime without accepting a proxied SPA", async () => {

@@ -49,6 +49,50 @@
 	}
 }
 
+(vbtech_headers) {
+	encode zstd gzip
+
+	header {
+		defer
+		-Server
+		X-Vbtech-Release-Sha "{env.VBTECH_RELEASE_SHA}"
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests"
+	}
+}
+
+(vbtech_routes) {
+	route {
+		@vbtechContact {
+			method POST
+			path /api/contact
+			vars {env.VBTECH_SUBMISSION_STATE} enabled
+		}
+		handle @vbtechContact {
+			request_body {
+				max_size 16KB
+			}
+			rewrite * {env.VBTECH_FUNCTION_PATH}
+			reverse_proxy https://functions.yandexcloud.net {
+				import standard_api_transport
+			}
+		}
+
+		@vbtechReserved path /api /api/*
+		handle @vbtechReserved {
+			respond 404
+		}
+
+		reverse_proxy vbtech-web:8080 {
+			import standard_api_transport
+		}
+	}
+}
+
 (admin_routes) {
 	root * /srv/admin
 	route {
@@ -281,6 +325,14 @@ http://{$MARKIRO_LANDING_DOMAIN}:8080 {
 	redir https://{$MARKIRO_LANDING_DOMAIN}{uri} permanent
 }
 
+http://v-b.tech:8080 {
+	redir https://v-b.tech{uri} permanent
+}
+
+http://www.v-b.tech:8080 {
+	redir https://v-b.tech{uri} permanent
+}
+
 https://{$MARKIRO_DOMAIN}:8443 {
 	import common_headers
 	import application_csp
@@ -297,4 +349,14 @@ https://{$MARKIRO_LANDING_DOMAIN}:8443 {
 	import common_headers
 	import landing_csp
 	import landing_routes
+}
+
+https://v-b.tech:8443 {
+	import vbtech_headers
+	import vbtech_routes
+}
+
+https://www.v-b.tech:8443 {
+	import vbtech_headers
+	redir https://v-b.tech{uri} permanent
 }
