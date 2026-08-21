@@ -801,6 +801,11 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
   // "waiting" is a freshly opened shift: no scan has landed yet, so the
   // journal-backed counters and recent-operations list must be empty too --
   // not the mid-shift numbers a screen with an actual scan history would show.
+  // "ok" (validation-mode, no box panel) falls through here as non-waiting on
+  // purpose: it needs `operations[0]` populated below so ScanResultInstrument
+  // renders the real inline compact-success panel -- the accepted verdict's
+  // ONLY visible feedback in production (see the module doc comment above
+  // `SignalFixture`).
   const waiting = mode === "validation" || mode === "aggregation-waiting";
   const workLabels = buildWorkLabels(t, locale, 1);
   const operations = waiting ? [] : galleryRecentOperations();
@@ -948,6 +953,13 @@ function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: Gall
  * line (see `onOutcome`'s `detail` computation, which stays `undefined` for
  * every non-duplicate status).
  */
+/**
+ * "duplicate"/"error" only -- "ok" is not a signal-overlay state in
+ * production (WorkScreen.tsx's `publishVerdict` returns early for tone
+ * "ok", so the accepted verdict never gets a full-screen flash); its gallery
+ * id (`work-ok`) instead goes through `WorkFixture`'s "ok" mode below, which
+ * renders the real inline compact-success panel.
+ */
 function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }) {
   const t = i18n.getFixedT(locale);
   if (tone === "duplicate") {
@@ -960,13 +972,10 @@ function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }
       />
     );
   }
-  if (tone === "error") {
-    // Any of signal.wrongCode/wrongGtin/systemError is a faithful "red
-    // verdict" -- this picks the wrong-GTIN case (a scan for a different,
-    // known product) as the representative example.
-    return <SignalOverlay tone="error" title={t("signal.wrongGtin")} />;
-  }
-  return <SignalOverlay tone="ok" title={t("signal.ok")} detail="DEMO-SERIAL-000128" />;
+  // Any of signal.wrongCode/wrongGtin/systemError is a faithful "red
+  // verdict" -- this picks the wrong-GTIN case (a scan for a different,
+  // known product) as the representative example.
+  return <SignalOverlay tone="error" title={t("signal.wrongGtin")} />;
 }
 
 /**
