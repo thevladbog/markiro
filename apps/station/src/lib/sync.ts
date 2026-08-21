@@ -147,6 +147,12 @@ interface ConflictStatusResponse {
   reviewedCodeHashes: string[];
 }
 
+interface CodeReleaseResponse {
+  until: string;
+  releasedCodeHashes: string[];
+  nextCursor?: string;
+}
+
 interface DeniedStationRecord {
   recordKind: "item" | "box" | "exception";
   recordIndex: number;
@@ -185,6 +191,75 @@ function isConflictStatusResponse(value: unknown): value is ConflictStatusRespon
   if (typeof value !== "object" || value === null) return false;
   const reviewed = (value as Record<string, unknown>).reviewedCodeHashes;
   return Array.isArray(reviewed) && reviewed.every(isCodeHash);
+}
+
+function isRegistryRevision(value: unknown): value is string {
+  if (typeof value !== "string" || !/^(0|[1-9][0-9]{0,18})$/.test(value)) return false;
+  try {
+    return BigInt(value) <= 9_223_372_036_854_775_807n;
+  } catch {
+    return false;
+  }
+}
+
+function isCodeReleaseResponse(value: unknown): value is CodeReleaseResponse {
+  if (typeof value !== "object" || value === null) return false;
+  const response = value as Record<string, unknown>;
+  return (
+    isRegistryRevision(response.until) &&
+    Array.isArray(response.releasedCodeHashes) &&
+    response.releasedCodeHashes.every(isCodeHash) &&
+    (response.nextCursor === undefined ||
+      (typeof response.nextCursor === "string" && response.nextCursor.length > 0))
+  );
+}
+
+const CODE_RELEASE_REVISION_META_KEY = "code_release_revision";
+
+async function removeReleasedCodes(exec: SqlExecutor, codeHashes: string[]): Promise<void> {
+  const unique = [...new Set(codeHashes)];
+  if (unique.length === 0) return;
+  const placeholders = unique.map(() => "?").join(", ");
+  await exec.run(`DELETE FROM codes_mirror WHERE code_hash IN (${placeholders})`, unique);
+}
+
+async function reconcileReleasedCodes(
+  exec: SqlExecutor,
+  client: Pick<StationClient, "post">,
+): Promise<void> {
+  const localCodes = await exec.all<{ present: number }>(
+    `SELECT 1 AS present FROM codes_mirror
+      WHERE length(code_hash) = 64
+        AND code_hash NOT GLOB '*[^0-9a-f]*'
+      LIMIT 1`,
+  );
+  if (localCodes.length === 0) return;
+
+  const persisted = await loadPersistedValue(exec, CODE_RELEASE_REVISION_META_KEY);
+  const since = isRegistryRevision(persisted) ? persisted : "0";
+  let until: string | null = null;
+  let cursor: string | null = null;
+  for (;;) {
+    const body: { since: string; until?: string; cursor?: string } =
+      cursor === null || until === null ? { since } : { since, until, cursor };
+    const response: unknown = await client.post<unknown>("/station/codes/releases", body);
+    if (!isCodeReleaseResponse(response) || BigInt(response.until) < BigInt(since)) {
+      throw new Error("station: unexpected /station/codes/releases response shape");
+    }
+    if (until !== null && response.until !== until) {
+      throw new Error("station: code release snapshot changed during pagination");
+    }
+    await removeReleasedCodes(exec, response.releasedCodeHashes);
+    if (response.nextCursor === undefined) {
+      await savePersistedValue(exec, CODE_RELEASE_REVISION_META_KEY, response.until);
+      return;
+    }
+    if (response.nextCursor === cursor) {
+      throw new Error("station: code release cursor did not advance");
+    }
+    until = response.until;
+    cursor = response.nextCursor;
+  }
 }
 
 async function reconcileReviewedConflicts(
@@ -1171,6 +1246,14 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
         } catch (err) {
           if (isStationCredentialRejection(err)) await rejectCredential();
           else console.error("station: conflict status reconciliation failed", err);
+        }
+      }
+      if (!pauseInvalidated() && !credentialGeneration.sealed && retryTimer === null) {
+        try {
+          await reconcileReleasedCodes(deps.exec, deps.client);
+        } catch (err) {
+          if (isStationCredentialRejection(err)) await rejectCredential();
+          else console.error("station: code release reconciliation failed", err);
         }
       }
     } catch (err) {

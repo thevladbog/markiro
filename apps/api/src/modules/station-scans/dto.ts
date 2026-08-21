@@ -216,6 +216,40 @@ export interface StationConflictStatusResponseDto {
   reviewedCodeHashes: string[];
 }
 
+const MAX_PG_BIGINT = 9_223_372_036_854_775_807n;
+export const stationCodeReleaseRevisionSchema = z.string().refine((value) => {
+  if (!/^(0|[1-9][0-9]{0,18})$/.test(value)) return false;
+  try {
+    return BigInt(value) <= MAX_PG_BIGINT;
+  } catch {
+    return false;
+  }
+}, "must be a canonical unsigned bigint revision");
+
+export const stationCodeReleasesSchema = z
+  .object({
+    since: stationCodeReleaseRevisionSchema.default("0"),
+    until: stationCodeReleaseRevisionSchema.optional(),
+    cursor: z.string().min(1).max(1024).optional(),
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if ((value.until === undefined) !== (value.cursor === undefined)) {
+      ctx.addIssue({
+        code: "custom",
+        path: value.until === undefined ? ["until"] : ["cursor"],
+        message: "until and cursor must be supplied together",
+      });
+    }
+  });
+export type StationCodeReleasesDto = z.infer<typeof stationCodeReleasesSchema>;
+
+export interface StationCodeReleasesResponseDto {
+  until: string;
+  releasedCodeHashes: string[];
+  nextCursor?: string;
+}
+
 /** A code in THIS batch that lost ownership to an earlier scan elsewhere. */
 export interface BatchConflictDto {
   codeHash: string;

@@ -255,6 +255,7 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     contract: customerContract(STATION_GUARDS, { mode: "recovery", kind: "station" }),
     routes: [
       "POST /station/conflicts/status (StationScansController.conflictStatus)",
+      "POST /station/codes/releases (StationScansController.codeReleases)",
       "POST /station/scans (StationScansController.ingest)",
     ],
   },

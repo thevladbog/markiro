@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { and, eq, inArray } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canonicalizeKm, kmHash } from "@markiro/domain";
@@ -35,6 +36,7 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let tenantId: string;
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
   let shiftId: string;
@@ -62,7 +64,7 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     await app.init();
     await listenOnLoopback(app);
     agent = request.agent(app!.getHttpServer());
-    const tenantId = await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
 
     const station = await createTestStationDevice(app!, agent, "Line 1");
     stationKey = station.apiKey;
@@ -262,6 +264,30 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     const exceptions = await agent.get(`/box-exceptions?shiftId=${shiftId}`).expect(200);
     const kinds = (exceptions.body as { items: { kind: string }[] }).items.map((e) => e.kind);
     expect(kinds).toContain("disassemble");
+
+    const releasedCodeHashes = ["aa", "bb"].map((label) =>
+      kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-apply-${label}`)),
+    );
+    const owners = await db
+      .select({ codeHash: schema.codeRegistry.codeHash })
+      .from(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          inArray(schema.codeRegistry.codeHash, releasedCodeHashes),
+        ),
+      );
+    expect(owners).toEqual([]);
+
+    const releases = await request(app!.getHttpServer())
+      .post("/station/codes/releases")
+      .set("x-api-key", stationKey)
+      .send({ since: "0" })
+      .expect(200);
+    expect((releases.body as { until: string }).until).toMatch(/^[1-9][0-9]*$/);
+    expect((releases.body as { releasedCodeHashes: string[] }).releasedCodeHashes.sort()).toEqual(
+      releasedCodeHashes.sort(),
+    );
   });
 
   it("apply is all-or-nothing: a written_off line blocks and re-marks, the valid line's box stays untouched", async () => {
