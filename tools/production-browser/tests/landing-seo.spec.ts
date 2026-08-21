@@ -60,14 +60,14 @@ const routes = [
   ...verificationRoutes,
 ];
 const MARKIRO_MODULE_LAYOUT = [
-  { position: "0-0", row: "1", column: "1", color: "rgb(250, 250, 248)" },
-  { position: "0-2", row: "1", column: "3", color: "rgb(250, 250, 248)" },
-  { position: "1-1", row: "2", column: "2", color: "rgb(250, 250, 248)" },
-  { position: "2-0", row: "3", column: "1", color: "rgb(250, 250, 248)" },
-  { position: "2-2", row: "3", column: "3", color: "rgb(250, 250, 248)" },
-  { position: "3-0", row: "4", column: "1", color: "rgb(250, 250, 248)" },
-  { position: "3-2", row: "4", column: "3", color: "rgb(250, 250, 248)" },
-  { position: "4-1", row: "5", column: "2", color: "rgb(61, 220, 122)" },
+  { x: "14", y: "14", color: "rgb(19, 18, 22)" },
+  { x: "14", y: "26", color: "rgb(19, 18, 22)" },
+  { x: "14", y: "38", color: "rgb(19, 18, 22)" },
+  { x: "26", y: "22", color: "rgb(19, 18, 22)" },
+  { x: "38", y: "14", color: "rgb(19, 18, 22)" },
+  { x: "38", y: "26", color: "rgb(19, 18, 22)" },
+  { x: "38", y: "38", color: "rgb(19, 18, 22)" },
+  { x: "26", y: "42", color: "rgb(61, 220, 122)" },
 ];
 
 const demoCases = [
@@ -207,27 +207,29 @@ for (const [route, wordmark] of [
           modules.map((module) => {
             const style = getComputedStyle(module);
             return {
-              position: module.getAttribute("data-position"),
-              row: style.gridRowStart,
-              column: style.gridColumnStart,
-              width: style.width,
-              height: style.height,
-              color: style.backgroundColor,
+              x: module.getAttribute("x"),
+              y: module.getAttribute("y"),
+              width: module.getAttribute("width"),
+              height: module.getAttribute("height"),
+              color: style.fill,
             };
           }),
         ),
       ).toEqual(
-        MARKIRO_MODULE_LAYOUT.map(({ position, row, column, color }) => ({
-          position,
-          row,
-          column,
-          width: "4px",
-          height: "4px",
+        MARKIRO_MODULE_LAYOUT.map(({ x, y, color }) => ({
+          x,
+          y,
+          width: "8",
+          height: "8",
           color,
         })),
       );
+      expect(
+        await brand.locator(".brand-mark__tile").evaluate((tile) => getComputedStyle(tile).fill),
+      ).toBe("rgb(250, 250, 248)");
       await expect(brand.locator("[data-brand-accent]")).toHaveCount(1);
-      await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("data-position", "4-1");
+      await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("x", "26");
+      await expect(brand.locator("[data-brand-accent]")).toHaveAttribute("y", "42");
     }
   });
 }

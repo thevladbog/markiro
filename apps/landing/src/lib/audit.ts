@@ -59,14 +59,14 @@ const MARKIRO_MODULE_ATTRIBUTE = "data-markiro-module";
 const MARKIRO_MODULE_FILL = "#fafaf8";
 const MARKIRO_ACCENT_FILL = "#3ddc7a";
 const MARKIRO_MODULE_GRID = [
-  { x: "18", y: "8" },
-  { x: "38", y: "8" },
-  { x: "28", y: "18" },
-  { x: "18", y: "28" },
-  { x: "38", y: "28" },
-  { x: "18", y: "38" },
+  { x: "14", y: "14" },
+  { x: "14", y: "26" },
+  { x: "14", y: "38" },
+  { x: "26", y: "22" },
+  { x: "38", y: "14" },
+  { x: "38", y: "26" },
   { x: "38", y: "38" },
-  { x: "28", y: "48" },
+  { x: "26", y: "42" },
 ] as const;
 const MARKIRO_MODULE_SIZE = "8";
 
