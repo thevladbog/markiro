@@ -22,6 +22,8 @@ interface ShiftListItem {
   status: "planned" | "active" | "closed";
   mode: "validation" | "aggregation";
   productName: string | null;
+  /** Short operator-facing name from the catalog; null = use productName. */
+  productPrintName?: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate?: string | null;
@@ -293,7 +295,7 @@ export function ShiftSelection({
                 <ShiftCard
                   key={shift.id}
                   number={shift.number ?? null}
-                  productName={shift.productName}
+                  productName={shift.productPrintName ?? shift.productName}
                   plannedDate={shift.plannedDate}
                   productionDate={shift.productionDate ?? null}
                   productionDateLabel={t("shifts.productionShort")}

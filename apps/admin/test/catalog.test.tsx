@@ -500,6 +500,7 @@ describe("CatalogPage", () => {
           body: JSON.stringify({
             gtin: "4006381333931",
             name: "Молоко 1л",
+            printName: null,
             productGroup: null,
             boxCapacity: null,
             palletCapacity: null,
@@ -688,6 +689,7 @@ describe("CatalogPage", () => {
       expect(body).toEqual({
         gtin: "4006381333931",
         name: "Йогурт",
+        printName: null,
         productGroup: null,
         boxCapacity: null,
         palletCapacity: null,
@@ -727,12 +729,16 @@ describe("CatalogPage", () => {
     await screen.findByText("Новый продукт");
 
     // Assert the new inputs are rendered
+    expect(screen.getByLabelText("Наименование для печати")).toBeDefined();
     expect(screen.getByLabelText("Цена за шт., ₽")).toBeDefined();
     expect(screen.getByLabelText("Код ЕГАИС")).toBeDefined();
     expect(screen.getByLabelText("Срок годности, дней")).toBeDefined();
 
     // Fill required and new optional fields
     fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Напиток" } });
+    fireEvent.change(screen.getByLabelText("Наименование для печати"), {
+      target: { value: "  Дикий Крест Особый 5%  " },
+    });
     fireEvent.change(screen.getByLabelText("ГТИН"), { target: { value: "4006381333931" } });
     fireEvent.change(screen.getByLabelText("Цена за шт., ₽"), { target: { value: "52,00" } });
     fireEvent.change(screen.getByLabelText("Код ЕГАИС"), { target: { value: "ЕГАИС123" } });
@@ -747,6 +753,7 @@ describe("CatalogPage", () => {
           body: JSON.stringify({
             gtin: "4006381333931",
             name: "Напиток",
+            printName: "Дикий Крест Особый 5%",
             productGroup: null,
             boxCapacity: null,
             palletCapacity: null,

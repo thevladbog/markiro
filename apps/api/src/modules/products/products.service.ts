@@ -47,6 +47,7 @@ const CURRENT_PRODUCT_SELECTION = {
   tenantId: schema.products.tenantId,
   gtin14: schema.products.gtin14,
   name: schema.products.name,
+  printName: schema.products.printName,
   productGroup: schema.products.productGroup,
   boxCapacity: schema.products.boxCapacity,
   palletCapacity: schema.products.palletCapacity,
@@ -133,6 +134,7 @@ export class ProductsService {
           status,
           defaultCounterpartyId: data.defaultCounterpartyId ?? null,
           unitPrice: data.unitPrice ?? null,
+          printName: data.printName ?? null,
           egaisCode: data.egaisCode ?? null,
           shelfLifeDays: data.shelfLifeDays ?? null,
           externalRef: data.externalRef ?? null,
@@ -188,6 +190,7 @@ export class ProductsService {
           status,
         };
         if (data.unitPrice !== undefined) set.unitPrice = data.unitPrice;
+        if (data.printName !== undefined) set.printName = data.printName;
         if (data.egaisCode !== undefined) set.egaisCode = data.egaisCode;
         if (data.shelfLifeDays !== undefined) set.shelfLifeDays = data.shelfLifeDays;
         if (data.externalRef !== undefined) set.externalRef = data.externalRef;
@@ -745,6 +748,7 @@ export class ProductsService {
       id: row.id,
       gtin14: row.gtin14,
       name: row.name,
+      printName: row.printName,
       productGroup: row.productGroup,
       boxCapacity: row.boxCapacity,
       palletCapacity: row.palletCapacity,
