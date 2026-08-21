@@ -2,7 +2,7 @@
   "name": "markiro",
   "private": true,
   "license": "SEE LICENSE IN LICENSE",
-  "packageManager": "pnpm@11.10.0",
+  "packageManager": "pnpm@11.22.0",
   "engines": {
     "node": ">=24"
   },
@@ -13,6 +13,8 @@
     "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "check:deps": "node tools/check-no-major-bumps.mjs",
+    "test:dependency-guard": "node --test tools/test/*.test.mjs",
     "test:yandex-runtime": "node --test deploy/yandex/test/*.test.mjs",
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
     "verify:station-production-cors": "node tools/station-release/verify-api-cors.mjs https://admin.markiro.app",
@@ -25,14 +27,14 @@
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
-    "eslint": "10.7.0",
+    "eslint": "10.8.1",
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react-hooks": "7.1.1",
-    "globals": "17.7.0",
+    "globals": "17.11.0",
     "js-yaml": "5.2.2",
-    "prettier": "3.9.5",
-    "turbo": "2.10.4",
+    "prettier": "3.9.6",
+    "turbo": "2.10.11",
     "typescript": "6.0.3",
-    "typescript-eslint": "8.65.0"
+    "typescript-eslint": "8.67.0"
   }
 }

@@ -48,6 +48,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm format:check
+      # Manifests pin exact versions, so a sweep has to use `pnpm update
+      # --latest`, which crosses majors indiscriminately. These two steps are
+      # what make that safe: the guard fails on a breaking version change
+      # against `tools/dependency-baseline.json`, and its own tests keep the
+      # guard from silently degrading into one that always passes.
+      - run: pnpm check:deps
+      - run: pnpm test:dependency-guard
       - run: pnpm --filter @markiro/db db:migrate
       - run: pnpm turbo lint typecheck test build --concurrency=1 --force
 

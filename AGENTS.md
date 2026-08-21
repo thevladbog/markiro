@@ -308,6 +308,14 @@ Do not claim Windows or hardware confirmation from a host-only Cargo test.
 - Prefer exact JavaScript dependency versions and preserve `workspace:*` for
   internal packages. Existing range exceptions are not permission to add new
   ranges or perform an unrelated repo-wide cleanup.
+- Because those pins are exact, `pnpm update -r` is a no-op and a real sweep needs
+  `pnpm update -r --latest`, which crosses majors indiscriminately. Always follow
+  such a sweep with `pnpm check:deps` (`tools/check-no-major-bumps.mjs`): it
+  compares every manifest against `tools/dependency-baseline.json` and exits
+  non-zero naming anything whose breaking version moved — the major at `1.0.0`
+  and above, the minor below it. Once the sweep has merged, re-anchor the
+  baseline with `node tools/generate-dependency-baseline.mjs` as its own commit,
+  so the baseline diff is the reviewable record of what moved.
 - The repository currently has install-related keys in `.npmrc` and dependency
   allowlists, overrides, and patches in `pnpm-workspace.yaml`. With pnpm 11, do
   not assume a setting is enforced merely because it appears in a file. Check

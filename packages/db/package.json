@@ -38,13 +38,13 @@
     "@better-auth/api-key": "1.6.23",
     "better-auth": "1.6.23",
     "drizzle-orm": "0.45.2",
-    "pg": "8.22.0"
+    "pg": "8.23.0"
   },
   "devDependencies": {
-    "@types/node": "26.1.1",
-    "@types/pg": "8.20.0",
+    "@types/node": "26.2.0",
+    "@types/pg": "8.23.1",
     "drizzle-kit": "0.31.10",
     "typescript": "6.0.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   }
 }
