@@ -46,6 +46,18 @@ export interface EmployeeDto {
 export interface CreateEmployeeInput {
   fullName: string;
   role?: string | null;
+  /** Cabinet member to link the new employee to (create-from-registered-user flow). */
+  memberId?: string | null;
+}
+
+/** Mirrors `apps/api/src/modules/employees/dto.ts`'s `LinkableMemberDto`. */
+export interface LinkableMemberDto {
+  memberId: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  middleName: string | null;
+  position: string | null;
 }
 
 export interface UpdateEmployeeInput {
@@ -82,8 +94,15 @@ interface ListEmployeesResponse {
   items: EmployeeDto[];
 }
 
+interface ListLinkableMembersResponse {
+  items: LinkableMemberDto[];
+}
+
 /** Shared TanStack Query cache key prefix for the employees list (all filter variants). */
 export const EMPLOYEES_QUERY_KEY = ["employees"] as const;
+
+/** Cache key for the linkable cabinet members picker (create-employee form). */
+export const LINKABLE_MEMBERS_QUERY_KEY = ["employees", "linkable-members"] as const;
 
 function employeesQueryKey(params: ListEmployeesParams) {
   return [...EMPLOYEES_QUERY_KEY, params] as const;
@@ -163,7 +182,22 @@ export function useEmployees(params: ListEmployeesParams = {}): UseQueryResult<E
   });
 }
 
-/** `POST /employees`. Invalidates every employees list query variant on success. */
+/** `GET /employees/linkable-members` -- cabinet members without a linked employee. */
+export function useLinkableMembers(): UseQueryResult<LinkableMemberDto[]> {
+  return useQuery({
+    queryKey: LINKABLE_MEMBERS_QUERY_KEY,
+    queryFn: async () => {
+      const response = await apiFetch<ListLinkableMembersResponse>("/employees/linkable-members");
+      return response.items;
+    },
+  });
+}
+
+/**
+ * `POST /employees`. Invalidates every employees list query variant on success;
+ * the shared `["employees"]` prefix also covers the linkable-members picker
+ * (a linked member must leave it).
+ */
 export function useCreateEmployee(): UseMutationResult<EmployeeDto, Error, CreateEmployeeInput> {
   const queryClient = useQueryClient();
   return useMutation({

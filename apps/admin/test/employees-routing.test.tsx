@@ -218,6 +218,126 @@ it("opens creation over the mounted list, submits the exact payload, and returns
   expect(await screen.findByText("Анна Смирнова")).toBeDefined();
 });
 
+const LINKABLE_PETROV = {
+  memberId: "member-petrov",
+  email: "petrov@example.com",
+  firstName: "Пётр",
+  lastName: "Петров",
+  middleName: "Иванович",
+  position: "Кладовщик",
+};
+
+it("creates an employee from a registered member: prefills the form and links via memberId", async () => {
+  const created = {
+    ...JANE,
+    id: "3",
+    fullName: "Петров Пётр Иванович",
+    role: "Кладовщик",
+  };
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url) === "/api/employees/linkable-members") {
+      return jsonResponse(200, { items: [LINKABLE_PETROV] });
+    }
+    if (String(url) === "/api/employees" && init?.method === "POST") {
+      return jsonResponse(201, created);
+    }
+    return jsonResponse(200, { items: [JANE] });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const { router, user } = renderPanel(["/employees/new"]);
+
+  await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Новый сотрудник" });
+  await user.click(within(panel).getByRole("radio", { name: "Выбрать из зарегистрированных" }));
+  await user.click(
+    within(panel).getByRole("combobox", { name: "Зарегистрированный пользователь" }),
+  );
+  await user.click(await screen.findByRole("option", { name: "Петров Пётр Иванович — Кладовщик" }));
+
+  const fullNameInput = within(panel).getByLabelText<HTMLInputElement>("ФИО");
+  expect(fullNameInput.value).toBe("Петров Пётр Иванович");
+  expect(within(panel).getByLabelText<HTMLInputElement>("Должность").value).toBe("Кладовщик");
+
+  await user.click(within(panel).getByRole("button", { name: "Создать" }));
+
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/employees",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          fullName: "Петров Пётр Иванович",
+          role: "Кладовщик",
+          memberId: "member-petrov",
+        }),
+      }),
+    ),
+  );
+  await waitFor(() => expect(router.state.location.pathname).toBe("/employees"));
+});
+
+it("requires picking a member in registered-user mode and keeps manual submits unlinked", async () => {
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url) === "/api/employees/linkable-members") {
+      return jsonResponse(200, { items: [LINKABLE_PETROV] });
+    }
+    if (String(url) === "/api/employees" && init?.method === "POST") {
+      return jsonResponse(201, { ...JANE, id: "4", fullName: "Ручной Ввод", role: null });
+    }
+    return jsonResponse(200, { items: [JANE] });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const { user } = renderPanel(["/employees/new"]);
+
+  await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Новый сотрудник" });
+  await user.click(within(panel).getByRole("radio", { name: "Выбрать из зарегистрированных" }));
+  await user.type(within(panel).getByLabelText("ФИО"), "Ручной Ввод");
+  await user.click(within(panel).getByRole("button", { name: "Создать" }));
+
+  expect(await within(panel).findByText("Выберите пользователя из списка")).toBeDefined();
+  expect(fetchMock).not.toHaveBeenCalledWith(
+    "/api/employees",
+    expect.objectContaining({ method: "POST" }),
+  );
+
+  // Back to manual mode: the same submit now succeeds without a memberId.
+  await user.click(within(panel).getByRole("radio", { name: "Ввести вручную" }));
+  await user.click(within(panel).getByRole("button", { name: "Создать" }));
+  await waitFor(() =>
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/employees",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ fullName: "Ручной Ввод", role: null }),
+      }),
+    ),
+  );
+});
+
+it("explains an empty registered-user list and keeps the picker disabled", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url) === "/api/employees/linkable-members") {
+        return jsonResponse(200, { items: [] });
+      }
+      return jsonResponse(200, { items: [JANE] });
+    }),
+  );
+  const { user } = renderPanel(["/employees/new"]);
+
+  await screen.findByLabelText("ФИО");
+  const panel = screen.getByRole("dialog", { name: "Новый сотрудник" });
+  await user.click(within(panel).getByRole("radio", { name: "Выбрать из зарегистрированных" }));
+
+  expect(
+    await within(panel).findByText(
+      "Нет доступных пользователей: все участники кабинета уже связаны с сотрудниками.",
+    ),
+  ).toBeDefined();
+});
+
 it("falls back to the employees list when a directly entered panel closes", async () => {
   vi.stubGlobal(
     "fetch",

@@ -3,6 +3,8 @@ import { z } from "zod";
 export const createEmployeeSchema = z.object({
   fullName: z.string().trim().min(1).max(200),
   role: z.string().trim().min(1).max(120).nullable().optional(),
+  // better-auth member ids are opaque text, not UUIDs.
+  memberId: z.string().trim().min(1).max(255).nullable().optional(),
 });
 export type CreateEmployeeDto = z.infer<typeof createEmployeeSchema>;
 
@@ -84,4 +86,17 @@ export interface EmployeeDto {
 }
 export interface ListEmployeesResponseDto {
   items: EmployeeDto[];
+}
+
+/** A cabinet member without a linked employee — a candidate for the create-employee picker. */
+export interface LinkableMemberDto {
+  memberId: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  middleName: string | null;
+  position: string | null;
+}
+export interface ListLinkableMembersResponseDto {
+  items: LinkableMemberDto[];
 }

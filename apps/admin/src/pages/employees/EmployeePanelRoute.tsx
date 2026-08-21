@@ -9,6 +9,7 @@ import { toast } from "../../lib/toast.js";
 import { useRoutePanelGuard } from "../../lib/useRoutePanelGuard.js";
 import {
   useCreateEmployee,
+  useLinkableMembers,
   useUpdateEmployee,
   type CreateEmployeeInput,
   type EmployeeDto,
@@ -159,6 +160,7 @@ export function EmployeeCreatePanelRoute(): ReactElement {
   const { t } = useTranslation();
   const { context, close } = usePanelContext();
   const mutation = useCreateEmployee();
+  const linkableMembers = useLinkableMembers();
   const [error, setError] = useState<string | null>(null);
   const guard = useRoutePanelGuard(close, mutation.isPending);
   const { employeesResolved } = context;
@@ -196,6 +198,9 @@ export function EmployeeCreatePanelRoute(): ReactElement {
           mode="create"
           submitting={mutation.isPending}
           submissionError={error}
+          linkableMembers={linkableMembers.data ?? []}
+          linkableMembersPending={linkableMembers.isPending}
+          linkableMembersError={linkableMembers.isError}
           onDirtyChange={guard.setDirty}
           onSubmit={async (input) => {
             try {

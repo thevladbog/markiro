@@ -1435,10 +1435,20 @@
         "discardBody": "Your unsaved changes will be lost.",
         "continueEditing": "Continue editing",
         "discardAction": "Discard",
+        "sourceLabel": "Data source",
+        "sourceManual": "Enter manually",
+        "sourceMember": "Pick a registered user",
+        "memberLabel": "Registered user",
+        "memberPlaceholder": "Select a user",
+        "memberSearchLabel": "Search users",
+        "memberSearchPlaceholder": "Type a name or email",
+        "membersEmpty": "No users available: every cabinet member is already linked to an employee.",
+        "membersLoadError": "Failed to load registered users. Fill in the fields manually or try again later.",
         "errors": {
           "fullNameRequired": "Enter a full name",
           "fullNameTooLong": "200 characters or fewer",
-          "roleTooLong": "120 characters or fewer"
+          "roleTooLong": "120 characters or fewer",
+          "memberRequired": "Select a user from the list"
         }
       },
       "sections": {

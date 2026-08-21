@@ -19,6 +19,7 @@ import type {
   IssueBadgeDto,
   ListEmployeesQueryDto,
   ListEmployeesResponseDto,
+  ListLinkableMembersResponseDto,
   UpdateEmployeeDto,
   UpdateEmployeePickupPolicyDto,
 } from "./dto";
@@ -52,22 +53,96 @@ export class EmployeesService {
     return { items: rows.map((r) => this.toDto(r.employee, badges, r.pickupPolicy)) };
   }
 
-  async createEmployee(tenantId: string, dto: CreateEmployeeDto): Promise<EmployeeDto> {
-    return this.db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(schema.employees)
-        .values({ tenantId, fullName: dto.fullName, role: dto.role ?? null })
-        .returning();
-      if (!row) throw new InternalServerErrorException("Failed to create employee");
-      const [pickupPolicy] = await tx
-        .insert(schema.employeePickupPolicies)
-        .values({ tenantId, employeeId: row.id })
-        .returning();
-      if (!pickupPolicy) {
-        throw new InternalServerErrorException("Failed to create employee pickup policy");
+  async listLinkableMembers(tenantId: string): Promise<ListLinkableMembersResponseDto> {
+    const items = await this.db
+      .select({
+        memberId: schema.member.id,
+        email: schema.user.email,
+        firstName: schema.userProfiles.firstName,
+        lastName: schema.userProfiles.lastName,
+        middleName: schema.userProfiles.middleName,
+        position: schema.tenantMemberProfiles.position,
+      })
+      .from(schema.member)
+      .innerJoin(schema.user, eq(schema.user.id, schema.member.userId))
+      .leftJoin(schema.userProfiles, eq(schema.userProfiles.userId, schema.member.userId))
+      .leftJoin(
+        schema.tenantMemberProfiles,
+        and(
+          eq(schema.tenantMemberProfiles.organizationId, tenantId),
+          eq(schema.tenantMemberProfiles.memberId, schema.member.id),
+        ),
+      )
+      .leftJoin(
+        schema.cabinetEmployeeLinks,
+        and(
+          eq(schema.cabinetEmployeeLinks.organizationId, tenantId),
+          eq(schema.cabinetEmployeeLinks.memberId, schema.member.id),
+        ),
+      )
+      .where(
+        and(eq(schema.member.organizationId, tenantId), isNull(schema.cabinetEmployeeLinks.id)),
+      )
+      .orderBy(schema.user.email);
+    return { items };
+  }
+
+  async createEmployee(
+    tenantId: string,
+    actorUserId: string,
+    dto: CreateEmployeeDto,
+  ): Promise<EmployeeDto> {
+    try {
+      return await this.db.transaction(async (tx) => {
+        if (dto.memberId) {
+          const [target] = await tx
+            .select({ id: schema.member.id })
+            .from(schema.member)
+            .where(
+              and(eq(schema.member.organizationId, tenantId), eq(schema.member.id, dto.memberId)),
+            );
+          if (!target) throw new NotFoundException("Member not found");
+        }
+        const [row] = await tx
+          .insert(schema.employees)
+          .values({ tenantId, fullName: dto.fullName, role: dto.role ?? null })
+          .returning();
+        if (!row) throw new InternalServerErrorException("Failed to create employee");
+        const [pickupPolicy] = await tx
+          .insert(schema.employeePickupPolicies)
+          .values({ tenantId, employeeId: row.id })
+          .returning();
+        if (!pickupPolicy) {
+          throw new InternalServerErrorException("Failed to create employee pickup policy");
+        }
+        if (dto.memberId) {
+          await tx.insert(schema.cabinetEmployeeLinks).values({
+            organizationId: tenantId,
+            memberId: dto.memberId,
+            employeeId: row.id,
+          });
+          // Same audit action as the Team-page link flow (`TeamService.linkEmployee`).
+          await tx.insert(schema.tenantAuditEvents).values({
+            organizationId: tenantId,
+            actorUserId,
+            action: "team.member.employee_linked",
+            outcome: "success",
+            targetType: "member",
+            targetId: dto.memberId,
+            after: { employeeId: row.id },
+          });
+        }
+        return this.toDto(row, new Map(), pickupPolicy);
+      });
+    } catch (error) {
+      if (
+        (error as { cause?: { code?: string } })?.cause?.code === "23505" ||
+        (error as { code?: string })?.code === "23505"
+      ) {
+        throw new ConflictException("Member is already linked to an employee");
       }
-      return this.toDto(row, new Map(), pickupPolicy);
-    });
+      throw error;
+    }
   }
 
   async updateEmployee(tenantId: string, id: string, dto: UpdateEmployeeDto): Promise<EmployeeDto> {

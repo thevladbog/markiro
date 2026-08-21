@@ -39,6 +39,7 @@ import {
   type IssueBadgeDto,
   type ListEmployeesQueryDto,
   type ListEmployeesResponseDto,
+  type ListLinkableMembersResponseDto,
   type UpdateEmployeeDto,
   type UpdateEmployeePickupPolicyDto,
 } from "./dto";
@@ -65,6 +66,17 @@ export class EmployeesController {
     return this.employeesService.listEmployees(req.tenantId!, query);
   }
 
+  // OPERATIONS_WRITE (not MEMBERS_MANAGE): this list only feeds the
+  // create-employee picker, so the write capability that gates `POST /employees`
+  // is the right bar for seeing which members can still be linked.
+  @Get("linkable-members")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
+  async listLinkableMembers(
+    @Req() req: RequestWithTenant,
+  ): Promise<ListLinkableMembersResponseDto> {
+    return this.employeesService.listLinkableMembers(req.tenantId!);
+  }
+
   @Post()
   @RequireSubscriptionWrite()
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
@@ -72,7 +84,7 @@ export class EmployeesController {
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createEmployeeSchema)) body: CreateEmployeeDto,
   ): Promise<EmployeeDto> {
-    return this.employeesService.createEmployee(req.tenantId!, body);
+    return this.employeesService.createEmployee(req.tenantId!, req.userId!, body);
   }
 
   @Patch("pickup-policy/limits")
