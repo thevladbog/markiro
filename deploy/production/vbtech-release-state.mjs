@@ -508,7 +508,7 @@ async function publishRecord(directory, value, supplied) {
     await unlink(temporary);
     temporaryExists = false;
     await syncDirectory(directory);
-  } catch (error) {
+  } catch {
     throw transitionError();
   } finally {
     await file?.close().catch(() => undefined);
@@ -567,6 +567,25 @@ export function validateVbtechSelector(value) {
     throw selectorError();
   }
   return { ...value };
+}
+
+export async function vbtechReleaseStatus(directory, selector) {
+  const validatedSelector = validateVbtechSelector(selector);
+  const state = await readReleaseState(directory);
+  const chain = state?.chains.get(releaseIdentity(validatedSelector));
+  const latest = chain?.at(-1);
+  if (latest === undefined)
+    return {
+      state: "absent",
+      record: null,
+      persisted: false,
+    };
+  const record = (latest.terminalClaim ?? latest.pendingClaim).record;
+  return {
+    state: record.state,
+    record: { ...record },
+    persisted: state.persistedRecords.some((persisted) => sameRecord(persisted, record)),
+  };
 }
 
 export async function latestHealthyVbtechRelease(directory) {

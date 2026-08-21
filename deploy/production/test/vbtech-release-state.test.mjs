@@ -19,6 +19,7 @@ import {
   markVbtechReleaseFailed,
   markVbtechReleaseHealthy,
   validateVbtechSelector,
+  vbtechReleaseStatus,
   writePendingVbtechRelease,
 } from "../vbtech-release-state.mjs";
 
@@ -180,6 +181,82 @@ test("excludes a failed terminal candidate from active selection", async () => {
   await markVbtechReleaseFailed(releases, failedPending, dependencies());
 
   assert.deepEqual(await latestHealthyVbtechRelease(releases), healthy);
+});
+
+test("reports the authoritative pending, healthy, and failed lifecycle status", async () => {
+  const absentDirectory = await directory();
+  assert.deepEqual(await vbtechReleaseStatus(absentDirectory, selector()), {
+    state: "absent",
+    record: null,
+    persisted: false,
+  });
+
+  const healthyDirectory = await directory();
+  const pending = await writePendingVbtechRelease(healthyDirectory, selector(), dependencies());
+  assert.deepEqual(await vbtechReleaseStatus(healthyDirectory, selector()), {
+    state: "pending",
+    record: pending,
+    persisted: true,
+  });
+  const healthy = await markVbtechReleaseHealthy(healthyDirectory, pending, dependencies());
+  assert.deepEqual(await vbtechReleaseStatus(healthyDirectory, selector()), {
+    state: "healthy",
+    record: healthy,
+    persisted: true,
+  });
+
+  const failedDirectory = await directory();
+  const failedPending = await writePendingVbtechRelease(
+    failedDirectory,
+    selector(),
+    dependencies(),
+  );
+  const failed = await markVbtechReleaseFailed(failedDirectory, failedPending, dependencies());
+  assert.deepEqual(await vbtechReleaseStatus(failedDirectory, selector()), {
+    state: "failed",
+    record: failed,
+    persisted: true,
+  });
+});
+
+test("reports a durable terminal claim that still needs record recovery", async () => {
+  const releases = await directory();
+  const pending = await writePendingVbtechRelease(releases, selector(), dependencies());
+  const expected = record({ state: "healthy" });
+  await assert.rejects(
+    markVbtechReleaseHealthy(releases, pending, {
+      randomUUID: () => {
+        throw new Error("simulated crash after terminal claim");
+      },
+    }),
+    (error) => error.message === "v-b release transition rejected",
+  );
+
+  assert.deepEqual(await vbtechReleaseStatus(releases, selector()), {
+    state: "healthy",
+    record: expected,
+    persisted: false,
+  });
+});
+
+test("reports a durable pending claim that requires fail-closed recovery", async () => {
+  const releases = await directory();
+  const expected = record({ state: "pending" });
+  await assert.rejects(
+    writePendingVbtechRelease(releases, selector(), {
+      now: () => new Date("2026-08-21T10:20:30.000Z"),
+      randomUUID: () => {
+        throw new Error("simulated crash after pending claim");
+      },
+    }),
+    (error) => error.message === "v-b release transition rejected",
+  );
+
+  assert.deepEqual(await vbtechReleaseStatus(releases, selector()), {
+    state: "pending",
+    record: expected,
+    persisted: false,
+  });
 });
 
 test("permits a new pending generation after a failed terminal", async () => {

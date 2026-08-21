@@ -1,8 +1,9 @@
-import { spawn } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { lstat, readFile, readdir, readlink, stat } from "node:fs/promises";
 import { isIP } from "node:net";
 import { basename, isAbsolute, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs, PRODUCTION_COMPOSE_PROJECT } from "./compose-files.mjs";
@@ -12,6 +13,7 @@ import {
   markVbtechReleaseFailed,
   markVbtechReleaseHealthy,
   validateVbtechSelector,
+  vbtechReleaseStatus,
   writePendingVbtechRelease,
 } from "./vbtech-release-state.mjs";
 
@@ -46,9 +48,13 @@ const EDGE_READINESS_TIMEOUT_MS = 180_000;
 const EDGE_READINESS_INTERVAL_MS = 2_000;
 const PRIVATE_SMOKE_TIMEOUT_MS = 180_000;
 const STATE_TIMEOUT_MS = 30_000;
+const STATE_CHILD_TERMINATION_TIMEOUT_MS = 5_000;
+const STATE_CHILD_REQUEST_TIMEOUT_MS = 5_000;
 const TERMINATION_GRACE_MS = 1_000;
 const MAX_TIMEOUT_MS = 15 * 60_000;
 const MAX_ATTEMPTS = 2_000;
+const STATE_CHILD_ARGUMENT = "markiro-vbtech-state-child-v1";
+const STATE_CHILD_CONTRACT = "MARKIRO_VBTECH_STATE_CHILD 1";
 
 const DEPLOYMENT_STAGES = new Set([
   "configuration",
@@ -74,7 +80,7 @@ const ROLLBACK_STAGES = new Set([
 ]);
 
 class VbtechDeployStageError extends Error {
-  constructor(stage, rollbackStage) {
+  constructor(stage, rollbackStage, { canRollback = true, finalState } = {}) {
     const safeStage = DEPLOYMENT_STAGES.has(stage) ? stage : "configuration";
     const safeRollbackStage = ROLLBACK_STAGES.has(rollbackStage) ? rollbackStage : undefined;
     super(
@@ -85,13 +91,17 @@ class VbtechDeployStageError extends Error {
     this.name = "VbtechDeployStageError";
     this.stage = safeStage;
     this.rollbackStage = safeRollbackStage;
+    this.canRollback = canRollback;
+    this.finalState = finalState;
   }
 }
+
+class BoundedTimeoutError extends Error {}
 
 function timeoutPromise(promise, timeoutMs) {
   return new Promise((resolvePromise, rejectPromise) => {
     const timer = setTimeout(
-      () => rejectPromise(new Error("bounded operation timed out")),
+      () => rejectPromise(new BoundedTimeoutError("bounded operation timed out")),
       timeoutMs,
     );
     Promise.resolve(promise).then(
@@ -180,8 +190,169 @@ async function defaultProbeEdge({ transportOrigin, timeoutMs }) {
   return { status };
 }
 
-function dependencies(supplied) {
+function stateTransitionAction(system, kind, directory, value) {
+  if (kind === "pending") return system.writePendingVbtechRelease(directory, value);
+  if (kind === "healthy") return system.markVbtechReleaseHealthy(directory, value);
+  if (kind === "failed") return system.markVbtechReleaseFailed(directory, value);
+  throw new Error("state transition is invalid");
+}
+
+function startInProcessStateTransition(system, kind, directory, value) {
+  const promise = Promise.resolve().then(() =>
+    stateTransitionAction(system, kind, directory, value),
+  );
   return {
+    promise,
+    async terminate() {
+      await promise.catch(() => undefined);
+      return true;
+    },
+  };
+}
+
+function validStateChildMessage(message) {
+  return (
+    message &&
+    typeof message === "object" &&
+    !Array.isArray(message) &&
+    message.ok === true &&
+    Object.keys(message).sort().join(",") === "ok,value"
+  );
+}
+
+function startChildStateTransition(kind, directory, value) {
+  const child = fork(fileURLToPath(import.meta.url), [STATE_CHILD_ARGUMENT], {
+    env: {},
+    execArgv: [],
+    serialization: "json",
+    stdio: ["ignore", "ignore", "ignore", "ipc"],
+  });
+  let settled = false;
+  const promise = new Promise((resolveTransition, rejectTransition) => {
+    const rejectOnce = () => {
+      if (settled) return;
+      settled = true;
+      rejectTransition(new Error("state transition child failed"));
+    };
+    child.once("message", (message) => {
+      if (!validStateChildMessage(message)) {
+        rejectOnce();
+        return;
+      }
+      if (settled) return;
+      settled = true;
+      child.unref();
+      resolveTransition(message.value);
+    });
+    child.once("error", rejectOnce);
+    child.once("exit", () => {
+      if (settled) return;
+      settled = true;
+      rejectTransition(new Error("state transition child failed"));
+    });
+    child.send(
+      {
+        contract: STATE_CHILD_CONTRACT,
+        directory,
+        kind,
+        value,
+      },
+      (error) => {
+        if (error) rejectOnce();
+      },
+    );
+  });
+  const exited = () =>
+    new Promise((resolveExit) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolveExit();
+        return;
+      }
+      child.once("exit", resolveExit);
+    });
+  return {
+    promise,
+    async terminate() {
+      if (child.exitCode !== null || child.signalCode !== null) return true;
+      child.unref();
+      const exit = exited();
+      child.kill("SIGTERM");
+      try {
+        if (child.connected) child.disconnect();
+      } catch {
+        // The exit listener remains the authority if the IPC channel closed concurrently.
+      }
+      const killTimer = setTimeout(() => child.kill("SIGKILL"), TERMINATION_GRACE_MS);
+      try {
+        await exit;
+      } finally {
+        clearTimeout(killTimer);
+      }
+      return true;
+    },
+  };
+}
+
+function receiveStateChildRequest() {
+  return new Promise((resolveRequest, rejectRequest) => {
+    const timer = setTimeout(rejectRequest, STATE_CHILD_REQUEST_TIMEOUT_MS);
+    process.once("message", (message) => {
+      clearTimeout(timer);
+      resolveRequest(message);
+    });
+  });
+}
+
+function sendStateChildResult(message) {
+  return new Promise((resolveSend, rejectSend) => {
+    if (typeof process.send !== "function") {
+      rejectSend();
+      return;
+    }
+    process.send(message, (error) => (error ? rejectSend() : resolveSend()));
+  });
+}
+
+async function runStateTransitionChild() {
+  try {
+    const request = await receiveStateChildRequest();
+    if (
+      !hasExactKeys(request, "contract,directory,kind,value") ||
+      request.contract !== STATE_CHILD_CONTRACT ||
+      !["failed", "healthy", "pending"].includes(request.kind) ||
+      typeof request.directory !== "string" ||
+      !isAbsolute(request.directory) ||
+      request.directory.includes("\0") ||
+      resolve(request.directory) !== request.directory
+    )
+      throw new Error("state transition child request is invalid");
+    const value = await stateTransitionAction(
+      {
+        markVbtechReleaseFailed,
+        markVbtechReleaseHealthy,
+        writePendingVbtechRelease,
+      },
+      request.kind,
+      request.directory,
+      request.value,
+    );
+    await sendStateChildResult({ ok: true, value });
+    process.disconnect();
+    return 0;
+  } catch {
+    await sendStateChildResult({ ok: false }).catch(() => undefined);
+    process.disconnect?.();
+    return 1;
+  }
+}
+
+function dependencies(supplied) {
+  const hasInjectedStateTransition = [
+    "writePendingVbtechRelease",
+    "markVbtechReleaseHealthy",
+    "markVbtechReleaseFailed",
+  ].some((key) => Object.hasOwn(supplied, key));
+  const system = {
     runner: processRunner(),
     lstat,
     readFile,
@@ -192,6 +363,7 @@ function dependencies(supplied) {
     writePendingVbtechRelease,
     markVbtechReleaseHealthy,
     markVbtechReleaseFailed,
+    vbtechReleaseStatus,
     runPrivateVbtechSmoke,
     probeEdge: defaultProbeEdge,
     sleep: (delay) => new Promise((resolveSleep) => setTimeout(resolveSleep, delay)),
@@ -200,6 +372,11 @@ function dependencies(supplied) {
     ...supplied,
     paths: { ...DEFAULT_PATHS, ...supplied.paths },
   };
+  system.startStateTransition ??= (kind, directory, value) =>
+    hasInjectedStateTransition
+      ? startInProcessStateTransition(system, kind, directory, value)
+      : startChildStateTransition(kind, directory, value);
+  return system;
 }
 
 function hasExactKeys(value, keys) {
@@ -268,6 +445,7 @@ function executorSettings(options) {
     "edgeReadinessIntervalMs",
     "edgeReadinessAttempts",
     "privateSmokeTimeoutMs",
+    "stateTransitionTimeoutMs",
   ]);
   if (
     !options ||
@@ -312,6 +490,10 @@ function executorSettings(options) {
     privateSmokeTimeoutMs: positiveBoundedInteger(
       options.privateSmokeTimeoutMs,
       PRIVATE_SMOKE_TIMEOUT_MS,
+    ),
+    stateTransitionTimeoutMs: positiveBoundedInteger(
+      options.stateTransitionTimeoutMs,
+      STATE_TIMEOUT_MS,
     ),
   };
 }
@@ -402,6 +584,29 @@ function validMarkiroRecord(value, file) {
   return file === `${base}.${value.state}.json`;
 }
 
+function sameVbtechRelease(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.imageRef === right.imageRef &&
+    left.imageDigest === right.imageDigest &&
+    left.releaseSha === right.releaseSha &&
+    left.functionPath === right.functionPath &&
+    left.submissionState === right.submissionState
+  );
+}
+
+function sameMarkiroRelease(left, right) {
+  return (
+    left?.tag === right?.tag &&
+    left?.previousTag === right?.previousTag &&
+    left?.apiDigest === right?.apiDigest &&
+    left?.edgeDigest === right?.edgeDigest &&
+    sameVbtechRelease(left?.vbtech, right?.vbtech) &&
+    left?.state === right?.state &&
+    left?.createdAt === right?.createdAt
+  );
+}
+
 async function activeReleaseTarget(system) {
   const path = system.paths.activeReleaseLink;
   const metadata = await system.lstat(path);
@@ -431,6 +636,7 @@ async function matchingActiveMarkiroRecord(system, releaseSha) {
     throw new Error("active Markiro state is invalid");
   const files = await system.readdir(system.paths.markiroReleaseDirectory);
   const healthy = [];
+  const failed = [];
   for (const file of files.sort()) {
     if (!file.endsWith(".json")) continue;
     const path = `${system.paths.markiroReleaseDirectory}/${file}`;
@@ -452,9 +658,14 @@ async function matchingActiveMarkiroRecord(system, releaseSha) {
     if (value?.tag !== releaseSha) continue;
     if (!validMarkiroRecord(value, file)) throw new Error("active Markiro state is invalid");
     if (value.state === "healthy") healthy.push(value);
+    if (value.state === "failed") failed.push(value);
   }
-  if (healthy.length !== 1) throw new Error("active Markiro state is invalid");
-  return healthy[0];
+  const effective = healthy.filter(
+    (candidate) =>
+      !failed.some((terminal) => sameMarkiroRelease({ ...terminal, state: "healthy" }, candidate)),
+  );
+  if (effective.length !== 1) throw new Error("active Markiro state is invalid");
+  return effective[0];
 }
 
 function boundedResult(result) {
@@ -765,18 +976,158 @@ function selectorFromHealthyRecord(value) {
   });
 }
 
-function validatedPendingRecord(value, selector) {
+function validatedLifecycleRecord(value, selector, state, createdAt) {
   if (
     !hasExactKeys(value, "createdAt,imageDigest,imageRef,releaseSha,state,submissionState") ||
-    value.state !== "pending" ||
+    value.state !== state ||
     !isCanonicalIsoDate(value.createdAt) ||
+    (createdAt !== undefined && value.createdAt !== createdAt) ||
     value.releaseSha !== selector.releaseSha ||
     value.imageRef !== selector.imageRef ||
     value.imageDigest !== selector.imageDigest ||
     value.submissionState !== selector.submissionState
   )
-    throw new Error("pending v-b lifecycle record is invalid");
+    throw new Error("v-b lifecycle record is invalid");
   return value;
+}
+
+function validatedPendingRecord(value, selector) {
+  return validatedLifecycleRecord(value, selector, "pending");
+}
+
+function validatedTerminalRecord(value, selector, pending, state) {
+  return validatedLifecycleRecord(value, selector, state, pending.createdAt);
+}
+
+function validatedReleaseStatus(value, selector, pending) {
+  if (
+    !hasExactKeys(value, "persisted,record,state") ||
+    typeof value.persisted !== "boolean" ||
+    !["absent", "failed", "healthy", "pending"].includes(value.state)
+  )
+    throw new Error("v-b lifecycle status is invalid");
+  if (value.state === "absent") {
+    if (value.record !== null || value.persisted)
+      throw new Error("v-b lifecycle status is invalid");
+    return value;
+  }
+  validatedLifecycleRecord(value.record, selector, value.state, pending?.createdAt);
+  return value;
+}
+
+function validStateTransitionHandle(value) {
+  return (
+    hasExactKeys(value, "promise,terminate") &&
+    value.promise &&
+    typeof value.promise.then === "function" &&
+    typeof value.terminate === "function"
+  );
+}
+
+async function reconcileStateTransition(system, input, handle, pending) {
+  try {
+    const terminated = await timeoutPromise(handle.terminate(), STATE_CHILD_TERMINATION_TIMEOUT_MS);
+    if (terminated !== true) return { outcome: "uncertain" };
+  } catch {
+    return { outcome: "uncertain" };
+  }
+  try {
+    const status = await timeoutPromise(
+      system.vbtechReleaseStatus(system.paths.vbtechReleaseDirectory, input.selector),
+      STATE_TIMEOUT_MS,
+    );
+    return {
+      outcome: "reconciled",
+      status: validatedReleaseStatus(status, input.selector, pending),
+    };
+  } catch {
+    return { outcome: "uncertain" };
+  }
+}
+
+async function supervisedStateTransition(system, input, kind, value, pending) {
+  let handle;
+  try {
+    handle = system.startStateTransition(kind, system.paths.vbtechReleaseDirectory, value);
+    if (!validStateTransitionHandle(handle)) throw new Error("state transition handle is invalid");
+  } catch {
+    return { outcome: "uncertain" };
+  }
+  try {
+    return {
+      outcome: "completed",
+      value: await timeoutPromise(handle.promise, input.settings.stateTransitionTimeoutMs),
+    };
+  } catch {
+    return reconcileStateTransition(system, input, handle, pending);
+  }
+}
+
+async function publishFailedState(system, input, pending) {
+  system.event("failed");
+  const transition = await supervisedStateTransition(system, input, "failed", pending, pending);
+  if (transition.outcome === "completed") {
+    try {
+      return {
+        ok: true,
+        record: validatedTerminalRecord(transition.value, input.selector, pending, "failed"),
+      };
+    } catch {
+      return { ok: false, finalState: "uncertain" };
+    }
+  }
+  if (transition.outcome === "reconciled" && transition.status.state === "failed")
+    return { ok: true, record: transition.status.record };
+  return {
+    ok: false,
+    finalState: transition.outcome === "reconciled" ? transition.status.state : "uncertain",
+  };
+}
+
+async function publishPendingState(system, input) {
+  system.event("pending");
+  const transition = await supervisedStateTransition(system, input, "pending", input.selector);
+  if (transition.outcome === "completed") {
+    try {
+      return validatedPendingRecord(transition.value, input.selector);
+    } catch {
+      throw new VbtechDeployStageError("pending", undefined, { canRollback: false });
+    }
+  }
+  if (transition.outcome === "uncertain")
+    throw new VbtechDeployStageError("pending", undefined, { canRollback: false });
+  const { status } = transition;
+  if (status.state === "pending" && status.persisted) {
+    const failed = await publishFailedState(system, input, status.record);
+    throw new VbtechDeployStageError("pending", failed.ok ? undefined : "failed-record", {
+      canRollback: false,
+      finalState: failed.ok ? "failed" : failed.finalState,
+    });
+  }
+  throw new VbtechDeployStageError("pending", undefined, {
+    canRollback: false,
+    finalState: status.state,
+  });
+}
+
+async function publishHealthyState(system, input, pending) {
+  system.event("healthy");
+  const transition = await supervisedStateTransition(system, input, "healthy", pending, pending);
+  if (transition.outcome === "completed") {
+    try {
+      return validatedTerminalRecord(transition.value, input.selector, pending, "healthy");
+    } catch {
+      throw new VbtechDeployStageError("healthy", undefined, { canRollback: false });
+    }
+  }
+  if (transition.outcome === "uncertain")
+    throw new VbtechDeployStageError("healthy", undefined, { canRollback: false });
+  const { status } = transition;
+  if (status.state === "healthy") return status.record;
+  throw new VbtechDeployStageError("healthy", undefined, {
+    canRollback: status.state === "failed" || (status.state === "pending" && status.persisted),
+    finalState: status.state,
+  });
 }
 
 async function emitStage(system, event, failureStage, action, timeoutMs) {
@@ -941,17 +1292,7 @@ export async function deployVbtechRelease(options, supplied = {}) {
     },
     STATE_TIMEOUT_MS,
   );
-  const pending = await emitStage(
-    system,
-    "pending",
-    "pending",
-    async () =>
-      validatedPendingRecord(
-        await system.writePendingVbtechRelease(system.paths.vbtechReleaseDirectory, input.selector),
-        input.selector,
-      ),
-    STATE_TIMEOUT_MS,
-  );
+  const pending = await publishPendingState(system, input);
   const environment = commandEnvironment(input, active, input.selector);
   const compose = productionComposeArgs(environment);
   let serviceActivationAttempted = false;
@@ -1002,29 +1343,18 @@ export async function deployVbtechRelease(options, supplied = {}) {
         }),
       input.settings.privateSmokeTimeoutMs,
     );
-    return await emitStage(
-      system,
-      "healthy",
-      "healthy",
-      () => system.markVbtechReleaseHealthy(system.paths.vbtechReleaseDirectory, pending),
-      STATE_TIMEOUT_MS,
-    );
+    return await publishHealthyState(system, input, pending);
   } catch (error) {
     primaryFailure =
       error instanceof VbtechDeployStageError ? error : new VbtechDeployStageError("configuration");
   }
 
   let rollbackFailure;
-  if (serviceActivationAttempted)
+  if (serviceActivationAttempted && primaryFailure.canRollback)
     rollbackFailure = await rollbackCandidate(system, input, active, previous);
-  try {
-    system.event("failed");
-    await timeoutPromise(
-      system.markVbtechReleaseFailed(system.paths.vbtechReleaseDirectory, pending),
-      STATE_TIMEOUT_MS,
-    );
-  } catch {
-    rollbackFailure ??= "failed-record";
+  if (primaryFailure.canRollback && primaryFailure.finalState !== "failed") {
+    const failed = await publishFailedState(system, input, pending);
+    if (!failed.ok) rollbackFailure ??= "failed-record";
   }
   throw new VbtechDeployStageError(primaryFailure.stage, rollbackFailure);
 }
@@ -1067,5 +1397,9 @@ export async function runVbtechDeployCli(options = {}) {
 }
 
 if (isMainModule(import.meta.url)) {
-  process.exitCode = await runVbtechDeployCli();
+  const argv = process.argv.slice(2);
+  process.exitCode =
+    argv.length === 1 && argv[0] === STATE_CHILD_ARGUMENT && typeof process.send === "function"
+      ? await runStateTransitionChild()
+      : await runVbtechDeployCli();
 }

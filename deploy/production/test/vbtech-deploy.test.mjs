@@ -9,6 +9,7 @@ import {
   deployVbtechRelease,
   runVbtechDeployCli,
 } from "../vbtech-deploy.mjs";
+import { latestHealthyVbtechRelease as readHealthyVbtechRelease } from "../vbtech-release-state.mjs";
 
 const markiroSha = "0123456789abcdef0123456789abcdef01234567";
 const apiImageDigest = `sha256:${"a".repeat(64)}`;
@@ -114,6 +115,20 @@ function stageError(error, stage, rollbackStage) {
   return true;
 }
 
+function deferred() {
+  let resolvePromise;
+  let rejectPromise;
+  const promise = new Promise((resolve, reject) => {
+    resolvePromise = resolve;
+    rejectPromise = reject;
+  });
+  return { promise, resolve: resolvePromise, reject: rejectPromise };
+}
+
+function delay(milliseconds) {
+  return new Promise((resolveDelay) => setTimeout(resolveDelay, milliseconds));
+}
+
 async function fixture(t, options = {}) {
   const root = await mkdtemp(join(tmpdir(), "vbtech-deploy-test-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -134,6 +149,7 @@ async function fixture(t, options = {}) {
 
   const events = [];
   const calls = [];
+  const stateAttempts = [];
   const stateWrites = [];
   const smokeCalls = [];
   const readinessCalls = [];
@@ -241,7 +257,9 @@ async function fixture(t, options = {}) {
     },
     async writePendingVbtechRelease(directory, selector) {
       assert.equal(directory, vbtechReleaseDirectory);
+      stateAttempts.push({ kind: "pending" });
       if (options.failAt === currentStage) throw new Error("pending private error");
+      await options.pendingDeferred?.promise;
       const pending = lifecycleRecord({
         releaseSha: selector.releaseSha,
         imageDigest: selector.imageDigest,
@@ -253,20 +271,38 @@ async function fixture(t, options = {}) {
     },
     async markVbtechReleaseHealthy(directory, pending) {
       assert.equal(directory, vbtechReleaseDirectory);
+      stateAttempts.push({ kind: "healthy" });
       if (options.failAt === currentStage) throw new Error("healthy private error");
       assert.equal(
         smokeCalls.some((call) => call.expectedVbtechReleaseSha === candidateSha),
         true,
       );
+      await options.healthyDeferred?.promise;
       const healthy = { ...pending, state: "healthy" };
       stateWrites.push({ kind: "healthy", value: healthy });
       return healthy;
     },
     async markVbtechReleaseFailed(directory, pending) {
       assert.equal(directory, vbtechReleaseDirectory);
-      stateWrites.push({ kind: "failed", value: { ...pending, state: "failed" } });
+      stateAttempts.push({ kind: "failed" });
       if (options.failedRecordError) throw new Error("failed record private error");
+      stateWrites.push({ kind: "failed", value: { ...pending, state: "failed" } });
       return { ...pending, state: "failed" };
+    },
+    async vbtechReleaseStatus(directory, selector) {
+      assert.equal(directory, vbtechReleaseDirectory);
+      const record = stateWrites
+        .map(({ value }) => value)
+        .filter(
+          (value) =>
+            value.releaseSha === selector.releaseSha &&
+            value.imageRef === selector.imageRef &&
+            value.imageDigest === selector.imageDigest,
+        )
+        .at(-1);
+      return record === undefined
+        ? { state: "absent", record: null, persisted: false }
+        : { state: record.state, record, persisted: true };
     },
     async runPrivateVbtechSmoke(smokeOptions) {
       smokeCalls.push({ ...smokeOptions });
@@ -300,6 +336,7 @@ async function fixture(t, options = {}) {
     root,
     readinessCalls,
     smokeCalls,
+    stateAttempts,
     stateWrites,
   };
 }
@@ -359,6 +396,154 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
           /(?:^|[-_/])(migrate|terraform|yandex|yc|function|database)(?:$|[-_/])/i.test(arg),
         ),
     ),
+    false,
+  );
+});
+
+test("accepts a finite state-transition deadline without changing normal state order", async (t) => {
+  const context = await fixture(t);
+
+  await deployVbtechRelease(
+    { environment: environment(), stateTransitionTimeoutMs: 100 },
+    context.dependencies,
+  );
+
+  assert.deepEqual(
+    context.stateWrites.map(({ kind }) => kind),
+    ["pending", "healthy"],
+  );
+});
+
+test("runs default lifecycle writes inside the bounded state child process", async (t) => {
+  const context = await fixture(t);
+  for (const key of [
+    "markVbtechReleaseFailed",
+    "markVbtechReleaseHealthy",
+    "vbtechReleaseStatus",
+    "writePendingVbtechRelease",
+  ])
+    delete context.dependencies[key];
+
+  const healthy = await deployVbtechRelease(
+    { environment: environment(), stateTransitionTimeoutMs: 2_000 },
+    context.dependencies,
+  );
+
+  assert.equal(healthy.state, "healthy");
+  assert.deepEqual(
+    await readHealthyVbtechRelease(context.dependencies.paths.vbtechReleaseDirectory),
+    healthy,
+  );
+  assert.deepEqual(context.stateAttempts, []);
+  assert.deepEqual(context.stateWrites, []);
+});
+
+test("a delayed pending transition is reconciled to failed before the deployment returns", async (t) => {
+  const pendingDeferred = deferred();
+  const context = await fixture(t, { pendingDeferred });
+  let settled = false;
+  const observed = deployVbtechRelease(
+    { environment: environment(), stateTransitionTimeoutMs: 10 },
+    context.dependencies,
+  ).then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  observed.then(() => {
+    settled = true;
+  });
+
+  await delay(30);
+  const settledBeforePendingCompleted = settled;
+  pendingDeferred.resolve();
+  const outcome = await observed;
+
+  assert.equal(settledBeforePendingCompleted, false);
+  assert.equal(outcome.status, "rejected");
+  assert.equal(stageError(outcome.error, "pending", undefined), true);
+  assert.deepEqual(
+    context.stateWrites.map(({ kind }) => kind),
+    ["pending", "failed"],
+  );
+  assert.deepEqual(context.calls.filter(isComposeMutation), []);
+});
+
+test("a delayed healthy transition settles authoritatively before any rollback or failed write", async (t) => {
+  const healthyDeferred = deferred();
+  const context = await fixture(t, { healthyDeferred });
+  let settled = false;
+  const observed = deployVbtechRelease(
+    { environment: environment(), stateTransitionTimeoutMs: 10 },
+    context.dependencies,
+  ).then(
+    (value) => ({ status: "fulfilled", value }),
+    (error) => ({ status: "rejected", error }),
+  );
+  observed.then(() => {
+    settled = true;
+  });
+
+  for (let attempt = 0; attempt < 200 && !context.events.includes("healthy"); attempt += 1)
+    await delay(1);
+  assert.equal(context.events.includes("healthy"), true);
+  await delay(30);
+  const settledBeforeHealthyCompleted = settled;
+  const rollbackBeforeHealthyCompleted = context.events.some((event) =>
+    event.startsWith("rollback-"),
+  );
+  healthyDeferred.resolve();
+  const outcome = await observed;
+
+  assert.equal(settledBeforeHealthyCompleted, false);
+  assert.equal(rollbackBeforeHealthyCompleted, false);
+  assert.equal(outcome.status, "fulfilled");
+  assert.equal(outcome.value.state, "healthy");
+  assert.deepEqual(
+    context.stateWrites.map(({ kind }) => kind),
+    ["pending", "healthy"],
+  );
+  assert.equal(
+    context.events.some((event) => event.startsWith("rollback-")),
+    false,
+  );
+});
+
+test("fails closed without rollback or a competing terminal when cancellation is unproven", async (t) => {
+  const context = await fixture(t);
+  const writePending = context.dependencies.writePendingVbtechRelease;
+  context.dependencies.startStateTransition = (kind, directory, value) => {
+    if (kind === "healthy")
+      return {
+        promise: new Promise(() => undefined),
+        async terminate() {
+          throw new Error("password must-never-reach-output");
+        },
+      };
+    const promise = Promise.resolve().then(() => writePending(directory, value));
+    return {
+      promise,
+      async terminate() {
+        await promise.catch(() => undefined);
+        return true;
+      },
+    };
+  };
+
+  await assert.rejects(
+    deployVbtechRelease(
+      { environment: environment(), stateTransitionTimeoutMs: 10 },
+      context.dependencies,
+    ),
+    (error) => stageError(error, "healthy", undefined),
+  );
+
+  assert.deepEqual(
+    context.stateWrites.map(({ kind }) => kind),
+    ["pending"],
+  );
+  assert.equal(context.events.includes("failed"), false);
+  assert.equal(
+    context.events.some((event) => event.startsWith("rollback-")),
     false,
   );
 });
@@ -440,6 +625,67 @@ test("requires exactly one matching healthy active Markiro record", async (t) =>
   );
   assert.equal(context.stateWrites.length, 0);
   assert.deepEqual(context.calls.filter(isComposeMutation), []);
+});
+
+test("excludes an active Markiro healthy record invalidated by its matching failed terminal", async (t) => {
+  const context = await fixture(t);
+  const failed = markiroRecord({ state: "failed" });
+  await writeFile(
+    join(context.markiroReleaseDirectory, markiroRecordFileName(failed)),
+    `${JSON.stringify(failed)}\n`,
+    { mode: 0o600 },
+  );
+
+  await assert.rejects(
+    deployVbtechRelease({ environment: environment() }, context.dependencies),
+    (error) => stageError(error, "active-markiro", undefined),
+  );
+  assert.equal(context.stateWrites.length, 0);
+  assert.equal(context.calls.length, 0);
+});
+
+test("does not invalidate active Markiro healthy evidence with an unrelated failed record", async (t) => {
+  const context = await fixture(t);
+  const unrelated = markiroRecord({
+    apiDigest: `ghcr.io/thevladbog/markiro-api@sha256:${"7".repeat(64)}`,
+    state: "failed",
+  });
+  await writeFile(
+    join(context.markiroReleaseDirectory, markiroRecordFileName(unrelated)),
+    `${JSON.stringify(unrelated)}\n`,
+    { mode: 0o600 },
+  );
+
+  const result = await deployVbtechRelease({ environment: environment() }, context.dependencies);
+
+  assert.equal(result.state, "healthy");
+  assert.deepEqual(
+    context.stateWrites.map(({ kind }) => kind),
+    ["pending", "healthy"],
+  );
+});
+
+test("rejects ambiguous effective active Markiro records before pending or Docker mutation", async (t) => {
+  const context = await fixture(t);
+  const second = markiroRecord({ createdAt: "2026-08-21T10:20:31.000Z" });
+  const unrelatedFailed = markiroRecord({
+    createdAt: "2026-08-21T10:20:32.000Z",
+    edgeDigest: `ghcr.io/thevladbog/markiro-edge@sha256:${"8".repeat(64)}`,
+    state: "failed",
+  });
+  for (const value of [second, unrelatedFailed])
+    await writeFile(
+      join(context.markiroReleaseDirectory, markiroRecordFileName(value)),
+      `${JSON.stringify(value)}\n`,
+      { mode: 0o600 },
+    );
+
+  await assert.rejects(
+    deployVbtechRelease({ environment: environment() }, context.dependencies),
+    (error) => stageError(error, "active-markiro", undefined),
+  );
+  assert.equal(context.stateWrites.length, 0);
+  assert.equal(context.calls.length, 0);
 });
 
 test("rejects an unsafe Markiro release-state directory before mutation", async (t) => {
@@ -659,7 +905,11 @@ for (const [name, fixtureOptions, rollbackStage, deployOverrides] of [
           rollbackStage,
         ),
     );
-    assert.equal(context.stateWrites.at(-1).kind, "failed");
+    assert.equal(context.stateAttempts.at(-1).kind, "failed");
+    assert.equal(
+      context.stateWrites.at(-1).kind,
+      fixtureOptions.failedRecordError ? "pending" : "failed",
+    );
   });
 }
 
