@@ -1,0 +1,24 @@
+services:
+  vbtech-web:
+    image: ${VBTECH_IMAGE_TAG:?VBTECH_IMAGE_TAG is required}
+    restart: unless-stopped
+    environment:
+      VBTECH_RELEASE_SHA: ${VBTECH_RELEASE_SHA:?VBTECH_RELEASE_SHA is required}
+    expose:
+      - "8080"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  edge:
+    environment:
+      VBTECH_RELEASE_SHA: ${VBTECH_RELEASE_SHA}
+      VBTECH_FUNCTION_PATH: ${VBTECH_FUNCTION_PATH}
+      VBTECH_SUBMISSION_STATE: ${VBTECH_SUBMISSION_STATE}
+    depends_on:
+      vbtech-web:
+        condition: service_healthy

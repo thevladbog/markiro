@@ -11,6 +11,8 @@ const apiImageDigest = `sha256:${"a".repeat(64)}`;
 const edgeImageDigest = `sha256:${"b".repeat(64)}`;
 const apiImage = `ghcr.io/thevladbog/markiro-api@${apiImageDigest}`;
 const edgeImage = `ghcr.io/thevladbog/markiro-edge@${edgeImageDigest}`;
+const vbtechReleaseSha = "e".repeat(40);
+const vbtechImage = `ghcr.io/thevladbog/vbtech-web:${vbtechReleaseSha}`;
 const environment = {
   MARKIRO_IMAGE_TAG: tag,
   MARKIRO_API_IMAGE_DIGEST: apiImageDigest,
@@ -238,6 +240,54 @@ test("passes all configured authorities and the immutable tag to public smoke", 
   assert.equal(smokeOptions.expectedReleaseSha, tag);
   assert.equal(smokeOptions.landingDemoSubmissionState, "disabled");
   assert.equal(readinessUrl, "https://app.markiro.example:18443/health/live");
+});
+
+test("deploys and smokes an independently tagged v-b service before switching the shared edge", async () => {
+  const { dependencies, releaseDirectory, runner } = await fixture();
+  let smokeOptions;
+  dependencies.runPreflight = async () => ({
+    imageTag: tag,
+    apiImageDigest,
+    edgeImageDigest,
+    envFile: environment.MARKIRO_ENV_FILE,
+    vbtechImageTag: vbtechImage,
+    vbtechReleaseSha,
+    vbtechDomain: "v-b.tech",
+    vbtechWwwDomain: "www.v-b.tech",
+    vbtechFunctionPath: "/d4example",
+    vbtechSubmissionState: "disabled",
+  });
+  dependencies.runSmoke = async (options) => {
+    smokeOptions = options;
+  };
+
+  const release = await deployRelease(
+    {
+      environment: {
+        ...environment,
+        VBTECH_IMAGE_TAG: vbtechImage,
+        VBTECH_DOMAIN: "v-b.tech",
+        VBTECH_WWW_DOMAIN: "www.v-b.tech",
+      },
+      releaseDirectory,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+
+  const commands = runner.calls.map(({ args }) => args);
+  assert.ok(commands.some((args) => args.includes("pull") && args.includes("vbtech-web")));
+  assert.ok(commands.some((args) => args.at(-1) === vbtechImage && args.includes("inspect")));
+  assert.ok(commands.some((args) => args.at(-1) === "vbtech-web" && args.includes("up")));
+  assert.ok(
+    commands.findIndex((args) => args.at(-1) === "vbtech-web" && args.includes("up")) <
+      commands.findIndex((args) => args.at(-1) === "edge" && args.includes("up")),
+  );
+  assert.equal(release.vbtech.imageTag, vbtechImage);
+  assert.equal(smokeOptions.vbtechBaseUrl, "https://v-b.tech");
+  assert.equal(smokeOptions.vbtechWwwBaseUrl, "https://www.v-b.tech");
+  assert.equal(smokeOptions.expectedVbtechReleaseSha, vbtechReleaseSha);
+  assert.equal(smokeOptions.vbtechSubmissionState, "disabled");
 });
 
 test("uses only a structurally valid newest healthy release as the previous tag", async () => {

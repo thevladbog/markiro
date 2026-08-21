@@ -19,3 +19,13 @@ export function validateProductionDomains(domain, kioskDomain, landingDomain) {
     throw new Error("production domains must be distinct");
   return { domain, kioskDomain, landingDomain };
 }
+
+export function validateVbtechDomains(domain, wwwDomain, reservedDomains = []) {
+  validateProductionDomain(domain, "VBTECH_DOMAIN");
+  validateProductionDomain(wwwDomain, "VBTECH_WWW_DOMAIN");
+  if (domain !== "v-b.tech") throw new Error("VBTECH_DOMAIN is invalid");
+  if (wwwDomain !== "www.v-b.tech") throw new Error("VBTECH_WWW_DOMAIN is invalid");
+  if (new Set([...reservedDomains, domain, wwwDomain]).size !== reservedDomains.length + 2)
+    throw new Error("production domains must be distinct");
+  return { domain, wwwDomain };
+}

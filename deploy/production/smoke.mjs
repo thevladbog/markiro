@@ -4,13 +4,15 @@ import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
-import { validateProductionDomains } from "./production-domain.mjs";
+import { validateProductionDomains, validateVbtechDomains } from "./production-domain.mjs";
 import { RUNTIME_DEPENDENCY_PROBE_SOURCE } from "./runtime-dependency-probe.mjs";
 
 const APPLICATION_CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const LANDING_CSP =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
+const VBTECH_CSP =
+  "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const LANDING_SITE_URL = "https://markiro.app";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
@@ -159,6 +161,21 @@ export const LANDING_ROUTE_CHECKS = Object.freeze([
   Object.freeze(["GET", "/missing/", "branded-not-found"]),
 ]);
 
+export const VBTECH_ROUTE_CHECKS = Object.freeze([
+  Object.freeze(["GET", "/", "vbtech-page"]),
+  Object.freeze(["GET", "/en/", "vbtech-page"]),
+  Object.freeze(["GET", "/legal/", "vbtech-page"]),
+  Object.freeze(["GET", "/privacy/", "vbtech-page"]),
+  Object.freeze(["GET", "/personal-data-consent/", "vbtech-page"]),
+  Object.freeze(["GET", "/api/contact", "not-found"]),
+  Object.freeze(["POST", "/api/contact/", "not-found"]),
+  Object.freeze(["POST", "/api/other", "not-found"]),
+  Object.freeze(["GET", "/api/auth/get-session", "not-found"]),
+  Object.freeze(["GET", "/station/bootstrap", "vbtech-not-found"]),
+  Object.freeze(["GET", "/kiosk/bootstrap", "vbtech-not-found"]),
+  Object.freeze(["POST", "/api/contact", "contact-state"]),
+]);
+
 function productionBaseUrl(domain, port) {
   const authority = port && port !== "443" ? `${domain}:${port}` : domain;
   return `https://${authority}`;
@@ -167,6 +184,12 @@ function productionBaseUrl(domain, port) {
 export function landingDemoSubmissionState(value) {
   if (value !== "disabled" && value !== "enabled")
     throw new Error("landing demo submission smoke state is invalid");
+  return value;
+}
+
+export function vbtechSubmissionState(value) {
+  if (value !== "disabled" && value !== "enabled")
+    throw new Error("v-b contact submission smoke state is invalid");
   return value;
 }
 
@@ -186,10 +209,26 @@ export function productionBaseUrls(environment) {
   if (landingDomain === "landing.localhost" && !isLocalSet)
     throw new Error("MARKIRO_LANDING_DOMAIN is invalid");
   const port = environment.MARKIRO_HTTPS_PORT;
-  return {
+  const urls = {
     admin: productionBaseUrl(domain, port),
     kiosk: productionBaseUrl(kioskDomain, port),
     landing: productionBaseUrl(landingDomain, port),
+  };
+  const vbtechConfigured = [
+    environment.VBTECH_IMAGE_TAG,
+    environment.VBTECH_DOMAIN,
+    environment.VBTECH_WWW_DOMAIN,
+  ].some((value) => value !== undefined);
+  if (!vbtechConfigured) return urls;
+  const vbtech = validateVbtechDomains(environment.VBTECH_DOMAIN, environment.VBTECH_WWW_DOMAIN, [
+    domain,
+    kioskDomain,
+    landingDomain,
+  ]);
+  return {
+    ...urls,
+    vbtech: productionBaseUrl(vbtech.domain, port),
+    vbtechWww: productionBaseUrl(vbtech.wwwDomain, port),
   };
 }
 
@@ -251,6 +290,29 @@ function assertHeaders(response, requiresHsts, routeLabel, expectedCsp = APPLICA
   if (headers.get("x-frame-options") !== "SAMEORIGIN") throw new Error("SAMEORIGIN is missing");
   if (headers.get("referrer-policy") !== "strict-origin-when-cross-origin")
     throw new Error("referrer policy is missing");
+}
+
+function assertVbtechHeaders(response, requiresHsts, routeLabel, expectedReleaseSha) {
+  const headers = response.headers;
+  if (headers.get("content-security-policy") !== VBTECH_CSP)
+    throw new Error(`v-b CSP is not the production policy on ${routeLabel}`);
+  if (
+    requiresHsts &&
+    headers.get("strict-transport-security") !== "max-age=63072000; includeSubDomains"
+  )
+    throw new Error("v-b HSTS is missing");
+  if (headers.get("x-content-type-options") !== "nosniff")
+    throw new Error("v-b nosniff is missing");
+  if (headers.get("x-frame-options") !== "DENY") throw new Error("v-b DENY is missing");
+  if (headers.get("referrer-policy") !== "strict-origin-when-cross-origin")
+    throw new Error("v-b referrer policy is missing");
+  if (
+    headers.get("permissions-policy") !==
+    "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+  )
+    throw new Error("v-b permissions policy is missing");
+  if (headers.get("x-vbtech-release-sha") !== expectedReleaseSha)
+    throw new Error("v-b release identity does not match the expected release");
 }
 
 function shellSignature(html) {
@@ -1145,12 +1207,74 @@ async function runLandingSmoke(options, client) {
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
 }
 
+export async function runVbtechSmoke(options, client = requestClient()) {
+  const baseUrl = options.vbtechBaseUrl.replace(/\/$/, "");
+  const wwwBaseUrl = options.vbtechWwwBaseUrl.replace(/\/$/, "");
+  const releaseSha = options.expectedVbtechReleaseSha;
+  if (typeof releaseSha !== "string" || !/^[0-9a-f]{40}$/.test(releaseSha))
+    throw new Error("v-b release identity is invalid");
+  const submissionState = vbtechSubmissionState(options.vbtechSubmissionState);
+  const requiresHsts = new URL(baseUrl).protocol === "https:";
+
+  for (const [method, path, kind] of VBTECH_ROUTE_CHECKS) {
+    const response = await publicRequest(client, new URL(path, baseUrl), {
+      method,
+      ...(method === "POST" ? { body: "{}", headers: { "content-type": "application/json" } } : {}),
+    });
+    const body = await getText(response);
+    assertVbtechHeaders(response, requiresHsts, `v-b ${method} ${path}`, releaseSha);
+    const contentType = response.headers.get("content-type") || "";
+
+    if (kind === "vbtech-page") {
+      if (
+        response.status !== 200 ||
+        !/text\/html/i.test(contentType) ||
+        !body.includes(`meta name="vbtech-release-sha" content="${releaseSha}"`) ||
+        !/<html\b[^>]*\bdata-theme=/i.test(body)
+      )
+        throw new Error(`v-b ${path} is not the expected release page`);
+      continue;
+    }
+    if (kind === "vbtech-not-found") {
+      if (response.status !== 404 || !/text\/html/i.test(contentType))
+        throw new Error(`v-b ${path} did not return the branded 404`);
+      continue;
+    }
+    if (kind === "not-found") {
+      if (response.status !== 404 || /text\/html/i.test(contentType))
+        throw new Error(`v-b ${method} ${path} did not return a plain 404`);
+      continue;
+    }
+    const expectedStatus = submissionState === "enabled" ? 400 : 404;
+    if (kind !== "contact-state" || response.status !== expectedStatus)
+      throw new Error(`v-b POST /api/contact does not match the configured state`);
+  }
+
+  const canonicalPath = "/canonical-check";
+  const redirect = await publicRequest(client, new URL(canonicalPath, wwwBaseUrl), {
+    method: "GET",
+    redirect: "manual",
+  });
+  assertVbtechHeaders(
+    redirect,
+    new URL(wwwBaseUrl).protocol === "https:",
+    "v-b canonical redirect",
+    releaseSha,
+  );
+  if (
+    ![301, 308].includes(redirect.status) ||
+    redirect.headers.get("location") !== new URL(canonicalPath, baseUrl).href
+  )
+    throw new Error("v-b www authority is not canonical");
+}
+
 export async function runPublicSmoke(options, client = requestClient()) {
   const landingState = landingDemoSubmissionState(options.landingDemoSubmissionState ?? "disabled");
   const smokeOptions = { ...options, landingDemoSubmissionState: landingState };
   const admin = await runAdminSmoke(smokeOptions, client);
   const kiosk = await runKioskSmoke(smokeOptions, client, admin);
   const landing = await runLandingSmoke(smokeOptions, client);
+  if (options.vbtechBaseUrl) await runVbtechSmoke(options, client);
   if (!options.expectedReleaseSha && (admin.releaseSha || kiosk.releaseSha || landing.releaseSha)) {
     if (
       !admin.releaseSha ||
@@ -1162,7 +1286,7 @@ export async function runPublicSmoke(options, client = requestClient()) {
 }
 
 /**
- * @param {{adminBaseUrl: string, kioskBaseUrl: string, landingBaseUrl: string, assetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
+ * @param {{adminBaseUrl: string, kioskBaseUrl: string, landingBaseUrl: string, vbtechBaseUrl?: string, vbtechWwwBaseUrl?: string, assetName?: string, kioskAssetName?: string, expectedReleaseSha?: string, expectedVbtechReleaseSha?: string, vbtechSubmissionState?: "disabled" | "enabled", environment?: Record<string, string | undefined>, commandTimeoutMs?: number, readinessAttempts?: number, readinessIntervalMs?: number, sleep?: (milliseconds: number) => Promise<void>}} options
  * @param {{request(url: string | URL, init: RequestInit): Promise<{status: number, headers: Headers, text(): Promise<string>}>}=} client
  * @param {{run(command: string, args: string[]): Promise<{code: number, stdout: string, stderr: string, durationMs?: number}>}=} docker
  */

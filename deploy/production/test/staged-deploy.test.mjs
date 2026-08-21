@@ -12,6 +12,8 @@ const API_DIGEST = `sha256:${"a".repeat(64)}`;
 const EDGE_DIGEST = `sha256:${"b".repeat(64)}`;
 const PREVIOUS_API = `ghcr.io/thevladbog/markiro-api@sha256:${"c".repeat(64)}`;
 const PREVIOUS_EDGE = `ghcr.io/thevladbog/markiro-edge@sha256:${"d".repeat(64)}`;
+const VBTECH_SHA = "e".repeat(40);
+const VBTECH_IMAGE = `ghcr.io/thevladbog/vbtech-web:${VBTECH_SHA}`;
 const ENVIRONMENT = {
   MARKIRO_IMAGE_TAG: TAG,
   MARKIRO_API_IMAGE_DIGEST: API_DIGEST,
@@ -121,6 +123,42 @@ test("prepare stops after local API and edge readiness with an exclusive pending
     persisted.some(({ value }) => value.tag === TAG && value.state === "healthy"),
     false,
   );
+});
+
+test("staged v-b activation is recorded and rollback to a Markiro-only release stops its service", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  dependencies.runPreflight = async (environment) => ({
+    imageTag: environment.MARKIRO_IMAGE_TAG,
+    apiImageDigest: environment.MARKIRO_API_IMAGE_DIGEST,
+    edgeImageDigest: environment.MARKIRO_EDGE_IMAGE_DIGEST,
+    envFile: environment.MARKIRO_ENV_FILE,
+    vbtechImageTag: VBTECH_IMAGE,
+    vbtechReleaseSha: VBTECH_SHA,
+    vbtechDomain: "v-b.tech",
+    vbtechWwwDomain: "www.v-b.tech",
+    vbtechFunctionPath: "/d4example",
+    vbtechSubmissionState: "disabled",
+  });
+  const environment = {
+    ...ENVIRONMENT,
+    VBTECH_IMAGE_TAG: VBTECH_IMAGE,
+    VBTECH_DOMAIN: "v-b.tech",
+    VBTECH_WWW_DOMAIN: "www.v-b.tech",
+  };
+
+  const candidate = await prepareRelease(
+    { environment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  assert.equal(candidate.vbtech.imageTag, VBTECH_IMAGE);
+  assert.ok(calls.some(({ args }) => args.includes("pull") && args.includes("vbtech-web")));
+  assert.ok(calls.some(({ args }) => args.at(-1) === "vbtech-web" && args.includes("up")));
+
+  await rollbackPreparedRelease(
+    { candidate, environment, releaseDirectory, readinessAttempts: 1 },
+    dependencies,
+  );
+  assert.ok(calls.some(({ args }) => args.includes("stop") && args.includes("vbtech-web")));
 });
 
 test("two SHA release directories replace one stable Compose project and rollback restores the prior digest pair", async () => {

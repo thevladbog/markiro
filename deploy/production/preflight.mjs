@@ -4,10 +4,11 @@ import process from "node:process";
 
 import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
-import { validateProductionDomains } from "./production-domain.mjs";
+import { validateProductionDomains, validateVbtechDomains } from "./production-domain.mjs";
 
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
+const VBTECH_IMAGE_PATTERN = /^ghcr\.io\/thevladbog\/vbtech-web:([0-9a-f]{40})$/;
 const COMPOSE_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 const STDERR_LIMIT_BYTES = 8 * 1024;
@@ -19,6 +20,57 @@ function isEmail(value) {
 
 function invalid(variable) {
   return new Error(`${variable} is invalid`);
+}
+
+function parseVbtechConfig(environment, reservedDomains) {
+  const keys = [
+    "VBTECH_IMAGE_TAG",
+    "VBTECH_DOMAIN",
+    "VBTECH_WWW_DOMAIN",
+    "VBTECH_FUNCTION_ORIGIN",
+    "VBTECH_SUBMISSION_STATE",
+  ];
+  if (keys.every((key) => environment[key] === undefined)) return undefined;
+
+  const image = environment.VBTECH_IMAGE_TAG;
+  const imageMatch = typeof image === "string" ? image.match(VBTECH_IMAGE_PATTERN) : null;
+  if (!imageMatch) throw invalid("VBTECH_IMAGE_TAG");
+  const { domain, wwwDomain } = validateVbtechDomains(
+    environment.VBTECH_DOMAIN,
+    environment.VBTECH_WWW_DOMAIN,
+    reservedDomains,
+  );
+
+  let functionOrigin;
+  try {
+    functionOrigin = new URL(environment.VBTECH_FUNCTION_ORIGIN);
+  } catch {
+    throw invalid("VBTECH_FUNCTION_ORIGIN");
+  }
+  if (
+    functionOrigin.protocol !== "https:" ||
+    functionOrigin.hostname !== "functions.yandexcloud.net" ||
+    functionOrigin.port ||
+    functionOrigin.username ||
+    functionOrigin.password ||
+    functionOrigin.search ||
+    functionOrigin.hash ||
+    !/^\/[A-Za-z0-9_-]+$/.test(functionOrigin.pathname)
+  )
+    throw invalid("VBTECH_FUNCTION_ORIGIN");
+
+  const submissionState = environment.VBTECH_SUBMISSION_STATE;
+  if (submissionState !== "disabled" && submissionState !== "enabled")
+    throw invalid("VBTECH_SUBMISSION_STATE");
+
+  return {
+    imageTag: image,
+    releaseSha: imageMatch[1],
+    domain,
+    wwwDomain,
+    functionPath: functionOrigin.pathname,
+    submissionState,
+  };
 }
 
 function validateKioskOrigin(envText, kioskDomain, httpsPort) {
@@ -72,6 +124,15 @@ export async function composeQuiet(environment, supplied = {}) {
     childEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;
   if (environment.MARKIRO_HTTPS_PORT !== undefined)
     childEnvironment.MARKIRO_HTTPS_PORT = environment.MARKIRO_HTTPS_PORT;
+  for (const key of [
+    "VBTECH_IMAGE_TAG",
+    "VBTECH_DOMAIN",
+    "VBTECH_WWW_DOMAIN",
+    "VBTECH_RELEASE_SHA",
+    "VBTECH_FUNCTION_PATH",
+    "VBTECH_SUBMISSION_STATE",
+  ])
+    if (environment[key] !== undefined) childEnvironment[key] = environment[key];
 
   await new Promise((resolve, reject) => {
     let child;
@@ -156,6 +217,11 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} MARKIRO_ENV_FILE
  * @property {string | undefined} MARKIRO_HTTP_PORT
  * @property {string | undefined} MARKIRO_HTTPS_PORT
+ * @property {string | undefined} VBTECH_IMAGE_TAG
+ * @property {string | undefined} VBTECH_DOMAIN
+ * @property {string | undefined} VBTECH_WWW_DOMAIN
+ * @property {string | undefined} VBTECH_FUNCTION_ORIGIN
+ * @property {string | undefined} VBTECH_SUBMISSION_STATE
  */
 
 /**
@@ -169,6 +235,12 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} acmeEmail
  * @property {string} envFile
  * @property {"direct"} edgeMode
+ * @property {string=} vbtechImageTag
+ * @property {string=} vbtechReleaseSha
+ * @property {string=} vbtechDomain
+ * @property {string=} vbtechWwwDomain
+ * @property {string=} vbtechFunctionPath
+ * @property {"disabled" | "enabled"=} vbtechSubmissionState
  */
 
 /**
@@ -213,6 +285,7 @@ export async function runPreflight(
   if (kioskDomain === "kiosk.localhost" && !isDirectLocalSet) throw invalid("MARKIRO_KIOSK_DOMAIN");
   if (landingDomain === "landing.localhost" && !isDirectLocalSet)
     throw invalid("MARKIRO_LANDING_DOMAIN");
+  const vbtech = parseVbtechConfig(environment, [domain, kioskDomain, landingDomain]);
   if (!acmeEmail || !isEmail(acmeEmail)) throw invalid("ACME_EMAIL");
 
   try {
@@ -245,6 +318,14 @@ export async function runPreflight(
       MARKIRO_ENV_FILE: envFile,
       MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
     };
+    if (vbtech) {
+      composeEnvironment.VBTECH_IMAGE_TAG = vbtech.imageTag;
+      composeEnvironment.VBTECH_DOMAIN = vbtech.domain;
+      composeEnvironment.VBTECH_WWW_DOMAIN = vbtech.wwwDomain;
+      composeEnvironment.VBTECH_RELEASE_SHA = vbtech.releaseSha;
+      composeEnvironment.VBTECH_FUNCTION_PATH = vbtech.functionPath;
+      composeEnvironment.VBTECH_SUBMISSION_STATE = vbtech.submissionState;
+    }
     if (environment.MARKIRO_HTTP_PORT !== undefined)
       composeEnvironment.MARKIRO_HTTP_PORT = environment.MARKIRO_HTTP_PORT;
     if (environment.MARKIRO_HTTPS_PORT !== undefined)
@@ -264,6 +345,16 @@ export async function runPreflight(
     acmeEmail,
     envFile,
     edgeMode,
+    ...(vbtech
+      ? {
+          vbtechImageTag: vbtech.imageTag,
+          vbtechReleaseSha: vbtech.releaseSha,
+          vbtechDomain: vbtech.domain,
+          vbtechWwwDomain: vbtech.wwwDomain,
+          vbtechFunctionPath: vbtech.functionPath,
+          vbtechSubmissionState: vbtech.submissionState,
+        }
+      : {}),
   };
 }
 
