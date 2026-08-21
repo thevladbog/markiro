@@ -32,9 +32,12 @@ function visibleNativeSelects() {
   );
 }
 
-function installTeamApi() {
+function installTeamApi({ status = TEAM_MEMBER.status }: { status?: "active" | "invited" } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
-  let member = { ...TEAM_MEMBER };
+  let member: { status: "active" | "invited" } & Omit<typeof TEAM_MEMBER, "status"> = {
+    ...TEAM_MEMBER,
+    status,
+  };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -57,6 +60,15 @@ function installTeamApi() {
 }
 
 describe("SaaS admin custom controls", () => {
+  it("renders the invited status returned for a newly created platform user", async () => {
+    installTeamApi({ status: "invited" });
+
+    renderSaasApp({ initialEntry: "/team" });
+
+    expect(await screen.findByText("Ожидает активации")).toBeDefined();
+    expect(screen.queryByText("team.statuses.invited")).toBeNull();
+  });
+
   it("replaces team native roles with keyboard-selectable controls and preserves the role mutation", async () => {
     const api = installTeamApi();
     renderSaasApp({ initialEntry: "/team" });

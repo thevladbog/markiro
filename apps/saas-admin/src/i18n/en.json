@@ -316,7 +316,7 @@
     "statuses": {
       "active": "Active",
       "suspended": "Suspended",
-      "pending_activation": "Pending activation"
+      "invited": "Pending activation"
     }
   },
   "audit": {
@@ -548,7 +548,8 @@
     "sources": {
       "demo": "Demo provisioning",
       "manual": "Manual assignment",
-      "paid_offer_line": "Paid offer"
+      "paid_offer_line": "Paid offer",
+      "paid_invoice_line": "Paid invoice"
     },
     "createForm": {
       "title": "New tenant",
