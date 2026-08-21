@@ -1,6 +1,7 @@
 import { BRAND_LETTERHEAD_CONTENT } from "./documents/brand-letterhead.js";
 import { CONSENT_CONTENT } from "./documents/consent.js";
 import { PRIVACY_CONTENT } from "./documents/privacy.js";
+import { STATION_OPERATOR_SHIFT_CONTENT } from "./documents/station-operator-shift.js";
 import { TENANT_PROCESSING_CONTENT } from "./documents/tenant-processing.js";
 import { formatLegalEffectiveDate, parseLegalRevision } from "./identity.js";
 import type { LegalRevision } from "./identity.js";
@@ -85,6 +86,14 @@ export const LEGAL_RELEASES = [
     operatorProfileId: "operator-2026-08-15",
     routes: { ru: "/legal/brand-letterhead/", en: "/en/legal/brand-letterhead/" },
   },
+  {
+    code: "MKR-INS-01",
+    revision: "2026.08/01",
+    effectiveDate: "2026-08-21",
+    status: "active",
+    operatorProfileId: "operator-2026-08-15",
+    routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/" },
+  },
 ] as const satisfies readonly LegalDocumentRelease[];
 
 export const LEGAL_DOCUMENTS = [
@@ -92,6 +101,7 @@ export const LEGAL_DOCUMENTS = [
   { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
   { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
+  { releaseKey: "MKR-INS-01/2026.08/01", content: STATION_OPERATOR_SHIFT_CONTENT },
 ] as const satisfies readonly LegalDocumentSource[];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {

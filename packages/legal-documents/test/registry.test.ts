@@ -19,6 +19,7 @@ describe("legal document registry", () => {
       "MKR-PD-02",
       "MKR-DPA-01",
       "MKR-BRD-01",
+      "MKR-INS-01",
     ]);
     expect(OPERATOR_PROFILES["operator-2026-08-15"]).toEqual({
       name: "Богатырев Владислав Сергеевич",
@@ -35,8 +36,13 @@ describe("legal document registry", () => {
   it("pins paired, unique public routes and valid initial metadata", () => {
     expect(() => validateLegalRegistry(LEGAL_RELEASES)).not.toThrow();
     expect(LEGAL_RELEASES.every(({ revision }) => revision === "2026.08/01")).toBe(true);
-    expect(LEGAL_RELEASES.every(({ effectiveDate }) => effectiveDate === "2026-08-15")).toBe(true);
-    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(8);
+    expect(
+      LEGAL_RELEASES.filter(({ code }) => code !== "MKR-INS-01").every(
+        ({ effectiveDate }) => effectiveDate === "2026-08-15",
+      ),
+    ).toBe(true);
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-08-21");
+    expect(new Set(LEGAL_RELEASES.flatMap(({ routes }) => Object.values(routes))).size).toBe(9);
     expect(findLegalRelease("MKR-PD-02")).toBe(LEGAL_RELEASES[1]);
     expect(findLegalRelease("MKR-PD-02", "2026.08/01")).toBe(LEGAL_RELEASES[1]);
   });
@@ -139,11 +145,11 @@ describe("legal document registry", () => {
   it("accepts a Russian-only instruction release and rejects Russian-only legal releases", () => {
     const instructionRelease = {
       code: "MKR-INS-01",
-      revision: "2026.08/01",
-      effectiveDate: "2026-08-21",
+      revision: "2026.08/02",
+      effectiveDate: "2026-08-22",
       status: "draft",
       operatorProfileId: "operator-2026-08-15",
-      routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/" },
+      routes: { ru: "/instruktsii/stantsiya-vkhod-i-start-smeny-chernovik/" },
     } as unknown as LegalDocumentRelease;
     expect(() => validateLegalRegistry([...cloneReleases(), instructionRelease])).not.toThrow();
 
@@ -154,7 +160,7 @@ describe("legal document registry", () => {
     const instructionWithEn = {
       ...instructionRelease,
       routes: {
-        ru: "/instruktsii/stantsiya-vkhod-i-start-smeny/",
+        ru: "/instruktsii/stantsiya-vkhod-i-start-smeny-chernovik/",
         en: "/en/instructions/station-shift-start/",
       },
     } as unknown as LegalDocumentRelease;
