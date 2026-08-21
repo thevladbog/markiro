@@ -5,7 +5,7 @@ export type { LegalIdentity, LegalRevision } from "./identity.js";
 export type LegalLocale = "ru" | "en";
 
 export type LegalDocumentCode =
-  "MKR-PD-01" | "MKR-PD-02" | "MKR-DPA-01" | "MKR-BRD-01" | "MKR-INS-01";
+  "MKR-PD-01" | "MKR-PD-02" | "MKR-DPA-01" | "MKR-BRD-01" | "MKR-INS-01" | "MKR-INS-02";
 
 export type LegalDocumentKind = "legal" | "template" | "instruction";
 

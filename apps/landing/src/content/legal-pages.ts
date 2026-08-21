@@ -39,6 +39,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция оператора станции сканирования: вход по бейджу, выбор или создание смены, начало работы.",
     en: "Printable scanning-station operator instruction: badge sign-in, shift selection or creation, and starting work.",
   },
+  "MKR-INS-02": {
+    ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, работа без сети и закрытие смены.",
+    en: "Printable operator instruction: the scanning cycle, station signals, box filling and closing, offline work, and closing the shift.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {

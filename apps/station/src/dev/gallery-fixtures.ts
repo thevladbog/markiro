@@ -138,7 +138,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "clear-confirm",
     source: "synthetic",
   },
-  { id: "work-ok", kind: "signal", variant: "ok", source: "synthetic" },
+  // Not a "signal" fixture like duplicate/error: production never shows a
+  // full-screen overlay for an accepted scan (WorkScreen.tsx's
+  // publishVerdict returns early for tone "ok"). The real feedback is the
+  // inline compact-success panel inside ScanResultInstrument, so this state
+  // renders through the real work screen (WorkFixture) instead.
+  { id: "work-ok", kind: "work", variant: "ok", source: "synthetic" },
   { id: "work-duplicate", kind: "signal", variant: "duplicate", source: "synthetic" },
   { id: "work-error", kind: "signal", variant: "error", source: "synthetic" },
   { id: "box-empty", kind: "box", variant: "empty", source: "synthetic" },
