@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useSyncExternalStore, type ReactElement } from "react";
-import { MemoryRouter, Route, Routes } from "react-router";
+import { createMemoryRouter, MemoryRouter, Route, Routes, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -13,6 +13,7 @@ import {
   type SessionData,
 } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
+import { AuthQueryBoundary } from "../src/query/AuthQueryBoundary.js";
 import { CreateOrgPage } from "../src/pages/auth/CreateOrg.js";
 import { ActivateOwnerPage } from "../src/pages/auth/ActivateOwner.js";
 import { LoginPage } from "../src/pages/auth/Login.js";
@@ -564,6 +565,63 @@ describe("SelectOrgPage", () => {
         ...session,
         session: { activeOrganizationId: "org_1" },
       };
+      listeners.forEach((listener) => listener());
+    });
+    await screen.findByText("SHELL_PLACEHOLDER");
+  });
+
+  it("enters the shell on the first selection despite the identity-keyed remount", async () => {
+    // Reproduces the production wiring: AuthQueryBoundary remounts the whole
+    // router subtree when the session identity gains the active organization,
+    // which used to wipe the page state holding the pending navigation.
+    let session: SessionData = {
+      session: { activeOrganizationId: null },
+      user: { id: "user_1", email: "user@example.com" },
+    };
+    const listeners = new Set<() => void>();
+    const client = createFakeAuthClient({
+      useSession: () => {
+        const observedSession = useSyncExternalStore(
+          (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+          () => session,
+          () => session,
+        );
+        return { data: observedSession, isPending: false, error: null };
+      },
+      organization: {
+        create: vi.fn(),
+        list: vi.fn(async () => ({
+          data: [{ id: "org_1", name: "Acme Corp", slug: "acme-corp" }],
+          error: null,
+        })),
+        setActive: vi.fn(async () => ({ data: {}, error: null })),
+      },
+    });
+    const router = createMemoryRouter(
+      [
+        { path: "/org/select", element: <SelectOrgPage /> },
+        { path: "/", element: <div>SHELL_PLACEHOLDER</div> },
+      ],
+      { initialEntries: ["/org/select"] },
+    );
+    render(
+      <ThemeProvider>
+        <AuthClientProvider client={client}>
+          <AuthQueryBoundary>
+            <RouterProvider router={router} />
+          </AuthQueryBoundary>
+        </AuthClientProvider>
+      </ThemeProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть организацию Acme Corp" }));
+    await waitFor(() => expect(client.organization.setActive).toHaveBeenCalledTimes(1));
+
+    act(() => {
+      session = { ...session, session: { activeOrganizationId: "org_1" } };
       listeners.forEach((listener) => listener());
     });
     await screen.findByText("SHELL_PLACEHOLDER");
