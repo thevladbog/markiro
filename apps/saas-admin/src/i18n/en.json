@@ -1,8 +1,27 @@
 {
+  "brand": {
+    "logoAlt": "Markiro logo"
+  },
   "auth": {
     "email": "Email",
     "password": "Password",
     "signOut": "Sign out",
+    "frame": {
+      "brandRegion": "Markiro operations perimeter",
+      "headline": "The platform, under control.",
+      "description": "An internal perimeter for managing tenants, subscriptions, and billing.",
+      "contour": "Perimeter",
+      "internal": "Internal",
+      "access": "Access",
+      "region": "Region",
+      "staffOnly": "MARKIRO STAFF ONLY",
+      "twoFactorRequired": "2FA REQUIRED",
+      "toggleLanguage": "Switch interface language",
+      "toggleTheme": "Change theme. Current: {{theme}}",
+      "themeSystem": "SYSTEM THEME",
+      "themeLight": "LIGHT THEME",
+      "themeDark": "DARK THEME"
+    },
     "validation": {
       "email": "Enter a valid address",
       "required": "This field is required",
@@ -15,7 +34,7 @@
     "login": {
       "eyebrow": "Access perimeter",
       "title": "Platform sign in",
-      "subtitle": "Isolated service perimeter for Markiro operations.",
+      "subtitle": "Use your Markiro staff account. An authenticator code is required after the password.",
       "submit": "Sign in",
       "recovery": "Use a backup code",
       "error": "Could not sign in"
@@ -38,12 +57,15 @@
       "challengeTitle": "Two-factor check",
       "challengeBody": "Enter the current code from your authenticator app.",
       "enrollTitle": "Set up 2FA",
-      "enrollBody": "Operational sections remain locked until the new key is verified.",
+      "enrollBody": "Scan the QR code in your authenticator app and save the backup codes.",
       "createKey": "Create 2FA key",
       "secretSurface": "2FA enrollment data",
       "qrAlt": "QR code for two-factor authentication setup",
-      "secretWarning": "Add the key to your app and save the backup codes. They disappear after you leave this screen.",
+      "manualTitle": "Manual key",
+      "manualHelp": "Scan the QR code with your authenticator app. If scanning is unavailable, add the key manually.",
+      "keyOnce": "The key is shown only now.",
       "backupTitle": "Backup codes",
+      "backupMeta": "One-time use",
       "code": "Authenticator code",
       "verify": "Verify code",
       "useBackup": "Use a backup code",

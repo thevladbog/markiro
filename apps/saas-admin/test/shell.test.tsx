@@ -28,6 +28,8 @@ describe("SaaS-admin shell", () => {
       "Сеанс · подтверждён",
     );
     expect(screen.getByText("SAAS CONSOLE · 01")).toBeDefined();
+    const logo = screen.getByRole("img", { name: "Логотип Маркиро" });
+    expect(logo.querySelector("img")).not.toBeNull();
   });
 
   it("does not claim API availability when catalog loading fails", async () => {

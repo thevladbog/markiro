@@ -5,6 +5,7 @@ import { Button, StatusChip } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../auth/PlatformAuthBoundary.js";
 import { useAuthClient } from "../auth/client.js";
+import { MarkiroLogo } from "../components/MarkiroLogo.js";
 import i18n from "../i18n/index.js";
 import { NavigationGuardProvider, useNavigationGuard } from "./NavigationGuard.js";
 
@@ -27,13 +28,8 @@ function AppShellContent() {
       </a>
       <header className="app-header">
         <div className="app-brand">
-          <span className="brand-mark" aria-hidden="true">
-            M
-          </span>
-          <div>
-            <span className="app-brand__name">MARKIRO</span>
-            <span className="app-brand__scope">PLATFORM OPERATIONS</span>
-          </div>
+          <MarkiroLogo className="app-brand__logo" />
+          <span className="app-brand__scope">PLATFORM OPERATIONS</span>
         </div>
         <nav className="app-nav" aria-label={t("shell.navigation")}>
           <NavLink to="/tenants" className={({ isActive }) => (isActive ? "active" : undefined)}>

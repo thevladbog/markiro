@@ -19,6 +19,17 @@ afterEach(() => {
 });
 
 describe("platform authentication", () => {
+  it("uses the official Markiro identity in the platform-operations auth shell", async () => {
+    renderSaasApp({ initialEntry: "/login", state: authState() });
+
+    const logos = await screen.findAllByRole("img", { name: "Логотип Маркиро" });
+    expect(logos.length).toBeGreaterThan(0);
+    expect(logos.every((logo) => logo.querySelector("img"))).toBe(true);
+    expect(
+      screen.getByRole("complementary", { name: "Операционный контур Markiro" }),
+    ).toBeDefined();
+  });
+
   it("removes the backend activation fragment from browser history and exchanges it only once", async () => {
     const activationToken = "backend-produced-activation-token-2026";
     window.history.replaceState(null, "", `/activate#token=${activationToken}`);
