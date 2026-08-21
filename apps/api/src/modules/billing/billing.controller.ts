@@ -5,7 +5,13 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import { BillingService } from "./billing.service";
 import { BillingDocumentsService } from "./billing-documents.service";
 import { BillingApplicationService } from "./billing-application.service";
-import { createInvoiceSchema, invoiceIdSchema, type CreateInvoiceDto } from "./dto";
+import {
+  applyInvoiceSchema,
+  createInvoiceSchema,
+  invoiceIdSchema,
+  type ApplyInvoiceDto,
+  type CreateInvoiceDto,
+} from "./dto";
 
 @Controller("platform/invoices")
 export class BillingController {
@@ -86,8 +92,9 @@ export class BillingController {
   apply(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
+    @Body(new ZodValidationPipe(applyInvoiceSchema)) body: ApplyInvoiceDto,
   ) {
-    return this.application.apply(req.platformPrincipal!, id);
+    return this.application.apply(req.platformPrincipal!, id, body);
   }
 
   @Post(":id/cancel")

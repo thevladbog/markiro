@@ -25,4 +25,11 @@ describe("tenant billing schema", () => {
     expect(schema.INVOICE_LINE_KINDS).toEqual(["plan", "addon", "service", "custom"]);
     expect(schema.INVOICE_APPLICATION_MODES).toEqual(["manual", "automatic"]);
   });
+
+  it("exposes invoice lines and payments as tenant-scoped fulfilment sources", () => {
+    expect(Object.keys(schema.invoiceLines)).toEqual(expect.arrayContaining(["tenantId", "id"]));
+    expect(Object.keys(schema.billingPayments)).toEqual(
+      expect.arrayContaining(["tenantId", "id", "invoiceId"]),
+    );
+  });
 });

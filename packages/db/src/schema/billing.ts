@@ -206,6 +206,7 @@ export const invoiceLines = pgTable(
   },
   (table) => [
     unique("invoice_lines_tenant_id_uq").on(table.tenantId, table.id),
+    unique("invoice_lines_tenant_invoice_id_uq").on(table.tenantId, table.invoiceId, table.id),
     unique("invoice_lines_invoice_position_uq").on(table.invoiceId, table.position),
     foreignKey({
       name: "invoice_lines_tenant_invoice_fk",
@@ -383,6 +384,7 @@ export const billingPayments = pgTable(
   (table) => [
     unique("billing_payments_tenant_id_uq").on(table.tenantId, table.id),
     unique("billing_payments_invoice_uq").on(table.tenantId, table.invoiceId),
+    unique("billing_payments_tenant_invoice_id_uq").on(table.tenantId, table.invoiceId, table.id),
     unique("billing_payments_idempotency_uq").on(table.idempotencyKey),
     foreignKey({
       name: "billing_payments_tenant_invoice_fk",

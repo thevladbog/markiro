@@ -63,6 +63,7 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     await rm(join(legacyMigrations, "0054_shift_production_date.sql"));
     await rm(join(legacyMigrations, "0055_brief_mole_man.sql"));
     await rm(join(legacyMigrations, "0056_align_dated_label_quantity.sql"));
+    await rm(join(legacyMigrations, "0057_funny_wiccan.sql"));
     await rm(join(legacyMigrations, "meta", "0030_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0031_snapshot.json"));
     await rm(join(legacyMigrations, "meta", "0032_snapshot.json"));
@@ -122,7 +123,8 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
         entry.tag !== "0053_date_free_label_templates" &&
         entry.tag !== "0054_shift_production_date" &&
         entry.tag !== "0055_brief_mole_man" &&
-        entry.tag !== "0056_align_dated_label_quantity",
+        entry.tag !== "0056_align_dated_label_quantity" &&
+        entry.tag !== "0057_funny_wiccan",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0029_loving_triathlon");
     await writeFile(journalPath, JSON.stringify(journal));
@@ -568,6 +570,133 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
     ).rejects.toThrow();
   });
 
+  it("enforces tenant-scoped invoice fulfilment source references", async () => {
+    const constraints = await pool.query<{ conname: string }>(
+      `SELECT conname
+       FROM pg_constraint
+       WHERE conname = ANY($1::text[])
+       ORDER BY conname`,
+      [
+        [
+          "ordered_services_tenant_billing_payment_fk",
+          "ordered_services_tenant_invoice_line_fk",
+          "subscription_addons_tenant_source_invoice_line_fk",
+          "tenant_subscriptions_tenant_source_invoice_line_fk",
+        ],
+      ],
+    );
+
+    expect(constraints.rows.map((row) => row.conname)).toEqual([
+      "ordered_services_tenant_billing_payment_fk",
+      "ordered_services_tenant_invoice_line_fk",
+      "subscription_addons_tenant_source_invoice_line_fk",
+      "tenant_subscriptions_tenant_source_invoice_line_fk",
+    ]);
+
+    const tenantA = `invoice-source-a-${randomUUID()}`;
+    const tenantB = `invoice-source-b-${randomUUID()}`;
+    const catalogItemId = randomUUID();
+    const versionId = randomUUID();
+    const invoiceA = randomUUID();
+    const invoiceB = randomUUID();
+    const invoiceC = randomUUID();
+    const lineA = randomUUID();
+    const lineB = randomUUID();
+    const lineC = randomUUID();
+    const paymentA = randomUUID();
+    const paymentB = randomUUID();
+    const paymentC = randomUUID();
+    await pool.query(
+      `INSERT INTO organization (id, name, slug, created_at)
+       VALUES ($1, 'Invoice source A', $1, now()), ($2, 'Invoice source B', $2, now())`,
+      [tenantA, tenantB],
+    );
+    await pool.query(
+      "INSERT INTO catalog_items (id, code, name_ru, name_en, kind) VALUES ($1, $2, 'Настройка', 'Setup', 'service')",
+      [catalogItemId, `invoice-service-${catalogItemId}`],
+    );
+    await pool.query(
+      "INSERT INTO catalog_item_versions (id, catalog_item_id, kind, version, status, name_ru, name_en, unit, billing_mode, unit_price, vat_included, published_at) VALUES ($1, $2, 'service', 1, 'published', 'Настройка', 'Setup', 'service', 'one_time', '100.00', true, now())",
+      [versionId, catalogItemId],
+    );
+    await pool.query(
+      `INSERT INTO invoices (id, tenant_id, number, status, subtotal, vat_total, total, created_by_platform_user_id)
+       VALUES ($1, $2, $3, 'draft', '100.00', '0.00', '100.00', 'migration-test-admin'),
+              ($4, $5, $6, 'draft', '100.00', '0.00', '100.00', 'migration-test-admin'),
+              ($7, $2, $8, 'draft', '100.00', '0.00', '100.00', 'migration-test-admin')`,
+      [
+        invoiceA,
+        tenantA,
+        `INV-A-${invoiceA}`,
+        invoiceB,
+        tenantB,
+        `INV-B-${invoiceB}`,
+        invoiceC,
+        `INV-C-${invoiceC}`,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO invoice_lines (id, tenant_id, invoice_id, position, kind, catalog_version_id, catalog_kind, name_ru, name_en, quantity, unit, agreed_unit_price, vat_included, line_subtotal, line_vat, line_total)
+       VALUES ($1, $2, $3, 1, 'service', $4, 'service', 'Настройка', 'Setup', 1, 'service', '100.00', true, '100.00', '0.00', '100.00'),
+              ($5, $6, $7, 1, 'service', $4, 'service', 'Настройка', 'Setup', 1, 'service', '100.00', true, '100.00', '0.00', '100.00'),
+              ($8, $2, $9, 1, 'service', $4, 'service', 'Настройка', 'Setup', 1, 'service', '100.00', true, '100.00', '0.00', '100.00')`,
+      [lineA, tenantA, invoiceA, versionId, lineB, tenantB, invoiceB, lineC, invoiceC],
+    );
+    await pool.query(
+      `INSERT INTO billing_payments (id, tenant_id, invoice_id, source, paid_at, amount, bank_reference, platform_user_id, idempotency_key)
+       VALUES ($1, $2, $3, 'manual', now(), '100.00', 'bank-a', 'migration-test-admin', $4),
+              ($5, $6, $7, 'manual', now(), '100.00', 'bank-b', 'migration-test-admin', $8),
+              ($9, $2, $10, 'manual', now(), '100.00', 'bank-c', 'migration-test-admin', $11)`,
+      [
+        paymentA,
+        tenantA,
+        invoiceA,
+        `payment-${paymentA}`,
+        paymentB,
+        tenantB,
+        invoiceB,
+        `payment-${paymentB}`,
+        paymentC,
+        invoiceC,
+        `payment-${paymentC}`,
+      ],
+    );
+    await pool.query(
+      `INSERT INTO ordered_services (id, tenant_id, invoice_id, invoice_line_id, billing_payment_id, catalog_version_id, name_ru, name_en, quantity, unit, ordered_at)
+       VALUES ($1, $2, $3, $4, $5, $6, 'Настройка', 'Setup', 1, 'service', now())`,
+      [randomUUID(), tenantA, invoiceA, lineA, paymentA, versionId],
+    );
+
+    await expect(
+      pool.query(
+        `INSERT INTO ordered_services (id, tenant_id, invoice_id, invoice_line_id, billing_payment_id, catalog_version_id, name_ru, name_en, quantity, unit, ordered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Дубль', 'Duplicate', 1, 'service', now())`,
+        [randomUUID(), tenantA, invoiceA, lineA, paymentA, versionId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `INSERT INTO ordered_services (id, tenant_id, invoice_id, invoice_line_id, billing_payment_id, catalog_version_id, name_ru, name_en, quantity, unit, ordered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Чужой источник', 'Cross tenant', 1, 'service', now())`,
+        [randomUUID(), tenantA, invoiceB, lineB, paymentB, versionId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `INSERT INTO ordered_services (id, tenant_id, invoice_id, invoice_line_id, billing_payment_id, catalog_version_id, name_ru, name_en, quantity, unit, ordered_at)
+         VALUES ($1, $2, $3, $4, $5, $6, 'Другой счёт', 'Different invoice', 1, 'service', now())`,
+        [randomUUID(), tenantA, invoiceA, lineA, paymentC, versionId],
+      ),
+    ).rejects.toThrow();
+    await expect(
+      pool.query(
+        `INSERT INTO ordered_services (id, tenant_id, invoice_id, invoice_line_id, catalog_version_id, name_ru, name_en, quantity, unit, ordered_at)
+         VALUES ($1, $2, $3, $4, $5, 'Неполный источник', 'Incomplete source', 1, 'service', now())`,
+        [randomUUID(), tenantA, invoiceA, randomUUID(), versionId],
+      ),
+    ).rejects.toThrow();
+  });
+
   it("keeps ordered-service facts append-only", async () => {
     const tenantId = `service-facts-tenant-${randomUUID()}`;
     const catalogItemId = randomUUID();
@@ -615,4 +744,67 @@ describe.skipIf(!databaseUrl)("SaaS migration behavior", () => {
       pool.query("DELETE FROM ordered_services WHERE id = $1", [orderedServiceId]),
     ).rejects.toThrow();
   });
+});
+
+describe.skipIf(!databaseUrl)("paid invoice source upgrade boundary", () => {
+  const databaseName = `markiro_paid_invoice_upgrade_${randomUUID().replaceAll("-", "_")}`;
+  const scratchUrl = new URL(databaseUrl ?? "postgres://invalid");
+  scratchUrl.pathname = `/${databaseName}`;
+  scratchUrl.search = "";
+  const maintenancePool = new pg.Pool({ connectionString: databaseUrl });
+  const pool = new pg.Pool({ connectionString: scratchUrl.toString() });
+  let temporaryRoot = "";
+  let created = false;
+
+  beforeAll(async () => {
+    await maintenancePool.query(`CREATE DATABASE "${databaseName}"`);
+    created = true;
+    temporaryRoot = await mkdtemp(join(tmpdir(), "markiro-paid-invoice-upgrade-"));
+    const through0056 = join(temporaryRoot, "migrations");
+    await cp(migrationsFolder, through0056, { recursive: true });
+    await rm(join(through0056, "0057_funny_wiccan.sql"));
+    await rm(join(through0056, "meta", "0057_snapshot.json"));
+    const journalPath = join(through0056, "meta", "_journal.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+      entries: Array<{ tag: string }>;
+    };
+    journal.entries = journal.entries.filter((entry) => entry.tag !== "0057_funny_wiccan");
+    await writeFile(journalPath, JSON.stringify(journal));
+
+    await migrate(drizzle(pool), { migrationsFolder: through0056 });
+  }, 120_000);
+
+  afterAll(async () => {
+    await pool.end();
+    if (created) await maintenancePool.query(`DROP DATABASE "${databaseName}"`);
+    await maintenancePool.end();
+    if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
+  });
+
+  it("applies paid_invoice_line after migration 0056 committed separately", async () => {
+    await expect(migrate(drizzle(pool), { migrationsFolder })).resolves.toBeUndefined();
+
+    const enumValues = await pool.query<{ enumlabel: string }>(
+      `SELECT enumlabel
+       FROM pg_enum
+       JOIN pg_type ON pg_type.oid = pg_enum.enumtypid
+       WHERE pg_type.typname = 'subscription_source'
+       ORDER BY enumsortorder`,
+    );
+    expect(enumValues.rows.map((row) => row.enumlabel)).toContain("paid_invoice_line");
+
+    const constraints = await pool.query<{ conname: string }>(
+      `SELECT conname
+       FROM pg_constraint
+       WHERE conname IN (
+         'subscription_addons_commercial_source_check',
+         'tenant_subscriptions_commercial_source_check'
+       )
+       ORDER BY conname`,
+    );
+    expect(constraints.rows.map((row) => row.conname)).toEqual([
+      "subscription_addons_commercial_source_check",
+      "tenant_subscriptions_commercial_source_check",
+    ]);
+  }, 120_000);
 });

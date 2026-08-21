@@ -1,27 +1,15 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
-import { Alert, Button, Card, PageHeader, StatusChip, Table } from "@markiro/ui";
+import { Alert, PageHeader, StatusChip, Table } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
-import { issueInvoice, listInvoices, payInvoice, renderInvoice, type Invoice } from "./api.js";
+import { listInvoices, type Invoice } from "./api.js";
 
 export function BillingPage() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
-  const client = useQueryClient();
   const invoices = useQuery({ queryKey: ["platform", "invoices"], queryFn: listInvoices });
   const location = useLocation();
-  const [selected, setSelected] = useState<Invoice | null>(null);
-  const issue = useMutation({
-    mutationFn: () => issueInvoice(selected!.id),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "invoices"] }),
-  });
-  const pay = useMutation({
-    mutationFn: () => payInvoice(selected!.id, selected!.total, `manual-${selected!.number}`),
-    onSuccess: () => void client.invalidateQueries({ queryKey: ["platform", "invoices"] }),
-  });
-  const document = useMutation({ mutationFn: () => renderInvoice(selected!.id) });
   if (invoices.isPending)
     return (
       <section className="catalog-page">
@@ -55,9 +43,9 @@ export function BillingPage() {
             key: "number",
             title: t("billing.number"),
             render: (invoice: Invoice) => (
-              <button type="button" className="table-link" onClick={() => setSelected(invoice)}>
+              <Link className="table-link" to={`/billing/${invoice.id}`}>
                 {invoice.number}
-              </button>
+              </Link>
             ),
           },
           {
@@ -86,26 +74,6 @@ export function BillingPage() {
         rows={invoices.data?.items ?? []}
         empty={t("billing.empty")}
       />
-      {selected ? (
-        <Card title={`${t("billing.detail")} · ${selected.number}`}>
-          <p>{selected.total} ₽</p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {selected.status === "draft" ? (
-              <Button loading={issue.isPending} onClick={() => void issue.mutateAsync()}>
-                {t("billing.issue")}
-              </Button>
-            ) : null}
-            {selected.status === "issued" ? (
-              <Button loading={pay.isPending} onClick={() => void pay.mutateAsync()}>
-                {t("billing.pay")}
-              </Button>
-            ) : null}
-            <Button loading={document.isPending} onClick={() => void document.mutateAsync()}>
-              {t("billing.document")}
-            </Button>
-          </div>
-        </Card>
-      ) : null}
     </section>
   );
 }

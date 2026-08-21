@@ -62,13 +62,13 @@ function AppShellContent() {
           </NavLink>
           <NavLink to="/team" className={({ isActive }) => (isActive ? "active" : undefined)}>
             <span className="nav-index" aria-hidden="true">
-              04
+              05
             </span>
             {t("shell.team")}
           </NavLink>
           <NavLink to="/audit" className={({ isActive }) => (isActive ? "active" : undefined)}>
             <span className="nav-index" aria-hidden="true">
-              05
+              06
             </span>
             {t("shell.audit")}
           </NavLink>

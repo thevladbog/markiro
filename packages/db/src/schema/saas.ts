@@ -64,6 +64,7 @@ export const subscriptionSource = pgEnum("subscription_source", [
   "demo",
   "manual",
   "paid_offer_line",
+  "paid_invoice_line",
 ]);
 export const subscriptionAddonStatus = pgEnum("subscription_addon_status", [
   "scheduled",
@@ -447,6 +448,7 @@ export const tenantSubscriptions = pgTable(
     endsAt: timestamp("ends_at", { withTimezone: true }),
     source: subscriptionSource("source").notNull(),
     sourceOfferLineId: uuid("source_offer_line_id"),
+    sourceInvoiceLineId: uuid("source_invoice_line_id"),
     createdByPlatformUserId: text("created_by_platform_user_id").references(() => platformUsers.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
@@ -459,6 +461,9 @@ export const tenantSubscriptions = pgTable(
     uniqueIndex("tenant_subscriptions_one_scheduled_uq")
       .on(table.tenantId)
       .where(sql`${table.status} = 'scheduled'`),
+    uniqueIndex("tenant_subscriptions_invoice_line_uq")
+      .on(table.tenantId, table.sourceInvoiceLineId)
+      .where(sql`${table.sourceInvoiceLineId} is not null`),
     foreignKey({
       name: "tenant_subscriptions_plan_version_fk",
       columns: [table.planVersionId, table.planKind],
@@ -479,8 +484,9 @@ export const tenantSubscriptions = pgTable(
       sql`${table.status} <> 'pending_activation' or (${table.startsAt} is null and ${table.endsAt} is null)`,
     ),
     check(
-      "tenant_subscriptions_source_offer_check",
-      sql`(${table.source} = 'paid_offer_line') = (${table.sourceOfferLineId} is not null)`,
+      "tenant_subscriptions_commercial_source_check",
+      sql`((${table.source} = 'paid_offer_line') = (${table.sourceOfferLineId} is not null))
+        and ((${table.source} = 'paid_invoice_line') = (${table.sourceInvoiceLineId} is not null))`,
     ),
   ],
 );
@@ -499,12 +505,16 @@ export const subscriptionAddons = pgTable(
     status: subscriptionAddonStatus("status").notNull(),
     source: subscriptionSource("source").notNull(),
     sourceOfferLineId: uuid("source_offer_line_id"),
+    sourceInvoiceLineId: uuid("source_invoice_line_id"),
     createdByPlatformUserId: text("created_by_platform_user_id").references(() => platformUsers.id),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     unique("subscription_addons_tenant_id_uq").on(table.tenantId, table.id),
+    uniqueIndex("subscription_addons_invoice_line_uq")
+      .on(table.tenantId, table.sourceInvoiceLineId)
+      .where(sql`${table.sourceInvoiceLineId} is not null`),
     foreignKey({
       name: "subscription_addons_tenant_subscription_fk",
       columns: [table.tenantId, table.subscriptionId],
@@ -527,8 +537,9 @@ export const subscriptionAddons = pgTable(
       sql`${table.startsAt} is null or ${table.endsAt} is null or ${table.endsAt} > ${table.startsAt}`,
     ),
     check(
-      "subscription_addons_source_offer_check",
-      sql`(${table.source} = 'paid_offer_line') = (${table.sourceOfferLineId} is not null)`,
+      "subscription_addons_commercial_source_check",
+      sql`((${table.source} = 'paid_offer_line') = (${table.sourceOfferLineId} is not null))
+        and ((${table.source} = 'paid_invoice_line') = (${table.sourceInvoiceLineId} is not null))`,
     ),
   ],
 );
@@ -597,8 +608,11 @@ export const orderedServices = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     tenantId: text("tenant_id").notNull(),
-    offerLineId: uuid("offer_line_id").notNull(),
-    paymentId: uuid("payment_id").notNull(),
+    offerLineId: uuid("offer_line_id"),
+    paymentId: uuid("payment_id"),
+    invoiceId: uuid("invoice_id"),
+    invoiceLineId: uuid("invoice_line_id"),
+    billingPaymentId: uuid("billing_payment_id"),
     catalogVersionId: uuid("catalog_version_id"),
     catalogKind: catalogItemKind("catalog_kind").notNull().default("service"),
     nameRu: text("name_ru").notNull(),
@@ -614,6 +628,9 @@ export const orderedServices = pgTable(
   (table) => [
     unique("ordered_services_tenant_id_uq").on(table.tenantId, table.id),
     unique("ordered_services_offer_line_uq").on(table.tenantId, table.offerLineId),
+    uniqueIndex("ordered_services_invoice_line_uq")
+      .on(table.tenantId, table.invoiceLineId)
+      .where(sql`${table.invoiceLineId} is not null`),
     foreignKey({
       name: "ordered_services_tenant_offer_line_fk",
       columns: [table.tenantId, table.offerLineId],
@@ -631,6 +648,11 @@ export const orderedServices = pgTable(
     }),
     check("ordered_services_kind_check", sql`${table.catalogKind} = 'service'`),
     check("ordered_services_quantity_positive", sql`${table.quantity} > 0`),
+    check(
+      "ordered_services_source_check",
+      sql`(${table.offerLineId} is not null and ${table.paymentId} is not null and ${table.invoiceId} is null and ${table.invoiceLineId} is null and ${table.billingPaymentId} is null)
+        or (${table.offerLineId} is null and ${table.paymentId} is null and ${table.invoiceId} is not null and ${table.invoiceLineId} is not null and ${table.billingPaymentId} is not null)`,
+    ),
   ],
 );
 
