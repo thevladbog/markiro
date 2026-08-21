@@ -606,7 +606,7 @@ export function ShiftForm({
  *   `productionDate` only when their final value differs from the form
  *   default. This prevents a stale edit panel from overwriting a concurrent
  *   correction.
- * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`, `productionDate`,
+ * - Every other field (`mode`, `lineId`, `plannedQty`, `plannedDate`,
  *   `palletsEnabled`) is always sent as shown, matching the simpler
  *   full-form-resend convention `ProductForm`/`CounterpartyForm` already use.
  * - `productId` is included only on create -- `updateShiftSchema` has no such
