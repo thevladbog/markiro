@@ -29,6 +29,8 @@ export interface PickupSlipData {
   printEmployeeQrOnSlip: boolean;
   /** Pre-computed order total, formatted as a decimal string (e.g. "126.00"), or null if unknown. */
   total: string | null;
+  /** Full name of the authorized cabinet user who opened the slip — printed under the "Администратор" signature. */
+  printedByName: string | null;
   items: PickupSlipItem[];
 }
 
@@ -230,7 +232,7 @@ function finalBlocks(data: PickupSlipData, writeoffSubReason: string, badgeQr: s
       <div class="slip-signature">
         <span class="slip-meta-label">Администратор</span>
         <span class="signature-line"></span>
-        <span class="signature-name">ФИО</span>
+        <span class="signature-name">${escapeHtml(data.printedByName ?? "ФИО")}</span>
       </div>
     </div>
   </div>`;
@@ -332,12 +334,14 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .slip-meta-detail { color: #45433E; font-size: 10px; }
 .slip-content { min-height: 0; display: flex; flex-direction: column; gap: 2.5mm; overflow: hidden; }
 .slip-table { width: 100%; table-layout: fixed; border-collapse: collapse; }
-.col-n { width: 8mm; } .col-product { width: auto; } .col-km { width: 58mm; } .col-price { width: 18mm; } .col-dm { width: 17mm; }
+/* col-dm is sized for its "DataMatrix" heading (with breathing room before
+   the head bar's right edge), not for the 11.5mm symbol below it. */
+.col-n { width: 8mm; } .col-product { width: auto; } .col-km { width: 53mm; } .col-price { width: 18mm; } .col-dm { width: 22mm; }
 .slip-table-head { display: table-header-group; }
 .slip-table-head tr { height: 7mm; background: #17161A; color: #FAFAF8; }
 .slip-table-head th { padding: 1.5mm 2mm; font-size: 8.5px; line-height: 1; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
 .slip-table-head th:first-child { border-radius: 2mm 0 0 0; }
-.slip-table-head th:last-child { border-radius: 0 2mm 0 0; }
+.slip-table-head th:last-child { border-radius: 0 2mm 0 0; padding-right: 4mm; }
 .slip-item-row { height: 14.5mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #E0DED7; }
 .slip-item-row td { height: 14.5mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
 .slip-item-number { text-align: center; }

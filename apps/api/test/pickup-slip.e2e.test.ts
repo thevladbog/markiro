@@ -158,6 +158,10 @@ describe.skipIf(!ready)("pickup order printed slip e2e", () => {
     expect(res.text).toContain("@page");
     const svgCount = (res.text.match(/<svg/g) ?? []).length;
     expect(svgCount).toBeGreaterThanOrEqual(3);
+    // The "Администратор" signature is pre-filled with the printing cabinet
+    // user's name ("T" — see support/auth.ts's sign-up fixture).
+    expect(res.text).toContain('<span class="signature-name">T</span>');
+    expect(res.text).not.toContain('<span class="signature-name">ФИО</span>');
   });
 
   it("404s for an order that doesn't exist", async () => {
