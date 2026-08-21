@@ -10,6 +10,7 @@ const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const VBTECH_IMAGE_PATTERN = /^ghcr\.io\/thevladbog\/vbtech-web@(sha256:[0-9a-f]{64})$/;
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const VBTECH_FUNCTION_ORIGIN_PATTERN = /^https:\/\/functions\.yandexcloud\.net\/[A-Za-z0-9_-]+$/;
 const COMPOSE_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 const STDERR_LIMIT_BYTES = 8 * 1024;
@@ -51,6 +52,11 @@ function parseVbtechConfig(environment, reservedDomains) {
     throw invalid("VBTECH_SUBMISSION_STATE");
 
   const parseFunctionOrigin = () => {
+    if (
+      typeof environment.VBTECH_FUNCTION_ORIGIN !== "string" ||
+      !VBTECH_FUNCTION_ORIGIN_PATTERN.test(environment.VBTECH_FUNCTION_ORIGIN)
+    )
+      throw invalid("VBTECH_FUNCTION_ORIGIN");
     let functionOrigin;
     try {
       functionOrigin = new URL(environment.VBTECH_FUNCTION_ORIGIN);

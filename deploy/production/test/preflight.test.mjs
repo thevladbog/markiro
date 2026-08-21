@@ -140,6 +140,22 @@ test("accepts an enabled isolated v-b overlay only with a Yandex function origin
   assert.equal(result.vbtechSubmissionState, "enabled");
 });
 
+for (const [name, functionOrigin] of [
+  ["explicit HTTPS port", "https://functions.yandexcloud.net:443/d4example"],
+  ["uppercase function host", "https://FUNCTIONS.YANDEXCLOUD.NET/d4example"],
+  ["surrounding function-origin whitespace", " https://functions.yandexcloud.net/d4example "],
+]) {
+  test(`rejects an enabled v-b configuration with ${name}`, () =>
+    assertRejected(
+      {
+        ...vbtechRelease,
+        VBTECH_FUNCTION_ORIGIN: functionOrigin,
+        VBTECH_SUBMISSION_STATE: "enabled",
+      },
+      "VBTECH_FUNCTION_ORIGIN is invalid",
+    ));
+}
+
 for (const [name, overrides, expected] of [
   ["partial overlay", { VBTECH_RELEASE_SHA: undefined }, "VBTECH_RELEASE_SHA is invalid"],
   [
