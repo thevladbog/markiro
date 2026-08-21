@@ -1130,10 +1130,24 @@ export function WorkScreen({
           // a still-null `boxRef` and land with no box at all, exactly the
           // gap `boxReady` exists to close.
           await boxReady.current;
-          const verdict = validateShiftScan(raw, {
+          let verdict = validateShiftScan(raw, {
             expectedGtin14,
             isDuplicate: (key) => keys.current.has(key),
           });
+          let duplicateFirstSeen: string | null | undefined;
+          if (verdict.status === "duplicate") {
+            duplicateFirstSeen = await findFirstSeen(exec, verdict.key);
+            if (duplicateFirstSeen === null) {
+              // Periodic sync removed a server-released code after this
+              // screen loaded its in-memory index. Confirm only the apparent
+              // duplicate against SQLite, then heal the stale Set in place.
+              keys.current.delete(verdict.key);
+              verdict = validateShiftScan(raw, {
+                expectedGtin14,
+                isDuplicate: (key) => keys.current.has(key),
+              });
+            }
+          }
           const scannedAt = new Date().toISOString();
           const event = {
             shiftId,
@@ -1201,7 +1215,9 @@ export function WorkScreen({
 
           await recordScan(exec, event, null);
           const firstSeen =
-            verdict.status === "duplicate" ? await findFirstSeen(exec, verdict.key) : null;
+            verdict.status === "duplicate"
+              ? (duplicateFirstSeen ?? (await findFirstSeen(exec, verdict.key)))
+              : null;
           return { raw, verdict, firstSeen };
         },
         onOutcome(outcome) {

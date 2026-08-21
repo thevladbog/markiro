@@ -1356,7 +1356,9 @@
         "cancelError": "Could not cancel the document. Please try again.",
         "cancelSuccess": "Document cancelled",
         "updateError": "Could not save the changes. Please try again.",
-        "dismissAction": "Cancel"
+        "dismissAction": "Cancel",
+        "printBoxes": "Print: boxes",
+        "printFull": "Print: boxes and contents"
       },
       "lineStatus": {
         "ok": "Ready",

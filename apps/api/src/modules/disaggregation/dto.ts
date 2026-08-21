@@ -38,6 +38,12 @@ export const listDocumentsQuerySchema = z.object({
 });
 export type ListDocumentsQueryDto = z.infer<typeof listDocumentsQuerySchema>;
 
+/** GET /disaggregation/:id/report query schema. */
+export const reportQuerySchema = z.object({
+  variant: z.enum(["boxes", "full"]).default("boxes"),
+});
+export type ReportQueryDto = z.infer<typeof reportQuerySchema>;
+
 /** POST /disaggregation/:id/lines schema. */
 export const addLinesSchema = z.object({
   ssccs: z.array(z.string().trim().min(1).max(64)).min(1).max(500),

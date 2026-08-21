@@ -978,6 +978,44 @@ describe("WorkScreen", () => {
     expect(events[0]?.verdict).toBe("duplicate");
   });
 
+  it("accepts a code removed by background synchronization after the duplicate index loaded", async () => {
+    const source = manualSource();
+    const base = makeExec();
+    const codeHash = kmHash(parseKm(KM));
+    await base.run(
+      `INSERT INTO codes_mirror (code_hash, shift_id, gtin14, serial, scanned_at)
+       VALUES (?, ?, ?, ?, ?)`,
+      [codeHash, "closed-shift", "04600000000015", "5Ab1", "2026-08-20T10:00:00.000Z"],
+    );
+    let indexLoaded!: () => void;
+    const loaded = new Promise<void>((resolve) => {
+      indexLoaded = resolve;
+    });
+    const exec: SqlExecutor = {
+      run: base.run,
+      async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+        const rows = await base.all<T>(sql, params);
+        if (sql === "SELECT code_hash FROM codes_mirror") indexLoaded();
+        return rows;
+      },
+    };
+    renderWorkScreen({ source, exec });
+    await loaded;
+
+    await exec.run("DELETE FROM codes_mirror WHERE code_hash = ?", [codeHash]);
+    act(() => source.emit(KM));
+
+    await waitFor(async () => {
+      expect(await exec.all("SELECT code_hash FROM codes_mirror")).toHaveLength(1);
+    });
+    expect(await screen.findByText("1")).toBeDefined();
+    expect(
+      await exec.all<{ verdict: string }>(
+        "SELECT verdict FROM scan_events_mirror ORDER BY id DESC LIMIT 1",
+      ),
+    ).toEqual([{ verdict: "ok" }]);
+  });
+
   it("rejects a code belonging to another product", async () => {
     const source = manualSource();
     const exec = makeExec();

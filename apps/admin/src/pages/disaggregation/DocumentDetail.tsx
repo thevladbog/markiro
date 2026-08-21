@@ -483,10 +483,30 @@ export function DisaggregationDocumentPage() {
       <PageHeader
         title={doc.docNo}
         actions={
-          <StatusChip
-            status={STATUS_TO_CHIP[doc.status]}
-            label={t(`pages.disaggregation.status.${doc.status}`)}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                window.open(`/api/disaggregation/${doc.id}/report?variant=boxes`);
+              }}
+            >
+              {t("pages.disaggregation.detail.printBoxes")}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                window.open(`/api/disaggregation/${doc.id}/report?variant=full`);
+              }}
+            >
+              {t("pages.disaggregation.detail.printFull")}
+            </Button>
+            <StatusChip
+              status={STATUS_TO_CHIP[doc.status]}
+              label={t(`pages.disaggregation.status.${doc.status}`)}
+            />
+          </div>
         }
       />
 

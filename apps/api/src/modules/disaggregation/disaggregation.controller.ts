@@ -11,6 +11,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -18,6 +19,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 import { ApiConsumes, ApiTags } from "@nestjs/swagger";
+import type { Response } from "express";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -32,13 +34,16 @@ import {
   addLinesSchema,
   createDocumentSchema,
   listDocumentsQuerySchema,
+  reportQuerySchema,
   updateDocumentSchema,
   type AddLinesDto,
   type CreateDocumentDto,
   type ListDocumentsQueryDto,
+  type ReportQueryDto,
   type UpdateDocumentDto,
 } from "./dto";
 import { DisaggregationService } from "./disaggregation.service";
+import { renderDisaggregationReportHtml } from "./report";
 import { parseSsccImport } from "./import-parser";
 
 @ApiTags("disaggregation")
@@ -71,6 +76,25 @@ export class DisaggregationController {
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   get(@Req() req: RequestWithTenant, @Param("id", new ParseUUIDPipe()) id: string) {
     return this.service.getDocument(req.tenantId!, id);
+  }
+
+  /**
+   * Print-ready A4 "Акт дезагрегации": `variant=boxes` — только коды
+   * упаковок (SSCC + Code128); `variant=full` — плюс DataMatrix каждого
+   * кода содержимого. Same open-in-new-tab HTML contract as
+   * `GET /pickup-orders/:id/slip`.
+   */
+  @Get(":id/report")
+  @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  async report(
+    @Req() req: RequestWithTenant,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Query(new ZodValidationPipe(reportQuerySchema)) query: ReportQueryDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<string> {
+    const data = await this.service.reportData(req.tenantId!, id, query.variant === "full");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return renderDisaggregationReportHtml(data);
   }
 
   @Patch(":id")

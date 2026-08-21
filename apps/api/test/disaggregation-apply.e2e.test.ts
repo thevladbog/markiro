@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
+import { and, eq, inArray } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { canonicalizeKm, kmHash } from "@markiro/domain";
@@ -35,6 +36,7 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
   let app: INestApplication | undefined;
   let setup: AuthSetup;
   let db: Db;
+  let tenantId: string;
   let agent: ReturnType<typeof request.agent>;
   let stationKey: string;
   let shiftId: string;
@@ -62,7 +64,7 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     await app.init();
     await listenOnLoopback(app);
     agent = request.agent(app!.getHttpServer());
-    const tenantId = await signUpAndActivate(agent);
+    tenantId = await signUpAndActivate(agent);
 
     const station = await createTestStationDevice(app!, agent, "Line 1");
     stationKey = station.apiKey;
@@ -262,6 +264,30 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     const exceptions = await agent.get(`/box-exceptions?shiftId=${shiftId}`).expect(200);
     const kinds = (exceptions.body as { items: { kind: string }[] }).items.map((e) => e.kind);
     expect(kinds).toContain("disassemble");
+
+    const releasedCodeHashes = ["aa", "bb"].map((label) =>
+      kmHash(canonicalizeKm(`01${VALID_GTIN14}21S-apply-${label}`)),
+    );
+    const owners = await db
+      .select({ codeHash: schema.codeRegistry.codeHash })
+      .from(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          inArray(schema.codeRegistry.codeHash, releasedCodeHashes),
+        ),
+      );
+    expect(owners).toEqual([]);
+
+    const releases = await request(app!.getHttpServer())
+      .post("/station/codes/releases")
+      .set("x-api-key", stationKey)
+      .send({ since: "0" })
+      .expect(200);
+    expect((releases.body as { until: string }).until).toMatch(/^[1-9][0-9]*$/);
+    expect((releases.body as { releasedCodeHashes: string[] }).releasedCodeHashes.sort()).toEqual(
+      releasedCodeHashes.sort(),
+    );
   });
 
   it("apply is all-or-nothing: a written_off line blocks and re-marks, the valid line's box stays untouched", async () => {
@@ -358,5 +384,62 @@ describe.skipIf(!ready)("disaggregation apply e2e", () => {
     const doc = await draftWithReasonAndLine(sscc5);
     await agent.post(`/disaggregation/${doc.id}/apply`).expect(200);
     await agent.post(`/disaggregation/${doc.id}/apply`).expect(409); // not_draft
+  });
+
+  it("prints both report variants: boxes-only for a draft, boxes+contents after apply", async () => {
+    // Fresh box with two codes so the full variant has real contents to show.
+    const shift4 = await openShiftForProduct(productId);
+    const reportSscc = "123456789012345712";
+    await postBatch(stationKey, [
+      scan(shift4, "rep1", "t4", "2026-07-01T13:00:00.000Z", "b7"),
+      scan(shift4, "rep2", "t4", "2026-07-01T13:00:01.000Z", "b7"),
+    ]);
+    await postBatch(
+      stationKey,
+      [],
+      [
+        {
+          boxId: "b7",
+          shiftId: shift4,
+          terminalId: "t4",
+          sscc: reportSscc,
+          closedAt: "2026-01-04T00:00:00.000Z",
+          operatorId: null,
+        },
+      ],
+    );
+    await agent.post(`/shifts/${shift4}/close`).send({ reason: "done" }).expect(200);
+
+    const doc = await draftWithReasonAndLine(reportSscc);
+    await agent.patch(`/disaggregation/${doc.id}`).send({ comment: "Мятый короб" }).expect(200);
+
+    const draftReport = await agent
+      .get(`/disaggregation/${doc.id}/report?variant=boxes`)
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+    expect(draftReport.text).toContain("Акт дезагрегации");
+    expect(draftReport.text).toContain(`(00)${reportSscc}`);
+    expect(draftReport.text).toContain("Порча");
+    expect(draftReport.text).toContain("Мятый короб");
+    expect(draftReport.text).toContain("Черновик");
+    expect(draftReport.text).not.toContain('class="dm-box"');
+
+    await agent.post(`/disaggregation/${doc.id}/apply`).expect(200);
+
+    // The full variant still shows the box's contents AFTER the apply
+    // released its items (removed_at = disassembled_at).
+    const fullReport = await agent
+      .get(`/disaggregation/${doc.id}/report?variant=full`)
+      .expect(200)
+      .expect("Content-Type", /text\/html/);
+    expect(fullReport.text).toContain(`(00)${reportSscc}`);
+    expect(fullReport.text).toContain("Проведён");
+    expect(fullReport.text.match(/class="dm-box"/g)).toHaveLength(2);
+    expect(fullReport.text).toContain("21 S-apply-rep1");
+    expect(fullReport.text).toContain("21 S-apply-rep2");
+    expect(fullReport.text).toContain("коробов — 1 · кодов — 2");
+    expect(fullReport.text).not.toContain("₽");
+
+    await agent.get(`/disaggregation/${doc.id}/report?variant=bogus`).expect(400);
   });
 });
