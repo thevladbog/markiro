@@ -97,8 +97,8 @@ const STATUS_LABEL: Record<DisaggregationReportData["status"], string> = {
 // ---- pagination ------------------------------------------------------------
 //
 // Same fixed-A4-page approach as pickup's slip.ts, but the content stream is
-// heterogeneous (box bands, code-chip rows, table rows), so pages are packed
-// by known per-unit millimetre heights instead of fixed item counts.
+// heterogeneous (box rows, indented code rows), so pages are packed by known
+// per-unit millimetre heights instead of fixed item counts.
 
 type ReportUnit =
   | { kind: "row"; heightMm: number; html: string }
@@ -262,26 +262,33 @@ function finalBlocks(data: DisaggregationReportData): string {
   </div>`;
 }
 
-// ---- variant: boxes-only table --------------------------------------------
+// ---- table rows ------------------------------------------------------------
+//
+// Both variants are ONE table. Top-level rows are boxes with the SSCC
+// Code128 in the right column; with `includeContents`, each box's unit
+// codes follow underneath as indented tree rows (├/└) with the code's
+// DataMatrix in that same right column.
 
-const BOXES_TABLE_HEAD_MM = 8;
-const BOXES_ROW_MM = 13;
+const TABLE_HEAD_MM = 8;
+const BOX_ROW_MM = 13;
+const CODE_ROW_MM = 14.5;
+const EMPTY_NOTE_MM = 8;
 
-function boxesTableHead(): string {
+function tableHead(includeContents: boolean): string {
   return `<thead class="rep-table-head">
     <tr>
       <th>№</th>
-      <th>Код упаковки (SSCC)</th>
+      <th>${includeContents ? "Код упаковки (SSCC) / код маркировки (КМ)" : "Код упаковки (SSCC)"}</th>
       <th>Продукт</th>
       <th class="rep-count">Кодов, шт.</th>
-      <th class="rep-barcode-heading">Штрихкод SSCC</th>
+      <th class="rep-barcode-heading">${includeContents ? "Штрихкод / DataMatrix" : "Штрихкод SSCC"}</th>
     </tr>
   </thead>`;
 }
 
-function boxesRow(line: DisaggregationReportLine): string {
+function boxRow(line: DisaggregationReportLine): string {
   return `
-      <tr class="rep-item-row">
+      <tr class="rep-box-row">
         <td class="mono rep-item-number">${line.n}</td>
         <td class="mono rep-sscc-label">${escapeHtml(ssccHri(line.sscc))}</td>
         <td><span class="rep-product-name">${line.productName ? escapeHtml(line.productName) : "—"}</span></td>
@@ -290,65 +297,48 @@ function boxesRow(line: DisaggregationReportLine): string {
       </tr>`;
 }
 
+function codeRow(code: DisaggregationReportCode, isLast: boolean): string {
+  return `
+      <tr class="rep-code-row">
+        <td></td>
+        <td class="mono rep-km-label"><span class="rep-tree">${isLast ? "└" : "├"}</span>${escapeHtml(kmLabel(code))}</td>
+        <td></td>
+        <td></td>
+        <td><span class="dm-box">${dataMatrix(code.rawKm)}</span></td>
+      </tr>`;
+}
+
 function boxesUnits(data: DisaggregationReportData): ReportUnit[] {
   return data.lines.map((line) => ({
     kind: "row" as const,
-    heightMm: BOXES_ROW_MM,
-    html: boxesRow(line),
+    heightMm: BOX_ROW_MM,
+    html: boxRow(line),
   }));
-}
-
-// ---- variant: boxes + contents --------------------------------------------
-
-const BAND_MM = 15;
-const CODES_ROW_MM = 22;
-const EMPTY_NOTE_MM = 8;
-const CODES_PER_ROW = 4;
-
-function boxBand(line: DisaggregationReportLine): string {
-  return `<div class="rep-band">
-    <div class="rep-band-info">
-      <span class="rep-band-n mono">${line.n}</span>
-      <span class="rep-band-copy">
-        <span class="mono rep-band-sscc">${escapeHtml(ssccHri(line.sscc))}</span>
-        <span class="rep-band-detail">${line.productName ? escapeHtml(line.productName) : "Продукт не определён"} · кодов: <strong>${line.codeCount}</strong></span>
-      </span>
-    </div>
-    <span class="sscc-box">${ssccBarcode(line.sscc)}</span>
-  </div>`;
-}
-
-function codesRow(codes: DisaggregationReportCode[]): string {
-  const chips = codes
-    .map(
-      (code) => `<span class="rep-chip">
-        <span class="dm-box">${dataMatrix(code.rawKm)}</span>
-        <span class="mono rep-chip-label">${escapeHtml(kmLabel(code))}</span>
-      </span>`,
-    )
-    .join("");
-  return `<div class="rep-codes-row">${chips}</div>`;
 }
 
 function contentsUnits(data: DisaggregationReportData): ReportUnit[] {
   const units: ReportUnit[] = [];
   for (const line of data.lines) {
-    units.push({ kind: "band", heightMm: BAND_MM, html: boxBand(line) });
+    units.push({ kind: "band", heightMm: BOX_ROW_MM, html: boxRow(line) });
     if (line.codes.length === 0) {
       units.push({
         kind: "row",
         heightMm: EMPTY_NOTE_MM,
-        html: '<div class="rep-empty-note">Содержимое короба недоступно</div>',
+        html: `
+      <tr class="rep-code-row rep-code-row--empty">
+        <td></td>
+        <td class="rep-km-label" colspan="4"><span class="rep-tree">└</span>Содержимое короба недоступно</td>
+      </tr>`,
       });
       continue;
     }
-    for (let i = 0; i < line.codes.length; i += CODES_PER_ROW) {
+    line.codes.forEach((code, index) => {
       units.push({
         kind: "row",
-        heightMm: CODES_ROW_MM,
-        html: codesRow(line.codes.slice(i, i + CODES_PER_ROW)),
+        heightMm: CODE_ROW_MM,
+        html: codeRow(code, index === line.codes.length - 1),
       });
-    }
+    });
   }
   return units;
 }
@@ -358,7 +348,7 @@ function contentsUnits(data: DisaggregationReportData): ReportUnit[] {
 /** Pure: builds the print-ready A4 "Акт дезагрегации" document. No I/O, no `Date.now()`. */
 export function renderDisaggregationReportHtml(data: DisaggregationReportData): string {
   const units = data.includeContents ? contentsUnits(data) : boxesUnits(data);
-  const pages = paginateUnits(units, data.includeContents ? 0 : BOXES_TABLE_HEAD_MM);
+  const pages = paginateUnits(units, TABLE_HEAD_MM);
   const totalPages = pages.length;
   const logo = brandLogo(data);
   const metadata = metadataBlock(data);
@@ -372,11 +362,9 @@ export function renderDisaggregationReportHtml(data: DisaggregationReportData): 
     .map((pageUnits, index) => {
       const pageNumber = index + 1;
       const isLastPage = pageNumber === totalPages;
-      const body = data.includeContents
-        ? `<div class="rep-stream">${pageUnits.map((unit) => unit.html).join("")}</div>`
-        : `<table class="rep-table">
+      const body = `<table class="rep-table">
         <colgroup><col class="col-n"><col class="col-sscc"><col class="col-product"><col class="col-count"><col class="col-barcode"></colgroup>
-        ${boxesTableHead()}
+        ${tableHead(data.includeContents)}
         <tbody>${pageUnits.map((unit) => unit.html).join("")}</tbody>
       </table>`;
       return `<section class="rep-page" data-report-page="${pageNumber}">
@@ -436,29 +424,24 @@ body { background: #E9E7E1; font-family: Arial, sans-serif; color: #17161A; }
 .rep-table-head th { padding: 1.5mm 2mm; font-size: 8.5px; line-height: 1; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
 .rep-table-head th:first-child { border-radius: 2mm 0 0 0; }
 .rep-table-head th:last-child { border-radius: 0 2mm 0 0; }
-.rep-item-row { height: 13mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #E0DED7; }
-.rep-item-row td { height: 13mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-box-row { height: 13mm; background: #F7F6F2; break-inside: avoid; page-break-inside: avoid; border-top: .25mm solid #C9C6BD; border-bottom: .25mm solid #E0DED7; }
+.rep-box-row td { height: 13mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-code-row { height: 14.5mm; break-inside: avoid; page-break-inside: avoid; border-bottom: .25mm solid #EDEBE5; }
+.rep-code-row td { height: 14.5mm; padding: 1mm 2mm; vertical-align: middle; overflow: hidden; }
+.rep-km-label { color: #45433E; font-size: 8.5px; overflow-wrap: anywhere; padding-left: 5mm !important; }
+.rep-tree { display: inline-block; width: 3.5mm; color: #A5A29A; }
+.rep-code-row--empty { height: 8mm; }
+.rep-code-row--empty td { height: 8mm; color: #6B6862; font-size: 9.5px; }
 .rep-item-number { text-align: center; }
 .rep-product-name { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 1.25; }
-.rep-sscc-label { font-size: 9.5px; overflow-wrap: anywhere; }
+.rep-sscc-label { font-size: 9.5px; font-weight: 700; overflow-wrap: anywhere; }
 .rep-count { text-align: right !important; white-space: nowrap; }
 .rep-barcode-heading { text-align: center !important; }
 .sscc-box { height: 8mm; display: flex; align-items: center; justify-content: center; }
 .sscc-box svg { display: block; width: auto; max-width: 48mm; height: 100%; }
 .rep-code-missing { font-size: 9px; line-height: 1.2; color: #6B6862; text-align: center; }
-.rep-stream { display: flex; flex-direction: column; gap: 2mm; }
-.rep-band { min-height: 13mm; padding: 1.5mm 3mm; border: .25mm solid #E0DED7; border-radius: 2mm; background: #F7F6F2; display: flex; align-items: center; justify-content: space-between; gap: 6mm; break-inside: avoid; page-break-inside: avoid; }
-.rep-band-info { min-width: 0; display: flex; align-items: center; gap: 3mm; }
-.rep-band-n { width: 7mm; height: 7mm; border-radius: 50%; background: #17161A; color: #FAFAF8; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
-.rep-band-copy { min-width: 0; display: flex; flex-direction: column; gap: .5mm; }
-.rep-band-sscc { font-size: 11.5px; font-weight: 700; overflow-wrap: anywhere; }
-.rep-band-detail { color: #45433E; font-size: 10px; }
-.rep-codes-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2mm; padding: 0 1mm; break-inside: avoid; page-break-inside: avoid; }
-.rep-chip { min-height: 19mm; padding: 1.5mm; border: .25mm solid #E0DED7; border-radius: 1.5mm; display: flex; flex-direction: column; align-items: center; gap: 1mm; }
-.dm-box { width: 12mm; height: 12mm; display: flex; align-items: center; justify-content: center; }
+.dm-box { width: 11.5mm; height: 11.5mm; margin: 0 auto; display: flex; align-items: center; justify-content: center; }
 .dm-box svg { display: block; width: 100%; height: 100%; }
-.rep-chip-label { color: #45433E; font-size: 7px; line-height: 1.2; text-align: center; overflow-wrap: anywhere; }
-.rep-empty-note { padding: 1.5mm 3mm; color: #6B6862; font-size: 9.5px; }
 .rep-final-blocks { margin-top: auto; break-inside: avoid; page-break-inside: avoid; display: flex; flex-direction: column; gap: 2.5mm; }
 .rep-total { min-height: 7mm; padding: 1.5mm 2mm; border-bottom: .25mm solid #C9C6BD; display: flex; justify-content: flex-end; align-items: baseline; gap: 8mm; font-size: 12px; font-weight: 700; }
 .rep-operation { padding: 3mm 4mm; border: .25mm solid #E0DED7; border-radius: 2mm; background: #F7F6F2; display: flex; flex-direction: column; gap: 1.5mm; color: #45433E; font-size: 9.5px; }

@@ -73,12 +73,16 @@ describe("renderDisaggregationReportHtml", () => {
     expect(html.match(/class="code128-box"/g)).toHaveLength(1);
   });
 
-  it("full variant renders the box bands plus one DataMatrix per unit code", () => {
+  it("full variant nests one indented DataMatrix code row under each box row", () => {
     const html = renderDisaggregationReportHtml(fixture({ includeContents: true }));
-    expect(html.match(/class="rep-band"/g)).toHaveLength(2);
+    expect(html.match(/class="rep-box-row"/g)).toHaveLength(2);
+    expect(html.match(/class="rep-code-row"/g)).toHaveLength(5);
     expect(html.match(/class="dm-box"/g)).toHaveLength(5);
     expect(html).toContain(`01 ${GTIN} 21 BOX1SER1`);
     expect(html).toContain(`01 ${GTIN} 21 BOX2SER2`);
+    // Tree glyphs: the last code of each box closes with └, the rest use ├.
+    expect(html.match(/class="rep-tree">└/g)).toHaveLength(2);
+    expect(html.match(/class="rep-tree">├/g)).toHaveLength(3);
   });
 
   it("never prints prices", () => {
@@ -127,17 +131,17 @@ describe("renderDisaggregationReportHtml", () => {
     expect(renderedSscc).toEqual(lines.map((l) => l.n));
   });
 
-  it("paginates the contents variant without orphaning a box band at a page break", () => {
+  it("paginates the contents variant without orphaning a box row at a page break", () => {
     const lines = Array.from({ length: 12 }, (_, index) => line(index + 1, 9));
     const html = renderDisaggregationReportHtml(fixture({ includeContents: true, lines }));
     const pages = html.match(/<section class="rep-page"[\s\S]*?<\/section>/g) ?? [];
     expect(pages.length).toBeGreaterThan(1);
     for (const page of pages) {
-      // A box band is never the last unit of a page: its first codes row
-      // always sits after it on the same page.
-      if (!page.includes('class="rep-band"')) continue;
-      expect(page.lastIndexOf('class="rep-band"')).toBeLessThan(
-        page.lastIndexOf('class="rep-codes-row"'),
+      // A box row is never the last row of a page: its first code row
+      // always sits under it on the same page.
+      if (!page.includes('class="rep-box-row"')) continue;
+      expect(page.lastIndexOf('class="rep-box-row"')).toBeLessThan(
+        page.lastIndexOf('class="rep-code-row"'),
       );
     }
     expect(html.match(/class="dm-box"/g)).toHaveLength(12 * 9);
