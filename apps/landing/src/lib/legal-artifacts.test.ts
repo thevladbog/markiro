@@ -123,4 +123,24 @@ describe("loadLegalArtifacts", () => {
       await expect(loadLegalArtifacts(root)).rejects.toThrow(/unlisted|entry|manifest/i);
     },
   );
+
+  it("rejects an English artifact for a Russian-only instruction", async () => {
+    const root = await copiedPublicRoot();
+    await editManifest(root, (manifest) => {
+      manifest.push({
+        code: "MKR-INS-01",
+        revision: "2026.08/01",
+        effectiveDate: "2026-08-21",
+        locale: "en",
+        kind: "pdfa-2b",
+        fileName: "markiro_mkr-ins-01_2026.08-01_en.pdf",
+        bytes: 1,
+        sha256: "0".repeat(64),
+        mediaType: "application/pdf",
+        generator: { docx: "9.7.1", libreOffice: "26.2.5", veraPdf: "1.30.2" },
+      });
+    });
+
+    await expect(loadLegalArtifacts(root)).rejects.toThrow(/locale is not published/);
+  });
 });
