@@ -389,7 +389,6 @@ body,
 }
 
 .gallery-centered-card,
-.gallery-print,
 .gallery-box {
   display: grid;
   width: 100%;
@@ -413,7 +412,6 @@ body,
 }
 
 .gallery-centered-card .mk-card__body,
-.gallery-print,
 .gallery-box {
   display: grid;
   gap: var(--sp-4);

@@ -106,14 +106,23 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
-  // "offline" renders the real work screen mid-shift (see WorkFixture's
-  // "offline" mode below), so it gets the same always-present operator/window
-  // controls App.tsx renders for every authenticated screen with a shift.
-  const withActiveShiftControls =
-    headerVariant !== null ||
-    fixture.kind === "shift" ||
+  // Single source of truth for every fixture that renders `WorkFixture` as an
+  // ordinary mid-shift work screen -- "work" itself, plus "box-full" and
+  // "offline", which were re-platformed onto the real work screen instead of
+  // their own standalone wrapper (see the "box"/"sync" cases in
+  // `GalleryState` below). Drives BOTH chrome decisions production ties to
+  // an active shift, so the two can never drift apart again: App.tsx sets
+  // `statusBarCollapsible={shift !== null}` (collapsed once a shift is
+  // active) and unconditionally passes `operatorControl`/`windowControl`
+  // whenever authenticated -- the latter is also true during plain shift
+  // selection (no WorkFixture yet), which is why `withActiveShiftControls`
+  // below still ORs in `fixture.kind === "shift"` on top of this.
+  const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
+    (fixture.kind === "box" && fixture.variant === "full") ||
     syncVariant === "offline";
+  const withActiveShiftControls =
+    headerVariant !== null || fixture.kind === "shift" || rendersActiveShiftWorkScreen;
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -161,7 +170,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
         syncStuck={syncVariant === "stuck"}
         conflicts={fixture.kind === "conflicts" ? 4 : 0}
-        statusBarCollapsible={fixture.kind === "work"}
+        statusBarCollapsible={rendersActiveShiftWorkScreen}
         {...(headerControls
           ? {
               update: headerControls.update,
@@ -952,8 +961,7 @@ function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: Gall
  * `signal.firstSeen` first-scan time); an error verdict never has a second
  * line (see `onOutcome`'s `detail` computation, which stays `undefined` for
  * every non-duplicate status).
- */
-/**
+ *
  * "duplicate"/"error" only -- "ok" is not a signal-overlay state in
  * production (WorkScreen.tsx's `publishVerdict` returns early for tone
  * "ok", so the accepted verdict never gets a full-screen flash); its gallery
