@@ -532,6 +532,7 @@ function environment(overrides = {}) {
     GHCR_USERNAME: "github-actions",
     GHCR_TOKEN: "masked-job-token",
     MARKIRO_DOMAIN: "admin.markiro.example",
+    MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_LANDING_DOMAIN: "markiro.example",
     MARKIRO_LANDING_DEMO_SUBMISSION_STATE: "disabled",
@@ -604,6 +605,7 @@ test("real direct adapter uses pinned SSH and job-scoped registry credentials on
   assert.match(prepare.input, /GHCR_USERNAME/);
   assert.match(prepare.input, /GHCR_TOKEN/);
   assert.ok(prepare.args.includes("MARKIRO_EDGE_MODE=direct"));
+  assert.ok(prepare.args.includes("MARKIRO_SAAS_ADMIN_DOMAIN=saas-admin.markiro.example"));
   assert.ok(prepare.args.includes("MARKIRO_LANDING_DOMAIN=markiro.example"));
   assert.ok(prepare.args.includes("ACME_EMAIL=ops@example.test"));
   assert.ok(prepare.args.includes(`--working-directory=/opt/markiro/releases/${COMMIT}`));

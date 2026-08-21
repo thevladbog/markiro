@@ -956,6 +956,7 @@ export async function deployRelease(options, supplied = {}) {
       await dependencies.runSmoke({
         environment,
         adminBaseUrl: baseUrls.admin,
+        saasAdminBaseUrl: baseUrls.saasAdmin,
         kioskBaseUrl: baseUrls.kiosk,
         landingBaseUrl: baseUrls.landing,
         ...(vbtech
