@@ -321,7 +321,7 @@ describe("NewShift", () => {
   // it retires the old relative derivation, which recomputed "today" after the
   // interaction and so disagreed with the request whenever a run crossed local
   // midnight.
-  it("resolves a known GTIN, creates + opens a validation shift", async () => {
+  it("sends a null production date and opens with an old create response that omits it", async () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T21:30:00.000Z"));
@@ -377,8 +377,130 @@ describe("NewShift", () => {
       productId: "p1",
       mode: "validation",
       plannedDate: "2026-08-15",
+      productionDate: null,
     });
   });
+
+  it("shows an optional production-date picker only after resolving a product", async () => {
+    vi.spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      );
+
+    render(
+      <NewShift client={client} source={silentSource} onStarted={vi.fn()} onBack={() => {}} />,
+    );
+    expect(screen.queryByRole("button", { name: "Production date" })).toBeNull();
+
+    submitGtin();
+    await screen.findByText("Cola");
+
+    expect(screen.getByRole("button", { name: "Production date" })).toBeDefined();
+    expect(screen.getByText("Optional. Use the date printed on the product.")).toBeDefined();
+  });
+
+  it("sends the selected production date and opens only after an exact create echo", async () => {
+    useTimeZone("Europe/Moscow");
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "s9",
+            status: "planned",
+            mode: "validation",
+            productionDate: "2026-08-21",
+          }),
+          { status: 201 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "s9", status: "active", mode: "validation" }), {
+          status: 200,
+        }),
+      );
+    const onStarted = vi.fn();
+    render(
+      <NewShift client={client} source={silentSource} onStarted={onStarted} onBack={() => {}} />,
+    );
+    submitGtin();
+    await screen.findByText("Cola");
+
+    fireEvent.click(screen.getByRole("button", { name: "Production date" }));
+    fireEvent.click(screen.getByRole("button", { name: "August 21, 2026" }));
+    fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+    await waitFor(() =>
+      expect(onStarted).toHaveBeenCalledWith({ id: "s9", status: "active", mode: "validation" }),
+    );
+    expect(JSON.parse(fetchMock.mock.calls[2]?.[1]?.body as string)).toEqual({
+      productId: "p1",
+      mode: "validation",
+      plannedDate: "2026-08-14",
+      productionDate: "2026-08-21",
+    });
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("http://localhost:3000/shifts/s9/open");
+  });
+
+  it.each([
+    ["omits the production date", { id: "s9", status: "planned", mode: "validation" }],
+    [
+      "echoes a null production date",
+      { id: "s9", status: "planned", mode: "validation", productionDate: null },
+    ],
+    [
+      "echoes a different production date",
+      { id: "s9", status: "planned", mode: "validation", productionDate: "2026-08-22" },
+    ],
+  ])(
+    "keeps the product screen and does not open when the create response %s",
+    async (_case, created) => {
+      useTimeZone("Europe/Moscow");
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
+      const fetchMock = vi
+        .spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
+        )
+        .mockResolvedValueOnce(new Response(JSON.stringify(created), { status: 201 }));
+      const onStarted = vi.fn();
+      render(
+        <NewShift client={client} source={silentSource} onStarted={onStarted} onBack={() => {}} />,
+      );
+      submitGtin();
+      await screen.findByText("Cola");
+
+      fireEvent.click(screen.getByRole("button", { name: "Production date" }));
+      fireEvent.click(screen.getByRole("button", { name: "August 21, 2026" }));
+      fireEvent.click(screen.getByRole("button", { name: "Start" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByText(
+            "The shift was not opened. Ask an administrator to remove the incomplete planned shift, update the server, then retry.",
+          ),
+        ).toBeDefined(),
+      );
+      expect(screen.getByTestId("new-shift-found")).toBeDefined();
+      expect(onStarted).not.toHaveBeenCalled();
+      expect(fetchMock.mock.calls).toHaveLength(3);
+    },
+  );
 
   it("shows the blocking not-in-catalog screen for an unknown GTIN", async () => {
     vi.spyOn(globalThis, "fetch")
@@ -514,6 +636,7 @@ describe("NewShift", () => {
       productId: "p1",
       mode: "aggregation",
       plannedDate: "2026-08-14",
+      productionDate: null,
       boxLabelTemplateId: "tpl-default",
     });
     expect(fetchMock.mock.calls[4]?.[0]).toBe("http://localhost:3000/shifts/s9/open");
@@ -708,6 +831,8 @@ describe("NewShift", () => {
     fireEvent.change(input, { target: { value: "4600000000015" } });
     fireEvent.submit(input.closest("form")!);
     await screen.findByText("Cola");
+    expect(screen.getByRole("button", { name: "Дата производства" })).toBeDefined();
+    expect(screen.getByText("Необязательно. Берите с продукции.")).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Агрегация" }));
     fireEvent.click(screen.getByRole("button", { name: "Начать" }));
