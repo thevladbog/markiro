@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, NavLink, Outlet } from "react-router";
+import { Link, NavLink, Outlet, useLocation } from "react-router";
 
 import { CABINET_CAPABILITY, type CabinetCapability } from "@markiro/domain";
 import { Sidebar, cn, type SidebarItem } from "@markiro/ui";
@@ -139,6 +139,7 @@ export const NAV_ITEMS: ReadonlyArray<{
  */
 export function AppShell() {
   const { t } = useTranslation();
+  const location = useLocation();
   const authClient = useAuthClient();
   const { data: session } = authClient.useSession();
   const canReadOperations = useCan(C.OPERATIONS_READ);
@@ -191,6 +192,7 @@ export function AppShell() {
             openLabel={t("profile.openNamed", {
               name: profileName || session?.user.name || session?.user.email || "",
             })}
+            returnTo={`${location.pathname}${location.search}`}
           />
         }
       />
@@ -251,17 +253,19 @@ function SidebarFooter({
   email,
   avatarUrl,
   openLabel,
+  returnTo,
 }: {
   name: string | null | undefined;
   email: string;
   avatarUrl: string | null;
   openLabel: string;
+  returnTo: string;
 }) {
   const displayName = name && name.trim().length > 0 ? name : email;
 
   return (
     <Link
-      to="/profile"
+      to={`/profile?returnTo=${encodeURIComponent(returnTo)}`}
       aria-label={openLabel}
       style={{
         display: "flex",

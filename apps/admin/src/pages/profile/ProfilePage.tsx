@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { Navigate, useNavigate, useSearchParams } from "react-router";
 
-import { Alert, Button, Card, Input, PageHeader, Spinner } from "@markiro/ui";
+import { Alert, Button, Input } from "@markiro/ui";
 
 import { ApiRequestError } from "../../api/client.js";
 import { useAuthClient } from "../../auth/client.js";
+import { AccountShell } from "../account/AccountShell.js";
 import {
   useAvatarUrl,
   useDeleteAvatar,
@@ -18,7 +19,7 @@ export function ProfilePage() {
   const auth = useAuthClient();
   const session = auth.useSession();
 
-  if (session.isPending) return <CenteredSpinner />;
+  if (session.isPending) return <AccountLoading />;
   if (!session.data) return <Navigate to="/login" replace />;
   return <ProfileContent email={session.data.user.email} />;
 }
@@ -32,6 +33,7 @@ function ProfileContent({ email }: { email: string }) {
   const update = useUpdateProfile();
   const upload = useUploadAvatar();
   const removeAvatar = useDeleteAvatar();
+  const avatarInputId = useId();
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [middleName, setMiddleName] = useState("");
@@ -48,12 +50,48 @@ function ProfileContent({ email }: { email: string }) {
     setMiddleName(profile.data.middleName ?? "");
   }, [profile.data]);
 
-  if (profile.isPending) return <CenteredSpinner />;
+  const returnTo = safeReturnTo(searchParams.get("returnTo"));
+  const handleBack = () => void navigate(returnTo);
+
+  if (profile.isPending) {
+    return (
+      <AccountShell
+        eyebrow={t("account.eyebrow")}
+        title={t("profile.title")}
+        description={t("profile.description")}
+        accountLabel={email}
+        backLabel={t("account.back")}
+        onBack={handleBack}
+      >
+        <div className="mk-account-frame">
+          <div
+            className="mk-account-panel mk-account-profile-skeleton"
+            role="status"
+            aria-label={t("common.loading")}
+          >
+            <span />
+            <span />
+          </div>
+        </div>
+      </AccountShell>
+    );
+  }
   if (profile.isError || !profile.data) {
     return (
-      <div style={{ padding: 32 }}>
-        <Alert tone="error">{t("profile.loadError")}</Alert>
-      </div>
+      <AccountShell
+        eyebrow={t("account.eyebrow")}
+        title={t("profile.title")}
+        description={t("profile.description")}
+        accountLabel={email}
+        backLabel={t("account.back")}
+        onBack={handleBack}
+      >
+        <div className="mk-account-frame">
+          <div className="mk-account-panel mk-account-section">
+            <Alert tone="error">{t("profile.loadError")}</Alert>
+          </div>
+        </div>
+      </AccountShell>
     );
   }
 
@@ -73,9 +111,8 @@ function ProfileContent({ email }: { email: string }) {
         lastName: normalizedLastName,
         middleName: middleName.trim() || null,
       });
-      const requested = searchParams.get("returnTo");
-      if (requested || searchParams.get("complete") === "1") {
-        void navigate(safeReturnTo(requested), { replace: true });
+      if (searchParams.get("returnTo") || searchParams.get("complete") === "1") {
+        void navigate(returnTo, { replace: true });
       } else {
         setSaved(true);
       }
@@ -103,131 +140,149 @@ function ProfileContent({ email }: { email: string }) {
     }
   };
 
+  const initials = initialsOf(firstName, lastName, email);
+
   return (
-    <main
-      style={{
-        maxWidth: 840,
-        margin: "0 auto",
-        padding: "36px 32px",
-        display: "flex",
-        flexDirection: "column",
-        gap: 20,
-      }}
+    <AccountShell
+      eyebrow={t("account.eyebrow")}
+      title={t("profile.title")}
+      description={t("profile.description")}
+      accountLabel={email}
+      backLabel={t("account.back")}
+      onBack={handleBack}
     >
-      <PageHeader title={t("profile.title")} />
       {searchParams.get("complete") === "1" ? (
-        <Alert tone="info" title={t("profile.completeTitle")}>
-          {t("profile.completeBody")}
-        </Alert>
+        <div className="mk-account-alert">
+          <Alert tone="info" title={t("profile.completeTitle")}>
+            {t("profile.completeBody")}
+          </Alert>
+        </div>
       ) : null}
-      <Card title={t("profile.personalTitle")}>
-        <form
-          onSubmit={(event) => void submit(event)}
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(180px, 240px) minmax(0, 1fr)",
-            gap: 28,
-          }}
-        >
-          <section
-            style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }}
-          >
-            {avatar.data?.url ? (
-              <img
-                src={avatar.data.url}
-                alt={t("profile.avatarAlt")}
-                width={144}
-                height={144}
-                style={{
-                  width: 144,
-                  height: 144,
-                  objectFit: "cover",
-                  borderRadius: "var(--r-3)",
-                  border: "1px solid var(--line)",
-                }}
-              />
-            ) : (
-              <div
-                aria-label={t("profile.noAvatar")}
-                style={{
-                  width: 144,
-                  height: 144,
-                  borderRadius: "var(--r-3)",
-                  background: "var(--surface-panel)",
-                  border: "1px solid var(--line)",
-                  display: "grid",
-                  placeItems: "center",
-                  color: "var(--fg-3)",
-                  font: "var(--text-body-sm)",
-                  textAlign: "center",
-                  padding: 12,
-                  boxSizing: "border-box",
-                }}
-              >
-                {t("profile.noAvatar")}
+      <div className="mk-account-frame">
+        <div className="mk-account-panel">
+          <form onSubmit={(event) => void submit(event)} className="mk-account-form">
+            <section className="mk-account-section">
+              <header className="mk-account-section__heading">
+                <h2>{t("profile.photoTitle")}</h2>
+                <p>{t("profile.photoHint")}</p>
+              </header>
+              <div className="mk-account-avatar-shell">
+                {avatar.data?.url ? (
+                  <img
+                    className="mk-account-avatar"
+                    src={avatar.data.url}
+                    alt={t("profile.avatarAlt")}
+                  />
+                ) : (
+                  <div className="mk-account-avatar__empty" aria-label={t("profile.noAvatar")}>
+                    <span aria-hidden="true">{initials}</span>
+                  </div>
+                )}
               </div>
-            )}
-            <Input
-              type="file"
-              accept="image/png,image/jpeg,image/webp"
-              label={t("profile.uploadAvatar")}
-              disabled={upload.isPending}
-              onChange={(event) => void uploadFile(event.target.files?.[0])}
-            />
-            {profile.data.hasAvatar ? (
-              <Button
-                type="button"
-                size="compact"
-                variant="secondary"
-                loading={removeAvatar.isPending}
-                onClick={() => void deleteAvatar()}
-              >
-                {t("profile.deleteAvatar")}
-              </Button>
-            ) : null}
-            {avatarError ? <Alert tone="error">{avatarError}</Alert> : null}
-          </section>
-          <section style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {saveError ? <Alert tone="error">{saveError}</Alert> : null}
-            {saved ? <Alert tone="ok">{t("profile.saveSuccess")}</Alert> : null}
-            <Input label={t("profile.email")} value={email} readOnly />
-            <Input
-              required
-              autoComplete="given-name"
-              label={t("profile.firstName")}
-              value={firstName}
-              onChange={(event) => setFirstName(event.target.value)}
-            />
-            <Input
-              required
-              autoComplete="family-name"
-              label={t("profile.lastName")}
-              value={lastName}
-              onChange={(event) => setLastName(event.target.value)}
-            />
-            <Input
-              autoComplete="additional-name"
-              label={t("profile.middleName")}
-              value={middleName}
-              onChange={(event) => setMiddleName(event.target.value)}
-            />
-            <Button type="submit" loading={update.isPending} style={{ alignSelf: "flex-start" }}>
-              {t("profile.save")}
-            </Button>
-          </section>
-        </form>
-      </Card>
-    </main>
+              <div className="mk-account-avatar-actions">
+                <label
+                  className="mk-account-upload"
+                  data-disabled={upload.isPending || undefined}
+                  htmlFor={avatarInputId}
+                >
+                  {profile.data.hasAvatar ? t("profile.changeAvatar") : t("profile.uploadAvatar")}
+                  {/* eslint-disable-next-line no-restricted-syntax -- the browser file picker requires a native file input; the visible control is the associated styled label. */}
+                  <input
+                    className="mk-account-file-input"
+                    id={avatarInputId}
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp"
+                    aria-label={t("profile.uploadAvatar")}
+                    disabled={upload.isPending}
+                    onChange={(event) => void uploadFile(event.target.files?.[0])}
+                  />
+                </label>
+                {profile.data.hasAvatar ? (
+                  <Button
+                    type="button"
+                    size="compact"
+                    variant="secondary"
+                    fullWidth
+                    loading={removeAvatar.isPending}
+                    onClick={() => void deleteAvatar()}
+                  >
+                    {t("profile.deleteAvatar")}
+                  </Button>
+                ) : null}
+                {avatarError ? <Alert tone="error">{avatarError}</Alert> : null}
+              </div>
+            </section>
+            <section className="mk-account-section">
+              <header className="mk-account-section__heading">
+                <h2>{t("profile.personalTitle")}</h2>
+                <p>{t("profile.personalHint")}</p>
+              </header>
+              <div className="mk-account-fields">
+                {saveError || saved ? (
+                  <div className="mk-account-fields__alerts">
+                    {saveError ? <Alert tone="error">{saveError}</Alert> : null}
+                    {saved ? <Alert tone="ok">{t("profile.saveSuccess")}</Alert> : null}
+                  </div>
+                ) : null}
+                <Input label={t("profile.email")} value={email} readOnly />
+                <Input
+                  required
+                  autoComplete="given-name"
+                  label={t("profile.firstName")}
+                  value={firstName}
+                  onChange={(event) => setFirstName(event.target.value)}
+                />
+                <Input
+                  required
+                  autoComplete="family-name"
+                  label={t("profile.lastName")}
+                  value={lastName}
+                  onChange={(event) => setLastName(event.target.value)}
+                />
+                <Input
+                  autoComplete="additional-name"
+                  label={t("profile.middleName")}
+                  value={middleName}
+                  onChange={(event) => setMiddleName(event.target.value)}
+                />
+                <div className="mk-account-form__actions">
+                  <Button className="mk-account-action" type="submit" disabled={update.isPending}>
+                    {t("profile.save")}
+                    <span className="mk-account-action__icon" aria-hidden="true">
+                      {update.isPending ? (
+                        <span className="mk-account-org__progress">•••</span>
+                      ) : (
+                        <svg viewBox="0 0 20 20" focusable="false">
+                          <path d="M4 10h11M10.5 5.5 15 10l-4.5 4.5" />
+                        </svg>
+                      )}
+                    </span>
+                  </Button>
+                </div>
+              </div>
+            </section>
+          </form>
+        </div>
+      </div>
+    </AccountShell>
   );
 }
 
-function CenteredSpinner() {
+function AccountLoading() {
   const { t } = useTranslation();
   return (
-    <div style={{ display: "flex", justifyContent: "center", paddingTop: 96 }}>
-      <Spinner label={t("common.loading")} />
+    <div className="mk-account-page">
+      <div className="mk-account-page__loading" role="status" aria-label={t("common.loading")}>
+        <span />
+        <span />
+      </div>
     </div>
   );
+}
+
+function initialsOf(firstName: string, lastName: string, email: string): string {
+  const initials = `${firstName.trim()[0] ?? ""}${lastName.trim()[0] ?? ""}`.toUpperCase();
+  return initials || email.trim().slice(0, 2).toUpperCase();
 }
 
 function safeReturnTo(value: string | null): string {
