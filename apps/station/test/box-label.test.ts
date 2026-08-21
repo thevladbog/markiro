@@ -126,6 +126,14 @@ describe("addCalendarDays", () => {
 });
 
 describe("expiryIsoDate", () => {
+  it("counts from an explicit production date instead of the local close day", () => {
+    expect(
+      withTimeZone("Europe/Moscow", () =>
+        expiryIsoDate("2026-03-01T22:30:00.000Z", 2, "2026-02-27"),
+      ),
+    ).toBe("2026-03-01");
+  });
+
   it("counts the shelf life from the LOCAL production date", () => {
     // 01:00 Moscow on 2025-05-20, stored as 22:00 UTC on the 19th.
     expect(
@@ -170,6 +178,16 @@ describe("expiryIsoDate", () => {
     );
   });
 
+  it("rolls an explicit production date over leap-day and year boundaries", () => {
+    expect(expiryIsoDate("2025-01-01T00:00:00.000Z", 1, "2024-02-28")).toBe("2024-02-29");
+    expect(expiryIsoDate("2025-01-01T00:00:00.000Z", 1, "2026-12-31")).toBe("2027-01-01");
+  });
+
+  it("fails safe instead of falling back when an explicit date is malformed", () => {
+    expect(expiryIsoDate("2025-05-20T00:00:00.000Z", 10, "2025-02-30")).toBe("");
+    expect(expiryIsoDate("2025-05-20T00:00:00.000Z", 10, "not-a-date")).toBe("");
+  });
+
   it("returns empty for null, non-integer, non-positive, or invalid input", () => {
     withTimeZone("Europe/Moscow", () => {
       expect(expiryIsoDate("2025-05-20T00:00:00.000Z", null)).toBe("");
@@ -192,6 +210,7 @@ describe("boxLabelFields — egais/expiry", () => {
     operatorName: null,
     counterpartyName: null,
     closedAt: "2025-05-19T22:00:00.000Z",
+    productionDate: null,
     shiftNumber: null,
   };
 
@@ -218,6 +237,41 @@ describe("boxLabelFields — egais/expiry", () => {
     );
     expect(utc.date).toBe("19.05.2025");
     expect(utc.expiry).toBe("19.11.2025");
+  });
+
+  it("prints one explicit production date and derives expiry from that same date", () => {
+    const fields = withTimeZone("Europe/Moscow", () =>
+      boxLabelFields({
+        ...base,
+        closedAt: "2026-03-01T22:30:00.000Z",
+        productionDate: "2026-02-27",
+        egaisCode: null,
+        shelfLifeDays: 2,
+      }),
+    );
+    expect(fields.date).toBe("27.02.2026");
+    expect(fields.expiry).toBe("01.03.2026");
+  });
+
+  it("reprints the same explicit production and expiry dates across local close days", () => {
+    const input = {
+      ...base,
+      closedAt: "2026-03-01T22:30:00.000Z",
+      productionDate: "2026-02-27",
+      egaisCode: null,
+      shelfLifeDays: 2,
+    };
+    const firstPrint = withTimeZone("Europe/Moscow", () => boxLabelFields(input));
+    const reprint = withTimeZone("America/Los_Angeles", () => boxLabelFields(input));
+
+    expect({ date: firstPrint.date, expiry: firstPrint.expiry }).toEqual({
+      date: "27.02.2026",
+      expiry: "01.03.2026",
+    });
+    expect({ date: reprint.date, expiry: reprint.expiry }).toEqual({
+      date: "27.02.2026",
+      expiry: "01.03.2026",
+    });
   });
 
   /**
@@ -266,6 +320,19 @@ describe("boxLabelFields — egais/expiry", () => {
   it("prints an empty date rather than throwing on a malformed closedAt", () => {
     const fields = withTimeZone("Europe/Moscow", () =>
       boxLabelFields({ ...base, closedAt: "garbage", egaisCode: null, shelfLifeDays: 184 }),
+    );
+    expect(fields.date).toBe("");
+    expect(fields.expiry).toBe("");
+  });
+
+  it("prints blank dates instead of hiding a malformed explicit production date", () => {
+    const fields = withTimeZone("Europe/Moscow", () =>
+      boxLabelFields({
+        ...base,
+        productionDate: "2025-02-30",
+        egaisCode: null,
+        shelfLifeDays: 184,
+      }),
     );
     expect(fields.date).toBe("");
     expect(fields.expiry).toBe("");

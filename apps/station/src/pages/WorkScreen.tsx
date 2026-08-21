@@ -71,6 +71,8 @@ export interface WorkScreenProps {
   productEgaisCode?: string | null;
   /** The shift's product shelf life in days, used to compute the box label's `expiry` field. */
   productShelfLifeDays?: number | null;
+  /** Declared production date mirrored with the shift; null keeps the close-date fallback. */
+  productionDate?: string | null;
   /** Human-readable shift number for the box label's `shift.no` field. */
   shiftNumber?: string | null;
   plannedQty?: number | null | undefined;
@@ -149,6 +151,7 @@ export function WorkScreen({
   counterpartyName,
   productEgaisCode,
   productShelfLifeDays,
+  productionDate,
   shiftNumber,
   plannedQty,
   source,
@@ -829,18 +832,18 @@ export function WorkScreen({
 
   /**
    * `closedAt` comes from the BOX, never from `new Date()` at render time.
-   * The label's «Дата производства» is the box's close date and «Годен до»
-   * is that plus the product's shelf life, so stamping the current clock
-   * here made a recovery print issued the next morning — or a reprint days
-   * later — carry a different expiry than the label already stuck to the
-   * same physical box. Every caller supplies the box's own persisted
-   * `closed_at`: the close result for a fresh print, `boxes_mirror` (via
-   * `findUnresolvedBoxPrint` / `listClosedBoxes`) for every later one.
+   * When the shift has no declared production date, the label falls back to
+   * that close date and derives expiry from the same day. Stamping the
+   * current clock here made a recovery print issued the next morning — or a
+   * reprint days later — carry a different expiry than the label already
+   * stuck to the same physical box. Every caller supplies the box's own
+   * persisted `closed_at`: the close result for a fresh print, `boxes_mirror`
+   * (via `findUnresolvedBoxPrint` / `listClosedBoxes`) for every later one.
    *
    * The timestamp stays a UTC ISO instant in storage; `boxLabelFields`
    * renders it as this station's LOCAL calendar day (storage UTC, display
-   * local), so a box closed at 01:00 Moscow time prints today, not
-   * yesterday.
+   * local), so the legacy fallback for a box closed at 01:00 Moscow time
+   * prints today, not yesterday. A valid declared date wins unchanged.
    */
   function fieldsForClosedBox(result: {
     sscc: string;
@@ -857,6 +860,7 @@ export function WorkScreen({
       operatorName: null,
       counterpartyName: counterpartyName ?? null,
       closedAt: result.closedAt,
+      productionDate: productionDate ?? null,
       shiftNumber: shiftNumber ?? null,
     });
   }

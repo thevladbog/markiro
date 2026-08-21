@@ -1382,6 +1382,7 @@ export function App() {
             counterpartyName={shiftContext.counterpartyName}
             productEgaisCode={shiftContext.egaisCode}
             productShelfLifeDays={shiftContext.shelfLifeDays}
+            productionDate={shiftContext.productionDate}
             shiftNumber={shiftContext.number}
             plannedQty={shiftContext.plannedQty}
             source={scanSource}
