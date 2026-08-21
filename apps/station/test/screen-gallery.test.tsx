@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -424,18 +424,24 @@ describe("development screen gallery", () => {
     ["shift-loading", "Загрузка смен"],
     ["shift-read-error", "Не удалось загрузить смены"],
     ["shift-empty", "Открытых смен нет"],
-    ["exception-applying", "Запись сохраняется в локальный журнал"],
+    ["exception-applying", "Выполняем действие"],
     ["serial-exhaustion", "Продолжение сканирования заблокировано"],
-    ["conflicts-loading", "Загрузка конфликтов"],
-    ["conflicts-read-error", "Не удалось прочитать локальные конфликты"],
-    ["conflicts-empty", "Конфликтов нет"],
+    ["conflicts-loading", "Читаем локальный список расхождений"],
+    ["conflicts-read-error", "Не удалось прочитать список расхождений"],
+    ["conflicts-empty", "Расхождений нет"],
     ["credential-recovery-sealing", "подготавливаются к безопасному восстановлению"],
     ["credential-recovery-failed", "Не удалось подготовить локальные данные"],
     ["credential-recovery-ready", "Сохранено: 12 сканирований"],
     ["print-mismatch", "Это другая этикетка"],
     ["print-not-sscc", "Это не групповой код"],
-  ] as const)("renders distinct persistent viewport %s", (state, expectedCopy) => {
+  ] as const)("renders distinct persistent viewport %s", async (state, expectedCopy) => {
     const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
-    expect(view.container.textContent).toContain(expectedCopy);
+    // exception-applying and the conflicts variants reach their captured
+    // text through the real components' own async state machine (simulated
+    // button clicks / a synthetic executor promise), not the first
+    // synchronous render.
+    await waitFor(() => {
+      expect(view.container.textContent).toContain(expectedCopy);
+    });
   });
 });

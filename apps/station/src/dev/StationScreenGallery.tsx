@@ -1,11 +1,14 @@
-import { useLayoutEffect, useRef, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 import i18n from "../i18n/index.js";
-import type { BoxPrintErrorCode } from "../lib/boxes.js";
+import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
+import type { SqlExecutor } from "../lib/mirror.js";
 import type { RecentOperation } from "../lib/journal.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import { ConflictList } from "../pages/ConflictList.js";
+import { ExceptionFlow } from "../pages/ExceptionFlow.js";
 import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
@@ -1065,132 +1068,202 @@ function SerialRecoveryFixture({ locale }: { locale: GalleryLocale }) {
   );
 }
 
+const GALLERY_EXCEPTION_BOXES: ClosedBoxSummary[] = [
+  {
+    boxId: "gallery-exception-box-1",
+    sscc: "046012345600000016",
+    itemCount: 24,
+    closedAt: "2026-08-21T09:14:00+03:00",
+  },
+  {
+    boxId: "gallery-exception-box-2",
+    sscc: "046012345600000023",
+    itemCount: 18,
+    closedAt: "2026-08-21T10:02:00+03:00",
+  },
+  {
+    boxId: "gallery-exception-box-3",
+    sscc: "046012345600000030",
+    itemCount: 12,
+    closedAt: "2026-08-21T10:41:00+03:00",
+  },
+];
+
+/** Never fires on its own -- exists only so `ExceptionFlow` renders the real
+ * scan-target hint on its "target" stage the way it does whenever WorkScreen
+ * hands it a live scan source. */
+function galleryExceptionScanSource(): ScanSource {
+  return { start: () => () => undefined };
+}
+
+/**
+ * Mirrors ExceptionFlow.tsx's own render tree (the real component, driven
+ * through its own buttons) instead of hand-copied markup, so every captured
+ * stage matches the current exception flow -- action/target/reason copy,
+ * button variants, and (critically) the "confirm" stage's irreversible
+ * double-confirmation dialog, which only the "disassemble" action reaches.
+ * "reprint" shares the same "target"/"reason" stages but a different,
+ * non-double-confirmed "confirm" screen -- this fixture always drives the
+ * "disassemble" path so exception-confirm/-result show the disassemble
+ * copy the design spec calls for, never the reprint one.
+ */
 function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const title: Record<string, string> = {
-    action: ru ? "Выберите действие" : "Choose action",
-    target: ru ? "Выберите короб" : "Choose box",
-    reason: ru ? "Укажите причину" : "Choose reason",
-    confirm: ru ? "Подтвердите действие" : "Confirm action",
-    applying: ru ? "Выполняем действие" : "Applying action",
-    result: ru ? "Действие выполнено" : "Action completed",
-  };
-  const items: Record<string, string[]> = {
-    action: ru
-      ? [
-          "Отменить последнее сканирование",
-          "Очистить короб",
-          "Повторить печать",
-          "Расформировать короб",
-        ]
-      : ["Undo latest scan", "Clear box", "Reprint label", "Disassemble box"],
-    target: ["TEST-BOX-0001 · 24", "TEST-BOX-0002 · 18", "TEST-BOX-0003 · 12"],
-    reason: ru
-      ? ["Этикетка повреждена", "Этикетка не читается", "Замятие в принтере", "Другая причина"]
-      : ["Damaged label", "Unreadable label", "Printer jam", "Other reason"],
-    confirm: [ru ? "Повторно напечатать этикетку TEST-BOX-0001?" : "Reprint label TEST-BOX-0001?"],
-    applying: [ru ? "Запись сохраняется в локальный журнал…" : "Saving to the local journal…"],
-    result: [ru ? "Этикетка отправлена на печать" : "Label sent to printer"],
-  };
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (stage === "action") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const t = i18n.getFixedT(locale);
+    const clickByText = (text: string): void => {
+      const button = Array.from(root.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      button?.click();
+    };
+    const steps: Array<() => void> = [() => clickByText(t("box.disassembleAction"))];
+    if (stage !== "target") {
+      steps.push(() => root.querySelector<HTMLButtonElement>(".shift-boxes__row")?.click());
+    }
+    if (stage === "confirm" || stage === "applying" || stage === "result") {
+      steps.push(() => clickByText(t("box.reasons.disassemble.wrongProduct")));
+    }
+    if (stage === "applying" || stage === "result") {
+      steps.push(() => clickByText(t("box.confirmDisassemble")));
+    }
+    let index = 0;
+    function runNext(): void {
+      if (index >= steps.length) return;
+      steps[index]?.();
+      index += 1;
+      setTimeout(runNext, 0);
+    }
+    setTimeout(runNext, 0);
+  }, [stage, locale]);
+
   return (
-    <StationScreen
-      title={ru ? "Исключения" : "Exceptions"}
-      header={<p className="gallery-subtitle">{title[stage]}</p>}
-      actions={
-        <GalleryFooter
-          locale={locale}
-          {...(stage === "confirm" ? { primary: ru ? "Подтвердить" : "Confirm" } : {})}
-        />
-      }
-    >
-      <div className="gallery-action-grid">
-        {(items[stage] ?? []).map((item) =>
-          stage === "result" || stage === "applying" ? (
-            <Alert key={item} tone={stage === "result" ? "ok" : "info"}>
-              {item}
-            </Alert>
-          ) : (
-            <Button key={item} size="floor" variant="secondary">
-              {item}
-            </Button>
-          ),
-        )}
-      </div>
-    </StationScreen>
+    <div ref={rootRef} className="gallery-exception-flow">
+      <ExceptionFlow
+        boxes={GALLERY_EXCEPTION_BOXES}
+        canUndo
+        hasOpenBox
+        onUndo={() => Promise.resolve()}
+        onClear={() => Promise.resolve()}
+        onReprint={() => Promise.resolve()}
+        // "applying" must stay parked on that stage for its own capture --
+        // an already-resolved promise would flip straight to "result"
+        // before the screenshot lands.
+        onDisassemble={() =>
+          stage === "applying" ? new Promise<void>(() => undefined) : Promise.resolve()
+        }
+        onBack={() => undefined}
+        onPendingChange={() => undefined}
+        scanSource={galleryExceptionScanSource()}
+      />
+    </div>
   );
 }
 
+interface GalleryConflictRow {
+  code_hash: string;
+  winning_terminal_id: string | null;
+  winning_scanned_at: string;
+  detected_at: string;
+  gtin14: string | null;
+  serial: string | null;
+}
+
+const GALLERY_CONFLICT_ROWS: GalleryConflictRow[] = [
+  {
+    code_hash: "gallery-conflict-1",
+    winning_terminal_id: "DEMO-TERM-11",
+    winning_scanned_at: "2026-08-21T09:14:22+03:00",
+    detected_at: "2026-08-21T09:15:03+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000128",
+  },
+  {
+    code_hash: "gallery-conflict-2",
+    winning_terminal_id: "DEMO-TERM-12",
+    winning_scanned_at: "2026-08-21T09:18:47+03:00",
+    detected_at: "2026-08-21T09:19:10+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000129",
+  },
+  {
+    code_hash: "gallery-conflict-3",
+    winning_terminal_id: "DEMO-TERM-21",
+    winning_scanned_at: "2026-08-21T10:02:31+03:00",
+    detected_at: "2026-08-21T10:03:05+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000130",
+  },
+  {
+    code_hash: "gallery-conflict-4",
+    winning_terminal_id: "DEMO-TERM-22",
+    winning_scanned_at: "2026-08-21T10:07:58+03:00",
+    detected_at: "2026-08-21T10:08:40+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000131",
+  },
+];
+
+/** Answers exactly the two queries `readConflicts` issues (see
+ * `apps/station/src/lib/conflicts.ts`), so `ConflictList` -- the real
+ * component -- drives every persistent variant without a network dependency.
+ * "loading" never resolves, reproducing the interstitial for a static
+ * capture; "read-error" rejects the count query the way a corrupt local
+ * mirror would. */
+function galleryConflictExecutor(variant: string): SqlExecutor {
+  const rows = variant === "empty" ? [] : GALLERY_CONFLICT_ROWS;
+  return {
+    run: () => Promise.resolve(),
+    all<T>(sql: string, params?: unknown[]): Promise<T[]> {
+      if (variant === "loading") return new Promise<T[]>(() => undefined);
+      if (sql.includes("COUNT(*)")) {
+        if (variant === "read-error") {
+          return Promise.reject(new Error("gallery: conflict read failed"));
+        }
+        return Promise.resolve([{ n: rows.length }] as T[]);
+      }
+      if (sql.includes("FROM conflicts_mirror")) {
+        const [limit, offset] = (params ?? []) as [number, number];
+        return Promise.resolve(rows.slice(offset, offset + limit) as T[]);
+      }
+      return Promise.resolve([]);
+    },
+  };
+}
+
+/**
+ * Mirrors ConflictList.tsx's own render tree (the real component, backed by
+ * a synthetic executor answering its exact queries) instead of hand-copied
+ * markup, so title, per-card copy ("Закреплён за …"), and pagination match
+ * the current production screen. "2" drives the real component to its own
+ * second page through its own Pager "next" button, the same way a real
+ * operator would.
+ */
 function ConflictFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  if (variant === "loading" || variant === "read-error" || variant === "empty") {
-    return (
-      <StationScreen
-        title={ru ? "Конфликты" : "Conflicts"}
-        actions={<GalleryFooter locale={locale} />}
-      >
-        <div className="gallery-centered-card">
-          {variant === "read-error" ? (
-            <Alert
-              tone="error"
-              action={
-                <Button size="floor" variant="secondary">
-                  {ru ? "Повторить" : "Retry"}
-                </Button>
-              }
-            >
-              {ru
-                ? "Не удалось прочитать локальные конфликты"
-                : "Local conflicts could not be read"}
-            </Alert>
-          ) : (
-            <p
-              className="gallery-state-message"
-              role={variant === "loading" ? "status" : undefined}
-            >
-              {variant === "loading"
-                ? ru
-                  ? "Загрузка конфликтов…"
-                  : "Loading conflicts…"
-                : ru
-                  ? "Конфликтов нет"
-                  : "There are no conflicts"}
-            </p>
-          )}
-        </div>
-      </StationScreen>
-    );
-  }
-  const page = variant === "2" ? 2 : 1;
-  const serials = page === 1 ? ["TEST-000128", "TEST-000129"] : ["TEST-000130", "TEST-000131"];
+  const rootRef = useRef<HTMLDivElement>(null);
+  const exec = useMemo(() => galleryConflictExecutor(variant), [variant]);
+
+  useLayoutEffect(() => {
+    if (variant !== "2") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const t = i18n.getFixedT(locale);
+    setTimeout(() => {
+      const next = Array.from(root.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.trim() === t("conflicts.nextPage"),
+      );
+      next?.click();
+    }, 0);
+  }, [variant, locale]);
+
   return (
-    <StationScreen
-      title={ru ? "Конфликты" : "Conflicts"}
-      actions={<GalleryFooter locale={locale} />}
-    >
-      <div className="gallery-paged-grid">
-        <div className="gallery-two-cards">
-          {serials.map((serial, index) => (
-            <Card key={serial} className="gallery-card" title={`04607000000042 ${serial}`}>
-              <p>
-                {ru ? "Первой приняла" : "Accepted first by"}: DEMO-TERM-{page}
-                {index + 1}
-              </p>
-              <p>
-                {ru
-                  ? "Продолжайте работу; запись сохранена."
-                  : "Continue working; the record is retained."}
-              </p>
-            </Card>
-          ))}
-        </div>
-        <GalleryPager
-          page={page}
-          previousLabel={ru ? "Назад" : "Previous"}
-          nextLabel={ru ? "Далее" : "Next"}
-          pageLabel={COPY[locale].page(page)}
-        />
-      </div>
-    </StationScreen>
+    <div ref={rootRef} className="gallery-conflict-list">
+      <ConflictList exec={exec} onBack={() => undefined} />
+    </div>
   );
 }
 
