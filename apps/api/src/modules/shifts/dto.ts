@@ -22,6 +22,24 @@ export type StationCloseAccess =
 /** `YYYY-MM-DD`, matches the `date` column's string mode. */
 const plannedDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "plannedDate must be YYYY-MM-DD");
 
+const productionDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "productionDate must be YYYY-MM-DD")
+  .refine((value) => {
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) return false;
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(0);
+    parsed.setUTCFullYear(year, month - 1, day);
+    return (
+      parsed.getUTCFullYear() === year &&
+      parsed.getUTCMonth() === month - 1 &&
+      parsed.getUTCDate() === day
+    );
+  }, "productionDate must be a real calendar date");
+
 /**
  * POST /shifts schema. `boxCapacity`/`palletCapacity`/`counterpartyId`
  * are server-prefilled from the product when omitted (`undefined`); an
@@ -46,6 +64,7 @@ export const createShiftSchema = z.object({
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
+  productionDate: productionDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   palletsEnabled: z.boolean().optional(),
@@ -65,6 +84,7 @@ export const updateShiftSchema = z.object({
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
+  productionDate: productionDateSchema.nullable().optional(),
   boxCapacity: z.number().int().min(1).nullable().optional(),
   palletCapacity: z.number().int().min(1).nullable().optional(),
   palletsEnabled: z.boolean().optional(),
@@ -105,6 +125,7 @@ export interface ShiftDto {
   boxLabelTemplateId: string | null;
   plannedQty: number | null;
   plannedDate: string | null;
+  productionDate: string | null;
   boxCapacity: number | null;
   palletCapacity: number | null;
   palletsEnabled: boolean;
@@ -220,3 +241,280 @@ export interface ShiftBundleDto {
  * reference data and can never allocate or reconcile an SSCC block.
  */
 export type ShiftReferenceBundleDto = Omit<ShiftBundleDto, "sscc"> & { sscc: null };
+
+export const productionDateOpenApiSchema = {
+  type: "string",
+  format: "date",
+  nullable: true,
+  description: "Declared production date; null keeps legacy date fallback behavior",
+};
+
+const nullableUuidOpenApiSchema = { type: "string", format: "uuid", nullable: true };
+const nullablePositiveIntegerOpenApiSchema = { type: "integer", minimum: 1, nullable: true };
+const nullableDateOpenApiSchema = { type: "string", format: "date", nullable: true };
+const nullableDateTimeOpenApiSchema = { type: "string", format: "date-time", nullable: true };
+
+export const createShiftOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["productId", "mode"],
+  properties: {
+    productId: { type: "string", format: "uuid" },
+    mode: { type: "string", enum: [...SHIFT_MODES] },
+    lineId: nullableUuidOpenApiSchema,
+    counterpartyId: nullableUuidOpenApiSchema,
+    ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
+    boxLabelTemplateId: nullableUuidOpenApiSchema,
+    plannedQty: nullablePositiveIntegerOpenApiSchema,
+    plannedDate: nullableDateOpenApiSchema,
+    productionDate: productionDateOpenApiSchema,
+    boxCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletsEnabled: { type: "boolean" },
+  },
+};
+
+export const updateShiftOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [],
+  properties: {
+    mode: { type: "string", enum: [...SHIFT_MODES] },
+    lineId: nullableUuidOpenApiSchema,
+    counterpartyId: nullableUuidOpenApiSchema,
+    ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
+    boxLabelTemplateId: nullableUuidOpenApiSchema,
+    plannedQty: nullablePositiveIntegerOpenApiSchema,
+    plannedDate: nullableDateOpenApiSchema,
+    productionDate: productionDateOpenApiSchema,
+    boxCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletsEnabled: { type: "boolean" },
+  },
+};
+
+const productImageOpenApiSchema = {
+  type: "object",
+  nullable: true,
+  additionalProperties: false,
+  required: ["checksum", "contentType", "byteSize", "width", "height"],
+  properties: {
+    checksum: { type: "string" },
+    contentType: { type: "string", enum: ["image/webp"] },
+    byteSize: { type: "integer", minimum: 0 },
+    width: { type: "integer", minimum: 0 },
+    height: { type: "integer", minimum: 0 },
+  },
+};
+
+const stationCloseAccessOpenApiSchema = {
+  type: "object",
+  oneOf: [
+    {
+      additionalProperties: false,
+      required: ["kind", "ownerDeviceId"],
+      properties: {
+        kind: { type: "string", enum: ["single_device"] },
+        ownerDeviceId: { type: "string", format: "uuid" },
+      },
+    },
+    {
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { type: "string", enum: ["admin_only"] } },
+    },
+  ],
+};
+
+const shiftRequiredFields = [
+  "id",
+  "number",
+  "status",
+  "mode",
+  "productId",
+  "productName",
+  "lineId",
+  "lineName",
+  "counterpartyId",
+  "counterpartyName",
+  "ssccIssuerCounterpartyId",
+  "boxLabelTemplateId",
+  "plannedQty",
+  "plannedDate",
+  "productionDate",
+  "boxCapacity",
+  "palletCapacity",
+  "palletsEnabled",
+  "createdFrom",
+  "openedAt",
+  "closedAt",
+  "closeReason",
+  "lateDataAt",
+  "createdAt",
+];
+
+export const shiftOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: shiftRequiredFields,
+  properties: {
+    id: { type: "string", format: "uuid" },
+    number: { type: "string" },
+    status: { type: "string", enum: [...SHIFT_STATUSES] },
+    mode: { type: "string", enum: [...SHIFT_MODES] },
+    productId: { type: "string", format: "uuid" },
+    productName: { type: "string", nullable: true },
+    image: productImageOpenApiSchema,
+    lineId: nullableUuidOpenApiSchema,
+    lineName: { type: "string", nullable: true },
+    counterpartyId: nullableUuidOpenApiSchema,
+    counterpartyName: { type: "string", nullable: true },
+    ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
+    boxLabelTemplateId: nullableUuidOpenApiSchema,
+    plannedQty: nullablePositiveIntegerOpenApiSchema,
+    plannedDate: nullableDateOpenApiSchema,
+    productionDate: productionDateOpenApiSchema,
+    boxCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletsEnabled: { type: "boolean" },
+    createdFrom: { type: "string", enum: ["admin", "station"] },
+    openedAt: nullableDateTimeOpenApiSchema,
+    closedAt: nullableDateTimeOpenApiSchema,
+    closeReason: { type: "string", nullable: true },
+    lateDataAt: nullableDateTimeOpenApiSchema,
+    createdAt: { type: "string", format: "date-time" },
+    stationCloseAccess: stationCloseAccessOpenApiSchema,
+  },
+};
+
+export const listShiftsOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: shiftOpenApiSchema } },
+};
+
+const stationBundleShiftOpenApiSchema = {
+  ...shiftOpenApiSchema,
+  required: [...shiftRequiredFields, "image", "labelTemplateId", "labelTemplateName"],
+  properties: {
+    ...shiftOpenApiSchema.properties,
+    labelTemplateId: { type: "string", nullable: true, enum: [null] },
+    labelTemplateName: { type: "string", nullable: true, enum: [null] },
+  },
+};
+
+const stationBundleProductOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "gtin14",
+    "name",
+    "productGroup",
+    "boxCapacity",
+    "palletCapacity",
+    "status",
+    "defaultCounterpartyId",
+    "defaultLabelTemplateId",
+    "unitPrice",
+    "egaisCode",
+    "shelfLifeDays",
+    "externalRef",
+    "createdAt",
+    "image",
+  ],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    gtin14: { type: "string" },
+    name: { type: "string" },
+    productGroup: { type: "string", nullable: true },
+    boxCapacity: nullablePositiveIntegerOpenApiSchema,
+    palletCapacity: nullablePositiveIntegerOpenApiSchema,
+    status: { type: "string", enum: ["draft", "active"] },
+    defaultCounterpartyId: nullableUuidOpenApiSchema,
+    defaultLabelTemplateId: { type: "string", nullable: true, enum: [null] },
+    unitPrice: { type: "string", nullable: true },
+    egaisCode: { type: "string", nullable: true },
+    shelfLifeDays: nullablePositiveIntegerOpenApiSchema,
+    externalRef: { type: "string", nullable: true },
+    createdAt: { type: "string", format: "date-time" },
+    image: productImageOpenApiSchema,
+  },
+};
+
+const boxLabelTemplateOpenApiSchema = {
+  type: "object",
+  nullable: true,
+  additionalProperties: false,
+  required: ["id", "name", "spec"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string" },
+    spec: { type: "object", additionalProperties: true },
+  },
+};
+
+const operatorMirrorOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["operatorId", "name", "login", "role", "pinHash", "badgeHash", "active"],
+  properties: {
+    operatorId: { type: "string", format: "uuid" },
+    name: { type: "string" },
+    login: { type: "string" },
+    role: { type: "string" },
+    pinHash: { type: "string" },
+    badgeHash: { type: "string", nullable: true },
+    active: { type: "boolean" },
+  },
+};
+
+const ssccBundleOpenApiSchema = {
+  type: "object",
+  nullable: true,
+  additionalProperties: false,
+  required: ["issuerPrefix", "extensionDigit", "fromSerial", "toSerial", "consumedThroughSerial"],
+  properties: {
+    issuerPrefix: { type: "string" },
+    extensionDigit: { type: "integer", minimum: 0, maximum: 9 },
+    fromSerial: { type: "integer", minimum: 0 },
+    toSerial: { type: "integer", minimum: 0 },
+    consumedThroughSerial: { type: "integer", minimum: 0, nullable: true },
+  },
+};
+
+const shiftBundleRequiredFields = [
+  "shift",
+  "product",
+  "labelTemplate",
+  "boxLabelTemplate",
+  "counterpartyGln",
+  "operators",
+  "sscc",
+  "ssccRevokedFrom",
+];
+
+export const shiftBundleOpenApiSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: shiftBundleRequiredFields,
+  properties: {
+    shift: stationBundleShiftOpenApiSchema,
+    product: stationBundleProductOpenApiSchema,
+    labelTemplate: { type: "string", nullable: true, enum: [null] },
+    boxLabelTemplate: boxLabelTemplateOpenApiSchema,
+    counterpartyGln: { type: "string", nullable: true },
+    operators: { type: "array", items: operatorMirrorOpenApiSchema },
+    sscc: ssccBundleOpenApiSchema,
+    ssccRevokedFrom: { type: "array", items: { type: "integer", minimum: 0 } },
+  },
+};
+
+export const shiftReferenceBundleOpenApiSchema = {
+  ...shiftBundleOpenApiSchema,
+  properties: {
+    ...shiftBundleOpenApiSchema.properties,
+    sscc: { type: "object", nullable: true, enum: [null] },
+  },
+};

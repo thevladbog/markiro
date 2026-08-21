@@ -274,6 +274,117 @@ describe.skipIf(!ready)("lines + shifts e2e", () => {
     expect(res.body.createdAt).toBeDefined();
   });
 
+  it("propagates a declared production date through create, persistence, reads, open, and bundles", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const created = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", productionDate: "2026-08-21" })
+      .expect(201);
+    const id = created.body.id as string;
+    expect(created.body.productionDate).toBe("2026-08-21");
+
+    const [stored] = await db
+      .select({ productionDate: schema.shifts.productionDate })
+      .from(schema.shifts)
+      .where(and(eq(schema.shifts.tenantId, orgId), eq(schema.shifts.id, id)));
+    expect(stored).toEqual({ productionDate: "2026-08-21" });
+
+    const read = await agent.get(`/shifts/${id}`).expect(200);
+    expect(read.body.productionDate).toBe("2026-08-21");
+
+    const listed = await agent.get("/shifts").expect(200);
+    expect(listed.body.items).toContainEqual(
+      expect.objectContaining({ id, productionDate: "2026-08-21" }),
+    );
+
+    const opened = await agent.post(`/shifts/${id}/open`).expect(200);
+    expect(opened.body.productionDate).toBe("2026-08-21");
+
+    const bundle = await agent.get(`/shifts/${id}/bundle`).expect(200);
+    expect(bundle.body.shift.productionDate).toBe("2026-08-21");
+
+    const referenceBundle = await agent.get(`/shifts/${id}/reference-bundle`).expect(200);
+    expect(referenceBundle.body.shift.productionDate).toBe("2026-08-21");
+
+    const otherTenant = request.agent(app!.getHttpServer());
+    await signUpAndActivate(otherTenant);
+    await otherTenant.get(`/shifts/${id}`).expect(404);
+    await otherTenant.get(`/shifts/${id}/reference-bundle`).expect(404);
+  });
+
+  it("returns null for explicit-null and omitted production dates", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+
+    const explicitNull = await agent
+      .post("/shifts")
+      .send({ productId, mode: "validation", productionDate: null })
+      .expect(201);
+    expect(explicitNull.body.productionDate).toBeNull();
+
+    const omitted = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    expect(omitted.body.productionDate).toBeNull();
+  });
+
+  it.each(["2026-02-30", "21.08.2026"])(
+    "POST /shifts rejects invalid production date %s",
+    async (productionDate) => {
+      const agent = request.agent(app!.getHttpServer());
+      const orgId = await signUpAndActivate(agent);
+      const productId = await seedProduct(orgId, {
+        status: "active",
+        productGroup: "Beverages",
+        boxCapacity: 12,
+        palletCapacity: 48,
+      });
+
+      await agent
+        .post("/shifts")
+        .send({ productId, mode: "validation", productionDate })
+        .expect(400);
+    },
+  );
+
+  it("PATCH /shifts/:id propagates production date for current planned and active updates", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const orgId = await signUpAndActivate(agent);
+    const productId = await seedProduct(orgId, {
+      status: "active",
+      productGroup: "Beverages",
+      boxCapacity: 12,
+      palletCapacity: 48,
+    });
+    const created = await agent.post("/shifts").send({ productId, mode: "validation" }).expect(201);
+    const id = created.body.id as string;
+
+    const planned = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-20" })
+      .expect(200);
+    expect(planned.body.productionDate).toBe("2026-08-20");
+
+    await agent.post(`/shifts/${id}/open`).expect(200);
+    const active = await agent
+      .patch(`/shifts/${id}`)
+      .send({ productionDate: "2026-08-21" })
+      .expect(200);
+    expect(active.body.productionDate).toBe("2026-08-21");
+  });
+
   it("POST /shifts: explicit counterpartyId null overrides the product default", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);

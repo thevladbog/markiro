@@ -11,7 +11,7 @@ import {
   Req,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags } from "@nestjs/swagger";
+import { ApiBody, ApiCreatedResponse, ApiOkResponse, ApiTags } from "@nestjs/swagger";
 import { CABINET_CAPABILITY } from "@markiro/domain";
 import { AllowStationOrPermissions, RequirePermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -26,8 +26,14 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   closeShiftSchema,
+  createShiftOpenApiSchema,
   createShiftSchema,
   listShiftsQuerySchema,
+  listShiftsOpenApiSchema,
+  shiftBundleOpenApiSchema,
+  shiftOpenApiSchema,
+  shiftReferenceBundleOpenApiSchema,
+  updateShiftOpenApiSchema,
   updateShiftSchema,
   type CloseShiftDto,
   type CreateShiftDto,
@@ -51,6 +57,7 @@ export class ShiftsController {
 
   @Get()
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOkResponse({ schema: listShiftsOpenApiSchema })
   async listShifts(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listShiftsQuerySchema)) query: ListShiftsQueryDto,
@@ -83,6 +90,7 @@ export class ShiftsController {
   // list/open/bundle its own.
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOkResponse({ schema: shiftOpenApiSchema })
   async getShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     return this.shiftsService.getShift(req.tenantId!, id);
   }
@@ -90,6 +98,8 @@ export class ShiftsController {
   @Post()
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiBody({ schema: createShiftOpenApiSchema })
+  @ApiCreatedResponse({ schema: shiftOpenApiSchema })
   async createShift(
     @Req() req: RequestWithTenant,
     @Body(new ZodValidationPipe(createShiftSchema)) body: CreateShiftDto,
@@ -110,6 +120,8 @@ export class ShiftsController {
   @Patch(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiBody({ schema: updateShiftOpenApiSchema })
+  @ApiOkResponse({ schema: shiftOpenApiSchema })
   async updateShift(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
@@ -144,6 +156,7 @@ export class ShiftsController {
   @HttpCode(200)
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_WRITE)
   @RequireSubscriptionWrite()
+  @ApiOkResponse({ schema: shiftOpenApiSchema })
   async openShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
     return this.shiftsService.openShift(req.tenantId!, id, req.deviceId);
   }
@@ -161,6 +174,7 @@ export class ShiftsController {
   @Get(":id/bundle")
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @AllowSubscriptionRecovery("shift")
+  @ApiOkResponse({ schema: shiftBundleOpenApiSchema })
   async getBundle(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftBundleDto> {
     return this.shiftsService.getBundle(req.tenantId!, id, req.deviceId ?? null);
   }
@@ -168,6 +182,7 @@ export class ShiftsController {
   @Get(":id/reference-bundle")
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @AllowSubscriptionRecovery("shift")
+  @ApiOkResponse({ schema: shiftReferenceBundleOpenApiSchema })
   async getReferenceBundle(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,

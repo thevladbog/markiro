@@ -66,6 +66,7 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
   plannedQty: schema.shifts.plannedQty,
   plannedDate: schema.shifts.plannedDate,
+  productionDate: schema.shifts.productionDate,
   boxCapacity: schema.shifts.boxCapacity,
   palletCapacity: schema.shifts.palletCapacity,
   palletsEnabled: schema.shifts.palletsEnabled,
@@ -293,6 +294,7 @@ export class ShiftsService {
             mode: data.mode,
             plannedQty: data.plannedQty ?? null,
             plannedDate: data.plannedDate ?? null,
+            productionDate: data.productionDate ?? null,
             boxCapacity: boxCapacity ?? null,
             palletCapacity: palletCapacity ?? null,
             palletsEnabled,
@@ -345,6 +347,8 @@ export class ShiftsService {
       data.boxLabelTemplateId !== undefined ? data.boxLabelTemplateId : current.boxLabelTemplateId;
     const plannedQty = data.plannedQty !== undefined ? data.plannedQty : current.plannedQty;
     const plannedDate = data.plannedDate !== undefined ? data.plannedDate : current.plannedDate;
+    const productionDate =
+      data.productionDate !== undefined ? data.productionDate : current.productionDate;
     const boxCapacity = data.boxCapacity !== undefined ? data.boxCapacity : current.boxCapacity;
     const palletCapacity =
       data.palletCapacity !== undefined ? data.palletCapacity : current.palletCapacity;
@@ -365,6 +369,7 @@ export class ShiftsService {
           boxLabelTemplateId,
           plannedQty,
           plannedDate,
+          productionDate,
           boxCapacity,
           palletCapacity,
           palletsEnabled,
@@ -396,6 +401,7 @@ export class ShiftsService {
       "lineId",
       "plannedQty",
       "plannedDate",
+      "productionDate",
       "boxLabelTemplateId",
     ]);
     const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
@@ -406,11 +412,15 @@ export class ShiftsService {
     }
 
     const changes: Partial<
-      Pick<ShiftRow, "lineId" | "plannedQty" | "plannedDate" | "boxLabelTemplateId">
+      Pick<
+        ShiftRow,
+        "lineId" | "plannedQty" | "plannedDate" | "productionDate" | "boxLabelTemplateId"
+      >
     > = {};
     if (data.lineId !== undefined) changes.lineId = data.lineId;
     if (data.plannedQty !== undefined) changes.plannedQty = data.plannedQty;
     if (data.plannedDate !== undefined) changes.plannedDate = data.plannedDate;
+    if (data.productionDate !== undefined) changes.productionDate = data.productionDate;
     if (data.boxLabelTemplateId !== undefined) {
       changes.boxLabelTemplateId = data.boxLabelTemplateId;
     }
@@ -661,6 +671,7 @@ export class ShiftsService {
       boxLabelTemplateId: shift.boxLabelTemplateId,
       plannedQty: shift.plannedQty,
       plannedDate: shift.plannedDate,
+      productionDate: shift.productionDate,
       boxCapacity: shift.boxCapacity,
       palletCapacity: shift.palletCapacity,
       palletsEnabled: shift.palletsEnabled,
@@ -946,6 +957,7 @@ export class ShiftsService {
       boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
       plannedQty: schema.shifts.plannedQty,
       plannedDate: schema.shifts.plannedDate,
+      productionDate: schema.shifts.productionDate,
       boxCapacity: schema.shifts.boxCapacity,
       palletCapacity: schema.shifts.palletCapacity,
       palletsEnabled: schema.shifts.palletsEnabled,
