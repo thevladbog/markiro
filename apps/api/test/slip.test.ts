@@ -32,6 +32,7 @@ function fixture(overrides: Partial<PickupSlipData> = {}): PickupSlipData {
     writeoffReasonName: null,
     printEmployeeQrOnSlip: false,
     total: "126.00",
+    printedByName: "Иванова Мария Сергеевна",
     items: [
       {
         n: 1,
@@ -120,7 +121,9 @@ describe("renderPickupSlipHtml", () => {
       Array.from(page.matchAll(/21 SERIAL(\d+)/g), (match) => Number(match[1])),
     );
     expect(renderedSerials).toEqual(Array.from({ length: 17 }, (_, index) => index + 1));
-    expect(pages.map((page) => page.match(/class="slip-item-row"/g)?.length ?? 0)).toEqual([9, 8]);
+    // Greedy fill: the regular page packs to capacity, only the remainder
+    // flows to the final page (which also hosts the closing blocks).
+    expect(pages.map((page) => page.match(/class="slip-item-row"/g)?.length ?? 0)).toEqual([13, 4]);
   });
 
   it("uses organization branding when safe and falls back to Markiro for unsafe sources", () => {
@@ -158,6 +161,14 @@ describe("renderPickupSlipHtml", () => {
     expect(html).toMatch(
       /class="signature-line"[^>]*><\/span>\s*<span class="signature-name">Смирнов Алексей Петрович<\/span>/,
     );
+    // The "Администратор" signature carries the cabinet user who printed the
+    // slip; without one it degrades to the blank "ФИО" placeholder.
+    expect(html).toMatch(
+      /class="signature-line"[^>]*><\/span>\s*<span class="signature-name">Иванова Мария Сергеевна<\/span>/,
+    );
+    expect(html).not.toContain('<span class="signature-name">ФИО</span>');
+    const anonymousHtml = renderPickupSlipHtml(fixture({ printedByName: null }));
+    expect(anonymousHtml).toContain('<span class="signature-name">ФИО</span>');
   });
 
   it("renders gracefully with no org profile and no active badge", () => {
