@@ -94,7 +94,7 @@ describe("legal document registry", () => {
     mismatched[0] = {
       ...mismatched[0]!,
       routes: { ...mismatched[0]!.routes, en: "/privacy/" },
-    };
+    } as unknown as LegalDocumentRelease;
     expect(() => validateLegalRegistry(mismatched)).toThrow(/English route/i);
   });
 

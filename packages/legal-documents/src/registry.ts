@@ -96,13 +96,13 @@ export const LEGAL_RELEASES = [
   },
 ] as const satisfies readonly LegalDocumentRelease[];
 
-export const LEGAL_DOCUMENTS = [
+export const LEGAL_DOCUMENTS: readonly LegalDocumentSource[] = [
   { releaseKey: "MKR-PD-01/2026.08/01", content: PRIVACY_CONTENT },
   { releaseKey: "MKR-PD-02/2026.08/01", content: CONSENT_CONTENT },
   { releaseKey: "MKR-DPA-01/2026.08/01", content: TENANT_PROCESSING_CONTENT },
   { releaseKey: "MKR-BRD-01/2026.08/01", content: BRAND_LETTERHEAD_CONTENT },
   { releaseKey: "MKR-INS-01/2026.08/01", content: STATION_OPERATOR_SHIFT_CONTENT },
-] as const satisfies readonly LegalDocumentSource[];
+];
 
 function compareLegalRevisions(left: LegalRevision, right: LegalRevision): number {
   const leftParts = parseLegalRevision(left);
