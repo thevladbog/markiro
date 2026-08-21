@@ -104,9 +104,9 @@ describe.skipIf(!databaseUrl)("print-name label templates migration", () => {
       "SELECT name, spec FROM label_templates WHERE tenant_id = 'pn-b' ORDER BY name",
     );
     expect(b.rows).toHaveLength(10); // 1 pre-existing marker + 9 seeded
-    expect(b.rows.find((r) => r.name === "Коробка 58×40 (203 dpi) [Назв. для печати]")?.spec).toEqual(
-      { marker: true },
-    );
+    expect(
+      b.rows.find((r) => r.name === "Коробка 58×40 (203 dpi) [Назв. для печати]")?.spec,
+    ).toEqual({ marker: true });
 
     // The seeded specs bind the headline to product.printName.
     const seeded = a.rows.find((r) => r.name === "Коробка 58×40 (203 dpi) [Назв. для печати]")
