@@ -459,19 +459,18 @@ export class DisaggregationService {
               eq(schema.boxes.id, schema.boxItems.boxId),
             ),
           )
-          .innerJoin(
-            schema.codeRegistry,
-            and(
-              eq(schema.codeRegistry.tenantId, schema.boxItems.tenantId),
-              eq(schema.codeRegistry.codeHash, schema.boxItems.codeHash),
-            ),
-          )
+          // Join the hot code rows through the box item's own (codeHash,
+          // addedAt == the owning scan's scannedAt), NOT through
+          // code_registry: applying the document
+          // releases ownership by DELETING the registry rows (see
+          // applyDocument), so a registry join would silently drop the
+          // contents of every disassembled box from the printed report.
           .innerJoin(
             schema.codes,
             and(
-              eq(schema.codes.tenantId, schema.codeRegistry.tenantId),
-              eq(schema.codes.codeHash, schema.codeRegistry.codeHash),
-              eq(schema.codes.scannedAt, schema.codeRegistry.scannedAt),
+              eq(schema.codes.tenantId, schema.boxItems.tenantId),
+              eq(schema.codes.codeHash, schema.boxItems.codeHash),
+              eq(schema.codes.scannedAt, schema.boxItems.addedAt),
             ),
           )
           .where(
