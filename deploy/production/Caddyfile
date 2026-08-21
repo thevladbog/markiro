@@ -129,7 +129,7 @@
 		}
 
 		@stationRoot {
-			path /shifts /products /products/gtin-check
+			path /shifts /shifts/box-label-templates /products /products/gtin-check
 			header X-Api-Key *
 		}
 		handle @stationRoot {
@@ -139,7 +139,7 @@
 		}
 
 		@stationRootPreflight {
-			path /shifts /products /products/gtin-check
+			path /shifts /shifts/box-label-templates /products /products/gtin-check
 			method OPTIONS
 		}
 		handle @stationRootPreflight {

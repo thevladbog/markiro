@@ -476,8 +476,8 @@ function assertAuthorityContract(adapted, { alb }) {
     ["/api/*"],
     ["/1c_exchange"],
     ["/station/*", "/kiosk/*", "/health", "/health/*", "/openapi.json", "/docs", "/docs/*"],
-    ["/shifts", "/products", "/products/gtin-check"],
-    ["/shifts", "/products", "/products/gtin-check"],
+    ["/shifts", "/shifts/box-label-templates", "/products", "/products/gtin-check"],
+    ["/shifts", "/shifts/box-label-templates", "/products", "/products/gtin-check"],
     ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
     ["^/shifts/[^/]+/(open|bundle|reference-bundle)$"],
   ];
@@ -1162,6 +1162,11 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     { method: "POST", path: "/shifts", headers: { "x-api-key": "station-test-key" } },
     { method: "GET", path: "/products", headers: { "x-api-key": "station-test-key" } },
     {
+      method: "GET",
+      path: "/shifts/box-label-templates",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
       method: "POST",
       path: "/products/gtin-check",
       headers: { "x-api-key": "station-test-key" },
@@ -1182,6 +1187,7 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
       headers: { "x-api-key": "station-test-key" },
     },
     { method: "OPTIONS", path: "/shifts" },
+    { method: "OPTIONS", path: "/shifts/box-label-templates" },
     { method: "OPTIONS", path: "/products" },
     { method: "OPTIONS", path: "/products/gtin-check" },
     { method: "OPTIONS", path: "/shifts/shift-1/open" },
