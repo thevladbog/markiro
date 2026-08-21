@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import type { ReactElement } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useSyncExternalStore, type ReactElement } from "react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,7 @@ import {
   AuthClientProvider,
   type AuthClientLike,
   type OrganizationSummary,
+  type SessionData,
 } from "../src/auth/client.js";
 import i18n from "../src/i18n/index.js";
 import { CreateOrgPage } from "../src/pages/auth/CreateOrg.js";
@@ -435,12 +436,60 @@ describe("CreateOrgPage", () => {
 });
 
 describe("SelectOrgPage", () => {
+  it("presents each organization as one descriptive action", async () => {
+    const client = createFakeAuthClient({
+      useSession: () => ({
+        data: {
+          session: { activeOrganizationId: null },
+          user: { id: "user_1", email: "user@example.com" },
+        },
+        isPending: false,
+        error: null,
+      }),
+      organization: {
+        create: vi.fn(),
+        setActive: vi.fn(async () => ({ data: {}, error: null })),
+        list: vi.fn(async () => ({
+          data: [{ id: "org_1", name: "Acme Corp", slug: "acme-corp" }],
+          error: null,
+        })),
+      },
+    });
+
+    renderRouted(client, "/org/select", <SelectOrgPage />);
+
+    expect(
+      await screen.findByRole("button", { name: "Открыть организацию Acme Corp" }),
+    ).toBeDefined();
+    expect(screen.getByText("acme-corp")).toBeDefined();
+  });
+
   it("lists organizations from the auth client and activates the chosen one", async () => {
+    let session: SessionData = {
+      session: { activeOrganizationId: null },
+      user: { id: "user_1", email: "user@example.com" },
+    };
+    const listeners = new Set<() => void>();
     let resolveSetActive!: (value: { data: unknown; error: null }) => void;
     const setActiveResult = new Promise<{ data: unknown; error: null }>((resolve) => {
-      resolveSetActive = resolve;
+      resolveSetActive = (value) => {
+        session = { ...session, session: { activeOrganizationId: "org_1" } };
+        listeners.forEach((listener) => listener());
+        resolve(value);
+      };
     });
     const client = createFakeAuthClient({
+      useSession: () => {
+        const observedSession = useSyncExternalStore(
+          (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+          () => session,
+          () => session,
+        );
+        return { data: observedSession, isPending: false, error: null };
+      },
       organization: {
         create: vi.fn(),
         setActive: vi.fn(() => setActiveResult),
@@ -455,7 +504,7 @@ describe("SelectOrgPage", () => {
 
     expect(await screen.findByText("Acme Corp")).toBeDefined();
 
-    fireEvent.click(screen.getByRole("button", { name: "Выбрать" }));
+    fireEvent.click(screen.getByRole("button", { name: "Открыть организацию Acme Corp" }));
 
     await waitFor(() => {
       expect(client.organization.setActive).toHaveBeenCalledWith({ organizationId: "org_1" });
@@ -467,24 +516,29 @@ describe("SelectOrgPage", () => {
     await screen.findByText("SHELL_PLACEHOLDER");
   });
 
-  it("refreshes the session before navigating after organization activation", async () => {
-    let resolveRefresh!: () => void;
-    const refresh = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveRefresh = resolve;
-        }),
-    );
+  it("waits for the selected organization to appear in the session before entering the shell", async () => {
+    let session: SessionData = {
+      session: { activeOrganizationId: null },
+      user: { id: "user_1", email: "user@example.com" },
+    };
+    const listeners = new Set<() => void>();
     const client = createFakeAuthClient({
-      useSession: () => ({
-        data: {
-          session: { activeOrganizationId: null },
-          user: { id: "user_1", email: "user@example.com" },
-        },
-        isPending: false,
-        error: null,
-        refetch: refresh,
-      }),
+      useSession: () => {
+        const observedSession = useSyncExternalStore(
+          (listener) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+          () => session,
+          () => session,
+        );
+        return {
+          data: observedSession,
+          isPending: false,
+          error: null,
+          refetch: vi.fn(async () => undefined),
+        };
+      },
       organization: {
         create: vi.fn(),
         list: vi.fn(async () => ({
@@ -496,12 +550,22 @@ describe("SelectOrgPage", () => {
     });
     renderRouted(client, "/org/select", <SelectOrgPage />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Выбрать" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть организацию Acme Corp" }));
 
-    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(client.organization.setActive).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
     expect(screen.queryByText("SHELL_PLACEHOLDER")).toBeNull();
 
-    resolveRefresh();
+    act(() => {
+      session = {
+        ...session,
+        session: { activeOrganizationId: "org_1" },
+      };
+      listeners.forEach((listener) => listener());
+    });
     await screen.findByText("SHELL_PLACEHOLDER");
   });
 

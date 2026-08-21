@@ -2,23 +2,30 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 
-import { Alert, Button, Spinner } from "@markiro/ui";
+import { Alert, Button } from "@markiro/ui";
 
 import { useAuthClient, type OrganizationSummary } from "../../auth/client.js";
 import { useClearAuthQueryCache } from "../../query/AuthQueryBoundary.js";
-import { AuthLayout } from "./AuthLayout.js";
+import { AccountShell } from "../account/AccountShell.js";
 
 export function SelectOrgPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const authClient = useAuthClient();
   const clearAuthQueryCache = useClearAuthQueryCache();
-  const { refetch: refetchSession } = authClient.useSession();
+  const { data: session } = authClient.useSession();
 
   const [organizations, setOrganizations] = useState<OrganizationSummary[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectingId, setSelectingId] = useState<string | null>(null);
+  const [activatedId, setActivatedId] = useState<string | null>(null);
   const [selectError, setSelectError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activatedId && session?.session.activeOrganizationId === activatedId) {
+      void navigate("/", { replace: true });
+    }
+  }, [activatedId, navigate, session?.session.activeOrganizationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +51,7 @@ export function SelectOrgPage() {
   }, []);
 
   const handleSelect = async (organizationId: string) => {
+    if (selectingId) return;
     setSelectingId(organizationId);
     setSelectError(null);
     clearAuthQueryCache();
@@ -53,63 +61,125 @@ export function SelectOrgPage() {
       setSelectingId(null);
       return;
     }
-    await refetchSession?.();
-    void navigate("/", { replace: true });
+    setActivatedId(organizationId);
   };
 
+  const handleBack = async () => {
+    if (session?.session.activeOrganizationId) {
+      void navigate("/", { replace: true });
+      return;
+    }
+    clearAuthQueryCache();
+    try {
+      await authClient.signOut();
+    } finally {
+      void navigate("/login", { replace: true });
+    }
+  };
+
+  const activeOrganizationId = session?.session.activeOrganizationId ?? null;
+
   return (
-    <AuthLayout title={t("auth.selectOrg.title")}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {loadError && <Alert tone="error">{loadError}</Alert>}
-        {selectError && <Alert tone="error">{selectError}</Alert>}
-        {organizations === null && !loadError && (
-          <div style={{ display: "flex", justifyContent: "center", padding: 24 }}>
-            <Spinner />
-          </div>
-        )}
-        {organizations !== null && organizations.length === 0 && (
-          <p style={{ font: "var(--text-body)", color: "var(--fg-2)" }}>
-            {t("auth.selectOrg.empty")}
-          </p>
-        )}
-        {organizations !== null && organizations.length > 0 && (
-          <ul
-            style={{
-              listStyle: "none",
-              display: "flex",
-              flexDirection: "column",
-              gap: 8,
-              margin: 0,
-              padding: 0,
-            }}
-          >
-            {organizations.map((org) => (
-              <li
-                key={org.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 12,
-                }}
-              >
-                <span style={{ font: "var(--text-body)", color: "var(--fg-1)" }}>{org.name}</span>
-                <Button
-                  size="compact"
-                  variant="secondary"
-                  loading={selectingId === org.id}
-                  onClick={() => void handleSelect(org.id)}
-                >
-                  {t("auth.selectOrg.selectButton")}
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-        <p style={{ font: "var(--text-body-sm)", color: "var(--fg-3)" }}>
-          <Link to="/org/create">{t("auth.selectOrg.createNew")}</Link>
-        </p>
+    <AccountShell
+      eyebrow={t("account.eyebrow")}
+      title={t("auth.selectOrg.title")}
+      description={t("auth.selectOrg.description")}
+      accountLabel={session?.user.email ?? t("account.unknownUser")}
+      backLabel={activeOrganizationId ? t("account.backToWorkspace") : t("account.signOutToLogin")}
+      onBack={handleBack}
+    >
+      {selectError ? (
+        <div className="mk-account-alert">
+          <Alert tone="error">{selectError}</Alert>
+        </div>
+      ) : null}
+      <div className="mk-account-frame">
+        <div className="mk-account-panel">
+          <header className="mk-account-panel__header">
+            <div>
+              <h2>{t("auth.selectOrg.listTitle")}</h2>
+              <p>{t("auth.selectOrg.listHint")}</p>
+            </div>
+            {organizations ? (
+              <span className="mk-account-page__eyebrow">
+                {t("auth.selectOrg.count", { count: organizations.length })}
+              </span>
+            ) : null}
+          </header>
+
+          {loadError ? (
+            <div className="mk-account-list__error">
+              <Alert tone="error">{loadError}</Alert>
+            </div>
+          ) : null}
+          {organizations === null && !loadError ? (
+            <div className="mk-account-skeleton" role="status" aria-label={t("common.loading")}>
+              <span />
+              <span />
+            </div>
+          ) : null}
+          {organizations?.length === 0 ? (
+            <p className="mk-account-list__empty">{t("auth.selectOrg.empty")}</p>
+          ) : null}
+          {organizations && organizations.length > 0 ? (
+            <ul className="mk-account-list">
+              {organizations.map((org) => {
+                const current = org.id === activeOrganizationId;
+                const selecting = selectingId === org.id;
+                return (
+                  <li className="mk-account-org-shell" key={org.id}>
+                    <Button
+                      className="mk-account-org"
+                      variant="secondary"
+                      fullWidth
+                      aria-label={t("auth.selectOrg.openNamed", { name: org.name })}
+                      aria-busy={selecting || undefined}
+                      disabled={selectingId !== null}
+                      onClick={() => void handleSelect(org.id)}
+                    >
+                      <span className="mk-account-org__mark" aria-hidden="true">
+                        {initialsOf(org.name)}
+                      </span>
+                      <span className="mk-account-org__copy">
+                        <strong>{org.name}</strong>
+                        <code>{org.slug}</code>
+                      </span>
+                      {current ? (
+                        <span className="mk-account-org__current">
+                          {t("auth.selectOrg.current")}
+                        </span>
+                      ) : null}
+                      <span className="mk-account-action__icon" aria-hidden="true">
+                        {selecting ? (
+                          <span className="mk-account-org__progress">•••</span>
+                        ) : (
+                          <svg viewBox="0 0 20 20" focusable="false">
+                            <path d="M4 10h11M10.5 5.5 15 10l-4.5 4.5" />
+                          </svg>
+                        )}
+                      </span>
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+
+          <footer className="mk-account-panel__footer">
+            <p>{t("auth.selectOrg.createHint")}</p>
+            <Link className="mk-account-link" to="/org/create">
+              {t("auth.selectOrg.createNew")}
+            </Link>
+          </footer>
+        </div>
       </div>
-    </AuthLayout>
+    </AccountShell>
   );
+}
+
+function initialsOf(value: string): string {
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  if (parts.length === 1) return (parts[0] ?? "").slice(0, 2).toUpperCase();
+  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }

@@ -105,12 +105,27 @@
       "genericError": "Could not create the organization."
     },
     "selectOrg": {
-      "title": "Select organization",
+      "title": "Where will you work?",
+      "description": "Choose an organization. Its data, roles, and workflows stay inside its own boundary.",
+      "listTitle": "Your organizations",
+      "listHint": "We will open the selected workspace.",
+      "count": "Available: {{count}}",
       "empty": "You don't have any organizations yet.",
       "selectButton": "Select",
+      "openNamed": "Open {{name}} organization",
+      "current": "Current",
       "createNew": "Create a new organization",
+      "createHint": "Need a separate workspace for another company?",
       "genericError": "Could not load the organization list."
     }
+  },
+  "account": {
+    "eyebrow": "Account",
+    "signedInAs": "Signed in as",
+    "unknownUser": "User",
+    "back": "Back",
+    "backToWorkspace": "Return to workspace",
+    "signOutToLogin": "Sign out"
   },
   "invitation": {
     "title": "Team invitation",
@@ -146,7 +161,11 @@
   },
   "profile": {
     "title": "My profile",
+    "description": "Your name and photo help colleagues recognize you in audit history, invitations, and print forms.",
     "personalTitle": "Personal details",
+    "personalHint": "The email address belongs to your account.",
+    "photoTitle": "Photo",
+    "photoHint": "PNG, JPEG, or WebP. A square image works best.",
     "completeTitle": "Complete your profile",
     "completeBody": "Your first and last name are used in invitations, audit history, and print forms. You will return to work after saving.",
     "email": "Email",
@@ -161,6 +180,7 @@
     "avatarAlt": "Profile photo",
     "noAvatar": "No photo uploaded",
     "uploadAvatar": "Upload photo",
+    "changeAvatar": "Replace photo",
     "deleteAvatar": "Delete photo",
     "avatarError": "Could not update the photo. The current image was preserved.",
     "openNamed": "Open {{name}} profile"
