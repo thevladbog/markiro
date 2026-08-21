@@ -21,6 +21,7 @@ const SHIFT = {
   boxLabelTemplateId: null,
   plannedQty: 200,
   plannedDate: "2026-08-13",
+  productionDate: null,
   boxCapacity: null,
   palletCapacity: null,
   palletsEnabled: false,

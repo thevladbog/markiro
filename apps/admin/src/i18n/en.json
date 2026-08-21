@@ -812,6 +812,8 @@
         "modeAggregation": "Aggregation",
         "plannedQtyLabel": "Planned quantity, units",
         "plannedDateLabel": "Shift date",
+        "productionDateLabel": "Production date (for reports)",
+        "productionDateHint": "If omitted, labels and reports keep the previous date rule.",
         "lineLabel": "Line",
         "noLine": "None selected",
         "noLinesHint": "No lines yet -- create one via the API or settings.",
