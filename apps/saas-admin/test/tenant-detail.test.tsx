@@ -62,6 +62,17 @@ describe("tenant subscription detail", () => {
     expect(screen.queryByText("Текущий и запланированный тарифы")).toBeNull();
   });
 
+  it("keeps tenant legal data usable when optional DaData health is unavailable", async () => {
+    installTenantApi({ dadataResponseStatus: 503 });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=legal` });
+
+    expect(await screen.findByText("Юридические данные тенанта")).toBeDefined();
+    expect(await screen.findByText("Расчётные счета")).toBeDefined();
+    expect(
+      await screen.findByText("DaData временно недоступна — ручной ввод доступен"),
+    ).toBeDefined();
+  });
+
   it("accepts a production-like legacy tenant detail with PostgreSQL timestamps", async () => {
     const detail = {
       ...structuredClone(TENANT_DETAIL),

@@ -35,4 +35,28 @@ describe("organization settings", () => {
     expect(await screen.findByText("DaData не настроена — ручной ввод доступен")).toBeDefined();
     expect(screen.getByText("Настройки")).toBeDefined();
   });
+
+  it("keeps legal and bank settings usable when optional DaData health is unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/billing/operator-profile")) return jsonResponse(200, null);
+        if (url.endsWith("/api/platform/billing/operator/accounts")) return jsonResponse(200, []);
+        if (url.endsWith("/api/platform/suggestions/status")) {
+          return jsonResponse(503, { code: "dadata_unavailable" });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: "/settings/organization" });
+
+    expect(await screen.findByText("Реквизиты продавца")).toBeDefined();
+    expect(await screen.findByText("Расчётные счета")).toBeDefined();
+    expect(
+      await screen.findByText("DaData временно недоступна — ручной ввод доступен"),
+    ).toBeDefined();
+  });
 });

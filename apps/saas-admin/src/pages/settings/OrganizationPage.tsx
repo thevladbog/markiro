@@ -77,9 +77,9 @@ export function OrganizationPage() {
       {!canRead ? <Alert tone="warn">{t("legal.noAccess")}</Alert> : null}
       {canRead ? (
         <PanelState
-          loading={profile.isPending || accounts.isPending || dadata.isPending}
+          loading={profile.isPending || accounts.isPending}
           empty={false}
-          error={profile.error ?? accounts.error ?? dadata.error}
+          error={profile.error ?? accounts.error}
           onRetry={() => {
             void profile.refetch();
             void accounts.refetch();
@@ -90,7 +90,7 @@ export function OrganizationPage() {
             scope="operator"
             profile={profile.data ?? null}
             accounts={accounts.data ?? []}
-            dadataStatus={dadata.data?.status ?? "unavailable"}
+            dadataStatus={dadata.error ? "unavailable" : (dadata.data?.status ?? "unconfigured")}
             canWrite={canWrite}
             busy={busy}
             onSaveProfile={(input) => saveProfile.mutateAsync(input)}

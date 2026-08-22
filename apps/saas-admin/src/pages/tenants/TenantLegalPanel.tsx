@@ -62,9 +62,9 @@ export function TenantLegalPanel({ tenantId, canWrite }: { tenantId: string; can
 
   return (
     <PanelState
-      loading={profile.isPending || accounts.isPending || dadata.isPending}
+      loading={profile.isPending || accounts.isPending}
       empty={false}
-      error={profile.error ?? accounts.error ?? dadata.error}
+      error={profile.error ?? accounts.error}
       onRetry={() => {
         void profile.refetch();
         void accounts.refetch();
@@ -75,7 +75,7 @@ export function TenantLegalPanel({ tenantId, canWrite }: { tenantId: string; can
         scope="tenant"
         profile={profile.data ?? null}
         accounts={accounts.data ?? []}
-        dadataStatus={dadata.data?.status ?? "unavailable"}
+        dadataStatus={dadata.error ? "unavailable" : (dadata.data?.status ?? "unconfigured")}
         canWrite={canWrite}
         busy={busy}
         onSaveProfile={(input) => saveProfile.mutateAsync(input)}

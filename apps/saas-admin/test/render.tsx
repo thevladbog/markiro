@@ -668,6 +668,7 @@ export function installTenantApi({
   billingProfile = null,
   bankAccounts = [],
   dadataStatus = "unconfigured",
+  dadataResponseStatus = 200,
   renewHandler,
 }: {
   me?: PlatformPrincipal;
@@ -683,6 +684,7 @@ export function installTenantApi({
   billingProfile?: unknown;
   bankAccounts?: unknown[];
   dadataStatus?: "ready" | "unconfigured" | "unavailable" | "no_results";
+  dadataResponseStatus?: number;
   renewHandler?: () => Promise<Response>;
 } = {}) {
   const mutationCalls: TenantMutationCall[] = [];
@@ -724,7 +726,9 @@ export function installTenantApi({
         return jsonResponse(200, bankAccounts);
       }
       if (url.endsWith("/api/platform/suggestions/status") && method === "GET") {
-        return jsonResponse(200, { status: dadataStatus });
+        return dadataResponseStatus === 200
+          ? jsonResponse(200, { status: dadataStatus })
+          : jsonResponse(dadataResponseStatus, { code: "dadata_unavailable" });
       }
       if (
         url.endsWith(`/api/platform/tenants/${TENANT_ID}/owner-activation/renew`) &&
