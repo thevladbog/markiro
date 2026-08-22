@@ -27,6 +27,9 @@ interface Draft {
   ogrnip: string;
   legalAddressRaw: string;
   legalAddress: DadataAddressSuggestion | null;
+  actualSameAsLegal: boolean;
+  actualAddressRaw: string;
+  actualAddress: DadataAddressSuggestion | null;
   postalSameAsLegal: boolean;
   postalAddressRaw: string;
   postalAddress: DadataAddressSuggestion | null;
@@ -58,6 +61,7 @@ export function LegalProfileForm({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline);
+  const personKind = draft.kind === "self_employed" || draft.kind === "individual";
 
   useEffect(() => {
     setDraft(baseline);
@@ -74,7 +78,7 @@ export function LegalProfileForm({
   };
   const selectOrganization = (suggestion: DadataOrganizationSuggestion) => {
     patch({
-      kind: scope === "operator" ? "legal_entity" : suggestion.kind,
+      kind: suggestion.kind,
       fullName: suggestion.fullName,
       displayName: suggestion.displayName,
       inn: suggestion.inn,
@@ -123,20 +127,18 @@ export function LegalProfileForm({
       <fieldset disabled={!canWrite || busy}>
         <legend>{t("legal.sections.identity")}</legend>
         <div className="legal-form-grid legal-form-grid--two">
-          {scope === "tenant" ? (
-            <Select
-              native
-              label={t("legal.fields.kind")}
-              value={draft.kind}
-              onValueChange={(kind) => patch({ kind })}
-              options={[
-                { value: "legal_entity", label: t("legal.kinds.legal_entity") },
-                { value: "sole_proprietor", label: t("legal.kinds.sole_proprietor") },
-                { value: "self_employed", label: t("legal.kinds.self_employed") },
-                { value: "individual", label: t("legal.kinds.individual") },
-              ]}
-            />
-          ) : null}
+          <Select
+            native
+            label={t("legal.fields.kind")}
+            value={draft.kind}
+            onValueChange={(kind) => patch({ kind })}
+            options={[
+              { value: "legal_entity", label: t("legal.kinds.legal_entity") },
+              { value: "sole_proprietor", label: t("legal.kinds.sole_proprietor") },
+              { value: "self_employed", label: t("legal.kinds.self_employed") },
+              { value: "individual", label: t("legal.kinds.individual") },
+            ]}
+          />
           <OrganizationSuggestField
             value={organizationSearch}
             onValueChange={setOrganizationSearch}
@@ -144,7 +146,7 @@ export function LegalProfileForm({
             disabled={!canWrite || busy}
           />
           <Input
-            label={t("legal.fields.fullName")}
+            label={t(personKind ? "legal.fields.personName" : "legal.fields.fullName")}
             value={draft.fullName}
             onChange={(event) => patch({ fullName: event.target.value })}
             required
@@ -200,7 +202,7 @@ export function LegalProfileForm({
         <legend>{t("legal.sections.addresses")}</legend>
         <div className="legal-form-grid">
           <AddressSuggestField
-            label={t("legal.fields.legalAddress")}
+            label={t(personKind ? "legal.fields.registrationAddress" : "legal.fields.legalAddress")}
             value={draft.legalAddressRaw}
             onValueChange={(legalAddressRaw) => patch({ legalAddressRaw, legalAddress: null })}
             onSelect={(legalAddress) =>
@@ -208,6 +210,24 @@ export function LegalProfileForm({
             }
             disabled={!canWrite || busy}
           />
+          <Checkbox
+            label={t(
+              personKind ? "legal.fields.actualSameRegistration" : "legal.fields.actualSameLegal",
+            )}
+            checked={draft.actualSameAsLegal}
+            onCheckedChange={(actualSameAsLegal) => patch({ actualSameAsLegal })}
+          />
+          {!draft.actualSameAsLegal ? (
+            <AddressSuggestField
+              label={t("legal.fields.actualAddress")}
+              value={draft.actualAddressRaw}
+              onValueChange={(actualAddressRaw) => patch({ actualAddressRaw, actualAddress: null })}
+              onSelect={(actualAddress) =>
+                patch({ actualAddressRaw: actualAddress.value, actualAddress })
+              }
+              disabled={!canWrite || busy}
+            />
+          ) : null}
           <Checkbox
             label={t("legal.fields.postalSame")}
             checked={draft.postalSameAsLegal}
@@ -280,9 +300,9 @@ export function LegalProfileForm({
   );
 }
 
-function draftFromProfile(profile: Profile | null, scope: "operator" | "tenant"): Draft {
+function draftFromProfile(profile: Profile | null, _scope: "operator" | "tenant"): Draft {
   return {
-    kind: scope === "operator" ? "legal_entity" : (profile?.kind ?? "legal_entity"),
+    kind: profile?.kind ?? "legal_entity",
     fullName: profile?.fullName ?? "",
     displayName: profile?.displayName ?? "",
     inn: profile?.inn ?? "",
@@ -291,6 +311,9 @@ function draftFromProfile(profile: Profile | null, scope: "operator" | "tenant")
     ogrnip: profile?.ogrnip ?? "",
     legalAddressRaw: profile?.legalAddressRaw ?? "",
     legalAddress: profile?.legalAddress ?? null,
+    actualSameAsLegal: profile?.actualSameAsLegal ?? true,
+    actualAddressRaw: profile?.actualAddressRaw ?? "",
+    actualAddress: profile?.actualAddress ?? null,
     postalSameAsLegal: profile?.postalSameAsLegal ?? true,
     postalAddressRaw: profile?.postalAddressRaw ?? "",
     postalAddress: profile?.postalAddress ?? null,
@@ -306,6 +329,13 @@ function toInput(draft: Draft): ProfileInput {
     displayName: draft.displayName.trim(),
     legalAddressRaw: draft.legalAddressRaw.trim(),
     legalAddress: draft.legalAddress,
+    actualAddress: draft.actualSameAsLegal
+      ? ({ sameAsLegal: true } as const)
+      : ({
+          sameAsLegal: false as const,
+          raw: draft.actualAddressRaw.trim(),
+          normalized: draft.actualAddress,
+        } as const),
     postalAddress: draft.postalSameAsLegal
       ? ({ sameAsLegal: true } as const)
       : ({

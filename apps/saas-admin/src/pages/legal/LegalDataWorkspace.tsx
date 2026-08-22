@@ -44,7 +44,7 @@ export function LegalDataWorkspace({
 
   return (
     <div className="legal-workspace">
-      <BillingReadiness profile={profile} accounts={accounts} />
+      <BillingReadiness scope={scope} profile={profile} accounts={accounts} />
       <Alert tone={dadataStatus === "ready" ? "ok" : "info"}>
         {t(`legal.dadata.health.${dadataStatus}`)}
       </Alert>
