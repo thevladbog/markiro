@@ -47,6 +47,8 @@ export function SuggestionMenu<T>({
             type="button"
             role="option"
             aria-selected={active}
+            data-active={active || undefined}
+            tabIndex={-1}
             onMouseDown={(event) => event.preventDefault()}
             onMouseMove={() => onActiveIndexChange(index)}
             onClick={() => onSelect(item)}

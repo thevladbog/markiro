@@ -147,11 +147,19 @@ describe("DaData suggestion fields", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("suppresses a selected organization result until the operator edits again", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(200, { status: "ready", items: [ORGANIZATION] })),
-    );
+  it("suppresses a late organization result until the operator edits again", async () => {
+    let resolveLateResult: ((response: Response) => void) | undefined;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { status: "ready", items: [ORGANIZATION] }))
+      .mockImplementationOnce(
+        () =>
+          new Promise<Response>((resolve) => {
+            resolveLateResult = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { status: "ready", items: [ORGANIZATION] }));
+    vi.stubGlobal("fetch", fetchMock);
     renderField(<OrganizationHarness />);
     const input = screen.getByLabelText("Организация или ИНН");
 
@@ -164,9 +172,13 @@ describe("DaData suggestion fields", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
 
     await new Promise((resolve) => window.setTimeout(resolve, 300));
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    if (!resolveLateResult) throw new Error("The deferred request did not start");
+    resolveLateResult(jsonResponse(200, { status: "ready", items: [ORGANIZATION] }));
+    await act(async () => undefined);
     expect(screen.queryByRole("listbox")).toBeNull();
 
-    fireEvent.change(input, { target: { value: `${ORGANIZATION.value} ` } });
+    fireEvent.change(input, { target: { value: `${ORGANIZATION.value} x` } });
     expect(await screen.findByRole("listbox")).toBeDefined();
   });
 
@@ -206,9 +218,9 @@ describe("DaData suggestion fields", () => {
     expect(input.getAttribute("aria-expanded")).toBe("true");
     expect(input.getAttribute("aria-controls")).toBe(listbox.id);
     await user.keyboard("{ArrowDown}");
-    expect(input.getAttribute("aria-activedescendant")).toBe(
-      screen.getByRole("option", { name: ORGANIZATION.value }).id,
-    );
+    const activeOption = screen.getByRole("option", { name: ORGANIZATION.value });
+    expect(input.getAttribute("aria-activedescendant")).toBe(activeOption.id);
+    expect(activeOption.getAttribute("data-active")).toBe("true");
     await user.keyboard("{Enter}");
 
     expect(input).toHaveProperty("value", ORGANIZATION.value);
@@ -227,14 +239,16 @@ describe("DaData suggestion fields", () => {
 
     await user.click(input);
     await user.type(input, "Сбер");
-    await screen.findByRole("listbox");
+    const option = await screen.findByRole("option", { name: /ПАО СБЕРБАНК/ });
+    fireEvent.mouseDown(option);
+    expect(document.activeElement).toBe(input);
     await user.keyboard("{Escape}");
 
     expect(onSelect).not.toHaveBeenCalled();
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
-  it("dismisses a bank menu when focus leaves the complete field control", async () => {
+  it("tabs past non-tabbable bank options and dismisses when focus leaves the field control", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => jsonResponse(200, { status: "ready", items: [BANK] })),
@@ -251,8 +265,9 @@ describe("DaData suggestion fields", () => {
     await user.click(input);
     await user.type(input, "Сбер");
     await screen.findByRole("listbox");
-    fireEvent.blur(input, { relatedTarget: screen.getByRole("button", { name: "Вне подсказок" }) });
+    await user.tab();
 
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Вне подсказок" }));
     expect(screen.queryByRole("listbox")).toBeNull();
   });
 
