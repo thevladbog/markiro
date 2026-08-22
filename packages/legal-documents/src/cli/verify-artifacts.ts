@@ -3,23 +3,37 @@ import { lstat, readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { LEGAL_RELEASES } from "../registry.js";
+import { LEGAL_RELEASES, legalDocumentKind, legalReleaseLocales } from "../registry.js";
 import { legalVerificationUrl } from "../identity.js";
 import type { LegalDocumentCode, LegalLocale } from "../types.js";
 import { artifactFileName } from "../artifacts/names.js";
 
 export const MAX_LEGAL_PDF_BYTES = 5 * 1024 * 1024;
+export const MAX_INSTRUCTION_PDF_BYTES = 12 * 1024 * 1024;
 export const VERAPDF_VERSION = "1.30.2";
 export const VERAPDF_RELEASE_IMAGE =
   "docker.io/verapdf/cli@sha256:d5ee329657cf9bc4b2400392dd54c7d0a0ce9980ff6fa2da5590eebeec007cdb";
 
+export function maxLegalPdfBytes(code: LegalDocumentCode): number {
+  return legalDocumentKind(code) === "instruction"
+    ? MAX_INSTRUCTION_PDF_BYTES
+    : MAX_LEGAL_PDF_BYTES;
+}
+
 const DOCX_MEDIA_TYPE =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document" as const;
-const LEGAL_DOCUMENT_CODES = ["MKR-PD-01", "MKR-PD-02", "MKR-DPA-01", "MKR-BRD-01"] as const;
+const LEGAL_DOCUMENT_CODES = [
+  "MKR-PD-01",
+  "MKR-PD-02",
+  "MKR-DPA-01",
+  "MKR-BRD-01",
+  "MKR-INS-01",
+  "MKR-INS-02",
+  "MKR-INS-03",
+] as const;
 const LEGAL_LOCALES = ["ru", "en"] as const;
-const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01)_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-01|pd-02|dpa-01|brd-01|ins-0[123])_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 
 export interface PublishedLegalArtifact {
@@ -233,7 +247,10 @@ function parseArtifact(value: unknown, index: number): PublishedLegalArtifact {
   if (!release) {
     throw new Error(`Artifact is not a current release: ${code}/${value.revision}`);
   }
-  if (kind === "template-docx" && !TEMPLATE_CODES.has(code)) {
+  if (!legalReleaseLocales(code).includes(locale)) {
+    throw new Error(`Artifact locale is not published for ${code}: ${locale}`);
+  }
+  if (kind === "template-docx" && legalDocumentKind(code) !== "template") {
     throw new Error(`Legal artifact is not a downloadable template: ${code}`);
   }
 
@@ -292,9 +309,9 @@ function expectedArtifactKeys(): Set<string> {
   const keys = new Set<string>();
   for (const release of LEGAL_RELEASES) {
     if (release.status !== "active") continue;
-    for (const locale of LEGAL_LOCALES) {
+    for (const locale of legalReleaseLocales(release.code)) {
       keys.add(`${release.code}|${release.revision}|${locale}|pdfa-2b`);
-      if (TEMPLATE_CODES.has(release.code)) {
+      if (legalDocumentKind(release.code) === "template") {
         keys.add(`${release.code}|${release.revision}|${locale}|template-docx`);
       }
     }
@@ -404,8 +421,8 @@ export async function verifyArtifactManifest(
     if (stats.size !== entry.bytes) {
       throw new Error(`Legal artifact size mismatch: ${entry.fileName}`);
     }
-    if (entry.kind === "pdfa-2b" && stats.size > MAX_LEGAL_PDF_BYTES) {
-      throw new Error(`Legal PDF exceeds the five MiB release bound: ${entry.fileName}`);
+    if (entry.kind === "pdfa-2b" && stats.size > maxLegalPdfBytes(entry.code)) {
+      throw new Error(`Legal PDF exceeds its release size bound: ${entry.fileName}`);
     }
     const digest = createHash("sha256")
       .update(await readFile(artifactPath))

@@ -1,4 +1,4 @@
-import { findLegalRelease } from "../registry.js";
+import { findLegalRelease, legalDocumentKind, legalReleaseLocales } from "../registry.js";
 import { legalRevisionFileToken, legalVerificationUrl, type LegalRevision } from "../identity.js";
 import type { LegalDocumentCode, LegalLocale } from "../types.js";
 
@@ -12,8 +12,6 @@ export interface LegalArtifactRequest {
   readonly kind: LegalArtifactKind;
   readonly verificationUrl: string;
 }
-
-const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 
 export function assertLegalArtifactRequest(input: LegalArtifactRequest): void {
   if (input.locale !== "ru" && input.locale !== "en") {
@@ -38,7 +36,10 @@ export function assertLegalArtifactRequest(input: LegalArtifactRequest): void {
   ) {
     throw new Error(`Legal artifact release is not current: ${input.code}/${input.revision}`);
   }
-  if (input.kind === "template-docx" && !TEMPLATE_CODES.has(input.code)) {
+  if (!legalReleaseLocales(input.code).includes(input.locale)) {
+    throw new Error(`Invalid legal artifact locale for ${input.code}: ${input.locale}`);
+  }
+  if (input.kind === "template-docx" && legalDocumentKind(input.code) !== "template") {
     throw new Error(`Legal artifact is not a downloadable template: ${input.code}`);
   }
 

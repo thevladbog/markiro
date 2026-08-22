@@ -178,13 +178,15 @@ function requireServer(value, name) {
 }
 
 export function dnsOptionsFromEnvironment(environment) {
-  const { domain, kioskDomain, landingDomain } = validateProductionDomains(
+  const { domain, saasAdminDomain, kioskDomain, landingDomain } = validateProductionDomains(
     environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_SAAS_ADMIN_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
     environment.MARKIRO_LANDING_DOMAIN,
   );
   const options = {
     adminDomain: domain,
+    saasAdminDomain,
     kioskDomain,
     landingDomain,
     authoritativeServer: requireServer(
@@ -276,11 +278,17 @@ export async function verifyDnsConvergence(options, supplied = {}) {
   let lastError;
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      for (const domain of [options.adminDomain, options.kioskDomain, options.landingDomain])
+      for (const domain of [
+        options.adminDomain,
+        options.saasAdminDomain,
+        options.kioskDomain,
+        options.landingDomain,
+      ])
         await verifyDnsOnce({ ...options, domain }, dependencies);
       return {
         answers: {
           [options.adminDomain]: [...approvedAnswers],
+          [options.saasAdminDomain]: [...approvedAnswers],
           [options.kioskDomain]: [...approvedAnswers],
           [options.landingDomain]: [...approvedAnswers],
         },

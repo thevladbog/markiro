@@ -7,6 +7,7 @@ RUN corepack enable && corepack prepare pnpm@11.10.0 --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml turbo.json tsconfig.base.json ./
 COPY patches ./patches
 COPY apps/admin/package.json ./apps/admin/package.json
+COPY apps/saas-admin/package.json ./apps/saas-admin/package.json
 COPY apps/kiosk/package.json ./apps/kiosk/package.json
 COPY apps/landing/package.json ./apps/landing/package.json
 COPY packages/db/package.json ./packages/db/package.json
@@ -15,6 +16,7 @@ COPY packages/legal-documents/package.json ./packages/legal-documents/package.js
 COPY packages/ui/package.json ./packages/ui/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/admin ./apps/admin
+COPY apps/saas-admin ./apps/saas-admin
 COPY apps/kiosk ./apps/kiosk
 COPY apps/landing ./apps/landing
 COPY packages/db ./packages/db
@@ -26,7 +28,7 @@ COPY deploy/production/verify-legal-artifacts.mjs ./deploy/production/verify-leg
 COPY deploy/production/legal-artifacts-attestation.json ./deploy/production/legal-artifacts-attestation.json
 
 FROM build-base AS application-build
-RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...
+RUN pnpm turbo build --filter @markiro/admin... --filter @markiro/saas-admin... --filter @markiro/kiosk...
 
 FROM build-base AS legal-documents-build
 RUN pnpm --filter @markiro/domain build
@@ -60,6 +62,7 @@ FROM caddy:2.11.4-alpine AS runtime
 COPY deploy/production/Caddyfile /etc/caddy/Caddyfile
 COPY deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint
 COPY --from=application-build /workspace/apps/admin/dist /srv/admin
+COPY --from=application-build /workspace/apps/saas-admin/dist /srv/saas-admin
 COPY --from=application-build /workspace/apps/kiosk/dist /srv/kiosk
 COPY --from=landing-build /workspace/apps/landing/dist /srv/landing
 RUN addgroup -S -g 10001 markiro \

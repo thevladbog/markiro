@@ -105,12 +105,27 @@
       "genericError": "Could not create the organization."
     },
     "selectOrg": {
-      "title": "Select organization",
+      "title": "Where will you work?",
+      "description": "Choose an organization. Its data, roles, and workflows stay inside its own boundary.",
+      "listTitle": "Your organizations",
+      "listHint": "We will open the selected workspace.",
+      "count": "Available: {{count}}",
       "empty": "You don't have any organizations yet.",
       "selectButton": "Select",
+      "openNamed": "Open {{name}} organization",
+      "current": "Current",
       "createNew": "Create a new organization",
+      "createHint": "Need a separate workspace for another company?",
       "genericError": "Could not load the organization list."
     }
+  },
+  "account": {
+    "eyebrow": "Account",
+    "signedInAs": "Signed in as",
+    "unknownUser": "User",
+    "back": "Back",
+    "backToWorkspace": "Return to workspace",
+    "signOutToLogin": "Sign out"
   },
   "invitation": {
     "title": "Team invitation",
@@ -146,7 +161,11 @@
   },
   "profile": {
     "title": "My profile",
+    "description": "Your name and photo help colleagues recognize you in audit history, invitations, and print forms.",
     "personalTitle": "Personal details",
+    "personalHint": "The email address belongs to your account.",
+    "photoTitle": "Photo",
+    "photoHint": "PNG, JPEG, or WebP. A square image works best.",
     "completeTitle": "Complete your profile",
     "completeBody": "Your first and last name are used in invitations, audit history, and print forms. You will return to work after saving.",
     "email": "Email",
@@ -161,6 +180,7 @@
     "avatarAlt": "Profile photo",
     "noAvatar": "No photo uploaded",
     "uploadAvatar": "Upload photo",
+    "changeAvatar": "Replace photo",
     "deleteAvatar": "Delete photo",
     "avatarError": "Could not update the photo. The current image was preserved.",
     "openNamed": "Open {{name}} profile"
@@ -428,6 +448,12 @@
       "resultCount_many": "{{count}} products",
       "resultCount_other": "{{count}} products",
       "statusFilterLabel": "Status",
+      "pageSizeLabel": "Per page",
+      "pager": {
+        "label": "Catalog pages",
+        "previous": "Previous page",
+        "next": "Next page"
+      },
       "statusFilter": {
         "all": "All statuses",
         "draft": "Draft",
@@ -447,7 +473,6 @@
         "name": "Name",
         "productGroup": "Group",
         "boxCapacity": "Per box",
-        "palletCapacity": "Per pallet",
         "status": "Status",
         "actions": "Actions"
       },
@@ -650,6 +675,7 @@
         "loadError": "Could not load the template. Refresh the page or sign in again.",
         "fields": {
           "product.name": "Product name",
+          "product.printName": "Print name",
           "product.gtin": "Product GTIN",
           "product.egais": "EGAIS code",
           "km.code": "Marking code",
@@ -1429,10 +1455,20 @@
         "discardBody": "Your unsaved changes will be lost.",
         "continueEditing": "Continue editing",
         "discardAction": "Discard",
+        "sourceLabel": "Data source",
+        "sourceManual": "Enter manually",
+        "sourceMember": "Pick a registered user",
+        "memberLabel": "Registered user",
+        "memberPlaceholder": "Select a user",
+        "memberSearchLabel": "Search users",
+        "memberSearchPlaceholder": "Type a name or email",
+        "membersEmpty": "No users available: every cabinet member is already linked to an employee.",
+        "membersLoadError": "Failed to load registered users. Fill in the fields manually or try again later.",
         "errors": {
           "fullNameRequired": "Enter a full name",
           "fullNameTooLong": "200 characters or fewer",
-          "roleTooLong": "120 characters or fewer"
+          "roleTooLong": "120 characters or fewer",
+          "memberRequired": "Select a user from the list"
         }
       },
       "sections": {

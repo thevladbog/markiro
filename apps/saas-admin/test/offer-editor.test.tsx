@@ -30,12 +30,14 @@ function installOfferEditorApi({
   failCatalogRefresh = false,
   tenantItems = [TENANT_LIST_ITEM],
   me = ACCOUNTANT_ME,
+  offers = [],
 }: {
   createStatus?: number;
   retireOnRefresh?: boolean;
   failCatalogRefresh?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
   me?: Record<string, unknown>;
+  offers?: Array<Record<string, unknown>>;
 } = {}) {
   const calls: Array<{ method: string; path: string; body: unknown }> = [];
   let catalogFetches = 0;
@@ -45,7 +47,9 @@ function installOfferEditorApi({
       const url = String(input);
       const method = init.method ?? "GET";
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
-      if (url.endsWith("/api/platform/offers") && method === "GET") return jsonResponse(200, []);
+      if (url.endsWith("/api/platform/offers") && method === "GET") {
+        return jsonResponse(200, offers);
+      }
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return jsonResponse(200, {
           items: tenantItems,
@@ -119,6 +123,25 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
+  it("keeps an expired offer visible in the register", async () => {
+    installOfferEditorApi({
+      offers: [
+        {
+          id: "91111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          status: "expired",
+          total: "15000.00",
+        },
+      ],
+    });
+
+    renderSaasApp({ initialEntry: "/offers" });
+
+    expect(await screen.findByText(TENANT_ID)).toBeDefined();
+    expect(screen.getByText("expired")).toBeDefined();
+    expect(screen.queryByText("Не удалось загрузить предложения")).toBeNull();
+  });
+
   it("redirects a direct read-only visit to offers without loading an editable form", async () => {
     installOfferEditorApi({ me: READ_ONLY_BILLING_ME });
     renderSaasApp({ initialEntry: "/offers/new" });

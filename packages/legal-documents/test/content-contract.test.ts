@@ -4,25 +4,34 @@ import {
   findLegalDocument,
   findLegalRelease,
   formatLegalEffectiveDate,
+  legalDocumentKind,
   legalRevisionFileToken,
+  legalReleaseLocales,
   legalVerificationPath,
   legalVerificationUrl,
+  requireLegalContent,
   type LegalBlock,
   type LegalDocumentCode,
   type LegalLocale,
 } from "../src/index.js";
 
 const sectionIds = (code: LegalDocumentCode, locale: LegalLocale): string[] =>
-  findLegalDocument(code).content[locale].sections.map(({ id }) => id);
+  requireLegalContent(findLegalDocument(code), locale).sections.map(({ id }) => id);
 
 const documentContent = (code: LegalDocumentCode, locale: LegalLocale) =>
-  findLegalDocument(code).content[locale];
+  requireLegalContent(findLegalDocument(code), locale);
 
 const blockText = (block: LegalBlock): string => {
   if (block.kind === "paragraph") return block.text;
   if (block.kind === "definition-list") {
     return block.items.map(({ term, detail }) => `${term} — ${detail}`).join(" ");
   }
+  if (block.kind === "step") {
+    return [block.title, block.text, block.image?.caption, block.expected]
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (block.kind === "callout") return block.text;
   return block.items.join(" ");
 };
 
@@ -56,14 +65,14 @@ const sectionText = (code: LegalDocumentCode, locale: LegalLocale, sectionId: st
 };
 
 const allPublicLegalText = (): string[] =>
-  LEGAL_DOCUMENTS.flatMap(({ content }) => [
-    documentText(content.ru.locale === "ru" ? findCode(content.ru.title) : neverCode(), "ru"),
-    documentText(content.en.locale === "en" ? findCode(content.en.title) : neverCode(), "en"),
-  ]);
+  LEGAL_DOCUMENTS.flatMap(({ content }) => {
+    const code = content.ru.locale === "ru" ? findCode(content.ru.title) : neverCode();
+    return legalReleaseLocales(code).map((locale) => documentText(code, locale));
+  });
 
 function findCode(title: string): LegalDocumentCode {
   const source = LEGAL_DOCUMENTS.find(
-    ({ content }) => content.ru.title === title || content.en.title === title,
+    ({ content }) => content.ru.title === title || content.en?.title === title,
   );
   if (!source) throw new Error(`Unknown legal document title: ${title}`);
   return source.releaseKey.slice(0, source.releaseKey.indexOf("/")) as LegalDocumentCode;
@@ -94,22 +103,31 @@ describe("bilingual legal document sources", () => {
       const russian = documentText(code, "ru");
       const russianMentions = russian.match(/Маркиро(?: \(англ\. — Markiro\))?|Markiro/gu) ?? [];
 
-      expect(russian.match(/Маркиро \(англ\. — Markiro\)/gu)).toHaveLength(1);
-      expect(russianMentions[0]).toBe(bilingualFirstUse);
-      expect(russianMentions.slice(1)).toEqual(
-        Array.from({ length: russianMentions.length - 1 }, () => "Маркиро"),
-      );
+      if (legalDocumentKind(code) === "instruction") {
+        expect(russian.match(/Маркиро \(англ\. — Markiro\)/gu)).toBeNull();
+        expect(russianMentions).toEqual(
+          Array.from({ length: russianMentions.length }, () => "Маркиро"),
+        );
+      } else {
+        expect(russian.match(/Маркиро \(англ\. — Markiro\)/gu)).toHaveLength(1);
+        expect(russianMentions[0]).toBe(bilingualFirstUse);
+        expect(russianMentions.slice(1)).toEqual(
+          Array.from({ length: russianMentions.length - 1 }, () => "Маркиро"),
+        );
+      }
 
-      const english = documentText(code, "en");
-      expect(english).toContain("Markiro");
-      expect(english).not.toContain("Маркиро");
+      if (legalReleaseLocales(code).includes("en")) {
+        const english = documentText(code, "en");
+        expect(english).toContain("Markiro");
+        expect(english).not.toContain("Маркиро");
+      }
     }
   });
 
   it("uses dash-separated definitions with unpunctuated source terms", () => {
     for (const source of LEGAL_DOCUMENTS) {
       const code = findCode(source.content.ru.title);
-      for (const locale of ["ru", "en"] as const) {
+      for (const locale of legalReleaseLocales(code)) {
         const text = documentText(code, locale);
         for (const { term, detail } of definitionItems(code, locale)) {
           expectUnpunctuatedDefinitionTerm(term);
@@ -129,6 +147,7 @@ describe("bilingual legal document sources", () => {
   it("uses the localized revision and effective-date wording in public prose", () => {
     for (const source of LEGAL_DOCUMENTS) {
       const code = findCode(source.content.ru.title);
+      if (legalDocumentKind(code) === "instruction") continue;
       const russian = documentText(code, "ru");
       const english = documentText(code, "en");
 
@@ -224,6 +243,7 @@ describe("bilingual legal document sources", () => {
     expect(privacyRu).toMatch(/трансграничн.*не планируется/isu);
 
     for (const source of LEGAL_DOCUMENTS) {
+      if (!source.content.en) continue;
       const english = documentText(findCode(source.content.en.title), "en");
       expect(english).toMatch(/Russian.*authoritative/isu);
       expect(source.content.ru.sections.map(({ id }) => id)).toEqual(

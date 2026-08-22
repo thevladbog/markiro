@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const expectedApplicationCsp =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const smartCaptchaOrigin = "https://smartcaptcha.cloud.yandex.ru";
 const expectedLandingCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
@@ -31,6 +31,7 @@ const commerceMlProxyTimeouts = Object.freeze({
   write_timeout: "5m",
 });
 const adminHost = "admin.example.test";
+const saasAdminHost = "saas-admin.example.test";
 const kioskHost = "kiosk.example.test";
 const landingHost = "markiro.example.test";
 const vbtechHost = "v-b.tech";
@@ -122,6 +123,8 @@ async function adaptCaddy(source, run = execFileSync) {
             `${caddyfile}:/etc/caddy/Caddyfile:ro`,
             "-e",
             `MARKIRO_DOMAIN=${adminHost}`,
+            "-e",
+            `MARKIRO_SAAS_ADMIN_DOMAIN=${saasAdminHost}`,
             "-e",
             `MARKIRO_KIOSK_DOMAIN=${kioskHost}`,
             "-e",
@@ -363,7 +366,7 @@ function normalizeAdminRoute(route) {
 }
 
 function assertAuthorityContract(adapted, { alb }) {
-  const approvedHosts = [adminHost, kioskHost, landingHost];
+  const approvedHosts = [adminHost, saasAdminHost, kioskHost, landingHost];
   const applications = applicationRoutes(adapted);
   assert.equal(applications.length, approvedHosts.length);
   for (const route of applications) {
@@ -386,13 +389,18 @@ function assertAuthorityContract(adapted, { alb }) {
         .flatMap((candidate) => candidate.host),
     ),
   ].sort();
-  assert.deepEqual(hosts, [adminHost, kioskHost, landingHost, vbtechHost, vbtechWwwHost].sort());
+  assert.deepEqual(
+    hosts,
+    [adminHost, saasAdminHost, kioskHost, landingHost, vbtechHost, vbtechWwwHost].sort(),
+  );
 
   const admin = applicationRoute(adapted, adminHost);
+  const saasAdmin = applicationRoute(adapted, saasAdminHost);
   const kiosk = applicationRoute(adapted, kioskHost);
   const landing = applicationRoute(adapted, landingHost);
   for (const [host, route, expectedRoot] of [
     [adminHost, admin, "/srv/admin"],
+    [saasAdminHost, saasAdmin, "/srv/saas-admin"],
     [kioskHost, kiosk, "/srv/kiosk"],
     [landingHost, landing, "/srv/landing"],
   ]) {
@@ -453,7 +461,7 @@ function assertAuthorityContract(adapted, { alb }) {
       methods,
       host === adminHost
         ? [["OPTIONS"], ["OPTIONS"], ["GET", "HEAD"]]
-        : host === kioskHost
+        : host === kioskHost || host === saasAdminHost
           ? [["GET", "HEAD"]]
           : [
               ["POST"],
@@ -515,6 +523,32 @@ function assertAuthorityContract(adapted, { alb }) {
       [{ handler: "rewrite", strip_path_prefix: "/api" }],
       `adjacent admin path ${path} must retain the generic API rewrite`,
     );
+  }
+
+  const saasAdminProxies = proxyRoutes(saasAdmin);
+  const saasAdminReverseProxies = nestedObjects(saasAdmin).filter(
+    (candidate) => candidate.handler === "reverse_proxy",
+  );
+  assert.equal(saasAdminReverseProxies.length, 2);
+  assert.deepEqual(
+    saasAdminProxies.map(({ paths }) => paths),
+    [["/api/platform-auth/*"], ["/api/platform/*"]],
+  );
+  assert.deepEqual(saasAdminProxies[0].rewrites, []);
+  assert.deepEqual(saasAdminProxies[1].rewrites, [
+    { handler: "rewrite", strip_path_prefix: "/api" },
+  ]);
+  const saasAdminRoutes = applicationOrderedRouteTable(saasAdmin);
+  for (const path of [
+    "/api",
+    "/api/auth/get-session",
+    "/api/kiosk/bootstrap",
+    "/station/bootstrap",
+    "/health/ready",
+    "/docs",
+  ]) {
+    const request = { method: "GET", path };
+    assertOnlyPlain404(selectedAdaptedRoute(saasAdminRoutes, request), request);
   }
 
   const kioskProxies = proxyRoutes(kiosk);
@@ -630,7 +664,12 @@ function assertAuthorityContract(adapted, { alb }) {
   const landingReverseProxies = nestedObjects(landing).filter(
     (candidate) => candidate.handler === "reverse_proxy",
   );
-  for (const proxy of [...adminReverseProxies, ...kioskReverseProxies, ...landingReverseProxies]) {
+  for (const proxy of [
+    ...adminReverseProxies,
+    ...saasAdminReverseProxies,
+    ...kioskReverseProxies,
+    ...landingReverseProxies,
+  ]) {
     const forwardedProto = proxy.headers?.request?.set?.["X-Forwarded-Proto"];
     if (alb) assert.deepEqual(forwardedProto, ["https"]);
     else assert.equal(forwardedProto, undefined);
@@ -727,10 +766,12 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(base, /RUN pnpm install --frozen-lockfile/);
   for (const input of [
     "apps/admin/package.json ./apps/admin/package.json",
+    "apps/saas-admin/package.json ./apps/saas-admin/package.json",
     "apps/kiosk/package.json ./apps/kiosk/package.json",
     "apps/landing/package.json ./apps/landing/package.json",
     "packages/legal-documents/package.json ./packages/legal-documents/package.json",
     "apps/admin ./apps/admin",
+    "apps/saas-admin ./apps/saas-admin",
     "apps/kiosk ./apps/kiosk",
     "apps/landing ./apps/landing",
     "packages/legal-documents ./packages/legal-documents",
@@ -740,7 +781,8 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.deepEqual(applicationInstructions, [
     {
       name: "RUN",
-      arguments: "pnpm turbo build --filter @markiro/admin... --filter @markiro/kiosk...",
+      arguments:
+        "pnpm turbo build --filter @markiro/admin... --filter @markiro/saas-admin... --filter @markiro/kiosk...",
     },
   ]);
   assert.deepEqual(
@@ -781,6 +823,10 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   );
   assert.match(
     runtime,
+    /COPY --from=application-build \/workspace\/apps\/saas-admin\/dist \/srv\/saas-admin/,
+  );
+  assert.match(
+    runtime,
     /COPY --from=application-build \/workspace\/apps\/kiosk\/dist \/srv\/kiosk/,
   );
   assert.match(
@@ -802,6 +848,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "deploy/production/Caddyfile /etc/caddy/Caddyfile",
     "deploy/production/edge-entrypoint.sh /usr/bin/edge-entrypoint",
     "--from=application-build /workspace/apps/admin/dist /srv/admin",
+    "--from=application-build /workspace/apps/saas-admin/dist /srv/saas-admin",
     "--from=application-build /workspace/apps/kiosk/dist /srv/kiosk",
     "--from=landing-build /workspace/apps/landing/dist /srv/landing",
   ]);
@@ -810,6 +857,7 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     .map((copy) => copy.slice("--from=application-build ".length));
   assert.deepEqual(buildCopies, [
     "/workspace/apps/admin/dist /srv/admin",
+    "/workspace/apps/saas-admin/dist /srv/saas-admin",
     "/workspace/apps/kiosk/dist /srv/kiosk",
   ]);
   assert.deepEqual(
@@ -821,6 +869,8 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
     "!apps/",
     "!apps/admin/",
     "!apps/admin/**",
+    "!apps/saas-admin/",
+    "!apps/saas-admin/**",
     "!apps/kiosk/",
     "!apps/kiosk/**",
     "!apps/landing/",
@@ -841,6 +891,20 @@ function assertEdgeImageContract(dockerfile, dockerignore) {
   assert.match(dockerignore, /^\*\*\/dist\/$/m);
 }
 
+test("platform authority serves only the SaaS shell and platform API namespaces", async () => {
+  const caddy = await readFile("deploy/production/Caddyfile", "utf8");
+  assert.match(caddy, /^http:\/\/\{\$MARKIRO_SAAS_ADMIN_DOMAIN\}:8080 \{$/m);
+  assert.match(caddy, /^https:\/\/\{\$MARKIRO_SAAS_ADMIN_DOMAIN\}:8443 \{$/m);
+  const platformRoutes = caddy.match(/\(saas_admin_routes\) \{([\s\S]*?)^\}/m)?.[1] ?? "";
+  assert.match(platformRoutes, /root \* \/srv\/saas-admin/);
+  assert.match(platformRoutes, /@platformAuth path \/api\/platform-auth\/\*/);
+  assert.match(platformRoutes, /@platformApi path \/api\/platform\/\*/);
+  assert.match(platformRoutes, /handle @platformApi/);
+  assert.match(platformRoutes, /uri strip_prefix \/api/);
+  assert.match(platformRoutes, /@platformReserved path \/api \/api\/\*/);
+  assert.doesNotMatch(platformRoutes, /admin_routes|kiosk_routes|landing_routes/);
+});
+
 test("edge build validates every tracked legal artifact before copying landing output", async () => {
   const [dockerfile, dockerignore, manifestSource] = await Promise.all([
     readFile("deploy/production/edge.Dockerfile", "utf8"),
@@ -848,7 +912,7 @@ test("edge build validates every tracked legal artifact before copying landing o
     readFile("apps/landing/public/legal/artifacts.json", "utf8"),
   ]);
   const artifacts = JSON.parse(manifestSource);
-  assert.equal(artifacts.length, 12);
+  assert.equal(artifacts.length, 15);
   assert.equal(new Set(artifacts.map(({ fileName }) => fileName)).size, artifacts.length);
   for (const artifact of artifacts) {
     assert.match(artifact.sha256, /^[0-9a-f]{64}$/);
@@ -1016,10 +1080,10 @@ test("every API proxy has a finite route-appropriate transport timeout profile",
     (match) => match[1],
   );
 
-  assert.equal(reverseProxies.length, 10);
+  assert.equal(reverseProxies.length, 12);
   assert.equal(
     reverseProxies.filter((block) => /import standard_api_transport/.test(block)).length,
-    9,
+    11,
   );
   assert.equal(
     reverseProxies.filter((block) => /import commerce_ml_transport/.test(block)).length,

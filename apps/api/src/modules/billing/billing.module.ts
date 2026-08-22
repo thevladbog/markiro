@@ -16,5 +16,6 @@ import { TenantBillingService } from "./tenant-billing.service";
     SubscriptionLifecycleService,
     TenantBillingService,
   ],
+  exports: [BillingApplicationService],
 })
 export class BillingModule {}

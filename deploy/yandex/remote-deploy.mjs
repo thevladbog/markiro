@@ -390,6 +390,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
     run: runCommand,
     smoke: ({
       adminBaseUrl,
+      saasAdminBaseUrl,
       kioskBaseUrl,
       landingBaseUrl,
       expectedReleaseSha,
@@ -397,6 +398,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
     }) =>
       runPublicSmoke({
         adminBaseUrl,
+        saasAdminBaseUrl,
         kioskBaseUrl,
         landingBaseUrl,
         expectedReleaseSha,
@@ -410,8 +412,9 @@ async function runRemoteDeploymentInternal(environment, supplied) {
   const expectedDemoSubmissionState = landingDemoSubmissionState(
     requiredEnvironment("MARKIRO_LANDING_DEMO_SUBMISSION_STATE", environment),
   );
-  const { domain, kioskDomain, landingDomain } = validateProductionDomains(
+  const { domain, saasAdminDomain, kioskDomain, landingDomain } = validateProductionDomains(
     environment.MARKIRO_DOMAIN,
+    environment.MARKIRO_SAAS_ADMIN_DOMAIN,
     environment.MARKIRO_KIOSK_DOMAIN,
     environment.MARKIRO_LANDING_DOMAIN,
   );
@@ -484,6 +487,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
           `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
           "MARKIRO_COMPOSE_PROJECT=markiro-production",
           `MARKIRO_DOMAIN=${domain}`,
+          `MARKIRO_SAAS_ADMIN_DOMAIN=${saasAdminDomain}`,
           `MARKIRO_KIOSK_DOMAIN=${kioskDomain}`,
           `MARKIRO_LANDING_DOMAIN=${landingDomain}`,
           "MARKIRO_EDGE_MODE=direct",
@@ -594,12 +598,14 @@ async function runRemoteDeploymentInternal(environment, supplied) {
         smoke: () => {
           const baseUrls = productionBaseUrls({
             MARKIRO_DOMAIN: domain,
+            MARKIRO_SAAS_ADMIN_DOMAIN: saasAdminDomain,
             MARKIRO_KIOSK_DOMAIN: kioskDomain,
             MARKIRO_LANDING_DOMAIN: landingDomain,
             MARKIRO_EDGE_MODE: "direct",
           });
           return system.smoke({
             adminBaseUrl: baseUrls.admin,
+            saasAdminBaseUrl: baseUrls.saasAdmin,
             kioskBaseUrl: baseUrls.kiosk,
             landingBaseUrl: baseUrls.landing,
             expectedReleaseSha: manifest.commit,

@@ -1,7 +1,8 @@
 locals {
-  admin_dns_name   = "${trimsuffix(var.domain, ".")}."
-  kiosk_dns_name   = "${trimsuffix(var.kiosk_domain, ".")}."
-  landing_dns_name = "${trimsuffix(var.landing_domain, ".")}."
+  admin_dns_name      = "${trimsuffix(var.domain, ".")}."
+  saas_admin_dns_name = "${trimsuffix(var.saas_admin_domain, ".")}."
+  kiosk_dns_name      = "${trimsuffix(var.kiosk_domain, ".")}."
+  landing_dns_name    = "${trimsuffix(var.landing_domain, ".")}."
   labels = {
     app         = "markiro"
     environment = "production"
@@ -80,6 +81,16 @@ resource "yandex_dns_recordset" "application" {
 
   zone_id = var.dns_zone_id
   name    = local.admin_dns_name
+  type    = "A"
+  ttl     = 300
+  data    = [module.compute.app_public_ip]
+}
+
+resource "yandex_dns_recordset" "saas_admin_application" {
+  count = var.public_dns_enabled ? 1 : 0
+
+  zone_id = var.dns_zone_id
+  name    = local.saas_admin_dns_name
   type    = "A"
   ttl     = 300
   data    = [module.compute.app_public_ip]

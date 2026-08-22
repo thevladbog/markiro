@@ -4,6 +4,7 @@ import {
   formatLegalEffectiveDate,
   findLegalDocument,
   findLegalRelease,
+  requireLegalContent,
   type LegalBlock,
 } from "@markiro/legal-documents";
 
@@ -23,7 +24,7 @@ interface Props {
 const { page } = Astro.props;
 const release = findLegalRelease(page.code);
 const documentSource = findLegalDocument(page.code);
-const content = documentSource.content[page.locale];
+const content = requireLegalContent(documentSource, page.locale);
 const operator = OPERATOR_PROFILES[release.operatorProfileId];
 const registryPath = page.locale === "ru" ? "/legal/" : "/en/legal/";
 const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);

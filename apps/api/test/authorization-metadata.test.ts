@@ -89,6 +89,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
     EmployeesController,
     {
       listEmployees: readPolicy,
+      listLinkableMembers: writePolicy,
       createEmployee: writePolicy,
       bulkUpdatePickupLimits: writePolicy,
       bulkUpdatePickupWriteoff: writePolicy,

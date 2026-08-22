@@ -389,7 +389,7 @@ describe.skipIf(!ready)("products e2e", () => {
     await agent2.delete(`/products/${id}`).expect(404);
   });
 
-  it("GET /products supports search (name substring, gtin14 prefix) and status filters", async () => {
+  it("GET /products supports search (name substring, gtin14 substring) and status filters", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);
 
@@ -414,6 +414,15 @@ describe.skipIf(!ready)("products e2e", () => {
       .expect(200);
     expect(byGtinPrefix.body.items).toHaveLength(1);
     expect(byGtinPrefix.body.items[0]).toMatchObject({ gtin14: GTIN14_WIDGET_A });
+
+    // Substring in the middle of the gtin14 -- also covers searching by an
+    // EAN-13 fragment that lacks the gtin14 leading zero.
+    const byGtinMiddle = await agent
+      .get("/products")
+      .query({ search: GTIN14_WIDGET_A.slice(3, 11) })
+      .expect(200);
+    expect(byGtinMiddle.body.items).toHaveLength(1);
+    expect(byGtinMiddle.body.items[0]).toMatchObject({ gtin14: GTIN14_WIDGET_A });
 
     const activeOnly = await agent.get("/products").query({ status: "active" }).expect(200);
     expect(activeOnly.body.items).toHaveLength(1);

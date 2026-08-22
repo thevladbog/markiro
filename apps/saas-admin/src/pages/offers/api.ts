@@ -5,7 +5,7 @@ import type { CreateOfferInput } from "../documents/types.js";
 
 const moneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/);
 const uuidSchema = z.uuid();
-const offerStatusSchema = z.enum(["draft", "published", "paid", "cancelled"]);
+const offerStatusSchema = z.enum(["draft", "published", "paid", "cancelled", "expired"]);
 const offerLineSchema = z.object({
   id: uuidSchema,
   kind: z.enum(["plan", "addon", "service"]),
@@ -68,7 +68,7 @@ export interface OfferLine {
 export interface Offer {
   id: string;
   tenantId: string;
-  status: "draft" | "published" | "paid" | "cancelled";
+  status: "draft" | "published" | "paid" | "cancelled" | "expired";
   total: string;
   lines?: OfferLine[];
 }

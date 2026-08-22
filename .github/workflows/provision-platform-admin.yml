@@ -1,0 +1,52 @@
+name: Provision production platform administrator
+
+on:
+  workflow_dispatch:
+    inputs:
+      email:
+        description: Email address for the first platform administrator
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: markiro-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  provision:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: production-deploy
+    permissions:
+      contents: read
+    env:
+      YC_APP_PUBLIC_ADDRESS: ${{ vars.YC_APP_PUBLIC_ADDRESS }}
+      APP_SSH_HOST_KEYS_B64: ${{ vars.APP_SSH_HOST_KEYS_B64 }}
+      YC_APP_DEPLOY_LOGIN: markiro-deploy
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Provision platform administrator
+        env:
+          PLATFORM_ADMIN_EMAIL: ${{ inputs.email }}
+          YC_APP_DEPLOY_SSH_PRIVATE_KEY: ${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key_path="$RUNNER_TEMP/markiro-platform-admin-key"
+          test ! -e "$key_path"
+          trap 'rm -f -- "$key_path"' EXIT
+          printf '%s\n' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          export YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH="$key_path"
+          node deploy/yandex/platform-admin-provision.mjs run
+
+      - name: Remove local provisioning credentials
+        if: always()
+        run: |
+          set -euo pipefail
+          rm -f -- "$RUNNER_TEMP/markiro-platform-admin-key"

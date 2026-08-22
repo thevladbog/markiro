@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -246,15 +246,28 @@ describe("development screen gallery", () => {
     },
   );
 
-  it("renders standalone box states through the production grouped fill instrument", () => {
+  it("renders box states through the production grouped fill instrument", () => {
+    // "box-empty" is a standalone component review (the box panel never has
+    // its own screen in production).
     const view = render(<StationScreenGallery request={{ state: "box-empty", locale: "ru" }} />);
     expect(view.container.querySelectorAll(".work-box-fill__cell")).toHaveLength(20);
+    expect(view.container.querySelector(".work-screen")).toBeNull();
 
+    // "box-full" is a moment inside an ordinary scanning shift, so -- unlike
+    // "box-empty" -- it renders inside the real work screen alongside the
+    // scan result and counters, the same as production.
     view.rerender(<StationScreenGallery request={{ state: "box-full", locale: "ru" }} />);
+    expect(view.container.querySelector(".work-screen")).not.toBeNull();
+    expect(view.container.querySelector(".work-scan-result")).not.toBeNull();
     const grouped = view.container.querySelector<HTMLElement>(".work-box-fill__grid");
     expect(grouped?.getAttribute("data-grouped")).toBe("true");
     expect(grouped?.getAttribute("aria-valuemax")).toBe("120");
     expect(view.container.querySelector(".work-box-fill")?.textContent).toContain("120 / 120");
+    expect(
+      within(view.container.querySelector(".work-box-fill") as HTMLElement).getByRole("button", {
+        name: "Закрыть короб",
+      }),
+    ).toBeDefined();
   });
 
   it.each([
@@ -294,13 +307,22 @@ describe("development screen gallery", () => {
     vi.stubGlobal("fetch", fetchSpy);
 
     for (const state of EXPECTED_GALLERY_STATE_IDS) {
+      const fixture = GALLERY_FIXTURES.find((candidate) => candidate.id === state);
       const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
 
       expect(screen.getByTestId("station-screen-gallery").getAttribute("data-gallery-state")).toBe(
         state,
       );
-      expect(view.container.querySelector(".station-root")).not.toBeNull();
-      expect(view.container.querySelector(".station-screen-slot")).not.toBeNull();
+      if (fixture?.kind === "login") {
+        // Sign-in has no station/operator/shift identity yet, so -- exactly
+        // like the production `stage === "login"` branch in App.tsx -- it
+        // renders without the shared FloorShell status bar.
+        expect(view.container.querySelector(".operator-login")).not.toBeNull();
+        expect(view.container.querySelector(".station-root")).toBeNull();
+      } else {
+        expect(view.container.querySelector(".station-root")).not.toBeNull();
+        expect(view.container.querySelector(".station-screen-slot")).not.toBeNull();
+      }
 
       view.unmount();
     }
@@ -402,18 +424,24 @@ describe("development screen gallery", () => {
     ["shift-loading", "Загрузка смен"],
     ["shift-read-error", "Не удалось загрузить смены"],
     ["shift-empty", "Открытых смен нет"],
-    ["exception-applying", "Запись сохраняется в локальный журнал"],
+    ["exception-applying", "Выполняем действие"],
     ["serial-exhaustion", "Продолжение сканирования заблокировано"],
-    ["conflicts-loading", "Загрузка конфликтов"],
-    ["conflicts-read-error", "Не удалось прочитать локальные конфликты"],
-    ["conflicts-empty", "Конфликтов нет"],
+    ["conflicts-loading", "Читаем локальный список расхождений"],
+    ["conflicts-read-error", "Не удалось прочитать список расхождений"],
+    ["conflicts-empty", "Расхождений нет"],
     ["credential-recovery-sealing", "подготавливаются к безопасному восстановлению"],
     ["credential-recovery-failed", "Не удалось подготовить локальные данные"],
     ["credential-recovery-ready", "Сохранено: 12 сканирований"],
-    ["print-mismatch", "SSCC другого короба"],
-    ["print-not-sscc", "не распознан SSCC"],
-  ] as const)("renders distinct persistent viewport %s", (state, expectedCopy) => {
+    ["print-mismatch", "Это другая этикетка"],
+    ["print-not-sscc", "Это не групповой код"],
+  ] as const)("renders distinct persistent viewport %s", async (state, expectedCopy) => {
     const view = render(<StationScreenGallery request={{ state, locale: "ru" }} />);
-    expect(view.container.textContent).toContain(expectedCopy);
+    // exception-applying and the conflicts variants reach their captured
+    // text through the real components' own async state machine (simulated
+    // button clicks / a synthetic executor promise), not the first
+    // synchronous render.
+    await waitFor(() => {
+      expect(view.container.textContent).toContain(expectedCopy);
+    });
   });
 });

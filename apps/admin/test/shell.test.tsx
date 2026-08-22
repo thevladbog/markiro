@@ -182,6 +182,9 @@ describe("ShellPage", () => {
     expect(await screen.findByText("Test Org")).toBeDefined();
     expect(screen.getAllByText("user@example.com").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: /Выйти|Sign out/i })).toBeDefined();
+    expect(
+      screen.getByRole("link", { name: "Открыть профиль Test User" }).getAttribute("href"),
+    ).toBe("/profile?returnTo=%2Fshell");
 
     // Verify no redirect occurred -- location should still be /shell
     const locationPathname = screen.getByTestId("location-pathname");

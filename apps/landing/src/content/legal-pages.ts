@@ -2,7 +2,9 @@ import {
   LEGAL_RELEASES,
   findLegalDocument,
   findLegalRelease,
+  legalReleaseLocales,
   legalVerificationPath,
+  requireLegalContent,
   type LegalDocumentCode,
   type LegalLocale,
 } from "@markiro/legal-documents";
@@ -33,6 +35,18 @@ const DESCRIPTION_BY_CODE = {
     ru: "Правила использования компактного фирменного бланка и контроля версии документа Маркиро.",
     en: "Use and document-control rules for the compact Markiro branded letterhead.",
   },
+  "MKR-INS-01": {
+    ru: "Печатная инструкция оператора станции сканирования: вход по бейджу, выбор или создание смены, начало работы.",
+    en: "Printable scanning-station operator instruction: badge sign-in, shift selection or creation, and starting work.",
+  },
+  "MKR-INS-02": {
+    ru: "Печатная инструкция оператора: цикл сканирования, сигналы станции, наполнение и закрытие коробов, работа без сети и закрытие смены.",
+    en: "Printable operator instruction: the scanning cycle, station signals, box filling and closing, offline work, and closing the shift.",
+  },
+  "MKR-INS-03": {
+    ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба, сбой печати, коды, занятые другим терминалом.",
+    en: "Printable operator instruction for exceptions: label reprint, box disassembly, print recovery, and codes claimed by another terminal.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
@@ -47,13 +61,15 @@ export function getLegalDocumentPage(
 ): LegalDocumentPageDefinition {
   const release = findLegalRelease(code);
   const source = findLegalDocument(code);
-  const content = source.content[locale];
+  const content = requireLegalContent(source, locale);
+  const route = release.routes[locale];
+  if (!route) throw new Error(`Legal route is not published for ${code}/${locale}`);
   return {
     code,
     locale,
     metadata: {
-      path: release.routes[locale],
-      alternatePath: release.routes[locale === "ru" ? "en" : "ru"],
+      path: route,
+      alternatePath: release.routes[locale === "ru" ? "en" : "ru"] ?? route,
       locale,
       title: `${content.title} — ${locale === "ru" ? "Маркиро" : "Markiro"}`,
       description: DESCRIPTION_BY_CODE[code][locale],
@@ -93,13 +109,13 @@ export const LEGAL_SEARCH_PAGES: readonly SearchPageRecord[] = [
     };
   }),
   ...ACTIVE_LEGAL_RELEASES.flatMap((release) =>
-    (["ru", "en"] as const).map((locale) => {
+    legalReleaseLocales(release.code).map((locale) => {
       const page = getLegalDocumentPage(release.code, locale);
       return {
         path: page.metadata.path,
         alternatePath: page.metadata.alternatePath,
         locale,
-        navigationLabel: findLegalDocument(release.code).content[locale].title,
+        navigationLabel: requireLegalContent(findLegalDocument(release.code), locale).title,
         description: page.metadata.description,
         lastModified: release.effectiveDate,
       };

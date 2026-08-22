@@ -67,6 +67,33 @@ afterEach(async () => {
 });
 
 describe("ProfilePage", () => {
+  it("returns to the requested admin screen without saving", async () => {
+    const fetchMock = vi.fn(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith("/api/profile") && !init?.method) {
+        return response(200, {
+          firstName: "Анна",
+          lastName: "Соколова",
+          middleName: null,
+          hasAvatar: false,
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderProfile("/profile?returnTo=%2Fcatalog");
+
+    await screen.findByDisplayValue("Анна");
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+
+    expect(await screen.findByText("CATALOG_RETURN")).toBeDefined();
+    expect(
+      fetchMock.mock.calls.some(
+        ([input, init]) => String(input).endsWith("/api/profile") && init?.method === "PATCH",
+      ),
+    ).toBe(false);
+  });
+
   it("works without an active tenant, saves structured names, and returns to the requested route", async () => {
     const requests: Array<{ url: string; init: RequestInit | undefined }> = [];
     vi.stubGlobal(

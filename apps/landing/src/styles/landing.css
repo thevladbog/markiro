@@ -108,54 +108,20 @@ input:focus-visible {
 }
 
 .brand-mark__symbol {
-  display: grid;
-  grid-template-columns: repeat(3, 0.25rem);
-  grid-template-rows: repeat(5, 0.25rem);
-  gap: 0.0625rem;
-  width: 0.875rem;
+  width: 1.5rem;
   height: 1.5rem;
 }
 
+.brand-mark__tile {
+  fill: var(--fg-1);
+}
+
 .brand-mark__module {
-  width: 0.25rem;
-  height: 0.25rem;
-  background: var(--fg-1);
-}
-
-.brand-mark__module[data-position="0-0"] {
-  grid-area: 1 / 1;
-}
-
-.brand-mark__module[data-position="0-2"] {
-  grid-area: 1 / 3;
-}
-
-.brand-mark__module[data-position="1-1"] {
-  grid-area: 2 / 2;
-}
-
-.brand-mark__module[data-position="2-0"] {
-  grid-area: 3 / 1;
-}
-
-.brand-mark__module[data-position="2-2"] {
-  grid-area: 3 / 3;
-}
-
-.brand-mark__module[data-position="3-0"] {
-  grid-area: 4 / 1;
-}
-
-.brand-mark__module[data-position="3-2"] {
-  grid-area: 4 / 3;
-}
-
-.brand-mark__module[data-position="4-1"] {
-  grid-area: 5 / 2;
+  fill: var(--surface-page);
 }
 
 .brand-mark__module--accent {
-  background: var(--accent);
+  fill: var(--accent);
 }
 
 .brand-mark__word {
@@ -2567,5 +2533,89 @@ input:focus-visible {
   .landing-footer nav {
     flex-wrap: wrap;
     gap: var(--sp-4) var(--sp-6);
+  }
+}
+
+/* Instruction documents (MKR-INS-*) */
+.instruction-step {
+  margin: var(--sp-7) 0;
+  padding-left: var(--sp-4);
+  border-left: 3px solid var(--line);
+}
+
+.instruction-step__title {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-3);
+  margin: 0 0 var(--sp-3);
+  font: 500 1.0625rem / 1.3 var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+.instruction-step__number {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: var(--r-round);
+  background: var(--fg-1);
+  color: var(--surface-page);
+  font: 600 0.8125rem / 1 var(--font-mono);
+}
+
+.instruction-step__figure {
+  margin: var(--sp-4) 0;
+}
+
+.instruction-step__figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+}
+
+.instruction-step__figure figcaption {
+  margin-top: var(--sp-2);
+  color: var(--fg-3);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.instruction-step__expected {
+  color: var(--fg-2);
+  font-size: 0.95rem;
+}
+
+.instruction-callout {
+  margin: var(--sp-5) 0;
+  padding: var(--sp-4) var(--sp-5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.instruction-callout--warning {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+}
+
+.instruction-callout strong {
+  display: block;
+  margin-bottom: var(--sp-1);
+  color: var(--fg-3);
+  font: 600 0.75rem / 1 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.instruction-callout--warning strong {
+  color: var(--warn-fg);
+}
+
+@media print {
+  .instruction-step {
+    break-inside: avoid;
   }
 }

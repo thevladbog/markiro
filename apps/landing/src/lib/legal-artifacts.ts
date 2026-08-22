@@ -5,6 +5,8 @@ import path from "node:path";
 
 import {
   LEGAL_RELEASES,
+  legalDocumentKind,
+  legalReleaseLocales,
   legalRevisionFileToken,
   type LegalDocumentCode,
   type LegalDocumentRelease,
@@ -34,9 +36,8 @@ export interface PublishedLegalArtifact {
 
 const DEFAULT_PUBLIC_ROOT = path.resolve(process.cwd(), "public");
 const SAFE_FILE_NAME =
-  /^markiro_mkr-(?:pd-0[12]|dpa-01|brd-01)_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
+  /^markiro_mkr-(?:pd-0[12]|dpa-01|brd-01|ins-0[123])_\d{4}\.\d{2}-\d{2}_(?:ru|en)\.(?:pdf|docx)$/;
 const SHA256 = /^[a-f0-9]{64}$/;
-const TEMPLATE_CODES = new Set<LegalDocumentCode>(["MKR-DPA-01", "MKR-BRD-01"]);
 const PUBLISHED_RELEASES = (LEGAL_RELEASES as readonly LegalDocumentRelease[]).filter(
   ({ status }) => status !== "draft",
 );
@@ -228,8 +229,11 @@ function parseArtifact(value: unknown): Omit<PublishedLegalArtifact, "href"> {
 
   const release = findRelease(value.code, value.revision, value.effectiveDate);
   if (value.locale !== "ru" && value.locale !== "en") fail("locale is invalid");
+  if (!legalReleaseLocales(release.code).includes(value.locale)) {
+    fail("locale is not published for this code");
+  }
   if (value.kind !== "pdfa-2b" && value.kind !== "template-docx") fail("kind is invalid");
-  if (value.kind === "template-docx" && !TEMPLATE_CODES.has(release.code)) {
+  if (value.kind === "template-docx" && legalDocumentKind(release.code) !== "template") {
     fail("DOCX is allowed only for template releases");
   }
   if (typeof value.fileName !== "string" || !SAFE_FILE_NAME.test(value.fileName)) {
@@ -283,9 +287,9 @@ function assertCompleteReleaseSet(artifacts: readonly PublishedLegalArtifact[]):
   const actual = new Set(artifacts.map(descriptorKey));
   const expected = new Set<string>();
   for (const release of PUBLISHED_RELEASES) {
-    for (const locale of ["ru", "en"] as const) {
+    for (const locale of legalReleaseLocales(release.code)) {
       expected.add(descriptorKey({ ...release, locale, kind: "pdfa-2b" }));
-      if (TEMPLATE_CODES.has(release.code)) {
+      if (legalDocumentKind(release.code) === "template") {
         expected.add(descriptorKey({ ...release, locale, kind: "template-docx" }));
       }
     }

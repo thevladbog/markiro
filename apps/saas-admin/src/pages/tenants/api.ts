@@ -3,7 +3,19 @@ import { z } from "zod";
 import { platformApiFetch } from "../../api/client.js";
 
 const POSTGRES_INTEGER_MAX = 2_147_483_647;
-const isoDateSchema = z.iso.datetime({ offset: true });
+const isoDateSchema = z.preprocess(
+  (value) => {
+    if (typeof value !== "string") return value;
+    let normalized = value.replace(" ", "T");
+    if (/^[^T]+T/.test(normalized) && !/[zZ]|[+-]\d{2}(?::?\d{2})?$/.test(normalized)) {
+      normalized += "Z";
+    } else if (/[+-]\d{2}$/.test(normalized)) {
+      normalized += ":00";
+    }
+    return normalized;
+  },
+  z.iso.datetime({ offset: true }),
+);
 const nullableIsoDateSchema = isoDateSchema.nullable();
 const subscriptionStatusSchema = z.enum([
   "pending_activation",
@@ -14,7 +26,7 @@ const subscriptionStatusSchema = z.enum([
   "superseded",
   "cancelled",
 ]);
-const subscriptionSourceSchema = z.enum(["demo", "manual", "paid_offer_line"]);
+const subscriptionSourceSchema = z.enum(["demo", "manual", "paid_offer_line", "paid_invoice_line"]);
 const activationPolicySchema = z.enum(["immediate", "after_current"]);
 const catalogStatusSchema = z.enum(["draft", "published", "retired"]);
 const catalogKindSchema = z.enum(["plan", "addon", "service"]);
@@ -23,7 +35,9 @@ const billingPeriodSchema = z.enum(["month", "year"]).nullable();
 const nullableQuotaSchema = z.number().int().positive().max(POSTGRES_INTEGER_MAX).nullable();
 const moneySchema = z.string().regex(/^\d{1,12}\.\d{2}$/);
 
-export const tenantIdSchema = z.uuid();
+// Tenant references are opaque. New records use UUIDs, while imported Better
+// Auth organizations can retain their original bounded identifiers.
+export const tenantIdSchema = z.string().trim().min(1).max(128);
 
 const listPlanVersionSchema = z.object({
   id: z.uuid().nullable(),

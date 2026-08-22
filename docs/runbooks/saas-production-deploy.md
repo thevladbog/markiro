@@ -9,7 +9,8 @@ runner, deployment controller и rehearsal workflow не участвуют.
 - environment `production-deploy`;
 - variable `YC_APP_PUBLIC_ADDRESS`;
 - variable `APP_SSH_HOST_KEYS_B64` с проверенными host keys app VM;
-- variables `MARKIRO_DOMAIN`, `MARKIRO_KIOSK_DOMAIN` и `MARKIRO_LANDING_DOMAIN`;
+- variables `MARKIRO_DOMAIN`, `MARKIRO_SAAS_ADMIN_DOMAIN`, `MARKIRO_KIOSK_DOMAIN` и
+  `MARKIRO_LANDING_DOMAIN`;
 - secret `YC_APP_DEPLOY_SSH_PRIVATE_KEY` для пользователя `markiro-deploy`.
 
 ## Запуск
@@ -25,9 +26,13 @@ backward-compatible с предыдущим образом.
 Если bounded rollback не завершился, используйте
 [`yandex-recovery.md`](./yandex-recovery.md).
 
-Caddy слушает 80/443 на VM и выпускает ACME TLS для admin, kiosk и landing. API не
-публикует отдельный host port. Production env материализуется из runtime
-Lockbox; секреты не передаются в аргументах или release archive.
+Caddy слушает 80/443 на VM и выпускает ACME TLS для customer admin, SaaS admin,
+kiosk и landing. SaaS admin публикуется отдельным origin, который обслуживает
+только platform SPA, `/api/platform-auth/*` и `/api/platform/*`; customer и
+device namespaces там закрыты. API не публикует отдельный host port. Production
+env материализуется из runtime Lockbox; `SAAS_ADMIN_ORIGIN` обязан точно
+совпадать с `https://$MARKIRO_SAAS_ADMIN_DOMAIN`. Секреты не передаются в
+аргументах или release archive.
 
 ## Приватная выкладка v-b.tech
 

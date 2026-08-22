@@ -188,6 +188,7 @@ describe("boxLabelFields", () => {
       sscc: SSCC,
       itemCount: 12,
       productName: "Кола",
+      productPrintName: null,
       gtin14: GTIN,
       egaisCode: null,
       shelfLifeDays: null,
@@ -199,6 +200,7 @@ describe("boxLabelFields", () => {
     });
     expect(fields).toEqual({
       "product.name": "Кола",
+      "product.printName": "Кола",
       "product.gtin": GTIN,
       "product.egais": "",
       "km.code": "",
@@ -217,6 +219,7 @@ describe("boxLabelFields", () => {
       sscc: SSCC,
       itemCount: 1,
       productName: "",
+      productPrintName: null,
       gtin14: GTIN,
       egaisCode: null,
       shelfLifeDays: null,
@@ -236,6 +239,7 @@ describe("boxLabelFields", () => {
       sscc: SSCC,
       itemCount: 1,
       productName: "",
+      productPrintName: null,
       gtin14: GTIN,
       egaisCode: null,
       shelfLifeDays: null,

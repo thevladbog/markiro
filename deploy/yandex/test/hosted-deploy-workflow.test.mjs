@@ -73,6 +73,7 @@ function assertDirectDeployWorkflow(source) {
   assert.equal(deploy.env.YC_APP_PUBLIC_ADDRESS, "${{ vars.YC_APP_PUBLIC_ADDRESS }}");
   assert.equal(deploy.env.APP_SSH_HOST_KEYS_B64, "${{ vars.APP_SSH_HOST_KEYS_B64 }}");
   assert.equal(deploy.env.ACME_EMAIL, "${{ vars.ACME_EMAIL }}");
+  assert.equal(deploy.env.MARKIRO_SAAS_ADMIN_DOMAIN, "${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}");
 
   const checkout = deploy.steps.find((step) =>
     String(step.uses || "").startsWith("actions/checkout@"),
@@ -289,6 +290,7 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     YC_APP_PUBLIC_ADDRESS: "${{ vars.YC_APP_PUBLIC_ADDRESS }}",
     APP_SSH_HOST_KEYS_B64: "${{ vars.APP_SSH_HOST_KEYS_B64 }}",
     MARKIRO_DOMAIN: "${{ vars.MARKIRO_DOMAIN }}",
+    MARKIRO_SAAS_ADMIN_DOMAIN: "${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}",
     MARKIRO_KIOSK_DOMAIN: "${{ vars.MARKIRO_KIOSK_DOMAIN }}",
     MARKIRO_LANDING_DOMAIN: "${{ vars.MARKIRO_LANDING_DOMAIN }}",
     YC_APP_DEPLOY_LOGIN: "markiro-deploy",

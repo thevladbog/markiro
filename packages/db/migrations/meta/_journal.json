@@ -407,6 +407,20 @@
       "when": 1787328110973,
       "tag": "0057_product_print_name",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "7",
+      "when": 1787335403668,
+      "tag": "0058_remarkable_pyro",
+      "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1787337545297,
+      "tag": "0059_print_name_label_templates",
+      "breakpoints": true
     }
   ]
 }

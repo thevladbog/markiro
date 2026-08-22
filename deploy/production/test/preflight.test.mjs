@@ -10,6 +10,7 @@ const release = {
   MARKIRO_API_IMAGE_DIGEST: `sha256:${"a".repeat(64)}`,
   MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
   MARKIRO_DOMAIN: "app.markiro.example",
+  MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
   MARKIRO_LANDING_DOMAIN: "markiro.example",
   ACME_EMAIL: "ops@example.test",
@@ -35,6 +36,7 @@ test("documents every digest selector input and output in the preflight interfac
     "MARKIRO_API_IMAGE_DIGEST",
     "MARKIRO_EDGE_IMAGE_DIGEST",
     "MARKIRO_DOMAIN",
+    "MARKIRO_SAAS_ADMIN_DOMAIN",
     "MARKIRO_KIOSK_DOMAIN",
     "MARKIRO_LANDING_DOMAIN",
     "MARKIRO_EDGE_MODE",
@@ -49,6 +51,7 @@ test("documents every digest selector input and output in the preflight interfac
     "apiImageDigest",
     "edgeImageDigest",
     "domain",
+    "saasAdminDomain",
     "kioskDomain",
     "landingDomain",
     "envFile",
@@ -61,7 +64,7 @@ test("documents every digest selector input and output in the preflight interfac
 
 function dependencies({
   mode = 0o600,
-  envText = "KIOSK_ORIGIN=https://kiosk.markiro.example\n",
+  envText = "KIOSK_ORIGIN=https://kiosk.markiro.example\nSAAS_ADMIN_ORIGIN=https://saas-admin.markiro.example\n",
   composeError,
 } = {}) {
   return {
@@ -95,6 +98,7 @@ test("accepts digest-pinned release inputs and a private environment file", asyn
     apiImageDigest: release.MARKIRO_API_IMAGE_DIGEST,
     edgeImageDigest: release.MARKIRO_EDGE_IMAGE_DIGEST,
     domain: release.MARKIRO_DOMAIN,
+    saasAdminDomain: release.MARKIRO_SAAS_ADMIN_DOMAIN,
     kioskDomain: release.MARKIRO_KIOSK_DOMAIN,
     landingDomain: release.MARKIRO_LANDING_DOMAIN,
     acmeEmail: release.ACME_EMAIL,
@@ -236,7 +240,10 @@ test("passes optional host port overrides unchanged to Compose validation", asyn
   await runPreflight(
     { ...release, MARKIRO_HTTP_PORT: "18080", MARKIRO_HTTPS_PORT: "18443" },
     {
-      ...dependencies({ envText: "KIOSK_ORIGIN=https://kiosk.markiro.example:18443\n" }),
+      ...dependencies({
+        envText:
+          "KIOSK_ORIGIN=https://kiosk.markiro.example:18443\nSAAS_ADMIN_ORIGIN=https://saas-admin.markiro.example:18443\n",
+      }),
       composeQuiet: async (environment) => {
         validatedEnvironment = environment;
       },
@@ -261,7 +268,7 @@ test("does not inject absent optional host ports into Compose validation", async
   assert.equal(Object.hasOwn(validatedEnvironment, "MARKIRO_HTTPS_PORT"), false);
 });
 
-test("passes the kiosk and landing domains to Compose validation", async () => {
+test("passes the SaaS admin, kiosk and landing domains to Compose validation", async () => {
   let validatedEnvironment;
 
   await runPreflight(release, {
@@ -271,8 +278,22 @@ test("passes the kiosk and landing domains to Compose validation", async () => {
     },
   });
 
+  assert.equal(validatedEnvironment.MARKIRO_SAAS_ADMIN_DOMAIN, release.MARKIRO_SAAS_ADMIN_DOMAIN);
   assert.equal(validatedEnvironment.MARKIRO_KIOSK_DOMAIN, release.MARKIRO_KIOSK_DOMAIN);
   assert.equal(validatedEnvironment.MARKIRO_LANDING_DOMAIN, release.MARKIRO_LANDING_DOMAIN);
+});
+
+test("rejects a runtime SaaS origin that does not match the exact production host", async () => {
+  await assert.rejects(
+    runPreflight(
+      release,
+      dependencies({
+        envText:
+          "KIOSK_ORIGIN=https://kiosk.markiro.example\nSAAS_ADMIN_ORIGIN=https://other.markiro.example\n",
+      }),
+    ),
+    /SAAS_ADMIN_ORIGIN does not match MARKIRO_SAAS_ADMIN_DOMAIN/,
+  );
 });
 
 for (const [variable, value] of [
@@ -360,10 +381,14 @@ test("accepts only the explicit local direct-mode domain set", async () => {
     {
       ...release,
       MARKIRO_DOMAIN: "localhost",
+      MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
       MARKIRO_LANDING_DOMAIN: "landing.localhost",
     },
-    dependencies({ envText: "KIOSK_ORIGIN=https://kiosk.localhost\n" }),
+    dependencies({
+      envText:
+        "KIOSK_ORIGIN=https://kiosk.localhost\nSAAS_ADMIN_ORIGIN=https://saas-admin.localhost\n",
+    }),
   );
 
   assert.equal(result.domain, "localhost");
@@ -382,6 +407,7 @@ test("accepts only the explicit local direct-mode domain set", async () => {
     {
       ...release,
       MARKIRO_DOMAIN: "localhost",
+      MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
       MARKIRO_LANDING_DOMAIN: "landing.localhost",
       MARKIRO_EDGE_MODE: "behind-alb",
@@ -420,11 +446,15 @@ test("accepts the direct-mode HTTPS port in the kiosk origin", async () => {
     {
       ...release,
       MARKIRO_DOMAIN: "localhost",
+      MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
       MARKIRO_LANDING_DOMAIN: "landing.localhost",
       MARKIRO_HTTPS_PORT: "18443",
     },
-    dependencies({ envText: "KIOSK_ORIGIN=https://kiosk.localhost:18443\n" }),
+    dependencies({
+      envText:
+        "KIOSK_ORIGIN=https://kiosk.localhost:18443\nSAAS_ADMIN_ORIGIN=https://saas-admin.localhost:18443\n",
+    }),
   );
 
   assert.equal(result.kioskDomain, "kiosk.localhost");
@@ -498,6 +528,7 @@ test("passes optional host port overrides to the Compose child without other env
 
   assert.equal(childEnvironment.MARKIRO_HTTP_PORT, "18080");
   assert.equal(childEnvironment.MARKIRO_HTTPS_PORT, "18443");
+  assert.equal(childEnvironment.MARKIRO_SAAS_ADMIN_DOMAIN, release.MARKIRO_SAAS_ADMIN_DOMAIN);
   assert.equal(childEnvironment.MARKIRO_KIOSK_DOMAIN, release.MARKIRO_KIOSK_DOMAIN);
   assert.equal(childEnvironment.MARKIRO_LANDING_DOMAIN, release.MARKIRO_LANDING_DOMAIN);
 });

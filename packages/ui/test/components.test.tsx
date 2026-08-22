@@ -260,6 +260,41 @@ describe("Input", () => {
     expect(document.getElementById(describedBy!)?.textContent).toBe("Больше остатка");
   });
 
+  it("disables browser autofill by default but keeps it overridable", () => {
+    render(
+      <>
+        <Input label="ФИО" />
+        <Input label="Email" autoComplete="email" />
+      </>,
+    );
+    expect(screen.getByLabelText("ФИО").getAttribute("autocomplete")).toBe("off");
+    expect(screen.getByLabelText("Email").getAttribute("autocomplete")).toBe("email");
+  });
+
+  it("shields fields without explicit autofill from browser and extension password managers", () => {
+    render(
+      <>
+        <Input label="ПИН" type="password" />
+        <Input label="Логин" />
+        <Input label="Пароль" type="password" autoComplete="current-password" />
+      </>,
+    );
+    // Chrome игнорирует autocomplete="off" на парольных полях — уважает только new-password.
+    const pin = screen.getByLabelText("ПИН");
+    expect(pin.getAttribute("autocomplete")).toBe("new-password");
+    expect(pin.hasAttribute("data-1p-ignore")).toBe(true);
+    expect(pin.getAttribute("data-lpignore")).toBe("true");
+    expect(pin.hasAttribute("data-bwignore")).toBe(true);
+    expect(pin.getAttribute("data-form-type")).toBe("other");
+    const login = screen.getByLabelText("Логин");
+    expect(login.hasAttribute("data-1p-ignore")).toBe(true);
+    // Явный autoComplete означает «автофилл здесь уместен» — парольники не глушим.
+    const password = screen.getByLabelText("Пароль");
+    expect(password.getAttribute("autocomplete")).toBe("current-password");
+    expect(password.hasAttribute("data-1p-ignore")).toBe(false);
+    expect(password.hasAttribute("data-lpignore")).toBe(false);
+  });
+
   it("supports mono styling for codes and quantities", () => {
     render(<Input label="GTIN" mono />);
     const input = screen.getByLabelText("GTIN");

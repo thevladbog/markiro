@@ -20,6 +20,7 @@ const environment = {
   MARKIRO_EDGE_IMAGE_DIGEST: edgeImageDigest,
   MARKIRO_ENV_FILE: "/private/production.env",
   MARKIRO_DOMAIN: "app.markiro.example",
+  MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
   MARKIRO_LANDING_DOMAIN: "markiro.example",
   MARKIRO_LANDING_DEMO_SUBMISSION_STATE: "disabled",

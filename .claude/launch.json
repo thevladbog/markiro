@@ -32,6 +32,12 @@
       "port": 5373
     },
     {
+      "name": "landing",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@markiro/landing", "dev"],
+      "port": 5473
+    },
+    {
       "name": "station",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["--filter", "@markiro/station", "dev"],

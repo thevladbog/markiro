@@ -33,6 +33,8 @@ export function Input({
   prefix,
   suffix,
   size = "md",
+  autoComplete,
+  type,
   disabled,
   className,
   style,
@@ -58,6 +60,22 @@ export function Input({
     setFocus(false);
     onBlur?.(event);
   };
+
+  // Почти все поля админки — данные других людей (ФИО сотрудника, PIN станции),
+  // и автофилл подставляет туда email/пароль владельца. autocomplete="off" Chrome
+  // игнорирует на парольных полях — уважает только "new-password"; расширения-
+  // парольники игнорируют его везде, их глушат data-атрибуты. Поля, где автофилл
+  // уместен (логин, свой профиль), задают autoComplete явно и не глушатся.
+  const resolvedAutoComplete = autoComplete ?? (type === "password" ? "new-password" : "off");
+  const passwordManagerOptOut =
+    autoComplete === undefined
+      ? {
+          "data-1p-ignore": true,
+          "data-lpignore": "true",
+          "data-bwignore": true,
+          "data-form-type": "other",
+        }
+      : undefined;
 
   return (
     <div
@@ -108,6 +126,9 @@ export function Input({
         <input
           ref={inputRef}
           id={inputId}
+          type={type}
+          autoComplete={resolvedAutoComplete}
+          {...passwordManagerOptOut}
           disabled={disabled}
           aria-invalid={error ? true : undefined}
           aria-describedby={describedBy}

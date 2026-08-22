@@ -1,0 +1,143 @@
+---
+import {
+  OPERATOR_PROFILES,
+  formatLegalEffectiveDate,
+  findLegalDocument,
+  findLegalRelease,
+  requireLegalContent,
+  type LegalBlock,
+} from "@markiro/legal-documents";
+
+import type { LegalDocumentPageDefinition } from "../content/legal-pages";
+import { buildLegalPageGraph } from "../lib/seo";
+import { readPublicSiteConfig } from "../lib/site-config";
+import { artifactsForRelease, loadLegalArtifacts } from "../lib/legal-artifacts";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+import LegalArtifactControls from "./LegalArtifactControls.astro";
+
+interface Props {
+  page: LegalDocumentPageDefinition;
+  images: Record<string, string>;
+}
+
+const { page, images } = Astro.props;
+const release = findLegalRelease(page.code);
+const content = requireLegalContent(findLegalDocument(page.code), page.locale);
+const operator = OPERATOR_PROFILES[release.operatorProfileId];
+const registryPath = "/legal/";
+const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }, page.locale);
+const artifacts = artifactsForRelease(await loadLegalArtifacts(), release.code, release.revision, page.locale);
+const graph = buildLegalPageGraph(page.metadata, {
+  published: release.effectiveDate,
+  modified: release.effectiveDate,
+});
+
+const imageUrl = (id: string): string => {
+  const url = images[id];
+  if (!url) throw new Error(`Missing instruction image asset: ${id}`);
+  return url;
+};
+
+const stepBlocks = (blocks: readonly LegalBlock[]) => {
+  let stepNumber = 0;
+  return blocks.map((block) => ({
+    block,
+    stepNumber: block.kind === "step" ? ++stepNumber : 0,
+  }));
+};
+---
+
+<BaseLayout metadata={page.metadata} graph={graph}>
+  <LandingHeader page={page.metadata} phone={siteConfig.phone} />
+  <main id="main" class="legal-page instruction-page">
+    <header class="legal-hero">
+      <div class="container legal-hero__inner">
+        <a class="legal-backlink" href={registryPath}>← Реестр документов</a>
+        <p class="section-index">{page.code}</p>
+        <h1>{content.title}</h1>
+        <p class="legal-hero__summary">{content.summary}</p>
+      </div>
+    </header>
+
+    <div class="container legal-layout">
+      <aside class="legal-sidebar">
+        <div class="legal-release-card" data-legal-status={release.status}>
+          <span>Действует</span>
+          <dl>
+            <div><dt>Код</dt><dd data-legal-code>{release.code}</dd></div>
+            <div><dt>Редакция</dt><dd data-legal-revision>{release.revision}</dd></div>
+            <div><dt>Действует с</dt><dd><time datetime={release.effectiveDate} data-legal-effective-date>{formatLegalEffectiveDate(release.effectiveDate, page.locale)}</time></dd></div>
+          </dl>
+        </div>
+        <nav class="legal-toc" aria-label="Содержание">
+          <p>Содержание</p>
+          {content.sections.map((section) => <a href={`#${section.id}`}>{section.heading}</a>)}
+        </nav>
+      </aside>
+
+      <article class="legal-document instruction-document" data-legal-document data-legal-kind="instruction">
+        <LegalArtifactControls release={release} locale={page.locale} artifacts={artifacts} />
+        {content.sections.map((section) => (
+          <section id={section.id} aria-labelledby={`${section.id}-heading`}>
+            <h2 id={`${section.id}-heading`}>{section.heading}</h2>
+            {stepBlocks(section.blocks).map(({ block, stepNumber }) => (
+              <>
+                {block.kind === "paragraph" && <p>{block.text}</p>}
+                {block.kind === "ordered-list" && <ol>{block.items.map((item) => <li>{item}</li>)}</ol>}
+                {block.kind === "unordered-list" && <ul>{block.items.map((item) => <li>{item}</li>)}</ul>}
+                {block.kind === "definition-list" && (
+                  <dl class="legal-definitions">
+                    {block.items.map(({ term, detail }) => (
+                      <div>
+                        <dt>{term} <span aria-hidden="true">—&nbsp;</span></dt>
+                        <dd>{detail}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {block.kind === "callout" && (
+                  <aside class={`instruction-callout instruction-callout--${block.tone}`} role="note">
+                    <strong>{block.tone === "warning" ? "Важно" : "Примечание"}</strong>
+                    <p>{block.text}</p>
+                  </aside>
+                )}
+                {block.kind === "step" && (
+                  <article class="instruction-step">
+                    <h3 class="instruction-step__title">
+                      <span class="instruction-step__number" aria-hidden="true">{stepNumber}</span>
+                      Шаг {stepNumber}. {block.title}
+                    </h3>
+                    <p>{block.text}</p>
+                    {block.image && (
+                      <figure class="instruction-step__figure">
+                        <img src={imageUrl(block.image.id)} alt={block.image.caption} loading="lazy" width="1280" height="800" />
+                        <figcaption>{block.image.caption}</figcaption>
+                      </figure>
+                    )}
+                    {block.expected && (
+                      <p class="instruction-step__expected"><strong>Ожидаемый результат:</strong> {block.expected}</p>
+                    )}
+                  </article>
+                )}
+              </>
+            ))}
+          </section>
+        ))}
+
+        <aside class="legal-contact" aria-label="Контакты оператора">
+          <h2>Контакты оператора</h2>
+          <p>{operator.name}<br />{operator.address}</p>
+          <p><a href={`mailto:${operator.email}`}>{operator.email}</a><br /><a href="tel:+79343551490">{operator.phone}</a></p>
+        </aside>
+      </article>
+    </div>
+  </main>
+  <LandingFooter page={page.metadata} />
+
+  <script>
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+    initLanding(document, browserLandingRuntime(window));
+  </script>
+</BaseLayout>

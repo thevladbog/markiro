@@ -77,6 +77,7 @@ test("CI keeps production bundle, Yandex runtime and infrastructure contracts", 
   assert.match(source, /pnpm format:check/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
+  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*saas-admin\.localhost/);
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
   assertNoRetiredLegalEnvironmentVariables(source);
   assertProtectedDemoRuntimeInventory(
@@ -130,6 +131,7 @@ test("release publication is main-only, digest-bound and writes the immutable ma
   assert.doesNotMatch(source, /:latest\b/);
   for (const variable of ["PLATFORM_AUTH_SECRET", "PLATFORM_AUTH_URL", "SAAS_ADMIN_ORIGIN"])
     assert.match(source, new RegExp(variable));
+  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*saas-admin\.localhost/);
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*landing\.localhost/);
   assertNoRetiredLegalEnvironmentVariables(source);
   const runtimeStep = namedStep(
@@ -210,6 +212,7 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   assert.match(source, /YC_APP_DEPLOY_SSH_PRIVATE_KEY/);
   assert.match(source, /APP_SSH_HOST_KEYS_B64/);
   assert.match(source, /ACME_EMAIL:\s*\$\{\{ vars\.ACME_EMAIL \}\}/);
+  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*\$\{\{ vars\.MARKIRO_SAAS_ADMIN_DOMAIN \}\}/);
   assert.match(source, /MARKIRO_LANDING_DOMAIN:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
   assert.match(
     source,
@@ -271,6 +274,7 @@ test("v-b deploy is a protected manual digest-bound private executor", async () 
   assert.match(verification.run, /docker manifest inspect "\$image_ref" > \/dev\/null/);
   assert.match(delivery.run, /remote-vbtech-deploy[.]mjs run/);
   assert.doesNotMatch(delivery.run, /remote-deploy[.]mjs run/);
+  assert.match(source, /MARKIRO_SAAS_ADMIN_DOMAIN:\s*\$\{\{ vars\.MARKIRO_SAAS_ADMIN_DOMAIN \}\}/);
   assert.match(before.run, /runtime-diagnostics[.]mjs run/);
   assert.match(after.run, /runtime-diagnostics[.]mjs run/);
   assert.match(source, /ghcr[.]io\/thevladbog\/vbtech-web/);
@@ -284,8 +288,9 @@ test("v-b deploy is a protected manual digest-bound private executor", async () 
   );
 });
 
-test("infrastructure workflow passes the landing domain to Terraform", async () => {
+test("infrastructure workflow passes the SaaS admin and landing domains to Terraform", async () => {
   const source = await read(".github/workflows/yandex-infrastructure.yml");
+  assert.match(source, /TF_VAR_saas_admin_domain:\s*\$\{\{ vars\.MARKIRO_SAAS_ADMIN_DOMAIN \}\}/);
   assert.match(source, /TF_VAR_landing_domain:\s*\$\{\{ vars\.MARKIRO_LANDING_DOMAIN \}\}/);
 });
 

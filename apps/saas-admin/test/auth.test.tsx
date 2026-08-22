@@ -19,6 +19,17 @@ afterEach(() => {
 });
 
 describe("platform authentication", () => {
+  it("uses the official Markiro identity in the platform-operations auth shell", async () => {
+    renderSaasApp({ initialEntry: "/login", state: authState() });
+
+    const logos = await screen.findAllByRole("img", { name: "Логотип Маркиро" });
+    expect(logos.length).toBeGreaterThan(0);
+    expect(logos.every((logo) => logo.querySelector("img"))).toBe(true);
+    expect(
+      screen.getByRole("complementary", { name: "Операционный контур Markiro" }),
+    ).toBeDefined();
+  });
+
   it("removes the backend activation fragment from browser history and exchanges it only once", async () => {
     const activationToken = "backend-produced-activation-token-2026";
     window.history.replaceState(null, "", `/activate#token=${activationToken}`);
@@ -106,6 +117,26 @@ describe("platform authentication", () => {
 
     expect(await screen.findByRole("heading", { name: "Настройте 2FA" })).toBeDefined();
     expect(screen.queryByRole("heading", { name: "Каталог" })).toBeNull();
+  });
+
+  it("renders a scannable QR code and keeps the manual TOTP key during enrollment", async () => {
+    const state = authState({ session: readySession(false) });
+    renderSaasApp({
+      initialEntry: "/two-factor?mode=enroll",
+      state,
+      client: fakeAuthClient(state),
+    });
+    const user = userEvent.setup();
+
+    await user.type(await screen.findByLabelText("Пароль"), "password-value");
+    await user.click(screen.getByRole("button", { name: "Создать ключ 2FA" }));
+
+    const qrCode = await screen.findByRole("img", {
+      name: "QR-код для настройки двухфакторной аутентификации",
+    });
+    expect(qrCode.tagName).toBe("svg");
+    expect(qrCode.querySelectorAll("path").length).toBeGreaterThan(0);
+    expect(screen.getByText(state.enrollment.totpURI)).toBeDefined();
   });
 
   it("accepts a TOTP challenge and opens the protected catalog", async () => {

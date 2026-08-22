@@ -2,7 +2,8 @@
 
 Эта инструкция относится к MVP с одним клиентом. Рабочая схема: одна публичная
 VM с Caddy и Docker Compose, приватный Managed PostgreSQL и приватный media S3.
-Домены: `admin.markiro.app` и `kiosk.markiro.app`.
+Домены: `admin.markiro.app`, `saas-admin.markiro.app`, `kiosk.markiro.app` и
+`markiro.app`.
 
 ## 1. Проверить выпуск образов
 
@@ -37,11 +38,13 @@ groups и deployment-controller/runner ресурсы. Ожидаемые сох
 
 ## 4. Проверить прямой DNS
 
-Обе A-записи должны указывать на reserved public IP app VM:
+Все A-записи должны указывать на reserved public IP app VM:
 
 ```bash
 dig +short A admin.markiro.app
+dig +short A saas-admin.markiro.app
 dig +short A kiosk.markiro.app
+dig +short A markiro.app
 ```
 
 На этом шаге проверяется только DNS. Caddy начнёт выпуск ACME-сертификатов после
@@ -55,6 +58,7 @@ production**:
 ```text
 release_run_id=<successful-publish-run-id>
 release_sha=<same-40-character-main-sha>
+landing_demo_submission_state=<enabled-or-disabled>
 ```
 
 Единственный GitHub-hosted job проверяет release manifest, подключается к app VM
@@ -65,13 +69,15 @@ SSH key.
 
 ## 6. Проверить TLS и приложение
 
-После запуска Caddy сам выпускает ACME-сертификаты. Проверьте HTTPS для обоих
+После запуска Caddy сам выпускает ACME-сертификаты. Проверьте HTTPS для всех
 доменов; сертификаты Certificate Manager больше не используются.
 
 Проверьте:
 
 - `https://admin.markiro.app/health/ready` возвращает готовность API;
 - `https://admin.markiro.app/docs` открывает документацию;
+- `https://saas-admin.markiro.app/` отдаёт отдельную platform SPA и не отдаёт
+  customer/device namespaces;
 - `https://kiosk.markiro.app/` отдаёт kiosk PWA;
 - kiosk не отдаёт SPA для зарезервированных `/api`, `/station` и `/kiosk`;
 - отправку тестового письма через Cloud Postbox;

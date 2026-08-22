@@ -14,11 +14,13 @@ import {
 } from "../smoke.mjs";
 
 const csp =
-  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
+  "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob: https://storage.yandexcloud.net; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self' blob:; manifest-src 'self'";
 const landingCsp =
   "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; img-src 'self' data: blob:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' https://smartcaptcha.cloud.yandex.ru; frame-src 'self' https://smartcaptcha.cloud.yandex.ru; connect-src 'self' https://smartcaptcha.cloud.yandex.ru; worker-src 'self' blob:; manifest-src 'self'";
 const shell =
   '<html><head><title>Markiro</title><script type="module" src="/assets/main.js"></script></head><body></body></html>';
+const saasAdminShell =
+  '<html><head><title>Markiro Platform</title><script type="module" src="/assets/saas.js"></script></head><body></body></html>';
 const kioskShell =
   '<html lang="ru"><head><title>Маркиро — Киоск</title><script type="module" src="/assets/kiosk.js"></script><link rel="manifest" href="/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/registerSW.js" defer></script></head><body><div id="root"></div></body></html>';
 const kioskManifest = JSON.stringify({
@@ -90,12 +92,14 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
   assert.deepEqual(
     productionBaseUrls({
       MARKIRO_DOMAIN: "localhost",
+      MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.localhost",
       MARKIRO_KIOSK_DOMAIN: "kiosk.localhost",
       MARKIRO_LANDING_DOMAIN: "landing.localhost",
       MARKIRO_HTTPS_PORT: "18443",
     }),
     {
       admin: "https://localhost:18443",
+      saasAdmin: "https://saas-admin.localhost:18443",
       kiosk: "https://kiosk.localhost:18443",
       landing: "https://landing.localhost:18443",
     },
@@ -103,11 +107,13 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
   assert.deepEqual(
     productionBaseUrls({
       MARKIRO_DOMAIN: "admin.markiro.example",
+      MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
       MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
       MARKIRO_LANDING_DOMAIN: "markiro.example",
     }),
     {
       admin: "https://admin.markiro.example",
+      saasAdmin: "https://saas-admin.markiro.example",
       kiosk: "https://kiosk.markiro.example",
       landing: "https://markiro.example",
     },
@@ -117,11 +123,13 @@ test("uses the configured HTTPS port for production-bundle smoke", () => {
 test("activates v-b smoke authorities only for the exact digest selector and ignores retired inputs", () => {
   const markiroEnvironment = {
     MARKIRO_DOMAIN: "admin.markiro.example",
+    MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_LANDING_DOMAIN: "markiro.example",
   };
   const markiroUrls = {
     admin: "https://admin.markiro.example",
+    saasAdmin: "https://saas-admin.markiro.example",
     kiosk: "https://kiosk.markiro.example",
     landing: "https://markiro.example",
   };
@@ -225,7 +233,11 @@ test("rejects malformed and equal smoke authorities without disclosing their val
 
   for (const [environment, message, privateValue] of cases) {
     assert.throws(
-      () => productionBaseUrls(environment),
+      () =>
+        productionBaseUrls({
+          MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
+          ...environment,
+        }),
       (error) => {
         assert.equal(error.message, message);
         assert.doesNotMatch(error.message, new RegExp(privateValue.replaceAll(".", "\\.")));
@@ -280,8 +292,41 @@ function smokeClient(releaseSha, landingDemoSubmissionState = "disabled") {
       requests.push({ url, init });
       const parsed = new URL(url);
       const path = parsed.pathname;
+      const saasAdmin = parsed.hostname.startsWith("saas-admin.");
       const kiosk = parsed.hostname.startsWith("kiosk.");
       const landing = parsed.hostname === "markiro.example";
+      if (saasAdmin && (path === "/" || path === "/login"))
+        return response({
+          body: saasAdminShell,
+          headers: {
+            "cache-control": "no-cache",
+            "content-type": "text/html",
+            ...(releaseSha ? { "x-markiro-release-sha": releaseSha } : {}),
+          },
+        });
+      if (saasAdmin && path === "/assets/saas.js")
+        return response({
+          body: "console.log('platform')",
+          headers: {
+            "cache-control": "public, max-age=31536000, immutable",
+            "content-type": "application/javascript",
+          },
+        });
+      if (
+        saasAdmin &&
+        (path.startsWith("/api/platform-auth/") || path.startsWith("/api/platform/"))
+      )
+        return response({
+          status: path.startsWith("/api/platform/") ? 401 : 200,
+          body: path.startsWith("/api/platform/") ? '{"code":"unauthorized"}' : "null",
+          headers: { "content-type": "application/json" },
+        });
+      if (saasAdmin)
+        return response({
+          status: 404,
+          body: "not found",
+          headers: { "content-type": "text/plain" },
+        });
       if (
         landing &&
         [
@@ -491,6 +536,7 @@ test("runner public smoke exercises the external route contract without local Do
   await runPublicSmoke(
     {
       adminBaseUrl: "https://app.markiro.example",
+      saasAdminBaseUrl: "https://saas-admin.markiro.example",
       kioskBaseUrl: "https://kiosk.markiro.example",
       landingBaseUrl: "https://markiro.example",
     },
@@ -498,6 +544,13 @@ test("runner public smoke exercises the external route contract without local Do
   );
 
   assert.ok(client.requests.some(({ url }) => new URL(url).pathname === "/health/ready"));
+  assert.ok(
+    client.requests.some(
+      ({ url }) =>
+        new URL(url).hostname === "saas-admin.markiro.example" &&
+        new URL(url).pathname === "/api/platform/catalog",
+    ),
+  );
   assert.ok(
     client.requests.some(
       ({ url }) =>

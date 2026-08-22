@@ -1,13 +1,22 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
+import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 import i18n from "../i18n/index.js";
-import type { BoxPrintErrorCode } from "../lib/boxes.js";
+import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
+import type { SqlExecutor } from "../lib/mirror.js";
 import type { RecentOperation } from "../lib/journal.js";
+import type { ScanSource } from "../lib/scan-source.js";
+import { ConflictList } from "../pages/ConflictList.js";
+import { ExceptionFlow } from "../pages/ExceptionFlow.js";
+import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { FloorShell } from "../ui/FloorShell.js";
+import { OperatorNameSearch } from "../ui/OperatorNameSearch.js";
+import { PrintVerification } from "../ui/PrintVerification.js";
 import { ShiftCard } from "../ui/ShiftCard.js";
+import { StationBrand } from "../ui/StationBrand.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { WindowModeControl } from "../ui/WindowModeControl.js";
 import { BoxFillInstrument } from "../ui/work/BoxFillInstrument.js";
@@ -77,10 +86,46 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     void i18n.changeLanguage(request.locale);
   }, [request.locale]);
 
+  if (fixture.kind === "login") {
+    // The real OperatorLogin never renders inside the FloorShell station
+    // chrome -- App.tsx's `stage === "login"` branch mounts it directly
+    // under `withWindowChrome`, not `<FloorShell>`, because there is no
+    // station/operator/shift identity yet to show in a status bar. Wrapping
+    // it in the shared status bar the way every other fixture is wrapped
+    // would steal ~80px from this fixed, non-scrolling screen and visibly
+    // clip the PIN keypad's last row -- a capture artifact the real screen
+    // never has.
+    return (
+      <div
+        className="station-gallery-capture station-window-frame"
+        data-testid="station-screen-gallery"
+        data-gallery-state={fixture.id}
+        data-gallery-locale={request.locale}
+      >
+        <GalleryState fixture={fixture} locale={request.locale} />
+      </div>
+    );
+  }
+
   const syncVariant = fixture.kind === "sync" ? fixture.variant : null;
   const headerVariant = fixture.kind === "floor-header" ? fixture.variant : null;
+  // Single source of truth for every fixture that renders `WorkFixture` as an
+  // ordinary mid-shift work screen -- "work" itself, plus "box-full" and
+  // "offline", which were re-platformed onto the real work screen instead of
+  // their own standalone wrapper (see the "box"/"sync" cases in
+  // `GalleryState` below). Drives BOTH chrome decisions production ties to
+  // an active shift, so the two can never drift apart again: App.tsx sets
+  // `statusBarCollapsible={shift !== null}` (collapsed once a shift is
+  // active) and unconditionally passes `operatorControl`/`windowControl`
+  // whenever authenticated -- the latter is also true during plain shift
+  // selection (no WorkFixture yet), which is why `withActiveShiftControls`
+  // below still ORs in `fixture.kind === "shift"` on top of this.
+  const rendersActiveShiftWorkScreen =
+    fixture.kind === "work" ||
+    (fixture.kind === "box" && fixture.variant === "full") ||
+    syncVariant === "offline";
   const withActiveShiftControls =
-    headerVariant !== null || fixture.kind === "shift" || fixture.kind === "work";
+    headerVariant !== null || fixture.kind === "shift" || rendersActiveShiftWorkScreen;
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -128,7 +173,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
         syncStuck={syncVariant === "stuck"}
         conflicts={fixture.kind === "conflicts" ? 4 : 0}
-        statusBarCollapsible={fixture.kind === "work"}
+        statusBarCollapsible={rendersActiveShiftWorkScreen}
         {...(headerControls
           ? {
               update: headerControls.update,
@@ -167,7 +212,15 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
     case "signal":
       return <SignalFixture tone={fixture.variant} locale={locale} />;
     case "box":
-      return <BoxFixture full={fixture.variant === "full"} locale={locale} />;
+      // A full box is a moment inside an otherwise ordinary scanning shift --
+      // the real BoxFillInstrument never renders on its own screen the way
+      // "empty" does here for isolated component review; it always sits
+      // inside the full work screen next to the scan result and counters.
+      return fixture.variant === "full" ? (
+        <WorkFixture mode="box-full" locale={locale} />
+      ) : (
+        <BoxFixture locale={locale} />
+      );
     case "box-print-recovery":
       return <BoxPrintRecoveryFixture variant={fixture.variant} />;
     case "serial-recovery":
@@ -179,9 +232,20 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
     case "setup":
       return <SetupFixture tab={fixture.variant} locale={locale} />;
     case "sync":
-      return <SyncFixture stuck={fixture.variant === "stuck"} locale={locale} />;
+      // "offline" is not a dedicated interstitial screen in production --
+      // App.tsx never navigates away from the active work screen when the
+      // server becomes unreachable; it stays on WorkScreen and only the
+      // status bar's "Сервер"/"Синхронизация" indicators and the counters'
+      // "Не отправлено" line change (see the design spec's "Работа без
+      // сети" section). Only the genuinely stuck-queue interstitial
+      // (`sync-stuck`) is its own screen.
+      return fixture.variant === "offline" ? (
+        <WorkFixture mode="offline" locale={locale} />
+      ) : (
+        <SyncFixture locale={locale} />
+      );
     case "print":
-      return <PrintFixture variant={fixture.variant} locale={locale} />;
+      return <PrintFixture variant={fixture.variant} />;
     case "updates":
       return <UpdateFixture variant={fixture.variant} locale={locale} />;
     case "floor-header":
@@ -329,68 +393,185 @@ function PairingFixture({ variant, locale }: { variant: string; locale: GalleryL
   );
 }
 
+const RU_SEARCH_ROSTER_NAMES = [
+  "Александрова-Романовская Екатерина Владимировна",
+  "Иванов Алексей Сергеевич",
+  "Петрова Мария Андреевна",
+  "Смирнов Александр Олегович",
+  "Фёдорова Елена Викторовна",
+];
+const EN_SEARCH_ROSTER_NAMES = [
+  "Alexandria Montgomery-Wellington the Third",
+  "Alex Johnson",
+  "Alice Peterson",
+  "Alicia Smith",
+  "Alison Foster",
+];
+
+/** Every entry matches the fixed query below through the real `searchOperatorsByName`. */
+function galleryOperatorRoster(locale: GalleryLocale): OperatorMirrorRecord[] {
+  const names = locale === "ru" ? RU_SEARCH_ROSTER_NAMES : EN_SEARCH_ROSTER_NAMES;
+  return names.map((name, index) => ({
+    operatorId: `gallery-search-operator-${index}`,
+    name,
+    login: String(100234001 + index),
+    role: "packer",
+    pinHash: "gallery-demo-pin-hash",
+    badgeHash: null,
+    active: true,
+  }));
+}
+
+/** Mirrors OperatorLogin.tsx's own render tree (composed from the same real
+ * sub-components) instead of hand-copied markup, so the captured screenshot
+ * matches the current badge-first sign-in flow stage for stage. */
 function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const isSearch = variant === "name-search";
-  const searchNames = ru
-    ? [
-        "Александрова-Романовская Екатерина Владимировна",
-        "Иванов Алексей Сергеевич",
-        "Петрова Мария Андреевна",
-        "Смирнов Александр Олегович",
-        "Фёдорова Елена Викторовна",
-      ]
-    : [
-        "Alexandria Montgomery-Wellington the Third",
-        "Alex Johnson",
-        "Alice Peterson",
-        "Alicia Smith",
-        "Alison Foster",
-      ];
-  const title = ru ? "Вход оператора" : "Operator sign-in";
-  const prompt =
+  const t = i18n.getFixedT(locale);
+  const stage: "badge" | "login" | "pin" | "search" =
     variant === "badge"
-      ? ru
-        ? "Приложите пропуск"
-        : "Present badge"
-      : variant === "number"
-        ? ru
-          ? "Введите логин"
-          : "Enter login"
-        : variant === "pin"
-          ? ru
-            ? "Введите PIN"
-            : "Enter PIN"
-          : ru
-            ? "Найдите себя по имени"
-            : "Find your name";
+      ? "badge"
+      : variant === "pin"
+        ? "pin"
+        : variant === "name-search"
+          ? "search"
+          : "login";
+  const prompt =
+    stage === "badge"
+      ? t("login.badgePrimary")
+      : stage === "login"
+        ? t("login.loginPrompt")
+        : stage === "search"
+          ? t("login.nameSearchPrompt")
+          : t("login.pinPrompt");
+  const loginValue = "0042";
+  const pinValue = "1234";
+  const roster = galleryOperatorRoster(locale);
+  const searchQuery = locale === "ru" ? "ов" : "Al";
+
   return (
-    <StationScreen title={title} header={<p className="gallery-subtitle">{prompt}</p>}>
-      {isSearch ? (
-        <div className="gallery-search-grid" data-testid="gallery-name-search-results">
-          <div className="gallery-search-field">{ru ? "Але" : "Ale"}</div>
-          {searchNames.map((name) => (
-            <Button key={name} size="floor" variant="secondary" fullWidth>
-              <span className="operator-name-search__result-label">{name}</span>
+    <main className="operator-login" aria-labelledby="gallery-operator-login-title">
+      <header className="operator-login__header">
+        <StationBrand
+          compact
+          className="operator-login__brand"
+          descriptor={t("app.stationDescriptor")}
+        />
+        <div className="operator-login__prompt">
+          <h1 id="gallery-operator-login-title">{t("login.title")}</h1>
+          <p>{prompt}</p>
+        </div>
+      </header>
+
+      <div
+        className="operator-login__message"
+        aria-live="polite"
+        style={{ minHeight: 64, overflow: "hidden" }}
+      />
+
+      {stage === "badge" ? (
+        <div
+          className="operator-login__scanner-status"
+          role="status"
+          aria-label={t("login.badgeReady")}
+        >
+          <span className="operator-login__scanner-status-icon" aria-hidden="true">
+            ✓
+          </span>
+          <span>{t("login.badgeReady")}</span>
+        </div>
+      ) : null}
+
+      <div
+        className={`operator-login__body${stage === "badge" ? " operator-login__body--badge" : ""}`}
+      >
+        {stage === "search" ? (
+          // `display: contents` keeps this wrapper (added only to give the
+          // capture a stable query hook) out of the box model, so
+          // `.operator-name-search` still lands directly in
+          // `.operator-login__body`'s grid the way production's untouched
+          // JSX does -- required for its `grid-row: 1 / -1; height: 100%`.
+          <div data-testid="gallery-name-search-results" style={{ display: "contents" }}>
+            <OperatorNameSearch
+              operators={roster}
+              query={searchQuery}
+              onQueryChange={() => undefined}
+              onSelect={() => undefined}
+              disabled={false}
+            />
+          </div>
+        ) : (
+          <>
+            {stage !== "badge" ? (
+              <div
+                className="operator-login__readout"
+                aria-label={stage === "login" ? "login" : "pin"}
+              >
+                {stage === "login" ? loginValue : "•".repeat(pinValue.length)}
+              </div>
+            ) : null}
+            <div className="operator-login__keypad-zone">
+              {stage === "badge" ? (
+                <div className="operator-login__badge-panel">
+                  <BadgeScanIllustration />
+                  <div className="operator-login__badge-copy">
+                    <h2>{t("login.badgeInstruction")}</h2>
+                    <p>{t("login.badgeExplanation")}</p>
+                  </div>
+                </div>
+              ) : (
+                <PinPad
+                  value={stage === "login" ? loginValue : pinValue}
+                  onChange={() => undefined}
+                  maxLength={stage === "login" ? 12 : 6}
+                  size="floor"
+                  ariaLabel={stage === "login" ? t("login.loginKeypad") : t("login.pinKeypad")}
+                  backspaceLabel={t("login.backspace")}
+                  clearLabel={t("login.clear")}
+                />
+              )}
+            </div>
+          </>
+        )}
+      </div>
+
+      <div
+        className="operator-login__actions"
+        style={{ "--operator-login-action-columns": stage === "login" ? 3 : 2 } as CSSProperties}
+      >
+        {stage === "badge" ? (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.findByName")}
             </Button>
-          ))}
-        </div>
-      ) : variant === "badge" ? (
-        <div className="gallery-badge" aria-hidden="true">
-          ▣
-        </div>
-      ) : (
-        <div className="gallery-keypad">
-          <div className="gallery-code">{variant === "pin" ? "••••" : "0042"}</div>
-          <PinPad
-            value={variant === "pin" ? "1234" : "0042"}
-            maxLength={12}
-            size="floor"
-            onChange={() => undefined}
-          />
-        </div>
-      )}
-    </StationScreen>
+            <Button size="floor">{t("login.useLogin")}</Button>
+          </>
+        ) : stage === "login" ? (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.back")}
+            </Button>
+            <Button size="floor" variant="secondary">
+              {t("login.findByName")}
+            </Button>
+            <Button size="floor">{t("login.next")}</Button>
+          </>
+        ) : stage === "pin" ? (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.back")}
+            </Button>
+            <Button size="floor">{t("login.submit")}</Button>
+          </>
+        ) : (
+          <>
+            <Button size="floor" variant="secondary">
+              {t("login.back")}
+            </Button>
+            <Button size="floor">{t("login.useLogin")}</Button>
+          </>
+        )}
+      </div>
+    </main>
   );
 }
 
@@ -623,10 +804,32 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
 
 function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
-  const aggregation = mode.startsWith("aggregation");
+  const t = i18n.getFixedT(locale);
+  // "box-full" is a filled box moments before it closes -- still an ordinary
+  // scanning shift, just with the box panel at capacity, so it shares the
+  // aggregation branch's box panel below.
+  const boxFull = mode === "box-full";
+  const aggregation = mode.startsWith("aggregation") || boxFull;
+  // "waiting" is a freshly opened shift: no scan has landed yet, so the
+  // journal-backed counters and recent-operations list must be empty too --
+  // not the mid-shift numbers a screen with an actual scan history would show.
+  // "ok" (validation-mode, no box panel) falls through here as non-waiting on
+  // purpose: it needs `operations[0]` populated below so ScanResultInstrument
+  // renders the real inline compact-success panel -- the accepted verdict's
+  // ONLY visible feedback in production (see the module doc comment above
+  // `SignalFixture`).
   const waiting = mode === "validation" || mode === "aggregation-waiting";
-  const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
-  const operations = galleryRecentOperations();
+  const workLabels = buildWorkLabels(t, locale, 1);
+  const operations = waiting ? [] : galleryRecentOperations();
+  // Validation-mode shifts carry a plan target the way the shift list's own
+  // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
+  // shifts in this gallery have no plan, matching the shift list there too.
+  const plannedQty = mode === "validation" ? 10_000 : undefined;
+  // A grouped, >100-capacity box (see BoxFillInstrument's own `grouped` rule)
+  // exercises the same viewport-review case the standalone "box-empty"
+  // fixture already covers for the empty end of the range.
+  const boxCapacity = boxFull ? 120 : 20;
+  const boxItemCount = boxFull ? 120 : 2;
   return (
     <main className="work-screen" aria-label={ru ? "Тестовый товар А" : "Sample product A"}>
       <div className="work-screen__content">
@@ -638,15 +841,17 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               image={galleryProductImage}
               productName={ru ? "Тестовый товар А" : "Sample product A"}
               counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
+              plannedQty={plannedQty}
+              planLabel={t("work.plan")}
               operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
             />
             {aggregation ? (
               <BoxFillInstrument
-                box={{ boxId: "gallery-box-1", itemCount: 2 }}
+                box={{ boxId: "gallery-box-1", itemCount: boxItemCount }}
                 ordinal={1}
-                acceptedToken="gallery-accepted-2"
-                capacity={20}
+                acceptedToken={boxFull ? "gallery-box-full" : "gallery-accepted-2"}
+                capacity={boxCapacity}
                 canUndo
                 labels={workLabels.box}
                 onClose={() => undefined}
@@ -657,9 +862,9 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
           </div>
           <aside className="work-screen__secondary" aria-label={workLabels.summary}>
             <WorkCounters
-              accepted={1248}
-              rejected={3}
-              pendingSync={7}
+              accepted={waiting ? 0 : 1248}
+              rejected={waiting ? 0 : 3}
+              pendingSync={mode === "offline" ? 7 : 0}
               locale={workLabels.locale}
               labels={workLabels.counters}
             />
@@ -752,44 +957,55 @@ function WorkOverlayFixture({ overlay, locale }: { overlay: string; locale: Gall
   );
 }
 
+/**
+ * Mirrors WorkScreen's own `toneOf`/`showTimedSignal` wiring: the title
+ * always comes from the same `signal.*` keys the real verdict flash uses, and
+ * -- like production -- only "duplicate" carries a detail line (the
+ * `signal.firstSeen` first-scan time); an error verdict never has a second
+ * line (see `onOutcome`'s `detail` computation, which stays `undefined` for
+ * every non-duplicate status).
+ *
+ * "duplicate"/"error" only -- "ok" is not a signal-overlay state in
+ * production (WorkScreen.tsx's `publishVerdict` returns early for tone
+ * "ok", so the accepted verdict never gets a full-screen flash); its gallery
+ * id (`work-ok`) instead goes through `WorkFixture`'s "ok" mode below, which
+ * renders the real inline compact-success panel.
+ */
 function SignalFixture({ tone, locale }: { tone: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
+  const t = i18n.getFixedT(locale);
   if (tone === "duplicate") {
+    const time = locale === "ru" ? "14:31:52" : "2:31:52 PM";
     return (
       <SignalOverlay
         tone="duplicate"
-        title={ru ? "ДУБЛИКАТ" : "DUPLICATE"}
-        detail={ru ? "Первое сканирование 14:31:52" : "First scanned 14:31:52"}
+        title={t("signal.duplicate")}
+        detail={t("signal.firstSeen", { time })}
       />
     );
   }
-  if (tone === "error") {
-    return (
-      <SignalOverlay
-        tone="error"
-        title={ru ? "КОД ОТКЛОНЁН" : "CODE REJECTED"}
-        detail={ru ? "Неверный GTIN" : "Invalid GTIN"}
-      />
-    );
-  }
-  return (
-    <SignalOverlay tone="ok" title={ru ? "ПРИНЯТО" : "ACCEPTED"} detail="TEST-SERIAL-000128" />
-  );
+  // Any of signal.wrongCode/wrongGtin/systemError is a faithful "red
+  // verdict" -- this picks the wrong-GTIN case (a scan for a different,
+  // known product) as the representative example.
+  return <SignalOverlay tone="error" title={t("signal.wrongGtin")} />;
 }
 
-function BoxFixture({ full, locale }: { full: boolean; locale: GalleryLocale }) {
+/**
+ * "box-empty" only -- an isolated component review of an unstarted box,
+ * never a real production screen (the box panel only ever renders inside the
+ * work screen; see "box-full" above, which now goes through `WorkFixture`
+ * instead of this wrapper for exactly that reason).
+ */
+function BoxFixture({ locale }: { locale: GalleryLocale }) {
   const ru = locale === "ru";
-  const capacity = full ? 120 : 20;
-  const itemCount = full ? capacity : 0;
   const workLabels = buildWorkLabels(i18n.getFixedT(locale), locale, 1);
   return (
     <StationScreen title={ru ? "Текущий короб" : "Current box"}>
       <BoxFillInstrument
-        box={{ boxId: "gallery-box-standalone", itemCount }}
+        box={{ boxId: "gallery-box-standalone", itemCount: 0 }}
         ordinal={1}
-        acceptedToken={full ? "gallery-full" : null}
-        capacity={capacity}
-        canUndo={itemCount > 0}
+        acceptedToken={null}
+        capacity={20}
+        canUndo={false}
         labels={workLabels.box}
         onClose={() => undefined}
         onUndo={() => undefined}
@@ -852,132 +1068,208 @@ function SerialRecoveryFixture({ locale }: { locale: GalleryLocale }) {
   );
 }
 
+const GALLERY_EXCEPTION_BOXES: ClosedBoxSummary[] = [
+  {
+    boxId: "gallery-exception-box-1",
+    sscc: "046012345600000016",
+    itemCount: 24,
+    closedAt: "2026-08-21T09:14:00+03:00",
+  },
+  {
+    boxId: "gallery-exception-box-2",
+    sscc: "046012345600000023",
+    itemCount: 18,
+    closedAt: "2026-08-21T10:02:00+03:00",
+  },
+  {
+    boxId: "gallery-exception-box-3",
+    sscc: "046012345600000030",
+    itemCount: 12,
+    closedAt: "2026-08-21T10:41:00+03:00",
+  },
+];
+
+/** Never fires on its own -- exists only so `ExceptionFlow` renders the real
+ * scan-target hint on its "target" stage the way it does whenever WorkScreen
+ * hands it a live scan source. */
+function galleryExceptionScanSource(): ScanSource {
+  return { start: () => () => undefined };
+}
+
+/**
+ * Mirrors ExceptionFlow.tsx's own render tree (the real component, driven
+ * through its own buttons) instead of hand-copied markup, so every captured
+ * stage matches the current exception flow -- action/target/reason copy,
+ * button variants, and (critically) the "confirm" stage's irreversible
+ * double-confirmation dialog, which only the "disassemble" action reaches.
+ * "reprint" shares the same "target"/"reason" stages but a different,
+ * non-double-confirmed "confirm" screen. This fixture drives the "reprint"
+ * path only for the "reason" stage, so exception-reason shows the reprint
+ * reason directory ("Этикетка повреждена" et al.) instead of the
+ * disassemble one; every other stage -- including "confirm"/"result" --
+ * drives the "disassemble" path so exception-confirm/-result keep showing
+ * the disassemble copy (irreversible double-confirmation) the design spec
+ * calls for.
+ */
 function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const title: Record<string, string> = {
-    action: ru ? "Выберите действие" : "Choose action",
-    target: ru ? "Выберите короб" : "Choose box",
-    reason: ru ? "Укажите причину" : "Choose reason",
-    confirm: ru ? "Подтвердите действие" : "Confirm action",
-    applying: ru ? "Выполняем действие" : "Applying action",
-    result: ru ? "Действие выполнено" : "Action completed",
-  };
-  const items: Record<string, string[]> = {
-    action: ru
-      ? [
-          "Отменить последнее сканирование",
-          "Очистить короб",
-          "Повторить печать",
-          "Расформировать короб",
-        ]
-      : ["Undo latest scan", "Clear box", "Reprint label", "Disassemble box"],
-    target: ["TEST-BOX-0001 · 24", "TEST-BOX-0002 · 18", "TEST-BOX-0003 · 12"],
-    reason: ru
-      ? ["Этикетка повреждена", "Этикетка не читается", "Замятие в принтере", "Другая причина"]
-      : ["Damaged label", "Unreadable label", "Printer jam", "Other reason"],
-    confirm: [ru ? "Повторно напечатать этикетку TEST-BOX-0001?" : "Reprint label TEST-BOX-0001?"],
-    applying: [ru ? "Запись сохраняется в локальный журнал…" : "Saving to the local journal…"],
-    result: [ru ? "Этикетка отправлена на печать" : "Label sent to printer"],
-  };
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    if (stage === "action") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const t = i18n.getFixedT(locale);
+    const clickByText = (text: string): void => {
+      const button = Array.from(root.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.trim() === text,
+      );
+      button?.click();
+    };
+    // Only the "reason" stage drives the reprint path -- see the comment above.
+    const initialAction = stage === "reason" ? t("box.reprintAction") : t("box.disassembleAction");
+    const steps: Array<() => void> = [() => clickByText(initialAction)];
+    if (stage !== "target") {
+      steps.push(() => root.querySelector<HTMLButtonElement>(".shift-boxes__row")?.click());
+    }
+    if (stage === "confirm" || stage === "applying" || stage === "result") {
+      steps.push(() => clickByText(t("box.reasons.disassemble.wrongProduct")));
+    }
+    if (stage === "applying" || stage === "result") {
+      steps.push(() => clickByText(t("box.confirmDisassemble")));
+    }
+    let index = 0;
+    function runNext(): void {
+      if (index >= steps.length) return;
+      steps[index]?.();
+      index += 1;
+      setTimeout(runNext, 0);
+    }
+    setTimeout(runNext, 0);
+  }, [stage, locale]);
+
   return (
-    <StationScreen
-      title={ru ? "Исключения" : "Exceptions"}
-      header={<p className="gallery-subtitle">{title[stage]}</p>}
-      actions={
-        <GalleryFooter
-          locale={locale}
-          {...(stage === "confirm" ? { primary: ru ? "Подтвердить" : "Confirm" } : {})}
-        />
-      }
-    >
-      <div className="gallery-action-grid">
-        {(items[stage] ?? []).map((item) =>
-          stage === "result" || stage === "applying" ? (
-            <Alert key={item} tone={stage === "result" ? "ok" : "info"}>
-              {item}
-            </Alert>
-          ) : (
-            <Button key={item} size="floor" variant="secondary">
-              {item}
-            </Button>
-          ),
-        )}
-      </div>
-    </StationScreen>
+    <div ref={rootRef} className="gallery-exception-flow">
+      <ExceptionFlow
+        boxes={GALLERY_EXCEPTION_BOXES}
+        canUndo
+        hasOpenBox
+        onUndo={() => Promise.resolve()}
+        onClear={() => Promise.resolve()}
+        onReprint={() => Promise.resolve()}
+        // "applying" must stay parked on that stage for its own capture --
+        // an already-resolved promise would flip straight to "result"
+        // before the screenshot lands.
+        onDisassemble={() =>
+          stage === "applying" ? new Promise<void>(() => undefined) : Promise.resolve()
+        }
+        onBack={() => undefined}
+        onPendingChange={() => undefined}
+        scanSource={galleryExceptionScanSource()}
+      />
+    </div>
   );
 }
 
+interface GalleryConflictRow {
+  code_hash: string;
+  winning_terminal_id: string | null;
+  winning_scanned_at: string;
+  detected_at: string;
+  gtin14: string | null;
+  serial: string | null;
+}
+
+const GALLERY_CONFLICT_ROWS: GalleryConflictRow[] = [
+  {
+    code_hash: "gallery-conflict-1",
+    winning_terminal_id: "DEMO-TERM-11",
+    winning_scanned_at: "2026-08-21T09:14:22+03:00",
+    detected_at: "2026-08-21T09:15:03+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000128",
+  },
+  {
+    code_hash: "gallery-conflict-2",
+    winning_terminal_id: "DEMO-TERM-12",
+    winning_scanned_at: "2026-08-21T09:18:47+03:00",
+    detected_at: "2026-08-21T09:19:10+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000129",
+  },
+  {
+    code_hash: "gallery-conflict-3",
+    winning_terminal_id: "DEMO-TERM-21",
+    winning_scanned_at: "2026-08-21T10:02:31+03:00",
+    detected_at: "2026-08-21T10:03:05+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000130",
+  },
+  {
+    code_hash: "gallery-conflict-4",
+    winning_terminal_id: "DEMO-TERM-22",
+    winning_scanned_at: "2026-08-21T10:07:58+03:00",
+    detected_at: "2026-08-21T10:08:40+03:00",
+    gtin14: "04607000000042",
+    serial: "DEMO-SERIAL-000131",
+  },
+];
+
+/** Answers exactly the two queries `readConflicts` issues (see
+ * `apps/station/src/lib/conflicts.ts`), so `ConflictList` -- the real
+ * component -- drives every persistent variant without a network dependency.
+ * "loading" never resolves, reproducing the interstitial for a static
+ * capture; "read-error" rejects the count query the way a corrupt local
+ * mirror would. */
+function galleryConflictExecutor(variant: string): SqlExecutor {
+  const rows = variant === "empty" ? [] : GALLERY_CONFLICT_ROWS;
+  return {
+    run: () => Promise.resolve(),
+    all<T>(sql: string, params?: unknown[]): Promise<T[]> {
+      if (variant === "loading") return new Promise<T[]>(() => undefined);
+      if (sql.includes("COUNT(*)")) {
+        if (variant === "read-error") {
+          return Promise.reject(new Error("gallery: conflict read failed"));
+        }
+        return Promise.resolve([{ n: rows.length }] as T[]);
+      }
+      if (sql.includes("FROM conflicts_mirror")) {
+        const [limit, offset] = (params ?? []) as [number, number];
+        return Promise.resolve(rows.slice(offset, offset + limit) as T[]);
+      }
+      return Promise.resolve([]);
+    },
+  };
+}
+
+/**
+ * Mirrors ConflictList.tsx's own render tree (the real component, backed by
+ * a synthetic executor answering its exact queries) instead of hand-copied
+ * markup, so title, per-card copy ("Закреплён за …"), and pagination match
+ * the current production screen. "2" drives the real component to its own
+ * second page through its own Pager "next" button, the same way a real
+ * operator would.
+ */
 function ConflictFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  if (variant === "loading" || variant === "read-error" || variant === "empty") {
-    return (
-      <StationScreen
-        title={ru ? "Конфликты" : "Conflicts"}
-        actions={<GalleryFooter locale={locale} />}
-      >
-        <div className="gallery-centered-card">
-          {variant === "read-error" ? (
-            <Alert
-              tone="error"
-              action={
-                <Button size="floor" variant="secondary">
-                  {ru ? "Повторить" : "Retry"}
-                </Button>
-              }
-            >
-              {ru
-                ? "Не удалось прочитать локальные конфликты"
-                : "Local conflicts could not be read"}
-            </Alert>
-          ) : (
-            <p
-              className="gallery-state-message"
-              role={variant === "loading" ? "status" : undefined}
-            >
-              {variant === "loading"
-                ? ru
-                  ? "Загрузка конфликтов…"
-                  : "Loading conflicts…"
-                : ru
-                  ? "Конфликтов нет"
-                  : "There are no conflicts"}
-            </p>
-          )}
-        </div>
-      </StationScreen>
-    );
-  }
-  const page = variant === "2" ? 2 : 1;
-  const serials = page === 1 ? ["TEST-000128", "TEST-000129"] : ["TEST-000130", "TEST-000131"];
+  const rootRef = useRef<HTMLDivElement>(null);
+  const exec = useMemo(() => galleryConflictExecutor(variant), [variant]);
+
+  useLayoutEffect(() => {
+    if (variant !== "2") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const t = i18n.getFixedT(locale);
+    setTimeout(() => {
+      const next = Array.from(root.querySelectorAll("button")).find(
+        (candidate) => candidate.textContent?.trim() === t("conflicts.nextPage"),
+      );
+      next?.click();
+    }, 0);
+  }, [variant, locale]);
+
   return (
-    <StationScreen
-      title={ru ? "Конфликты" : "Conflicts"}
-      actions={<GalleryFooter locale={locale} />}
-    >
-      <div className="gallery-paged-grid">
-        <div className="gallery-two-cards">
-          {serials.map((serial, index) => (
-            <Card key={serial} className="gallery-card" title={`04607000000042 ${serial}`}>
-              <p>
-                {ru ? "Первой приняла" : "Accepted first by"}: DEMO-TERM-{page}
-                {index + 1}
-              </p>
-              <p>
-                {ru
-                  ? "Продолжайте работу; запись сохранена."
-                  : "Continue working; the record is retained."}
-              </p>
-            </Card>
-          ))}
-        </div>
-        <GalleryPager
-          page={page}
-          previousLabel={ru ? "Назад" : "Previous"}
-          nextLabel={ru ? "Далее" : "Next"}
-          pageLabel={COPY[locale].page(page)}
-        />
-      </div>
-    </StationScreen>
+    <div ref={rootRef} className="gallery-conflict-list">
+      <ConflictList exec={exec} onBack={() => undefined} />
+    </div>
   );
 }
 
@@ -1029,38 +1321,22 @@ function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
   );
 }
 
-function SyncFixture({ stuck, locale }: { stuck: boolean; locale: GalleryLocale }) {
+/**
+ * "sync-stuck" only -- the queue-stopped interstitial. Plain "offline" is not
+ * a dedicated screen in production (see the "sync" case in `GalleryState`
+ * above), so this component no longer needs an "offline" branch.
+ */
+function SyncFixture({ locale }: { locale: GalleryLocale }) {
   const ru = locale === "ru";
   return (
     <StationScreen
-      title={
-        stuck
-          ? ru
-            ? "Синхронизация остановилась"
-            : "Sync stopped"
-          : ru
-            ? "Работа без сети"
-            : "Working offline"
-      }
-      actions={
-        <GalleryFooter
-          locale={locale}
-          {...(stuck ? { primary: ru ? "Повторить" : "Retry" } : {})}
-        />
-      }
+      title={ru ? "Синхронизация остановилась" : "Sync stopped"}
+      actions={<GalleryFooter locale={locale} primary={ru ? "Повторить" : "Retry"} />}
     >
       <div className="gallery-centered-card">
         <Alert
           tone="warn"
-          title={
-            stuck
-              ? ru
-                ? "18 операций ожидают отправки"
-                : "18 operations are waiting"
-              : ru
-                ? "7 операций сохранены на устройстве"
-                : "7 operations are saved on this device"
-          }
+          title={ru ? "18 операций ожидают отправки" : "18 operations are waiting"}
         >
           <p>
             {ru
@@ -1073,39 +1349,44 @@ function SyncFixture({ stuck, locale }: { stuck: boolean; locale: GalleryLocale 
   );
 }
 
-function PrintFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const mismatch = variant === "mismatch";
-  const notSscc = variant === "not-sscc";
+/** A valid, but different-from-`expected`, SSCC -- exercises PrintVerification's
+ * own "mismatch" branch (a real, checksum-valid box label, just the wrong one). */
+const GALLERY_PRINT_VERIFICATION_EXPECTED_SSCC = "046012345600000016";
+const GALLERY_PRINT_VERIFICATION_OTHER_SSCC = "046012345600000023";
+
+/** Delivers one fixed raw payload (or none) the instant PrintVerification
+ * subscribes, reproducing its "mismatch"/"notSscc" feedback without a real
+ * scanner -- `start` runs synchronously inside the component's own mount
+ * effect, so the listener fires before that effect's `active` flag could
+ * ever be stale. */
+function galleryPrintScanSource(raw: string | null): ScanSource {
+  return {
+    start(listener) {
+      if (raw !== null) listener(raw);
+      return () => undefined;
+    },
+  };
+}
+
+/** Mirrors PrintVerification.tsx's own render tree (the real component, not
+ * hand-copied markup) so the captured screen matches the current box-label
+ * verification dialog -- title, instruction copy, SSCC formatting, and
+ * footer button placement -- stage for stage. */
+function PrintFixture({ variant }: { variant: string }) {
+  const raw =
+    variant === "mismatch"
+      ? GALLERY_PRINT_VERIFICATION_OTHER_SSCC
+      : variant === "not-sscc"
+        ? "NOT-A-VALID-SSCC"
+        : null;
   return (
-    <StationScreen
-      title={ru ? "Проверьте напечатанную этикетку" : "Verify the printed label"}
-      actions={
-        <GalleryFooter
-          locale={locale}
-          primary={ru ? "Повторить печать" : "Reprint"}
-          secondary={ru ? "Пропустить" : "Skip"}
-        />
-      }
-    >
-      <div className="gallery-print">
-        <p>{ru ? "Отсканируйте SSCC с этикетки короба" : "Scan the SSCC on the box label"}</p>
-        <strong className="gallery-code">000000000000000000</strong>
-        <Alert tone={mismatch || notSscc ? "error" : "info"}>
-          {mismatch
-            ? ru
-              ? "Отсканирован SSCC другого короба"
-              : "The scanned SSCC belongs to another box"
-            : notSscc
-              ? ru
-                ? "На этикетке не распознан SSCC"
-                : "No SSCC was recognized on the label"
-              : ru
-                ? "Ожидание сканирования"
-                : "Waiting for scan"}
-        </Alert>
-      </div>
-    </StationScreen>
+    <PrintVerification
+      expected={GALLERY_PRINT_VERIFICATION_EXPECTED_SSCC}
+      onVerified={() => undefined}
+      onReprint={() => undefined}
+      onSkip={() => undefined}
+      scanSource={galleryPrintScanSource(raw)}
+    />
   );
 }
 

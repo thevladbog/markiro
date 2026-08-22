@@ -31,6 +31,7 @@ const ALLOWED_VBTECH_INPUTS = new Set([
 ]);
 const ALLOWED_MARKIRO_INPUTS = new Set([
   "MARKIRO_DOMAIN",
+  "MARKIRO_SAAS_ADMIN_DOMAIN",
   "MARKIRO_KIOSK_DOMAIN",
   "MARKIRO_LANDING_DOMAIN",
 ]);
@@ -75,12 +76,18 @@ function validateHostedInput(environment) {
     if (Object.hasOwn(environment, "VBTECH_IMAGE_REF") && environment.VBTECH_IMAGE_REF !== imageRef)
       throw configurationError();
 
-    const { domain, kioskDomain, landingDomain } = validateProductionDomains(
+    const { domain, saasAdminDomain, kioskDomain, landingDomain } = validateProductionDomains(
       requiredEnvironment("MARKIRO_DOMAIN", environment),
+      requiredEnvironment("MARKIRO_SAAS_ADMIN_DOMAIN", environment),
       requiredEnvironment("MARKIRO_KIOSK_DOMAIN", environment),
       requiredEnvironment("MARKIRO_LANDING_DOMAIN", environment),
     );
-    validateVbtechDomains("v-b.tech", "www.v-b.tech", [domain, kioskDomain, landingDomain]);
+    validateVbtechDomains("v-b.tech", "www.v-b.tech", [
+      domain,
+      saasAdminDomain,
+      kioskDomain,
+      landingDomain,
+    ]);
     const address = publicIpv4(requiredEnvironment("YC_APP_PUBLIC_ADDRESS", environment));
     const login = requiredEnvironment("YC_APP_DEPLOY_LOGIN", environment);
     if (login !== "markiro-deploy") throw configurationError();
@@ -115,6 +122,7 @@ function validateHostedInput(environment) {
       login,
       registryInput,
       releaseSha,
+      saasAdminDomain,
     };
   } catch {
     throw configurationError();
@@ -154,6 +162,7 @@ function executorEnvironmentArguments(input) {
     "MARKIRO_COMPOSE_PROJECT=markiro-production",
     "MARKIRO_ENV_FILE=/etc/markiro/production.env",
     `MARKIRO_DOMAIN=${input.domain}`,
+    `MARKIRO_SAAS_ADMIN_DOMAIN=${input.saasAdminDomain}`,
     `MARKIRO_KIOSK_DOMAIN=${input.kioskDomain}`,
     `MARKIRO_LANDING_DOMAIN=${input.landingDomain}`,
     `VBTECH_RELEASE_SHA=${input.releaseSha}`,

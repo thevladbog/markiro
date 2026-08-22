@@ -1,8 +1,27 @@
 {
+  "brand": {
+    "logoAlt": "Markiro logo"
+  },
   "auth": {
     "email": "Email",
     "password": "Password",
     "signOut": "Sign out",
+    "frame": {
+      "brandRegion": "Markiro operations perimeter",
+      "headline": "The platform, under control.",
+      "description": "An internal perimeter for managing tenants, subscriptions, and billing.",
+      "contour": "Perimeter",
+      "internal": "Internal",
+      "access": "Access",
+      "region": "Region",
+      "staffOnly": "MARKIRO STAFF ONLY",
+      "twoFactorRequired": "2FA REQUIRED",
+      "toggleLanguage": "Switch interface language",
+      "toggleTheme": "Change theme. Current: {{theme}}",
+      "themeSystem": "SYSTEM THEME",
+      "themeLight": "LIGHT THEME",
+      "themeDark": "DARK THEME"
+    },
     "validation": {
       "email": "Enter a valid address",
       "required": "This field is required",
@@ -15,7 +34,7 @@
     "login": {
       "eyebrow": "Access perimeter",
       "title": "Platform sign in",
-      "subtitle": "Isolated service perimeter for Markiro operations.",
+      "subtitle": "Use your Markiro staff account. An authenticator code is required after the password.",
       "submit": "Sign in",
       "recovery": "Use a backup code",
       "error": "Could not sign in"
@@ -38,12 +57,15 @@
       "challengeTitle": "Two-factor check",
       "challengeBody": "Enter the current code from your authenticator app.",
       "enrollTitle": "Set up 2FA",
-      "enrollBody": "Operational sections remain locked until the new key is verified.",
+      "enrollBody": "Scan the QR code in your authenticator app and save the backup codes.",
       "createKey": "Create 2FA key",
       "secretSurface": "2FA enrollment data",
       "qrAlt": "QR code for two-factor authentication setup",
-      "secretWarning": "Add the key to your app and save the backup codes. They disappear after you leave this screen.",
+      "manualTitle": "Manual key",
+      "manualHelp": "Scan the QR code with your authenticator app. If scanning is unavailable, add the key manually.",
+      "keyOnce": "The key is shown only now.",
       "backupTitle": "Backup codes",
+      "backupMeta": "One-time use",
       "code": "Authenticator code",
       "verify": "Verify code",
       "useBackup": "Use a backup code",
@@ -116,7 +138,82 @@
     "detail": "Invoice",
     "issue": "Issue",
     "pay": "Record payment",
-    "document": "Generate document"
+    "document": "Generate document",
+    "back": "Back to invoice register",
+    "detailTitle": "Invoice {{number}}",
+    "loadingDetail": "Loading invoice state",
+    "detailLoadError": "Could not load invoice",
+    "issueDate": "Issued",
+    "dueDate": "Due date",
+    "applicationMode": "Application mode",
+    "invoiceLines": "Items and application",
+    "position": "Pos.",
+    "item": "Catalog item",
+    "activation": "Activation",
+    "applicationStatus": "Result",
+    "paymentTitle": "Payment confirmation",
+    "paymentDoesNotApply": "Payment does not change the subscription yet",
+    "bankReference": "Bank reference",
+    "confirmPayment": "Confirm payment",
+    "retryPayment": "Retry payment",
+    "paymentError": "Payment could not be recorded. A retry uses the same operation key.",
+    "applicationTitle": "Apply paid items",
+    "operatorDecision": "Waiting for an operator decision",
+    "applicationReason": "Application reason",
+    "applyHow": "How to apply {{name}}",
+    "choosePolicy": "Choose activation timing",
+    "applySelected": "Apply selected lines",
+    "applicationError": "Could not apply the selected lines",
+    "readOnly": "You can view this invoice but cannot change its state.",
+    "statuses": { "draft": "Draft", "issued": "Issued", "paid": "Paid", "cancelled": "Cancelled" },
+    "modes": { "manual": "After operator decision", "automatic": "Automatically after payment" },
+    "policies": {
+      "immediate": "Immediately",
+      "after_current": "After current",
+      "manual": "Operator decides"
+    },
+    "applicationStatuses": {
+      "not_started": "Not started",
+      "pending": "Pending",
+      "applied": "Applied",
+      "failed": "Needs attention"
+    },
+    "flow": {
+      "label": "Invoice stages",
+      "issued": "Invoice issued",
+      "issuedHint": "Items and price are frozen",
+      "payment": "Payment confirmed",
+      "paymentHint": "Financial fact recorded",
+      "application": "Items applied",
+      "applicationHint": "Subscription and services reconciled"
+    },
+    "states": {
+      "draft": {
+        "eyebrow": "DRAFT",
+        "title": "Invoice has not been issued",
+        "body": "Review the items and total, then issue the invoice to freeze its terms."
+      },
+      "waiting_payment": {
+        "eyebrow": "WAITING FOR PAYMENT",
+        "title": "Invoice is ready for payment",
+        "body": "The subscription stays unchanged until payment is confirmed and items are applied."
+      },
+      "waiting_application": {
+        "eyebrow": "PAID · ACTION REQUIRED",
+        "title": "Waiting for an operator decision",
+        "body": "Payment is confirmed. Review the lines and choose activation timing where required."
+      },
+      "partial_failure": {
+        "eyebrow": "PARTIALLY APPLIED",
+        "title": "Some items need attention",
+        "body": "Successful changes are preserved and failed lines can be retried safely."
+      },
+      "applied": {
+        "eyebrow": "APPLIED",
+        "title": "Commercial cycle complete",
+        "body": "Payment and every line result are recorded in history."
+      }
+    }
   },
   "documents": {
     "eyebrow": { "invoice": "Invoice issuance", "offer": "Commercial terms" },
@@ -219,7 +316,7 @@
     "statuses": {
       "active": "Active",
       "suspended": "Suspended",
-      "pending_activation": "Pending activation"
+      "invited": "Pending activation"
     }
   },
   "audit": {
@@ -451,7 +548,8 @@
     "sources": {
       "demo": "Demo provisioning",
       "manual": "Manual assignment",
-      "paid_offer_line": "Paid offer"
+      "paid_offer_line": "Paid offer",
+      "paid_invoice_line": "Paid invoice"
     },
     "createForm": {
       "title": "New tenant",
