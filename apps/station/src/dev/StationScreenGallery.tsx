@@ -919,6 +919,7 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
               gtin="04607000000042"
               operation={waiting ? null : (operations[0] ?? null)}
               labels={workLabels.status}
+              showVerdict={!aggregation}
             />
             {aggregation ? (
               <BoxFillInstrument
@@ -928,6 +929,14 @@ function WorkFixture({ mode, locale }: { mode: string; locale: GalleryLocale }) 
                 capacity={boxCapacity}
                 canUndo
                 labels={workLabels.box}
+                lastAccepted={
+                  waiting
+                    ? null
+                    : operations[0]?.identity
+                      ? { serial: operations[0].identity.serial }
+                      : null
+                }
+                verdictLabels={{ ok: workLabels.status.ok, waiting: workLabels.status.waiting }}
                 onClose={() => undefined}
                 onUndo={() => undefined}
                 onClear={() => undefined}
