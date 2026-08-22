@@ -45,7 +45,7 @@ export function Login() {
     clearPlatformChallenge();
     await session.refetch?.();
     const requested = (location.state as { from?: unknown } | null)?.from;
-    void navigate(typeof requested === "string" ? requested : "/catalog", { replace: true });
+    void navigate(typeof requested === "string" ? requested : "/", { replace: true });
   });
 
   return (

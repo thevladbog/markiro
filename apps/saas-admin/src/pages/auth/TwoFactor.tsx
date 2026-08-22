@@ -68,7 +68,7 @@ export function TwoFactor() {
     codeForm.reset();
     setEnrollment(null);
     await session.refetch?.();
-    void navigate("/catalog", { replace: true });
+    void navigate("/", { replace: true });
   });
 
   const title =

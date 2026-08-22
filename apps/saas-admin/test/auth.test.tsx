@@ -2,14 +2,8 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  authState,
-  fakeAuthClient,
-  installCatalogApi,
-  jsonResponse,
-  readySession,
-  renderSaasApp,
-} from "./render.js";
+import { authState, fakeAuthClient, jsonResponse, readySession, renderSaasApp } from "./render.js";
+import { installOperationsApi } from "./operationsFixtures.js";
 
 afterEach(() => {
   cleanup();
@@ -182,17 +176,17 @@ describe("platform authentication", () => {
     expect(screen.getByText(state.enrollment.totpURI)).toBeDefined();
   });
 
-  it("accepts a TOTP challenge and opens the protected catalog", async () => {
+  it("accepts a TOTP challenge and opens the operational overview", async () => {
     window.sessionStorage.setItem("markiro.platform.2fa-challenge", "pending");
-    installCatalogApi();
+    installOperationsApi();
     const state = authState();
     renderSaasApp({ initialEntry: "/two-factor?mode=challenge", state });
     const user = userEvent.setup();
 
-    await user.type(screen.getByLabelText("Код из приложения"), "123456");
+    await user.type(await screen.findByLabelText("Код из приложения"), "123456");
     await user.click(screen.getByRole("button", { name: "Подтвердить код" }));
 
-    expect(await screen.findByRole("heading", { name: "Каталог" })).toBeDefined();
+    expect(await screen.findByRole("heading", { name: "Операционный обзор" })).toBeDefined();
     expect(window.sessionStorage.getItem("markiro.platform.2fa-challenge")).toBeNull();
   });
 
