@@ -29,6 +29,13 @@ export interface ScanResultInstrumentProps {
   /** Expected GTIN-14 of the shift's product; prints as a chip and seeds the fallback accent hue. */
   gtin?: string | null | undefined;
   refreshKey?: number;
+  /**
+   * False when an aggregation shift shows the accepted-scan readout inside the
+   * box instrument instead (BoxFillInstrument's `lastAccepted`) — this card
+   * then renders the product identity alone, so the screen never carries two
+   * live verdict regions.
+   */
+  showVerdict?: boolean;
 }
 
 export function operationStatusLabel(verdict: string, labels: ScanResultLabels): string {
@@ -57,12 +64,16 @@ export function ScanResultInstrument({
   image,
   gtin,
   refreshKey,
+  showVerdict = true,
 }: ScanResultInstrumentProps) {
-  const tone = operation?.verdict === "ok" ? "ok" : operation ? "error" : "neutral";
   const hue = useProductAccentHue({ exec, productId, image, gtin, refreshKey });
   const heroStyle = hue === null ? undefined : ({ "--product-hue": String(hue) } as CSSProperties);
   return (
-    <section className="work-instrument work-scan-result" aria-label={productName}>
+    <section
+      className="work-instrument work-scan-result"
+      aria-label={productName}
+      data-identity-only={showVerdict ? undefined : "true"}
+    >
       <div
         className="work-scan-result__identity"
         data-accent={hue === null ? undefined : "true"}
@@ -101,37 +112,50 @@ export function ScanResultInstrument({
           </div>
         </div>
       </div>
-      <div
-        className="work-scan-result__verdict"
-        role="status"
-        data-tone={tone}
-        data-compact-success={tone === "ok" && operation?.identity ? "true" : undefined}
-        aria-label={
-          tone === "ok" && operation?.identity
-            ? `${labels.ok}: ${operation.identity.normalized}`
-            : undefined
-        }
-      >
-        {tone === "ok" && operation?.identity ? (
-          <>
-            <span
-              className="work-scan-result__accepted-marker"
-              data-semantic="accepted-marker"
-              aria-hidden="true"
-            >
-              ✓
-            </span>
-            <code className="work-scan-result__normalized" data-semantic="normalized-code">
-              {operation.identity.normalized}
-            </code>
-          </>
-        ) : (
-          <strong>
-            {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
-          </strong>
-        )}
-        {tone !== "ok" && operation?.codeSuffix ? <span>{operation.codeSuffix}</span> : null}
-      </div>
+      {showVerdict ? <ScanVerdict operation={operation} labels={labels} /> : null}
     </section>
+  );
+}
+
+function ScanVerdict({
+  operation,
+  labels,
+}: {
+  operation: RecentOperation | null;
+  labels: ScanResultLabels;
+}) {
+  const tone = operation?.verdict === "ok" ? "ok" : operation ? "error" : "neutral";
+  return (
+    <div
+      className="work-scan-result__verdict"
+      role="status"
+      data-tone={tone}
+      data-compact-success={tone === "ok" && operation?.identity ? "true" : undefined}
+      aria-label={
+        tone === "ok" && operation?.identity
+          ? `${labels.ok}: ${operation.identity.normalized}`
+          : undefined
+      }
+    >
+      {tone === "ok" && operation?.identity ? (
+        <>
+          <span
+            className="work-scan-result__accepted-marker"
+            data-semantic="accepted-marker"
+            aria-hidden="true"
+          >
+            ✓
+          </span>
+          <code className="work-scan-result__normalized" data-semantic="normalized-code">
+            {operation.identity.normalized}
+          </code>
+        </>
+      ) : (
+        <strong>
+          {operation ? operationStatusLabel(operation.verdict, labels) : labels.waiting}
+        </strong>
+      )}
+      {tone !== "ok" && operation?.codeSuffix ? <span>{operation.codeSuffix}</span> : null}
+    </div>
   );
 }

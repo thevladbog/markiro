@@ -20,6 +20,16 @@ export interface BoxFillInstrumentProps {
   canUndo: boolean;
   closeDisabled?: boolean;
   labels: BoxFillLabels;
+  /**
+   * The latest accepted scan, printed beside the readout as «✓ serial». The
+   * serial alone identifies the bottle to a worker mid-box; the full
+   * normalized code stays in the recent-operations list. When given (non-
+   * undefined), this instrument owns the screen's accepted-scan live region —
+   * the caller must pass `showVerdict={false}` to its ScanResultInstrument.
+   */
+  lastAccepted?: { serial: string } | null;
+  /** Labels for the accepted readout; required whenever lastAccepted is used. */
+  verdictLabels?: { ok: string; waiting: string };
   onClose: () => void;
   onUndo: () => void;
   onClear: () => void;
@@ -68,6 +78,8 @@ export function BoxFillInstrument({
   canUndo,
   closeDisabled = false,
   labels,
+  lastAccepted,
+  verdictLabels,
   onClose,
   onUndo,
   onClear,
@@ -96,6 +108,25 @@ export function BoxFillInstrument({
               {usableCapacity ? `${box.itemCount} / ${usableCapacity}` : box.itemCount}
             </strong>
             <span>{usableCapacity ? labels.count : labels.capacityUnknown}</span>
+            {verdictLabels ? (
+              <div
+                className="work-box-fill__last"
+                role="status"
+                data-tone={lastAccepted ? "ok" : "neutral"}
+                aria-label={
+                  lastAccepted ? `${verdictLabels.ok}: ${lastAccepted.serial}` : undefined
+                }
+              >
+                {lastAccepted ? (
+                  <>
+                    <span aria-hidden="true">✓</span>
+                    <code data-semantic="accepted-serial">{lastAccepted.serial}</code>
+                  </>
+                ) : (
+                  <span>{verdictLabels.waiting}</span>
+                )}
+              </div>
+            ) : null}
           </div>
           {usableCapacity ? (
             <div

@@ -125,6 +125,12 @@ describe("fixed station viewport source contract", () => {
     expect(css).toMatch(
       /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-scan-result\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1\.35fr\) minmax\(150px, 0\.65fr\);[^}]*grid-template-rows:\s*minmax\(0, 1fr\);/s,
     );
+    // The side-by-side compact is for sharing the column with the box panel;
+    // a boxless scan result stacks hero-over-verdict instead of stretching
+    // the gradient into an empty tower.
+    expect(css).toMatch(
+      /@media \(max-width:\s*1100px\), \(max-height:\s*767px\)[\s\S]*?\.work-screen__primary\s*>\s*\.work-scan-result:only-child\s*\{[^}]*grid-template-columns:\s*none;[^}]*grid-template-rows:\s*auto minmax\(0, 1fr\);/s,
+    );
     // The photo shrinks at 1024 but keeps its 3:4 portrait (the base rule owns
     // the aspect ratio) -- a bottle is never re-cropped into a square.
     expect(css).toMatch(/\.work-scan-result__image\s*\{[^}]*aspect-ratio:\s*3 \/ 4;/s);

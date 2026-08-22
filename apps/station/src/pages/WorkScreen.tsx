@@ -1575,6 +1575,7 @@ export function WorkScreen({
                 image={productImage}
                 gtin={expectedGtin14}
                 refreshKey={imageRefreshKey}
+                showVerdict={issuerPrefix === null}
               />
               {issuerPrefix !== null ? (
                 <BoxFillInstrument
@@ -1589,6 +1590,15 @@ export function WorkScreen({
                   canUndo={lastScanned?.boxId === box?.boxId}
                   closeDisabled={closing}
                   labels={workLabels.box}
+                  lastAccepted={
+                    latestAcceptedOperation?.identity
+                      ? { serial: latestAcceptedOperation.identity.serial }
+                      : null
+                  }
+                  verdictLabels={{
+                    ok: workLabels.status.ok,
+                    waiting: workLabels.status.waiting,
+                  }}
                   onClose={enqueueManualClose}
                   onUndo={() => void handleUndo()}
                   onClear={() => setConfirmClear(true)}

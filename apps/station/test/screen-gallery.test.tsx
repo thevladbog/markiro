@@ -92,17 +92,14 @@ describe("development screen gallery", () => {
       <StationScreenGallery request={{ state: "work-aggregation", locale: "ru" }} />,
     );
 
+    // The aggregation card is the identity hero alone: the accepted-scan
+    // readout lives in the box instrument and prints the serial only, while
+    // the full code stays in the recent-operations list.
     const scan = view.container.querySelector<HTMLElement>(".work-scan-result");
     expect(scan).not.toBeNull();
-    expect(scan?.querySelector('[data-semantic="accepted-marker"]')?.textContent).toBe("✓");
-    expect(scan?.querySelector('[data-semantic="normalized-code"]')?.textContent).toBe(
-      "(01)04607000000042 (21)DEMO-SERIAL-000128 (91)ABCD " +
-        "(92)TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789 (93)XYZ1",
-    );
-    expect(scan?.querySelector('[data-semantic="verdict"]')).toBeNull();
-    expect(scan?.querySelector('[data-semantic="gtin"]')).toBeNull();
-    expect(scan?.querySelector('[data-semantic="serial"]')).toBeNull();
-    expect(scan?.querySelector('[data-semantic="crypto"]')).toBeNull();
+    expect(scan?.getAttribute("data-identity-only")).toBe("true");
+    expect(scan?.querySelector('[data-semantic="accepted-marker"]')).toBeNull();
+    expect(scan?.querySelector('[data-semantic="normalized-code"]')).toBeNull();
     expect(scan?.textContent).not.toContain("ПРИНЯТО");
     expect(scan?.textContent).not.toContain("Криптохвост");
     expect(view.container.querySelector(".mk-signal-overlay")).toBeNull();
@@ -112,6 +109,10 @@ describe("development screen gallery", () => {
     if (!box) throw new Error("work box fill was not rendered");
     expect(within(box).getByText("Короб № 1")).toBeDefined();
     expect(within(box).getByTestId("box-progress").textContent).toBe("2 / 10");
+    expect(
+      within(box).getByRole("status").querySelector('[data-semantic="accepted-serial"]')
+        ?.textContent,
+    ).toBe("DEMO-SERIAL-000128");
     expect(box.querySelector('.work-box-fill__grid[data-large="true"]')).not.toBeNull();
     const cells = box.querySelectorAll(".work-box-fill__cell");
     expect(cells).toHaveLength(10);
@@ -146,9 +147,10 @@ describe("development screen gallery", () => {
     );
 
     expect(await screen.findByRole("img", { name: "Тестовый товар А" })).toBeDefined();
+    // The waiting readout lives beside the box count now, not in the card.
     expect(within(view.container).getByText("Ожидание скана…")).toBeDefined();
     expect(
-      view.container.querySelector(".work-scan-result__verdict[data-tone='neutral']"),
+      view.container.querySelector(".work-box-fill__last[data-tone='neutral']"),
     ).not.toBeNull();
     expect(within(view.container).getByText("Короб № 1")).toBeDefined();
   });
@@ -228,13 +230,13 @@ describe("development screen gallery", () => {
   ])(
     "announces the localized accepted result without adding visual fact copy in $locale",
     ({ locale, accepted }) => {
-      const normalized =
-        "(01)04607000000042 (21)DEMO-SERIAL-000128 (91)ABCD " +
-        "(92)TEST-LONG-CRYPTO-TAIL-ABCDEFGHIJKLMNOPQRSTUVWXYZ-0123456789 (93)XYZ1";
+      // The aggregation readout announces and prints the SERIAL only — the
+      // full normalized code lives in the recent-operations list.
+      const serial = "DEMO-SERIAL-000128";
       render(<StationScreenGallery request={{ state: "work-aggregation", locale }} />);
 
-      const status = screen.getByRole("status", { name: `${accepted}: ${normalized}` });
-      expect(status.textContent).toBe(`✓${normalized}`);
+      const status = screen.getByRole("status", { name: `${accepted}: ${serial}` });
+      expect(status.textContent).toBe(`✓${serial}`);
       expect(status.textContent).not.toContain(accepted);
       expect(status.textContent).not.toContain("GTIN");
       expect(status.textContent).not.toContain("Серийный номер");
