@@ -61,6 +61,11 @@ const TeamPage = lazy(() =>
 const AuditPage = lazy(() =>
   import("./pages/audit/AuditPage.js").then((module) => ({ default: module.AuditPage })),
 );
+const OrganizationPage = lazy(() =>
+  import("./pages/settings/OrganizationPage.js").then((module) => ({
+    default: module.OrganizationPage,
+  })),
+);
 
 function RouteLoading() {
   const { t } = useTranslation();
@@ -96,6 +101,7 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/billing/:invoiceId" element={<InvoiceDetailPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/settings/organization" element={<OrganizationPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         <Route path="/tenants/new" element={<CreateTenantPanel />} />
         <Route path="/tenants/:tenantId" element={<TenantPage />} />

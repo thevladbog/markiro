@@ -68,6 +68,17 @@ function AppShellContent() {
             </span>
             {t("shell.audit")}
           </NavLink>
+          {principal.capabilities.includes("billing.read") ? (
+            <NavLink
+              to="/settings/organization"
+              className={({ isActive }) => (isActive ? "active" : undefined)}
+            >
+              <span className="nav-index" aria-hidden="true">
+                07
+              </span>
+              {t("shell.settings")}
+            </NavLink>
+          ) : null}
         </nav>
         <div className="app-tools">
           <span className="role-tag">{t(`roles.${principal.role}`)}</span>
