@@ -92,3 +92,23 @@ export type { FullScreenDialogProps } from "./FullScreenDialog.js";
 
 export { SignalOverlay } from "./SignalOverlay.js";
 export type { SignalOverlayProps, SignalTone } from "./SignalOverlay.js";
+
+export { OperationalRail } from "./OperationalRail.js";
+export type {
+  OperationalRailGroup,
+  OperationalRailItem,
+  OperationalRailLinkProps,
+  OperationalRailProps,
+} from "./OperationalRail.js";
+
+export { MetricStrip } from "./MetricStrip.js";
+export type { MetricStripItem, MetricStripProps, MetricStripTone } from "./MetricStrip.js";
+
+export { DataTabs } from "./DataTabs.js";
+export type { DataTabItem, DataTabsProps } from "./DataTabs.js";
+
+export { DefinitionGrid } from "./DefinitionGrid.js";
+export type { DefinitionGridItem, DefinitionGridProps } from "./DefinitionGrid.js";
+
+export { SectionHeader } from "./SectionHeader.js";
+export type { SectionHeaderProps } from "./SectionHeader.js";

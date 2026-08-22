@@ -58,6 +58,19 @@
   --fg-on-info-solid: #ffffff; /* 4.88:1 */
 
   --focus-ring: #1a4f9c;
+
+  /* operational console aliases — composition-specific names, same shared palette */
+  --mk-surface-paper: var(--surface-page);
+  --mk-surface-workspace: var(--surface-card);
+  --mk-border-operational: var(--line);
+  --mk-border-operational-strong: var(--line-strong);
+  --mk-accent-operational: var(--accent);
+  --mk-rail-bg: #171916;
+  --mk-rail-bg-hover: #22251f;
+  --mk-rail-bg-active: #292d26;
+  --mk-rail-fg: #f2f0e9;
+  --mk-rail-muted: #9da198;
+  --mk-rail-border: #3d403a;
 }
 
 [data-theme="dark"] {
@@ -176,4 +189,10 @@
   --control-keypad: 96px; /* клавиша цифрового блока; station compact может снизить до 80px */
   --focus-ring-w: 2px;
   --focus-ring-offset: 2px;
+
+  --mk-rail-width: 248px;
+  --mk-workspace-header-height: 88px;
+  --mk-table-row-dense: 44px;
+  --mk-radius-operational: 2px;
+  --mk-motion-fast: 140ms;
 }
