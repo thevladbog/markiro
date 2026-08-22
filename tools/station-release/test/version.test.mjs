@@ -65,10 +65,8 @@ test("derives one monotonic stable version from an accepted beta", () => {
     },
   );
   assert.equal(
-    stablePromotionFromBeta(
-      ["station-v0.1.0", "station-v0.1.1-beta.4"],
-      "station-v0.1.1-beta.4",
-    ).previousStableTag,
+    stablePromotionFromBeta(["station-v0.1.0", "station-v0.1.1-beta.4"], "station-v0.1.1-beta.4")
+      .previousStableTag,
     "station-v0.1.0",
   );
 });
@@ -80,10 +78,7 @@ test("rejects duplicate, downgrade and malformed stable promotions", () => {
   );
   assert.throws(
     () =>
-      stablePromotionFromBeta(
-        ["station-v0.2.0", "station-v0.1.1-beta.4"],
-        "station-v0.1.1-beta.4",
-      ),
+      stablePromotionFromBeta(["station-v0.2.0", "station-v0.1.1-beta.4"], "station-v0.1.1-beta.4"),
     /invalid station stable promotion/,
   );
   assert.throws(
