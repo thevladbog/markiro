@@ -133,6 +133,16 @@ describe("LegalProfileForm", () => {
     await user.selectOptions(screen.getByLabelText("Payer type"), "self_employed");
     expect(screen.getByLabelText("Full name")).toBeDefined();
     expect(screen.getByLabelText("Registration address")).toBeDefined();
+    expect(screen.queryByLabelText("KPP")).toBeNull();
+    expect(screen.queryByLabelText("OGRN")).toBeNull();
+    expect(screen.queryByLabelText("OGRNIP")).toBeNull();
+
+    await user.selectOptions(screen.getByLabelText("Payer type"), "individual");
+    expect(screen.getByLabelText("Full name")).toBeDefined();
+    expect(screen.getByLabelText("Registration address")).toBeDefined();
+    expect(screen.queryByLabelText("KPP")).toBeNull();
+    expect(screen.queryByLabelText("OGRN")).toBeNull();
+    expect(screen.queryByLabelText("OGRNIP")).toBeNull();
   });
 
   it("supports every tenant profile kind and requires explicit confirmation before saving", async () => {
