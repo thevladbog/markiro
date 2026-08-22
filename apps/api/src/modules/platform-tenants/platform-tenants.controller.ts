@@ -2,6 +2,10 @@ import { Body, Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestj
 import { platformTenantContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import {
+  PlatformApiProtectedCreated,
+  PlatformApiProtectedOk,
+} from "../../platform-http/platform-openapi";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -22,6 +26,7 @@ export class PlatformTenantsController {
   constructor(private readonly tenants: PlatformTenantsService) {}
 
   @Get()
+  @PlatformApiProtectedOk({ response: platformTenantContracts.list.response })
   @RequirePlatformCapabilities("tenants.read")
   async list(
     @Req() request: RequestWithPlatformPrincipal,
@@ -34,6 +39,10 @@ export class PlatformTenantsController {
   }
 
   @Post()
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.create.body,
+    response: platformTenantContracts.create.response,
+  })
   @RequirePlatformCapabilities("tenants.write")
   async create(
     @Req() request: RequestWithPlatformPrincipal,
@@ -46,6 +55,7 @@ export class PlatformTenantsController {
   }
 
   @Get(":id")
+  @PlatformApiProtectedOk({ response: platformTenantContracts.detail.response })
   @RequirePlatformCapabilities("tenants.read")
   async get(
     @Req() request: RequestWithPlatformPrincipal,
@@ -59,6 +69,7 @@ export class PlatformTenantsController {
 
   @Post(":id/owner-activation/renew")
   @HttpCode(200)
+  @PlatformApiProtectedOk({ response: platformTenantContracts.renewActivation.response })
   @RequirePlatformCapabilities("tenants.write")
   async renewActivation(
     @Req() request: RequestWithPlatformPrincipal,
@@ -71,6 +82,10 @@ export class PlatformTenantsController {
   }
 
   @Post(":id/subscription/plan")
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.assignPlan.body,
+    response: platformTenantContracts.assignPlan.response,
+  })
   @RequirePlatformCapabilities("tenants.write", "billing.write")
   async assignPlan(
     @Req() request: RequestWithPlatformPrincipal,
@@ -84,6 +99,10 @@ export class PlatformTenantsController {
   }
 
   @Post(":id/subscription/addons")
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.assignAddon.body,
+    response: platformTenantContracts.assignAddon.response,
+  })
   @RequirePlatformCapabilities("tenants.write", "billing.write")
   async assignAddon(
     @Req() request: RequestWithPlatformPrincipal,

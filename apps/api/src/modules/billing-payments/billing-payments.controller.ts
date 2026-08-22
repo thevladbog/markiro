@@ -2,6 +2,10 @@ import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import {
+  PlatformApiProtectedCreated,
+  PlatformApiProtectedOk,
+} from "../../platform-http/platform-openapi";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { invoiceIdSchema } from "../billing/dto";
@@ -18,6 +22,7 @@ export class BillingPaymentsController {
   constructor(private readonly payments: BillingPaymentsService) {}
 
   @Get()
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.payments.list.response })
   @RequirePlatformCapabilities("billing.read")
   async list(@Query("tenantId") tenantId?: string) {
     return parsePlatformResponse(
@@ -27,6 +32,10 @@ export class BillingPaymentsController {
   }
 
   @Post("invoices/:invoiceId")
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.payments.manual.body,
+    response: platformCommercialContracts.payments.manual.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async record(
     @Req() req: RequestWithPlatformPrincipal,
@@ -40,6 +49,10 @@ export class BillingPaymentsController {
   }
 
   @Post("imports")
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.payments.import.body,
+    response: platformCommercialContracts.payments.import.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async import(
     @Req() req: RequestWithPlatformPrincipal,

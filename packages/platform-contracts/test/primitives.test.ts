@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { platformErrorSchema, platformTenantIdSchema, platformTimestampSchema } from "../src/index.js";
+import {
+  platformErrorSchema,
+  platformTenantIdSchema,
+  platformTimestampSchema,
+} from "../src/index.js";
 
 describe("platform contract primitives", () => {
   it("accepts legacy tenant references and PostgreSQL timestamps", () => {

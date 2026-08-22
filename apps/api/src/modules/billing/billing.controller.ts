@@ -2,6 +2,10 @@ import { Body, Controller, Get, Param, Post, Query, Req } from "@nestjs/common";
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import {
+  PlatformApiProtectedCreated,
+  PlatformApiProtectedOk,
+} from "../../platform-http/platform-openapi";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import { BillingService } from "./billing.service";
@@ -28,6 +32,7 @@ export class BillingController {
   ) {}
 
   @Get()
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.list.response })
   @RequirePlatformCapabilities("billing.read")
   async list(@Query("tenantId") tenantId?: string) {
     return parsePlatformResponse(
@@ -37,6 +42,7 @@ export class BillingController {
   }
 
   @Get(":id")
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.detail.response })
   @RequirePlatformCapabilities("billing.read")
   async get(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -46,6 +52,10 @@ export class BillingController {
   }
 
   @Post()
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.invoices.create.body,
+    response: platformCommercialContracts.invoices.create.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async create(
     @Req() req: RequestWithPlatformPrincipal,
@@ -58,6 +68,7 @@ export class BillingController {
   }
 
   @Post(":id/issue")
+  @PlatformApiProtectedCreated({ response: platformCommercialContracts.invoices.issue.response })
   @RequirePlatformCapabilities("billing.write")
   async issue(
     @Req() req: RequestWithPlatformPrincipal,
@@ -72,6 +83,9 @@ export class BillingController {
   }
 
   @Post(":id/document")
+  @PlatformApiProtectedCreated({
+    response: platformCommercialContracts.invoices.document.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async document(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -81,6 +95,9 @@ export class BillingController {
   }
 
   @Get(":id/documents")
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.invoices.documents.list.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async documentsList(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -90,6 +107,9 @@ export class BillingController {
   }
 
   @Post(":id/documents")
+  @PlatformApiProtectedCreated({
+    response: platformCommercialContracts.invoices.documents.render.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async documentsRender(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -99,6 +119,7 @@ export class BillingController {
   }
 
   @Get(":id/document")
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.invoices.documentUrl.response })
   @RequirePlatformCapabilities("billing.read")
   async documentUrl(@Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -108,6 +129,9 @@ export class BillingController {
   }
 
   @Get(":id/documents/:documentId/download")
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.invoices.documents.download.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async documentDownload(
     @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
@@ -125,6 +149,10 @@ export class BillingController {
   }
 
   @Post(":id/apply")
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.invoices.apply.body,
+    response: platformCommercialContracts.invoices.apply.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async apply(
     @Req() req: RequestWithPlatformPrincipal,
@@ -138,6 +166,7 @@ export class BillingController {
   }
 
   @Post(":id/cancel")
+  @PlatformApiProtectedCreated({ response: platformCommercialContracts.invoices.cancel.response })
   @RequirePlatformCapabilities("billing.write")
   async cancel(
     @Req() req: RequestWithPlatformPrincipal,

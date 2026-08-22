@@ -18,6 +18,10 @@ import { ProductsController } from "../src/modules/products/products.controller"
 import { ProductsService } from "../src/modules/products/products.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
+import {
+  addPlatformSessionSecurity,
+  PLATFORM_SESSION_SECURITY,
+} from "../src/platform-http/platform-openapi";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
@@ -114,6 +118,20 @@ function expectExactObjectFields(schema: TestSchema, fields: readonly string[]):
 
 describe("self-hosted OpenAPI documentation", () => {
   let server: Server;
+
+  it("defines the named production Better Auth cookie security scheme", () => {
+    const configuration = addPlatformSessionSecurity(
+      new DocumentBuilder().setTitle("platform contract test").setVersion("test"),
+    ).build();
+
+    expect(configuration.components?.securitySchemes).toEqual({
+      [PLATFORM_SESSION_SECURITY]: {
+        type: "apiKey",
+        in: "cookie",
+        name: "markiro-platform.session_token",
+      },
+    });
+  });
 
   it("parses script end tags with valid whitespace before the closing bracket", () => {
     expect(scriptSources('<script src="/docs/scalar.js"></script   >')).toEqual([

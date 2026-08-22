@@ -639,4 +639,18 @@ describe("registered subscription route inventory", () => {
     expect(unclassified, "unclassified registered unsafe routes").toEqual([]);
     expect(encounteredExemptions.sort()).toEqual(Object.keys(EXEMPTIONS).sort());
   });
+
+  it("keeps every platform route inside the isolated platform policy boundary", () => {
+    const reflector = new Reflector();
+    const unprotected = routes
+      .filter((route) => route.path === "/platform" || route.path.startsWith("/platform/"))
+      .filter(
+        (route) =>
+          reflector.getAllAndOverride(PLATFORM_ACCESS_POLICY, [route.handler, route.controller]) ===
+          undefined,
+      )
+      .map(routeKey);
+
+    expect(unprotected).toEqual([]);
+  });
 });

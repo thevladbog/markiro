@@ -2,6 +2,10 @@ import { Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req } fro
 import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import {
+  PlatformApiProtectedCreated,
+  PlatformApiProtectedOk,
+} from "../../platform-http/platform-openapi";
 import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
@@ -26,6 +30,7 @@ export class PlatformOffersController {
   ) {}
 
   @Get()
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.list.response })
   @RequirePlatformCapabilities("billing.read")
   async list(@Req() req: RequestWithPlatformPrincipal, @Query("tenantId") tenantId?: string) {
     return parsePlatformResponse(
@@ -35,6 +40,7 @@ export class PlatformOffersController {
   }
 
   @Get(":id")
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.detail.response })
   @RequirePlatformCapabilities("billing.read")
   async detail(
     @Req() req: RequestWithPlatformPrincipal,
@@ -47,6 +53,10 @@ export class PlatformOffersController {
   }
 
   @Post()
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.offers.create.body,
+    response: platformCommercialContracts.offers.create.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async create(
     @Req() req: RequestWithPlatformPrincipal,
@@ -60,6 +70,7 @@ export class PlatformOffersController {
 
   @Post(":id/publish")
   @HttpCode(200)
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.publish.response })
   @RequirePlatformCapabilities("billing.write")
   async publish(
     @Req() req: RequestWithPlatformPrincipal,
@@ -74,6 +85,9 @@ export class PlatformOffersController {
   }
 
   @Get(":id/documents")
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.offers.documents.list.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async documentsList(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -83,6 +97,9 @@ export class PlatformOffersController {
   }
 
   @Post(":id/documents")
+  @PlatformApiProtectedCreated({
+    response: platformCommercialContracts.offers.documents.render.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async documentsRender(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
     return parsePlatformResponse(
@@ -92,6 +109,9 @@ export class PlatformOffersController {
   }
 
   @Get(":id/documents/:documentId/download")
+  @PlatformApiProtectedOk({
+    response: platformCommercialContracts.offers.documents.download.response,
+  })
   @RequirePlatformCapabilities("billing.read")
   async documentsDownload(
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
@@ -110,6 +130,7 @@ export class PlatformOffersController {
 
   @Post(":id/cancel")
   @HttpCode(200)
+  @PlatformApiProtectedOk({ response: platformCommercialContracts.offers.cancel.response })
   @RequirePlatformCapabilities("billing.write")
   async cancel(
     @Req() req: RequestWithPlatformPrincipal,
@@ -122,6 +143,10 @@ export class PlatformOffersController {
   }
 
   @Post(":id/payment")
+  @PlatformApiProtectedCreated({
+    body: platformCommercialContracts.offers.payment.body,
+    response: platformCommercialContracts.offers.payment.response,
+  })
   @RequirePlatformCapabilities("billing.write")
   async pay(
     @Req() req: RequestWithPlatformPrincipal,

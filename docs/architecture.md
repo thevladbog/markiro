@@ -20,6 +20,9 @@ apps/
 packages/
   domain/     GS1 validation, SSCC, ZPL/TSPL generation, Cyrillic
               rasterization, export formats — shared by api/admin/station
+  platform-contracts/
+              Zod request, response, error, and primitive contracts shared by
+              the platform API, SaaS administration browser, and OpenAPI
   ui/         Markiro design system (tokens, office+floor components)
   db/         Drizzle schemas: Postgres (server) + SQLite (station mirror)
 ```
@@ -128,6 +131,39 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
   over the "Обмен с сайтом" protocol at `/1c_exchange`, live in the
   Integrations section of the cabinet (`docs/design-briefs/08-integrations.md`,
   `docs/superpowers/specs/2026-07-29-commerceml-design.md`).
+
+### Platform administration contract boundary
+
+`packages/platform-contracts` owns the platform administration wire contract. Its exported Zod
+objects are the single source of truth for API boundary validation, SaaS browser parsing, and the
+success, request-body, and strict error schemas embedded into OpenAPI. Controllers bind their
+declarative OpenAPI metadata directly to those objects; copying nested field lists into Swagger
+decorators is not an accepted contract path.
+
+Some response contracts normalize database `Date` values and timestamp strings. Zod 4 cannot
+represent those output transforms as JSON Schema, so OpenAPI publishes the shared schema's accepted
+JSON wire-input shape (without the JSON Schema `$schema` marker). The controller response boundary
+still parses that shape and returns the normalized contract output, including canonical ISO
+timestamps.
+
+The current SaaS OpenAPI inventory covers the platform principal, public activation, team, audit,
+tenants and subscription assignment, catalog and demo-plan setting, offers and their documents and
+payment, invoices and their documents/application/cancellation, and payments. Protected operations
+declare the named `platformSession` Better Auth cookie scheme for
+`markiro-platform.session_token`; public activation deliberately declares no cookie security.
+Legacy billing-profile routes under `/platform/billing/operator-profile` and
+`/platform/billing/tenants/:tenantId/profile` are intentionally handed to the following legal-profile
+contract slice and are not represented as already migrated here.
+
+Every platform error response has the safe `{ code, message, requestId }` envelope. Request IDs are
+the diagnostic correlation boundary: neither response bodies nor secrets belong in browser errors
+or server logs. The SaaS application treats independent panels as independent contract boundaries,
+so one failed panel exposes its endpoint context and request ID without erasing already-valid data
+from another panel.
+
+OpenAPI and automated contract tests prove repository-level route, schema, status, and declared
+security agreement only. They do not prove a live reverse proxy, database, deployed browser,
+external integration, or production environment.
 
 ## 6. AuthN/AuthZ
 

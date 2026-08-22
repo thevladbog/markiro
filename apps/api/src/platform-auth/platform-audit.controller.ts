@@ -4,6 +4,7 @@ import { schema, type Db } from "@markiro/db";
 import { platformAuditContracts, type PlatformAuditQuery } from "@markiro/platform-contracts";
 import { DB } from "../auth/auth.module";
 import { Inject } from "@nestjs/common";
+import { PlatformApiProtectedOk } from "../platform-http/platform-openapi";
 import { ZodValidationPipe } from "../zod.pipe";
 import { RequirePlatformCapabilities } from "./platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "./platform-auth.guard";
@@ -16,6 +17,7 @@ export class PlatformAuditController {
   constructor(@Inject(DB) private readonly db: Db) {}
 
   @Get()
+  @PlatformApiProtectedOk({ response: platformAuditContracts.list.response })
   async list(
     @Req() request: RequestWithPlatformPrincipal,
     @Query(new ZodValidationPipe(platformAuditContracts.list.query)) query: PlatformAuditQuery,

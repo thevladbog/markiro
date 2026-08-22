@@ -253,11 +253,9 @@ export const assignableCatalogVersionSchema = z
     service: z.object({}).strict().optional(),
   })
   .superRefine((value, context) => {
-    const disclosedFinancialFields = [
-      value.unitPrice,
-      value.vatRateBps,
-      value.vatIncluded,
-    ].filter((field) => field !== undefined).length;
+    const disclosedFinancialFields = [value.unitPrice, value.vatRateBps, value.vatIncluded].filter(
+      (field) => field !== undefined,
+    ).length;
     if (disclosedFinancialFields !== 0 && disclosedFinancialFields !== 3) {
       context.addIssue({
         code: "custom",
