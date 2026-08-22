@@ -27,6 +27,13 @@ interface DeviceCredentialMutationEvent {
   outcome: "succeeded" | "failed";
 }
 
+interface SensitiveReadEvent {
+  tenantId: string;
+  userId: string | null;
+  action: string;
+  resourceId: string | null;
+}
+
 @Injectable()
 export class SecurityAuditService {
   private readonly logger = new Logger("SecurityAudit");
@@ -65,6 +72,23 @@ export class SecurityAuditService {
         action: event.action,
         resourceId: event.resourceId,
         outcome: event.outcome,
+      }),
+    );
+  }
+
+  /**
+   * A successful read of data whose exposure matters (raw KM payloads for
+   * the box sell-codes screen): logged with the same structured shape as
+   * mutations so the audit trail answers "who saw box X's codes and when".
+   */
+  sensitiveRead(event: SensitiveReadEvent): void {
+    this.logger.log(
+      JSON.stringify({
+        tenantId: event.tenantId,
+        userId: event.userId,
+        action: event.action,
+        resourceId: event.resourceId,
+        outcome: "succeeded",
       }),
     );
   }
