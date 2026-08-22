@@ -126,6 +126,105 @@
     "support": "Support",
     "accountant": "Accountant"
   },
+  "legal": {
+    "organization": {
+      "title": "Our organization",
+      "subtitle": "Seller legal details and bank accounts used in documents"
+    },
+    "profile": {
+      "operatorTitle": "Seller details",
+      "tenantTitle": "Tenant legal details"
+    },
+    "sections": {
+      "identity": "Organization and registration details",
+      "addresses": "Addresses",
+      "contacts": "Document contact"
+    },
+    "fields": {
+      "kind": "Payer type",
+      "organizationSearch": "Organization or tax ID",
+      "fullName": "Full legal name",
+      "displayName": "Display name",
+      "inn": "INN",
+      "kpp": "KPP",
+      "ogrn": "OGRN",
+      "ogrnip": "OGRNIP",
+      "legalAddress": "Legal address",
+      "postalSame": "Postal address matches legal address",
+      "postalAddress": "Postal address",
+      "contactName": "Contact person",
+      "contactEmail": "Email",
+      "contactPhone": "Phone",
+      "bankSearch": "Bank or BIC"
+    },
+    "kinds": {
+      "legal_entity": "Legal entity",
+      "sole_proprietor": "Sole proprietor",
+      "self_employed": "Self-employed",
+      "individual": "Individual"
+    },
+    "confirmation": "Details checked against source documents",
+    "save": "Save and confirm",
+    "saved": "A new confirmed revision was saved",
+    "readOnly": "Read-only access",
+    "revision": "Revision {{revision}}",
+    "confirmedAt": "confirmed {{date}}",
+    "noAccess": "Financial data is unavailable for your role.",
+    "validation": {
+      "confirm": "Confirm the details are correct",
+      "invalid": "Check required fields and registration number lengths",
+      "saveFailed": "Could not save legal details"
+    },
+    "dadata": {
+      "organizationHint": "Enter a name or exact tax ID; a suggestion never saves automatically",
+      "addressHint": "Choose a suggestion or continue manual entry",
+      "bankHint": "Enter a bank name or exact BIC",
+      "searching": "Searching…",
+      "unconfigured": "DaData is not configured — enter details manually",
+      "unavailable": "DaData is unavailable — enter details manually",
+      "no_results": "No matches — enter details manually",
+      "health": {
+        "ready": "DaData is connected; selected suggestions still require confirmation",
+        "unconfigured": "DaData is not configured — manual entry is available",
+        "unavailable": "DaData is unavailable — manual entry is available",
+        "no_results": "No suggestions — manual entry is available"
+      }
+    },
+    "accounts": {
+      "title": "Bank accounts",
+      "add": "Add account",
+      "cancelCreate": "Cancel adding",
+      "label": "Account label",
+      "settlement": "Settlement account",
+      "settlementShort": "Account",
+      "bic": "BIC",
+      "bankName": "Bank",
+      "correspondent": "Correspondent account",
+      "currency": "Currency",
+      "save": "Add bank account",
+      "default": "Default",
+      "makeDefault": "Make default",
+      "archive": "Archive",
+      "empty": "No bank accounts yet",
+      "archived": "Archived accounts: {{count}}",
+      "invalid": "Check the account details: BIC is 9 digits and accounts are 20 digits",
+      "saveFailed": "Could not add the bank account",
+      "archiveTitle": "Archive bank account?",
+      "archiveBody": "Account “{{label}}” remains in history and existing documents.",
+      "replacement": "New default account",
+      "confirmArchive": "Confirm archive",
+      "cancelArchive": "Keep active"
+    },
+    "readiness": {
+      "title": "Document readiness",
+      "ready": "Details are ready",
+      "missing": "More data is required",
+      "profile": "Confirmed legal details",
+      "address": "Legal address",
+      "defaultAccount": "Default bank account",
+      "nonBlocking": "Incomplete billing details do not block tenant or production operations."
+    }
+  },
   "offers": {
     "title": "Commercial offers",
     "newTitle": "New offer",
@@ -241,6 +340,59 @@
       }
     }
   },
+  "payments": {
+    "title": "Payments",
+    "open": "Payment register",
+    "loading": "Loading payments",
+    "import": {
+      "title": "Import bank statement",
+      "help": "Upload a CSV file. Invoice and account matches stay in review until payment is recorded.",
+      "file": "Bank statement file",
+      "submit": "Import",
+      "success": "Statement imported. Review the suggested matches.",
+      "error": "Could not import the statement"
+    },
+    "review": {
+      "title": "Payment reconciliation",
+      "help": "Unknown and archived accounts need an explicit decision. New bank details are never created automatically.",
+      "empty": "No payments need review",
+      "loadError": "Could not load payments for review",
+      "payerUnavailable": "Payer not provided",
+      "legalData": "Legal details",
+      "reason": "Decision reason {{reference}}",
+      "confirm": "Confirm match",
+      "confirmUnknown": "Confirm without adding account",
+      "reject": "Reject",
+      "resolveError": "Could not save the decision"
+    },
+    "recorded": {
+      "title": "Recorded payments",
+      "help": "Payments already linked to invoices and preserved in the history.",
+      "empty": "No recorded payments yet",
+      "loadError": "Could not load recorded payments"
+    },
+    "columns": {
+      "date": "Date",
+      "invoice": "Invoice",
+      "amount": "Amount",
+      "source": "Source",
+      "account": "Payer account",
+      "legal": "Legal details"
+    },
+    "statuses": {
+      "unmatched": "Unmatched",
+      "suggested": "Suggested",
+      "matched": "Confirmed",
+      "rejected": "Rejected",
+      "needs_review": "Needs review"
+    },
+    "accounts": {
+      "unavailable": "Account not provided",
+      "unknown": "Unknown account · •••• {{last4}}",
+      "known": "{{label}} · •••• {{last4}} · {{status}}",
+      "statuses": { "active": "active", "archived": "archived" }
+    }
+  },
   "documents": {
     "eyebrow": { "invoice": "Invoice issuance", "offer": "Commercial terms" },
     "title": { "invoice": "New invoice", "offer": "New offer" },
@@ -249,6 +401,13 @@
     "tenantSearch": "Search tenants",
     "tenantEmpty": "No tenants found",
     "tenantLoading": "Loading tenants",
+    "sellerAccount": "Seller bank account",
+    "sellerAccountPlaceholder": "Choose a bank account",
+    "sellerAccountSearch": "Find an account by label, bank, or last digits",
+    "sellerAccountEmpty": "No active bank accounts",
+    "sellerAccountLoading": "Loading bank accounts",
+    "sellerAccountSettings": "Add an account in organization settings",
+    "snapshotNotice": "Legal details and the selected account are frozen when the document is issued.",
     "catalogPosition": "Add catalog position",
     "catalogPlaceholder": "Find a catalog position",
     "catalogSearch": "Search positions",
@@ -319,10 +478,18 @@
     "billing": "Invoices",
     "team": "Team",
     "audit": "Audit",
+    "settings": "Settings",
     "language": "Interface language",
     "statusLabel": "Platform status",
     "sessionConfirmed": "Session · confirmed",
     "secureSession": "2FA · SESSION SECURED"
+  },
+  "navigationGuard": {
+    "title": "Unsaved changes",
+    "body": "The entered data will be lost when you leave this section.",
+    "discard": "Discard changes",
+    "continue": "Continue editing",
+    "busy": "An operation is in progress. Wait for it to finish."
   },
   "team": {
     "title": "Platform team",
@@ -613,6 +780,11 @@
       "createOffer": "Create offer",
       "pendingActivation": "Owner activation pending",
       "overviewTitle": "Overview",
+      "tabs": {
+        "label": "Tenant sections",
+        "overview": "Overview and subscription",
+        "legal": "Legal details"
+      },
       "slug": "Slug",
       "createdAt": "Created",
       "activation": {

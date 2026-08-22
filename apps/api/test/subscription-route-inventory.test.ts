@@ -291,6 +291,24 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "BillingAccountsController.archiveOperator": platform(
+    "operator bank-account archival is guarded by platform billing capabilities",
+  ),
+  "BillingAccountsController.archiveTenant": platform(
+    "tenant bank-account archival is guarded by platform billing capabilities",
+  ),
+  "BillingAccountsController.createOperator": platform(
+    "operator bank-account creation is guarded by platform billing capabilities",
+  ),
+  "BillingAccountsController.createTenant": platform(
+    "tenant bank-account creation is guarded by platform billing capabilities",
+  ),
+  "BillingAccountsController.setOperatorDefault": platform(
+    "operator default-account mutation is guarded by platform billing capabilities",
+  ),
+  "BillingAccountsController.setTenantDefault": platform(
+    "tenant default-account mutation is guarded by platform billing capabilities",
+  ),
   "BillingController.create": platform(
     "platform invoice creation is guarded by platform billing capabilities",
   ),
@@ -314,6 +332,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   ),
   "BillingPaymentsController.import": platform(
     "platform bank import is guarded by platform billing capabilities",
+  ),
+  "BillingPaymentsController.resolveMatch": platform(
+    "platform payment matching decisions are guarded by platform billing capabilities",
   ),
   "BillingProfilesController.setOperator": platform(
     "operator billing profile mutation is guarded by platform billing capabilities",

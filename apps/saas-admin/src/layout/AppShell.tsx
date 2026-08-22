@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { NavLink, Outlet, useNavigate } from "react-router";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 
 import { Button, StatusChip } from "@markiro/ui";
 
@@ -13,6 +13,7 @@ function AppShellContent() {
   const { t } = useTranslation();
   const principal = usePlatformPrincipal();
   const auth = useAuthClient();
+  const location = useLocation();
   const navigate = useNavigate();
   const guard = useNavigationGuard(false, false);
 
@@ -50,7 +51,12 @@ function AppShellContent() {
             </span>
             {t("shell.offers")}
           </NavLink>
-          <NavLink to="/billing" className={({ isActive }) => (isActive ? "active" : undefined)}>
+          <NavLink
+            to="/billing"
+            className={({ isActive }) =>
+              isActive || location.pathname.startsWith("/payments") ? "active" : undefined
+            }
+          >
             <span className="nav-index" aria-hidden="true">
               04
             </span>
@@ -68,6 +74,17 @@ function AppShellContent() {
             </span>
             {t("shell.audit")}
           </NavLink>
+          {principal.capabilities.includes("billing.read") ? (
+            <NavLink
+              to="/settings/organization"
+              className={({ isActive }) => (isActive ? "active" : undefined)}
+            >
+              <span className="nav-index" aria-hidden="true">
+                07
+              </span>
+              {t("shell.settings")}
+            </NavLink>
+          ) : null}
         </nav>
         <div className="app-tools">
           <span className="role-tag">{t(`roles.${principal.role}`)}</span>

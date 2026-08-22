@@ -7,6 +7,7 @@ import type { OfferDocumentsService } from "../src/modules/platform-offers/offer
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
+import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 
 const actor: PlatformPrincipal = {
   userId: "11111111-1111-4111-8111-111111111111",
@@ -82,7 +83,11 @@ function serviceHarness(
   const db = {
     transaction: vi.fn(async (run: (executor: typeof tx) => Promise<unknown>) => run(tx)),
   } as unknown as Db;
-  return { service: new PlatformOffersService(db), insertedValues, insert: tx.insert };
+  return {
+    service: new PlatformOffersService(db, {} as PlatformAuditService),
+    insertedValues,
+    insert: tx.insert,
+  };
 }
 
 describe("PlatformOffersService catalog validation", () => {

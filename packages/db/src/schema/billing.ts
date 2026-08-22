@@ -60,6 +60,9 @@ export type PaymentMatchStatus = (typeof PAYMENT_MATCH_STATUSES)[number];
 export const INVOICE_APPLICATION_STATUSES = ["pending", "applied", "failed", "skipped"] as const;
 export type InvoiceApplicationStatus = (typeof INVOICE_APPLICATION_STATUSES)[number];
 
+export const BANK_ACCOUNT_STATUSES = ["active", "archived"] as const;
+export type BankAccountStatus = (typeof BANK_ACCOUNT_STATUSES)[number];
+
 export const billingProfileKind = pgEnum("billing_profile_kind", BILLING_PROFILE_KINDS);
 export const invoiceStatus = pgEnum("invoice_status", INVOICE_STATUSES);
 export const invoiceLineKind = pgEnum("invoice_line_kind", INVOICE_LINE_KINDS);
@@ -76,9 +79,11 @@ export const invoiceApplicationStatus = pgEnum(
   "invoice_application_status",
   INVOICE_APPLICATION_STATUSES,
 );
+export const bankAccountStatus = pgEnum("bank_account_status", BANK_ACCOUNT_STATUSES);
 
 const profileColumns = {
   kind: billingProfileKind("kind").notNull(),
+  fullName: text("full_name").notNull(),
   displayName: text("display_name").notNull(),
   inn: text("inn"),
   kpp: text("kpp"),
@@ -86,8 +91,18 @@ const profileColumns = {
   ogrnip: text("ogrnip"),
   addressRaw: text("address_raw").notNull(),
   address: jsonb("address"),
+  legalAddressRaw: text("legal_address_raw").notNull(),
+  legalAddress: jsonb("legal_address"),
+  postalSameAsLegal: boolean("postal_same_as_legal").notNull().default(false),
+  postalAddressRaw: text("postal_address_raw"),
+  postalAddress: jsonb("postal_address"),
   bankDetails: jsonb("bank_details"),
   contact: jsonb("contact"),
+  isConfirmed: boolean("is_confirmed").notNull().default(false),
+  confirmedByPlatformUserId: text("confirmed_by_platform_user_id").references(
+    () => platformUsers.id,
+  ),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
 };
 
 export const operatorBillingProfiles = pgTable(
@@ -108,6 +123,14 @@ export const operatorBillingProfiles = pgTable(
       .on(table.isCurrent)
       .where(sql`${table.isCurrent} = true`),
     check("operator_billing_profiles_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "operator_billing_profiles_confirmation_check",
+      sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,
+    ),
+    check(
+      "operator_billing_profiles_postal_same_check",
+      sql`${table.postalSameAsLegal} = false or (${table.postalAddressRaw} is null and ${table.postalAddress} is null)`,
+    ),
   ],
 );
 
@@ -131,6 +154,102 @@ export const tenantBillingProfiles = pgTable(
       .on(table.tenantId)
       .where(sql`${table.isCurrent} = true`),
     check("tenant_billing_profiles_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "tenant_billing_profiles_confirmation_check",
+      sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,
+    ),
+    check(
+      "tenant_billing_profiles_postal_same_check",
+      sql`${table.postalSameAsLegal} = false or (${table.postalAddressRaw} is null and ${table.postalAddress} is null)`,
+    ),
+  ],
+);
+
+const bankAccountColumns = {
+  id: uuid("id").primaryKey().defaultRandom(),
+  label: text("label").notNull(),
+  settlementAccount: text("settlement_account").notNull(),
+  bic: text("bic").notNull(),
+  bankName: text("bank_name").notNull(),
+  correspondentAccount: text("correspondent_account").notNull(),
+  currency: text("currency").notNull().default("RUB"),
+  status: bankAccountStatus("status").notNull().default("active"),
+  isDefault: boolean("is_default").notNull().default(false),
+  createdByPlatformUserId: text("created_by_platform_user_id")
+    .notNull()
+    .references(() => platformUsers.id),
+  archivedByPlatformUserId: text("archived_by_platform_user_id").references(() => platformUsers.id),
+  archivedAt: timestamp("archived_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+};
+
+export const operatorBankAccounts = pgTable(
+  "operator_bank_accounts",
+  {
+    ...bankAccountColumns,
+    migrationSourceProfileId: uuid("migration_source_profile_id").references(
+      () => operatorBillingProfiles.id,
+    ),
+  },
+  (table) => [
+    uniqueIndex("operator_bank_accounts_default_uq")
+      .on(table.isDefault)
+      .where(sql`${table.status} = 'active' and ${table.isDefault} = true`),
+    uniqueIndex("operator_bank_accounts_migration_source_uq")
+      .on(table.migrationSourceProfileId)
+      .where(sql`${table.migrationSourceProfileId} is not null`),
+    check(
+      "operator_bank_accounts_identifiers_check",
+      sql`${table.settlementAccount} ~ '^[0-9]{20}$' and ${table.bic} ~ '^[0-9]{9}$' and ${table.correspondentAccount} ~ '^[0-9]{20}$'`,
+    ),
+    check("operator_bank_accounts_currency_rub_check", sql`${table.currency} = 'RUB'`),
+    check(
+      "operator_bank_accounts_default_active_check",
+      sql`${table.isDefault} = false or ${table.status} = 'active'`,
+    ),
+    check(
+      "operator_bank_accounts_archive_check",
+      sql`(${table.status} = 'active' and ${table.archivedByPlatformUserId} is null and ${table.archivedAt} is null) or (${table.status} = 'archived' and ${table.isDefault} = false and ${table.archivedByPlatformUserId} is not null and ${table.archivedAt} is not null)`,
+    ),
+  ],
+);
+
+export const tenantBankAccounts = pgTable(
+  "tenant_bank_accounts",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id),
+    ...bankAccountColumns,
+    migrationSourceProfileId: uuid("migration_source_profile_id"),
+  },
+  (table) => [
+    unique("tenant_bank_accounts_tenant_id_uq").on(table.tenantId, table.id),
+    foreignKey({
+      columns: [table.tenantId, table.migrationSourceProfileId],
+      foreignColumns: [tenantBillingProfiles.tenantId, tenantBillingProfiles.id],
+      name: "tenant_bank_accounts_profile_fk",
+    }),
+    uniqueIndex("tenant_bank_accounts_default_uq")
+      .on(table.tenantId)
+      .where(sql`${table.status} = 'active' and ${table.isDefault} = true`),
+    uniqueIndex("tenant_bank_accounts_migration_source_uq")
+      .on(table.tenantId, table.migrationSourceProfileId)
+      .where(sql`${table.migrationSourceProfileId} is not null`),
+    check(
+      "tenant_bank_accounts_identifiers_check",
+      sql`${table.settlementAccount} ~ '^[0-9]{20}$' and ${table.bic} ~ '^[0-9]{9}$' and ${table.correspondentAccount} ~ '^[0-9]{20}$'`,
+    ),
+    check("tenant_bank_accounts_currency_rub_check", sql`${table.currency} = 'RUB'`),
+    check(
+      "tenant_bank_accounts_default_active_check",
+      sql`${table.isDefault} = false or ${table.status} = 'active'`,
+    ),
+    check(
+      "tenant_bank_accounts_archive_check",
+      sql`(${table.status} = 'active' and ${table.archivedByPlatformUserId} is null and ${table.archivedAt} is null) or (${table.status} = 'archived' and ${table.isDefault} = false and ${table.archivedByPlatformUserId} is not null and ${table.archivedAt} is not null)`,
+    ),
   ],
 );
 
@@ -146,8 +265,11 @@ export const invoices = pgTable(
     issueDate: timestamp("issue_date", { withTimezone: true }),
     dueDate: timestamp("due_date", { withTimezone: true }),
     currency: text("currency").notNull().default("RUB"),
+    sellerBankAccountId: uuid("seller_bank_account_id").references(() => operatorBankAccounts.id),
     sellerSnapshot: jsonb("seller_snapshot"),
     buyerSnapshot: jsonb("buyer_snapshot"),
+    sellerBankAccountSnapshot: jsonb("seller_bank_account_snapshot"),
+    buyerBankAccountSnapshot: jsonb("buyer_bank_account_snapshot"),
     subtotal: numeric("subtotal", { precision: 14, scale: 2 }).notNull().default("0"),
     vatTotal: numeric("vat_total", { precision: 14, scale: 2 }).notNull().default("0"),
     total: numeric("total", { precision: 14, scale: 2 }).notNull().default("0"),
@@ -337,6 +459,8 @@ export const paymentMatches = pgTable(
     importRowId: uuid("import_row_id").notNull(),
     tenantId: text("tenant_id"),
     invoiceId: uuid("invoice_id"),
+    tenantBankAccountId: uuid("tenant_bank_account_id"),
+    payerAccountEvidence: jsonb("payer_account_evidence"),
     status: paymentMatchStatus("status").notNull().default("unmatched"),
     score: integer("score"),
     reason: text("reason"),
@@ -356,6 +480,15 @@ export const paymentMatches = pgTable(
       columns: [table.tenantId, table.invoiceId],
       foreignColumns: [invoices.tenantId, invoices.id],
     }),
+    foreignKey({
+      name: "payment_matches_tenant_account_fk",
+      columns: [table.tenantId, table.tenantBankAccountId],
+      foreignColumns: [tenantBankAccounts.tenantId, tenantBankAccounts.id],
+    }),
+    check(
+      "payment_matches_account_tenant_check",
+      sql`${table.tenantBankAccountId} is null or ${table.tenantId} is not null`,
+    ),
     check(
       "payment_matches_score_check",
       sql`${table.score} is null or (${table.score} >= 0 and ${table.score} <= 100)`,

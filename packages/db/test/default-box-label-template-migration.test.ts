@@ -194,6 +194,12 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     });
     await rm(join(legacyMigrationsFolder, "0058_remarkable_pyro.sql"), { force: true });
     await rm(join(legacyMigrationsFolder, "0059_print_name_label_templates.sql"), { force: true });
+    await rm(join(legacyMigrationsFolder, "0060_saas_legal_profiles.sql"), { force: true });
+    await rm(join(legacyMigrationsFolder, "0061_saas_bank_accounts.sql"), { force: true });
+    await rm(join(legacyMigrationsFolder, "0062_document_account_snapshots.sql"), {
+      force: true,
+    });
+    await rm(join(legacyMigrationsFolder, "0063_payment_account_evidence.sql"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0042_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0043_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0044_snapshot.json"), { force: true });
@@ -212,6 +218,8 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
     await rm(join(legacyMigrationsFolder, "meta", "0057_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0058_snapshot.json"), { force: true });
     await rm(join(legacyMigrationsFolder, "meta", "0059_snapshot.json"), { force: true });
+    await rm(join(legacyMigrationsFolder, "meta", "0060_snapshot.json"), { force: true });
+    await rm(join(legacyMigrationsFolder, "meta", "0061_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -235,7 +243,11 @@ describe.skipIf(!databaseUrl)("default box label template migration", () => {
         entry.tag !== "0056_align_dated_label_quantity" &&
         entry.tag !== "0057_product_print_name" &&
         entry.tag !== "0058_remarkable_pyro" &&
-        entry.tag !== "0059_print_name_label_templates",
+        entry.tag !== "0059_print_name_label_templates" &&
+        entry.tag !== "0060_saas_legal_profiles" &&
+        entry.tag !== "0061_saas_bank_accounts" &&
+        entry.tag !== "0062_document_account_snapshots" &&
+        entry.tag !== "0063_payment_account_evidence",
     );
     expect(journal.entries.at(-1)?.tag).toBe("0041_product_images");
     await writeFile(journalPath, JSON.stringify(journal));

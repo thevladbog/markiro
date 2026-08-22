@@ -18,6 +18,7 @@ import {
 } from "../tenants/api.js";
 import { createOffer } from "./api.js";
 import { OfferTermsEditor } from "./OfferTermsEditor.js";
+import { listOperatorBankAccounts } from "../settings/api.js";
 
 function toTenantListItem(detail: TenantDetail): TenantListItem {
   return {
@@ -50,6 +51,10 @@ function OfferEditor() {
   const catalog = useQuery({
     queryKey: ["platform", "catalog", "document-picker"],
     queryFn: listCatalogVersions,
+  });
+  const sellerAccounts = useQuery({
+    queryKey: ["platform", "billing", "operator", "accounts"],
+    queryFn: listOperatorBankAccounts,
   });
   const selectedTenantOnPage =
     tenants.data?.items.some((tenant) => tenant.id === selectedTenantId) ?? false;
@@ -86,6 +91,7 @@ function OfferEditor() {
   if (
     tenants.isPending ||
     catalog.isPending ||
+    sellerAccounts.isPending ||
     (needsTenantPrefetch && prefetchedTenant.isPending)
   ) {
     return (
@@ -97,6 +103,7 @@ function OfferEditor() {
   }
   if (
     tenants.error ||
+    sellerAccounts.error ||
     (catalog.error && !catalog.data) ||
     (needsTenantPrefetch && prefetchedTenant.error)
   ) {
@@ -134,6 +141,8 @@ function OfferEditor() {
         initialDraft={initialDraft}
         tenants={pickerTenants}
         catalog={(catalog.data?.items ?? []).filter((version) => version.status === "published")}
+        sellerAccounts={sellerAccounts.data ?? []}
+        loadingSellerAccounts={sellerAccounts.isPending}
         loadingSources={false}
         submitting={create.isPending}
         {...(create.error

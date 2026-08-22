@@ -12,7 +12,7 @@ function vatRateBps(value: string | null): number | null {
 }
 
 export function sourceOfferDraft(
-  source: Pick<OfferDetail, "tenantId" | "lines">,
+  source: Pick<OfferDetail, "tenantId" | "sellerBankAccountId" | "lines">,
   catalog: readonly CatalogVersionDto[],
 ): DocumentDraft {
   const lines: DocumentLineDraft[] = source.lines.map((line) => {
@@ -54,5 +54,13 @@ export function sourceOfferDraft(
         : null,
     };
   });
-  return { tenantId: source.tenantId, applicationMode: "automatic", date: "", lines };
+  return {
+    tenantId: source.tenantId,
+    ...(source.sellerBankAccountId !== undefined
+      ? { sellerBankAccountId: source.sellerBankAccountId }
+      : {}),
+    applicationMode: "automatic",
+    date: "",
+    lines,
+  };
 }

@@ -40,6 +40,9 @@ const OffersPage = lazy(() =>
 const BillingPage = lazy(() =>
   import("./pages/billing/BillingPage.js").then((module) => ({ default: module.BillingPage })),
 );
+const PaymentsPage = lazy(() =>
+  import("./pages/payments/PaymentsPage.js").then((module) => ({ default: module.PaymentsPage })),
+);
 const CreateInvoicePage = lazy(() =>
   import("./pages/billing/CreateInvoicePage.js").then((module) => ({
     default: module.CreateInvoicePage,
@@ -60,6 +63,11 @@ const TeamPage = lazy(() =>
 );
 const AuditPage = lazy(() =>
   import("./pages/audit/AuditPage.js").then((module) => ({ default: module.AuditPage })),
+);
+const OrganizationPage = lazy(() =>
+  import("./pages/settings/OrganizationPage.js").then((module) => ({
+    default: module.OrganizationPage,
+  })),
 );
 
 function RouteLoading() {
@@ -92,10 +100,12 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/offers" element={<OffersPage />} />
         <Route path="/offers/new" element={<CreateOfferPage />} />
         <Route path="/billing" element={<BillingPage />} />
+        <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/billing/new" element={<CreateInvoicePage />} />
         <Route path="/billing/:invoiceId" element={<InvoiceDetailPage />} />
         <Route path="/team" element={<TeamPage />} />
         <Route path="/audit" element={<AuditPage />} />
+        <Route path="/settings/organization" element={<OrganizationPage />} />
         <Route path="/tenants" element={<TenantsPage />} />
         <Route path="/tenants/new" element={<CreateTenantPanel />} />
         <Route path="/tenants/:tenantId" element={<TenantPage />} />

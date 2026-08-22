@@ -6,7 +6,11 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
-import { platformCatalogContracts, type CatalogVersion } from "@markiro/platform-contracts";
+import {
+  platformCatalogContracts,
+  type CatalogVersion,
+  type OperatorBankAccount,
+} from "@markiro/platform-contracts";
 
 import i18n from "../src/i18n/index.js";
 import { NavigationGuardProvider } from "../src/layout/NavigationGuard.js";
@@ -93,6 +97,43 @@ const service = {
   service: {},
 } satisfies CatalogVersion;
 
+const sellerAccounts = [
+  {
+    id: "71111111-1111-4111-8111-111111111111",
+    label: "Основной",
+    settlementAccount: "40702810900000000001",
+    bic: "044525225",
+    bankName: "Банк основной",
+    correspondentAccount: "30101810400000000001",
+    currency: "RUB",
+    status: "active",
+    isDefault: true,
+    migrationSourceProfileId: null,
+    createdByPlatformUserId: "41111111-1111-4111-8111-111111111111",
+    archivedByPlatformUserId: null,
+    archivedAt: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+  },
+  {
+    id: "72222222-1111-4111-8111-111111111111",
+    label: "Резервный",
+    settlementAccount: "40702810900000000002",
+    bic: "044525225",
+    bankName: "Банк резервный",
+    correspondentAccount: "30101810400000000002",
+    currency: "RUB",
+    status: "active",
+    isDefault: false,
+    migrationSourceProfileId: null,
+    createdByPlatformUserId: "41111111-1111-4111-8111-111111111111",
+    archivedByPlatformUserId: null,
+    archivedAt: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+  },
+] satisfies OperatorBankAccount[];
+
 function renderComposer(overrides: Partial<React.ComponentProps<typeof DocumentComposer>> = {}) {
   const props = {
     kind: "invoice" as const,
@@ -139,6 +180,36 @@ async function selectCombobox(
 }
 
 describe("DocumentComposer", () => {
+  it("preselects the default seller account and submits an explicit replacement", async () => {
+    await i18n.changeLanguage("ru");
+    const user = userEvent.setup();
+    const { props } = renderComposer({
+      sellerAccounts,
+      initialDraft: {
+        tenantId: tenant.id,
+        applicationMode: "automatic",
+        date: "",
+        lines: [],
+      },
+    });
+
+    expect(
+      screen.getByText("Реквизиты и выбранный счёт фиксируются при выпуске документа."),
+    ).toBeDefined();
+    await selectCombobox(
+      user,
+      "Расчётный счёт продавца",
+      "Резервный",
+      "Резервный · •••• 0002 · Банк резервный",
+    );
+    await selectCombobox(user, "Добавить позицию", "v3", "Базовый тариф · plan-basic · v3");
+    await user.click(screen.getByRole("button", { name: "Создать черновик счёта" }));
+
+    expect(props.onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({ sellerBankAccountId: sellerAccounts[1]!.id }),
+    );
+  });
+
   it("uses the shared catalog parser without inventing omitted financial terms", () => {
     const {
       unitPrice: _unitPrice,

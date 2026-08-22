@@ -623,6 +623,171 @@ textarea {
   gap: 16px;
 }
 
+.payments-page {
+  display: grid;
+  gap: 16px;
+}
+
+.billing-header-actions,
+.payment-import-form,
+.payment-match-actions > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.payments-panel,
+.payment-match-card {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+}
+
+.payments-panel > header,
+.payment-match-card > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.payments-panel h2,
+.payment-match-card h3 {
+  margin: 0;
+  color: var(--fg-1);
+}
+
+.payments-panel h2 {
+  font: var(--text-h2);
+}
+
+.payments-panel header p,
+.payment-match-card h3,
+.payment-purpose {
+  margin: 4px 0 0;
+}
+
+.payments-panel header p,
+.payment-purpose,
+.payments-empty {
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.payment-import-form {
+  padding: 20px;
+}
+
+.payment-file-field,
+.payment-match-actions label {
+  display: grid;
+  flex: 1 1 320px;
+  gap: 8px;
+  color: var(--fg-2);
+  font: 600 14px/20px var(--font-ui);
+}
+
+.payment-file-field input,
+.payment-match-actions input {
+  width: 100%;
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  font: var(--text-body);
+}
+
+.payments-count,
+.payment-match-reference {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.payments-count {
+  min-width: 32px;
+  text-align: right;
+}
+
+.payments-empty {
+  padding: 20px;
+}
+
+.payment-match-list {
+  display: grid;
+  gap: 12px;
+  padding: 12px;
+  background: var(--surface-panel);
+}
+
+.payment-match-card > header {
+  padding: 14px 16px;
+}
+
+.payment-match-card h3 {
+  font: 600 16px/22px var(--font-ui);
+}
+
+.payment-match-data {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  padding: 16px;
+}
+
+.payment-match-data > div {
+  min-width: 0;
+  padding: 0 14px;
+  border-right: 1px solid var(--line);
+}
+
+.payment-match-data > div:first-child {
+  padding-left: 0;
+}
+
+.payment-match-data > div:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.payment-match-data dt {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.payment-match-data dd {
+  margin: 6px 0 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-1);
+  font: 600 14px/20px var(--font-ui);
+}
+
+.payment-purpose,
+.payment-match-actions {
+  padding: 14px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.payment-match-actions {
+  display: grid;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .payment-match-data {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  .payment-match-data > div {
+    padding: 0;
+    border-right: 0;
+  }
+}
+
 .catalog-coordinate {
   margin-top: -8px;
   letter-spacing: 0.08em;
@@ -1952,6 +2117,23 @@ textarea {
   margin-bottom: 20px;
 }
 
+.document-composer__parties,
+.seller-account-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.seller-account-picker p,
+.seller-account-picker a {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.seller-account-picker a {
+  color: var(--accent-text);
+}
+
 .document-composer__header p,
 .document-composer__header h1,
 .document-summary h2,
@@ -2124,7 +2306,336 @@ textarea {
   gap: 8px;
 }
 
+.organization-page,
+.legal-workspace,
+.legal-profile-form,
+.bank-accounts-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.organization-page {
+  min-width: 0;
+}
+
+.organization-page__subtitle {
+  margin: -8px 0 0;
+  color: var(--fg-2);
+  font: var(--text-body);
+}
+
+.legal-workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+  align-items: start;
+}
+
+.legal-workspace > .mk-alert,
+.legal-profile-card,
+.bank-accounts-panel {
+  grid-column: 1;
+}
+
+.billing-readiness {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-panel);
+}
+
+.billing-readiness h2,
+.legal-section-heading h2 {
+  margin: 4px 0 0;
+  color: var(--fg-1);
+  font: var(--text-h3);
+}
+
+.billing-readiness > strong[data-ready="true"] {
+  color: var(--ok-fg);
+}
+
+.billing-readiness > strong[data-ready="false"] {
+  color: var(--warn-fg);
+}
+
+.billing-readiness ul {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.billing-readiness li {
+  display: flex;
+  gap: 8px;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+}
+
+.billing-readiness li[data-ready="true"] span {
+  color: var(--ok-fg);
+}
+
+.billing-readiness p {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.legal-profile-card,
+.bank-accounts-panel {
+  min-width: 0;
+  border-radius: 0 !important;
+}
+
+.legal-profile-form fieldset {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.legal-profile-form fieldset:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.legal-profile-form legend {
+  margin-bottom: 12px;
+  color: var(--fg-1);
+  font: 600 14px/20px var(--font-ui);
+}
+
+.legal-form-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.legal-form-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.legal-form-grid--three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.suggest-field {
+  position: relative;
+  min-width: 0;
+}
+
+.suggest-field__status {
+  display: block;
+  margin-top: 6px;
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.suggest-field__menu {
+  z-index: 5;
+  display: grid;
+  margin-top: 4px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-2);
+}
+
+.suggest-field__menu button {
+  min-height: 44px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg-1);
+  text-align: left;
+  font: var(--text-body-sm);
+  cursor: pointer;
+}
+
+.suggest-field__menu button:last-child {
+  border-bottom: 0;
+}
+
+.suggest-field__menu button:hover,
+.suggest-field__menu button:focus-visible {
+  background: var(--surface-panel);
+}
+
+.legal-profile-confirmation,
+.legal-form-actions,
+.legal-section-heading,
+.bank-account-card__identity,
+.bank-account-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.legal-profile-confirmation > span,
+.legal-form-actions > span {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.bank-accounts-panel {
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+}
+
+.bank-account-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-panel);
+}
+
+.bank-account-form > .mk-alert,
+.bank-account-form > .mk-btn {
+  grid-column: 1 / -1;
+}
+
+.bank-account-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.bank-account-card {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-panel);
+}
+
+.bank-account-card__identity > div {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.bank-account-card__identity strong,
+.bank-account-card__identity span {
+  overflow-wrap: anywhere;
+}
+
+.bank-account-card__identity span {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.bank-account-card dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.bank-account-card dl > div {
+  min-width: 0;
+  padding: 10px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.bank-account-card dt {
+  color: var(--fg-3);
+  font: var(--text-meta);
+}
+
+.bank-account-card dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+  font: var(--text-body-sm);
+}
+
+.legal-empty-state {
+  min-height: 120px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line-strong);
+  color: var(--fg-3);
+  font: var(--text-body);
+}
+
+.archived-accounts summary {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  color: var(--fg-2);
+  font: var(--text-body-sm);
+  cursor: pointer;
+}
+
+.archive-account-confirmation {
+  display: grid;
+  gap: 12px;
+}
+
+.archive-account-confirmation p {
+  margin: 0;
+}
+
+.tenant-detail-tabs {
+  display: flex;
+  border: 1px solid var(--line);
+  background: var(--surface-card);
+}
+
+.tenant-detail-tabs button {
+  min-height: 52px;
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 18px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--fg-2);
+  font: 600 14px/20px var(--font-ui);
+  cursor: pointer;
+}
+
+.tenant-detail-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--ok-solid);
+  background: var(--surface-panel);
+  color: var(--fg-1);
+}
+
+.tenant-detail-tabs button span {
+  color: var(--fg-3);
+  font: var(--text-code);
+}
+
 @media (max-width: 900px) {
+  .legal-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .billing-readiness {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+  }
+
   .document-composer {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -2137,6 +2648,17 @@ textarea {
 }
 
 @media (max-width: 390px) {
+  .legal-form-grid--two,
+  .legal-form-grid--three,
+  .bank-account-form,
+  .bank-account-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .tenant-detail-tabs {
+    display: grid;
+  }
+
   .document-composer__workspace,
   .document-summary {
     padding: 14px;

@@ -127,15 +127,15 @@ export function NavigationGuardProvider({ children }: { children: ReactNode }) {
       {children}
       {busyNotice ? (
         <div className="navigation-busy-notice" role="status">
-          <Alert tone="warn">{t("tenants.unsaved.busy")}</Alert>
+          <Alert tone="warn">{t("navigationGuard.busy")}</Alert>
         </div>
       ) : null}
       <ConfirmDialog
         open={confirmOpen}
-        title={t("tenants.unsaved.title")}
-        description={t("tenants.unsaved.body")}
-        confirmLabel={t("tenants.unsaved.discard")}
-        cancelLabel={t("tenants.unsaved.continue")}
+        title={t("navigationGuard.title")}
+        description={t("navigationGuard.body")}
+        confirmLabel={t("navigationGuard.discard")}
+        cancelLabel={t("navigationGuard.continue")}
         tone="destructive"
         onCancel={cancelDiscard}
         onConfirm={confirmDiscard}

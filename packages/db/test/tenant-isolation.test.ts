@@ -162,6 +162,50 @@ describe.skipIf(!url)("tenant isolation (composite FKs + tenant-scoped uniquenes
     expect(productA!.tenantId).not.toBe(productB!.tenantId);
   });
 
+  it("rejects a tenant bank account linked to another tenant's profile revision", async () => {
+    const actorId = `bank-actor-${randomUUID()}`;
+    const profileA = randomUUID();
+    const profileB = randomUUID();
+    await pool.query(
+      `INSERT INTO platform_users (id, name, email, role, status)
+       VALUES ($1, 'Bank actor', $2, 'platform_admin', 'active')`,
+      [actorId, `${actorId}@example.invalid`],
+    );
+    await pool.query(
+      `INSERT INTO tenant_billing_profiles
+         (id, tenant_id, revision, is_current, kind, full_name, display_name,
+          address_raw, legal_address_raw, postal_same_as_legal, is_confirmed,
+          created_by_platform_user_id)
+       VALUES
+         ($1, $2, 1, true, 'individual', 'Tenant A', 'Tenant A', 'Address A', 'Address A', true, false, $3),
+         ($4, $5, 1, true, 'individual', 'Tenant B', 'Tenant B', 'Address B', 'Address B', true, false, $3)`,
+      [profileA, orgA.id, actorId, profileB, orgB.id],
+    );
+
+    try {
+      await expect(
+        pool.query(
+          `INSERT INTO tenant_bank_accounts
+             (tenant_id, label, settlement_account, bic, bank_name, correspondent_account,
+              currency, status, is_default, migration_source_profile_id,
+              created_by_platform_user_id)
+           VALUES ($1, 'Cross tenant', '40702810900000000001', '044525225', 'Bank',
+                   '30101810400000000225', 'RUB', 'active', true, $2, $3)`,
+          [orgB.id, profileA, actorId],
+        ),
+      ).rejects.toMatchObject({ code: FOREIGN_KEY_VIOLATION });
+    } finally {
+      await pool
+        .query("DELETE FROM tenant_bank_accounts WHERE tenant_id IN ($1, $2)", [orgA.id, orgB.id])
+        .catch(() => undefined);
+      await pool.query("DELETE FROM tenant_billing_profiles WHERE id IN ($1, $2)", [
+        profileA,
+        profileB,
+      ]);
+      await pool.query("DELETE FROM platform_users WHERE id = $1", [actorId]);
+    }
+  });
+
   it("rejects a product image that joins a tenant's product to another tenant's asset", async () => {
     const [productA] = await db
       .insert(products)

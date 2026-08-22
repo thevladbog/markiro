@@ -147,14 +147,24 @@ still parses that shape and returns the normalized contract output, including ca
 timestamps.
 
 The current SaaS OpenAPI inventory covers the platform principal, public activation, team, audit,
-tenants and subscription assignment, catalog and demo-plan setting, offers and their documents and
-payment, invoices and their documents/application/cancellation, and payments. Protected operations
+tenants and subscription assignment, catalog and demo-plan setting, legal profiles and bank
+accounts for Markiro and tenants, offers and their documents and payment, invoices and their
+documents/application/cancellation, and payments. Protected operations
 declare the named `platformSession` Better Auth cookie scheme using the initialized Better Auth
 session-cookie name (`markiro-platform.session_token` for HTTP and the `__Secure-`-prefixed name
 for HTTPS); public activation deliberately declares no cookie security.
-Legacy billing-profile routes under `/platform/billing/operator-profile` and
-`/platform/billing/tenants/:tenantId/profile` are intentionally handed to the following legal-profile
-contract slice and are not represented as already migrated here.
+
+Legal and banking data is revisioned. Issued offers and invoices keep immutable seller, buyer, and
+selected bank-account snapshots, so later profile edits or account archival cannot rewrite an
+already-issued document. A tenant and Markiro each have one legal profile and may have multiple
+bank accounts with one active default. DaData is an optional suggestion adapter for organizations,
+addresses, and banks; it never makes a suggestion authoritative or blocks manual entry.
+
+Bank imports retain the bounded source row as reconciliation evidence, while the public match and
+audit contracts expose only the payer account's last four digits and whether it is a known active,
+known archived, unknown, or unavailable account. Active known accounts may be suggested. Archived
+known and unknown accounts require an explicit operator decision. Confirming an unknown payer does
+not create a tenant bank account; adding legal details remains a separate audited action.
 
 Every platform error response has the safe `{ code, message, requestId }` envelope. Request IDs are
 the diagnostic correlation boundary: neither response bodies nor secrets belong in browser errors

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link, useLocation, useParams } from "react-router";
+import { Link, useLocation, useParams, useSearchParams } from "react-router";
 
 import { Alert, Button, Card, ConfirmDialog, PageHeader, StatusChip } from "@markiro/ui";
 
@@ -10,6 +10,7 @@ import { PanelState } from "../../components/PanelState.js";
 import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
+import { TenantLegalPanel } from "./TenantLegalPanel.js";
 import { useUnsavedChanges } from "./useUnsavedChanges.js";
 
 const STATUS_TONE = {
@@ -28,6 +29,7 @@ export function TenantPage() {
   const principal = usePlatformPrincipal();
   const queryClient = useQueryClient();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { tenantId = "" } = useParams();
   const validTenantId = tenantIdSchema.safeParse(tenantId);
   const tenant = useQuery({
@@ -101,6 +103,7 @@ export function TenantPage() {
   const renewSending = detail.ownerActivation?.status === "sending";
   const canDirectAssign = principal.role === "platform_admin";
   const financialVisible = principal.role !== "support";
+  const activeTab = searchParams.get("tab") === "legal" && financialVisible ? "legal" : "overview";
   const language = i18n.resolvedLanguage?.startsWith("en") ? "en" : "ru";
   const createdNotice =
     (location.state as { tenantCreated?: unknown } | null)?.tenantCreated === true;
@@ -139,66 +142,106 @@ export function TenantPage() {
         <Alert tone="warn">{t("tenants.detail.pendingActivation")}</Alert>
       ) : null}
 
-      <Card className="tenant-overview-card" title={t("tenants.detail.overviewTitle")} titleAs="h2">
-        <div className="tenant-overview-grid">
-          <dl className="tenant-facts">
-            <div>
-              <dt>{t("tenants.detail.slug")}</dt>
-              <dd className="mono">{detail.tenant.slug}</dd>
-            </div>
-            <div>
-              <dt>{t("tenants.detail.createdAt")}</dt>
-              <dd>
-                {new Intl.DateTimeFormat(language === "en" ? "en-GB" : "ru-RU", {
-                  dateStyle: "medium",
-                  timeZone: "Europe/Moscow",
-                }).format(new Date(detail.tenant.createdAt))}
-              </dd>
-            </div>
-          </dl>
-          <section className="owner-activation" aria-labelledby="owner-activation-title">
-            <h3 id="owner-activation-title">{t("tenants.detail.activation.title")}</h3>
-            {detail.ownerActivation ? (
-              <>
-                <strong>{detail.ownerActivation.ownerEmail}</strong>
-                <span>
-                  {detail.ownerActivation.emailVerified
-                    ? t("tenants.detail.activation.activated")
-                    : t(`tenants.detail.activation.status.${detail.ownerActivation.status}`, {
-                        defaultValue: detail.ownerActivation.status,
-                      })}
-                </span>
-                {canRenew ? (
-                  <Button
-                    variant="secondary"
-                    disabled={renewSending}
-                    onClick={() => setRenewOpen(true)}
-                  >
-                    {t("tenants.detail.activation.renew")}
-                  </Button>
-                ) : null}
-                {canRenew && renewSending ? (
-                  <span>{t("tenants.detail.activation.sendingBlocked")}</span>
-                ) : null}
-              </>
-            ) : (
-              <span>{t("tenants.detail.activation.missing")}</span>
-            )}
-            <div className="tenant-operation-status" role="status" aria-live="polite">
-              {renewMessage ? (
-                <span data-tone={renewMessage.tone}>{t(renewMessage.key)}</span>
-              ) : null}
-            </div>
-          </section>
-        </div>
-      </Card>
+      <div
+        className="tenant-detail-tabs"
+        role="tablist"
+        aria-label={t("tenants.detail.tabs.label")}
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === "overview"}
+          onClick={() => setSearchParams({})}
+        >
+          <span aria-hidden="true">01</span>
+          {t("tenants.detail.tabs.overview")}
+        </button>
+        {financialVisible ? (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === "legal"}
+            onClick={() => setSearchParams({ tab: "legal" })}
+          >
+            <span aria-hidden="true">02</span>
+            {t("tenants.detail.tabs.legal")}
+          </button>
+        ) : null}
+      </div>
 
-      <SubscriptionPanel
-        detail={detail}
-        canDirectAssign={canDirectAssign}
-        financialVisible={financialVisible}
-        accountant={principal.role === "accountant"}
-      />
+      {activeTab === "overview" ? (
+        <>
+          <Card
+            className="tenant-overview-card"
+            title={t("tenants.detail.overviewTitle")}
+            titleAs="h2"
+          >
+            <div className="tenant-overview-grid">
+              <dl className="tenant-facts">
+                <div>
+                  <dt>{t("tenants.detail.slug")}</dt>
+                  <dd className="mono">{detail.tenant.slug}</dd>
+                </div>
+                <div>
+                  <dt>{t("tenants.detail.createdAt")}</dt>
+                  <dd>
+                    {new Intl.DateTimeFormat(language === "en" ? "en-GB" : "ru-RU", {
+                      dateStyle: "medium",
+                      timeZone: "Europe/Moscow",
+                    }).format(new Date(detail.tenant.createdAt))}
+                  </dd>
+                </div>
+              </dl>
+              <section className="owner-activation" aria-labelledby="owner-activation-title">
+                <h3 id="owner-activation-title">{t("tenants.detail.activation.title")}</h3>
+                {detail.ownerActivation ? (
+                  <>
+                    <strong>{detail.ownerActivation.ownerEmail}</strong>
+                    <span>
+                      {detail.ownerActivation.emailVerified
+                        ? t("tenants.detail.activation.activated")
+                        : t(`tenants.detail.activation.status.${detail.ownerActivation.status}`, {
+                            defaultValue: detail.ownerActivation.status,
+                          })}
+                    </span>
+                    {canRenew ? (
+                      <Button
+                        variant="secondary"
+                        disabled={renewSending}
+                        onClick={() => setRenewOpen(true)}
+                      >
+                        {t("tenants.detail.activation.renew")}
+                      </Button>
+                    ) : null}
+                    {canRenew && renewSending ? (
+                      <span>{t("tenants.detail.activation.sendingBlocked")}</span>
+                    ) : null}
+                  </>
+                ) : (
+                  <span>{t("tenants.detail.activation.missing")}</span>
+                )}
+                <div className="tenant-operation-status" role="status" aria-live="polite">
+                  {renewMessage ? (
+                    <span data-tone={renewMessage.tone}>{t(renewMessage.key)}</span>
+                  ) : null}
+                </div>
+              </section>
+            </div>
+          </Card>
+
+          <SubscriptionPanel
+            detail={detail}
+            canDirectAssign={canDirectAssign}
+            financialVisible={financialVisible}
+            accountant={principal.role === "accountant"}
+          />
+        </>
+      ) : (
+        <TenantLegalPanel
+          tenantId={detail.tenant.id}
+          canWrite={principal.capabilities.includes("billing.write")}
+        />
+      )}
 
       <ConfirmDialog
         open={renewOpen}

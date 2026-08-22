@@ -62,6 +62,9 @@ function installInvoiceEditorApi({
       const url = String(input);
       const method = init.method ?? "GET";
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (url.endsWith("/api/platform/billing/operator/accounts") && method === "GET") {
+        return jsonResponse(200, []);
+      }
       if (url.endsWith("/api/platform/invoices") && method === "GET") {
         return jsonResponse(200, { items: [] });
       }

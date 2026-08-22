@@ -4,7 +4,14 @@ import { schema, type Db } from "@markiro/db";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
-import type { BillingProfileInput } from "./dto";
+import type { BillingProfileInput, OperatorBillingProfileInput } from "./dto";
+
+type OperatorBillingProfileRecord = typeof schema.operatorBillingProfiles.$inferSelect;
+type TenantBillingProfileRecord = typeof schema.tenantBillingProfiles.$inferSelect;
+type ExistingBillingProfile = Pick<
+  OperatorBillingProfileRecord,
+  "bankDetails" | "displayName" | "isConfirmed" | "kind" | "revision"
+>;
 
 @Injectable()
 export class BillingProfilesService {
@@ -13,7 +20,7 @@ export class BillingProfilesService {
     private readonly audit: PlatformAuditService,
   ) {}
 
-  async getOperator(): Promise<unknown> {
+  async getOperator(): Promise<OperatorBillingProfileRecord | null> {
     const [profile] = await this.db
       .select()
       .from(schema.operatorBillingProfiles)
@@ -22,7 +29,10 @@ export class BillingProfilesService {
     return profile ?? null;
   }
 
-  async setOperator(principal: PlatformPrincipal, input: BillingProfileInput): Promise<unknown> {
+  async setOperator(
+    principal: PlatformPrincipal,
+    input: OperatorBillingProfileInput,
+  ): Promise<OperatorBillingProfileRecord> {
     return this.db.transaction(async (tx) => {
       const [current] = await tx
         .select()
@@ -38,17 +48,9 @@ export class BillingProfilesService {
       const [created] = await tx
         .insert(schema.operatorBillingProfiles)
         .values({
-          ...input,
+          ...profileValues(input, principal.userId, current),
           revision: (current?.revision ?? 0) + 1,
           isCurrent: true,
-          inn: input.inn ?? null,
-          kpp: input.kpp ?? null,
-          ogrn: input.ogrn ?? null,
-          ogrnip: input.ogrnip ?? null,
-          address: input.address ?? null,
-          bankDetails: input.bankDetails ?? null,
-          contact: input.contact ?? null,
-          createdByPlatformUserId: principal.userId,
         })
         .returning();
       if (!created) throw new BadRequestException({ code: "billing_profile_create_failed" });
@@ -61,15 +63,15 @@ export class BillingProfilesService {
         targetType: "operator_billing_profile",
         targetId: created.id,
         reason: null,
-        before: current ? { revision: current.revision, displayName: current.displayName } : null,
-        after: { revision: created.revision, displayName: created.displayName },
+        before: current ? auditProfileSummary(current) : null,
+        after: auditProfileSummary(created),
         requestId: null,
       });
       return created;
     });
   }
 
-  async getTenant(tenantId: string): Promise<unknown> {
+  async getTenant(tenantId: string): Promise<TenantBillingProfileRecord | null> {
     const [profile] = await this.db
       .select()
       .from(schema.tenantBillingProfiles)
@@ -87,7 +89,7 @@ export class BillingProfilesService {
     principal: PlatformPrincipal,
     tenantId: string,
     input: BillingProfileInput,
-  ): Promise<unknown> {
+  ): Promise<TenantBillingProfileRecord> {
     const [tenant] = await this.db
       .select({ id: schema.organization.id })
       .from(schema.organization)
@@ -115,18 +117,10 @@ export class BillingProfilesService {
       const [created] = await tx
         .insert(schema.tenantBillingProfiles)
         .values({
-          ...input,
+          ...profileValues(input, principal.userId, current),
           tenantId,
           revision: (current?.revision ?? 0) + 1,
           isCurrent: true,
-          inn: input.inn ?? null,
-          kpp: input.kpp ?? null,
-          ogrn: input.ogrn ?? null,
-          ogrnip: input.ogrnip ?? null,
-          address: input.address ?? null,
-          bankDetails: input.bankDetails ?? null,
-          contact: input.contact ?? null,
-          createdByPlatformUserId: principal.userId,
         })
         .returning();
       if (!created) throw new BadRequestException({ code: "billing_profile_create_failed" });
@@ -139,11 +133,56 @@ export class BillingProfilesService {
         targetType: "tenant_billing_profile",
         targetId: created.id,
         reason: null,
-        before: current ? { revision: current.revision, displayName: current.displayName } : null,
-        after: { revision: created.revision, displayName: created.displayName },
+        before: current ? auditProfileSummary(current) : null,
+        after: auditProfileSummary(created),
         requestId: null,
       });
       return created;
     });
   }
+}
+
+function profileValues(
+  input: BillingProfileInput,
+  actorPlatformUserId: string,
+  current?: ExistingBillingProfile,
+) {
+  const postal = input.postalAddress;
+  const legalAddress = input.legalAddress ?? null;
+  return {
+    kind: input.kind,
+    fullName: input.fullName,
+    displayName: input.displayName,
+    inn: "inn" in input ? (input.inn ?? null) : null,
+    kpp: "kpp" in input ? input.kpp : null,
+    ogrn: "ogrn" in input ? input.ogrn : null,
+    ogrnip: "ogrnip" in input ? input.ogrnip : null,
+    legalAddressRaw: input.legalAddressRaw,
+    legalAddress,
+    postalSameAsLegal: postal.sameAsLegal,
+    postalAddressRaw: postal.sameAsLegal ? null : postal.raw,
+    postalAddress: postal.sameAsLegal ? null : (postal.normalized ?? null),
+    contact: input.contact,
+    isConfirmed: true,
+    confirmedByPlatformUserId: actorPlatformUserId,
+    confirmedAt: new Date(),
+    addressRaw: input.legalAddressRaw,
+    address: legalAddress,
+    bankDetails: current?.bankDetails ?? null,
+    createdByPlatformUserId: actorPlatformUserId,
+  };
+}
+
+function auditProfileSummary(profile: {
+  revision: number;
+  kind: string;
+  displayName: string;
+  isConfirmed: boolean;
+}) {
+  return {
+    revision: profile.revision,
+    kind: profile.kind,
+    displayName: profile.displayName,
+    confirmed: profile.isConfirmed,
+  };
 }

@@ -29,6 +29,245 @@ const nonNullUnknownSchema = z
   .unknown()
   .refine((value) => value !== null && value !== undefined, "Value must be present");
 
+export const billingProfileKindSchema = z.enum([
+  "individual",
+  "self_employed",
+  "sole_proprietor",
+  "legal_entity",
+]);
+
+export const normalizedBillingAddressSchema = z.object({
+  value: z.string().trim().min(1).max(1_000),
+  fiasId: z.string().max(100).nullable().optional(),
+  kladrId: z.string().max(100).nullable().optional(),
+  postalCode: z.string().max(20).nullable().optional(),
+  region: z.string().max(300).nullable().optional(),
+  city: z.string().max(300).nullable().optional(),
+  settlement: z.string().max(300).nullable().optional(),
+  street: z.string().max(300).nullable().optional(),
+  house: z.string().max(100).nullable().optional(),
+  block: z.string().max(100).nullable().optional(),
+  flat: z.string().max(100).nullable().optional(),
+  latitude: z.string().max(50).nullable().optional(),
+  longitude: z.string().max(50).nullable().optional(),
+  qualityCode: z.string().max(100).nullable().optional(),
+  completenessCode: z.string().max(100).nullable().optional(),
+});
+
+export const billingContactSchema = z
+  .object({
+    name: z.string().trim().min(1).max(300).nullable(),
+    email: z.email().max(254).nullable(),
+    phone: z.string().trim().min(1).max(50).nullable(),
+  })
+  .strict();
+
+const sameAsLegalPostalAddressSchema = z.object({ sameAsLegal: z.literal(true) }).strict();
+const separatePostalAddressSchema = z
+  .object({
+    sameAsLegal: z.literal(false),
+    raw: z.string().trim().min(1).max(1_000),
+    normalized: normalizedBillingAddressSchema.nullable().optional(),
+  })
+  .strict();
+export const billingPostalAddressInputSchema = z.discriminatedUnion("sameAsLegal", [
+  sameAsLegalPostalAddressSchema,
+  separatePostalAddressSchema,
+]);
+
+const billingProfileInputCommonFields = {
+  fullName: z.string().trim().min(1).max(500),
+  displayName: z.string().trim().min(1).max(300),
+  legalAddressRaw: z.string().trim().min(1).max(1_000),
+  legalAddress: normalizedBillingAddressSchema.nullable().optional(),
+  postalAddress: billingPostalAddressInputSchema,
+  contact: billingContactSchema,
+};
+
+const individualBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("individual"),
+    inn: z
+      .string()
+      .regex(/^\d{12}$/)
+      .nullable()
+      .optional(),
+  })
+  .strict();
+const selfEmployedBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("self_employed"),
+    inn: z.string().regex(/^\d{12}$/),
+  })
+  .strict();
+const soleProprietorBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("sole_proprietor"),
+    inn: z.string().regex(/^\d{12}$/),
+    ogrnip: z.string().regex(/^\d{15}$/),
+  })
+  .strict();
+export const operatorBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("legal_entity"),
+    inn: z.string().regex(/^\d{10}$/),
+    kpp: z.string().regex(/^\d{9}$/),
+    ogrn: z.string().regex(/^\d{13}$/),
+  })
+  .strict();
+
+export const billingProfileInputSchema = z.discriminatedUnion("kind", [
+  individualBillingProfileInputSchema,
+  selfEmployedBillingProfileInputSchema,
+  soleProprietorBillingProfileInputSchema,
+  operatorBillingProfileInputSchema,
+]);
+
+export const billingProfileSchema = z.object({
+  id: platformUuidSchema,
+  kind: billingProfileKindSchema,
+  fullName: z.string().min(1).max(500),
+  displayName: z.string().min(1).max(300),
+  inn: z.string().nullable(),
+  kpp: z.string().nullable(),
+  ogrn: z.string().nullable(),
+  ogrnip: z.string().nullable(),
+  legalAddressRaw: z.string().min(1).max(1_000),
+  legalAddress: normalizedBillingAddressSchema.nullable(),
+  postalSameAsLegal: z.boolean(),
+  postalAddressRaw: z.string().max(1_000).nullable(),
+  postalAddress: normalizedBillingAddressSchema.nullable(),
+  contact: billingContactSchema.nullable(),
+  revision: positiveIntegerSchema,
+  isCurrent: z.boolean(),
+  isConfirmed: z.boolean(),
+  confirmedByPlatformUserId: nullablePlatformUserIdSchema,
+  confirmedAt: nullableResponseTimestampSchema,
+  createdByPlatformUserId: nullablePlatformUserIdSchema,
+  createdAt: responseTimestampSchema,
+});
+export const operatorBillingProfileSchema = billingProfileSchema.extend({
+  kind: z.literal("legal_entity"),
+});
+export const tenantBillingProfileSchema = billingProfileSchema.extend({
+  tenantId: platformTenantIdSchema,
+});
+
+export const bankAccountStatusSchema = z.enum(["active", "archived"]);
+export const bankAccountInputSchema = z
+  .object({
+    label: z.string().trim().min(1).max(200),
+    settlementAccount: z.string().regex(/^\d{20}$/),
+    bic: z.string().regex(/^\d{9}$/),
+    bankName: z.string().trim().min(1).max(500),
+    correspondentAccount: z.string().regex(/^\d{20}$/),
+    currency: z.literal("RUB"),
+  })
+  .strict();
+export const bankAccountSchema = z
+  .object({
+    id: platformUuidSchema,
+    label: z.string().min(1).max(200),
+    settlementAccount: z.string().regex(/^\d{20}$/),
+    bic: z.string().regex(/^\d{9}$/),
+    bankName: z.string().min(1).max(500),
+    correspondentAccount: z.string().regex(/^\d{20}$/),
+    currency: z.literal("RUB"),
+    status: bankAccountStatusSchema,
+    isDefault: z.boolean(),
+    migrationSourceProfileId: platformUuidSchema.nullable(),
+    createdByPlatformUserId: platformUserIdSchema,
+    archivedByPlatformUserId: nullablePlatformUserIdSchema,
+    archivedAt: nullableResponseTimestampSchema,
+    createdAt: responseTimestampSchema,
+    updatedAt: responseTimestampSchema,
+  })
+  .strict();
+export const operatorBankAccountSchema = bankAccountSchema;
+export const tenantBankAccountSchema = bankAccountSchema.extend({
+  tenantId: platformTenantIdSchema,
+});
+
+export const dadataSuggestionStatusSchema = z.enum([
+  "ready",
+  "unconfigured",
+  "unavailable",
+  "no_results",
+]);
+export const dadataAddressSuggestionSchema = normalizedBillingAddressSchema.strict();
+export const dadataOrganizationSuggestionSchema = z
+  .object({
+    value: z.string().trim().min(1).max(1_000),
+    kind: z.enum(["legal_entity", "sole_proprietor"]),
+    fullName: z.string().trim().min(1).max(500),
+    displayName: z.string().trim().min(1).max(300),
+    inn: z.string().regex(/^\d{10}(?:\d{2})?$/),
+    kpp: z
+      .string()
+      .regex(/^\d{9}$/)
+      .nullable(),
+    ogrn: z
+      .string()
+      .regex(/^\d{13}$/)
+      .nullable(),
+    ogrnip: z
+      .string()
+      .regex(/^\d{15}$/)
+      .nullable(),
+    legalAddress: dadataAddressSuggestionSchema.nullable(),
+  })
+  .strict();
+export const dadataBankSuggestionSchema = z
+  .object({
+    value: z.string().trim().min(1).max(500),
+    bic: z.string().regex(/^\d{9}$/),
+    bankName: z.string().trim().min(1).max(500),
+    correspondentAccount: z
+      .string()
+      .regex(/^\d{20}$/)
+      .nullable(),
+  })
+  .strict();
+
+const dadataResultSchema = <T extends z.ZodType>(item: T) =>
+  z
+    .object({
+      status: dadataSuggestionStatusSchema,
+      items: z.array(item).max(20),
+    })
+    .strict();
+export const dadataOrganizationResultSchema = dadataResultSchema(
+  dadataOrganizationSuggestionSchema,
+);
+export const dadataAddressResultSchema = dadataResultSchema(dadataAddressSuggestionSchema);
+export const dadataBankResultSchema = dadataResultSchema(dadataBankSuggestionSchema);
+export const dadataStatusResponseSchema = z
+  .object({ status: dadataSuggestionStatusSchema })
+  .strict();
+export const dadataSuggestionQuerySchema = z
+  .object({
+    q: z
+      .string()
+      .trim()
+      .transform((value) => value.replace(/\s+/g, " "))
+      .pipe(z.string().min(3).max(300)),
+  })
+  .strict();
+export const bankAccountArchiveSchema = z
+  .object({
+    replacementAccountId: platformUuidSchema.optional(),
+  })
+  .strict();
+
+const bankAccountParamsSchema = z.object({ accountId: platformUuidSchema }).strict();
+const tenantBankAccountParamsSchema = z
+  .object({ tenantId: platformTenantIdSchema, accountId: platformUuidSchema })
+  .strict();
+
 export const offerActivationPolicySchema = z.enum(["immediately", "after_current"]);
 export const invoiceActivationPolicySchema = z.enum(["immediate", "after_current", "manual"]);
 export const commercialDocumentStatusSchema = z.enum(["pending", "ready", "failed"]);
@@ -54,6 +293,7 @@ const offerCreateLineSchema = z
 export const offerCreateSchema = z
   .object({
     tenantId: platformTenantIdSchema,
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     expiresAt: nullableRequestDateSchema.optional(),
     termsMarkdown: z.string().max(20_000).nullable().optional(),
     lines: z.array(offerCreateLineSchema).min(1).max(100),
@@ -75,6 +315,7 @@ const offerRecordCommonSchema = z
     familyId: platformUuidSchema,
     revision: positiveIntegerSchema,
     previousRevisionId: platformUuidSchema.nullable(),
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     total: platformMoneySchema,
     expiresAt: nullableResponseTimestampSchema,
     termsMarkdown: z.string().max(20_000).nullable(),
@@ -386,6 +627,7 @@ const invoiceCreateLineSchema = z
 export const invoiceCreateSchema = z
   .object({
     tenantId: platformTenantIdSchema,
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     dueDate: nullableRequestDateSchema.optional(),
     applicationMode: z.enum(["manual", "automatic"]),
     lines: z.array(invoiceCreateLineSchema).min(1).max(100),
@@ -433,6 +675,7 @@ const invoiceRecordCommonSchema = z
     id: platformUuidSchema,
     tenantId: platformTenantIdSchema,
     number: z.string().min(1),
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     dueDate: nullableResponseTimestampSchema,
     currency: z.literal("RUB"),
     subtotal: platformMoneySchema,
@@ -449,6 +692,8 @@ const unissuedInvoiceFields = {
   issueDate: z.null(),
   sellerSnapshot: z.null(),
   buyerSnapshot: z.null(),
+  sellerBankAccountSnapshot: z.null().optional(),
+  buyerBankAccountSnapshot: z.null().optional(),
   issuedByPlatformUserId: z.null(),
   issuedAt: z.null(),
 };
@@ -456,6 +701,8 @@ const issuedInvoiceFields = {
   issueDate: responseTimestampSchema,
   sellerSnapshot: nonNullUnknownSchema,
   buyerSnapshot: nonNullUnknownSchema,
+  sellerBankAccountSnapshot: z.unknown().nullable().optional(),
+  buyerBankAccountSnapshot: z.unknown().nullable().optional(),
   issuedByPlatformUserId: platformUserIdSchema,
   issuedAt: responseTimestampSchema,
 };
@@ -507,6 +754,8 @@ export const invoiceServiceRecordSchema = invoiceRecordCommonSchema
     dueDate: nullableServiceTimestampSchema,
     sellerSnapshot: z.unknown().nullable(),
     buyerSnapshot: z.unknown().nullable(),
+    sellerBankAccountSnapshot: z.unknown().nullable().optional(),
+    buyerBankAccountSnapshot: z.unknown().nullable().optional(),
     issuedByPlatformUserId: nullablePlatformUserIdSchema,
     issuedAt: nullableServiceTimestampSchema,
     paidAt: nullableServiceTimestampSchema,
@@ -802,11 +1051,139 @@ export const paymentImportServiceResultSchema = paymentImportResultSchema
   })
   .strict();
 
+export const payerAccountEvidenceSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      kind: z.literal("known"),
+      last4: z.string().regex(/^\d{4}$/),
+      accountStatus: bankAccountStatusSchema,
+      label: z.string().min(1).max(200),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("unknown"),
+      last4: z.string().regex(/^\d{4}$/),
+    })
+    .strict(),
+  z.object({ kind: z.literal("unavailable"), last4: z.null() }).strict(),
+]);
+
+export const paymentMatchSchema = z
+  .object({
+    id: platformUuidSchema,
+    importId: platformUuidSchema,
+    importRowId: platformUuidSchema,
+    sourceRowId: z.string().min(1).max(200),
+    operationDate: nullableResponseTimestampSchema,
+    amount: platformMoneySchema.nullable(),
+    currency: z.string().max(10).nullable(),
+    payerName: z.string().max(1_000).nullable(),
+    paymentPurpose: z.string().max(5_000).nullable(),
+    bankReference: z.string().max(1_000).nullable(),
+    tenantId: platformTenantIdSchema.nullable(),
+    invoiceId: platformUuidSchema.nullable(),
+    invoiceNumber: z.string().min(1).nullable(),
+    status: z.enum(["unmatched", "suggested", "matched", "rejected", "needs_review"]),
+    score: z.number().int().min(0).max(100).nullable(),
+    reason: z.string().max(1_000).nullable(),
+    tenantBankAccountId: platformUuidSchema.nullable(),
+    payerAccountEvidence: payerAccountEvidenceSchema.nullable(),
+    decidedByPlatformUserId: nullablePlatformUserIdSchema,
+    decidedAt: nullableResponseTimestampSchema,
+    createdAt: responseTimestampSchema,
+  })
+  .strict();
+
+export const paymentMatchServiceSchema = paymentMatchSchema
+  .extend({
+    operationDate: nullableServiceTimestampSchema,
+    decidedAt: nullableServiceTimestampSchema,
+    createdAt: serviceTimestampSchema,
+  })
+  .strict();
+
+export const paymentMatchResolveSchema = z.discriminatedUnion("decision", [
+  z
+    .object({
+      decision: z.literal("matched"),
+      tenantId: platformTenantIdSchema,
+      invoiceId: platformUuidSchema,
+      tenantBankAccountId: platformUuidSchema.nullable(),
+      reason: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+  z
+    .object({
+      decision: z.literal("rejected"),
+      reason: z.string().trim().min(1).max(1_000),
+    })
+    .strict(),
+]);
+
 const offerIdSchema = platformUuidSchema;
 const invoiceIdSchema = platformUuidSchema;
 const documentIdSchema = platformUuidSchema;
 
 export const platformCommercialContracts = {
+  billingProfiles: {
+    operator: {
+      get: { response: operatorBillingProfileSchema.nullable() },
+      set: { body: operatorBillingProfileInputSchema, response: operatorBillingProfileSchema },
+    },
+    tenant: {
+      get: { params: platformTenantIdSchema, response: tenantBillingProfileSchema.nullable() },
+      set: {
+        params: platformTenantIdSchema,
+        body: billingProfileInputSchema,
+        response: tenantBillingProfileSchema,
+      },
+    },
+  },
+  dadata: {
+    organizations: {
+      query: dadataSuggestionQuerySchema,
+      response: dadataOrganizationResultSchema,
+    },
+    addresses: {
+      query: dadataSuggestionQuerySchema,
+      response: dadataAddressResultSchema,
+    },
+    banks: { query: dadataSuggestionQuerySchema, response: dadataBankResultSchema },
+    status: { response: dadataStatusResponseSchema },
+  },
+  billingAccounts: {
+    operator: {
+      list: { response: z.array(operatorBankAccountSchema) },
+      create: { body: bankAccountInputSchema, response: operatorBankAccountSchema },
+      setDefault: { params: bankAccountParamsSchema, response: operatorBankAccountSchema },
+      archive: {
+        params: bankAccountParamsSchema,
+        body: bankAccountArchiveSchema,
+        response: operatorBankAccountSchema,
+      },
+    },
+    tenant: {
+      list: {
+        params: z.object({ tenantId: platformTenantIdSchema }).strict(),
+        response: z.array(tenantBankAccountSchema),
+      },
+      create: {
+        params: z.object({ tenantId: platformTenantIdSchema }).strict(),
+        body: bankAccountInputSchema,
+        response: tenantBankAccountSchema,
+      },
+      setDefault: {
+        params: tenantBankAccountParamsSchema,
+        response: tenantBankAccountSchema,
+      },
+      archive: {
+        params: tenantBankAccountParamsSchema,
+        body: bankAccountArchiveSchema,
+        response: tenantBankAccountSchema,
+      },
+    },
+  },
   offers: {
     list: { response: z.array(offerSchema) },
     detail: { params: offerIdSchema, response: offerDetailSchema },
@@ -851,6 +1228,14 @@ export const platformCommercialContracts = {
   },
   payments: {
     list: { response: z.object({ items: z.array(billingPaymentSchema) }).strict() },
+    matches: {
+      list: { response: z.object({ items: z.array(paymentMatchSchema) }).strict() },
+      resolve: {
+        params: platformUuidSchema,
+        body: paymentMatchResolveSchema,
+        response: paymentMatchSchema,
+      },
+    },
     manual: {
       params: invoiceIdSchema,
       body: manualPaymentSchema,
@@ -912,3 +1297,23 @@ export type PaymentImportDto = z.output<typeof paymentImportSchema>;
 export type PaymentImportResult = z.output<typeof paymentImportResultSchema>;
 export type PaymentImportResultSource = z.input<typeof paymentImportResultSchema>;
 export type PaymentImportServiceResultSource = z.input<typeof paymentImportServiceResultSchema>;
+export type PayerAccountEvidence = z.output<typeof payerAccountEvidenceSchema>;
+export type PaymentMatch = z.output<typeof paymentMatchSchema>;
+export type PaymentMatchServiceSource = z.input<typeof paymentMatchServiceSchema>;
+export type PaymentMatchResolveInput = z.input<typeof paymentMatchResolveSchema>;
+export type PaymentMatchResolveDto = z.output<typeof paymentMatchResolveSchema>;
+export type BillingProfileInput = z.output<typeof billingProfileInputSchema>;
+export type OperatorBillingProfileInput = z.output<typeof operatorBillingProfileInputSchema>;
+export type BillingProfile = z.output<typeof billingProfileSchema>;
+export type OperatorBillingProfile = z.output<typeof operatorBillingProfileSchema>;
+export type TenantBillingProfile = z.output<typeof tenantBillingProfileSchema>;
+export type BankAccountStatus = z.output<typeof bankAccountStatusSchema>;
+export type BankAccountInput = z.output<typeof bankAccountInputSchema>;
+export type BankAccount = z.output<typeof bankAccountSchema>;
+export type OperatorBankAccount = z.output<typeof operatorBankAccountSchema>;
+export type TenantBankAccount = z.output<typeof tenantBankAccountSchema>;
+export type BankAccountArchiveInput = z.output<typeof bankAccountArchiveSchema>;
+export type DadataSuggestionStatus = z.output<typeof dadataSuggestionStatusSchema>;
+export type DadataAddressSuggestion = z.output<typeof dadataAddressSuggestionSchema>;
+export type DadataOrganizationSuggestion = z.output<typeof dadataOrganizationSuggestionSchema>;
+export type DadataBankSuggestion = z.output<typeof dadataBankSuggestionSchema>;

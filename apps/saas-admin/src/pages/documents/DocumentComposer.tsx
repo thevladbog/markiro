@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from "react";
+import type { OperatorBankAccount } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 
 import type { CatalogVersionDto } from "../catalog/api.js";
@@ -14,12 +15,15 @@ import { CatalogPositionPicker } from "./CatalogPositionPicker.js";
 import { DocumentLinesTable } from "./DocumentLinesTable.js";
 import { DocumentSummary } from "./DocumentSummary.js";
 import { TenantPicker } from "./TenantPicker.js";
+import { SellerAccountPicker } from "./SellerAccountPicker.js";
 
 export interface DocumentComposerProps {
   kind: "invoice" | "offer";
   initialDraft?: DocumentDraft;
   tenants: readonly TenantListItem[];
   catalog: readonly CatalogVersionDto[];
+  sellerAccounts?: readonly OperatorBankAccount[];
+  loadingSellerAccounts?: boolean;
   loadingSources: boolean;
   submitting: boolean;
   submitError?: string;
@@ -41,6 +45,8 @@ export function DocumentComposer({
   initialDraft,
   tenants,
   catalog,
+  sellerAccounts = [],
+  loadingSellerAccounts = false,
   loadingSources,
   submitting,
   submitError,
@@ -49,7 +55,14 @@ export function DocumentComposer({
   onCancel,
 }: DocumentComposerProps) {
   const { t } = useTranslation();
-  const initial = useMemo(() => initialDraft ?? emptyDraft(), [initialDraft]);
+  const initial = useMemo(() => {
+    const base = initialDraft ?? emptyDraft();
+    if (base.sellerBankAccountId !== undefined) return base;
+    const defaultAccount = sellerAccounts.find(
+      (account) => account.status === "active" && account.isDefault,
+    );
+    return defaultAccount ? { ...base, sellerBankAccountId: defaultAccount.id } : base;
+  }, [initialDraft, sellerAccounts]);
   const [draft, setDraft] = useState<DocumentDraft>(initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [separate, setSeparate] = useState(false);
@@ -110,13 +123,23 @@ export function DocumentComposer({
             <p>{t(`documents.eyebrow.${kind}`)}</p>
             <h1 id="document-lines-title">{t(`documents.title.${kind}`)}</h1>
           </div>
-          <TenantPicker
-            tenants={tenants}
-            value={draft.tenantId}
-            loading={loadingSources}
-            {...(errors.tenantId ? { error: t(`documents.errors.${errors.tenantId}`) } : {})}
-            onValueChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
-          />
+          <div className="document-composer__parties">
+            <TenantPicker
+              tenants={tenants}
+              value={draft.tenantId}
+              loading={loadingSources}
+              {...(errors.tenantId ? { error: t(`documents.errors.${errors.tenantId}`) } : {})}
+              onValueChange={(tenantId) => dispatch({ type: "tenant.selected", tenantId })}
+            />
+            <SellerAccountPicker
+              accounts={sellerAccounts}
+              {...(draft.sellerBankAccountId !== undefined
+                ? { value: draft.sellerBankAccountId }
+                : {})}
+              loading={loadingSellerAccounts}
+              onValueChange={(accountId) => dispatch({ type: "sellerAccount.selected", accountId })}
+            />
+          </div>
         </header>
         <CatalogPositionPicker
           catalog={catalog}
