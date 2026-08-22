@@ -13,7 +13,7 @@ export const PLATFORM_SESSION_SECURITY = "platformSession";
 const PLATFORM_SESSION_COOKIE = "markiro-platform.session_token";
 
 const PROTECTED_ERROR_STATUSES = [400, 401, 403, 404, 409, 422, 429, 500] as const;
-const PUBLIC_ERROR_STATUSES = [400, 401, 409, 422, 429, 500] as const;
+const PUBLIC_ERROR_STATUSES = [400, 401, 404, 409, 422, 429, 500] as const;
 
 interface PlatformOpenApiOptions {
   response: ZodType;
@@ -32,7 +32,7 @@ export function platformOpenApiSchema(schema: ZodType): SchemaObject {
   // Platform response schemas normalize values such as database Dates and timestamp strings.
   // Zod cannot represent those output transforms in JSON Schema, so OpenAPI describes the
   // accepted JSON wire shape; the controller boundary still parses and normalizes the response.
-  const wireSchema = z.toJSONSchema(schema, { io: "input" });
+  const wireSchema = z.toJSONSchema(schema, { target: "openapi-3.0", io: "input" });
   Reflect.deleteProperty(wireSchema, "$schema");
   return wireSchema as SchemaObject;
 }
