@@ -120,10 +120,26 @@ export function renderSaasApp({
   };
 }
 
-export function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
+export function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
+  const normalizedBody =
+    status >= 400 &&
+    body !== null &&
+    typeof body === "object" &&
+    "code" in body &&
+    typeof body.code === "string"
+      ? {
+          message: "Platform request failed",
+          requestId: "11111111-1111-4111-8111-111111111111",
+          ...body,
+        }
+      : body;
+  return new Response(JSON.stringify(normalizedBody), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -630,6 +646,7 @@ export function installTenantApi({
   renewResponses = [],
   assignmentResponses = [],
   detailResponses = [],
+  catalogResponse = { items: [PUBLISHED_PLAN, SCHEDULED_PLAN, ADDON] },
   renewHandler,
 }: {
   me?: PlatformPrincipal;
@@ -641,6 +658,7 @@ export function installTenantApi({
   renewResponses?: Array<{ status: number; code?: string }>;
   assignmentResponses?: Array<{ status: number; code?: string }>;
   detailResponses?: Array<Record<string, unknown>>;
+  catalogResponse?: unknown;
   renewHandler?: () => Promise<Response>;
 } = {}) {
   const mutationCalls: TenantMutationCall[] = [];
@@ -732,7 +750,10 @@ export function installTenantApi({
         });
       }
       if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
-        return jsonResponse(200, { items: [PUBLISHED_PLAN, SCHEDULED_PLAN, ADDON] });
+        return jsonResponse(200, catalogResponse, {
+          "x-request-id": "11111111-1111-4111-8111-111111111111",
+          "x-markiro-release-sha": "test-release-sha",
+        });
       }
       if (url.endsWith("/api/platform/settings/demo-plan") && method === "GET") {
         return jsonResponse(200, { catalogVersionId: PUBLISHED_PLAN.id });

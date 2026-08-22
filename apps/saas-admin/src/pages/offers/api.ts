@@ -12,20 +12,22 @@ export type OfferLine = OfferDetail["lines"][number];
 export type { OfferDetail };
 
 export function listOffers() {
-  return platformApiFetch("/offers", platformCommercialContracts.offers.list.response);
+  return platformApiFetch("/offers", {
+    responseSchema: platformCommercialContracts.offers.list.response,
+  });
 }
 
 export function getOffer(id: string) {
   const validatedId = platformCommercialContracts.offers.detail.params.parse(id);
-  return platformApiFetch(
-    `/offers/${validatedId}`,
-    platformCommercialContracts.offers.detail.response,
-  );
+  return platformApiFetch(`/offers/${validatedId}`, {
+    responseSchema: platformCommercialContracts.offers.detail.response,
+  });
 }
 
 export function createOffer(input: CreateOfferInput) {
   const validated = platformCommercialContracts.offers.create.body.parse(input);
-  return platformApiFetch("/offers", platformCommercialContracts.offers.create.response, {
+  return platformApiFetch("/offers", {
+    responseSchema: platformCommercialContracts.offers.create.response,
     method: "POST",
     body: JSON.stringify(validated),
   });
@@ -33,11 +35,11 @@ export function createOffer(input: CreateOfferInput) {
 
 export function publishOffer(id: string) {
   const validatedId = platformCommercialContracts.offers.publish.params.parse(id);
-  return platformApiFetch(
-    `/offers/${validatedId}/publish`,
-    platformCommercialContracts.offers.publish.response,
-    { method: "POST", body: "{}" },
-  );
+  return platformApiFetch(`/offers/${validatedId}/publish`, {
+    responseSchema: platformCommercialContracts.offers.publish.response,
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function payOffer(id: string, amount: string, bankReference: string, key: string) {
@@ -47,13 +49,10 @@ export function payOffer(id: string, amount: string, bankReference: string, key:
     currency: "RUB",
     bankReference,
   });
-  return platformApiFetch(
-    `/offers/${validatedId}/payment`,
-    platformCommercialContracts.offers.payment.response,
-    {
-      method: "POST",
-      headers: { "Idempotency-Key": key },
-      body: JSON.stringify(validated),
-    },
-  );
+  return platformApiFetch(`/offers/${validatedId}/payment`, {
+    responseSchema: platformCommercialContracts.offers.payment.response,
+    method: "POST",
+    headers: { "Idempotency-Key": key },
+    body: JSON.stringify(validated),
+  });
 }

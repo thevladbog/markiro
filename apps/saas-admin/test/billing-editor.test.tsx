@@ -7,6 +7,7 @@ import {
   ADDON,
   PUBLISHED_PLAN,
   SERVICE,
+  SUPPORT_ME,
   TENANT_DETAIL,
   TENANT_ID,
   TENANT_LIST_ITEM,
@@ -16,11 +17,6 @@ import {
 
 const OFFER_ID = "81111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-21T10:00:00.000Z";
-const READ_ONLY_BILLING_ME = {
-  ...ACCOUNTANT_ME,
-  capabilities: ACCOUNTANT_ME.capabilities.filter((capability) => capability !== "billing.write"),
-};
-
 function publishedOffer(overrides: Record<string, unknown> = {}) {
   return {
     id: OFFER_ID,
@@ -136,8 +132,8 @@ async function addPosition(
 }
 
 describe("invoice editor route", () => {
-  it("redirects a direct read-only visit to billing without loading an editable form", async () => {
-    installInvoiceEditorApi({ me: READ_ONLY_BILLING_ME });
+  it("redirects a principal without billing write access without loading an editable form", async () => {
+    installInvoiceEditorApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/billing/new" });
 
     expect(await screen.findByRole("heading", { name: "Счета и платежи" })).toBeDefined();

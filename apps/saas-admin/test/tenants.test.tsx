@@ -7,6 +7,7 @@ import { platformApiFetch } from "../src/api/client.js";
 import {
   ACCOUNTANT_ME,
   SUPPORT_ME,
+  TENANT_ID,
   TENANT_LIST_ITEM,
   installTenantApi,
   jsonResponse,
@@ -47,10 +48,9 @@ describe("platform tenants", () => {
       ),
     );
 
-    const result = await platformApiFetch(
-      "/tenants?page=1&limit=50",
-      platformTenantContracts.list.response,
-    );
+    const result = await platformApiFetch("/tenants?page=1&limit=50", {
+      responseSchema: platformTenantContracts.list.response,
+    });
 
     expect(result.items[0]).toMatchObject({
       id: "legacy_better_auth_org",
@@ -199,6 +199,26 @@ describe("platform tenants", () => {
 
     expect(await screen.findByText("15 000,00 ₽")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Создать тенанта" })).toBeNull();
+  });
+
+  it("keeps tenant identity visible when the independently loaded catalog contract fails", async () => {
+    installTenantApi({
+      catalogResponse: {
+        items: [{ id: "malformed-version", password: "must-not-render" }],
+      },
+    });
+
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Обзор" })).toBeDefined();
+    const panelTitle = await screen.findByText("Формат ответа платформы изменился");
+    const panelError = panelTitle.closest('[role="alert"]');
+    expect(panelError).not.toBeNull();
+    if (!panelError) throw new Error("Contract alert is unavailable");
+    expect(panelError.textContent).toContain("11111111-1111-4111-8111-111111111111");
+    expect(panelError.textContent).not.toMatch(/malformed-version|password|must-not-render|items/i);
+    expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
   });
 
   it("blocks invalid create input, then sends only name, slug, and owner email", async () => {

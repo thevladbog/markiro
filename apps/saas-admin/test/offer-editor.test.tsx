@@ -7,6 +7,7 @@ import {
   ADDON,
   PUBLISHED_PLAN,
   SERVICE,
+  SUPPORT_ME,
   TENANT_DETAIL,
   TENANT_ID,
   TENANT_LIST_ITEM,
@@ -14,10 +15,6 @@ import {
   renderSaasApp,
 } from "./render.js";
 
-const READ_ONLY_BILLING_ME = {
-  ...ACCOUNTANT_ME,
-  capabilities: ACCOUNTANT_ME.capabilities.filter((capability) => capability !== "billing.write"),
-};
 const OFFER_ID = "91111111-1111-4111-8111-111111111111";
 const OFFER_CREATED_AT = "2026-08-21T10:00:00.000Z";
 
@@ -193,8 +190,8 @@ describe("offer editor route", () => {
     expect(screen.queryByText("Не удалось загрузить предложения")).toBeNull();
   });
 
-  it("redirects a direct read-only visit to offers without loading an editable form", async () => {
-    installOfferEditorApi({ me: READ_ONLY_BILLING_ME });
+  it("redirects a principal without billing write access without loading an editable form", async () => {
+    installOfferEditorApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/offers/new" });
 
     expect(await screen.findByRole("heading", { name: "Коммерческие предложения" })).toBeDefined();

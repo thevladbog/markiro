@@ -53,14 +53,11 @@ export function ActivatePlatformUser() {
     tokenRef.current = null;
     setSubmitError(null);
     try {
-      await platformApiFetch(
-        "/activation/complete",
-        platformAuthContracts.activationComplete.response,
-        {
-          method: "POST",
-          body: JSON.stringify({ token, password }),
-        },
-      );
+      await platformApiFetch("/activation/complete", {
+        responseSchema: platformAuthContracts.activationComplete.response,
+        method: "POST",
+        body: JSON.stringify({ token, password }),
+      });
       form.reset();
       setComplete(true);
     } catch {

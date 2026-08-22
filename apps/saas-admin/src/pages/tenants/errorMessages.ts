@@ -1,3 +1,5 @@
+import { ApiRequestError } from "../../api/client.js";
+
 type TenantOperation = "create" | "renew" | "plan" | "addon";
 
 const CREATE_ERROR_KEYS: Readonly<Record<string, string>> = {
@@ -36,7 +38,8 @@ const FALLBACK_KEYS: Record<TenantOperation, string> = {
   addon: "tenants.errors.assignment_failed",
 };
 
-export function tenantErrorMessageKey(operation: TenantOperation, code: string | null): string {
+export function tenantErrorMessageKey(operation: TenantOperation, error: unknown): string {
+  const code = error instanceof ApiRequestError && error.kind === "domain" ? error.code : null;
   const allowed =
     operation === "create"
       ? CREATE_ERROR_KEYS

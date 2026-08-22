@@ -15,7 +15,9 @@ export type CatalogCreateInput = CatalogVersionCreate;
 export type { AddonEffect, PlanEntitlements };
 
 export function listCatalogVersions() {
-  return platformApiFetch("/catalog/items", platformCatalogContracts.list.response);
+  return platformApiFetch("/catalog/items", {
+    responseSchema: platformCatalogContracts.list.response,
+  });
 }
 
 export function catalogVersionToCreateInput(item: CatalogVersion): CatalogVersionCreate {
@@ -55,18 +57,17 @@ export function catalogVersionToCreateInput(item: CatalogVersion): CatalogVersio
 
 export function createCatalogVersion(itemCode: string, input: CatalogVersionCreate) {
   const validated = platformCatalogContracts.createVersion.body.parse(input);
-  return platformApiFetch(
-    `/catalog/items/${itemCode}/versions`,
-    platformCatalogContracts.createVersion.response,
-    {
-      method: "POST",
-      body: JSON.stringify(validated),
-    },
-  );
+  return platformApiFetch(`/catalog/items/${itemCode}/versions`, {
+    responseSchema: platformCatalogContracts.createVersion.response,
+    method: "POST",
+    body: JSON.stringify(validated),
+  });
 }
 
 export function getDefaultDemoPlan() {
-  return platformApiFetch("/settings/demo-plan", platformCatalogContracts.getDefaultDemo.response);
+  return platformApiFetch("/settings/demo-plan", {
+    responseSchema: platformCatalogContracts.getDefaultDemo.response,
+  });
 }
 
 export function updateCatalogVersion(
@@ -75,43 +76,41 @@ export function updateCatalogVersion(
   patch: CatalogVersionPatch,
 ) {
   const validated = platformCatalogContracts.updateVersion.body.parse(patch);
-  return platformApiFetch(
-    `/catalog/items/${itemCode}/versions/${versionId}`,
-    platformCatalogContracts.updateVersion.response,
-    {
-      method: "PATCH",
-      body: JSON.stringify(validated),
-    },
-  );
+  return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}`, {
+    responseSchema: platformCatalogContracts.updateVersion.response,
+    method: "PATCH",
+    body: JSON.stringify(validated),
+  });
 }
 
 export function publishCatalogVersion(itemCode: string, versionId: string) {
-  return platformApiFetch(
-    `/catalog/items/${itemCode}/versions/${versionId}/publish`,
-    platformCatalogContracts.publishVersion.response,
-    { method: "POST", body: "{}" },
-  );
+  return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}/publish`, {
+    responseSchema: platformCatalogContracts.publishVersion.response,
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function retireCatalogVersion(itemCode: string, versionId: string) {
-  return platformApiFetch(
-    `/catalog/items/${itemCode}/versions/${versionId}/retire`,
-    platformCatalogContracts.retireVersion.response,
-    { method: "POST", body: "{}" },
-  );
+  return platformApiFetch(`/catalog/items/${itemCode}/versions/${versionId}/retire`, {
+    responseSchema: platformCatalogContracts.retireVersion.response,
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function archiveCatalogItem(itemCode: string) {
-  return platformApiFetch(
-    `/catalog/items/${itemCode}/archive`,
-    platformCatalogContracts.archiveItem.response,
-    { method: "POST", body: "{}" },
-  );
+  return platformApiFetch(`/catalog/items/${itemCode}/archive`, {
+    responseSchema: platformCatalogContracts.archiveItem.response,
+    method: "POST",
+    body: "{}",
+  });
 }
 
 export function setDefaultDemoPlan(catalogVersionId: string) {
   const validated = platformCatalogContracts.setDefaultDemo.body.parse({ catalogVersionId });
-  return platformApiFetch("/settings/demo-plan", platformCatalogContracts.setDefaultDemo.response, {
+  return platformApiFetch("/settings/demo-plan", {
+    responseSchema: platformCatalogContracts.setDefaultDemo.response,
     method: "PATCH",
     body: JSON.stringify(validated),
   });

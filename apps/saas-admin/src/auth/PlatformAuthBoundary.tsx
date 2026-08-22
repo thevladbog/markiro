@@ -39,7 +39,7 @@ export function PlatformAuthBoundary() {
   const location = useLocation();
   const principal = useQuery({
     queryKey: ["platform", "me", session.data?.user.id],
-    queryFn: () => platformApiFetch("/me", platformAuthContracts.me.response),
+    queryFn: () => platformApiFetch("/me", { responseSchema: platformAuthContracts.me.response }),
     enabled: Boolean(session.data && session.data.user.twoFactorEnabled !== false),
     staleTime: 30_000,
   });

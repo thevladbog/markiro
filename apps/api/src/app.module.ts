@@ -52,6 +52,7 @@ import { SubscriptionsModule } from "./subscriptions/subscriptions.module";
 import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module";
 import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
+import { PlatformHttpModule } from "./platform-http/platform-http.module";
 
 @Module({})
 export class AppModule {
@@ -77,6 +78,7 @@ export class AppModule {
     return {
       module: AppModule,
       imports: [
+        PlatformHttpModule,
         AuthModule.forRoot(setup),
         ...(setup.platformAuth
           ? [

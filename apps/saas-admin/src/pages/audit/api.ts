@@ -7,5 +7,7 @@ export const listAuditEvents = (params: { limit?: number; offset?: number } = {}
   const query = new URLSearchParams();
   query.set("limit", String(params.limit ?? 50));
   query.set("offset", String(params.offset ?? 0));
-  return platformApiFetch(`/audit?${query.toString()}`, platformAuditContracts.list.response);
+  return platformApiFetch(`/audit?${query.toString()}`, {
+    responseSchema: platformAuditContracts.list.response,
+  });
 };
