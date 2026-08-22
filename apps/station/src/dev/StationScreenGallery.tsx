@@ -1,14 +1,22 @@
-import { useLayoutEffect, useMemo, useRef, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
 
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
+import type { HardwareContract, UsbPrinterInfo } from "../lib/hardware.js";
+import type { HardwareConfig } from "../lib/hardware-config.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import type { RecentOperation } from "../lib/journal.js";
 import type { ScanSource } from "../lib/scan-source.js";
+import type { SoundSettings } from "../lib/signal-sound.js";
+import type { StationUpdaterController } from "../lib/use-station-updater.js";
+import { updateSeverity, type KnownStationUpdate } from "../lib/update-state.js";
 import { ConflictList } from "../pages/ConflictList.js";
+import { Enrollment } from "../pages/Enrollment.js";
 import { ExceptionFlow } from "../pages/ExceptionFlow.js";
+import { UpdateCenter } from "../pages/UpdateCenter.js";
+import { WorkstationSetup } from "../pages/WorkstationSetup.js";
 import { BadgeScanIllustration } from "../ui/BadgeScanIllustration.js";
 import { BoxPrintRecovery } from "../ui/BoxPrintRecovery.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
@@ -86,15 +94,16 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     void i18n.changeLanguage(request.locale);
   }, [request.locale]);
 
-  if (fixture.kind === "login") {
-    // The real OperatorLogin never renders inside the FloorShell station
-    // chrome -- App.tsx's `stage === "login"` branch mounts it directly
-    // under `withWindowChrome`, not `<FloorShell>`, because there is no
+  if (fixture.kind === "login" || fixture.kind === "pairing") {
+    // Neither the real OperatorLogin nor Enrollment ever renders inside the
+    // FloorShell station chrome -- App.tsx's `stage === "login"` AND
+    // `stage === "pairing"` branches both mount their screen directly under
+    // `withWindowChrome`, not `<FloorShell>`, because there is no
     // station/operator/shift identity yet to show in a status bar. Wrapping
-    // it in the shared status bar the way every other fixture is wrapped
+    // either in the shared status bar the way every other fixture is wrapped
     // would steal ~80px from this fixed, non-scrolling screen and visibly
-    // clip the PIN keypad's last row -- a capture artifact the real screen
-    // never has.
+    // clip the PIN keypad's last row (login) or show chrome the pairing
+    // screen never has -- a capture artifact the real screens never have.
     return (
       <div
         className="station-gallery-capture station-window-frame"
@@ -247,7 +256,7 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
     case "print":
       return <PrintFixture variant={fixture.variant} />;
     case "updates":
-      return <UpdateFixture variant={fixture.variant} locale={locale} />;
+      return <UpdateFixture variant={fixture.variant} />;
     case "floor-header":
       return <FloorHeaderFixture locale={locale} />;
     case "long-copy":
@@ -347,10 +356,72 @@ function LegacyIdentityFixture({ state, locale }: { state: string; locale: Galle
   );
 }
 
+/** The real cabinet address `enroll.cabinetAddress` names, reused as the
+ * synthetic pairing server for the "waiting" fixture -- no request is ever
+ * sent from the gallery (nothing simulates a submit), so this only needs to
+ * be a plausible, non-empty URL that keeps `pairingServerUrl` truthy the way
+ * a fresh, deployment-configured station's would be. */
+const GALLERY_PAIRING_SERVER_URL = "https://admin.markiro.app";
+
+/**
+ * Mirrors Enrollment.tsx's own render tree for the two states this gallery
+ * still needs to be faithful to (see MKR-INS-04 Task 1's audit):
+ *
+ * - "waiting" mounts the real component directly -- App.tsx's `stage ===
+ *   "pairing"` branch passes exactly this shape of props (machineId,
+ *   pairingServerUrl, onSetup) before any code has been entered, so the
+ *   component's own default state already IS the waiting screen.
+ * - "success" cannot be reached by driving the real component end to end:
+ *   `redeem()` needs a live pairing server response AND Tauri's local
+ *   SQLite/config IPC (`persistStationProvisioning`/`writeConfig`) to
+ *   resolve, neither of which exists in a plain dev-mode browser tab. This
+ *   stage is instead mirrored, line for line, from Enrollment.tsx's own
+ *   success branch (the `state === "success"` case in its final return).
+ *
+ * The other pairing variants (redeeming/error/service/recovery) are outside
+ * this audit's scope and keep their previous synthetic-card rendering below.
+ */
 function PairingFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const t = i18n.getFixedT(locale);
+
+  if (variant === "waiting") {
+    return (
+      <Enrollment
+        machineId="gallery-demo-machine"
+        pairingServerUrl={GALLERY_PAIRING_SERVER_URL}
+        onEnrolled={() => undefined}
+        onSetup={() => undefined}
+      />
+    );
+  }
+
+  if (variant === "success") {
+    return (
+      <main className="station-enrollment" aria-labelledby="station-enrollment-title">
+        <aside className="station-enrollment__context">
+          <StationBrand descriptor={t("app.stationDescriptor")} />
+          <div className="station-enrollment__intro">
+            <p>{t("app.stationPurpose")}</p>
+            <p className="station-enrollment__cabinet">{t("enroll.cabinetAddress")}</p>
+          </div>
+          <ol className="station-enrollment__steps">
+            <li>{t("enroll.steps.one")}</li>
+            <li>{t("enroll.steps.two")}</li>
+            <li>{t("enroll.steps.three")}</li>
+          </ol>
+        </aside>
+        <section className="station-enrollment__entry">
+          <div className="station-enrollment__success" role="status">
+            <h1 id="station-enrollment-title">{t("enroll.success")}</h1>
+            <p>{ru ? "Демо-станция 01 — Тестовая линия А" : "Demo station 01 — Test line A"}</p>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
   const messages: Record<string, { tone: "info" | "error" | "ok" | "warn"; text: string }> = {
-    waiting: { tone: "info", text: ru ? "Введите код подключения" : "Enter pairing code" },
     redeeming: {
       tone: "info",
       text: ru ? "Проверяем код подключения…" : "Checking pairing code…",
@@ -359,7 +430,6 @@ function PairingFixture({ variant, locale }: { variant: string; locale: GalleryL
       tone: "error",
       text: ru ? "Код истёк. Запросите новый." : "Code expired. Request a new one.",
     },
-    success: { tone: "ok", text: ru ? "Рабочее место подключено" : "Workstation paired" },
     service: {
       tone: "warn",
       text: ru ? "Сервисное подключение для восстановления" : "Service recovery connection",
@@ -1273,51 +1343,83 @@ function ConflictFixture({ variant, locale }: { variant: string; locale: Gallery
   );
 }
 
+/** Every call resolves without touching Tauri's IPC -- the real hardware
+ * surface is stateless per call (see hardware.ts's own doc comment), so a
+ * synthetic contract that just resolves is enough for WorkstationSetup to
+ * render every field; nothing in this gallery clicks "Connect"/"Test". */
+function gallerySetupHardware(): HardwareContract {
+  const usbPrinters: UsbPrinterInfo[] = [{ name: "DEMO-USB-PRINTER", port: "USB001" }];
+  return {
+    listScannerPorts: () => Promise.resolve(["DEMO-COM1", "DEMO-COM2"]),
+    listUsbPrinters: () => Promise.resolve(usbPrinters),
+    openScanner: () => Promise.resolve(),
+    closeScanner: () => Promise.resolve(),
+    onScan: () => Promise.resolve(() => undefined),
+    onScannerStatus: () => Promise.resolve(() => undefined),
+    print: () => Promise.resolve(),
+  };
+}
+
+const GALLERY_SETUP_HARDWARE_CONFIG: HardwareConfig = {
+  scanner: { port: "DEMO-COM1", baud: 9600 },
+  printer: { kind: "tcp", host: "192.168.10.20", port: 9100 },
+  printerLanguage: "zpl",
+  verifyPrintedLabel: true,
+};
+
+/** Answers exactly the `station_meta` query `loadHardwareConfig` issues (see
+ * hardware-config.ts), so the real `WorkstationSetup` starts pre-configured
+ * with a demo scanner and TCP printer without any local persistence. */
+function gallerySetupExecutor(): SqlExecutor {
+  return {
+    run: () => Promise.resolve(),
+    all<T>(sql: string): Promise<T[]> {
+      if (sql.includes("station_meta")) {
+        return Promise.resolve([{ value: JSON.stringify(GALLERY_SETUP_HARDWARE_CONFIG) }] as T[]);
+      }
+      return Promise.resolve([]);
+    },
+  };
+}
+
+/**
+ * Mirrors WorkstationSetup.tsx's own render tree (the real component, backed
+ * by a synthetic hardware contract + executor) instead of hand-copied tabs,
+ * so the title, tab labels, and every field on each tab match the current
+ * production setup screen. The tab switch is driven through the real
+ * `SetupTabs` component's own button, the same way an operator would.
+ */
 function SetupFixture({ tab, locale }: { tab: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
-  const labels = ru ? ["Сканер", "Принтер", "Звук"] : ["Scanner", "Printer", "Sound"];
-  const active = tab === "printer" ? 1 : tab === "sound" ? 2 : 0;
-  const content =
-    active === 0
-      ? ru
-        ? "Порт DEMO-COM1 · 9600 бод"
-        : "Port DEMO-COM1 · 9600 baud"
-      : active === 1
-        ? ru
-          ? "Принтер DEMO-PRINTER · ZPL"
-          : "Printer DEMO-PRINTER · ZPL"
-        : ru
-          ? "Громкость сигнала 70%"
-          : "Signal volume 70%";
+  const rootRef = useRef<HTMLDivElement>(null);
+  const hw = useMemo(gallerySetupHardware, []);
+  const exec = useMemo(gallerySetupExecutor, []);
+  const [sound, setSound] = useState<SoundSettings>({ muted: false, volume: 0.7 });
+
+  useLayoutEffect(() => {
+    if (tab === "scanner") return;
+    const root = rootRef.current;
+    if (!root) return;
+    const t = i18n.getFixedT(locale);
+    const label = tab === "printer" ? t("setup.printer") : t("setup.sound");
+    setTimeout(() => {
+      const button = Array.from(root.querySelectorAll<HTMLButtonElement>('[role="tab"]')).find(
+        (candidate) => candidate.textContent?.trim() === label,
+      );
+      button?.click();
+    }, 0);
+  }, [tab, locale]);
+
   return (
-    <StationScreen
-      title={ru ? "Настройка оборудования" : "Equipment setup"}
-      actions={<GalleryFooter locale={locale} primary={ru ? "Сохранить" : "Save"} />}
-    >
-      <div className="gallery-setup">
-        <div className="gallery-setup-tabs" role="tablist">
-          {labels.map((label, index) => (
-            <Button
-              key={label}
-              size="floor"
-              variant={index === active ? "primary" : "secondary"}
-              aria-pressed={index === active}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-        <Card className="gallery-card">
-          <p>{content}</p>
-          <Button size="floor" variant="secondary">
-            {ru ? "Проверить" : "Test"}
-          </Button>
-          <div className="gallery-result-slot">
-            <Alert tone="ok">{ru ? "Тестовое устройство готово" : "Synthetic device ready"}</Alert>
-          </div>
-        </Card>
-      </div>
-    </StationScreen>
+    <div ref={rootRef} className="gallery-workstation-setup">
+      <WorkstationSetup
+        hw={hw}
+        exec={exec}
+        sound={sound}
+        onSoundChange={setSound}
+        onConfigChange={() => undefined}
+        onDone={() => undefined}
+      />
+    </div>
   );
 }
 
@@ -1390,42 +1492,70 @@ function PrintFixture({ variant }: { variant: string }) {
   );
 }
 
-function UpdateFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
-  const ru = locale === "ru";
+/** Published dates chosen so `updateSeverity` (see update-state.ts) lands on
+ * the age bracket each variant needs to demonstrate, anchored to "now" so the
+ * fixture keeps working as the calendar advances. */
+const GALLERY_UPDATE_AGE_MS: Record<"info" | "warn" | "urgent", number> = {
+  info: 2 * 24 * 60 * 60 * 1000,
+  warn: 21 * 24 * 60 * 60 * 1000,
+  urgent: 45 * 24 * 60 * 60 * 1000,
+};
+
+function galleryUpdateAvailable(age: "info" | "warn" | "urgent" | null): KnownStationUpdate | null {
+  if (age === null) return null;
+  return {
+    // `isStationBetaVersion` (station-version.ts) only accepts betas, so the
+    // demo version keeps the brief's "1.4.2" base with the required suffix.
+    version: "1.4.2-beta.1",
+    publishedAt: new Date(Date.now() - GALLERY_UPDATE_AGE_MS[age]).toISOString(),
+  };
+}
+
+/** Implements the real `StationUpdaterController` contract directly (the
+ * production hook this normally comes from talks to Tauri's updater IPC),
+ * so `UpdateCenter` -- the real component -- renders every severity/error
+ * state without a network or IPC dependency. */
+function galleryUpdateController(
+  available: KnownStationUpdate | null,
+  error: "check-failed" | null,
+): StationUpdaterController {
+  return {
+    phase: "idle",
+    persisted: { schemaVersion: 1, lastAttemptAt: null, lastSuccessfulCheckAt: null, available },
+    severity: updateSeverity(Date.now(), available),
+    error,
+    downloadedBytes: 0,
+    totalBytes: null,
+    checkNow: () => Promise.resolve(),
+    install: () => Promise.resolve(),
+  };
+}
+
+/**
+ * Mirrors UpdateCenter.tsx's own render tree (the real component, backed by
+ * a synthetic controller implementing its exact interface) instead of
+ * hand-copied markup, so the title, per-severity age copy, and the
+ * active-shift blocker match the current production update screen.
+ */
+function UpdateFixture({ variant }: { variant: string }) {
   const activeShift = variant === "active-shift";
   const error = variant === "error";
   const current = variant === "current";
-  const tone = error || activeShift ? "warn" : current ? "ok" : "info";
+  const age =
+    current || error ? null : activeShift ? "warn" : (variant as "info" | "warn" | "urgent");
+  const available = galleryUpdateAvailable(age);
+  const controller = useMemo(
+    () => galleryUpdateController(available, error ? "check-failed" : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `available` is a fresh object each render; keyed on its own fields instead.
+    [available?.version, available?.publishedAt, error],
+  );
   return (
-    <StationScreen
-      title={ru ? "Обновления станции" : "Station updates"}
-      actions={
-        <GalleryFooter
-          locale={locale}
-          {...(current ? {} : { primary: ru ? "Скачать и установить" : "Download and install" })}
-        />
-      }
-    >
-      <div className="gallery-centered-card" data-update-severity={variant}>
-        <Alert tone={tone}>
-          {current
-            ? ru
-              ? "На станции установлена актуальная версия."
-              : "This station is up to date."
-            : error
-              ? ru
-                ? "Не удалось проверить обновления. Локальная работа продолжается."
-                : "Could not check for updates. Local work continues."
-              : activeShift
-                ? ru
-                  ? "Завершите активную смену перед установкой."
-                  : "Leave the active shift before installing."
-                : ru
-                  ? "Доступна версия 0.1.0-beta.2. Скачивание выполняется вручную."
-                  : "Version 0.1.0-beta.2 is available. Download is manual."}
-        </Alert>
-      </div>
-    </StationScreen>
+    <UpdateCenter
+      controller={controller}
+      activeShift={activeShift}
+      pendingOutbox={0}
+      onBack={() => undefined}
+    />
   );
 }
 

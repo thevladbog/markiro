@@ -319,6 +319,28 @@ describe("development screen gallery", () => {
         // renders without the shared FloorShell status bar.
         expect(view.container.querySelector(".operator-login")).not.toBeNull();
         expect(view.container.querySelector(".station-root")).toBeNull();
+      } else if (fixture?.kind === "pairing") {
+        // Pairing has no station/operator/shift identity yet either -- like
+        // login, App.tsx's `stage === "pairing"` branch mounts Enrollment
+        // without the shared FloorShell status bar.
+        expect(view.container.querySelector(".station-root")).toBeNull();
+        if (fixture.variant === "waiting" || fixture.variant === "success") {
+          // These two render the real Enrollment component (or, for
+          // "success", a faithful mirror of its own success branch -- see
+          // PairingFixture's doc comment) -- assert its real root and
+          // stage-specific copy so a silently empty render can't pass.
+          expect(view.container.querySelector(".station-enrollment")).not.toBeNull();
+          expect(view.container.textContent).toContain(
+            fixture.variant === "waiting" ? "Подключение станции" : "Станция подключена",
+          );
+        } else {
+          // redeeming/error/service/recovery are outside this audit's scope
+          // and still render the synthetic StationScreen card -- assert its
+          // container and that it isn't a silently empty render.
+          expect(view.container.querySelector(".gallery-centered-card")).not.toBeNull();
+          expect(view.container.querySelector(".gallery-card")).not.toBeNull();
+          expect(view.container.textContent?.trim().length).toBeGreaterThan(0);
+        }
       } else {
         expect(view.container.querySelector(".station-root")).not.toBeNull();
         expect(view.container.querySelector(".station-screen-slot")).not.toBeNull();

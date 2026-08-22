@@ -168,6 +168,22 @@
     }
   },
   {
+    "code": "MKR-INS-04",
+    "revision": "2026.08/01",
+    "effectiveDate": "2026-08-22",
+    "locale": "ru",
+    "kind": "pdfa-2b",
+    "fileName": "markiro_mkr-ins-04_2026.08-01_ru.pdf",
+    "bytes": 514129,
+    "sha256": "c1faac12499de50face7012b5350b93359567cacf685d0a0fcca1d199287354b",
+    "mediaType": "application/pdf",
+    "generator": {
+      "docx": "9.7.1",
+      "libreOffice": "26.2.5",
+      "veraPdf": "1.30.2"
+    }
+  },
+  {
     "code": "MKR-PD-01",
     "revision": "2026.08/01",
     "effectiveDate": "2026-08-15",

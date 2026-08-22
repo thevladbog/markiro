@@ -47,6 +47,10 @@ const DESCRIPTION_BY_CODE = {
     ru: "Печатная инструкция оператора для нештатных ситуаций: перепечатка этикетки, расформирование короба, сбой печати, коды, занятые другим терминалом.",
     en: "Printable operator instruction for exceptions: label reprint, box disassembly, print recovery, and codes claimed by another terminal.",
   },
+  "MKR-INS-04": {
+    ru: "Печатная инструкция наладчика: привязка станции к кабинету, подключение сканера и принтера, звук и обновления станции.",
+    en: "Printable technician instruction: pairing the station with the cabinet, connecting the scanner and printer, sound, and station updates.",
+  },
 } as const satisfies Record<LegalDocumentCode, Record<LegalLocale, string>>;
 
 export interface LegalDocumentPageDefinition {
