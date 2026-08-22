@@ -37,14 +37,20 @@ export class PlatformTeamController {
     @Body(new ZodValidationPipe(platformTeamContracts.changeRole.body))
     body: PlatformTeamRoleChangeInput,
   ) {
-    await this.team.changeRole(request.platformPrincipal!, id, body.role);
-    return parsePlatformResponse(platformTeamContracts.changeRole.response, { status: true });
+    const result: unknown = await this.team.changeRole(request.platformPrincipal!, id, body.role);
+    return parsePlatformResponse(
+      platformTeamContracts.changeRole.response,
+      result === undefined ? { status: true } : result,
+    );
   }
 
   @Post(":id/suspend")
   async suspend(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
-    await this.team.suspend(request.platformPrincipal!, id);
-    return parsePlatformResponse(platformTeamContracts.suspend.response, { status: true });
+    const result: unknown = await this.team.suspend(request.platformPrincipal!, id);
+    return parsePlatformResponse(
+      platformTeamContracts.suspend.response,
+      result === undefined ? { status: true } : result,
+    );
   }
 
   @Post(":id/activation/renew")
@@ -57,7 +63,10 @@ export class PlatformTeamController {
 
   @Post(":id/2fa/recover")
   async recoverTwoFactor(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
-    await this.team.recoverTwoFactor(request.platformPrincipal!, id);
-    return parsePlatformResponse(platformTeamContracts.recoverTwoFactor.response, { status: true });
+    const result: unknown = await this.team.recoverTwoFactor(request.platformPrincipal!, id);
+    return parsePlatformResponse(
+      platformTeamContracts.recoverTwoFactor.response,
+      result === undefined ? { status: true } : result,
+    );
   }
 }

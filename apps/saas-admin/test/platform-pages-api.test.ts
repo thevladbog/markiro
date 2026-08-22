@@ -96,6 +96,33 @@ describe("platform page API paths", () => {
     });
     await expect(recoverPlatformTwoFactor("platform-user-2")).resolves.toEqual({ status: true });
   });
+
+  it.each([
+    [
+      "invite",
+      { deliveryId: "11111111-1111-4111-8111-111111111111" },
+      () => invitePlatformUser("user@example.invalid", "support"),
+    ],
+    [
+      "renew activation",
+      { userId: "platform-user-2" },
+      () => renewPlatformActivation("platform-user-2"),
+    ],
+    [
+      "change role acknowledgement",
+      { status: false },
+      () => changePlatformRole("platform-user-2", "accountant"),
+    ],
+    ["suspend acknowledgement", { status: "ok" }, () => suspendPlatformUser("platform-user-2")],
+    ["recover 2FA acknowledgement", {}, () => recoverPlatformTwoFactor("platform-user-2")],
+  ] as const)("rejects a malformed %s 2xx response", async (_name, malformed, invoke) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async () => jsonResponse(malformed)),
+    );
+
+    await expect(invoke()).rejects.toThrow();
+  });
 });
 
 function jsonResponse(body: unknown): Response {

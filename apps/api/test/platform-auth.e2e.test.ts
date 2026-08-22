@@ -115,6 +115,70 @@ describe("platform identity response boundaries", () => {
     });
   });
 
+  it.each([
+    [
+      "invite",
+      { deliveryId: "11111111-1111-4111-8111-111111111111" },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.invite(platformRequest, {
+          email: "support@example.invalid",
+          role: "support",
+        }),
+    ],
+    [
+      "renew activation",
+      { userId: "platform-user-2" },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.renewActivation(platformRequest, "platform-user-2"),
+    ],
+    [
+      "change role acknowledgement",
+      { status: false },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.changeRole(platformRequest, "platform-user-2", { role: "accountant" }),
+    ],
+    [
+      "suspend acknowledgement",
+      { status: "ok" },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.suspend(platformRequest, "platform-user-2"),
+    ],
+    [
+      "recover 2FA acknowledgement",
+      {},
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.recoverTwoFactor(platformRequest, "platform-user-2"),
+    ],
+  ] as const)("rejects a malformed %s service success", async (_name, malformed, invoke) => {
+    const controller = new PlatformTeamController({
+      list: async () => [],
+      invite: async () => malformed,
+      changeRole: async () => malformed,
+      suspend: async () => malformed,
+      renewActivation: async () => malformed,
+      recoverTwoFactor: async () => malformed,
+    } as never);
+    const platformRequest = {
+      platformPrincipal: {
+        userId: "platform-admin-1",
+        role: "platform_admin",
+        capabilities: [
+          "tenants.read",
+          "tenants.write",
+          "catalog.read",
+          "catalog.write",
+          "billing.read",
+          "billing.write",
+          "platformTeam.write",
+          "audit.read",
+        ],
+        twoFactorReady: true,
+      },
+    } as never;
+
+    await expect(invoke(controller, platformRequest)).rejects.toThrow();
+  });
+
   it("normalizes audit timestamps and rejects a malformed activation success", async () => {
     const rows = [
       {
