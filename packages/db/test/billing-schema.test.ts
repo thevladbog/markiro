@@ -1,3 +1,4 @@
+import { getTableConfig } from "drizzle-orm/pg-core";
 import { describe, expect, it } from "vitest";
 import * as schema from "../src/schema.js";
 
@@ -31,5 +32,25 @@ describe("tenant billing schema", () => {
     expect(Object.keys(schema.billingPayments)).toEqual(
       expect.arrayContaining(["tenantId", "id", "invoiceId"]),
     );
+  });
+
+  it("stores versioned legal, postal, and confirmation facts on both profile histories", () => {
+    const expectedColumns = [
+      "full_name",
+      "legal_address_raw",
+      "legal_address",
+      "postal_same_as_legal",
+      "postal_address_raw",
+      "postal_address",
+      "is_confirmed",
+      "confirmed_by_platform_user_id",
+      "confirmed_at",
+    ];
+
+    for (const table of [schema.operatorBillingProfiles, schema.tenantBillingProfiles]) {
+      expect(getTableConfig(table).columns.map((column) => column.name)).toEqual(
+        expect.arrayContaining(expectedColumns),
+      );
+    }
   });
 });

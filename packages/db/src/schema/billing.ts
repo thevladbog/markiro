@@ -79,6 +79,7 @@ export const invoiceApplicationStatus = pgEnum(
 
 const profileColumns = {
   kind: billingProfileKind("kind").notNull(),
+  fullName: text("full_name").notNull(),
   displayName: text("display_name").notNull(),
   inn: text("inn"),
   kpp: text("kpp"),
@@ -86,8 +87,18 @@ const profileColumns = {
   ogrnip: text("ogrnip"),
   addressRaw: text("address_raw").notNull(),
   address: jsonb("address"),
+  legalAddressRaw: text("legal_address_raw").notNull(),
+  legalAddress: jsonb("legal_address"),
+  postalSameAsLegal: boolean("postal_same_as_legal").notNull().default(false),
+  postalAddressRaw: text("postal_address_raw"),
+  postalAddress: jsonb("postal_address"),
   bankDetails: jsonb("bank_details"),
   contact: jsonb("contact"),
+  isConfirmed: boolean("is_confirmed").notNull().default(false),
+  confirmedByPlatformUserId: text("confirmed_by_platform_user_id").references(
+    () => platformUsers.id,
+  ),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
 };
 
 export const operatorBillingProfiles = pgTable(
@@ -108,6 +119,14 @@ export const operatorBillingProfiles = pgTable(
       .on(table.isCurrent)
       .where(sql`${table.isCurrent} = true`),
     check("operator_billing_profiles_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "operator_billing_profiles_confirmation_check",
+      sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,
+    ),
+    check(
+      "operator_billing_profiles_postal_same_check",
+      sql`${table.postalSameAsLegal} = false or (${table.postalAddressRaw} is null and ${table.postalAddress} is null)`,
+    ),
   ],
 );
 
@@ -131,6 +150,14 @@ export const tenantBillingProfiles = pgTable(
       .on(table.tenantId)
       .where(sql`${table.isCurrent} = true`),
     check("tenant_billing_profiles_revision_positive", sql`${table.revision} > 0`),
+    check(
+      "tenant_billing_profiles_confirmation_check",
+      sql`(${table.isConfirmed} = false and ${table.confirmedByPlatformUserId} is null and ${table.confirmedAt} is null) or (${table.isConfirmed} = true and ${table.confirmedByPlatformUserId} is not null and ${table.confirmedAt} is not null)`,
+    ),
+    check(
+      "tenant_billing_profiles_postal_same_check",
+      sql`${table.postalSameAsLegal} = false or (${table.postalAddressRaw} is null and ${table.postalAddress} is null)`,
+    ),
   ],
 );
 

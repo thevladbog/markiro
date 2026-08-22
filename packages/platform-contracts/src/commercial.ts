@@ -29,6 +29,134 @@ const nonNullUnknownSchema = z
   .unknown()
   .refine((value) => value !== null && value !== undefined, "Value must be present");
 
+export const billingProfileKindSchema = z.enum([
+  "individual",
+  "self_employed",
+  "sole_proprietor",
+  "legal_entity",
+]);
+
+export const normalizedBillingAddressSchema = z.object({
+  value: z.string().trim().min(1).max(1_000),
+  fiasId: z.string().max(100).nullable().optional(),
+  kladrId: z.string().max(100).nullable().optional(),
+  postalCode: z.string().max(20).nullable().optional(),
+  region: z.string().max(300).nullable().optional(),
+  city: z.string().max(300).nullable().optional(),
+  settlement: z.string().max(300).nullable().optional(),
+  street: z.string().max(300).nullable().optional(),
+  house: z.string().max(100).nullable().optional(),
+  block: z.string().max(100).nullable().optional(),
+  flat: z.string().max(100).nullable().optional(),
+  latitude: z.string().max(50).nullable().optional(),
+  longitude: z.string().max(50).nullable().optional(),
+  qualityCode: z.string().max(100).nullable().optional(),
+  completenessCode: z.string().max(100).nullable().optional(),
+});
+
+export const billingContactSchema = z
+  .object({
+    name: z.string().trim().min(1).max(300).nullable(),
+    email: z.email().max(254).nullable(),
+    phone: z.string().trim().min(1).max(50).nullable(),
+  })
+  .strict();
+
+const sameAsLegalPostalAddressSchema = z.object({ sameAsLegal: z.literal(true) }).strict();
+const separatePostalAddressSchema = z
+  .object({
+    sameAsLegal: z.literal(false),
+    raw: z.string().trim().min(1).max(1_000),
+    normalized: normalizedBillingAddressSchema.nullable().optional(),
+  })
+  .strict();
+export const billingPostalAddressInputSchema = z.discriminatedUnion("sameAsLegal", [
+  sameAsLegalPostalAddressSchema,
+  separatePostalAddressSchema,
+]);
+
+const billingProfileInputCommonFields = {
+  fullName: z.string().trim().min(1).max(500),
+  displayName: z.string().trim().min(1).max(300),
+  legalAddressRaw: z.string().trim().min(1).max(1_000),
+  legalAddress: normalizedBillingAddressSchema.nullable().optional(),
+  postalAddress: billingPostalAddressInputSchema,
+  contact: billingContactSchema,
+};
+
+const individualBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("individual"),
+    inn: z
+      .string()
+      .regex(/^\d{12}$/)
+      .nullable()
+      .optional(),
+  })
+  .strict();
+const selfEmployedBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("self_employed"),
+    inn: z.string().regex(/^\d{12}$/),
+  })
+  .strict();
+const soleProprietorBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("sole_proprietor"),
+    inn: z.string().regex(/^\d{12}$/),
+    ogrnip: z.string().regex(/^\d{15}$/),
+  })
+  .strict();
+export const operatorBillingProfileInputSchema = z
+  .object({
+    ...billingProfileInputCommonFields,
+    kind: z.literal("legal_entity"),
+    inn: z.string().regex(/^\d{10}$/),
+    kpp: z.string().regex(/^\d{9}$/),
+    ogrn: z.string().regex(/^\d{13}$/),
+  })
+  .strict();
+
+export const billingProfileInputSchema = z.discriminatedUnion("kind", [
+  individualBillingProfileInputSchema,
+  selfEmployedBillingProfileInputSchema,
+  soleProprietorBillingProfileInputSchema,
+  operatorBillingProfileInputSchema,
+]);
+
+export const billingProfileSchema = z.object({
+  id: platformUuidSchema,
+  kind: billingProfileKindSchema,
+  fullName: z.string().min(1).max(500),
+  displayName: z.string().min(1).max(300),
+  inn: z.string().nullable(),
+  kpp: z.string().nullable(),
+  ogrn: z.string().nullable(),
+  ogrnip: z.string().nullable(),
+  legalAddressRaw: z.string().min(1).max(1_000),
+  legalAddress: normalizedBillingAddressSchema.nullable(),
+  postalSameAsLegal: z.boolean(),
+  postalAddressRaw: z.string().max(1_000).nullable(),
+  postalAddress: normalizedBillingAddressSchema.nullable(),
+  contact: billingContactSchema.nullable(),
+  revision: positiveIntegerSchema,
+  isCurrent: z.boolean(),
+  isConfirmed: z.boolean(),
+  confirmedByPlatformUserId: nullablePlatformUserIdSchema,
+  confirmedAt: nullableResponseTimestampSchema,
+  createdByPlatformUserId: nullablePlatformUserIdSchema,
+  createdAt: responseTimestampSchema,
+});
+export const operatorBillingProfileSchema = billingProfileSchema.extend({
+  kind: z.literal("legal_entity"),
+});
+export const tenantBillingProfileSchema = billingProfileSchema.extend({
+  tenantId: platformTenantIdSchema,
+});
+
 export const offerActivationPolicySchema = z.enum(["immediately", "after_current"]);
 export const invoiceActivationPolicySchema = z.enum(["immediate", "after_current", "manual"]);
 export const commercialDocumentStatusSchema = z.enum(["pending", "ready", "failed"]);
@@ -807,6 +935,20 @@ const invoiceIdSchema = platformUuidSchema;
 const documentIdSchema = platformUuidSchema;
 
 export const platformCommercialContracts = {
+  billingProfiles: {
+    operator: {
+      get: { response: operatorBillingProfileSchema.nullable() },
+      set: { body: operatorBillingProfileInputSchema, response: operatorBillingProfileSchema },
+    },
+    tenant: {
+      get: { params: platformTenantIdSchema, response: tenantBillingProfileSchema.nullable() },
+      set: {
+        params: platformTenantIdSchema,
+        body: billingProfileInputSchema,
+        response: tenantBillingProfileSchema,
+      },
+    },
+  },
   offers: {
     list: { response: z.array(offerSchema) },
     detail: { params: offerIdSchema, response: offerDetailSchema },
@@ -912,3 +1054,8 @@ export type PaymentImportDto = z.output<typeof paymentImportSchema>;
 export type PaymentImportResult = z.output<typeof paymentImportResultSchema>;
 export type PaymentImportResultSource = z.input<typeof paymentImportResultSchema>;
 export type PaymentImportServiceResultSource = z.input<typeof paymentImportServiceResultSchema>;
+export type BillingProfileInput = z.output<typeof billingProfileInputSchema>;
+export type OperatorBillingProfileInput = z.output<typeof operatorBillingProfileInputSchema>;
+export type BillingProfile = z.output<typeof billingProfileSchema>;
+export type OperatorBillingProfile = z.output<typeof operatorBillingProfileSchema>;
+export type TenantBillingProfile = z.output<typeof tenantBillingProfileSchema>;
