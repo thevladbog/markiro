@@ -111,3 +111,57 @@ test("deploy-only registry helper rejects an oversized deployment result and sti
   );
   assert.deepEqual(removed, ["/run/session"]);
 });
+
+test("v-b report mode returns only an exact bounded executor failure stage", async () => {
+  const report = "MARKIRO_VBTECH_DEPLOY_FAILURE private-smoke ROLLBACK rollback-edge\n";
+  const result = await withRegistryAuthentication(
+    {
+      getPayload: async () => ({
+        entries: [
+          { key: "GHCR_USERNAME", textValue: "user" },
+          { key: "GHCR_TOKEN", textValue: "token" },
+        ],
+      }),
+      makeDirectory: async () => "/run/session",
+      run: async (command) =>
+        command === "node"
+          ? { code: 1, stdout: "", stderr: report }
+          : { code: 0, stdout: "", stderr: "" },
+      remove: async () => {},
+    },
+    ["node", "deploy/production/vbtech-deploy.mjs", "run"],
+    undefined,
+    { allowVbtechFailureReport: true },
+  );
+
+  assert.equal(result, report);
+
+  for (const unsafe of [
+    "MARKIRO_VBTECH_DEPLOY_FAILURE private-smoke private-detail\n",
+    "MARKIRO_VBTECH_DEPLOY_FAILURE unknown\n",
+    `${report}extra\n`,
+  ]) {
+    await assert.rejects(
+      withRegistryAuthentication(
+        {
+          getPayload: async () => ({
+            entries: [
+              { key: "GHCR_USERNAME", textValue: "user" },
+              { key: "GHCR_TOKEN", textValue: "token" },
+            ],
+          }),
+          makeDirectory: async () => "/run/session",
+          run: async (command) =>
+            command === "node"
+              ? { code: 1, stdout: "", stderr: unsafe }
+              : { code: 0, stdout: "", stderr: "" },
+          remove: async () => {},
+        },
+        ["node", "deploy/production/vbtech-deploy.mjs", "run"],
+        undefined,
+        { allowVbtechFailureReport: true },
+      ),
+      /deployment command failed/,
+    );
+  }
+});
