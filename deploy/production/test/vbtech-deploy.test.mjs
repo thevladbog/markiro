@@ -317,7 +317,8 @@ async function fixture(t, options = {}) {
     },
     async probeEdge(probeOptions) {
       readinessCalls.push({ ...probeOptions });
-      if (options.rollbackFailAt === currentStage) throw new Error("private readiness error");
+      if (options.failAt === currentStage || options.rollbackFailAt === currentStage)
+        throw new Error("private readiness error");
       return { status: options.readinessStatus ?? 200 };
     },
     async sleep(delay) {
@@ -358,9 +359,11 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
     "up-vbtech-web",
     "health-vbtech-web",
     "recreate-edge",
+    "edge-readiness",
     "private-smoke",
     "healthy",
   ]);
+  assert.equal(context.readinessCalls.length, 1);
   assert.equal(healthy.state, "healthy");
   assert.deepEqual(
     context.stateWrites.map(({ kind }) => kind),
@@ -764,6 +767,7 @@ for (const [event, failureStage, expectsRollback] of [
   ["inspect-digest", "candidate-digest", false],
   ["up-vbtech-web", "candidate-service", true],
   ["recreate-edge", "edge-activation", true],
+  ["edge-readiness", "edge-activation", true],
 ]) {
   test(`classifies a bounded ${event} failure and compensates only after service activation`, async (t) => {
     const context = await fixture(t, { failAt: event });
@@ -808,7 +812,7 @@ test("first-install failure removes only the candidate service and restores Mark
     context.stateWrites.map(({ kind }) => kind),
     ["pending", "failed"],
   );
-  assert.equal(context.readinessCalls.length, 1);
+  assert.equal(context.readinessCalls.length, 2);
 });
 
 test("replacement failure restores the exact prior selector, health, edge, readiness, and smoke", async (t) => {
@@ -839,7 +843,7 @@ test("replacement failure restores the exact prior selector, health, edge, readi
     transportOrigin: "https://app.markiro.example",
     expectedVbtechReleaseSha: previousSha,
   });
-  assert.equal(context.readinessCalls.length, 1);
+  assert.equal(context.readinessCalls.length, 2);
   assert.deepEqual(
     context.stateWrites.map(({ kind }) => kind),
     ["pending", "failed"],
