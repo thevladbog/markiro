@@ -15,6 +15,7 @@ test("station beta docs cover manual promotion and recovery", async () => {
   ]);
   assert.match(runbook, /promote-existing/);
   assert.match(runbook, /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(runbook, /base64/i);
   assert.match(runbook, /SmartScreen|неподпис/i);
   assert.match(runbook, /outbox/i);
   assert.match(runbook, /ротац|rotation/i);
@@ -43,6 +44,7 @@ test("station stable docs separate automated release proof from physical accepta
   assert.match(stableRunbook, /SmartScreen|неизвестн.*издател/i);
   assert.match(stableRunbook, /beta.*stable/is);
   assert.match(stableRunbook, /TAURI_SIGNING_PRIVATE_KEY/);
+  assert.match(stableRunbook, /base64/i);
   assert.match(stableAcceptance, /NOT RUN/);
   assert.match(stableAcceptance, /beta.*stable/is);
   assert.match(stableAcceptance, /stable.*stable/is);

@@ -73,10 +73,10 @@ test("station beta publication is protected, serialized, main-only and channel-l
     signingStep.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD,
     "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
   );
-  assert.match(text, /Decode Tauri updater signing key/);
+  assert.match(text, /Normalize Tauri updater signing key/);
   assert.match(text, /normalized_key=\"\$\(.*normalize-signing-key\.mjs\)/s);
   assert.match(text, /normalized_key=.*\r?\n\s*normalized_key_file=/);
-  assert.match(text, /printf '%s' \"\$TAURI_SIGNING_PRIVATE_KEY\" > \"\$normalized_key_file\"/);
+  assert.match(text, /printf '%s' \"\$normalized_key\" > \"\$normalized_key_file\"/);
   assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY=\"\$normalized_key_file\"/);
   assert.match(text, /bundle=\"\$installer\"/);
   assert.match(text, /signature=\"\$bundle\.sig\"/);
@@ -110,11 +110,11 @@ test("station beta publication is protected, serialized, main-only and channel-l
   assert.doesNotMatch(text, /continue-on-error/i);
 });
 
-test("normalizes raw and base64-wrapped Tauri keys and rejects invalid input", async () => {
+test("canonicalizes raw and wrapped Tauri keys to CLI-compatible base64", async () => {
   const raw = "untrusted comment: rsign encrypted secret key\nRWZha2U=\n";
-  assert.equal(normalizeTauriSigningKey(raw), raw);
   const wrapped = Buffer.from(raw, "utf8").toString("base64");
-  assert.equal(normalizeTauriSigningKey(wrapped), raw);
+  assert.equal(normalizeTauriSigningKey(raw), wrapped);
+  assert.equal(normalizeTauriSigningKey(`  ${wrapped}\n`), wrapped);
   assert.throws(() => normalizeTauriSigningKey("not-a-signing-key"), /not a Tauri rsign/);
 });
 
