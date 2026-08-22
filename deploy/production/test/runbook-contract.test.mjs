@@ -5,6 +5,7 @@ import test from "node:test";
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const proseRegExp = (value) => new RegExp(escapeRegExp(value).replaceAll(" ", "\\s+"), "i");
 
 test("production deploy runbook describes one direct immutable Compose delivery", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
@@ -38,6 +39,90 @@ test("production runbooks keep API private and assign public TLS to direct Caddy
   assert.match(runbook, /Caddy слушает 80\/443 на VM/);
   assert.match(runbook, /ACME TLS/);
   assert.match(runbook, /API не[\s\S]*отдельный host port/);
+});
+
+test("production deploy runbook defines the private v-b approval and ownership boundary", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+
+  for (const required of [
+    "активен и валидирован Markiro-релиз с v-b executor",
+    "отдельное защищённое production-одобрение",
+    "Deploy v-b.tech private web",
+    "vbtech_release_sha",
+    "vbtech_image_digest",
+    "confirm_private_deploy",
+    "exact source SHA",
+    "exact OCI digest",
+    "до и после: runtime diagnostics version 3",
+    "VBTECH_SUBMISSION_STATE=disabled",
+    "function origin не требуется",
+    "только `vbtech-web`, пересоздание общего `edge` и приватные записи жизненного цикла v-b",
+    "API и миграции",
+    "PostgreSQL и другие изменения базы данных",
+    "IAM и service accounts",
+    "Lockbox",
+    "buckets и Object Storage",
+    "VPC и сетевой control plane",
+    "DNS",
+    "выпуск и активацию TLS-сертификата",
+    "публичную доступность",
+    "backend и активацию contact form",
+    "внешние email и captcha",
+    "не доказывает публичный DNS, TLS v-b.tech или публичную доступность",
+    "Rollback первого запуска",
+    "Rollback замены",
+    "новое явное одобрение с exact v-b source SHA и exact OCI digest",
+    "production-deploy",
+    "MARKIRO_VBTECH_DEPLOY_HEALTHY",
+    "MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]",
+  ])
+    assert.match(runbook, proseRegExp(required));
+});
+
+test("production deploy runbook orders the private v-b operator phases", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const phases = [
+    "Фаза 1. Смержить и опубликовать код Markiro executor",
+    "Фаза 2. Отдельно одобрить и развернуть Markiro-релиз с executor",
+    "Фаза 3. Снять и прочитать read-only baseline version 3",
+    "Фаза 4. Отдельно одобрить exact v-b source SHA и exact OCI digest",
+    "Фаза 5. Запустить Deploy v-b.tech private web с явным подтверждением",
+    "Фаза 6. Проверить private smoke и evidence до/после",
+    "Фаза 7. Остановиться до DNS, сертификата v-b.tech, backend и contact activation",
+  ];
+
+  let previous = -1;
+  for (const phase of phases) {
+    const current = runbook.indexOf(phase);
+    assert.ok(current > previous, `${phase} must follow the previous operator phase`);
+    previous = current;
+  }
+});
+
+test("production deploy runbook keeps private v-b evidence bounded and non-authorizing", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+
+  for (const required of [
+    "beforeRelease",
+    "afterRelease",
+    "cpuBusyBasisPointsDelta",
+    "memoryAvailableBytesDelta",
+    "rootFilesystemAvailableBytesDelta",
+    "private routing/content",
+    "Слияние этого изменения не разрешает live dispatch",
+  ])
+    assert.match(runbook, proseRegExp(required));
+
+  assert.doesNotMatch(runbook, /-----BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY-----/);
+  assert.doesNotMatch(runbook, /```(?:bash|sh)[\s\S]*?\bssh\b[\s\S]*?```/i);
+  assert.doesNotMatch(
+    runbook,
+    /(?:^|\n)\s*(?:v-b\.tech|www\.v-b\.tech)\s+\d+\s+IN\s+(?:A|AAAA|CNAME)\s+/i,
+  );
+  assert.doesNotMatch(
+    runbook,
+    /(?:слияние|merge) (?:этого изменения )?(?:разрешает|авторизует) live dispatch/i,
+  );
 });
 
 test("production runbooks contain no legacy deployment ceremony", async () => {
