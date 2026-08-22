@@ -4,9 +4,8 @@ import { useTranslation } from "react-i18next";
 import {
   Alert,
   Button,
-  Card,
   Input,
-  PageHeader,
+  SectionHeader,
   Select,
   Spinner,
   StatusChip,
@@ -48,8 +47,28 @@ export function TeamPage() {
       changePlatformRole(id, nextRole),
     onSuccess: refresh,
   });
-  if (team.isPending) return <Spinner label={t("team.loading")} />;
-  if (team.error) return <Alert tone="error">{t("team.loadError")}</Alert>;
+  if (team.isPending)
+    return (
+      <section className="platform-page">
+        <SectionHeader
+          eyebrow="PLATFORM / ACCESS"
+          title={t("team.title")}
+          description={t("team.description")}
+        />
+        <Spinner label={t("team.loading")} />
+      </section>
+    );
+  if (team.error)
+    return (
+      <section className="platform-page">
+        <SectionHeader
+          eyebrow="PLATFORM / ACCESS"
+          title={t("team.title")}
+          description={t("team.description")}
+        />
+        <Alert tone="error">{t("team.loadError")}</Alert>
+      </section>
+    );
   const canWrite = principal.capabilities.includes("platformTeam.write");
   const columns = [
     {
@@ -85,7 +104,7 @@ export function TeamPage() {
       title: t("team.actions"),
       render: (user: PlatformUser) =>
         canWrite ? (
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="team-row-actions">
             {user.status === "active" ? (
               <Button variant="secondary" onClick={() => void suspend.mutateAsync(user.id)}>
                 {t("team.suspend")}
@@ -103,11 +122,19 @@ export function TeamPage() {
     },
   ];
   return (
-    <section className="catalog-page">
-      <PageHeader title={t("team.title")} />
+    <section className="platform-page">
+      <SectionHeader
+        eyebrow="PLATFORM / ACCESS"
+        title={t("team.title")}
+        description={t("team.description")}
+      />
       {canWrite ? (
-        <Card title={t("team.inviteTitle")}>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "end" }}>
+        <section className="platform-action-panel" aria-labelledby="team-invite-title">
+          <header>
+            <span className="commerce-ledger__eyebrow">ACCESS CONTROL</span>
+            <h2 id="team-invite-title">{t("team.inviteTitle")}</h2>
+          </header>
+          <div className="team-invite-form">
             <Input
               label={t("team.email")}
               value={email}
@@ -127,9 +154,18 @@ export function TeamPage() {
               {t("team.invite")}
             </Button>
           </div>
-        </Card>
+        </section>
       ) : null}
-      <Table columns={columns} rows={team.data ?? []} empty={t("team.empty")} />
+      <section className="commerce-ledger" aria-labelledby="team-ledger-title">
+        <header className="commerce-ledger__header">
+          <div>
+            <span className="commerce-ledger__eyebrow">PLATFORM OPERATORS</span>
+            <h2 id="team-ledger-title">{t("team.registryTitle")}</h2>
+          </div>
+          <span className="commerce-ledger__count">{team.data?.length ?? 0}</span>
+        </header>
+        <Table columns={columns} rows={team.data ?? []} empty={t("team.empty")} />
+      </section>
     </section>
   );
 }

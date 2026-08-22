@@ -578,6 +578,8 @@
   },
   "team": {
     "title": "Platform team",
+    "description": "Operator access to SaaS platform administration.",
+    "registryTitle": "Platform operators",
     "loading": "Loading team",
     "loadError": "Could not load team",
     "inviteTitle": "Invite a colleague",
@@ -599,6 +601,8 @@
   },
   "audit": {
     "title": "Platform audit",
+    "description": "Immutable history of actions and outcomes.",
+    "registryTitle": "Audit log",
     "loading": "Loading audit",
     "loadError": "Could not load audit",
     "time": "Time",

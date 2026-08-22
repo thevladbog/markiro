@@ -879,6 +879,52 @@ textarea {
   gap: 16px;
 }
 
+.platform-page {
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.platform-action-panel {
+  border: 1px solid var(--line-strong);
+  background: var(--surface-card);
+}
+
+.platform-action-panel > header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line-strong);
+}
+
+.platform-action-panel h2 {
+  margin: 4px 0 0;
+  color: var(--fg-1);
+  font: var(--text-h2);
+}
+
+.team-invite-form,
+.team-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.team-invite-form {
+  align-items: end;
+  padding: 20px;
+}
+
+.team-invite-form > * {
+  flex: 1 1 220px;
+}
+
+.team-invite-form > .mk-btn {
+  flex: 0 0 auto;
+}
+
+.team-row-actions {
+  gap: 8px;
+}
+
 .billing-header-actions,
 .payment-import-form,
 .payment-match-actions > div {

@@ -27,6 +27,9 @@ describe("organization settings", () => {
     renderSaasApp({ initialEntry: "/settings/organization" });
 
     expect(await screen.findByRole("heading", { name: "Наша организация" })).toBeDefined();
+    expect(
+      screen.getByText("Юридические данные продавца и расчётные счета для документов"),
+    ).toBeDefined();
     expect(await screen.findByText("Реквизиты продавца")).toBeDefined();
     expect(await screen.findByText("Расчётные счета")).toBeDefined();
     expect(await screen.findByText("DaData не настроена — ручной ввод доступен")).toBeDefined();

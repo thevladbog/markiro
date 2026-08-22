@@ -5,7 +5,7 @@ import type {
   BillingProfileInput,
   OperatorBillingProfileInput,
 } from "@markiro/platform-contracts";
-import { Alert, PageHeader } from "@markiro/ui";
+import { Alert, SectionHeader } from "@markiro/ui";
 
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
@@ -69,11 +69,11 @@ export function OrganizationPage() {
 
   return (
     <section className="organization-page">
-      <PageHeader title={t("legal.organization.title")} />
-      <p className="organization-page__subtitle">{t("legal.organization.subtitle")}</p>
-      <div className="tenant-detail-coordinate" aria-hidden="true">
-        SETTINGS / LEGAL / BANKING
-      </div>
+      <SectionHeader
+        eyebrow="SETTINGS / LEGAL / BANKING"
+        title={t("legal.organization.title")}
+        description={t("legal.organization.subtitle")}
+      />
       {!canRead ? <Alert tone="warn">{t("legal.noAccess")}</Alert> : null}
       {canRead ? (
         <PanelState
