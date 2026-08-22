@@ -4,6 +4,7 @@ import type { Db } from "@markiro/db";
 import {
   OPERATIONS_RESTRICTION_WINDOW_DAYS,
   operationsAuditEventSummarySchema,
+  platformCapabilitiesForRole,
   platformOperationsContracts,
   platformTenantIdSchema,
   platformTimestampSchema,
@@ -11,6 +12,7 @@ import {
   type OperationsAuditEventSummary,
   type OperationsDecisionItem,
   type OperationsOverview,
+  type PlatformCapability,
   type PlatformHealth,
   type PlatformRole,
 } from "@markiro/platform-contracts";
@@ -300,6 +302,9 @@ export class PlatformOperationsService {
   ) {}
 
   async overview(role: PlatformRole): Promise<OperationsOverview> {
+    const capabilities: readonly PlatformCapability[] = platformCapabilitiesForRole[role];
+    const canReadBilling = capabilities.includes("billing.read");
+    const canReadDiagnostics = capabilities.includes("diagnostics.read");
     const generatedAt = this.now();
     const restrictionWindowEnd = new Date(
       generatedAt.getTime() + OPERATIONS_RESTRICTION_WINDOW_DAYS * 24 * 60 * 60 * 1_000,
@@ -314,10 +319,17 @@ export class PlatformOperationsService {
     ] = await Promise.all([
       this.repository.summary(generatedAt, restrictionWindowEnd),
       this.repository.subscriptionsEnding(generatedAt, restrictionWindowEnd, DECISION_QUEUE_LIMIT),
-      this.repository.overdueInvoiceFacts(generatedAt, DECISION_QUEUE_LIMIT),
-      this.repository.billingReadiness(DECISION_QUEUE_LIMIT),
+      canReadBilling
+        ? this.repository.overdueInvoiceFacts(generatedAt, DECISION_QUEUE_LIMIT)
+        : Promise.resolve([]),
+      canReadBilling
+        ? this.repository.billingReadiness(DECISION_QUEUE_LIMIT)
+        : Promise.resolve({
+            operator: { confirmedLegalProfile: true, defaultBankAccount: true },
+            tenants: [],
+          }),
       this.repository.recentActivity(role, RECENT_ACTIVITY_LIMIT),
-      this.monitoring(),
+      canReadDiagnostics ? this.monitoring() : Promise.resolve(null),
     ]);
 
     const decisionQueue: OperationsDecisionItem[] = [
@@ -361,6 +373,7 @@ export class PlatformOperationsService {
         },
       },
       ...summary,
+      overdueInvoices: canReadBilling ? summary.overdueInvoices : null,
       decisionQueue,
       recentActivity: [...recentActivity]
         .sort((left, right) => timestampValue(right.createdAt) - timestampValue(left.createdAt))

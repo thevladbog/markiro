@@ -164,6 +164,39 @@ describe("PlatformOperationsService", () => {
     expect(repository.recentActivity).toHaveBeenCalledWith("accountant", 10);
   });
 
+  it("omits billing metrics and decisions for support", async () => {
+    const repository = repositoryFixture();
+    const { readiness, dadata } = healthDependencies();
+    const service = new PlatformOperationsService(repository, readiness, dadata, () => NOW);
+
+    const result = await service.overview("support");
+
+    expect(result.overdueInvoices).toBeNull();
+    expect(result.decisionQueue.map((item) => item.kind)).toEqual(["subscription_ending"]);
+    expect(repository.overdueInvoiceFacts).not.toHaveBeenCalled();
+    expect(repository.billingReadiness).not.toHaveBeenCalled();
+    expect(result.health).not.toBeNull();
+    expect(readiness.ready).toHaveBeenCalledOnce();
+  });
+
+  it("omits diagnostics for accountants while preserving billing decisions", async () => {
+    const repository = repositoryFixture();
+    const { readiness, dadata } = healthDependencies();
+    const service = new PlatformOperationsService(repository, readiness, dadata, () => NOW);
+
+    const result = await service.overview("accountant");
+
+    expect(result.overdueInvoices).toBe(1);
+    expect(result.decisionQueue.map((item) => item.kind)).toEqual([
+      "overdue_invoice",
+      "subscription_ending",
+      "billing_readiness",
+    ]);
+    expect(result.health).toBeNull();
+    expect(readiness.ready).not.toHaveBeenCalled();
+    expect(dadata.status).not.toHaveBeenCalled();
+  });
+
   it("returns cached readiness and DaData state without infrastructure details", async () => {
     const repository = repositoryFixture();
     const { readiness, dadata } = healthDependencies();
@@ -383,7 +416,7 @@ describe.skipIf(!databaseUrl)("DrizzlePlatformOperationsRepository", () => {
       tenantName: "Ending tenant",
       subscriptionId: endingSubscriptionId,
     });
-    expect(new Date(ending[0]!.endsAt).toISOString()).toBe("2026-08-26T08:00:00.000Z");
+    expect(ending[0]!.endsAt).toBe("2026-08-26T08:00:00.000Z");
     const overdue = await repository.overdueInvoiceFacts(NOW, 25);
     expect(overdue).toHaveLength(1);
     expect(overdue[0]).toMatchObject({
@@ -392,7 +425,7 @@ describe.skipIf(!databaseUrl)("DrizzlePlatformOperationsRepository", () => {
       invoiceId: overdueInvoiceId,
       invoiceNumber: "СЧ-000202",
     });
-    expect(new Date(overdue[0]!.dueAt).toISOString()).toBe("2026-08-20T00:00:00.000Z");
+    expect(overdue[0]!.dueAt).toBe("2026-08-20T00:00:00.000Z");
     await expect(repository.billingReadiness(25)).resolves.toEqual({
       operator: { confirmedLegalProfile: true, defaultBankAccount: true },
       tenants: [

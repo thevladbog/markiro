@@ -19,6 +19,7 @@ import {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -35,6 +36,19 @@ const PRODUCTION_PLAN = "Производственный · plan-production · 
 const STATION_ADDON = "Дополнительная станция · addon-station · версия 1";
 
 describe("tenant subscription detail", () => {
+  it("scrolls a decision-queue anchor to the subscription section after loading", async () => {
+    const scrollIntoView = vi
+      .spyOn(HTMLElement.prototype, "scrollIntoView")
+      .mockImplementation(() => undefined);
+    installTenantApi();
+
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}#tenant-subscription` });
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" }));
+    expect((scrollIntoView.mock.instances[0] as HTMLElement).id).toBe("tenant-subscription");
+  });
+
   it("keeps overview stable and opens non-blocking legal data in a dedicated tab", async () => {
     installTenantApi();
     renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });

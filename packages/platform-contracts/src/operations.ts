@@ -166,10 +166,10 @@ export const operationsOverviewSchema = z
     definitions: operationsFormulaDefinitionsSchema,
     activeTenants: z.number().int().nonnegative(),
     tenantsApproachingRestriction: z.number().int().nonnegative(),
-    overdueInvoices: z.number().int().nonnegative(),
+    overdueInvoices: z.number().int().nonnegative().nullable(),
     decisionQueue: z.array(operationsDecisionItemSchema).max(100),
     recentActivity: z.array(operationsAuditEventSummarySchema).max(20),
-    health: platformHealthSchema,
+    health: platformHealthSchema.nullable(),
   })
   .strict();
 export type OperationsOverview = z.infer<typeof operationsOverviewSchema>;

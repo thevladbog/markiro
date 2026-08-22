@@ -28,7 +28,7 @@ describe("operational overview", () => {
       "/invoices/11111111-1111-4111-8111-111111111111",
     );
     expect(screen.getByRole("link", { name: /Подписка.*Первый завод/ }).getAttribute("href")).toBe(
-      "/tenants/21111111-1111-4111-8111-111111111111?tab=subscription",
+      "/tenants/21111111-1111-4111-8111-111111111111#tenant-subscription",
     );
     expect(
       screen.getByRole("link", { name: /Юридические данные.*Первый завод/ }).getAttribute("href"),
@@ -93,5 +93,23 @@ describe("operational overview", () => {
     expect(await screen.findByText("tenant.created")).toBeDefined();
     expect(api.requests.some((url) => url.endsWith("/operations/monitoring"))).toBe(false);
     expect(screen.queryByRole("heading", { name: "Состояние платформы" })).toBeNull();
+  });
+
+  it("does not render billing metrics or decisions for support", async () => {
+    installOperationsApi({
+      overview: {
+        ...OPERATIONS_OVERVIEW,
+        overdueInvoices: null,
+        decisionQueue: OPERATIONS_OVERVIEW.decisionQueue.filter(
+          (item) => item.kind === "subscription_ending",
+        ),
+      },
+    });
+    renderSaasApp({ initialEntry: "/" });
+
+    const metrics = await screen.findByRole("group", { name: "Ключевые показатели" });
+    expect(metrics.textContent).not.toContain("Просроченные счета");
+    expect(screen.queryByRole("link", { name: /MK-42/ })).toBeNull();
+    expect(screen.queryByText(/Юридические данные/)).toBeNull();
   });
 });

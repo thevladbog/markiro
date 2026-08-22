@@ -1,4 +1,5 @@
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { authState, jsonResponse, readySession, renderSaasApp, SUPPORT_ME } from "./render.js";
@@ -47,9 +48,35 @@ describe("SaaS-admin operational shell", () => {
 
     expect(await screen.findByRole("heading", { name: "Операционный обзор" })).toBeDefined();
     expect(screen.getByRole("link", { name: "Мониторинг" })).toBeDefined();
+    expect(screen.getByRole("link", { name: "Каталог" })).toBeDefined();
+    expect(screen.queryByRole("link", { name: "Предложения" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Счета" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Платежи" })).toBeNull();
     expect(screen.queryByRole("link", { name: "Наша организация" })).toBeNull();
+  });
+
+  it("moves focus into the mobile rail and restores it on Escape", async () => {
+    const user = userEvent.setup();
+    installOperationsApi();
+    renderSaasApp({ initialEntry: "/" });
+
+    const menu = await screen.findByRole("button", { name: /Меню/ });
+    await user.click(menu);
+
+    expect(document.querySelector(".app-workspace")?.hasAttribute("inert")).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Обзор" }));
+    screen.getByRole("link", { name: "Наша организация" }).focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole("link", { name: "Обзор" }));
+
+    await user.click(screen.getByRole("link", { name: "Тенанты" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Тенанты" })).toBeDefined();
+    await waitFor(() => expect(document.activeElement).toBe(menu));
+    expect(document.querySelector(".app-workspace")?.hasAttribute("inert")).toBe(false);
+
+    await user.click(menu);
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(document.activeElement).toBe(menu));
   });
 
   it("distinguishes loading, network, and unauthenticated states", async () => {

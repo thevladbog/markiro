@@ -1,5 +1,4 @@
 import { Module, type DynamicModule } from "@nestjs/common";
-import { HealthController } from "./health.controller";
 import { AuthModule } from "./auth/auth.module";
 import type { AuthSetup } from "./auth/auth.setup";
 import { JobsModule } from "./jobs/jobs.module";
@@ -52,6 +51,7 @@ import { ShiftExportsModule } from "./modules/shift-exports/shift-exports.module
 import { StationShiftCloseModule } from "./modules/station-shift-close/station-shift-close.module";
 import { DemoRequestsModule } from "./modules/demo-requests/demo-requests.module";
 import { PlatformHttpModule } from "./platform-http/platform-http.module";
+import { HealthModule } from "./health/health.module";
 
 @Module({})
 export class AppModule {
@@ -130,8 +130,9 @@ export class AppModule {
         InvitationsModule.forRoot(setup.databaseUrl),
         ProfileModule,
         TenantOwnerActivationModule,
+        HealthModule.forRoot(),
       ],
-      controllers: [HealthController],
+      controllers: [],
       providers: [],
     };
   }

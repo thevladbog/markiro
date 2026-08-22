@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams, useSearchParams } from "react-router";
 
@@ -65,6 +65,11 @@ export function TenantPage() {
     },
   });
   useUnsavedChanges(false, renew.isPending);
+
+  useEffect(() => {
+    if (location.hash !== "#tenant-subscription" || !tenant.data) return;
+    document.getElementById("tenant-subscription")?.scrollIntoView({ block: "start" });
+  }, [location.hash, tenant.data]);
 
   if (!validTenantId.success) {
     return (

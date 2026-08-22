@@ -7,7 +7,7 @@ import type { OperationsDecisionItem } from "@markiro/platform-contracts";
 function decisionDestination(item: OperationsDecisionItem): string {
   if (item.kind === "overdue_invoice") return `/invoices/${item.invoiceId}`;
   if (item.kind === "subscription_ending") {
-    return `/tenants/${item.tenantId}?tab=subscription`;
+    return `/tenants/${item.tenantId}#tenant-subscription`;
   }
   if (item.party === "tenant") return `/tenants/${item.tenantId}?tab=legal`;
   return "/settings/organization";

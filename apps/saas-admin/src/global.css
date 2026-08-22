@@ -1661,6 +1661,7 @@ textarea {
 .subscription-panel {
   display: grid;
   gap: 16px;
+  scroll-margin-top: calc(var(--mk-workspace-header-height) + 24px);
 }
 
 .tenant-search {
@@ -3068,11 +3069,13 @@ textarea {
     left: 0;
     width: var(--mk-rail-width);
     transform: translateX(-100%);
+    visibility: hidden;
     transition: transform var(--mk-motion-operational) ease;
   }
 
   .app-rail--open {
     transform: translateX(0);
+    visibility: visible;
   }
 
   .app-rail__backdrop {

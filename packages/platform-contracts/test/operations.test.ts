@@ -173,4 +173,34 @@ describe("platform operations contracts", () => {
       }),
     ).toThrow();
   });
+
+  it("accepts an overview with capability-redacted billing and diagnostics", () => {
+    const parsed = operationsOverviewSchema.parse({
+      generatedAt,
+      definitions: {
+        activeTenants: {
+          version: "active-tenants-v1",
+          subscriptionStatuses: ["trial", "active"],
+        },
+        tenantsApproachingRestriction: {
+          version: "subscriptions-ending-v1",
+          subscriptionStatuses: ["trial", "active"],
+          windowDays: 14,
+        },
+        overdueInvoices: {
+          version: "overdue-invoices-v1",
+          invoiceStatuses: ["issued"],
+        },
+      },
+      activeTenants: 2,
+      tenantsApproachingRestriction: 1,
+      overdueInvoices: null,
+      decisionQueue: [],
+      recentActivity: [],
+      health: null,
+    });
+
+    expect(parsed.overdueInvoices).toBeNull();
+    expect(parsed.health).toBeNull();
+  });
 });

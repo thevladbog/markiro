@@ -59,13 +59,20 @@ export function OverviewPage() {
                   }),
                   tone: overview.data.tenantsApproachingRestriction > 0 ? "warning" : "neutral",
                 },
-                {
-                  id: "overdue",
-                  label: t("overview.metrics.overdue"),
-                  value: overview.data.overdueInvoices,
-                  hint: t("overview.metrics.overdueHint"),
-                  tone: overview.data.overdueInvoices > 0 ? "critical" : "neutral",
-                },
+                ...(overview.data.overdueInvoices === null
+                  ? []
+                  : [
+                      {
+                        id: "overdue",
+                        label: t("overview.metrics.overdue"),
+                        value: overview.data.overdueInvoices,
+                        hint: t("overview.metrics.overdueHint"),
+                        tone:
+                          overview.data.overdueInvoices > 0
+                            ? ("critical" as const)
+                            : ("neutral" as const),
+                      },
+                    ]),
               ]}
             />
 

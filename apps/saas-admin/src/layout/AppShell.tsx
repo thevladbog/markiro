@@ -24,6 +24,8 @@ function AppShellContent() {
   const guard = useNavigationGuard(false, false);
   const [railOpen, setRailOpen] = useState(false);
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const wasRailOpenRef = useRef(false);
 
   const hasCapability = (capability: PlatformCapability) =>
     principal.capabilities.includes(capability);
@@ -51,13 +53,11 @@ function AppShellContent() {
       label: t("shell.groups.commerce"),
       items: [
         ...(hasCapability("catalog.read")
-          ? [
-              item("catalog", t("shell.catalog"), "/catalog", "03"),
-              item("offers", t("shell.offers"), "/offers", "04"),
-            ]
+          ? [item("catalog", t("shell.catalog"), "/catalog", "03")]
           : []),
         ...(hasCapability("billing.read")
           ? [
+              item("offers", t("shell.offers"), "/offers", "04"),
               item("invoices", t("shell.invoices"), "/invoices", "05"),
               item("payments", t("shell.payments"), "/payments", "06"),
             ]
@@ -90,14 +90,35 @@ function AppShellContent() {
 
   useEffect(() => {
     if (!railOpen) return;
+    railRef.current?.querySelector<HTMLElement>("a[href]")?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         setRailOpen(false);
-        menuButtonRef.current?.focus();
+        return;
+      }
+      if (event.key === "Tab") {
+        const links = Array.from(railRef.current?.querySelectorAll<HTMLElement>("a[href]") ?? []);
+        const first = links.at(0);
+        const last = links.at(-1);
+        if (!first || !last) return;
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
+  }, [railOpen]);
+
+  useEffect(() => {
+    if (wasRailOpenRef.current && !railOpen) {
+      menuButtonRef.current?.focus();
+    }
+    wasRailOpenRef.current = railOpen;
   }, [railOpen]);
 
   const signOut = async () => {
@@ -110,7 +131,11 @@ function AppShellContent() {
       <a className="skip-link" href="#main-content">
         {t("shell.skip")}
       </a>
-      <div className={railOpen ? "app-rail app-rail--open" : "app-rail"} id="platform-navigation">
+      <div
+        ref={railRef}
+        className={railOpen ? "app-rail app-rail--open" : "app-rail"}
+        id="platform-navigation"
+      >
         <OperationalRail
           brand={
             <div className="app-rail__brand">
@@ -143,13 +168,13 @@ function AppShellContent() {
           className="app-rail__backdrop"
           type="button"
           aria-label={t("shell.closeNavigation")}
+          tabIndex={-1}
           onClick={() => {
             setRailOpen(false);
-            menuButtonRef.current?.focus();
           }}
         />
       ) : null}
-      <div className="app-workspace">
+      <div className="app-workspace" inert={railOpen ? true : undefined}>
         <div className="workspace-header">
           <button
             ref={menuButtonRef}
