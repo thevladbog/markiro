@@ -1,0 +1,26 @@
+---
+import pairingWaiting from "@markiro/legal-documents/assets/instructions/mkr-ins-04/pairing-waiting.png?url";
+import pairingSuccess from "@markiro/legal-documents/assets/instructions/mkr-ins-04/pairing-success.png?url";
+import setupScanner from "@markiro/legal-documents/assets/instructions/mkr-ins-04/setup-scanner.png?url";
+import setupPrinter from "@markiro/legal-documents/assets/instructions/mkr-ins-04/setup-printer.png?url";
+import setupSound from "@markiro/legal-documents/assets/instructions/mkr-ins-04/setup-sound.png?url";
+import updateCurrent from "@markiro/legal-documents/assets/instructions/mkr-ins-04/update-current.png?url";
+import updateWarn from "@markiro/legal-documents/assets/instructions/mkr-ins-04/update-warn.png?url";
+import updateActiveShift from "@markiro/legal-documents/assets/instructions/mkr-ins-04/update-active-shift.png?url";
+
+import { getLegalDocumentPage } from "../../../content/legal-pages";
+import InstructionDocument from "../../../components/InstructionDocument.astro";
+
+const images = {
+  "pairing-waiting": pairingWaiting,
+  "pairing-success": pairingSuccess,
+  "setup-scanner": setupScanner,
+  "setup-printer": setupPrinter,
+  "setup-sound": setupSound,
+  "update-current": updateCurrent,
+  "update-warn": updateWarn,
+  "update-active-shift": updateActiveShift,
+};
+---
+
+<InstructionDocument page={getLegalDocumentPage("MKR-INS-04", "ru")} images={images} />
