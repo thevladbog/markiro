@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { platformCommercialContracts } from "../src/index.js";
+import { invoiceApplicationEventSchema, platformCommercialContracts } from "../src/index.js";
+import { invoiceDocumentRecordSchema } from "../src/commercial.js";
 
 const TENANT_ID = "legacy_better_auth_org";
 const OFFER_ID = "11111111-1111-4111-8111-111111111111";
@@ -30,6 +31,12 @@ const offerBase = {
   createdByPlatformUserId: PLATFORM_USER_ID,
   createdAt: CREATED_AT,
   updatedAt: new Date("2026-08-21T10:00:00.000Z"),
+} as const;
+
+const publishedOfferMetadata = {
+  number: "KP-2026-000001",
+  publishedAt: CREATED_AT,
+  publishedByPlatformUserId: PLATFORM_USER_ID,
 } as const;
 
 const offerLine = {
@@ -75,6 +82,14 @@ const invoiceBase = {
   cancelledAt: null,
   createdAt: CREATED_AT,
   updatedAt: CREATED_AT,
+} as const;
+
+const issuedInvoiceMetadata = {
+  issueDate: CREATED_AT,
+  sellerSnapshot: { displayName: "Markiro" },
+  buyerSnapshot: { displayName: "Factory" },
+  issuedAt: CREATED_AT,
+  issuedByPlatformUserId: PLATFORM_USER_ID,
 } as const;
 
 const invoiceLine = {
@@ -174,21 +189,27 @@ describe("platform commercial contracts", () => {
         ...offerBase,
         id: "12111111-1111-4111-8111-111111111111",
         status: "published",
-        number: "KP-2026-000001",
-        publishedAt: CREATED_AT,
-        publishedByPlatformUserId: PLATFORM_USER_ID,
+        ...publishedOfferMetadata,
       },
       {
         ...offerBase,
         id: "13111111-1111-4111-8111-111111111111",
         status: "paid",
-        number: "KP-2026-000002",
-        publishedAt: CREATED_AT,
-        publishedByPlatformUserId: PLATFORM_USER_ID,
+        ...publishedOfferMetadata,
         paidAt: CREATED_AT,
       },
-      { ...offerBase, id: "14111111-1111-4111-8111-111111111111", status: "cancelled" },
-      { ...offerBase, id: "15111111-1111-4111-8111-111111111111", status: "expired" },
+      {
+        ...offerBase,
+        id: "14111111-1111-4111-8111-111111111111",
+        status: "cancelled",
+        ...publishedOfferMetadata,
+      },
+      {
+        ...offerBase,
+        id: "15111111-1111-4111-8111-111111111111",
+        status: "expired",
+        ...publishedOfferMetadata,
+      },
     ]);
     expect(list[0]?.createdAt).toBe(ISO_CREATED_AT);
 
@@ -220,9 +241,7 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.offers.publish.response.parse({
         ...offerBase,
         status: "published",
-        number: "KP-2026-000001",
-        publishedAt: CREATED_AT,
-        publishedByPlatformUserId: PLATFORM_USER_ID,
+        ...publishedOfferMetadata,
         lines: [offerLine],
         documents: { revision: 1, documents: [readyDocument, failedDocument] },
       }).status,
@@ -231,6 +250,7 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.offers.cancel.response.parse({
         ...offerBase,
         status: "cancelled",
+        ...publishedOfferMetadata,
         lines: [offerLine],
       }).status,
     ).toBe("cancelled");
@@ -245,6 +265,57 @@ describe("platform commercial contracts", () => {
       fulfilments: ["a1111111-1111-4111-8111-111111111111"],
       subscriptionId: "b1111111-1111-4111-8111-111111111111",
     });
+  });
+
+  it("rejects offer lifecycle metadata that contradicts every status", () => {
+    const draft = { ...offerBase, status: "draft" } as const;
+    const published = {
+      ...offerBase,
+      ...publishedOfferMetadata,
+      status: "published",
+    } as const;
+    const paid = {
+      ...offerBase,
+      ...publishedOfferMetadata,
+      status: "paid",
+      paidAt: CREATED_AT,
+    } as const;
+    const cancelled = {
+      ...offerBase,
+      ...publishedOfferMetadata,
+      status: "cancelled",
+    } as const;
+    const expired = { ...offerBase, ...publishedOfferMetadata, status: "expired" } as const;
+    const contract = platformCommercialContracts.offers.list.response;
+
+    expect(contract.parse([draft, published, paid, cancelled, expired])).toHaveLength(5);
+
+    const invalid = [
+      ["draft number", { ...draft, number: "KP-2026-000001" }],
+      ["draft publishedAt", { ...draft, publishedAt: CREATED_AT }],
+      ["draft publisher", { ...draft, publishedByPlatformUserId: PLATFORM_USER_ID }],
+      ["draft paidAt", { ...draft, paidAt: CREATED_AT }],
+      ["published number", { ...published, number: null }],
+      ["published publishedAt", { ...published, publishedAt: null }],
+      ["published publisher", { ...published, publishedByPlatformUserId: null }],
+      ["published paidAt", { ...published, paidAt: CREATED_AT }],
+      ["paid number", { ...paid, number: null }],
+      ["paid publishedAt", { ...paid, publishedAt: null }],
+      ["paid publisher", { ...paid, publishedByPlatformUserId: null }],
+      ["paid paidAt", { ...paid, paidAt: null }],
+      ["cancelled number", { ...cancelled, number: null }],
+      ["cancelled publishedAt", { ...cancelled, publishedAt: null }],
+      ["cancelled publisher", { ...cancelled, publishedByPlatformUserId: null }],
+      ["cancelled paidAt", { ...cancelled, paidAt: CREATED_AT }],
+      ["expired number", { ...expired, number: null }],
+      ["expired publishedAt", { ...expired, publishedAt: null }],
+      ["expired publisher", { ...expired, publishedByPlatformUserId: null }],
+      ["expired paidAt", { ...expired, paidAt: CREATED_AT }],
+    ] as const;
+
+    for (const [name, candidate] of invalid) {
+      expect(contract.safeParse([candidate]).success, name).toBe(false);
+    }
   });
 
   it("parses offer document list, render, and download routes for every document state", () => {
@@ -267,6 +338,70 @@ describe("platform commercial contracts", () => {
     ).toContain("offer.pdf");
   });
 
+  it("rejects document metadata that contradicts every rendering state", () => {
+    const contract = platformCommercialContracts.offers.documents.list.response;
+    const listed = (document: object) => ({
+      ...document,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    });
+    const invalid = [
+      ["pending contentType", { ...pendingDocument, contentType: "text/html" }],
+      ["pending byteSize", { ...pendingDocument, byteSize: 1 }],
+      ["pending sha256", { ...pendingDocument, sha256: "a".repeat(64) }],
+      ["pending errorCode", { ...pendingDocument, errorCode: "render_failed" }],
+      ["ready contentType", { ...readyDocument, contentType: null }],
+      ["ready byteSize", { ...readyDocument, byteSize: null }],
+      ["ready sha256", { ...readyDocument, sha256: null }],
+      ["ready errorCode", { ...readyDocument, errorCode: "render_failed" }],
+      ["failed contentType", { ...failedDocument, contentType: "text/html" }],
+      ["failed byteSize", { ...failedDocument, byteSize: 1 }],
+      ["failed sha256", { ...failedDocument, sha256: "a".repeat(64) }],
+      ["failed errorCode", { ...failedDocument, errorCode: null }],
+    ] as const;
+
+    for (const [name, candidate] of invalid) {
+      expect(contract.safeParse([listed(candidate)]).success, name).toBe(false);
+    }
+
+    const invoiceDocumentFields = {
+      tenantId: TENANT_ID,
+      invoiceId: INVOICE_ID,
+      rendererVersion: "billing-print-v1",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    } as const;
+    expect(
+      invoiceDocumentRecordSchema.parse({
+        ...pendingDocument,
+        ...invoiceDocumentFields,
+        objectKey: null,
+      }).status,
+    ).toBe("pending");
+    expect(
+      invoiceDocumentRecordSchema.parse({
+        ...readyDocument,
+        ...invoiceDocumentFields,
+        objectKey: "tenants/redacted/invoices/redacted/r1.pdf",
+      }).status,
+    ).toBe("ready");
+    expect(
+      invoiceDocumentRecordSchema.parse({
+        ...failedDocument,
+        ...invoiceDocumentFields,
+        objectKey: null,
+      }).status,
+    ).toBe("failed");
+    expect(
+      invoiceDocumentRecordSchema.safeParse({
+        ...failedDocument,
+        ...invoiceDocumentFields,
+        objectKey: "tenants/redacted/invoices/redacted/r1.pdf",
+      }).success,
+      "failed objectKey",
+    ).toBe(false);
+  });
+
   it("parses every invoice success route with exact statuses and invoice activation spelling", () => {
     const list = platformCommercialContracts.invoices.list.response.parse({
       items: [
@@ -275,27 +410,20 @@ describe("platform commercial contracts", () => {
           ...invoiceBase,
           id: "32111111-1111-4111-8111-111111111111",
           status: "issued",
-          issueDate: CREATED_AT,
-          sellerSnapshot: { displayName: "Markiro" },
-          buyerSnapshot: { displayName: "Factory" },
-          issuedAt: CREATED_AT,
-          issuedByPlatformUserId: PLATFORM_USER_ID,
+          ...issuedInvoiceMetadata,
         },
         {
           ...invoiceBase,
           id: "33111111-1111-4111-8111-111111111111",
           status: "paid",
-          issueDate: CREATED_AT,
-          sellerSnapshot: { displayName: "Markiro" },
-          buyerSnapshot: { displayName: "Factory" },
-          issuedAt: CREATED_AT,
-          issuedByPlatformUserId: PLATFORM_USER_ID,
+          ...issuedInvoiceMetadata,
           paidAt: CREATED_AT,
         },
         {
           ...invoiceBase,
           id: "34111111-1111-4111-8111-111111111111",
           status: "cancelled",
+          ...issuedInvoiceMetadata,
           cancelledAt: CREATED_AT,
         },
       ],
@@ -310,11 +438,7 @@ describe("platform commercial contracts", () => {
     const detail = platformCommercialContracts.invoices.detail.response.parse({
       ...invoiceBase,
       status: "paid",
-      issueDate: CREATED_AT,
-      sellerSnapshot: { displayName: "Markiro" },
-      buyerSnapshot: { displayName: "Factory" },
-      issuedAt: CREATED_AT,
-      issuedByPlatformUserId: PLATFORM_USER_ID,
+      ...issuedInvoiceMetadata,
       paidAt: CREATED_AT,
       lines: [
         invoiceLine,
@@ -365,11 +489,7 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.invoices.issue.response.parse({
         ...invoiceBase,
         status: "issued",
-        issueDate: CREATED_AT,
-        sellerSnapshot: { displayName: "Markiro" },
-        buyerSnapshot: { displayName: "Factory" },
-        issuedAt: CREATED_AT,
-        issuedByPlatformUserId: PLATFORM_USER_ID,
+        ...issuedInvoiceMetadata,
         documents: { revision: 1, documents: [readyDocument] },
       }).status,
     ).toBe("issued");
@@ -377,6 +497,7 @@ describe("platform commercial contracts", () => {
       platformCommercialContracts.invoices.cancel.response.parse({
         ...invoiceBase,
         status: "cancelled",
+        ...issuedInvoiceMetadata,
         cancelledAt: CREATED_AT,
       }).status,
     ).toBe("cancelled");
@@ -395,6 +516,138 @@ describe("platform commercial contracts", () => {
       ],
     });
     expect(applied.results[0]?.status).toBe("skipped");
+  });
+
+  it("rejects invoice lifecycle metadata that contradicts every status", () => {
+    const draft = { ...invoiceBase, status: "draft" } as const;
+    const issued = { ...invoiceBase, ...issuedInvoiceMetadata, status: "issued" } as const;
+    const paid = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "paid",
+      paidAt: CREATED_AT,
+    } as const;
+    const cancelledIssued = {
+      ...invoiceBase,
+      ...issuedInvoiceMetadata,
+      status: "cancelled",
+      cancelledAt: CREATED_AT,
+    } as const;
+    const contract = platformCommercialContracts.invoices.list.response;
+
+    expect(contract.parse({ items: [draft, issued, paid, cancelledIssued] }).items).toHaveLength(4);
+
+    const cancelledWithoutIssuance = {
+      ...invoiceBase,
+      status: "cancelled",
+      cancelledAt: CREATED_AT,
+    } as const;
+
+    const invalid = [
+      ["draft issueDate", { ...draft, issueDate: CREATED_AT }],
+      ["draft sellerSnapshot", { ...draft, sellerSnapshot: { displayName: "Markiro" } }],
+      ["draft buyerSnapshot", { ...draft, buyerSnapshot: { displayName: "Factory" } }],
+      ["draft issuedAt", { ...draft, issuedAt: CREATED_AT }],
+      ["draft issuer", { ...draft, issuedByPlatformUserId: PLATFORM_USER_ID }],
+      ["draft paidAt", { ...draft, paidAt: CREATED_AT }],
+      ["draft cancelledAt", { ...draft, cancelledAt: CREATED_AT }],
+      ["issued issueDate", { ...issued, issueDate: null }],
+      ["issued sellerSnapshot", { ...issued, sellerSnapshot: null }],
+      ["issued buyerSnapshot", { ...issued, buyerSnapshot: null }],
+      ["issued issuedAt", { ...issued, issuedAt: null }],
+      ["issued issuer", { ...issued, issuedByPlatformUserId: null }],
+      ["issued paidAt", { ...issued, paidAt: CREATED_AT }],
+      ["issued cancelledAt", { ...issued, cancelledAt: CREATED_AT }],
+      ["paid issueDate", { ...paid, issueDate: null }],
+      ["paid sellerSnapshot", { ...paid, sellerSnapshot: null }],
+      ["paid buyerSnapshot", { ...paid, buyerSnapshot: null }],
+      ["paid issuedAt", { ...paid, issuedAt: null }],
+      ["paid issuer", { ...paid, issuedByPlatformUserId: null }],
+      ["paid paidAt", { ...paid, paidAt: null }],
+      ["paid cancelledAt", { ...paid, cancelledAt: CREATED_AT }],
+      ["cancelled without issuance", cancelledWithoutIssuance],
+      ["cancelled cancelledAt", { ...cancelledIssued, cancelledAt: null }],
+      ["cancelled paidAt", { ...cancelledIssued, paidAt: CREATED_AT }],
+      ["cancelled issued issueDate", { ...cancelledIssued, issueDate: null }],
+      ["cancelled issued seller", { ...cancelledIssued, sellerSnapshot: null }],
+      ["cancelled issued buyer", { ...cancelledIssued, buyerSnapshot: null }],
+      ["cancelled issued issuedAt", { ...cancelledIssued, issuedAt: null }],
+      ["cancelled issued issuer", { ...cancelledIssued, issuedByPlatformUserId: null }],
+    ] as const;
+
+    for (const [name, candidate] of invalid) {
+      expect(contract.safeParse({ items: [candidate] }).success, name).toBe(false);
+    }
+  });
+
+  it("rejects result and error metadata that contradicts every application state", () => {
+    const resultBase = {
+      lineId: INVOICE_LINE_ID,
+      attempt: 1,
+      kind: "plan",
+    } as const;
+    const results = [
+      { ...resultBase, status: "pending", result: null, errorCode: null },
+      { ...resultBase, status: "applied", result: { subscriptionId: OFFER_ID }, errorCode: null },
+      { ...resultBase, status: "failed", result: null, errorCode: "activation_failed" },
+      { ...resultBase, status: "skipped", result: { subscriptionId: OFFER_ID }, errorCode: null },
+    ] as const;
+    const response = (candidate: object) => ({
+      invoiceId: INVOICE_ID,
+      status: "partial_failure",
+      results: [candidate],
+    });
+
+    expect(
+      platformCommercialContracts.invoices.apply.response.parse({
+        invoiceId: INVOICE_ID,
+        status: "partial_failure",
+        results,
+      }).results,
+    ).toHaveLength(4);
+
+    const invalidResults = [
+      ["pending result", { ...results[0], result: {} }],
+      ["pending error", { ...results[0], errorCode: "activation_failed" }],
+      ["applied result", { ...results[1], result: null }],
+      ["applied error", { ...results[1], errorCode: "activation_failed" }],
+      ["failed result", { ...results[2], result: {} }],
+      ["failed error", { ...results[2], errorCode: null }],
+      ["skipped result", { ...results[3], result: null }],
+      ["skipped error", { ...results[3], errorCode: "activation_failed" }],
+    ] as const;
+    for (const [name, candidate] of invalidResults) {
+      expect(
+        platformCommercialContracts.invoices.apply.response.safeParse(response(candidate)).success,
+        name,
+      ).toBe(false);
+    }
+
+    const eventBase = {
+      ...applicationEvent,
+      beforeSnapshot: null,
+    } as const;
+    const events = [
+      { ...eventBase, status: "pending", afterSnapshot: null, errorCode: null },
+      { ...eventBase, status: "applied", afterSnapshot: { id: OFFER_ID }, errorCode: null },
+      { ...eventBase, status: "failed", afterSnapshot: null, errorCode: "activation_failed" },
+      { ...eventBase, status: "skipped", afterSnapshot: { id: OFFER_ID }, errorCode: null },
+    ] as const;
+    for (const event of events) expect(invoiceApplicationEventSchema.parse(event)).toBeTruthy();
+
+    const invalidEvents = [
+      ["pending snapshot", { ...events[0], afterSnapshot: {} }],
+      ["pending error", { ...events[0], errorCode: "activation_failed" }],
+      ["applied snapshot", { ...events[1], afterSnapshot: null }],
+      ["applied error", { ...events[1], errorCode: "activation_failed" }],
+      ["failed snapshot", { ...events[2], afterSnapshot: {} }],
+      ["failed error", { ...events[2], errorCode: null }],
+      ["skipped snapshot", { ...events[3], afterSnapshot: null }],
+      ["skipped error", { ...events[3], errorCode: "activation_failed" }],
+    ] as const;
+    for (const [name, candidate] of invalidEvents) {
+      expect(invoiceApplicationEventSchema.safeParse(candidate).success, name).toBe(false);
+    }
   });
 
   it("parses every invoice document route including the legacy render and latest URL variants", () => {

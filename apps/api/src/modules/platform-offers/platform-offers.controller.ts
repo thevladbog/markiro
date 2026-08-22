@@ -14,6 +14,10 @@ import {
 import { PlatformOffersService } from "./platform-offers.service";
 import { OfferDocumentsService } from "./offer-documents.service";
 
+const offerDocumentDownloadParamsPipe = new ZodValidationPipe(
+  platformCommercialContracts.offers.documents.download.params,
+);
+
 @Controller("platform/offers")
 export class PlatformOffersController {
   constructor(
@@ -93,9 +97,14 @@ export class PlatformOffersController {
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
     @Param("documentId") documentId: string,
   ) {
+    const params = {
+      offerId: id,
+      documentId,
+    };
+    offerDocumentDownloadParamsPipe.transform(params);
     return parsePlatformResponse(
       platformCommercialContracts.offers.documents.download.response,
-      await this.documents.url(id, documentId),
+      await this.documents.url(params.offerId, params.documentId),
     );
   }
 

@@ -25,6 +25,9 @@ const vatRateSchema = z
   .string()
   .regex(/^\d{1,3}\.\d{2}$/)
   .nullable();
+const nonNullUnknownSchema = z
+  .unknown()
+  .refine((value) => value !== null && value !== undefined, "Value must be present");
 
 export const offerActivationPolicySchema = z.enum(["immediately", "after_current"]);
 export const invoiceActivationPolicySchema = z.enum(["immediate", "after_current", "manual"]);
@@ -72,29 +75,46 @@ const offerRecordCommonSchema = z
     familyId: platformUuidSchema,
     revision: positiveIntegerSchema,
     previousRevisionId: platformUuidSchema.nullable(),
-    number: z.string().min(1).nullable(),
     total: platformMoneySchema,
     expiresAt: nullableResponseTimestampSchema,
     termsMarkdown: z.string().max(20_000).nullable(),
-    publishedAt: nullableResponseTimestampSchema,
-    publishedByPlatformUserId: nullablePlatformUserIdSchema,
-    paidAt: nullableResponseTimestampSchema,
     createdByPlatformUserId: nullablePlatformUserIdSchema,
     createdAt: responseTimestampSchema,
     updatedAt: responseTimestampSchema,
   })
   .strict();
 
-const draftOfferSchema = offerRecordCommonSchema.extend({ status: z.literal("draft") }).strict();
-const publishedOfferSchema = offerRecordCommonSchema
-  .extend({ status: z.literal("published") })
+const unpublishedOfferFields = {
+  number: z.null(),
+  publishedAt: z.null(),
+  publishedByPlatformUserId: z.null(),
+  paidAt: z.null(),
+};
+const publishedOfferFields = {
+  number: z.string().min(1),
+  publishedAt: responseTimestampSchema,
+  publishedByPlatformUserId: platformUserIdSchema,
+  paidAt: z.null(),
+};
+const paidOfferFields = {
+  ...publishedOfferFields,
+  paidAt: responseTimestampSchema,
+};
+
+const draftOfferSchema = offerRecordCommonSchema
+  .extend({ status: z.literal("draft"), ...unpublishedOfferFields })
   .strict();
-const paidOfferSchema = offerRecordCommonSchema.extend({ status: z.literal("paid") }).strict();
+const publishedOfferSchema = offerRecordCommonSchema
+  .extend({ status: z.literal("published"), ...publishedOfferFields })
+  .strict();
+const paidOfferSchema = offerRecordCommonSchema
+  .extend({ status: z.literal("paid"), ...paidOfferFields })
+  .strict();
 const cancelledOfferSchema = offerRecordCommonSchema
-  .extend({ status: z.literal("cancelled") })
+  .extend({ status: z.literal("cancelled"), ...publishedOfferFields })
   .strict();
 const expiredOfferSchema = offerRecordCommonSchema
-  .extend({ status: z.literal("expired") })
+  .extend({ status: z.literal("expired"), ...publishedOfferFields })
   .strict();
 
 export const offerSchema = z.discriminatedUnion("status", [
@@ -108,8 +128,10 @@ export const offerSchema = z.discriminatedUnion("status", [
 export const offerServiceRecordSchema = offerRecordCommonSchema
   .extend({
     status: z.enum(["draft", "published", "paid", "cancelled", "expired"]),
+    number: z.string().min(1).nullable(),
     expiresAt: nullableServiceTimestampSchema,
     publishedAt: nullableServiceTimestampSchema,
+    publishedByPlatformUserId: nullablePlatformUserIdSchema,
     paidAt: nullableServiceTimestampSchema,
     createdAt: serviceTimestampSchema,
     updatedAt: serviceTimestampSchema,
@@ -239,13 +261,10 @@ const readyDocumentFields = {
 const failedDocumentFields = {
   ...documentCommonFields,
   status: z.literal("failed"),
-  contentType: z.string().min(1).nullable(),
-  byteSize: nonNegativeIntegerSchema.nullable(),
-  sha256: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .nullable(),
-  errorCode: z.string().min(1).nullable(),
+  contentType: z.null(),
+  byteSize: z.null(),
+  sha256: z.null(),
+  errorCode: z.string().min(1),
 };
 
 export const commercialDocumentSchema = z.discriminatedUnion("status", [
@@ -307,7 +326,7 @@ export const invoiceDocumentRecordSchema = z.discriminatedUnion("status", [
     .object({
       ...failedDocumentFields,
       ...invoiceDocumentRecordFields,
-      objectKey: z.string().min(1).nullable(),
+      objectKey: z.null(),
     })
     .strict(),
 ]);
@@ -414,34 +433,63 @@ const invoiceRecordCommonSchema = z
     id: platformUuidSchema,
     tenantId: platformTenantIdSchema,
     number: z.string().min(1),
-    issueDate: nullableResponseTimestampSchema,
     dueDate: nullableResponseTimestampSchema,
     currency: z.literal("RUB"),
-    sellerSnapshot: z.unknown().nullable(),
-    buyerSnapshot: z.unknown().nullable(),
     subtotal: platformMoneySchema,
     vatTotal: platformMoneySchema,
     total: platformMoneySchema,
     applicationMode: z.enum(["manual", "automatic"]),
     createdByPlatformUserId: platformUserIdSchema,
-    issuedByPlatformUserId: nullablePlatformUserIdSchema,
-    issuedAt: nullableResponseTimestampSchema,
-    paidAt: nullableResponseTimestampSchema,
-    cancelledAt: nullableResponseTimestampSchema,
     createdAt: responseTimestampSchema,
     updatedAt: responseTimestampSchema,
   })
   .strict();
 
+const unissuedInvoiceFields = {
+  issueDate: z.null(),
+  sellerSnapshot: z.null(),
+  buyerSnapshot: z.null(),
+  issuedByPlatformUserId: z.null(),
+  issuedAt: z.null(),
+};
+const issuedInvoiceFields = {
+  issueDate: responseTimestampSchema,
+  sellerSnapshot: nonNullUnknownSchema,
+  buyerSnapshot: nonNullUnknownSchema,
+  issuedByPlatformUserId: platformUserIdSchema,
+  issuedAt: responseTimestampSchema,
+};
 const draftInvoiceSchema = invoiceRecordCommonSchema
-  .extend({ status: z.literal("draft") })
+  .extend({
+    status: z.literal("draft"),
+    ...unissuedInvoiceFields,
+    paidAt: z.null(),
+    cancelledAt: z.null(),
+  })
   .strict();
 const issuedInvoiceSchema = invoiceRecordCommonSchema
-  .extend({ status: z.literal("issued") })
+  .extend({
+    status: z.literal("issued"),
+    ...issuedInvoiceFields,
+    paidAt: z.null(),
+    cancelledAt: z.null(),
+  })
   .strict();
-const paidInvoiceSchema = invoiceRecordCommonSchema.extend({ status: z.literal("paid") }).strict();
+const paidInvoiceSchema = invoiceRecordCommonSchema
+  .extend({
+    status: z.literal("paid"),
+    ...issuedInvoiceFields,
+    paidAt: responseTimestampSchema,
+    cancelledAt: z.null(),
+  })
+  .strict();
 const cancelledInvoiceSchema = invoiceRecordCommonSchema
-  .extend({ status: z.literal("cancelled") })
+  .extend({
+    status: z.literal("cancelled"),
+    ...issuedInvoiceFields,
+    paidAt: z.null(),
+    cancelledAt: responseTimestampSchema,
+  })
   .strict();
 
 export const invoiceSchema = z.discriminatedUnion("status", [
@@ -457,6 +505,9 @@ export const invoiceServiceRecordSchema = invoiceRecordCommonSchema
     currency: z.string().min(1),
     issueDate: nullableServiceTimestampSchema,
     dueDate: nullableServiceTimestampSchema,
+    sellerSnapshot: z.unknown().nullable(),
+    buyerSnapshot: z.unknown().nullable(),
+    issuedByPlatformUserId: nullablePlatformUserIdSchema,
     issuedAt: nullableServiceTimestampSchema,
     paidAt: nullableServiceTimestampSchema,
     cancelledAt: nullableServiceTimestampSchema,
@@ -580,27 +631,54 @@ const manualBillingPaymentSchema = billingPaymentSchema
   .extend({ source: z.literal("manual"), importRowId: z.null() })
   .strict();
 
-export const invoiceApplicationEventSchema = z
+const invoiceApplicationEventCommonSchema = z
   .object({
     id: platformUuidSchema,
     tenantId: platformTenantIdSchema,
     invoiceId: platformUuidSchema,
     invoiceLineId: platformUuidSchema,
     attempt: positiveIntegerSchema,
-    status: z.enum(["pending", "applied", "failed", "skipped"]),
     kind: z.enum(["plan", "addon", "service", "custom"]),
     source: z.string().min(1),
     beforeSnapshot: z.unknown().nullable(),
-    afterSnapshot: z.unknown().nullable(),
-    errorCode: z.string().nullable(),
     actorPlatformUserId: nullablePlatformUserIdSchema,
     createdAt: responseTimestampSchema,
   })
   .strict();
 
-const invoiceApplicationEventServiceSchema = invoiceApplicationEventSchema
+export const invoiceApplicationEventSchema = z.discriminatedUnion("status", [
+  invoiceApplicationEventCommonSchema
+    .extend({ status: z.literal("pending"), afterSnapshot: z.null(), errorCode: z.null() })
+    .strict(),
+  invoiceApplicationEventCommonSchema
+    .extend({
+      status: z.literal("applied"),
+      afterSnapshot: nonNullUnknownSchema,
+      errorCode: z.null(),
+    })
+    .strict(),
+  invoiceApplicationEventCommonSchema
+    .extend({
+      status: z.literal("failed"),
+      afterSnapshot: z.null(),
+      errorCode: z.string().min(1),
+    })
+    .strict(),
+  invoiceApplicationEventCommonSchema
+    .extend({
+      status: z.literal("skipped"),
+      afterSnapshot: nonNullUnknownSchema,
+      errorCode: z.null(),
+    })
+    .strict(),
+]);
+
+const invoiceApplicationEventServiceSchema = invoiceApplicationEventCommonSchema
   .extend({
+    status: z.enum(["pending", "applied", "failed", "skipped"]),
     kind: z.string().min(1),
+    afterSnapshot: z.unknown().nullable(),
+    errorCode: z.string().nullable(),
     createdAt: serviceTimestampSchema,
   })
   .strict();
@@ -655,22 +733,33 @@ const issuedInvoiceWithDocumentsSchema = issuedInvoiceSchema
   .extend({ documents: commercialDocumentRenderResultSchema })
   .strict();
 
+const invoiceApplicationLineResultCommonSchema = z
+  .object({
+    lineId: platformUuidSchema,
+    attempt: positiveIntegerSchema,
+    kind: z.enum(["plan", "addon", "service", "custom"]),
+  })
+  .strict();
+const invoiceApplicationLineResultSchema = z.discriminatedUnion("status", [
+  invoiceApplicationLineResultCommonSchema
+    .extend({ status: z.literal("pending"), result: z.null(), errorCode: z.null() })
+    .strict(),
+  invoiceApplicationLineResultCommonSchema
+    .extend({ status: z.literal("applied"), result: nonNullUnknownSchema, errorCode: z.null() })
+    .strict(),
+  invoiceApplicationLineResultCommonSchema
+    .extend({ status: z.literal("failed"), result: z.null(), errorCode: z.string().min(1) })
+    .strict(),
+  invoiceApplicationLineResultCommonSchema
+    .extend({ status: z.literal("skipped"), result: nonNullUnknownSchema, errorCode: z.null() })
+    .strict(),
+]);
+
 export const invoiceApplicationResultSchema = z
   .object({
     invoiceId: platformUuidSchema,
     status: z.enum(["pending", "applied", "partial_failure"]),
-    results: z.array(
-      z
-        .object({
-          lineId: platformUuidSchema,
-          attempt: positiveIntegerSchema,
-          status: z.enum(["pending", "applied", "failed", "skipped"]),
-          kind: z.enum(["plan", "addon", "service", "custom"]),
-          result: z.unknown().nullable(),
-          errorCode: z.string().nullable(),
-        })
-        .strict(),
-    ),
+    results: z.array(invoiceApplicationLineResultSchema),
   })
   .strict();
 

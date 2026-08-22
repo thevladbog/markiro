@@ -15,6 +15,10 @@ import {
   type CreateInvoiceDto,
 } from "./dto";
 
+const invoiceDocumentDownloadParamsPipe = new ZodValidationPipe(
+  platformCommercialContracts.invoices.documents.download.params,
+);
+
 @Controller("platform/invoices")
 export class BillingController {
   constructor(
@@ -109,9 +113,14 @@ export class BillingController {
     @Param("id", new ZodValidationPipe(invoiceIdSchema)) id: string,
     @Param("documentId") documentId: string,
   ) {
+    const params = {
+      invoiceId: id,
+      documentId,
+    };
+    invoiceDocumentDownloadParamsPipe.transform(params);
     return parsePlatformResponse(
       platformCommercialContracts.invoices.documents.download.response,
-      await this.documents.url(id, documentId),
+      await this.documents.url(params.invoiceId, params.documentId),
     );
   }
 

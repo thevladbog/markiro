@@ -176,7 +176,14 @@ describe("offer editor route", () => {
 
   it("keeps an expired offer visible in the register", async () => {
     installOfferEditorApi({
-      offers: [offerRecord({ status: "expired" })],
+      offers: [
+        offerRecord({
+          status: "expired",
+          number: "KP-2026-000001",
+          publishedAt: OFFER_CREATED_AT,
+          publishedByPlatformUserId: "platform-accountant",
+        }),
+      ],
     });
 
     renderSaasApp({ initialEntry: "/offers" });

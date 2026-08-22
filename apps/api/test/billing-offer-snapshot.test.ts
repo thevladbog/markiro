@@ -1,3 +1,4 @@
+import { BadRequestException } from "@nestjs/common";
 import type { Db } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 
@@ -126,5 +127,25 @@ describe("platform invoice response boundary", () => {
     );
 
     await expect(controller.list()).rejects.toThrow();
+  });
+
+  it("rejects a malformed document id before the document service", async () => {
+    const documents = {
+      url: vi.fn(async () => ({
+        url: "https://objects.example.invalid/invoices/invoice.pdf?signature=redacted",
+      })),
+    } as unknown as BillingDocumentsService;
+    const controller = new BillingController(
+      {} as BillingService,
+      documents,
+      {} as BillingApplicationService,
+    );
+
+    const failure = await controller
+      .documentDownload("31111111-1111-4111-8111-111111111111", "not-a-uuid")
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(documents.url).not.toHaveBeenCalled();
   });
 });

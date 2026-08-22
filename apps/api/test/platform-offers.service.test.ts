@@ -212,4 +212,20 @@ describe("platform offer response boundary", () => {
 
     await expect(controller.list(request)).rejects.toThrow();
   });
+
+  it("rejects a malformed document id before the document service", async () => {
+    const documents = {
+      url: vi.fn(async () => ({
+        url: "https://objects.example.invalid/offers/offer.pdf?signature=redacted",
+      })),
+    } as unknown as OfferDocumentsService;
+    const controller = new PlatformOffersController({} as PlatformOffersService, documents);
+
+    const failure = await controller
+      .documentsDownload("41111111-1111-4111-8111-111111111111", "not-a-uuid")
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(documents.url).not.toHaveBeenCalled();
+  });
 });
