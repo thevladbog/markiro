@@ -92,6 +92,16 @@ function configurationError() {
   return new Error("hosted v-b deployment configuration is invalid");
 }
 
+function acmeEmail(value) {
+  if (
+    typeof value !== "string" ||
+    value.length > 254 ||
+    !/^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+$/.test(value)
+  )
+    throw configurationError();
+  return value;
+}
+
 function requiredEnvironment(name, environment) {
   const value = environment[name];
   if (typeof value !== "string" || value.length === 0) throw configurationError();
@@ -156,6 +166,7 @@ function validateHostedInput(environment) {
     if (Buffer.byteLength(registryInput, "utf8") > 512 * 1024) throw configurationError();
 
     return {
+      acmeEmail: acmeEmail(requiredEnvironment("ACME_EMAIL", environment)),
       address,
       domain,
       identity,
@@ -210,6 +221,7 @@ function executorEnvironmentArguments(input) {
     `MARKIRO_SAAS_ADMIN_DOMAIN=${input.saasAdminDomain}`,
     `MARKIRO_KIOSK_DOMAIN=${input.kioskDomain}`,
     `MARKIRO_LANDING_DOMAIN=${input.landingDomain}`,
+    `ACME_EMAIL=${input.acmeEmail}`,
     `VBTECH_RELEASE_SHA=${input.releaseSha}`,
     `VBTECH_IMAGE_DIGEST=${input.imageDigest}`,
     `VBTECH_IMAGE_REF=${input.imageRef}`,

@@ -293,6 +293,7 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     MARKIRO_SAAS_ADMIN_DOMAIN: "${{ vars.MARKIRO_SAAS_ADMIN_DOMAIN }}",
     MARKIRO_KIOSK_DOMAIN: "${{ vars.MARKIRO_KIOSK_DOMAIN }}",
     MARKIRO_LANDING_DOMAIN: "${{ vars.MARKIRO_LANDING_DOMAIN }}",
+    ACME_EMAIL: "${{ vars.ACME_EMAIL }}",
     YC_APP_DEPLOY_LOGIN: "markiro-deploy",
   });
   assert.doesNotMatch(

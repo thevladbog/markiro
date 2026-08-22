@@ -42,6 +42,7 @@ function environment(overrides = {}) {
     MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_LANDING_DOMAIN: "markiro.example",
+    ACME_EMAIL: "ops@markiro.example",
     VBTECH_RELEASE_SHA: candidateSha,
     VBTECH_IMAGE_DIGEST: candidateImageDigest,
     VBTECH_IMAGE_REF: candidateImageRef,
@@ -392,6 +393,7 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
     assert.equal(call.environment.DATABASE_URL, undefined);
     assert.equal(call.environment.SECRET_VALUE, undefined);
     assert.equal(call.environment.MARKIRO_SAAS_ADMIN_DOMAIN, "saas-admin.markiro.example");
+    assert.equal(call.environment.ACME_EMAIL, "ops@markiro.example");
   }
   assert.equal(
     context.calls.some(
@@ -570,6 +572,8 @@ for (const [name, overrides] of [
   ["Docker credential directory", { DOCKER_CONFIG: "/tmp/foreign-docker-config" }],
   ["retired image tag", { VBTECH_IMAGE_TAG: candidateSha }],
   ["function origin", { VBTECH_FUNCTION_ORIGIN: "https://functions.example" }],
+  ["missing ACME email", { ACME_EMAIL: undefined }],
+  ["ACME email", { ACME_EMAIL: "invalid email" }],
 ]) {
   test(`rejects an invalid ${name} before state or Compose mutation`, async (t) => {
     const context = await fixture(t);
@@ -808,6 +812,8 @@ test("first-install failure removes only the candidate service and restores Mark
       [...compose(environment(), false), "up", "-d", "--no-deps", "--force-recreate", "edge"],
     ],
   );
+  for (const call of context.calls.filter(isComposeMutation))
+    assert.equal(call.environment.ACME_EMAIL, "ops@markiro.example");
   assert.deepEqual(
     context.stateWrites.map(({ kind }) => kind),
     ["pending", "failed"],
