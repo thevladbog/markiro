@@ -21,13 +21,14 @@ const ADMIN_CAPABILITIES = [
   "billing.write",
   "platformTeam.write",
   "audit.read",
+  "diagnostics.read",
 ] as const;
 
 describe("platform identity contracts", () => {
   it("accepts every platform role with only its exact capability vocabulary", () => {
     expect(platformCapabilitiesForRole).toEqual({
       platform_admin: ADMIN_CAPABILITIES,
-      support: ["tenants.read", "tenants.write", "catalog.read", "audit.read"],
+      support: ["tenants.read", "tenants.write", "catalog.read", "audit.read", "diagnostics.read"],
       accountant: [
         "tenants.read",
         "catalog.read",

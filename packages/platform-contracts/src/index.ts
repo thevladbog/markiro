@@ -15,6 +15,22 @@ export type {
   PlatformUuid,
 } from "./primitives.js";
 export {
+  OPERATIONS_RESTRICTION_WINDOW_DAYS,
+  operationsAuditEventSummarySchema,
+  operationsDecisionItemSchema,
+  operationsFormulaDefinitionsSchema,
+  operationsOverviewSchema,
+  platformHealthComponentSchema,
+  platformHealthSchema,
+  platformOperationsContracts,
+} from "./operations.js";
+export type {
+  OperationsAuditEventSummary,
+  OperationsDecisionItem,
+  OperationsOverview,
+  PlatformHealth,
+} from "./operations.js";
+export {
   addonEffectSchema,
   archiveCatalogItemResponseSchema,
   catalogItemParamsSchema,
