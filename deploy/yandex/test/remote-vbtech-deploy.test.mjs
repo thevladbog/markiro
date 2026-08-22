@@ -180,7 +180,7 @@ test("hosted wrapper uses the active executor, fixed SSH trust, and an exact rem
     "VBTECH_SUBMISSION_STATE=disabled",
     "/usr/bin/node",
     "/usr/local/lib/markiro/registry-auth.mjs",
-    "run-stdin",
+    "run-stdin-vbtech-report",
     "/usr/bin/node",
     ACTIVE_EXECUTOR,
     "run",
@@ -401,6 +401,36 @@ test("hosted wrapper accepts only the exact healthy executor marker", async () =
     assert.equal(fixture.commands.length, 2);
     assert.equal(fixture.removals.length, 1);
   }
+});
+
+test("hosted CLI exposes only the exact allowlisted executor failure stage", async () => {
+  let call = 0;
+  const fixture = systemFixture({
+    run: async (command, args, options = {}) => {
+      fixture.commands.push({ command, args, options });
+      call += 1;
+      return call === 1
+        ? "MARKIRO_VBTECH_EXECUTOR 1\n"
+        : "MARKIRO_VBTECH_DEPLOY_FAILURE private-smoke ROLLBACK rollback-edge\n";
+    },
+  });
+  let stdout = "";
+  let stderr = "";
+
+  const exitCode = await runRemoteVbtechDeployCli({
+    argv: ["run"],
+    environment: environment(),
+    supplied: fixture.system,
+    stdout: { write: (value) => (stdout += value) },
+    stderr: { write: (value) => (stderr += value) },
+  });
+
+  assert.equal(exitCode, 1);
+  assert.equal(stdout, "");
+  assert.equal(
+    stderr,
+    "MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE private-smoke ROLLBACK rollback-edge\n",
+  );
 });
 
 test("hosted wrapper cleans temporary trust material and preserves the primary failure", async () => {

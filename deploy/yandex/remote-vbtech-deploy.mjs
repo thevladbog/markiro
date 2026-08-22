@@ -24,6 +24,28 @@ const VBTECH_REPOSITORY = "ghcr.io/thevladbog/vbtech-web";
 const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
 const MAX_HOST_KEYS_BYTES = 16 * 1024;
+const VBTECH_DEPLOYMENT_STAGES = new Set([
+  "configuration",
+  "validation",
+  "active-markiro",
+  "vbtech-state",
+  "pending",
+  "pull",
+  "candidate-digest",
+  "candidate-service",
+  "candidate-health",
+  "edge-activation",
+  "private-smoke",
+  "healthy",
+]);
+const VBTECH_ROLLBACK_STAGES = new Set([
+  "rollback-service",
+  "rollback-health",
+  "rollback-edge",
+  "rollback-readiness",
+  "rollback-smoke",
+  "failed-record",
+]);
 const ALLOWED_VBTECH_INPUTS = new Set([
   "VBTECH_IMAGE_DIGEST",
   "VBTECH_IMAGE_REF",
@@ -41,6 +63,29 @@ class ExecutorBootstrapRequiredError extends Error {
     super("v-b executor bootstrap is required");
     this.name = "ExecutorBootstrapRequiredError";
   }
+}
+
+class RemoteVbtechStageError extends Error {
+  constructor(stage, rollbackStage) {
+    super("hosted v-b deployment failed");
+    this.name = "RemoteVbtechStageError";
+    this.stage = stage;
+    this.rollbackStage = rollbackStage;
+  }
+}
+
+function executorFailureReport(value) {
+  const match =
+    typeof value === "string"
+      ? value.match(/^MARKIRO_VBTECH_DEPLOY_FAILURE ([a-z-]+)(?: ROLLBACK ([a-z-]+))?\n$/)
+      : null;
+  if (
+    !match ||
+    !VBTECH_DEPLOYMENT_STAGES.has(match[1]) ||
+    (match[2] !== undefined && !VBTECH_ROLLBACK_STAGES.has(match[2]))
+  )
+    return undefined;
+  return { stage: match[1], rollbackStage: match[2] };
 }
 
 function configurationError() {
@@ -222,14 +267,17 @@ async function runActiveExecutor(system, input, sshBase) {
       ...executorEnvironmentArguments(input),
       "/usr/bin/node",
       "/usr/local/lib/markiro/registry-auth.mjs",
-      "run-stdin",
+      "run-stdin-vbtech-report",
       "/usr/bin/node",
       ACTIVE_EXECUTOR,
       "run",
     ],
     { env: {}, input: input.registryInput },
   );
-  if (output !== HEALTHY_RESULT) throw new Error("hosted v-b deployment failed");
+  if (output === HEALTHY_RESULT) return;
+  const report = executorFailureReport(output);
+  if (report) throw new RemoteVbtechStageError(report.stage, report.rollbackStage);
+  throw new Error("hosted v-b deployment failed");
 }
 
 export async function runHostedVbtechDeploy(environment = process.env, supplied = {}) {
@@ -283,7 +331,9 @@ export async function runRemoteVbtechDeployCli(options = {}) {
     stderr.write(
       error instanceof ExecutorBootstrapRequiredError
         ? "MARKIRO_VBTECH_EXECUTOR_BOOTSTRAP_REQUIRED an executor-bearing Markiro release must be deployed first\n"
-        : "MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE\n",
+        : error instanceof RemoteVbtechStageError
+          ? `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE ${error.stage}${error.rollbackStage === undefined ? "" : ` ROLLBACK ${error.rollbackStage}`}\n`
+          : "MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE\n",
     );
     return 1;
   }
