@@ -112,7 +112,8 @@ Windows.
 - Environment `station-beta` содержит только
   `TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Приватный
   ключ хранится в зашифрованном офлайн-резерве; его нельзя печатать в логи,
-  коммитить или копировать на станцию.
+  коммитить или копировать на станцию. Значение private key храните в исходном
+  base64-формате, который выдаёт `tauri signer generate`; не декодируйте его.
 - `STATION_ORIGIN` — production runtime secret, а не signing secret environment:
   перед beta он обязан быть равен `http://tauri.localhost`. Значение
   `tauri://localhost` не является Windows origin для этой сборки.

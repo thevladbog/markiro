@@ -11,8 +11,10 @@ beta. Workflow не выбирает «последнюю beta», не доба�
    пользователя для запуска.
 2. Добавьте в environment секреты `TAURI_SIGNING_PRIVATE_KEY` и
    `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, используя ту же пару ключей, что у
-   beta-канала. Не печатайте, не скачивайте и не сравнивайте значения через
-   логи или терминал. Публичный ключ остаётся в Tauri-конфигурации.
+   beta-канала. Private key должен оставаться в исходном base64-формате из
+   `tauri signer generate`; не декодируйте его. Не печатайте, не скачивайте и не
+   сравнивайте значения через логи или терминал. Публичный ключ остаётся в
+   Tauri-конфигурации.
 3. Убедитесь, что production API принимает Windows origin
    `http://tauri.localhost`, и выполните `pnpm verify:station-production-cors`.
 
