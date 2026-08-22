@@ -40,7 +40,6 @@ jobs:
       MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       MARKIRO_LANDING_DOMAIN: ${{ vars.MARKIRO_LANDING_DOMAIN }}
       YC_APP_DEPLOY_LOGIN: markiro-deploy
-      YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: ${{ runner.temp }}/vbtech-deploy-key
     steps:
       - name: Validate private deploy request
         env:
@@ -97,9 +96,11 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          test ! -e "$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"
-          printf '%s\n' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"
-          chmod 600 "$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"
+          key_path="$RUNNER_TEMP/vbtech-deploy-key"
+          test ! -e "$key_path"
+          printf '%s\n' "$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "$key_path"
+          chmod 600 "$key_path"
+          printf 'YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH=%s\n' "$key_path" >> "$GITHUB_ENV"
 
       - name: Capture before runtime diagnostics
         run: |
