@@ -62,7 +62,10 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       .values(profileValues(1, "ООО Маркиро", "7707083893", "773601001", "1027700132195"));
     await connection.db.insert(schema.tenantBillingProfiles).values({
       tenantId,
-      ...profileValues(1, "ООО Покупатель", "7812014560", "781201001", "1027800000000"),
+      ...profileValues(1, "ООО Покупатель", "7812014560", "781201001", "1027800000000", {
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Казань, ул Баумана, 2",
+      }),
     });
     const [sellerAccount] = await connection.db
       .insert(schema.operatorBankAccounts)
@@ -73,12 +76,6 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       })
       .returning();
     sellerAccountId = sellerAccount!.id;
-    await connection.db.insert(schema.tenantBankAccounts).values({
-      tenantId,
-      ...accountValues("Основной счёт покупателя", "0002"),
-      isDefault: true,
-      createdByPlatformUserId: actorId,
-    });
   });
 
   afterAll(async () => {
@@ -87,7 +84,64 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     await maintenance.pool.end();
   });
 
+  it("publishes and issues without a buyer account while freezing the buyer actual address", async () => {
+    const draftInvoice = await billing.create(principal, invoiceInput());
+    const issuedInvoice = await billing.issue(principal, draftInvoice.id);
+    const draftOffer = await offers.create(principal, offerInput());
+    const publishedOffer = await offers.publish(principal, draftOffer.id);
+    const [offerSnapshot] = await connection.db
+      .select()
+      .from(schema.commercialOfferPrintSnapshots)
+      .where(eq(schema.commercialOfferPrintSnapshots.offerId, publishedOffer.id));
+
+    expect(issuedInvoice).toMatchObject({
+      buyerBankAccountSnapshot: null,
+      buyerSnapshot: {
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Казань, ул Баумана, 2",
+        actualAddress: null,
+      },
+    });
+    expect(offerSnapshot).toMatchObject({
+      buyerBankAccountSnapshot: null,
+      buyerSnapshot: {
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Казань, ул Баумана, 2",
+        actualAddress: null,
+      },
+    });
+
+    const auditEvents = await connection.db
+      .select({
+        action: schema.platformAuditEvents.action,
+        after: schema.platformAuditEvents.after,
+      })
+      .from(schema.platformAuditEvents);
+    expect(auditEvents.find((event) => event.action === "billing.invoice.issued")?.after).toEqual({
+      status: "issued",
+      number: issuedInvoice.number,
+      sellerAccountId,
+      sellerAccountLast4: "0001",
+      buyerAccountId: null,
+      buyerAccountLast4: null,
+    });
+    expect(auditEvents.find((event) => event.action === "billing.offer.published")?.after).toEqual({
+      status: "published",
+      number: publishedOffer.number,
+      sellerAccountId,
+      sellerAccountLast4: "0001",
+      buyerAccountId: null,
+      buyerAccountLast4: null,
+    });
+  });
+
   it("keeps invoice and offer parties unchanged after current details are replaced", async () => {
+    await connection.db.insert(schema.tenantBankAccounts).values({
+      tenantId,
+      ...accountValues("Основной счёт покупателя", "0002"),
+      isDefault: true,
+      createdByPlatformUserId: actorId,
+    });
     const draftInvoice = await billing.create(principal, invoiceInput());
     const issuedInvoice = await billing.issue(principal, draftInvoice.id);
     const draftOffer = await offers.create(principal, offerInput());
@@ -261,6 +315,9 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     inn: string,
     kpp: string,
     ogrn: string,
+    actualAddress: { actualSameAsLegal: boolean; actualAddressRaw?: string } = {
+      actualSameAsLegal: true,
+    },
   ) {
     return {
       revision,
@@ -272,6 +329,9 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       ogrn,
       addressRaw: "Москва",
       legalAddressRaw: "Москва",
+      actualSameAsLegal: actualAddress.actualSameAsLegal,
+      actualAddressRaw: actualAddress.actualAddressRaw ?? null,
+      actualAddress: null,
       postalSameAsLegal: true,
       isConfirmed: true,
       confirmedByPlatformUserId: actorId,

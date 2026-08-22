@@ -115,12 +115,6 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
         createdByPlatformUserId: actorId,
       })
       .returning();
-    await connection.db.insert(schema.tenantBankAccounts).values({
-      tenantId,
-      ...accountValues("Счёт покупателя", "0002"),
-      isDefault: true,
-      createdByPlatformUserId: actorId,
-    });
     const draft = await service.create(
       principal,
       invoiceInput({ sellerBankAccountId: selected!.id }),
@@ -140,6 +134,21 @@ describe.skipIf(!databaseUrl)("commercial document readiness", () => {
       response: { code: "billing_seller_account_inactive" },
     });
     expect(await invoiceStatus(draft.id)).toBe("draft");
+  });
+
+  it("issues a confirmed buyer invoice without a default buyer account", async () => {
+    await ensureConfirmedProfiles();
+    await connection.db.insert(schema.operatorBankAccounts).values({
+      ...accountValues("Основной счёт продавца", "0002"),
+      isDefault: true,
+      createdByPlatformUserId: actorId,
+    });
+    const draft = await service.create(principal, invoiceInput());
+
+    const issued = await service.issue(principal, draft.id);
+
+    expect(issued.status).toBe("issued");
+    expect(issued.buyerBankAccountSnapshot).toBeNull();
   });
 
   async function invoiceStatus(id: string) {
