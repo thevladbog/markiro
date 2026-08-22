@@ -386,8 +386,10 @@ test("uses every and only the production environment example keys", async () => 
     "S3_ACCESS_KEY_ID",
     "S3_SECRET_ACCESS_KEY",
     "S3_FORCE_PATH_STYLE",
+    "DADATA_TOKEN",
+    "DADATA_SECRET",
   ]);
-  assert.equal(inventory.length, 35);
+  assert.equal(inventory.length, 37);
   assert.deepEqual(
     runtimeInventoryKeyNames(
       inventory,
