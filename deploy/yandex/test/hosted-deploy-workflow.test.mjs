@@ -294,8 +294,12 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
     MARKIRO_KIOSK_DOMAIN: "${{ vars.MARKIRO_KIOSK_DOMAIN }}",
     MARKIRO_LANDING_DOMAIN: "${{ vars.MARKIRO_LANDING_DOMAIN }}",
     YC_APP_DEPLOY_LOGIN: "markiro-deploy",
-    YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH: "${{ runner.temp }}/vbtech-deploy-key",
   });
+  assert.doesNotMatch(
+    JSON.stringify(deploy.env),
+    /\$\{\{\s*runner[.]/,
+    "runner context must not be evaluated in job-level env",
+  );
 
   for (const step of deploy.steps.filter((candidate) => candidate.uses))
     assert.match(step.uses, /^[^@]+@[0-9a-f]{40}$/);
@@ -397,11 +401,19 @@ async function assertPrivateVbtechDeployWorkflow(source, { executePrograms = tru
   assert.deepEqual(keyCreation.env, {
     YC_APP_DEPLOY_SSH_PRIVATE_KEY: "${{ secrets.YC_APP_DEPLOY_SSH_PRIVATE_KEY }}",
   });
+  assert.match(keyCreation.run, /key_path="\$RUNNER_TEMP\/vbtech-deploy-key"/);
+  assert.match(keyCreation.run, /test ! -e "\$key_path"/);
+  assert.match(keyCreation.run, /printf '%s\\n' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$key_path"/);
+  assert.match(keyCreation.run, /chmod 600 "\$key_path"/);
   assert.match(
     keyCreation.run,
-    /printf '%s\\n' "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY" > "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"/,
+    /printf 'YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH=%s\\n' "\$key_path" >> "\$GITHUB_ENV"/,
   );
-  assert.match(keyCreation.run, /chmod 600 "\$YC_APP_DEPLOY_SSH_PRIVATE_KEY_PATH"/);
+  assert.doesNotMatch(
+    keyCreation.run,
+    /\$YC_APP_DEPLOY_SSH_PRIVATE_KEY(?!_PATH)[^\n]*>> "\$GITHUB_ENV"/,
+    "only the key path may be exported to later steps",
+  );
 
   const before = stepByName(deploy, "Capture before runtime diagnostics");
   const delivery = stepByName(deploy, "Deploy private v-b image");
