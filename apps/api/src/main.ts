@@ -86,6 +86,7 @@ async function bootstrap() {
     app,
     addPlatformSessionSecurity(
       new DocumentBuilder().setTitle("Markiro API").setVersion("0.1"),
+      (await platformSetup.platformAuth.$context).authCookies.sessionToken.name,
     ).build(),
   );
   app.use("/openapi.json", (_req: unknown, res: { json(b: unknown): void }) => res.json(doc));

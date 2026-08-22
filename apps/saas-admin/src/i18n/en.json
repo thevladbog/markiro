@@ -8,6 +8,7 @@
     "retry": "Retry",
     "requestId": "Request ID: {{requestId}}",
     "copyRequestId": "Copy request ID",
+    "contractEndpoint": "Endpoint: {{endpoint}}",
     "errors": {
       "network": {
         "title": "Platform connection unavailable",

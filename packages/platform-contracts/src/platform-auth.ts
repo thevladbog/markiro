@@ -183,7 +183,14 @@ export const platformAuditResponseSchema = z
   .strict();
 export type PlatformAuditResponse = z.infer<typeof platformAuditResponseSchema>;
 
-const platformTeamUserParamsSchema = z.object({ id: platformUserIdSchema }).strict();
+const platformTeamUserParamsSchema = z
+  .object({ id: platformUserIdSchema })
+  .strict()
+  .refine(({ id }) => !id.includes("/"), {
+    path: ["id"],
+    message: "Platform user ID must not contain a path separator",
+  });
+export type PlatformTeamUserParams = z.infer<typeof platformTeamUserParamsSchema>;
 
 export const platformTeamContracts = {
   list: { response: platformTeamListResponseSchema },

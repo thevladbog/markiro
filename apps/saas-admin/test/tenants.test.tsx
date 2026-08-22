@@ -9,6 +9,7 @@ import {
   SUPPORT_ME,
   TENANT_ID,
   TENANT_LIST_ITEM,
+  PUBLISHED_PLAN,
   installTenantApi,
   jsonResponse,
   renderSaasApp,
@@ -202,9 +203,16 @@ describe("platform tenants", () => {
   });
 
   it("keeps tenant identity visible when the independently loaded catalog contract fails", async () => {
+    const publishedPlanWithoutPlan = structuredClone(PUBLISHED_PLAN);
+    Reflect.deleteProperty(publishedPlanWithoutPlan, "plan");
     installTenantApi({
       catalogResponse: {
-        items: [{ id: "malformed-version", password: "must-not-render" }],
+        items: [
+          {
+            ...publishedPlanWithoutPlan,
+            descriptionRu: "password=must-not-render",
+          },
+        ],
       },
     });
 
@@ -216,8 +224,9 @@ describe("platform tenants", () => {
     const panelError = panelTitle.closest('[role="alert"]');
     expect(panelError).not.toBeNull();
     if (!panelError) throw new Error("Contract alert is unavailable");
+    expect(panelError.textContent).toContain("Эндпоинт: /catalog/items");
     expect(panelError.textContent).toContain("11111111-1111-4111-8111-111111111111");
-    expect(panelError.textContent).not.toMatch(/malformed-version|password|must-not-render|items/i);
+    expect(panelError.textContent).not.toMatch(/password|must-not-render|items\.0|\.plan|\[0\]/i);
     expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
   });
 

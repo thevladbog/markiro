@@ -39,9 +39,13 @@ export function PanelState({
     const kind: ApiErrorKind = apiError?.kind ?? "domain";
     const canRetry = kind !== "authorization" && onRetry !== undefined;
     const requestId = apiError?.requestId ?? null;
+    const contractEndpoint = kind === "contract" ? apiError?.endpoint : null;
     return (
       <Alert title={t(`panelState.errors.${kind}.title`)} tone="error">
         <p>{t(`panelState.errors.${kind}.body`)}</p>
+        {contractEndpoint ? (
+          <p>{t("panelState.contractEndpoint", { endpoint: contractEndpoint })}</p>
+        ) : null}
         {requestId ? (
           <p className="panel-state__request-id">
             <span>{t("panelState.requestId", { requestId })}</span>

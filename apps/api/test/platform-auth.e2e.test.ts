@@ -104,13 +104,17 @@ describe("platform identity response boundaries", () => {
       controller.invite(request, { email: "support@example.invalid", role: "support" }),
     ).resolves.toMatchObject({ userId: "platform-user-2" });
     await expect(
-      controller.changeRole(request, "platform-user-2", { role: "accountant" }),
+      controller.changeRole(request, { id: "platform-user-2" }, { role: "accountant" }),
     ).resolves.toEqual({ status: true });
-    await expect(controller.suspend(request, "platform-user-2")).resolves.toEqual({ status: true });
-    await expect(controller.renewActivation(request, "platform-user-2")).resolves.toMatchObject({
+    await expect(controller.suspend(request, { id: "platform-user-2" })).resolves.toEqual({
+      status: true,
+    });
+    await expect(
+      controller.renewActivation(request, { id: "platform-user-2" }),
+    ).resolves.toMatchObject({
       userId: "platform-user-2",
     });
-    await expect(controller.recoverTwoFactor(request, "platform-user-2")).resolves.toEqual({
+    await expect(controller.recoverTwoFactor(request, { id: "platform-user-2" })).resolves.toEqual({
       status: true,
     });
   });
@@ -129,25 +133,25 @@ describe("platform identity response boundaries", () => {
       "renew activation",
       { userId: "platform-user-2" },
       (controller: PlatformTeamController, platformRequest: never) =>
-        controller.renewActivation(platformRequest, "platform-user-2"),
+        controller.renewActivation(platformRequest, { id: "platform-user-2" }),
     ],
     [
       "change role acknowledgement",
       { status: false },
       (controller: PlatformTeamController, platformRequest: never) =>
-        controller.changeRole(platformRequest, "platform-user-2", { role: "accountant" }),
+        controller.changeRole(platformRequest, { id: "platform-user-2" }, { role: "accountant" }),
     ],
     [
       "suspend acknowledgement",
       { status: "ok" },
       (controller: PlatformTeamController, platformRequest: never) =>
-        controller.suspend(platformRequest, "platform-user-2"),
+        controller.suspend(platformRequest, { id: "platform-user-2" }),
     ],
     [
       "recover 2FA acknowledgement",
       {},
       (controller: PlatformTeamController, platformRequest: never) =>
-        controller.recoverTwoFactor(platformRequest, "platform-user-2"),
+        controller.recoverTwoFactor(platformRequest, { id: "platform-user-2" }),
     ],
   ] as const)("rejects a malformed %s service success", async (_name, malformed, invoke) => {
     const controller = new PlatformTeamController({

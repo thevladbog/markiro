@@ -117,6 +117,18 @@ describe("platform identity contracts", () => {
     ).toBe(false);
   });
 
+  it("keeps team route params bounded and rejects path separators", () => {
+    expect(platformTeamContracts.changeRole.params.parse({ id: "platform user?#%" })).toEqual({
+      id: "platform user?#%",
+    });
+    expect(platformTeamContracts.suspend.params.safeParse({ id: "x".repeat(129) }).success).toBe(
+      false,
+    );
+    expect(
+      platformTeamContracts.renewActivation.params.safeParse({ id: "platform/user" }).success,
+    ).toBe(false);
+  });
+
   it("validates public activation input without exposing credentials in the success shape", () => {
     const request = platformActivationCompleteRequestSchema.parse({
       token: "activation-token-with-enough-entropy",

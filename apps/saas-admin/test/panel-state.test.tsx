@@ -58,6 +58,7 @@ describe("PanelState", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toContain("Формат ответа платформы изменился");
+    expect(alert.textContent).toContain("Эндпоинт: /tenants");
     expect(alert.textContent).not.toMatch(/password|items|server|zod/i);
     expect(alert.textContent).toContain(REQUEST_ID);
     await user.click(screen.getByRole("button", { name: "Повторить" }));
@@ -82,6 +83,7 @@ describe("PanelState", () => {
     });
 
     expect(screen.getByRole("alert").textContent).toContain("Недостаточно прав");
+    expect(screen.getByRole("alert").textContent).not.toContain("/tenants");
     expect(screen.queryByRole("button", { name: "Повторить" })).toBeNull();
   });
 });

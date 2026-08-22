@@ -215,4 +215,5 @@ export type {
   PlatformTeamInviteInput,
   PlatformTeamRoleChangeInput,
   PlatformTeamUser,
+  PlatformTeamUserParams,
 } from "./platform-auth.js";

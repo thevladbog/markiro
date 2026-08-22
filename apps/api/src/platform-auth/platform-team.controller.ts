@@ -3,6 +3,7 @@ import {
   platformTeamContracts,
   type PlatformTeamInviteInput,
   type PlatformTeamRoleChangeInput,
+  type PlatformTeamUserParams,
 } from "@markiro/platform-contracts";
 import {
   PlatformApiProtectedCreated,
@@ -46,11 +47,16 @@ export class PlatformTeamController {
   })
   async changeRole(
     @Req() request: RequestWithPlatformPrincipal,
-    @Param("id") id: string,
+    @Param(new ZodValidationPipe(platformTeamContracts.changeRole.params))
+    params: PlatformTeamUserParams,
     @Body(new ZodValidationPipe(platformTeamContracts.changeRole.body))
     body: PlatformTeamRoleChangeInput,
   ) {
-    const result: unknown = await this.team.changeRole(request.platformPrincipal!, id, body.role);
+    const result: unknown = await this.team.changeRole(
+      request.platformPrincipal!,
+      params.id,
+      body.role,
+    );
     return parsePlatformResponse(
       platformTeamContracts.changeRole.response,
       result === undefined ? { status: true } : result,
@@ -59,8 +65,12 @@ export class PlatformTeamController {
 
   @Post(":id/suspend")
   @PlatformApiProtectedCreated({ response: platformTeamContracts.suspend.response })
-  async suspend(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
-    const result: unknown = await this.team.suspend(request.platformPrincipal!, id);
+  async suspend(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param(new ZodValidationPipe(platformTeamContracts.suspend.params))
+    params: PlatformTeamUserParams,
+  ) {
+    const result: unknown = await this.team.suspend(request.platformPrincipal!, params.id);
     return parsePlatformResponse(
       platformTeamContracts.suspend.response,
       result === undefined ? { status: true } : result,
@@ -69,17 +79,25 @@ export class PlatformTeamController {
 
   @Post(":id/activation/renew")
   @PlatformApiProtectedCreated({ response: platformTeamContracts.renewActivation.response })
-  async renewActivation(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
+  async renewActivation(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param(new ZodValidationPipe(platformTeamContracts.renewActivation.params))
+    params: PlatformTeamUserParams,
+  ) {
     return parsePlatformResponse(
       platformTeamContracts.renewActivation.response,
-      await this.team.renewActivation(request.platformPrincipal!, id),
+      await this.team.renewActivation(request.platformPrincipal!, params.id),
     );
   }
 
   @Post(":id/2fa/recover")
   @PlatformApiProtectedCreated({ response: platformTeamContracts.recoverTwoFactor.response })
-  async recoverTwoFactor(@Req() request: RequestWithPlatformPrincipal, @Param("id") id: string) {
-    const result: unknown = await this.team.recoverTwoFactor(request.platformPrincipal!, id);
+  async recoverTwoFactor(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param(new ZodValidationPipe(platformTeamContracts.recoverTwoFactor.params))
+    params: PlatformTeamUserParams,
+  ) {
+    const result: unknown = await this.team.recoverTwoFactor(request.platformPrincipal!, params.id);
     return parsePlatformResponse(
       platformTeamContracts.recoverTwoFactor.response,
       result === undefined ? { status: true } : result,

@@ -98,6 +98,52 @@ describe("platform page API paths", () => {
   });
 
   it.each([
+    ["change role", () => changePlatformRole("x".repeat(129), "accountant")],
+    ["suspend", () => suspendPlatformUser("platform/user")],
+    ["renew activation", () => renewPlatformActivation("x".repeat(129))],
+    ["recover 2FA", () => recoverPlatformTwoFactor("platform/user")],
+  ] as const)("rejects malformed %s params before fetch", (_name, invoke) => {
+    const fetchMock = vi.fn<typeof fetch>();
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(invoke).toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("URL-encodes a validated opaque team user ID before interpolation", async () => {
+    const opaqueId = "platform user?#%";
+    const encodedId = "platform%20user%3F%23%25";
+    const responses = new Map<string, unknown>([
+      [`PATCH /api/platform/team/${encodedId}/role`, { status: true }],
+      [`POST /api/platform/team/${encodedId}/suspend`, { status: true }],
+      [
+        `POST /api/platform/team/${encodedId}/activation/renew`,
+        {
+          userId: opaqueId,
+          deliveryId: "21111111-1111-4111-8111-111111111111",
+        },
+      ],
+      [`POST /api/platform/team/${encodedId}/2fa/recover`, { status: true }],
+    ]);
+    const fetchMock = vi.fn<typeof fetch>(async (input, init = {}) =>
+      jsonResponse(responses.get(`${init.method ?? "GET"} ${String(input)}`)),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await changePlatformRole(opaqueId, "accountant");
+    await suspendPlatformUser(opaqueId);
+    await renewPlatformActivation(opaqueId);
+    await recoverPlatformTwoFactor(opaqueId);
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      `/api/platform/team/${encodedId}/role`,
+      `/api/platform/team/${encodedId}/suspend`,
+      `/api/platform/team/${encodedId}/activation/renew`,
+      `/api/platform/team/${encodedId}/2fa/recover`,
+    ]);
+  });
+
+  it.each([
     [
       "invite",
       { deliveryId: "11111111-1111-4111-8111-111111111111" },

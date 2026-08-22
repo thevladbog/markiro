@@ -10,7 +10,6 @@ import { platformErrorSchema } from "@markiro/platform-contracts";
 import { z, type ZodType } from "zod";
 
 export const PLATFORM_SESSION_SECURITY = "platformSession";
-const PLATFORM_SESSION_COOKIE = "markiro-platform.session_token";
 
 const PROTECTED_ERROR_STATUSES = [400, 401, 403, 404, 409, 422, 429, 500] as const;
 const PUBLIC_ERROR_STATUSES = [400, 401, 404, 409, 422, 429, 500] as const;
@@ -20,9 +19,12 @@ interface PlatformOpenApiOptions {
   body?: ZodType;
 }
 
-export function addPlatformSessionSecurity(builder: DocumentBuilder): DocumentBuilder {
+export function addPlatformSessionSecurity(
+  builder: DocumentBuilder,
+  sessionCookieName: string,
+): DocumentBuilder {
   return builder.addCookieAuth(
-    PLATFORM_SESSION_COOKIE,
+    sessionCookieName,
     { type: "apiKey", in: "cookie" },
     PLATFORM_SESSION_SECURITY,
   );

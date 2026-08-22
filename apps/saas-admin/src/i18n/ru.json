@@ -8,6 +8,7 @@
     "retry": "Повторить",
     "requestId": "ID запроса: {{requestId}}",
     "copyRequestId": "Скопировать ID запроса",
+    "contractEndpoint": "Эндпоинт: {{endpoint}}",
     "errors": {
       "network": {
         "title": "Нет связи с платформой",

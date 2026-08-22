@@ -1,10 +1,10 @@
 import {
-  assignableCatalogResponseSchema,
   assignAddonSchema,
   assignPlanSchema,
   createTenantSchema,
   platformTenantContracts,
   platformTenantIdSchema,
+  platformCatalogContracts,
   type AssignableCatalogVersion,
   type AssignAddonInput,
   type AssignPlanInput,
@@ -75,7 +75,9 @@ export async function renewOwnerActivation(tenantId: string) {
 }
 
 export async function listAssignableCatalogVersions() {
-  return platformApiFetch("/catalog/items", { responseSchema: assignableCatalogResponseSchema });
+  return platformApiFetch("/catalog/items", {
+    responseSchema: platformCatalogContracts.list.response,
+  });
 }
 
 export async function assignTenantPlan(tenantId: string, input: AssignPlanInput) {

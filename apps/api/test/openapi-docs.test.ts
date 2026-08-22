@@ -2,6 +2,7 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
+import { buildPlatformAuth, type Db } from "@markiro/db";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
@@ -119,16 +120,26 @@ function expectExactObjectFields(schema: TestSchema, fields: readonly string[]):
 describe("self-hosted OpenAPI documentation", () => {
   let server: Server;
 
-  it("defines the named production Better Auth cookie security scheme", () => {
+  it.each([
+    ["http://api.example.test", "markiro-platform.session_token"],
+    ["https://api.example.test", "__Secure-markiro-platform.session_token"],
+  ])("defines the initialized Better Auth cookie security scheme for %s", async (baseURL, name) => {
+    const auth = buildPlatformAuth({} as Db, {
+      secret: "0123456789abcdef0123456789abcdef",
+      baseURL,
+      trustedOrigins: ["https://saas.example.test"],
+    });
+    const cookieName = (await auth.$context).authCookies.sessionToken.name;
     const configuration = addPlatformSessionSecurity(
       new DocumentBuilder().setTitle("platform contract test").setVersion("test"),
+      cookieName,
     ).build();
 
     expect(configuration.components?.securitySchemes).toEqual({
       [PLATFORM_SESSION_SECURITY]: {
         type: "apiKey",
         in: "cookie",
-        name: "markiro-platform.session_token",
+        name,
       },
     });
   });

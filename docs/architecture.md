@@ -149,8 +149,9 @@ timestamps.
 The current SaaS OpenAPI inventory covers the platform principal, public activation, team, audit,
 tenants and subscription assignment, catalog and demo-plan setting, offers and their documents and
 payment, invoices and their documents/application/cancellation, and payments. Protected operations
-declare the named `platformSession` Better Auth cookie scheme for
-`markiro-platform.session_token`; public activation deliberately declares no cookie security.
+declare the named `platformSession` Better Auth cookie scheme using the initialized Better Auth
+session-cookie name (`markiro-platform.session_token` for HTTP and the `__Secure-`-prefixed name
+for HTTPS); public activation deliberately declares no cookie security.
 Legacy billing-profile routes under `/platform/billing/operator-profile` and
 `/platform/billing/tenants/:tenantId/profile` are intentionally handed to the following legal-profile
 contract slice and are not represented as already migrated here.
