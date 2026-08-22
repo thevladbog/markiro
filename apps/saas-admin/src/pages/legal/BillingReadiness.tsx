@@ -11,7 +11,10 @@ export function BillingReadiness({
   accounts: BankAccount[];
 }) {
   const { t } = useTranslation();
-  const profileItem = { ready: profile !== null, label: t("legal.readiness.profile") };
+  const profileItem = {
+    ready: profile?.isConfirmed === true,
+    label: t("legal.readiness.profile"),
+  };
   const legalAddressItem = {
     ready: Boolean(profile?.legalAddressRaw),
     label: t("legal.readiness.address"),

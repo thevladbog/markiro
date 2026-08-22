@@ -97,6 +97,19 @@ describe("tenant subscription detail", () => {
     ).toBeDefined();
   });
 
+  it("does not treat an unconfirmed tenant profile as document-ready", async () => {
+    installTenantApi({
+      billingProfile: { ...confirmedIndividualProfile, isConfirmed: false },
+      bankAccounts: [],
+    });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}?tab=legal` });
+
+    expect(await screen.findByText("Нужно заполнить данные")).toBeDefined();
+    expect(
+      screen.getByText("Расчётный счёт покупателя — необязателен для сопоставления платежей"),
+    ).toBeDefined();
+  });
+
   it("accepts a production-like legacy tenant detail with PostgreSQL timestamps", async () => {
     const detail = {
       ...structuredClone(TENANT_DETAIL),

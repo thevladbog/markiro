@@ -4,12 +4,39 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
-import type { BillingProfileInput, OperatorBillingProfileInput } from "@markiro/platform-contracts";
+import type {
+  BillingProfileInput,
+  DadataAddressSuggestion,
+  OperatorBillingProfileInput,
+} from "@markiro/platform-contracts";
 
 import { LegalProfileForm } from "../src/pages/legal/LegalProfileForm";
-import "../src/i18n/index";
+import i18n from "../src/i18n/index";
+import { jsonResponse } from "./render";
 
-afterEach(() => cleanup());
+const ACTUAL_ADDRESS: DadataAddressSuggestion = {
+  value: "г Москва, ул Тверская, д 2",
+  fiasId: "7710010010000010002",
+  kladrId: "77000000000000200",
+  postalCode: "125009",
+  region: "Москва",
+  city: "Москва",
+  settlement: null,
+  street: "Тверская",
+  house: "2",
+  block: null,
+  flat: null,
+  latitude: "55.757",
+  longitude: "37.613",
+  qualityCode: "0",
+  completenessCode: "0",
+};
+
+afterEach(async () => {
+  cleanup();
+  vi.unstubAllGlobals();
+  await i18n.changeLanguage("ru");
+});
 
 function renderForm(
   scope: "operator" | "tenant" = "tenant",
@@ -55,7 +82,11 @@ describe("LegalProfileForm", () => {
     });
   });
 
-  it("maps a separate actual address independently from the postal address", async () => {
+  it("preserves an actual-address draft across equality and kind changes and maps its selection", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse(200, { status: "ready", items: [ACTUAL_ADDRESS] })),
+    );
     const save = renderForm();
     const user = userEvent.setup();
 
@@ -64,7 +95,22 @@ describe("LegalProfileForm", () => {
     await user.type(screen.getByLabelText("Краткое наименование"), "Иванов И. И.");
     await user.type(screen.getByLabelText("Адрес регистрации"), "Москва, Тверская, 1");
     await user.click(screen.getByLabelText("Фактический адрес совпадает с адресом регистрации"));
-    await user.type(screen.getByLabelText("Фактический адрес"), "Москва, Тверская, 2");
+    await user.type(screen.getByLabelText("Фактический адрес"), "Твер");
+    await user.click(await screen.findByRole("option", { name: ACTUAL_ADDRESS.value }));
+
+    await user.selectOptions(screen.getByLabelText("Тип плательщика"), "legal_entity");
+    await user.selectOptions(screen.getByLabelText("Тип плательщика"), "individual");
+    expect((screen.getByLabelText("Фактический адрес") as HTMLInputElement).value).toBe(
+      ACTUAL_ADDRESS.value,
+    );
+
+    await user.click(screen.getByLabelText("Фактический адрес совпадает с адресом регистрации"));
+    expect(screen.queryByLabelText("Фактический адрес")).toBeNull();
+    await user.click(screen.getByLabelText("Фактический адрес совпадает с адресом регистрации"));
+    expect((screen.getByLabelText("Фактический адрес") as HTMLInputElement).value).toBe(
+      ACTUAL_ADDRESS.value,
+    );
+
     await user.click(screen.getByLabelText("Реквизиты проверены по документам"));
     await user.click(screen.getByRole("button", { name: "Сохранить и подтвердить" }));
 
@@ -72,19 +118,21 @@ describe("LegalProfileForm", () => {
     expect(save.mock.calls[0]?.[0]).toMatchObject({
       actualAddress: {
         sameAsLegal: false,
-        raw: "Москва, Тверская, 2",
-        normalized: null,
+        raw: ACTUAL_ADDRESS.value,
+        normalized: ACTUAL_ADDRESS,
       },
       postalAddress: { sameAsLegal: true },
     });
+  });
 
-    await user.click(screen.getByLabelText("Фактический адрес совпадает с адресом регистрации"));
-    expect(screen.queryByLabelText("Фактический адрес")).toBeNull();
-    await user.click(screen.getByLabelText("Реквизиты проверены по документам"));
-    await user.click(screen.getByRole("button", { name: "Сохранить и подтвердить" }));
+  it("uses English person labels for self-employed and individual kinds", async () => {
+    await i18n.changeLanguage("en");
+    renderForm();
+    const user = userEvent.setup();
 
-    await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
-    expect(save.mock.calls[1]?.[0]).toMatchObject({ actualAddress: { sameAsLegal: true } });
+    await user.selectOptions(screen.getByLabelText("Payer type"), "self_employed");
+    expect(screen.getByLabelText("Full name")).toBeDefined();
+    expect(screen.getByLabelText("Registration address")).toBeDefined();
   });
 
   it("supports every tenant profile kind and requires explicit confirmation before saving", async () => {
