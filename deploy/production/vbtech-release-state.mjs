@@ -156,6 +156,8 @@ function dependencies(supplied = {}) {
   return {
     now: () => new Date(),
     randomUUID: nodeRandomUUID,
+    lstat,
+    stat,
     ...supplied,
   };
 }
@@ -340,14 +342,19 @@ function assertClaimConsistency(records, claims) {
   return { chains, logicalRecords: claims.map((claim) => claim.record) };
 }
 
-async function readReleaseState(directory) {
+async function readReleaseState(directory, supplied = {}) {
+  const system = dependencies(supplied);
   let directoryLinkMetadata;
   let directoryMetadata;
   try {
-    directoryLinkMetadata = await lstat(directory);
-    directoryMetadata = await stat(directory);
+    directoryLinkMetadata = await system.lstat(directory);
   } catch (error) {
     if (error?.code === "ENOENT") return undefined;
+    throw stateError();
+  }
+  try {
+    directoryMetadata = await system.stat(directory);
+  } catch {
     throw stateError();
   }
   if (
@@ -404,8 +411,8 @@ async function readReleaseState(directory) {
   return { chains, claims, persistedRecords: records, records: logicalRecords };
 }
 
-async function readReleaseRecords(directory) {
-  const state = await readReleaseState(directory);
+async function readReleaseRecords(directory, supplied = {}) {
+  const state = await readReleaseState(directory, supplied);
   return state?.records;
 }
 
@@ -588,8 +595,8 @@ export async function vbtechReleaseStatus(directory, selector) {
   };
 }
 
-export async function latestHealthyVbtechRelease(directory) {
-  const records = await readReleaseRecords(directory);
+export async function latestHealthyVbtechRelease(directory, supplied = {}) {
+  const records = await readReleaseRecords(directory, supplied);
   if (records === undefined) return undefined;
 
   const failed = records.filter((value) => value.state === "failed");

@@ -445,44 +445,52 @@ for (const [name, previousVbtech] of [
   });
 }
 
-test("staged v-b activation is recorded by digest and rollback to a Markiro-only release stops its service", async () => {
+test("rollback to a previous Markiro-only release retains the authoritative v-b selector", async () => {
   const { calls, dependencies, releaseDirectory } = await fixture();
-  dependencies.runPreflight = async (environment) => ({
-    imageTag: environment.MARKIRO_IMAGE_TAG,
-    apiImageDigest: environment.MARKIRO_API_IMAGE_DIGEST,
-    edgeImageDigest: environment.MARKIRO_EDGE_IMAGE_DIGEST,
-    envFile: environment.MARKIRO_ENV_FILE,
-    vbtechImageRef: VBTECH_IMAGE_REF,
-    vbtechImageDigest: VBTECH_DIGEST,
-    vbtechReleaseSha: VBTECH_SHA,
-    vbtechDomain: "v-b.tech",
-    vbtechWwwDomain: "www.v-b.tech",
-    vbtechFunctionPath: "",
-    vbtechSubmissionState: "disabled",
-  });
-  const environment = {
-    ...ENVIRONMENT,
-    VBTECH_IMAGE_REF: VBTECH_IMAGE_REF,
-    VBTECH_RELEASE_SHA: VBTECH_SHA,
-    VBTECH_FUNCTION_PATH: "",
-    VBTECH_SUBMISSION_STATE: "disabled",
-    VBTECH_DOMAIN: "v-b.tech",
-    VBTECH_WWW_DOMAIN: "www.v-b.tech",
-  };
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
 
   const candidate = await prepareRelease(
-    { environment, releaseDirectory, readinessAttempts: 1 },
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
     dependencies,
   );
   assert.deepEqual(candidate.vbtech, VBTECH_SELECTOR);
-  assert.ok(calls.some(({ args }) => args.includes("pull") && args.includes("vbtech-web")));
-  assert.ok(calls.some(({ args }) => args.at(-1) === "vbtech-web" && args.includes("up")));
+  const rollbackStart = calls.length;
 
   await rollbackPreparedRelease(
-    { candidate, environment, releaseDirectory, readinessAttempts: 1 },
+    { candidate, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
     dependencies,
   );
-  assert.ok(calls.some(({ args }) => args.includes("stop") && args.includes("vbtech-web")));
+  const rollbackCalls = calls.slice(rollbackStart);
+  assert.ok(
+    rollbackCalls.some(
+      ({ args }) => args.includes("pull") && args.includes("api") && args.includes("vbtech-web"),
+    ),
+  );
+  assert.ok(
+    rollbackCalls.some(
+      ({ args }) =>
+        args.includes("inspect") &&
+        args.includes("{{json .RepoDigests}}") &&
+        args.at(-1) === VBTECH_IMAGE_REF,
+    ),
+  );
+  assert.deepEqual(
+    rollbackCalls.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api", "vbtech-web", "edge"],
+  );
+  assert.equal(
+    rollbackCalls.some(({ args }) => args.includes("stop")),
+    false,
+  );
+  for (const call of rollbackCalls) {
+    assert.equal(call.environment.VBTECH_IMAGE_REF, VBTECH_IMAGE_REF);
+    assert.equal(call.environment.VBTECH_RELEASE_SHA, VBTECH_SHA);
+  }
 });
 
 test("two SHA release directories replace one stable Compose project and rollback restores the prior digest pair", async () => {
@@ -946,7 +954,7 @@ test("rollback restores the exact previous digest pair without migrations and ve
   );
 });
 
-test("a failing Markiro candidate restores the previous record's exact v-b selector", async () => {
+test("a failing Markiro candidate retains its authoritative v-b selector over stale previous state", async () => {
   let candidateEdgeStarts = 0;
   const { calls, dependencies, releaseDirectory } = await fixture({
     previousVbtech: PREVIOUS_VBTECH_SELECTOR,
@@ -987,33 +995,51 @@ test("a failing Markiro candidate restores the previous record's exact v-b selec
   }
   const restoredCalls = serviceStarts.slice(-3);
   for (const call of restoredCalls) {
-    assert.equal(call.environment.VBTECH_IMAGE_REF, PREVIOUS_VBTECH_IMAGE_REF);
-    assert.equal(call.environment.VBTECH_RELEASE_SHA, PREVIOUS_VBTECH_SHA);
+    assert.equal(call.environment.VBTECH_IMAGE_REF, VBTECH_IMAGE_REF);
+    assert.equal(call.environment.VBTECH_RELEASE_SHA, VBTECH_SHA);
     assert.equal(call.environment.VBTECH_FUNCTION_PATH, "");
     assert.equal(call.environment.VBTECH_SUBMISSION_STATE, "disabled");
     assert.equal(call.environment.VBTECH_DOMAIN, "v-b.tech");
     assert.equal(call.environment.VBTECH_WWW_DOMAIN, "www.v-b.tech");
     assert.equal(Object.hasOwn(call.environment, "VBTECH_IMAGE_TAG"), false);
   }
-  assert.ok(
-    calls.some(
-      ({ args }) => args.includes("pull") && args.includes("vbtech-web") && args.includes("api"),
-    ),
-  );
-  const previousInspectIndex = calls.findIndex(
-    ({ args }) =>
-      args.at(-1) === PREVIOUS_VBTECH_IMAGE_REF &&
-      args.includes("inspect") &&
-      args.includes("{{json .RepoDigests}}"),
-  );
   const restoredApiIndex = calls.findIndex(
     ({ args, environment }) =>
       args.includes("up") &&
       args.at(-1) === "api" &&
       environment.MARKIRO_IMAGE_TAG === PREVIOUS_TAG,
   );
-  assert.ok(previousInspectIndex >= 0);
-  assert.ok(previousInspectIndex < restoredApiIndex);
+  const authoritativeInspectIndexes = calls.flatMap(({ args }, index) =>
+    args.at(-1) === VBTECH_IMAGE_REF &&
+    args.includes("inspect") &&
+    args.includes("{{json .RepoDigests}}")
+      ? [index]
+      : [],
+  );
+  const restoredPullIndex = calls.findIndex(
+    ({ args, environment }) =>
+      args.includes("pull") &&
+      args.includes("api") &&
+      args.includes("vbtech-web") &&
+      environment.MARKIRO_IMAGE_TAG === PREVIOUS_TAG,
+  );
+  assert.equal(authoritativeInspectIndexes.length, 2);
+  assert.ok(restoredPullIndex >= 0);
+  assert.ok(restoredPullIndex < authoritativeInspectIndexes.at(-1));
+  assert.ok(authoritativeInspectIndexes.at(-1) < restoredApiIndex);
+  assert.equal(
+    calls.some(
+      ({ args }) =>
+        args.at(-1) === PREVIOUS_VBTECH_IMAGE_REF &&
+        args.includes("inspect") &&
+        args.includes("{{json .RepoDigests}}"),
+    ),
+    false,
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("stop") && args.includes("vbtech-web")),
+    false,
+  );
   const persisted = await records(releaseDirectory);
   assert.equal(
     persisted.filter(
@@ -1028,7 +1054,7 @@ test("a failing Markiro candidate restores the previous record's exact v-b selec
   );
 });
 
-test("rollback refuses to start the previous services when its exact v-b digest is absent", async () => {
+test("rollback refuses to start services when the authoritative v-b digest is absent", async () => {
   const { calls, dependencies, releaseDirectory } = await fixture({
     previousVbtech: PREVIOUS_VBTECH_SELECTOR,
   });
@@ -1043,10 +1069,10 @@ test("rollback refuses to start the previous services when its exact v-b digest 
     dependencies,
   );
   const originalRun = dependencies.runner.run.bind(dependencies.runner);
-  let previousVbtechInspects = 0;
+  let authoritativeVbtechInspects = 0;
   dependencies.runner.run = async (command, args, childEnvironment, timeoutMs) => {
-    if (args.includes("inspect") && args.at(-1) === PREVIOUS_VBTECH_IMAGE_REF) {
-      previousVbtechInspects += 1;
+    if (args.includes("inspect") && args.at(-1) === VBTECH_IMAGE_REF) {
+      authoritativeVbtechInspects += 1;
       return {
         code: 0,
         stdout: JSON.stringify([`ghcr.io/thevladbog/vbtech-web@sha256:${"8".repeat(64)}`]),
@@ -1066,17 +1092,23 @@ test("rollback refuses to start the previous services when its exact v-b digest 
   );
 
   const rollbackCalls = calls.slice(rollbackStart);
-  assert.equal(previousVbtechInspects, 1);
+  assert.equal(authoritativeVbtechInspects, 1);
   assert.equal(
     rollbackCalls.some(({ args }) => args.includes("up")),
     false,
   );
 });
 
-test("first-deploy rollback stops both candidate services and terminalizes the candidate failed", async () => {
+test("first-deploy rollback still stops every candidate service and terminalizes it failed", async () => {
   const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
   const candidate = await prepareRelease(
-    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
     dependencies,
   );
   const rollbackStart = calls.length;
@@ -1087,9 +1119,10 @@ test("first-deploy rollback stops both candidate services and terminalizes the c
   );
 
   assert.equal(candidate.previousTag, null);
+  assert.deepEqual(candidate.vbtech, VBTECH_SELECTOR);
   assert.deepEqual(
-    calls.slice(rollbackStart).map(({ args }) => args.slice(-3)),
-    [["stop", "api", "edge"]],
+    calls.slice(rollbackStart).map(({ args }) => args.slice(-4)),
+    [["stop", "api", "edge", "vbtech-web"]],
   );
   assert.equal(failed.state, "failed");
   assert.equal(

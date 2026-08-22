@@ -729,7 +729,7 @@ export async function finalizePreparedRelease({ candidate, releaseDirectory }) {
   return writeStagedRelease(releaseDirectory, { ...candidate, state: "healthy" }, "healthy");
 }
 
-/** Restore the exact previous healthy digest pair without running migrations. */
+/** Restore the exact previous Markiro digest pair while retaining the candidate v-b selector. */
 export async function rollbackPreparedRelease(options, supplied = {}) {
   const dependencies = deploymentDependencies(options, supplied);
   const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate, {
@@ -768,15 +768,6 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     return failed;
   }
   const previous = await healthyReleaseByTag(options.releaseDirectory, candidate.previousTag);
-  const candidateVbtechEnvironment = candidate.vbtech
-    ? environmentWithVbtech(
-        environmentWithoutVbtechSelector({ ...process.env, ...options.environment }),
-        candidate.vbtech,
-      )
-    : undefined;
-  const candidateVbtechCompose = candidateVbtechEnvironment
-    ? productionComposeArgs(candidateVbtechEnvironment)
-    : undefined;
   const environment = environmentWithVbtech(
     environmentWithoutVbtechSelector({
       ...process.env,
@@ -785,25 +776,25 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
       MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
       MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
     }),
-    previous.vbtech,
+    candidate.vbtech,
   );
   const compose = productionComposeArgs(environment);
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "pull", "api", "edge", ...(previous.vbtech ? ["vbtech-web"] : [])],
+    [...compose, "pull", "api", "edge", ...(candidate.vbtech ? ["vbtech-web"] : [])],
     environment,
     dependencies.timeouts.pull,
   );
-  if (previous.vbtech) {
-    const previousVbtechImage = await mustRun(
+  if (candidate.vbtech) {
+    const vbtechImage = await mustRun(
       dependencies,
       "docker",
-      ["image", "inspect", "--format", "{{json .RepoDigests}}", previous.vbtech.imageRef],
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", candidate.vbtech.imageRef],
       environment,
       dependencies.timeouts.command,
     );
-    requireApprovedDigest(previous.vbtech.imageRef, previousVbtechImage.stdout.trim());
+    requireApprovedDigest(candidate.vbtech.imageRef, vbtechImage.stdout.trim());
   }
   await mustRun(
     dependencies,
@@ -813,7 +804,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     dependencies.timeouts.service,
   );
   await waitForApi(dependencies, options, compose, environment);
-  if (previous.vbtech)
+  if (candidate.vbtech)
     await mustRun(
       dependencies,
       "docker",
@@ -824,19 +815,11 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "up", "-d", ...(previous.vbtech ? [] : ["--no-deps"]), "edge"],
+    [...compose, "up", "-d", ...(candidate.vbtech ? [] : ["--no-deps"]), "edge"],
     environment,
     dependencies.timeouts.service,
   );
   await waitForEdgeTls(dependencies, options);
-  if (candidate.vbtech && !previous.vbtech)
-    await mustRun(
-      dependencies,
-      "docker",
-      [...candidateVbtechCompose, "stop", "vbtech-web"],
-      candidateVbtechEnvironment,
-      dependencies.timeouts.service,
-    );
   dependencies.log("release rolled back");
   return markPreparedReleaseFailed(options.releaseDirectory, candidate);
 }

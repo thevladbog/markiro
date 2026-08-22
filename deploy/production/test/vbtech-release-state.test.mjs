@@ -5,6 +5,7 @@ import {
   mkdir,
   mkdtemp,
   readdir,
+  lstat,
   stat,
   symlink,
   writeFile,
@@ -721,4 +722,28 @@ test("rejects duplicate terminal transitions", async () => {
 
 test("returns undefined when the private state directory is absent", async () => {
   assert.equal(await latestHealthyVbtechRelease(await directory()), undefined);
+});
+
+test("fails closed when the private state directory is a dangling symbolic link", async () => {
+  const parent = await mkdtemp(join(tmpdir(), "vbtech-release-state-dangling-"));
+  const releases = join(parent, "releases");
+  await symlink(join(parent, "missing-target"), releases);
+
+  await assertStateRejected(() => latestHealthyVbtechRelease(releases));
+});
+
+test("fails closed when the private state directory disappears after lstat", async () => {
+  const releases = await directory();
+  await mkdir(releases, { mode: 0o700 });
+  const disappeared = new Error("simulated directory disappearance");
+  disappeared.code = "ENOENT";
+
+  await assertStateRejected(() =>
+    latestHealthyVbtechRelease(releases, {
+      lstat,
+      stat: async () => {
+        throw disappeared;
+      },
+    }),
+  );
 });
