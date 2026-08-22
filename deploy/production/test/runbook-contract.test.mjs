@@ -10,29 +10,38 @@ const privateVbtechSection = (runbook) => {
   const heading = "## Приватная выкладка v-b.tech";
   const start = runbook.indexOf(heading);
   assert.notEqual(start, -1, "private v-b runbook section must exist");
-  return runbook.slice(start);
+  const nextHeading = runbook.indexOf("\n## ", start + heading.length);
+  return runbook.slice(start, nextHeading === -1 ? undefined : nextHeading);
 };
 const privateVbtechInputNames = (section) => {
   const start = section.indexOf("#### Фаза 5.");
   const end = section.indexOf("#### Фаза 6.");
   assert.ok(start >= 0 && end > start, "private v-b dispatch phase must be bounded");
-  const bullets = section.slice(start, end).match(/^- .+$/gm) ?? [];
+  const phase = section.slice(start, end);
+  const bullets = phase.match(/^- .+$/gm) ?? [];
   assert.equal(bullets.length, 3, "private v-b dispatch phase must document exactly three inputs");
-  return bullets.map((bullet) => {
+  const bulletNames = bullets.map((bullet) => {
     const match = bullet.match(/^- `([^`]+)` —/);
     assert.ok(match, "every private v-b dispatch bullet must name one input");
     return match[1];
   });
+  const documentedTokens = [...new Set(phase.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])];
+  assert.deepEqual(
+    documentedTokens,
+    bulletNames,
+    "private v-b dispatch phase must not document another input token",
+  );
+  return bulletNames;
 };
 const assertPrivateVbtechTextIsSafe = (section) => {
   assert.doesNotMatch(section, /-----BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY-----/);
   assert.doesNotMatch(
     section,
-    /(?:^|[\n`])\s*(?:[$>]\s*)?ssh\s+(?:-[^\s]+\s+)*(?:\S+@)?\S+\s+(?:sudo\s+)?(?:docker|podman|systemctl|systemd-run|node)\b/im,
+    /(?:^|[\n`])\s*(?:[$>]\s*)?ssh\b[^\n`]{0,500}\b(?:docker|podman|systemctl|systemd-run|node)\b/im,
   );
   assert.doesNotMatch(
     section,
-    /(?:^|\n)\s*(?:v-b\.tech\.?|www\.v-b\.tech\.?)\s+(?:\d+\s+)?(?:IN\s+)?(?:A|AAAA|CNAME)\s+\S+/im,
+    /(?:^|\n)\s*(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)\s+(?:\d+\s+)?(?:IN\s+)?(?:A|AAAA|CNAME)\s+\S+/im,
   );
   assert.doesNotMatch(
     section,
@@ -134,6 +143,13 @@ test("production deploy runbook defines the private v-b approval and ownership b
     "VM-local `MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]` не выводится hosted wrapper",
     "До попытки активации service/edge rollback не выполняется",
     "После попытки активации candidate service",
+    "Компенсирующий rollback выполняется только если executor разрешил rollback",
+    "indeterminate terminal-state failure",
+    "немедленно остановить любые мутации",
+    "fresh strict runtime diagnostics version 3",
+    "запросить отдельную диагностику",
+    "нельзя утверждать, что service восстановлен или удалён либо что lifecycle state стал failed",
+    "не выполнять ad-hoc repair",
   ])
     assert.match(section, proseRegExp(required));
 
@@ -148,6 +164,41 @@ test("production deploy runbook defines the private v-b approval and ownership b
         "- `confirm_private_deploy` —",
         "- undocumented fourth input\n- `confirm_private_deploy` —",
       ),
+    ),
+  );
+  assert.throws(() =>
+    privateVbtechInputNames(
+      section.replace(
+        "Workflow повторно валидирует",
+        "Дополнительный input `undocumented_input` не используется.\n\nWorkflow повторно валидирует",
+      ),
+    ),
+  );
+
+  const isolated = privateVbtechSection(
+    `${runbook}\n## Следующий раздел\nssh host sudo docker ps\n`,
+  );
+  assert.doesNotMatch(isolated, /Следующий раздел|sudo docker ps/);
+
+  const conditionalRollback = proseRegExp(
+    "Компенсирующий rollback выполняется только если executor разрешил rollback",
+  );
+  assert.throws(() =>
+    assert.match(
+      section.replace(
+        "Компенсирующий rollback выполняется только если executor разрешил rollback",
+        "Компенсирующий rollback выполняется для каждого post-activation failure",
+      ),
+      conditionalRollback,
+    ),
+  );
+  const indeterminateNoClaim = proseRegExp(
+    "нельзя утверждать, что service восстановлен или удалён либо что lifecycle state стал failed",
+  );
+  assert.throws(() =>
+    assert.match(
+      section.replace("Нельзя утверждать, что service", "Можно утверждать, что service"),
+      indeterminateNoClaim,
     ),
   );
 });
@@ -205,7 +256,16 @@ test("production deploy runbook keeps private v-b evidence bounded and non-autho
       `${section}\n\`$ ssh operator@app sudo systemctl restart edge\`\n`,
     ),
   );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      `${section}\nssh -i /tmp/key -p 22 -o StrictHostKeyChecking=no operator@app sudo docker ps\n`,
+    ),
+  );
   assert.throws(() => assertPrivateVbtechTextIsSafe(`${section}\nA v-b.tech 203.0.113.10\n`));
+  assert.throws(() => assertPrivateVbtechTextIsSafe(`${section}\n@ 300 IN A 203.0.113.10\n`));
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nwww 300 IN CNAME public.example.net.\n`),
+  );
   assert.throws(() =>
     assertPrivateVbtechTextIsSafe(
       `${section}\n{"type":"A","name":"v-b.tech","value":"203.0.113.10"}\n`,

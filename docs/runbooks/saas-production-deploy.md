@@ -141,14 +141,28 @@ email или captcha. Каждая такая операция находитс�
   pull или digest verification завершается ошибкой, исполнитель публикует для candidate failed
   state, не меняя service или `edge`. Если не удалось создать саму pending record, candidate record
   ещё нет и rollback также не начинается.
-- **Rollback первого запуска после активации.** После попытки активации candidate service
-  исполнитель удаляет candidate `vbtech-web`, пересоздаёт и проверяет подтверждённую Markiro-only
-  конфигурацию общего `edge`, а затем публикует candidate failed state. Другие Markiro services и
-  cloud resources не входят в rollback.
-- **Rollback замены после активации.** Исполнитель восстанавливает точный selector и service
-  предыдущего healthy v-b release, проверяет его health, пересоздаёт и проверяет общий `edge`, затем
-  повторяет private route verification и публикует новый candidate failed.
-- Если VM-local rollback сам не завершился, executor всё равно пытается опубликовать failed state,
-  но hosted operator видит только `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE`, без primary stage и
-  rollback-stage. Такой результат не разрешает изменения API, database, DNS, TLS или cloud; для
-  дальнейшего действия нужен отдельный диагноз и одобрение.
+
+Компенсирующий rollback выполняется только если executor разрешил rollback для подтверждённого
+состояния lifecycle transition.
+
+- **Rollback первого запуска после активации, если он разрешён.** После попытки активации candidate
+  service исполнитель удаляет candidate `vbtech-web`, пересоздаёт и проверяет подтверждённую
+  Markiro-only конфигурацию общего `edge`, а затем публикует candidate failed state, если state ещё
+  не подтверждён как failed. Другие Markiro services и cloud resources не входят в rollback.
+- **Rollback замены после активации, если он разрешён.** Исполнитель восстанавливает точный selector
+  и service предыдущего healthy v-b release, проверяет его health, пересоздаёт и проверяет общий
+  `edge`, затем повторяет private route verification и публикует новый candidate failed, если state
+  ещё не подтверждён как failed.
+- **Indeterminate terminal-state failure.** Если после активации service, `edge` и private smoke
+  публикация healthy state завершилась неопределённо либо вернула невалидный результат, executor
+  запрещает rollback и не публикует failed state. Hosted operator видит
+  `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE`. Нужно немедленно остановить любые мутации, через
+  защищённый **Diagnose production runtime** снять fresh strict runtime diagnostics version 3 и
+  запросить отдельную диагностику. Нельзя утверждать, что service восстановлен или удалён либо
+  что lifecycle state стал failed; не выполнять ad-hoc repair.
+- При разрешённом rollback восстановление или удаление service и проверка `edge` происходят до
+  публикации failed state. Если state уже авторитетно failed, повторная failed transition не
+  создаётся. Ошибка самого rollback или допустимой failed transition остаётся видна hosted operator
+  только как `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE`, без primary stage и rollback-stage. Такой
+  результат не разрешает изменения API, database, DNS, TLS или cloud; для дальнейшего действия
+  нужен отдельный диагноз и одобрение.
