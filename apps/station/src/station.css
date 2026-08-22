@@ -2730,34 +2730,41 @@ body,
   justify-self: end;
 }
 
+/*
+ * Identity gets the flexible column; telemetry pills and the action rail take
+ * what their content needs and no more. The old grid gave the buttons a hard
+ * 960px floor, which on a 1440px screen left the four identity fields ~200px
+ * between them — the «Ст…» / «Оп…» bar this replaced.
+ */
 .station-status-bar {
   display: grid;
   min-width: 0;
   padding: var(--sp-2) var(--sp-4);
-  gap: var(--sp-3);
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1.35fr) minmax(0, 1fr) minmax(960px, 2fr);
+  gap: var(--sp-4);
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
   border-bottom: 1px solid var(--line);
   background: var(--surface-panel);
   font: var(--floor-body);
 }
 
+/* Buttons size to their captions; every freed pixel belongs to the identity. */
 .station-status-actions {
-  display: grid;
+  display: flex;
   min-width: 0;
   gap: var(--sp-2);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: stretch;
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .station-status-actions > * {
-  width: 100%;
   min-width: 0;
   min-height: 64px;
   max-width: 100%;
 }
 
 .station-status-actions :where(button, [role="button"]) {
-  width: 100%;
   min-width: 0;
   min-height: 64px;
   max-width: 100%;
@@ -2896,80 +2903,187 @@ body,
   gap: var(--sp-3);
 }
 
-.station-status-group {
+.station-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* The identity deck: what/where strong on top, who/which shift under it. */
+.station-status-identity {
   display: grid;
   min-width: 0;
   margin: 0;
-  gap: var(--sp-2) var(--sp-3);
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  align-items: center;
+  gap: 2px;
+  align-content: center;
 }
 
-.station-status-group + .station-status-group {
-  padding-left: var(--sp-3);
-  border-left: 1px solid var(--line);
+.station-status-identity__row {
+  display: flex;
+  min-width: 0;
+  gap: var(--sp-2);
+  align-items: baseline;
 }
 
 .station-status-item {
   min-width: 0;
+  display: flex;
+  align-items: baseline;
 }
 
-.station-status-item dt {
-  overflow: hidden;
+.station-status-identity__row .station-status-item + .station-status-item::before {
+  margin-right: var(--sp-2);
   color: var(--fg-3);
-  font: var(--floor-body);
+  content: "·";
+}
+
+.station-status-identity dd {
+  overflow: hidden;
+  min-width: 0;
+  margin: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.station-status-identity__row--primary dd {
+  color: var(--fg-1);
+  font: 700 17px/22px var(--font-ui);
+  letter-spacing: -0.01em;
+}
+
+.station-status-identity__row--secondary dd {
+  color: var(--fg-2);
+  font: 400 15px/20px var(--font-ui);
+}
+
+/*
+ * Telemetry pills: the dot is the state. A healthy pill is a green dot and a
+ * word; the value text is painted only when it says something the dot cannot
+ * (data-value-shown, set by the component). The value stays in the DOM either
+ * way for assistive tech.
+ */
+.station-status-pills {
+  display: flex;
+  min-width: 0;
+  margin: 0;
+  gap: var(--sp-2);
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.station-status-pill {
+  gap: 8px;
+  align-items: center;
+  padding: 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.station-status-pill__dot {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 50%;
+  background: var(--fg-3);
+}
+
+.station-status-pill[data-tone="ok"] .station-status-pill__dot {
+  background: var(--ok-solid);
+}
+
+.station-status-pill[data-tone="warn"] .station-status-pill__dot {
+  background: var(--warn-solid);
+}
+
+.station-status-pill[data-tone="warn"] {
+  border-color: var(--warn-border);
+}
+
+.station-status-pill dt {
+  overflow: hidden;
+  color: var(--fg-2);
+  font: 600 14px/18px var(--font-ui);
+  white-space: nowrap;
+}
+
+/* Pills prefer the short caption where one exists. */
 .station-status-label--short {
   display: none;
 }
 
-.station-status-item dd {
+.station-status-pill .station-status-label--long:has(+ .station-status-label--short) {
+  display: none;
+}
+
+.station-status-pill .station-status-label--short {
+  display: inline;
+}
+
+.station-status-pill dd {
   overflow: hidden;
+  min-width: 0;
   margin: 0;
   color: var(--fg-1);
-  font: var(--floor-body-strong);
+  font: 600 14px/18px var(--font-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.station-status-item[data-tone="ok"] dd {
+.station-status-pill[data-value-shown="false"] dd {
+  display: none;
+}
+
+.station-status-pill[data-tone="ok"] dd {
   color: var(--ok-fg);
 }
 
-.station-status-item[data-tone="warn"] dd {
+.station-status-pill[data-tone="warn"] dd {
   color: var(--warn-fg);
 }
 
-@media (max-width: 1439px) {
+/*
+ * Below 1680 the words leave the healthy pills — their dots stay, and a pill
+ * only speaks when it has something to say (data-value-shown). The identity
+ * deck keeps its full width all the way down.
+ */
+@media (max-width: 1679px) {
+  .station-status-pill {
+    padding: 8px 10px;
+  }
+
+  .station-status-pill[data-value-shown="false"] {
+    padding: 10px;
+  }
+
+  .station-status-pill[data-value-shown="false"] dt {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* Narrower still: the action rail drops under the identity + pills row. */
+@media (max-width: 1599px) {
   .station-status-bar {
-    grid-template-columns: minmax(0, 2.6fr) minmax(0, 1fr) minmax(0, 1.1fr);
-  }
-
-  .station-status-label--long:has(+ .station-status-label--short) {
-    display: none;
-  }
-
-  .station-status-label--short {
-    display: inline;
-  }
-
-  .station-status-group--sync {
-    grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.75fr));
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .station-status-actions {
     grid-column: 1 / -1;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 1179px) {
-  .station-status-bar {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    justify-content: flex-start;
   }
 }
 
@@ -2981,45 +3095,23 @@ body,
   .station-status-bar {
     padding-inline: var(--sp-3);
     gap: var(--sp-2);
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 0.9fr);
   }
 
-  .station-status-group {
-    gap: var(--sp-1) var(--sp-2);
+  .station-status-identity__row--primary dd {
+    font: 700 15px/20px var(--font-ui);
   }
 
-  .station-status-group--context {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    grid-auto-flow: row;
+  .station-status-identity__row--secondary dd {
+    font: 400 13px/18px var(--font-ui);
   }
 
-  .station-status-group--context > .station-status-item:last-child:nth-child(odd) {
-    grid-column: 1 / -1;
+  .station-status-pill {
+    padding: 6px 8px;
   }
 
-  .station-status-group--context .station-status-item {
-    display: grid;
-    gap: 0;
-  }
-
-  .station-status-group--context :is(dt, dd) {
-    overflow: visible;
-    text-overflow: clip;
-    white-space: normal;
-    overflow-wrap: anywhere;
-  }
-
-  .station-status-group--sync,
-  .station-status-group--hardware {
-    grid-template-columns: none;
-    grid-auto-flow: row;
-    grid-auto-rows: auto;
-  }
-
-  .station-status-item {
-    display: flex;
-    gap: var(--sp-1);
-    align-items: baseline;
+  .station-status-pill dt,
+  .station-status-pill dd {
+    font: 600 13px/16px var(--font-ui);
   }
 
   .shift-selection__grid {
@@ -3105,56 +3197,38 @@ body,
   }
 }
 
+/*
+ * Collapsed (active shift): the deck's two rows fold into one line — line ·
+ * shift — because station and operator are not rendered while collapsed.
+ */
 .station-status-bar[data-collapsed="true"] {
   min-height: 72px;
   padding-block: var(--sp-1);
+  gap: var(--sp-3);
+  /* line · shift + pills + expand always fit one row; the ≤1599px two-column
+     fallback is for the expanded bar's action rail, not for this one. */
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.station-status-bar[data-collapsed="true"] .station-status-identity {
+  display: flex;
   gap: var(--sp-2);
-  grid-template-columns:
-    minmax(0, 1.45fr)
-    minmax(0, 1.1fr)
-    minmax(0, 1.1fr)
-    minmax(144px, 0.65fr);
+  align-items: baseline;
 }
 
-.station-status-bar[data-collapsed="true"] .station-status-group {
-  gap: var(--sp-1) var(--sp-2);
-  grid-auto-flow: column;
-  grid-auto-rows: auto;
-  grid-auto-columns: minmax(0, 1fr);
+.station-status-bar[data-collapsed="true"]
+  .station-status-identity__row--secondary:has(.station-status-item)::before {
+  color: var(--fg-3);
+  content: "·";
 }
 
-.station-status-bar[data-collapsed="true"] .station-status-group--context {
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
-  grid-auto-flow: column;
-}
-
-.station-status-bar[data-collapsed="true"] .station-status-group--sync {
-  grid-template-columns: minmax(0, 1.5fr) repeat(2, minmax(0, 0.75fr));
-}
-
-.station-status-bar[data-collapsed="true"] .station-status-group--hardware {
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.8fr);
-}
-
-.station-status-bar[data-collapsed="true"] .station-status-item {
-  display: grid;
-  gap: 0;
-  align-content: center;
-}
-
-.station-status-bar[data-collapsed="true"] .station-status-item :is(dt, dd) {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.station-status-bar[data-collapsed="true"] .station-status-identity__row--secondary dd {
+  color: var(--fg-1);
+  font: 700 17px/22px var(--font-ui);
 }
 
 .station-status-bar[data-collapsed="true"] > .station-status-toggle {
-  width: 100%;
   min-height: 64px;
-}
-
-.station-status-actions:has(.station-status-toggle) {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .box-print-recovery {
