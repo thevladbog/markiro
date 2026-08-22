@@ -1573,6 +1573,7 @@ export function WorkScreen({
                 exec={exec}
                 productId={productId}
                 image={productImage}
+                gtin={expectedGtin14}
                 refreshKey={imageRefreshKey}
               />
               {issuerPrefix !== null ? (
