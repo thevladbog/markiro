@@ -8,7 +8,9 @@ import { validateProductionDomains, validateVbtechDomains } from "./production-d
 
 const IMAGE_TAG_PATTERN = /^[0-9a-f]{40}$/;
 const IMAGE_DIGEST_PATTERN = /^sha256:[0-9a-f]{64}$/;
-const VBTECH_IMAGE_PATTERN = /^ghcr\.io\/thevladbog\/vbtech-web:([0-9a-f]{40})$/;
+const VBTECH_IMAGE_PATTERN = /^ghcr\.io\/thevladbog\/vbtech-web@(sha256:[0-9a-f]{64})$/;
+const RELEASE_SHA_PATTERN = /^[0-9a-f]{40}$/;
+const VBTECH_FUNCTION_ORIGIN_PATTERN = /^https:\/\/functions\.yandexcloud\.net\/[A-Za-z0-9_-]+$/;
 const COMPOSE_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 const STDERR_LIMIT_BYTES = 8 * 1024;
@@ -24,7 +26,8 @@ function invalid(variable) {
 
 function parseVbtechConfig(environment, reservedDomains) {
   const keys = [
-    "VBTECH_IMAGE_TAG",
+    "VBTECH_IMAGE_REF",
+    "VBTECH_RELEASE_SHA",
     "VBTECH_DOMAIN",
     "VBTECH_WWW_DOMAIN",
     "VBTECH_FUNCTION_ORIGIN",
@@ -32,43 +35,58 @@ function parseVbtechConfig(environment, reservedDomains) {
   ];
   if (keys.every((key) => environment[key] === undefined)) return undefined;
 
-  const image = environment.VBTECH_IMAGE_TAG;
-  const imageMatch = typeof image === "string" ? image.match(VBTECH_IMAGE_PATTERN) : null;
-  if (!imageMatch) throw invalid("VBTECH_IMAGE_TAG");
+  const imageRef = environment.VBTECH_IMAGE_REF;
+  const imageMatch = typeof imageRef === "string" ? imageRef.match(VBTECH_IMAGE_PATTERN) : null;
+  if (!imageMatch) throw invalid("VBTECH_IMAGE_REF");
+  const releaseSha = environment.VBTECH_RELEASE_SHA;
+  if (typeof releaseSha !== "string" || !RELEASE_SHA_PATTERN.test(releaseSha))
+    throw invalid("VBTECH_RELEASE_SHA");
   const { domain, wwwDomain } = validateVbtechDomains(
     environment.VBTECH_DOMAIN,
     environment.VBTECH_WWW_DOMAIN,
     reservedDomains,
   );
 
-  let functionOrigin;
-  try {
-    functionOrigin = new URL(environment.VBTECH_FUNCTION_ORIGIN);
-  } catch {
-    throw invalid("VBTECH_FUNCTION_ORIGIN");
-  }
-  if (
-    functionOrigin.protocol !== "https:" ||
-    functionOrigin.hostname !== "functions.yandexcloud.net" ||
-    functionOrigin.port ||
-    functionOrigin.username ||
-    functionOrigin.password ||
-    functionOrigin.search ||
-    functionOrigin.hash ||
-    !/^\/[A-Za-z0-9_-]+$/.test(functionOrigin.pathname)
-  )
-    throw invalid("VBTECH_FUNCTION_ORIGIN");
-
   const submissionState = environment.VBTECH_SUBMISSION_STATE;
   if (submissionState !== "disabled" && submissionState !== "enabled")
     throw invalid("VBTECH_SUBMISSION_STATE");
 
+  const parseFunctionOrigin = () => {
+    if (
+      typeof environment.VBTECH_FUNCTION_ORIGIN !== "string" ||
+      !VBTECH_FUNCTION_ORIGIN_PATTERN.test(environment.VBTECH_FUNCTION_ORIGIN)
+    )
+      throw invalid("VBTECH_FUNCTION_ORIGIN");
+    let functionOrigin;
+    try {
+      functionOrigin = new URL(environment.VBTECH_FUNCTION_ORIGIN);
+    } catch {
+      throw invalid("VBTECH_FUNCTION_ORIGIN");
+    }
+    if (
+      functionOrigin.protocol !== "https:" ||
+      functionOrigin.hostname !== "functions.yandexcloud.net" ||
+      functionOrigin.port ||
+      functionOrigin.username ||
+      functionOrigin.password ||
+      functionOrigin.search ||
+      functionOrigin.hash ||
+      !/^\/[A-Za-z0-9_-]+$/.test(functionOrigin.pathname)
+    )
+      throw invalid("VBTECH_FUNCTION_ORIGIN");
+    return functionOrigin;
+  };
+  let functionPath = "";
+  if (submissionState === "enabled") functionPath = parseFunctionOrigin().pathname;
+  else if (environment.VBTECH_FUNCTION_ORIGIN !== undefined) parseFunctionOrigin();
+
   return {
-    imageTag: image,
-    releaseSha: imageMatch[1],
+    imageRef,
+    imageDigest: imageMatch[1],
+    releaseSha,
     domain,
     wwwDomain,
-    functionPath: functionOrigin.pathname,
+    functionPath,
     submissionState,
   };
 }
@@ -128,7 +146,7 @@ export async function composeQuiet(environment, supplied = {}) {
   if (environment.MARKIRO_HTTPS_PORT !== undefined)
     childEnvironment.MARKIRO_HTTPS_PORT = environment.MARKIRO_HTTPS_PORT;
   for (const key of [
-    "VBTECH_IMAGE_TAG",
+    "VBTECH_IMAGE_REF",
     "VBTECH_DOMAIN",
     "VBTECH_WWW_DOMAIN",
     "VBTECH_RELEASE_SHA",
@@ -221,7 +239,8 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} MARKIRO_ENV_FILE
  * @property {string | undefined} MARKIRO_HTTP_PORT
  * @property {string | undefined} MARKIRO_HTTPS_PORT
- * @property {string | undefined} VBTECH_IMAGE_TAG
+ * @property {string | undefined} VBTECH_IMAGE_REF
+ * @property {string | undefined} VBTECH_RELEASE_SHA
  * @property {string | undefined} VBTECH_DOMAIN
  * @property {string | undefined} VBTECH_WWW_DOMAIN
  * @property {string | undefined} VBTECH_FUNCTION_ORIGIN
@@ -240,7 +259,8 @@ export async function composeQuiet(environment, supplied = {}) {
  * @property {string | undefined} acmeEmail
  * @property {string} envFile
  * @property {"direct"} edgeMode
- * @property {string=} vbtechImageTag
+ * @property {string=} vbtechImageRef
+ * @property {string=} vbtechImageDigest
  * @property {string=} vbtechReleaseSha
  * @property {string=} vbtechDomain
  * @property {string=} vbtechWwwDomain
@@ -340,7 +360,7 @@ export async function runPreflight(
       MARKIRO_COMPOSE_PROJECT: environment.MARKIRO_COMPOSE_PROJECT,
     };
     if (vbtech) {
-      composeEnvironment.VBTECH_IMAGE_TAG = vbtech.imageTag;
+      composeEnvironment.VBTECH_IMAGE_REF = vbtech.imageRef;
       composeEnvironment.VBTECH_DOMAIN = vbtech.domain;
       composeEnvironment.VBTECH_WWW_DOMAIN = vbtech.wwwDomain;
       composeEnvironment.VBTECH_RELEASE_SHA = vbtech.releaseSha;
@@ -369,7 +389,8 @@ export async function runPreflight(
     edgeMode,
     ...(vbtech
       ? {
-          vbtechImageTag: vbtech.imageTag,
+          vbtechImageRef: vbtech.imageRef,
+          vbtechImageDigest: vbtech.imageDigest,
           vbtechReleaseSha: vbtech.releaseSha,
           vbtechDomain: vbtech.domain,
           vbtechWwwDomain: vbtech.wwwDomain,

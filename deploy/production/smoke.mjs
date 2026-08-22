@@ -231,11 +231,7 @@ export function productionBaseUrls(environment) {
     kiosk: productionBaseUrl(kioskDomain, port),
     landing: productionBaseUrl(landingDomain, port),
   };
-  const vbtechConfigured = [
-    environment.VBTECH_IMAGE_TAG,
-    environment.VBTECH_DOMAIN,
-    environment.VBTECH_WWW_DOMAIN,
-  ].some((value) => value !== undefined);
+  const vbtechConfigured = environment.VBTECH_IMAGE_REF !== undefined;
   if (!vbtechConfigured) return urls;
   const vbtech = validateVbtechDomains(environment.VBTECH_DOMAIN, environment.VBTECH_WWW_DOMAIN, [
     domain,
@@ -289,7 +285,7 @@ function dockerRunner(environment, timeoutMs) {
 }
 
 function requestClient() {
-  return { request: (url, init) => fetch(url, init) };
+  return { request: (url, init, signal) => fetch(url, { ...init, signal }) };
 }
 
 function assertHeaders(response, requiresHsts, routeLabel, expectedCsp = APPLICATION_CSP) {
@@ -683,7 +679,7 @@ async function getText(response) {
 
 async function publicRequest(client, url, init) {
   const signal = AbortSignal.timeout(5_000);
-  return client.request(url, { ...init, signal });
+  return client.request(url, init, signal);
 }
 
 function assertRoute(check, response, body, signature) {
@@ -1277,6 +1273,10 @@ async function runLandingSmoke(options, client) {
   return { releaseSha: root.headers.get("x-markiro-release-sha") };
 }
 
+/**
+ * Run the shared v-b route assertions through an injectable request client.
+ * The caller owns transport; this function always asserts the logical v-b authorities.
+ */
 export async function runVbtechSmoke(options, client = requestClient()) {
   const baseUrl = options.vbtechBaseUrl.replace(/\/$/, "");
   const wwwBaseUrl = options.vbtechWwwBaseUrl.replace(/\/$/, "");

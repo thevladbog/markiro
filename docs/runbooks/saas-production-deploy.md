@@ -33,3 +33,141 @@ device namespaces там закрыты. API не публикует отдел�
 env материализуется из runtime Lockbox; `SAAS_ADMIN_ORIGIN` обязан точно
 совпадать с `https://$MARKIRO_SAAS_ADMIN_DOMAIN`. Секреты не передаются в
 аргументах или release archive.
+
+## Приватная выкладка v-b.tech
+
+Слияние этого изменения не разрешает live dispatch. Для каждого живого запуска требуется новое
+явное одобрение с exact v-b source SHA и exact OCI digest. Разрешение охватывает только приватную
+выкладку статического сайта на существующую VM с выключенной отправкой и сбор read-only evidence.
+
+### Предварительные условия и границы
+
+- Должен уже быть активен и валидирован Markiro-релиз с v-b executor. Слияние и публикация кода
+  недостаточны: для выкладки этого Markiro-релиза необходимо отдельное защищённое
+  production-одобрение через обычный **Deploy production**.
+- Оба защищённых workflow используют environment `production-deploy` и уже настроенные переменные,
+  host keys и SSH secret из раздела «Требования». Значения credentials в evidence и runbook не
+  переносятся. Если executor contract отсутствует, сначала отдельно разверните и валидируйте
+  executor-bearing Markiro release; v-b workflow должен завершиться до мутаций.
+- В этой фазе неизменны `VBTECH_SUBMISSION_STATE=disabled`; function origin не требуется, backend
+  формы не создаётся и контактная отправка не включается.
+- Операция изменяет только `vbtech-web`, пересоздание общего `edge` и приватные записи жизненного
+  цикла v-b. Она не охватывает API и миграции; PostgreSQL и другие изменения базы данных; IAM и
+  service accounts; Lockbox; buckets и Object Storage; VPC и сетевой control plane; DNS; выпуск и
+  активацию TLS-сертификата; публичную доступность; backend и активацию contact form; внешние email
+  и captcha.
+
+Private smoke использует существующий доверенный Markiro TLS transport и проверяет private
+routing/content, release identity, заголовки, HTML-маршруты, redirect, 404 и disabled contact
+contract. Его успешный результат не доказывает публичный DNS, TLS v-b.tech или публичную
+доступность.
+
+### Последовательность оператора
+
+#### Фаза 1. Смержить и опубликовать код Markiro executor
+
+Смержите проверенный executor code и дождитесь его публикации как части обычного immutable Markiro
+release. Это только bootstrap artifact, а не разрешение на production deployment.
+
+#### Фаза 2. Отдельно одобрить и развернуть Markiro-релиз с executor
+
+Получите отдельное production-одобрение для точного Markiro release и выполните защищённый
+**Deploy production**. После его успешной smoke-проверки убедитесь, что этот executor-bearing
+Markiro release остаётся active и validated. Только после этого доступен bootstrap contract для
+независимого v-b deployment.
+
+#### Фаза 3. Снять и прочитать read-only baseline version 3
+
+Запустите защищённый **Diagnose production runtime** и сохраните его санитизированную строку
+`MARKIRO_RUNTIME_DIAGNOSTICS`. Принимать можно только строгий snapshot version 3. Проверьте active
+Markiro identity, текущую active v-b identity или `null`, единственную project-labelled Compose
+network, allowlisted состояния `api`, `edge`, `vbtech-web` и resource counters. Этот шаг read-only и
+не разрешает исправлять состояние вручную.
+
+#### Фаза 4. Отдельно одобрить exact v-b source SHA и exact OCI digest
+
+Одобрение должно буквально назвать один lowercase 40-character exact source SHA из `main` и один
+lowercase `sha256:` exact OCI digest образа `ghcr.io/thevladbog/vbtech-web`. Сверьте их с
+опубликованным attested artifact. Не подменяйте digest тегом.
+
+#### Фаза 5. Запустить Deploy v-b.tech private web с явным подтверждением
+
+Вручную запустите защищённый workflow **Deploy v-b.tech private web** и передайте ровно три inputs:
+
+- `vbtech_release_sha` — одобренный exact source SHA;
+- `vbtech_image_digest` — одобренный exact OCI digest;
+- `confirm_private_deploy` — `true`, только после сверки двух значений выше.
+
+Workflow повторно валидирует input shape и attestation. До удалённой мутации он сохраняет before
+snapshot — strict runtime diagnostics version 3, а после успешной выкладки — after snapshot —
+strict runtime diagnostics version 3. Перед мутацией он также требует активный executor contract.
+Не используйте ручные SSH-команды как замену этому workflow.
+
+#### Фаза 6. Проверить private smoke и evidence до/после
+
+Hosted wrapper выводит оператору только эти санитизированные маркеры:
+
+- `MARKIRO_VBTECH_DEPLOY_HEALTHY` — bounded deploy, service health, shared-edge recreation и private
+  smoke route/content завершились;
+- `MARKIRO_VBTECH_EXECUTOR_BOOTSTRAP_REQUIRED` — активный Markiro release не предоставляет нужный
+  executor contract; v-b mutation не разрешена;
+- `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE` — любая иная hosted deployment failure.
+
+VM-local `MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]` не выводится hosted
+wrapper. Поэтому по hosted output нельзя приписывать сбою primary stage или rollback-stage: при
+failure сохраняйте generic marker и failed job conclusion. Сырые команды, environment, логи
+контейнеров и HTML bodies не являются evidence.
+
+Оба встроенных snapshot должны быть строгими runtime diagnostics version 3. В
+`MARKIRO_VBTECH_CAPACITY_DELTA` прочитайте:
+
+- `beforeRelease` и `afterRelease`: Markiro release SHA, v-b release SHA и v-b image digest до и
+  после;
+- `cpuBusyBasisPointsDelta`;
+- `memoryAvailableBytesDelta`;
+- `rootFilesystemAvailableBytesDelta`.
+
+Отдельно зафиксируйте `MARKIRO_VBTECH_DEPLOY_HEALTHY` как успешный статус private smoke
+route/content и сверьте after identity с одобренными SHA и digest.
+
+Это сравнение — только фактический before/after snapshot одной операции. Оно не задаёт capacity
+threshold, не рекомендует resize и не доказывает длительную нагрузочную устойчивость. Private smoke
+не заменяет public DNS, v-b TLS или public reachability acceptance.
+
+#### Фаза 7. Остановиться до DNS, сертификата v-b.tech, backend и contact activation
+
+После сохранения evidence остановитесь. Не создавайте DNS records, не запускайте выпуск или
+активацию сертификата v-b.tech, не публикуйте сайт наружу, не подключайте backend/contact form,
+email или captcha. Каждая такая операция находится за отдельным reviewed approval boundary.
+
+### Интерпретация rollback
+
+- **До попытки активации service/edge rollback не выполняется.** Если pending record уже создана, а
+  pull или digest verification завершается ошибкой, исполнитель публикует для candidate failed
+  state, не меняя service или `edge`. Если не удалось создать саму pending record, candidate record
+  ещё нет и rollback также не начинается.
+
+Компенсирующий rollback выполняется только если executor разрешил rollback для подтверждённого
+состояния lifecycle transition.
+
+- **Rollback первого запуска после активации, если он разрешён.** После попытки активации candidate
+  service исполнитель удаляет candidate `vbtech-web`, пересоздаёт и проверяет подтверждённую
+  Markiro-only конфигурацию общего `edge`, а затем публикует candidate failed state, если state ещё
+  не подтверждён как failed. Другие Markiro services и cloud resources не входят в rollback.
+- **Rollback замены после активации, если он разрешён.** Исполнитель восстанавливает точный selector
+  и service предыдущего healthy v-b release, проверяет его health, пересоздаёт и проверяет общий
+  `edge`, затем повторяет private route verification и публикует новый candidate failed, если state
+  ещё не подтверждён как failed.
+- **Indeterminate terminal-state failure.** Если после активации service, `edge` и private smoke
+  публикация healthy state завершилась неопределённо либо вернула невалидный результат, executor
+  запрещает rollback и не публикует failed state. Hosted operator видит
+  `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE`. Нужно немедленно остановить любые мутации, через
+  защищённый **Diagnose production runtime** снять fresh strict runtime diagnostics version 3 и
+  запросить отдельную диагностику. Нельзя утверждать, что service восстановлен или удалён либо
+  что lifecycle state стал failed; не выполнять ad-hoc repair.
+- При разрешённом rollback восстановление или удаление service и проверка `edge` происходят до
+  публикации failed state. Если state уже авторитетно failed, повторная failed transition не
+  создаётся. Ошибка самого rollback или допустимой failed transition остаётся видна hosted operator
+  только как `MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE`, без primary stage и rollback-stage. Такой
+  результат не разрешает изменения API, database, DNS, TLS или cloud; для дальнейшего действия
+  нужен отдельный диагноз и одобрение.

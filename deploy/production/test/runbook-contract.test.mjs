@@ -5,6 +5,69 @@ import test from "node:test";
 const root = new URL("../../../", import.meta.url);
 const read = (path) => readFile(new URL(path, root), "utf8");
 const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const proseRegExp = (value) => new RegExp(escapeRegExp(value).replaceAll(" ", "\\s+"), "i");
+const privateVbtechSection = (runbook) => {
+  const heading = "## Приватная выкладка v-b.tech";
+  const start = runbook.indexOf(heading);
+  assert.notEqual(start, -1, "private v-b runbook section must exist");
+  const nextHeading = runbook.indexOf("\n## ", start + heading.length);
+  return runbook.slice(start, nextHeading === -1 ? undefined : nextHeading);
+};
+const privateVbtechInputNames = (section) => {
+  const start = section.indexOf("#### Фаза 5.");
+  const end = section.indexOf("#### Фаза 6.");
+  assert.ok(start >= 0 && end > start, "private v-b dispatch phase must be bounded");
+  const phase = section.slice(start, end);
+  const bullets = phase.match(/^- .+$/gm) ?? [];
+  assert.equal(bullets.length, 3, "private v-b dispatch phase must document exactly three inputs");
+  const bulletNames = bullets.map((bullet) => {
+    const match = bullet.match(/^- `([^`]+)` —/);
+    assert.ok(match, "every private v-b dispatch bullet must name one input");
+    return match[1];
+  });
+  const documentedTokens = [...new Set(phase.match(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g) ?? [])];
+  assert.deepEqual(
+    documentedTokens,
+    bulletNames,
+    "private v-b dispatch phase must not document another input token",
+  );
+  return bulletNames;
+};
+const assertPrivateVbtechTextIsSafe = (section) => {
+  assert.doesNotMatch(section, /-----BEGIN (?:OPENSSH|RSA|EC) PRIVATE KEY-----/);
+  assert.doesNotMatch(
+    section,
+    /(?:^|[\n`])\s*(?:[$>]\s*)?ssh\b[^\n`]{0,500}\b(?:docker|podman|systemctl|systemd-run|node)\b/im,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:^|\n)\s*(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)\s+(?:\d+\s+)?(?:IN\s+)?(?:A|AAAA|CNAME)\s+\S+/im,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:^|\n)\s*(?:A|AAAA|CNAME)\s+(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)\s+\S+/im,
+  );
+  assert.doesNotMatch(
+    section,
+    /"type"\s*:\s*"(?:A|AAAA|CNAME)"[\s\S]{0,120}"name"\s*:\s*"(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)"/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /"name"\s*:\s*"(?:@|www|v-b\.tech\.?|www\.v-b\.tech\.?)"[\s\S]{0,120}"type"\s*:\s*"(?:A|AAAA|CNAME)"/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:YC_APP_DEPLOY_SSH_PRIVATE_KEY|GHCR_TOKEN|APP_SSH_HOST_KEYS_B64|password|token|secret)\s*[:=]\s*(?!<[^>\n]+>|\$\{[^}\n]+\}|REDACTED\b)[^\s`]+/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /(?:Слияние этого изменения|Merge of this change)\s+(?:прямо\s+)?(?:разрешает|authorizes)\s+(?:live dispatch|живой запуск)/i,
+  );
+  assert.doesNotMatch(
+    section,
+    /После\s+(?:слияния|merge)[^\n]{0,80}(?:можно|разрешается|allowed|authorized)[^\n]{0,40}(?:live dispatch|живой запуск)/i,
+  );
+};
 
 test("production deploy runbook describes one direct immutable Compose delivery", async () => {
   const runbook = await read("docs/runbooks/saas-production-deploy.md");
@@ -38,6 +101,182 @@ test("production runbooks keep API private and assign public TLS to direct Caddy
   assert.match(runbook, /Caddy слушает 80\/443 на VM/);
   assert.match(runbook, /ACME TLS/);
   assert.match(runbook, /API не[\s\S]*отдельный host port/);
+});
+
+test("production deploy runbook defines the private v-b approval and ownership boundary", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const section = privateVbtechSection(runbook);
+
+  for (const required of [
+    "активен и валидирован Markiro-релиз с v-b executor",
+    "отдельное защищённое production-одобрение",
+    "Deploy v-b.tech private web",
+    "vbtech_release_sha",
+    "vbtech_image_digest",
+    "confirm_private_deploy",
+    "exact source SHA",
+    "exact OCI digest",
+    "before snapshot — strict runtime diagnostics version 3",
+    "after snapshot — strict runtime diagnostics version 3",
+    "VBTECH_SUBMISSION_STATE=disabled",
+    "function origin не требуется",
+    "только `vbtech-web`, пересоздание общего `edge` и приватные записи жизненного цикла v-b",
+    "API и миграции",
+    "PostgreSQL и другие изменения базы данных",
+    "IAM и service accounts",
+    "Lockbox",
+    "buckets и Object Storage",
+    "VPC и сетевой control plane",
+    "DNS",
+    "выпуск и активацию TLS-сертификата",
+    "публичную доступность",
+    "backend и активацию contact form",
+    "внешние email и captcha",
+    "не доказывает публичный DNS, TLS v-b.tech или публичную доступность",
+    "Rollback первого запуска",
+    "Rollback замены",
+    "новое явное одобрение с exact v-b source SHA и exact OCI digest",
+    "production-deploy",
+    "MARKIRO_VBTECH_DEPLOY_HEALTHY",
+    "MARKIRO_VBTECH_EXECUTOR_BOOTSTRAP_REQUIRED",
+    "MARKIRO_VBTECH_REMOTE_DEPLOY_FAILURE",
+    "VM-local `MARKIRO_VBTECH_DEPLOY_FAILURE <stage> [ROLLBACK <rollback-stage>]` не выводится hosted wrapper",
+    "До попытки активации service/edge rollback не выполняется",
+    "После попытки активации candidate service",
+    "Компенсирующий rollback выполняется только если executor разрешил rollback",
+    "indeterminate terminal-state failure",
+    "немедленно остановить любые мутации",
+    "fresh strict runtime diagnostics version 3",
+    "запросить отдельную диагностику",
+    "нельзя утверждать, что service восстановлен или удалён либо что lifecycle state стал failed",
+    "не выполнять ad-hoc repair",
+  ])
+    assert.match(section, proseRegExp(required));
+
+  assert.deepEqual(privateVbtechInputNames(section), [
+    "vbtech_release_sha",
+    "vbtech_image_digest",
+    "confirm_private_deploy",
+  ]);
+  assert.throws(() =>
+    privateVbtechInputNames(
+      section.replace(
+        "- `confirm_private_deploy` —",
+        "- undocumented fourth input\n- `confirm_private_deploy` —",
+      ),
+    ),
+  );
+  assert.throws(() =>
+    privateVbtechInputNames(
+      section.replace(
+        "Workflow повторно валидирует",
+        "Дополнительный input `undocumented_input` не используется.\n\nWorkflow повторно валидирует",
+      ),
+    ),
+  );
+
+  const isolated = privateVbtechSection(
+    `${runbook}\n## Следующий раздел\nssh host sudo docker ps\n`,
+  );
+  assert.doesNotMatch(isolated, /Следующий раздел|sudo docker ps/);
+
+  const conditionalRollback = proseRegExp(
+    "Компенсирующий rollback выполняется только если executor разрешил rollback",
+  );
+  assert.throws(() =>
+    assert.match(
+      section.replace(
+        "Компенсирующий rollback выполняется только если executor разрешил rollback",
+        "Компенсирующий rollback выполняется для каждого post-activation failure",
+      ),
+      conditionalRollback,
+    ),
+  );
+  const indeterminateNoClaim = proseRegExp(
+    "нельзя утверждать, что service восстановлен или удалён либо что lifecycle state стал failed",
+  );
+  assert.throws(() =>
+    assert.match(
+      section.replace("Нельзя утверждать, что service", "Можно утверждать, что service"),
+      indeterminateNoClaim,
+    ),
+  );
+});
+
+test("production deploy runbook orders the private v-b operator phases", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const phases = [
+    "Фаза 1. Смержить и опубликовать код Markiro executor",
+    "Фаза 2. Отдельно одобрить и развернуть Markiro-релиз с executor",
+    "Фаза 3. Снять и прочитать read-only baseline version 3",
+    "Фаза 4. Отдельно одобрить exact v-b source SHA и exact OCI digest",
+    "Фаза 5. Запустить Deploy v-b.tech private web с явным подтверждением",
+    "Фаза 6. Проверить private smoke и evidence до/после",
+    "Фаза 7. Остановиться до DNS, сертификата v-b.tech, backend и contact activation",
+  ];
+
+  let previous = -1;
+  for (const phase of phases) {
+    const current = runbook.indexOf(phase);
+    assert.ok(current > previous, `${phase} must follow the previous operator phase`);
+    previous = current;
+  }
+});
+
+test("production deploy runbook keeps private v-b evidence bounded and non-authorizing", async () => {
+  const runbook = await read("docs/runbooks/saas-production-deploy.md");
+  const section = privateVbtechSection(runbook);
+
+  for (const required of [
+    "beforeRelease",
+    "afterRelease",
+    "cpuBusyBasisPointsDelta",
+    "memoryAvailableBytesDelta",
+    "rootFilesystemAvailableBytesDelta",
+    "private routing/content",
+    "Слияние этого изменения не разрешает live dispatch",
+  ])
+    assert.match(section, proseRegExp(required));
+
+  assertPrivateVbtechTextIsSafe(section);
+
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      section.replace(
+        "Слияние этого изменения не разрешает live dispatch",
+        "Слияние этого изменения разрешает live dispatch",
+      ),
+    ),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nssh operator@app sudo docker compose up -d\n`),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      `${section}\n\`$ ssh operator@app sudo systemctl restart edge\`\n`,
+    ),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      `${section}\nssh -i /tmp/key -p 22 -o StrictHostKeyChecking=no operator@app sudo docker ps\n`,
+    ),
+  );
+  assert.throws(() => assertPrivateVbtechTextIsSafe(`${section}\nA v-b.tech 203.0.113.10\n`));
+  assert.throws(() => assertPrivateVbtechTextIsSafe(`${section}\n@ 300 IN A 203.0.113.10\n`));
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nwww 300 IN CNAME public.example.net.\n`),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(
+      `${section}\n{"type":"A","name":"v-b.tech","value":"203.0.113.10"}\n`,
+    ),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nGHCR_TOKEN=ghp_exampleliteral123456789\n`),
+  );
+  assert.throws(() =>
+    assertPrivateVbtechTextIsSafe(`${section}\nПосле merge можно выполнить live dispatch.\n`),
+  );
 });
 
 test("production runbooks contain no legacy deployment ceremony", async () => {

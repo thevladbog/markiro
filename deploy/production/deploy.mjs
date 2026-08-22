@@ -19,10 +19,23 @@ import { isMainModule } from "./cli-main.mjs";
 import { productionComposeArgs } from "./compose-files.mjs";
 import { runPreflight } from "./preflight.mjs";
 import { landingDemoSubmissionState, productionBaseUrls, runSmoke } from "./smoke.mjs";
+import { latestHealthyVbtechRelease, validateVbtechSelector } from "./vbtech-release-state.mjs";
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
-const vbtechRepository = "ghcr.io/thevladbog/vbtech-web";
+const defaultVbtechReleaseDirectory = "/var/lib/markiro/vbtech/releases";
+const trustedVbtechDomain = "v-b.tech";
+const trustedVbtechWwwDomain = "www.v-b.tech";
+const vbtechInputKeys = [
+  "VBTECH_IMAGE_REF",
+  "VBTECH_IMAGE_TAG",
+  "VBTECH_RELEASE_SHA",
+  "VBTECH_DOMAIN",
+  "VBTECH_WWW_DOMAIN",
+  "VBTECH_FUNCTION_ORIGIN",
+  "VBTECH_FUNCTION_PATH",
+  "VBTECH_SUBMISSION_STATE",
+];
 
 const COMMAND_TIMEOUT_MS = 30_000;
 const PULL_TIMEOUT_MS = 600_000;
@@ -218,61 +231,87 @@ function requireApprovedDigest(expected, output) {
   return expected;
 }
 
-function requireApprovedTag(expected, output) {
-  let repoTags;
-  try {
-    repoTags = JSON.parse(output);
-  } catch {
-    throw new Error("approved image tag is not present");
-  }
-  if (
-    !Array.isArray(repoTags) ||
-    !repoTags.every((value) => typeof value === "string") ||
-    !repoTags.includes(expected)
-  )
-    throw new Error("approved image tag is not present");
-  return expected;
-}
-
 function isVbtechRelease(value) {
-  return (
-    value &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    typeof value.imageTag === "string" &&
-    value.imageTag.startsWith(`${vbtechRepository}:`) &&
-    /^[0-9a-f]{40}$/.test(value.imageTag.slice(`${vbtechRepository}:`.length)) &&
-    typeof value.releaseSha === "string" &&
-    /^[0-9a-f]{40}$/.test(value.releaseSha) &&
-    value.imageTag === `${vbtechRepository}:${value.releaseSha}` &&
-    typeof value.functionPath === "string" &&
-    /^\/[A-Za-z0-9_-]+$/.test(value.functionPath) &&
-    (value.submissionState === "disabled" || value.submissionState === "enabled") &&
-    Object.keys(value).sort().join(",") === "functionPath,imageTag,releaseSha,submissionState"
-  );
+  try {
+    validateVbtechSelector(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function vbtechReleaseFromPreflight(preflight) {
-  if (preflight.vbtechImageTag === undefined) return undefined;
-  const value = {
-    imageTag: preflight.vbtechImageTag,
-    releaseSha: preflight.vbtechReleaseSha,
-    functionPath: preflight.vbtechFunctionPath,
-    submissionState: preflight.vbtechSubmissionState,
-  };
-  if (!isVbtechRelease(value)) throw new Error("approved v-b release is invalid");
+  if (preflight.vbtechImageRef === undefined) return undefined;
+  try {
+    return validateVbtechSelector({
+      imageRef: preflight.vbtechImageRef,
+      imageDigest: preflight.vbtechImageDigest,
+      releaseSha: preflight.vbtechReleaseSha,
+      functionPath: preflight.vbtechFunctionPath,
+      submissionState: preflight.vbtechSubmissionState,
+    });
+  } catch {
+    throw new Error("approved v-b release is invalid");
+  }
+}
+
+function vbtechReleaseFromLifecycle(value) {
+  if (value === undefined) return undefined;
+  try {
+    return validateVbtechSelector({
+      imageRef: value.imageRef,
+      imageDigest: value.imageDigest,
+      releaseSha: value.releaseSha,
+      functionPath: "",
+      submissionState: value.submissionState,
+    });
+  } catch {
+    throw new Error("v-b release state is invalid");
+  }
+}
+
+const vbtechEnvironmentEntries = (vbtech) => [
+  ["VBTECH_IMAGE_REF", vbtech.imageRef],
+  ["VBTECH_RELEASE_SHA", vbtech.releaseSha],
+  ["VBTECH_DOMAIN", trustedVbtechDomain],
+  ["VBTECH_WWW_DOMAIN", trustedVbtechWwwDomain],
+  ["VBTECH_FUNCTION_PATH", vbtech.functionPath],
+  ["VBTECH_SUBMISSION_STATE", vbtech.submissionState],
+];
+
+function environmentWithoutVbtechSelector(environment) {
+  const value = { ...environment };
+  for (const key of vbtechInputKeys) delete value[key];
   return value;
 }
 
 function environmentWithVbtech(environment, vbtech) {
+  if (environment.VBTECH_IMAGE_TAG !== undefined)
+    throw new Error("caller v-b selector conflicts with preserved release");
   if (!vbtech) return environment;
+  const entries = vbtechEnvironmentEntries(vbtech);
+  if (
+    environment.VBTECH_FUNCTION_ORIGIN !== undefined ||
+    entries.some(
+      ([key, expected]) => environment[key] !== undefined && environment[key] !== expected,
+    )
+  )
+    throw new Error("caller v-b selector conflicts with preserved release");
   return {
-    ...environment,
-    VBTECH_IMAGE_TAG: vbtech.imageTag,
-    VBTECH_RELEASE_SHA: vbtech.releaseSha,
-    VBTECH_FUNCTION_PATH: vbtech.functionPath,
-    VBTECH_SUBMISSION_STATE: vbtech.submissionState,
+    ...environmentWithoutVbtechSelector(environment),
+    ...Object.fromEntries(entries),
   };
+}
+
+function sameVbtechRelease(left, right) {
+  if (left === undefined || right === undefined) return left === right;
+  return (
+    left.imageRef === right.imageRef &&
+    left.imageDigest === right.imageDigest &&
+    left.releaseSha === right.releaseSha &&
+    left.functionPath === right.functionPath &&
+    left.submissionState === right.submissionState
+  );
 }
 
 function isValidIsoDate(value) {
@@ -305,7 +344,7 @@ function sameRelease(left, right) {
     left?.previousTag === right?.previousTag &&
     left?.apiDigest === right?.apiDigest &&
     left?.edgeDigest === right?.edgeDigest &&
-    JSON.stringify(left?.vbtech) === JSON.stringify(right?.vbtech) &&
+    sameVbtechRelease(left?.vbtech, right?.vbtech) &&
     left?.state === right?.state &&
     left?.createdAt === right?.createdAt
   );
@@ -507,6 +546,7 @@ async function waitForApi(dependencies, options, compose, environment) {
 
 function deploymentDependencies(options, supplied = {}) {
   return {
+    latestHealthyVbtechRelease,
     runPreflight,
     runner: processRunner(),
     writeRelease,
@@ -534,13 +574,26 @@ async function markPreparedReleaseFailed(releaseDirectory, candidate) {
  */
 export async function prepareRelease(options, supplied = {}) {
   const dependencies = deploymentDependencies(options, supplied);
+  const preservedLifecycle = options.vbtechReleaseDirectory
+    ? await dependencies.latestHealthyVbtechRelease(options.vbtechReleaseDirectory)
+    : undefined;
+  const preserved = vbtechReleaseFromLifecycle(preservedLifecycle);
+  if (
+    options.vbtechReleaseDirectory &&
+    preserved === undefined &&
+    vbtechInputKeys.some((key) => options.environment[key] !== undefined)
+  )
+    throw new Error("caller v-b selector conflicts with preserved release");
+  const effectiveEnvironment = environmentWithVbtech(options.environment, preserved);
   dependencies.log("preflight");
-  const preflight = await dependencies.runPreflight(options.environment);
+  const preflight = await dependencies.runPreflight(effectiveEnvironment);
   const vbtech = vbtechReleaseFromPreflight(preflight);
+  if (options.vbtechReleaseDirectory && !sameVbtechRelease(vbtech, preserved))
+    throw new Error("caller v-b selector conflicts with preserved release");
   const environment = environmentWithVbtech(
     {
       ...process.env,
-      ...options.environment,
+      ...effectiveEnvironment,
       MARKIRO_ENV_FILE: preflight.envFile,
     },
     vbtech,
@@ -589,7 +642,7 @@ export async function prepareRelease(options, supplied = {}) {
       ? await mustRun(
           dependencies,
           "docker",
-          ["image", "inspect", "--format", "{{json .RepoTags}}", vbtech.imageTag],
+          ["image", "inspect", "--format", "{{json .RepoDigests}}", vbtech.imageRef],
           environment,
           dependencies.timeouts.command,
         )
@@ -603,7 +656,7 @@ export async function prepareRelease(options, supplied = {}) {
         ? {
             vbtech: {
               ...vbtech,
-              imageTag: requireApprovedTag(vbtech.imageTag, vbtechImage.stdout.trim()),
+              imageRef: requireApprovedDigest(vbtech.imageRef, vbtechImage.stdout.trim()),
             },
           }
         : {}),
@@ -676,14 +729,20 @@ export async function finalizePreparedRelease({ candidate, releaseDirectory }) {
   return writeStagedRelease(releaseDirectory, { ...candidate, state: "healthy" }, "healthy");
 }
 
-/** Restore the exact previous healthy digest pair without running migrations. */
+/** Restore the exact previous Markiro digest pair while retaining the candidate v-b selector. */
 export async function rollbackPreparedRelease(options, supplied = {}) {
   const dependencies = deploymentDependencies(options, supplied);
   const candidate = await requirePendingRelease(options.releaseDirectory, options.candidate, {
     allowHealthy: true,
   });
   if (!candidate.previousTag) {
-    const environment = { ...process.env, ...options.environment };
+    const baseEnvironment = environmentWithoutVbtechSelector({
+      ...process.env,
+      ...options.environment,
+    });
+    const environment = candidate.vbtech
+      ? environmentWithVbtech(baseEnvironment, candidate.vbtech)
+      : baseEnvironment;
     const compose = productionComposeArgs(environment);
     const recoveryErrors = [];
     let failed;
@@ -709,30 +768,34 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     return failed;
   }
   const previous = await healthyReleaseByTag(options.releaseDirectory, candidate.previousTag);
-  const candidateVbtechEnvironment = candidate.vbtech
-    ? environmentWithVbtech({ ...process.env, ...options.environment }, candidate.vbtech)
-    : undefined;
-  const candidateVbtechCompose = candidateVbtechEnvironment
-    ? productionComposeArgs(candidateVbtechEnvironment)
-    : undefined;
   const environment = environmentWithVbtech(
-    {
+    environmentWithoutVbtechSelector({
       ...process.env,
       ...options.environment,
       MARKIRO_IMAGE_TAG: previous.tag,
       MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
       MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
-    },
-    previous.vbtech,
+    }),
+    candidate.vbtech,
   );
   const compose = productionComposeArgs(environment);
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "pull", "api", "edge", ...(previous.vbtech ? ["vbtech-web"] : [])],
+    [...compose, "pull", "api", "edge", ...(candidate.vbtech ? ["vbtech-web"] : [])],
     environment,
     dependencies.timeouts.pull,
   );
+  if (candidate.vbtech) {
+    const vbtechImage = await mustRun(
+      dependencies,
+      "docker",
+      ["image", "inspect", "--format", "{{json .RepoDigests}}", candidate.vbtech.imageRef],
+      environment,
+      dependencies.timeouts.command,
+    );
+    requireApprovedDigest(candidate.vbtech.imageRef, vbtechImage.stdout.trim());
+  }
   await mustRun(
     dependencies,
     "docker",
@@ -741,7 +804,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     dependencies.timeouts.service,
   );
   await waitForApi(dependencies, options, compose, environment);
-  if (previous.vbtech)
+  if (candidate.vbtech)
     await mustRun(
       dependencies,
       "docker",
@@ -752,19 +815,11 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "up", "-d", ...(previous.vbtech ? [] : ["--no-deps"]), "edge"],
+    [...compose, "up", "-d", ...(candidate.vbtech ? [] : ["--no-deps"]), "edge"],
     environment,
     dependencies.timeouts.service,
   );
   await waitForEdgeTls(dependencies, options);
-  if (candidate.vbtech && !previous.vbtech)
-    await mustRun(
-      dependencies,
-      "docker",
-      [...candidateVbtechCompose, "stop", "vbtech-web"],
-      candidateVbtechEnvironment,
-      dependencies.timeouts.service,
-    );
   dependencies.log("release rolled back");
   return markPreparedReleaseFailed(options.releaseDirectory, candidate);
 }
@@ -775,7 +830,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
  * @property {string | null} previousTag
  * @property {string} apiDigest
  * @property {string} edgeDigest
- * @property {{imageTag: string, releaseSha: string, functionPath: string, submissionState: "disabled" | "enabled"}=} vbtech
+ * @property {{imageRef: string, imageDigest: string, releaseSha: string, functionPath: "", submissionState: "disabled"}=} vbtech
  * @property {"pending" | "healthy" | "failed"} state
  * @property {string} createdAt
  */
@@ -784,6 +839,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
  * @typedef {object} DeployOptions
  * @property {Record<string, string | undefined>} environment
  * @property {string=} releaseDirectory
+ * @property {string=} vbtechReleaseDirectory
  * @property {number=} readinessAttempts
  * @property {number=} readinessIntervalMs
  * @property {number=} commandTimeoutMs
@@ -869,7 +925,7 @@ export async function deployRelease(options, supplied = {}) {
       ? await mustRun(
           dependencies,
           "docker",
-          ["image", "inspect", "--format", "{{json .RepoTags}}", vbtech.imageTag],
+          ["image", "inspect", "--format", "{{json .RepoDigests}}", vbtech.imageRef],
           environment,
           dependencies.timeouts.command,
         )
@@ -883,7 +939,7 @@ export async function deployRelease(options, supplied = {}) {
         ? {
             vbtech: {
               ...vbtech,
-              imageTag: requireApprovedTag(vbtech.imageTag, vbtechImage.stdout.trim()),
+              imageRef: requireApprovedDigest(vbtech.imageRef, vbtechImage.stdout.trim()),
             },
           }
         : {}),
@@ -1019,6 +1075,7 @@ if (isMainModule(import.meta.url)) {
         {
           environment: process.env,
           releaseDirectory: cliReleaseDirectory(),
+          vbtechReleaseDirectory: defaultVbtechReleaseDirectory,
           requirePreviousHealthy: process.env.MARKIRO_REQUIRE_PREVIOUS_HEALTHY === "1",
           requireNoPreviousHealthy: process.env.MARKIRO_REQUIRE_NO_PREVIOUS_HEALTHY === "1",
         },

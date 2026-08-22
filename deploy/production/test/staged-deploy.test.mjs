@@ -13,7 +13,33 @@ const EDGE_DIGEST = `sha256:${"b".repeat(64)}`;
 const PREVIOUS_API = `ghcr.io/thevladbog/markiro-api@sha256:${"c".repeat(64)}`;
 const PREVIOUS_EDGE = `ghcr.io/thevladbog/markiro-edge@sha256:${"d".repeat(64)}`;
 const VBTECH_SHA = "e".repeat(40);
-const VBTECH_IMAGE = `ghcr.io/thevladbog/vbtech-web:${VBTECH_SHA}`;
+const VBTECH_DIGEST = `sha256:${"5".repeat(64)}`;
+const VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${VBTECH_DIGEST}`;
+const VBTECH_SELECTOR = {
+  imageRef: VBTECH_IMAGE_REF,
+  imageDigest: VBTECH_DIGEST,
+  releaseSha: VBTECH_SHA,
+  functionPath: "",
+  submissionState: "disabled",
+};
+const VBTECH_HEALTHY = {
+  imageRef: VBTECH_IMAGE_REF,
+  imageDigest: VBTECH_DIGEST,
+  releaseSha: VBTECH_SHA,
+  submissionState: "disabled",
+  createdAt: "2026-08-03T08:00:00.000Z",
+  state: "healthy",
+};
+const PREVIOUS_VBTECH_SHA = "6".repeat(40);
+const PREVIOUS_VBTECH_DIGEST = `sha256:${"7".repeat(64)}`;
+const PREVIOUS_VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${PREVIOUS_VBTECH_DIGEST}`;
+const PREVIOUS_VBTECH_SELECTOR = {
+  imageRef: PREVIOUS_VBTECH_IMAGE_REF,
+  imageDigest: PREVIOUS_VBTECH_DIGEST,
+  releaseSha: PREVIOUS_VBTECH_SHA,
+  functionPath: "",
+  submissionState: "disabled",
+};
 const ENVIRONMENT = {
   MARKIRO_IMAGE_TAG: TAG,
   MARKIRO_API_IMAGE_DIGEST: API_DIGEST,
@@ -24,18 +50,25 @@ const ENVIRONMENT = {
   MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
   MARKIRO_LANDING_DOMAIN: "markiro.example",
 };
+const VBTECH_RELEASE_DIRECTORY = "/private/vbtech-releases";
+const ENVIRONMENT_WITH_VBTECH_DOMAINS = {
+  ...ENVIRONMENT,
+  VBTECH_DOMAIN: "v-b.tech",
+  VBTECH_WWW_DOMAIN: "www.v-b.tech",
+};
 
 function legacyFileName(record) {
   return `${record.createdAt.replace(/[:.]/g, "-")}-${record.tag}.json`;
 }
 
-async function fixture({ failure, withPrevious = true } = {}) {
+async function fixture({ failure, previousVbtech, withPrevious = true } = {}) {
   const releaseDirectory = await mkdtemp(join(tmpdir(), "markiro-staged-deploy-"));
   const previous = {
     tag: PREVIOUS_TAG,
     previousTag: null,
     apiDigest: PREVIOUS_API,
     edgeDigest: PREVIOUS_EDGE,
+    ...(previousVbtech === undefined ? {} : { vbtech: previousVbtech }),
     state: "healthy",
     createdAt: "2026-08-03T09:00:00.000Z",
   };
@@ -75,6 +108,19 @@ async function fixture({ failure, withPrevious = true } = {}) {
       apiImageDigest: environment.MARKIRO_API_IMAGE_DIGEST,
       edgeImageDigest: environment.MARKIRO_EDGE_IMAGE_DIGEST,
       envFile: environment.MARKIRO_ENV_FILE,
+      ...(environment.VBTECH_IMAGE_REF === undefined
+        ? {}
+        : {
+            vbtechImageRef: environment.VBTECH_IMAGE_REF,
+            vbtechImageDigest: environment.VBTECH_IMAGE_REF.slice(
+              environment.VBTECH_IMAGE_REF.indexOf("@") + 1,
+            ),
+            vbtechReleaseSha: environment.VBTECH_RELEASE_SHA,
+            vbtechDomain: environment.VBTECH_DOMAIN,
+            vbtechWwwDomain: environment.VBTECH_WWW_DOMAIN,
+            vbtechFunctionPath: environment.VBTECH_FUNCTION_PATH,
+            vbtechSubmissionState: environment.VBTECH_SUBMISSION_STATE,
+          }),
     }),
     runner,
     isReady: async () => true,
@@ -126,40 +172,326 @@ test("prepare stops after local API and edge readiness with an exclusive pending
   );
 });
 
-test("staged v-b activation is recorded and rollback to a Markiro-only release stops its service", async () => {
-  const { calls, dependencies, releaseDirectory } = await fixture();
-  dependencies.runPreflight = async (environment) => ({
-    imageTag: environment.MARKIRO_IMAGE_TAG,
-    apiImageDigest: environment.MARKIRO_API_IMAGE_DIGEST,
-    edgeImageDigest: environment.MARKIRO_EDGE_IMAGE_DIGEST,
-    envFile: environment.MARKIRO_ENV_FILE,
-    vbtechImageTag: VBTECH_IMAGE,
-    vbtechReleaseSha: VBTECH_SHA,
-    vbtechDomain: "v-b.tech",
-    vbtechWwwDomain: "www.v-b.tech",
-    vbtechFunctionPath: "/d4example",
-    vbtechSubmissionState: "disabled",
+test("prepare preserves the latest healthy v-b selector through preflight and the staged Compose switch", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    previousVbtech: VBTECH_SELECTOR,
   });
-  const environment = {
-    ...ENVIRONMENT,
-    VBTECH_IMAGE_TAG: VBTECH_IMAGE,
-    VBTECH_DOMAIN: "v-b.tech",
-    VBTECH_WWW_DOMAIN: "www.v-b.tech",
+  const runPreflight = dependencies.runPreflight;
+  let preflightEnvironment;
+  let selectedDirectory;
+  dependencies.latestHealthyVbtechRelease = async (directory) => {
+    selectedDirectory = directory;
+    return VBTECH_HEALTHY;
+  };
+  dependencies.runPreflight = async (environment) => {
+    preflightEnvironment = environment;
+    return runPreflight(environment);
   };
 
   const candidate = await prepareRelease(
-    { environment, releaseDirectory, readinessAttempts: 1 },
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
     dependencies,
   );
-  assert.equal(candidate.vbtech.imageTag, VBTECH_IMAGE);
+
+  assert.equal(selectedDirectory, VBTECH_RELEASE_DIRECTORY);
+  assert.deepEqual(
+    {
+      imageRef: preflightEnvironment.VBTECH_IMAGE_REF,
+      releaseSha: preflightEnvironment.VBTECH_RELEASE_SHA,
+      functionPath: preflightEnvironment.VBTECH_FUNCTION_PATH,
+      submissionState: preflightEnvironment.VBTECH_SUBMISSION_STATE,
+    },
+    {
+      imageRef: VBTECH_IMAGE_REF,
+      releaseSha: VBTECH_SHA,
+      functionPath: "",
+      submissionState: "disabled",
+    },
+  );
+  assert.equal(preflightEnvironment.VBTECH_DOMAIN, "v-b.tech");
+  assert.equal(preflightEnvironment.VBTECH_WWW_DOMAIN, "www.v-b.tech");
+  assert.equal(Object.hasOwn(preflightEnvironment, "VBTECH_IMAGE_TAG"), false);
+  assert.deepEqual(candidate.vbtech, VBTECH_SELECTOR);
+  assert.equal(candidate.previousTag, PREVIOUS_TAG);
   assert.ok(calls.some(({ args }) => args.includes("pull") && args.includes("vbtech-web")));
-  assert.ok(calls.some(({ args }) => args.at(-1) === "vbtech-web" && args.includes("up")));
+  assert.ok(
+    calls.some(
+      ({ args }) =>
+        args.at(-1) === VBTECH_IMAGE_REF &&
+        args.includes("inspect") &&
+        args.includes("{{json .RepoDigests}}"),
+    ),
+  );
+  assert.deepEqual(
+    calls.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api", "vbtech-web", "edge"],
+  );
+  const edge = calls.find(({ args }) => args.includes("up") && args.at(-1) === "edge");
+  assert.equal(edge.args.includes("--no-deps"), false);
+  for (const call of calls) {
+    assert.equal(call.environment.VBTECH_IMAGE_REF, VBTECH_IMAGE_REF);
+    assert.equal(call.environment.VBTECH_RELEASE_SHA, VBTECH_SHA);
+    assert.equal(call.environment.VBTECH_FUNCTION_PATH, "");
+    assert.equal(call.environment.VBTECH_SUBMISSION_STATE, "disabled");
+    assert.equal(Object.hasOwn(call.environment, "VBTECH_IMAGE_TAG"), false);
+  }
+});
+
+test("prepare remains Markiro-only when authoritative v-b state is absent", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  let selectedDirectory;
+  dependencies.latestHealthyVbtechRelease = async (directory) => {
+    selectedDirectory = directory;
+    return undefined;
+  };
+
+  const candidate = await prepareRelease(
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+
+  assert.equal(selectedDirectory, VBTECH_RELEASE_DIRECTORY);
+  assert.equal(Object.hasOwn(candidate, "vbtech"), false);
+  assert.ok(calls.every(({ args }) => !args.includes("vbtech-web")));
+  assert.ok(
+    calls.some(
+      ({ args }) => args.includes("up") && args.at(-1) === "edge" && args.includes("--no-deps"),
+    ),
+  );
+});
+
+test("prepare rejects every caller v-b input when authoritative state is absent before preflight or mutation", async (t) => {
+  const inputs = [
+    ["image reference", { VBTECH_IMAGE_REF }],
+    ["retired image tag", { VBTECH_IMAGE_TAG: `ghcr.io/thevladbog/vbtech-web:${VBTECH_SHA}` }],
+    ["release SHA", { VBTECH_RELEASE_SHA: VBTECH_SHA }],
+    ["apex domain", { VBTECH_DOMAIN: "v-b.tech" }],
+    ["www domain", { VBTECH_WWW_DOMAIN: "www.v-b.tech" }],
+    ["function origin", { VBTECH_FUNCTION_ORIGIN: "https://functions.yandexcloud.net/d4example" }],
+    ["function path", { VBTECH_FUNCTION_PATH: "" }],
+    ["submission state", { VBTECH_SUBMISSION_STATE: "disabled" }],
+    [
+      "complete configuration",
+      {
+        VBTECH_IMAGE_REF,
+        VBTECH_RELEASE_SHA: VBTECH_SHA,
+        VBTECH_DOMAIN: "v-b.tech",
+        VBTECH_WWW_DOMAIN: "www.v-b.tech",
+        VBTECH_FUNCTION_PATH: "",
+        VBTECH_SUBMISSION_STATE: "disabled",
+      },
+    ],
+  ];
+
+  for (const [name, input] of inputs) {
+    await t.test(name, async () => {
+      const { calls, dependencies, releaseDirectory } = await fixture();
+      const before = await records(releaseDirectory);
+      let preflightCalls = 0;
+      dependencies.latestHealthyVbtechRelease = async () => undefined;
+      dependencies.runPreflight = async () => {
+        preflightCalls += 1;
+        throw new Error("preflight must not run");
+      };
+
+      await assert.rejects(
+        prepareRelease(
+          {
+            environment: { ...ENVIRONMENT, ...input },
+            releaseDirectory,
+            vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+            readinessAttempts: 1,
+          },
+          dependencies,
+        ),
+        /caller v-b selector conflicts with preserved release/,
+      );
+
+      assert.equal(preflightCalls, 0);
+      assert.deepEqual(calls, []);
+      assert.deepEqual(await records(releaseDirectory), before);
+    });
+  }
+});
+
+test("prepare rejects invalid authoritative v-b state before preflight or mutation", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  const before = await records(releaseDirectory);
+  let preflightCalls = 0;
+  dependencies.latestHealthyVbtechRelease = async () => {
+    throw new Error("v-b release state is invalid");
+  };
+  dependencies.runPreflight = async () => {
+    preflightCalls += 1;
+    throw new Error("preflight must not run");
+  };
+
+  await assert.rejects(
+    prepareRelease(
+      {
+        environment: ENVIRONMENT,
+        releaseDirectory,
+        vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+        readinessAttempts: 1,
+      },
+      dependencies,
+    ),
+    /v-b release state is invalid/,
+  );
+
+  assert.equal(preflightCalls, 0);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await records(releaseDirectory), before);
+});
+
+for (const [name, overrides] of [
+  ["replace", { VBTECH_RELEASE_SHA: "a".repeat(40) }],
+  ["replace the trusted apex domain in", { VBTECH_DOMAIN: "other.example" }],
+  ["replace the trusted www domain in", { VBTECH_WWW_DOMAIN: "www.other.example" }],
+  [
+    "remove",
+    {
+      VBTECH_IMAGE_REF: "",
+      VBTECH_RELEASE_SHA: "",
+      VBTECH_FUNCTION_PATH: "",
+      VBTECH_SUBMISSION_STATE: "",
+    },
+  ],
+]) {
+  test(`prepare does not let caller environment ${name} the authoritative v-b selector`, async () => {
+    const { calls, dependencies, releaseDirectory } = await fixture();
+    let preflightCalls = 0;
+    dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
+    dependencies.runPreflight = async () => {
+      preflightCalls += 1;
+      throw new Error("preflight must not run");
+    };
+
+    await assert.rejects(
+      prepareRelease(
+        {
+          environment: {
+            ...ENVIRONMENT_WITH_VBTECH_DOMAINS,
+            VBTECH_IMAGE_REF: VBTECH_IMAGE_REF,
+            VBTECH_RELEASE_SHA: VBTECH_SHA,
+            VBTECH_FUNCTION_PATH: "",
+            VBTECH_SUBMISSION_STATE: "disabled",
+            ...overrides,
+          },
+          releaseDirectory,
+          vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+          readinessAttempts: 1,
+        },
+        dependencies,
+      ),
+      /caller v-b selector conflicts with preserved release/,
+    );
+
+    assert.equal(preflightCalls, 0);
+    assert.deepEqual(calls, []);
+    assert.deepEqual(
+      (await records(releaseDirectory)).map(({ value }) => value.tag),
+      [PREVIOUS_TAG],
+    );
+  });
+}
+
+for (const [name, previousVbtech] of [
+  [
+    "tag-based selector",
+    {
+      imageTag: `ghcr.io/thevladbog/vbtech-web:${VBTECH_SHA}`,
+      releaseSha: VBTECH_SHA,
+      functionPath: "/d4example",
+      submissionState: "disabled",
+    },
+  ],
+  [
+    "partial digest selector",
+    {
+      imageRef: VBTECH_IMAGE_REF,
+      releaseSha: VBTECH_SHA,
+      functionPath: "",
+      submissionState: "disabled",
+    },
+  ],
+]) {
+  test(`prepare rejects a previous Markiro record with a ${name}`, async () => {
+    const { calls, dependencies, releaseDirectory } = await fixture({ previousVbtech });
+
+    await assert.rejects(
+      prepareRelease(
+        {
+          environment: ENVIRONMENT,
+          releaseDirectory,
+          readinessAttempts: 1,
+          requirePreviousHealthy: true,
+        },
+        dependencies,
+      ),
+      /previous healthy release is unavailable/,
+    );
+
+    assert.deepEqual(calls, []);
+  });
+}
+
+test("rollback to a previous Markiro-only release retains the authoritative v-b selector", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
+
+  const candidate = await prepareRelease(
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+  assert.deepEqual(candidate.vbtech, VBTECH_SELECTOR);
+  const rollbackStart = calls.length;
 
   await rollbackPreparedRelease(
-    { candidate, environment, releaseDirectory, readinessAttempts: 1 },
+    { candidate, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
     dependencies,
   );
-  assert.ok(calls.some(({ args }) => args.includes("stop") && args.includes("vbtech-web")));
+  const rollbackCalls = calls.slice(rollbackStart);
+  assert.ok(
+    rollbackCalls.some(
+      ({ args }) => args.includes("pull") && args.includes("api") && args.includes("vbtech-web"),
+    ),
+  );
+  assert.ok(
+    rollbackCalls.some(
+      ({ args }) =>
+        args.includes("inspect") &&
+        args.includes("{{json .RepoDigests}}") &&
+        args.at(-1) === VBTECH_IMAGE_REF,
+    ),
+  );
+  assert.deepEqual(
+    rollbackCalls.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api", "vbtech-web", "edge"],
+  );
+  assert.equal(
+    rollbackCalls.some(({ args }) => args.includes("stop")),
+    false,
+  );
+  for (const call of rollbackCalls) {
+    assert.equal(call.environment.VBTECH_IMAGE_REF, VBTECH_IMAGE_REF);
+    assert.equal(call.environment.VBTECH_RELEASE_SHA, VBTECH_SHA);
+  }
 });
 
 test("two SHA release directories replace one stable Compose project and rollback restores the prior digest pair", async () => {
@@ -623,10 +955,161 @@ test("rollback restores the exact previous digest pair without migrations and ve
   );
 });
 
-test("first-deploy rollback stops both candidate services and terminalizes the candidate failed", async () => {
-  const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+test("a failing Markiro candidate retains its authoritative v-b selector over stale previous state", async () => {
+  let candidateEdgeStarts = 0;
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    previousVbtech: PREVIOUS_VBTECH_SELECTOR,
+    failure: ({ args }) => {
+      if (args.includes("up") && args.at(-1) === "edge") {
+        candidateEdgeStarts += 1;
+        return candidateEdgeStarts === 1;
+      }
+      return false;
+    },
+  });
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
+
+  await assert.rejects(
+    prepareRelease(
+      {
+        environment: ENVIRONMENT,
+        releaseDirectory,
+        vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+        readinessAttempts: 1,
+        requirePreviousHealthy: true,
+      },
+      dependencies,
+    ),
+    /docker failed/,
+  );
+
+  assert.deepEqual(
+    calls.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api", "vbtech-web", "edge", "api", "vbtech-web", "edge"],
+  );
+  const serviceStarts = calls.filter(({ args }) => args.includes("up"));
+  for (const call of serviceStarts.slice(0, 3)) {
+    assert.equal(call.environment.VBTECH_IMAGE_REF, VBTECH_IMAGE_REF);
+    assert.equal(call.environment.VBTECH_RELEASE_SHA, VBTECH_SHA);
+    assert.equal(call.environment.VBTECH_FUNCTION_PATH, "");
+    assert.equal(call.environment.VBTECH_SUBMISSION_STATE, "disabled");
+  }
+  const restoredCalls = serviceStarts.slice(-3);
+  for (const call of restoredCalls) {
+    assert.equal(call.environment.VBTECH_IMAGE_REF, VBTECH_IMAGE_REF);
+    assert.equal(call.environment.VBTECH_RELEASE_SHA, VBTECH_SHA);
+    assert.equal(call.environment.VBTECH_FUNCTION_PATH, "");
+    assert.equal(call.environment.VBTECH_SUBMISSION_STATE, "disabled");
+    assert.equal(call.environment.VBTECH_DOMAIN, "v-b.tech");
+    assert.equal(call.environment.VBTECH_WWW_DOMAIN, "www.v-b.tech");
+    assert.equal(Object.hasOwn(call.environment, "VBTECH_IMAGE_TAG"), false);
+  }
+  const restoredApiIndex = calls.findIndex(
+    ({ args, environment }) =>
+      args.includes("up") &&
+      args.at(-1) === "api" &&
+      environment.MARKIRO_IMAGE_TAG === PREVIOUS_TAG,
+  );
+  const authoritativeInspectIndexes = calls.flatMap(({ args }, index) =>
+    args.at(-1) === VBTECH_IMAGE_REF &&
+    args.includes("inspect") &&
+    args.includes("{{json .RepoDigests}}")
+      ? [index]
+      : [],
+  );
+  const restoredPullIndex = calls.findIndex(
+    ({ args, environment }) =>
+      args.includes("pull") &&
+      args.includes("api") &&
+      args.includes("vbtech-web") &&
+      environment.MARKIRO_IMAGE_TAG === PREVIOUS_TAG,
+  );
+  assert.equal(authoritativeInspectIndexes.length, 2);
+  assert.ok(restoredPullIndex >= 0);
+  assert.ok(restoredPullIndex < authoritativeInspectIndexes.at(-1));
+  assert.ok(authoritativeInspectIndexes.at(-1) < restoredApiIndex);
+  assert.equal(
+    calls.some(
+      ({ args }) =>
+        args.at(-1) === PREVIOUS_VBTECH_IMAGE_REF &&
+        args.includes("inspect") &&
+        args.includes("{{json .RepoDigests}}"),
+    ),
+    false,
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("stop") && args.includes("vbtech-web")),
+    false,
+  );
+  const persisted = await records(releaseDirectory);
+  assert.equal(
+    persisted.filter(
+      ({ name, value }) =>
+        name.endsWith(".json") && value.tag === PREVIOUS_TAG && value.state === "healthy",
+    ).length,
+    1,
+  );
+  assert.deepEqual(
+    persisted.find(({ value }) => value.tag === PREVIOUS_TAG).value.vbtech,
+    PREVIOUS_VBTECH_SELECTOR,
+  );
+});
+
+test("rollback refuses to start services when the authoritative v-b digest is absent", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    previousVbtech: PREVIOUS_VBTECH_SELECTOR,
+  });
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
   const candidate = await prepareRelease(
-    { environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
+    dependencies,
+  );
+  const originalRun = dependencies.runner.run.bind(dependencies.runner);
+  let authoritativeVbtechInspects = 0;
+  dependencies.runner.run = async (command, args, childEnvironment, timeoutMs) => {
+    if (args.includes("inspect") && args.at(-1) === VBTECH_IMAGE_REF) {
+      authoritativeVbtechInspects += 1;
+      return {
+        code: 0,
+        stdout: JSON.stringify([`ghcr.io/thevladbog/vbtech-web@sha256:${"8".repeat(64)}`]),
+        stderr: "private output",
+      };
+    }
+    return originalRun(command, args, childEnvironment, timeoutMs);
+  };
+  const rollbackStart = calls.length;
+
+  await assert.rejects(
+    rollbackPreparedRelease(
+      { candidate, environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+      dependencies,
+    ),
+    /approved image digest is not present/,
+  );
+
+  const rollbackCalls = calls.slice(rollbackStart);
+  assert.equal(authoritativeVbtechInspects, 1);
+  assert.equal(
+    rollbackCalls.some(({ args }) => args.includes("up")),
+    false,
+  );
+});
+
+test("first-deploy rollback still stops every candidate service and terminalizes it failed", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
+  const candidate = await prepareRelease(
+    {
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+      readinessAttempts: 1,
+    },
     dependencies,
   );
   const rollbackStart = calls.length;
@@ -637,9 +1120,10 @@ test("first-deploy rollback stops both candidate services and terminalizes the c
   );
 
   assert.equal(candidate.previousTag, null);
+  assert.deepEqual(candidate.vbtech, VBTECH_SELECTOR);
   assert.deepEqual(
-    calls.slice(rollbackStart).map(({ args }) => args.slice(-3)),
-    [["stop", "api", "edge"]],
+    calls.slice(rollbackStart).map(({ args }) => args.slice(-4)),
+    [["stop", "api", "edge", "vbtech-web"]],
   );
   assert.equal(failed.state, "failed");
   assert.equal(
