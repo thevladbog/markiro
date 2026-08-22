@@ -39,6 +39,7 @@ function environment(overrides = {}) {
     MARKIRO_COMPOSE_PROJECT: "markiro-production",
     MARKIRO_ENV_FILE: "/etc/markiro/production.env",
     MARKIRO_DOMAIN: "app.markiro.example",
+    MARKIRO_SAAS_ADMIN_DOMAIN: "saas-admin.markiro.example",
     MARKIRO_KIOSK_DOMAIN: "kiosk.markiro.example",
     MARKIRO_LANDING_DOMAIN: "markiro.example",
     VBTECH_RELEASE_SHA: candidateSha,
@@ -387,6 +388,7 @@ test("deploys the disabled digest candidate in the exact lifecycle order", async
     assert.equal(call.commandOptions.cwd, context.activeRelease);
     assert.equal(call.environment.DATABASE_URL, undefined);
     assert.equal(call.environment.SECRET_VALUE, undefined);
+    assert.equal(call.environment.MARKIRO_SAAS_ADMIN_DOMAIN, "saas-admin.markiro.example");
   }
   assert.equal(
     context.calls.some(
@@ -558,6 +560,10 @@ for (const [name, overrides] of [
   ["Compose project", { MARKIRO_COMPOSE_PROJECT: "foreign-project" }],
   ["environment file", { MARKIRO_ENV_FILE: "/tmp/production.env" }],
   ["Markiro transport domain", { MARKIRO_DOMAIN: "https://app.markiro.example" }],
+  [
+    "Markiro SaaS admin domain",
+    { MARKIRO_SAAS_ADMIN_DOMAIN: "https://saas-admin.markiro.example" },
+  ],
   ["Docker credential directory", { DOCKER_CONFIG: "/tmp/foreign-docker-config" }],
   ["retired image tag", { VBTECH_IMAGE_TAG: candidateSha }],
   ["function origin", { VBTECH_FUNCTION_ORIGIN: "https://functions.example" }],
