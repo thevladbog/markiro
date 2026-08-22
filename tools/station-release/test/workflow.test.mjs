@@ -73,11 +73,15 @@ test("station beta publication is protected, serialized, main-only and channel-l
     signingStep.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD,
     "${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}",
   );
-  assert.match(text, /Normalize Tauri updater signing key/);
-  assert.match(text, /normalized_key=\"\$\(.*normalize-signing-key\.mjs\)/s);
-  assert.match(text, /normalized_key=.*\r?\n\s*normalized_key_file=/);
-  assert.match(text, /printf '%s' \"\$normalized_key\" > \"\$normalized_key_file\"/);
-  assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY=\"\$normalized_key_file\"/);
+  assert.match(text, /Validate Tauri updater signing key/);
+  assert.match(
+    signingStep.run,
+    /printf '%s' \"\$TAURI_SIGNING_PRIVATE_KEY\" \| node tools\/station-release\/normalize-signing-key\.mjs > \/dev\/null/,
+  );
+  assert.match(text, /signing_key_file=\"\$RUNNER_TEMP\/station-updater\.key\"/);
+  assert.match(text, /printf '%s' \"\$TAURI_SIGNING_PRIVATE_KEY\" > \"\$signing_key_file\"/);
+  assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY=\"\$signing_key_file\"/);
+  assert.doesNotMatch(signingStep.run, /normalized_key=/);
   assert.match(text, /bundle=\"\$installer\"/);
   assert.match(text, /signature=\"\$bundle\.sig\"/);
   assert.match(text, /artifacts\.mjs stage beta/);
@@ -87,7 +91,7 @@ test("station beta publication is protected, serialized, main-only and channel-l
     /auth_header=\"AUTHORIZATION: basic \$\(printf 'x-access-token:%s' \"\$GH_TOKEN\" \| base64 -w0\)\"/,
   );
   assert.match(text, /git -c \"http\.extraheader=\$auth_header\" push/);
-  assert.match(text, /trap 'rm -f \"\$normalized_key_file\"' EXIT/);
+  assert.match(text, /trap 'rm -f \"\$signing_key_file\"' EXIT/);
   assert.ok(text.indexOf("normalize-signing-key.mjs") < text.indexOf("tauri build"));
   assert.match(text, /persist-credentials:\s*false/);
   assert.match(text, /pnpm\/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1/);

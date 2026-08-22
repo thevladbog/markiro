@@ -63,8 +63,14 @@ test("station stable publication promotes an explicit accepted beta channel-last
   assert.match(text, /--commit "\$base_sha"/);
   assert.match(text, /tauri\.stable\.conf\.json/);
   assert.match(text, /tauri build[\s\S]*--config src-tauri\/tauri\.stable\.conf\.json/);
-  assert.match(text, /normalized_key="\$\(.*normalize-signing-key\.mjs/s);
-  assert.match(text, /printf '%s' "\$normalized_key" > "\$normalized_key_file"/);
+  assert.match(
+    build.run,
+    /printf '%s' "\$TAURI_SIGNING_PRIVATE_KEY" \| node tools\/station-release\/normalize-signing-key\.mjs > \/dev\/null/,
+  );
+  assert.match(text, /signing_key_file="\$RUNNER_TEMP\/station-stable-updater\.key"/);
+  assert.match(text, /printf '%s' "\$TAURI_SIGNING_PRIVATE_KEY" > "\$signing_key_file"/);
+  assert.match(text, /export TAURI_SIGNING_PRIVATE_KEY="\$signing_key_file"/);
+  assert.doesNotMatch(build.run, /normalized_key=/);
   assert.match(text, /artifacts\.mjs stage-stable/);
   assert.match(text, /artifacts\.mjs validate stable/);
   assert.match(text, /changelog\.mjs generate/);
