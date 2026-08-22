@@ -34,11 +34,14 @@ describe("tenant billing schema", () => {
     );
   });
 
-  it("stores versioned legal, postal, and confirmation facts on both profile histories", () => {
+  it("stores versioned legal, actual, postal, and confirmation facts on both profile histories", () => {
     const expectedColumns = [
       "full_name",
       "legal_address_raw",
       "legal_address",
+      "actual_same_as_legal",
+      "actual_address_raw",
+      "actual_address",
       "postal_same_as_legal",
       "postal_address_raw",
       "postal_address",
@@ -53,9 +56,14 @@ describe("tenant billing schema", () => {
       );
     }
 
-    expect(
-      getTableConfig(schema.operatorBillingProfiles).checks.map((constraint) => constraint.name),
-    ).toContain("operator_billing_profiles_legal_entity_check");
+    const operatorCheckNames = getTableConfig(schema.operatorBillingProfiles).checks.map(
+      (constraint) => constraint.name,
+    );
+    expect(operatorCheckNames).not.toContain("operator_billing_profiles_legal_entity_check");
+    expect(operatorCheckNames).toContain("operator_billing_profiles_actual_same_check");
+    expect(getTableConfig(schema.tenantBillingProfiles).checks.map((constraint) => constraint.name)).toContain(
+      "tenant_billing_profiles_actual_same_check",
+    );
   });
 
   it("defines separate constrained operator and tenant bank-account tables", () => {
