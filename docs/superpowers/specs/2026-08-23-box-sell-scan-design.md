@@ -24,17 +24,23 @@ DataMatrix с навигацией тап/свайп → касса сканир
 
 ## API (`apps/api/src/modules/boxes/`)
 
-- `GET /boxes/:boxId/sell-codes` и поиск по этикетке
-  `GET /boxes/by-sscc/:sscc/sell-codes`.
-- Авторизация: сессия кабинета + новая `CABINET_CAPABILITY.boxSellView`
-  (`@RequirePermissions`), тенант-скоуп через `RequestWithTenant`.
+- Один эндпоинт `GET /boxes/sell-codes?sscc=` — UI-флоу всегда начинается со
+  сканирования/ввода SSCC, и строки списка коробов тоже несут SSCC, поэтому
+  вариант по boxId не нужен.
+- Авторизация: сессия кабинета + `CABINET_CAPABILITY.OPERATIONS_READ`
+  (`@RequirePermissions`), тенант-скоуп через `RequestWithTenant`. Отдельная
+  capability не вводится: capabilities выводятся только из ролей
+  (`resolveCabinetAccess`), и новая была бы выдана ровно тем же ролям
+  (manager+), то есть не сузила бы доступ — только добавила бы кода.
 - Ответ: `boxId`, `sscc`, статус, продукт/GTIN, количество, и активные items
   (`displacedAt IS NULL AND removedAt IS NULL`) с `canonicalRaw`, `gtin14`,
   `serial`.
 - `canonicalRaw` отдаётся только этим эндпоинтом. Существующий `BoxCardItemDto`
   не расширяем — сырые КМ не должны попадать в обычную карточку короба.
-- Ограничения: короб закрыт (`closedAt IS NOT NULL`) и не разобран
-  (`disassembledAt IS NULL`), иначе 409 с машиночитаемым кодом ошибки.
+- Ограничения: короб закрыт (`closedAt IS NOT NULL`), не разобран
+  (`disassembledAt IS NULL`) и содержит хотя бы один активный код, иначе 409 с
+  машиночитаемым кодом ошибки (`box_not_closed` / `box_disassembled` /
+  `box_empty`).
 - Аудит: каждый успешный вызов пишет событие «просмотр кодов короба для продажи»
   (пользователь, время, boxId) в существующий аудит-механизм API.
 
