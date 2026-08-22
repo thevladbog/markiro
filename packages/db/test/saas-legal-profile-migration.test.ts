@@ -36,8 +36,12 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     await rm(join(legacyMigrations, "0061_saas_bank_accounts.sql"), { force: true });
     await rm(join(legacyMigrations, "0062_document_account_snapshots.sql"), { force: true });
     await rm(join(legacyMigrations, "0063_payment_account_evidence.sql"), { force: true });
+    await rm(join(legacyMigrations, "0064_normalize_operator_billing_profile_kind.sql"), {
+      force: true,
+    });
     await rm(join(legacyMigrations, "meta", "0060_snapshot.json"), { force: true });
     await rm(join(legacyMigrations, "meta", "0061_snapshot.json"), { force: true });
+    await rm(join(legacyMigrations, "meta", "0064_snapshot.json"), { force: true });
     const journalPath = join(legacyMigrations, "meta", "_journal.json");
     const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
       entries: Array<{ tag: string }>;
@@ -47,7 +51,8 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
         entry.tag !== "0060_saas_legal_profiles" &&
         entry.tag !== "0061_saas_bank_accounts" &&
         entry.tag !== "0062_document_account_snapshots" &&
-        entry.tag !== "0063_payment_account_evidence",
+        entry.tag !== "0063_payment_account_evidence" &&
+        entry.tag !== "0064_normalize_operator_billing_profile_kind",
     );
     await writeFile(journalPath, JSON.stringify(journal));
 
@@ -62,7 +67,7 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
       `INSERT INTO operator_billing_profiles
          (id, revision, is_current, kind, display_name, inn, kpp, ogrn, address_raw, address, created_by_platform_user_id)
        VALUES
-         ('00000000-0000-4000-8000-000000000601', 1, true, 'legal_entity', 'Маркиро', '7700000000', '770001001', '1027700000000', 'г Москва', '{"city":"Москва"}'::jsonb, 'legal-admin')`,
+         ('00000000-0000-4000-8000-000000000601', 1, true, 'individual', 'Маркиро', '7700000000', '770001001', '1027700000000', 'г Москва', '{"city":"Москва"}'::jsonb, 'legal-admin')`,
     );
     await pool.query(
       `INSERT INTO tenant_billing_profiles
@@ -97,7 +102,7 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     expect(columns.rows).toHaveLength(18);
 
     const operator = await pool.query(
-      `SELECT full_name, legal_address_raw, legal_address, postal_same_as_legal,
+      `SELECT kind, full_name, legal_address_raw, legal_address, postal_same_as_legal,
               postal_address_raw, postal_address, is_confirmed,
               confirmed_by_platform_user_id, confirmed_at
        FROM operator_billing_profiles
@@ -105,6 +110,7 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
     );
     expect(operator.rows).toEqual([
       {
+        kind: "legal_entity",
         full_name: "Маркиро",
         legal_address_raw: "г Москва",
         legal_address: { value: "г Москва", city: "Москва" },
@@ -115,6 +121,16 @@ describe.skipIf(!databaseUrl)("SaaS legal-profile migration", () => {
         confirmed_by_platform_user_id: null,
         confirmed_at: null,
       },
+    ]);
+    const constraints = await pool.query<{ constraint_name: string }>(
+      `SELECT constraint_name
+       FROM information_schema.table_constraints
+       WHERE constraint_schema = 'public'
+         AND table_name = 'operator_billing_profiles'
+         AND constraint_name = 'operator_billing_profiles_legal_entity_check'`,
+    );
+    expect(constraints.rows).toEqual([
+      { constraint_name: "operator_billing_profiles_legal_entity_check" },
     ]);
   });
 });

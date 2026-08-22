@@ -153,7 +153,7 @@ export function OffersPage() {
             </div>
           ) : null}
         </section>
-      ) : selected.isPending ? (
+      ) : selectedId !== null && selected.isPending ? (
         <Spinner label={t("shell.routeLoading")} />
       ) : null}
     </section>

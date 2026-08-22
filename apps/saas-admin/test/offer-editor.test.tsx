@@ -156,6 +156,15 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
+  it("renders an empty offer register without a stale detail loader", async () => {
+    installOfferEditorApi();
+
+    renderSaasApp({ initialEntry: "/offers" });
+
+    expect(await screen.findByText("Предложений пока нет")).toBeDefined();
+    expect(screen.queryByText("Загружаем раздел")).toBeNull();
+  });
+
   it("rejects a malformed offer success body at the browser boundary", async () => {
     installOfferEditorApi({
       offers: [

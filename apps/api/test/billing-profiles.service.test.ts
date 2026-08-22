@@ -89,6 +89,79 @@ function operatorHarness() {
 describe("BillingProfilesService", () => {
   afterEach(() => vi.useRealTimers());
 
+  it("normalizes legacy contact JSON before validating operator and tenant responses", async () => {
+    const createdAt = new Date("2026-08-22T04:00:00.000Z");
+    const profiles = [
+      {
+        id: "00000000-0000-4000-8000-000000000613",
+        kind: "legal_entity",
+        fullName: "ООО Маркиро",
+        displayName: "Маркиро",
+        inn: "7700000000",
+        kpp: "770001001",
+        ogrn: "1027700000000",
+        ogrnip: null,
+        legalAddressRaw: "г Москва",
+        legalAddress: null,
+        postalSameAsLegal: true,
+        postalAddressRaw: null,
+        postalAddress: null,
+        contact: {
+          legacy: "preserved in storage",
+          name: " Бухгалтерия ",
+          email: "not-an-email",
+          phone: " +7 999 000-00-00 ",
+        },
+        revision: 1,
+        isCurrent: true,
+        isConfirmed: false,
+        confirmedByPlatformUserId: null,
+        confirmedAt: null,
+        createdByPlatformUserId: actor.userId,
+        createdAt,
+      },
+      {
+        id: "00000000-0000-4000-8000-000000000614",
+        tenantId: "tenant-1",
+        kind: "individual",
+        fullName: "Иванов Иван Иванович",
+        displayName: "Иванов И. И.",
+        inn: null,
+        kpp: null,
+        ogrn: null,
+        ogrnip: null,
+        legalAddressRaw: "г Казань",
+        legalAddress: null,
+        postalSameAsLegal: true,
+        postalAddressRaw: null,
+        postalAddress: null,
+        contact: {},
+        revision: 1,
+        isCurrent: true,
+        isConfirmed: false,
+        confirmedByPlatformUserId: null,
+        confirmedAt: null,
+        createdByPlatformUserId: actor.userId,
+        createdAt,
+      },
+    ];
+    const selectQuery = {
+      from: vi.fn(() => selectQuery),
+      where: vi.fn(() => selectQuery),
+      limit: vi.fn(async () => [profiles.shift()]),
+    };
+    const db = { select: vi.fn(() => selectQuery) } as unknown as Db;
+    const audit = { record: vi.fn() } as unknown as PlatformAuditService;
+    const controller = new BillingProfilesController(new BillingProfilesService(db, audit));
+
+    await expect(controller.getOperator()).resolves.toMatchObject({
+      contact: { name: "Бухгалтерия", email: null, phone: "+7 999 000-00-00" },
+    });
+    await expect(controller.getTenant("tenant-1")).resolves.toMatchObject({
+      contact: { name: null, email: null, phone: null },
+    });
+  });
+
   it("creates a confirmed append-only operator revision with exact bounded audit metadata", async () => {
     vi.useFakeTimers();
     vi.setSystemTime("2026-08-22T04:00:00.000Z");
