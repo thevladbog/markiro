@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Put, Req } from "@nestjs/common";
+import { Body, Controller, Get, Param, Put, Req, Res } from "@nestjs/common";
+import type { Response } from "express";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
 import { ZodValidationPipe } from "../../zod.pipe";
@@ -18,8 +19,11 @@ export class BillingProfilesController {
 
   @Get("operator-profile")
   @RequirePlatformCapabilities("billing.read")
-  async getOperator() {
-    return operatorBillingProfileResponseSchema.nullable().parse(await this.profiles.getOperator());
+  async getOperator(@Res() response: Response) {
+    const profile = operatorBillingProfileResponseSchema
+      .nullable()
+      .parse(await this.profiles.getOperator());
+    return response.json(profile);
   }
 
   @Put("operator-profile")
@@ -36,10 +40,11 @@ export class BillingProfilesController {
 
   @Get("tenants/:tenantId/profile")
   @RequirePlatformCapabilities("billing.read")
-  async getTenant(@Param("tenantId") tenantId: string) {
-    return tenantBillingProfileResponseSchema
+  async getTenant(@Param("tenantId") tenantId: string, @Res() response: Response) {
+    const profile = tenantBillingProfileResponseSchema
       .nullable()
       .parse(await this.profiles.getTenant(tenantId));
+    return response.json(profile);
   }
 
   @Put("tenants/:tenantId/profile")

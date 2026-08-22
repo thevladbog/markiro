@@ -1,4 +1,5 @@
 import type { Db } from "@markiro/db";
+import type { Response } from "express";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BillingProfilesService } from "../src/modules/billing-profiles/billing-profiles.service";
@@ -26,6 +27,10 @@ const input = {
   postalAddress: { sameAsLegal: true },
   contact: { name: "Бухгалтер", email: "billing@example.invalid", phone: null },
 } as OperatorBillingProfileInput;
+
+function jsonResponse(): Response {
+  return { json: (body: unknown) => body } as unknown as Response;
+}
 
 function operatorHarness() {
   const current = {
@@ -154,10 +159,10 @@ describe("BillingProfilesService", () => {
     const audit = { record: vi.fn() } as unknown as PlatformAuditService;
     const controller = new BillingProfilesController(new BillingProfilesService(db, audit));
 
-    await expect(controller.getOperator()).resolves.toMatchObject({
+    await expect(controller.getOperator(jsonResponse())).resolves.toMatchObject({
       contact: { name: "Бухгалтерия", email: null, phone: "+7 999 000-00-00" },
     });
-    await expect(controller.getTenant("tenant-1")).resolves.toMatchObject({
+    await expect(controller.getTenant("tenant-1", jsonResponse())).resolves.toMatchObject({
       contact: { name: null, email: null, phone: null },
     });
   });
@@ -240,6 +245,6 @@ describe("BillingProfilesService", () => {
     } as unknown as BillingProfilesService;
     const controller = new BillingProfilesController(service);
 
-    await expect(controller.getOperator()).rejects.toThrow();
+    await expect(controller.getOperator(jsonResponse())).rejects.toThrow();
   });
 });
