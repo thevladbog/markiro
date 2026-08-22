@@ -68,6 +68,9 @@ function installOfferEditorApi({
       const url = String(input);
       const method = init.method ?? "GET";
       if (url.endsWith("/api/platform/me")) return jsonResponse(200, me);
+      if (url.endsWith("/api/platform/billing/operator/accounts") && method === "GET") {
+        return jsonResponse(200, []);
+      }
       if (url.endsWith("/api/platform/offers") && method === "GET") {
         return jsonResponse(200, offers);
       }

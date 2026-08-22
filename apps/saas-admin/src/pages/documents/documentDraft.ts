@@ -68,6 +68,8 @@ export function documentDraftReducer(
   switch (action.type) {
     case "tenant.selected":
       return { ...draft, tenantId: action.tenantId };
+    case "sellerAccount.selected":
+      return { ...draft, sellerBankAccountId: action.accountId };
     case "catalog.added": {
       const existingIndex = draft.lines.findIndex(
         (line) => line.catalogVersionId === action.version.id,
@@ -227,6 +229,9 @@ export function validateDocumentDraft(
 export function toInvoiceCreateInput(draft: DocumentDraft): CreateInvoiceInput {
   return {
     tenantId: draft.tenantId,
+    ...(draft.sellerBankAccountId !== undefined
+      ? { sellerBankAccountId: draft.sellerBankAccountId }
+      : {}),
     dueDate: optionalDate(draft.date),
     applicationMode: draft.applicationMode,
     lines: draft.lines.map(toInvoiceLine),
@@ -236,6 +241,9 @@ export function toInvoiceCreateInput(draft: DocumentDraft): CreateInvoiceInput {
 export function toOfferCreateInput(draft: DocumentDraft): CreateOfferInput {
   const input: CreateOfferInput = {
     tenantId: draft.tenantId,
+    ...(draft.sellerBankAccountId !== undefined
+      ? { sellerBankAccountId: draft.sellerBankAccountId }
+      : {}),
     expiresAt: optionalDate(draft.date),
     lines: draft.lines.map(toOfferLine),
   };

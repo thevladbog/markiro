@@ -15,6 +15,12 @@ import type {
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
+import {
+  bankAccountLast4,
+  bankAccountSnapshot,
+  billingProfileSnapshot,
+  resolveCommercialBillingDetails,
+} from "./commercial-snapshots";
 import type { CreateInvoiceDto } from "./dto";
 
 const cents = (value: string): bigint => {
@@ -53,6 +59,7 @@ export class BillingService {
         .values({
           tenantId: input.tenantId,
           number: next,
+          sellerBankAccountId: input.sellerBankAccountId ?? null,
           dueDate: input.dueDate ? new Date(input.dueDate) : null,
           applicationMode: input.applicationMode,
           createdByPlatformUserId: principal.userId,
@@ -225,36 +232,30 @@ export class BillingService {
         .select()
         .from(schema.invoices)
         .where(eq(schema.invoices.id, id))
+        .for("update")
         .limit(1);
       if (!invoice) throw new NotFoundException({ code: "invoice_not_found" });
       if (invoice.status !== "draft") throw new ConflictException({ code: "invoice_not_draft" });
-      const [seller] = await tx
-        .select()
-        .from(schema.operatorBillingProfiles)
-        .where(eq(schema.operatorBillingProfiles.isCurrent, true))
-        .limit(1);
-      const [buyer] = await tx
-        .select()
-        .from(schema.tenantBillingProfiles)
-        .where(
-          and(
-            eq(schema.tenantBillingProfiles.tenantId, invoice.tenantId),
-            eq(schema.tenantBillingProfiles.isCurrent, true),
-          ),
-        )
-        .limit(1);
-      if (!seller || !buyer) throw new ConflictException({ code: "billing_profile_required" });
+      const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
+        tx,
+        invoice.tenantId,
+        invoice.sellerBankAccountId,
+      );
+      const now = new Date();
       const [updated] = await tx
         .update(schema.invoices)
         .set({
           status: "issued",
-          issueDate: new Date(),
-          issuedAt: new Date(),
+          issueDate: now,
+          issuedAt: now,
           issuedByPlatformUserId: principal.userId,
-          sellerSnapshot: seller,
-          buyerSnapshot: buyer,
+          sellerBankAccountId: sellerAccount.id,
+          sellerSnapshot: billingProfileSnapshot(seller),
+          buyerSnapshot: billingProfileSnapshot(buyer),
+          sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
+          buyerBankAccountSnapshot: bankAccountSnapshot(buyerAccount),
         })
-        .where(eq(schema.invoices.id, id))
+        .where(and(eq(schema.invoices.id, id), eq(schema.invoices.status, "draft")))
         .returning();
       if (!updated) throw new ConflictException({ code: "invoice_not_draft" });
       await this.audit.record(tx, {
@@ -267,7 +268,14 @@ export class BillingService {
         targetId: id,
         reason: null,
         before: { status: invoice.status },
-        after: { status: "issued", number: invoice.number },
+        after: {
+          status: "issued",
+          number: invoice.number,
+          sellerAccountId: sellerAccount.id,
+          sellerAccountLast4: bankAccountLast4(sellerAccount),
+          buyerAccountId: buyerAccount.id,
+          buyerAccountLast4: bankAccountLast4(buyerAccount),
+        },
         requestId: null,
       });
       return updated;

@@ -13,7 +13,14 @@ import type {
   OfferServiceRecordSource,
 } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
+import {
+  bankAccountLast4,
+  bankAccountSnapshot,
+  billingProfileSnapshot,
+  resolveCommercialBillingDetails,
+} from "../billing/commercial-snapshots";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
+import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
 import { calculateOfferTotals } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
@@ -21,7 +28,10 @@ import type { CreateOfferDto, PaymentDto } from "./dto";
 
 @Injectable()
 export class PlatformOffersService {
-  constructor(@Inject(DB) private readonly db: Db) {}
+  constructor(
+    @Inject(DB) private readonly db: Db,
+    private readonly audit: PlatformAuditService,
+  ) {}
 
   async create(actor: PlatformPrincipal, input: CreateOfferDto): Promise<OfferServiceDetailSource> {
     let termsMarkdown: string | null;
@@ -82,6 +92,7 @@ export class PlatformOffersService {
         .insert(schema.commercialOffers)
         .values({
           tenantId: input.tenantId,
+          sellerBankAccountId: input.sellerBankAccountId ?? null,
           revision: 1,
           status: "draft",
           total: total.total,
@@ -147,22 +158,11 @@ export class PlatformOffersService {
         .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
         .for("update");
       if (!draft) throw new ConflictException({ code: "offer_not_draft" });
-      const [seller] = await tx
-        .select()
-        .from(schema.operatorBillingProfiles)
-        .where(eq(schema.operatorBillingProfiles.isCurrent, true))
-        .limit(1);
-      const [buyer] = await tx
-        .select()
-        .from(schema.tenantBillingProfiles)
-        .where(
-          and(
-            eq(schema.tenantBillingProfiles.tenantId, draft.tenantId),
-            eq(schema.tenantBillingProfiles.isCurrent, true),
-          ),
-        )
-        .limit(1);
-      if (!seller || !buyer) throw new ConflictException({ code: "billing_profile_required" });
+      const { seller, buyer, sellerAccount, buyerAccount } = await resolveCommercialBillingDetails(
+        tx,
+        draft.tenantId,
+        draft.sellerBankAccountId,
+      );
       const [latest] = await tx
         .select({ number: schema.commercialOffers.number })
         .from(schema.commercialOffers)
@@ -183,6 +183,7 @@ export class PlatformOffersService {
           number,
           publishedAt: new Date(),
           publishedByPlatformUserId: actor.userId,
+          sellerBankAccountId: sellerAccount.id,
           updatedAt: new Date(),
         })
         .where(and(eq(schema.commercialOffers.id, id), eq(schema.commercialOffers.status, "draft")))
@@ -201,14 +202,36 @@ export class PlatformOffersService {
         number,
         publishedAt: updated.publishedAt ?? new Date(),
         expiresAt: updated.expiresAt,
-        sellerSnapshot: seller,
-        buyerSnapshot: buyer,
+        sellerSnapshot: billingProfileSnapshot(seller),
+        buyerSnapshot: billingProfileSnapshot(buyer),
+        sellerBankAccountSnapshot: bankAccountSnapshot(sellerAccount),
+        buyerBankAccountSnapshot: bankAccountSnapshot(buyerAccount),
         linesSnapshot: lines,
         subtotal: updated.total,
         vatTotal: "0.00",
         total: updated.total,
         termsMarkdown: terms.markdown,
         termsHtml: terms.html,
+      });
+      await this.audit.record(tx, {
+        actorPlatformUserId: actor.userId,
+        actorRole: actor.role,
+        action: "billing.offer.published",
+        outcome: "success",
+        tenantId: updated.tenantId,
+        targetType: "commercial_offer",
+        targetId: updated.id,
+        reason: null,
+        before: { status: draft.status },
+        after: {
+          status: updated.status,
+          number,
+          sellerAccountId: sellerAccount.id,
+          sellerAccountLast4: bankAccountLast4(sellerAccount),
+          buyerAccountId: buyerAccount.id,
+          buyerAccountLast4: bankAccountLast4(buyerAccount),
+        },
+        requestId: null,
       });
       return this.detailWith(tx, updated.tenantId, updated.id);
     });

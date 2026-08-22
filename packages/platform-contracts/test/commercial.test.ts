@@ -88,6 +88,8 @@ const issuedInvoiceMetadata = {
   issueDate: CREATED_AT,
   sellerSnapshot: { displayName: "Markiro" },
   buyerSnapshot: { displayName: "Factory" },
+  sellerBankAccountSnapshot: null,
+  buyerBankAccountSnapshot: null,
   issuedAt: CREATED_AT,
   issuedByPlatformUserId: PLATFORM_USER_ID,
 } as const;

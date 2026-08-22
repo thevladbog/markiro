@@ -29,6 +29,7 @@ export interface DocumentLineDraft {
 
 export interface DocumentDraft {
   tenantId: string;
+  sellerBankAccountId?: string | null;
   applicationMode: "manual" | "automatic";
   date: string;
   termsMarkdown?: string | null;
@@ -37,6 +38,7 @@ export interface DocumentDraft {
 
 export type DocumentDraftAction =
   | { type: "tenant.selected"; tenantId: string }
+  | { type: "sellerAccount.selected"; accountId: string }
   | { type: "catalog.added"; version: CatalogVersion; separate?: boolean; id: string }
   | { type: "line.quantityChanged"; id: string; quantity: number }
   | { type: "line.priceChanged"; id: string; price: string }

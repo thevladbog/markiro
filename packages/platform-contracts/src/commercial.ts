@@ -293,6 +293,7 @@ const offerCreateLineSchema = z
 export const offerCreateSchema = z
   .object({
     tenantId: platformTenantIdSchema,
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     expiresAt: nullableRequestDateSchema.optional(),
     termsMarkdown: z.string().max(20_000).nullable().optional(),
     lines: z.array(offerCreateLineSchema).min(1).max(100),
@@ -314,6 +315,7 @@ const offerRecordCommonSchema = z
     familyId: platformUuidSchema,
     revision: positiveIntegerSchema,
     previousRevisionId: platformUuidSchema.nullable(),
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     total: platformMoneySchema,
     expiresAt: nullableResponseTimestampSchema,
     termsMarkdown: z.string().max(20_000).nullable(),
@@ -625,6 +627,7 @@ const invoiceCreateLineSchema = z
 export const invoiceCreateSchema = z
   .object({
     tenantId: platformTenantIdSchema,
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     dueDate: nullableRequestDateSchema.optional(),
     applicationMode: z.enum(["manual", "automatic"]),
     lines: z.array(invoiceCreateLineSchema).min(1).max(100),
@@ -672,6 +675,7 @@ const invoiceRecordCommonSchema = z
     id: platformUuidSchema,
     tenantId: platformTenantIdSchema,
     number: z.string().min(1),
+    sellerBankAccountId: platformUuidSchema.nullable().optional(),
     dueDate: nullableResponseTimestampSchema,
     currency: z.literal("RUB"),
     subtotal: platformMoneySchema,
@@ -688,6 +692,8 @@ const unissuedInvoiceFields = {
   issueDate: z.null(),
   sellerSnapshot: z.null(),
   buyerSnapshot: z.null(),
+  sellerBankAccountSnapshot: z.null().optional(),
+  buyerBankAccountSnapshot: z.null().optional(),
   issuedByPlatformUserId: z.null(),
   issuedAt: z.null(),
 };
@@ -695,6 +701,8 @@ const issuedInvoiceFields = {
   issueDate: responseTimestampSchema,
   sellerSnapshot: nonNullUnknownSchema,
   buyerSnapshot: nonNullUnknownSchema,
+  sellerBankAccountSnapshot: z.unknown().nullable().optional(),
+  buyerBankAccountSnapshot: z.unknown().nullable().optional(),
   issuedByPlatformUserId: platformUserIdSchema,
   issuedAt: responseTimestampSchema,
 };
@@ -746,6 +754,8 @@ export const invoiceServiceRecordSchema = invoiceRecordCommonSchema
     dueDate: nullableServiceTimestampSchema,
     sellerSnapshot: z.unknown().nullable(),
     buyerSnapshot: z.unknown().nullable(),
+    sellerBankAccountSnapshot: z.unknown().nullable().optional(),
+    buyerBankAccountSnapshot: z.unknown().nullable().optional(),
     issuedByPlatformUserId: nullablePlatformUserIdSchema,
     issuedAt: nullableServiceTimestampSchema,
     paidAt: nullableServiceTimestampSchema,

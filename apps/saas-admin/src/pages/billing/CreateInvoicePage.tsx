@@ -19,6 +19,7 @@ import {
 import { createInvoice } from "./api.js";
 import { getOffer } from "../offers/api.js";
 import { sourceOfferDraft } from "./sourceOfferDraft.js";
+import { listOperatorBankAccounts } from "../settings/api.js";
 
 export { sourceOfferDraft } from "./sourceOfferDraft.js";
 
@@ -60,6 +61,10 @@ function InvoiceEditor() {
   const catalog = useQuery({
     queryKey: ["platform", "catalog", "document-picker"],
     queryFn: listCatalogVersions,
+  });
+  const sellerAccounts = useQuery({
+    queryKey: ["platform", "billing", "operator", "accounts"],
+    queryFn: listOperatorBankAccounts,
   });
   const selectedTenantId = sourceOffer.data?.tenantId ?? requestedTenant;
   const selectedTenantOnPage =
@@ -104,6 +109,7 @@ function InvoiceEditor() {
   if (
     tenants.isPending ||
     catalog.isPending ||
+    sellerAccounts.isPending ||
     (sourceOfferId !== undefined && sourceOffer.isPending) ||
     (needsTenantPrefetch && prefetchedTenant.isPending)
   ) {
@@ -116,6 +122,7 @@ function InvoiceEditor() {
   }
   if (
     tenants.error ||
+    sellerAccounts.error ||
     (catalog.error && !catalog.data) ||
     (sourceOfferId !== undefined && sourceOffer.error) ||
     (needsTenantPrefetch && prefetchedTenant.error)
@@ -145,6 +152,8 @@ function InvoiceEditor() {
       initialDraft={initialDraft}
       tenants={pickerTenants}
       catalog={(catalog.data?.items ?? []).filter((version) => version.status === "published")}
+      sellerAccounts={sellerAccounts.data ?? []}
+      loadingSellerAccounts={sellerAccounts.isPending}
       loadingSources={false}
       submitting={create.isPending}
       {...(create.error

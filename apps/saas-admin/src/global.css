@@ -1952,6 +1952,23 @@ textarea {
   margin-bottom: 20px;
 }
 
+.document-composer__parties,
+.seller-account-picker {
+  display: grid;
+  gap: 12px;
+}
+
+.seller-account-picker p,
+.seller-account-picker a {
+  margin: 0;
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.seller-account-picker a {
+  color: var(--accent-text);
+}
+
 .document-composer__header p,
 .document-composer__header h1,
 .document-summary h2,

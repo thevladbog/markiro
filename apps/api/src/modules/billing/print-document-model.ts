@@ -47,6 +47,8 @@ type InvoiceLike = {
   dueDate: Date | null;
   sellerSnapshot: unknown;
   buyerSnapshot: unknown;
+  sellerBankAccountSnapshot?: unknown;
+  buyerBankAccountSnapshot?: unknown;
   subtotal: string;
   vatTotal: string;
   total: string;
@@ -65,8 +67,35 @@ type InvoiceLike = {
 
 const profile = (value: unknown): BillingProfileSnapshot =>
   value && typeof value === "object" ? (value as BillingProfileSnapshot) : {};
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 const text = (value: unknown, fallback = "") =>
   typeof value === "string" || typeof value === "number" ? String(value) : fallback;
+const optionalText = (...values: unknown[]): string | null => {
+  for (const value of values) {
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return null;
+};
+
+const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnapshot => {
+  const source = profile(profileValue);
+  const contact = record(source.contact);
+  const legacyBankDetails = record(source.bankDetails);
+  const account = { ...legacyBankDetails, ...record(accountValue) };
+  return {
+    ...source,
+    legalName: optionalText(source.legalName, source.fullName),
+    taxId: optionalText(source.taxId, source.inn),
+    registrationId: optionalText(source.registrationId, source.ogrn, source.ogrnip),
+    address: optionalText(source.address, source.legalAddressRaw),
+    bankAccount: optionalText(source.bankAccount, account.settlementAccount),
+    bankName: optionalText(source.bankName, account.bankName),
+    correspondentAccount: optionalText(source.correspondentAccount, account.correspondentAccount),
+    phone: optionalText(source.phone, contact.phone),
+    email: optionalText(source.email, contact.email),
+  };
+};
 
 export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
   return {
@@ -75,8 +104,8 @@ export function toInvoicePrintModel(invoice: InvoiceLike): PrintDocumentModel {
     status: invoice.status,
     issuedOrPublishedAt: invoice.issueDate ?? new Date(0),
     dueOrExpiresAt: invoice.dueDate,
-    seller: profile(invoice.sellerSnapshot),
-    buyer: profile(invoice.buyerSnapshot),
+    seller: party(invoice.sellerSnapshot, invoice.sellerBankAccountSnapshot),
+    buyer: party(invoice.buyerSnapshot, invoice.buyerBankAccountSnapshot),
     lines: invoice.lines.map((line) => ({
       position: line.position,
       name: line.nameRu,
@@ -102,6 +131,8 @@ export function toOfferPrintModel(snapshot: {
   expiresAt: Date | null;
   sellerSnapshot: unknown;
   buyerSnapshot: unknown;
+  sellerBankAccountSnapshot?: unknown;
+  buyerBankAccountSnapshot?: unknown;
   linesSnapshot: unknown;
   subtotal: string;
   vatTotal: string;
@@ -115,8 +146,8 @@ export function toOfferPrintModel(snapshot: {
     status: snapshot.status,
     issuedOrPublishedAt: snapshot.publishedAt,
     dueOrExpiresAt: snapshot.expiresAt,
-    seller: profile(snapshot.sellerSnapshot),
-    buyer: profile(snapshot.buyerSnapshot),
+    seller: party(snapshot.sellerSnapshot, snapshot.sellerBankAccountSnapshot),
+    buyer: party(snapshot.buyerSnapshot, snapshot.buyerBankAccountSnapshot),
     lines: lines.map((line, index) => {
       const item = line as Record<string, unknown>;
       return {
