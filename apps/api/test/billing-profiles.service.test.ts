@@ -24,6 +24,11 @@ const input = {
   ogrn: "1027700000000",
   legalAddressRaw: "г Москва",
   legalAddress: { value: "г Москва", city: "Москва" },
+  actualAddress: {
+    sameAsLegal: false,
+    raw: "г Москва, ул Тверская, 2",
+    normalized: { value: "г Москва, ул Тверская, 2", city: "Москва" },
+  },
   postalAddress: { sameAsLegal: true },
   contact: { name: "Бухгалтер", email: "billing@example.invalid", phone: null },
 } as OperatorBillingProfileInput;
@@ -39,6 +44,7 @@ function operatorHarness() {
     kind: "legal_entity",
     displayName: "Старое имя",
     isConfirmed: true,
+    actualSameAsLegal: true,
   };
   const insertedValues: Array<Record<string, unknown>> = [];
   const updatedValues: Array<Record<string, unknown>> = [];
@@ -48,6 +54,9 @@ function operatorHarness() {
     revision: 3,
     isCurrent: true,
     ...input,
+    actualSameAsLegal: false,
+    actualAddressRaw: "г Москва, ул Тверская, 2",
+    actualAddress: { value: "г Москва, ул Тверская, 2", city: "Москва" },
     postalSameAsLegal: true,
     postalAddressRaw: null,
     postalAddress: null,
@@ -108,6 +117,9 @@ describe("BillingProfilesService", () => {
         ogrnip: null,
         legalAddressRaw: "г Москва",
         legalAddress: null,
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -137,6 +149,9 @@ describe("BillingProfilesService", () => {
         ogrnip: null,
         legalAddressRaw: "г Казань",
         legalAddress: null,
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -181,6 +196,9 @@ describe("BillingProfilesService", () => {
         fullName: "ООО Маркиро",
         legalAddressRaw: "г Москва",
         legalAddress: { value: "г Москва", city: "Москва" },
+        actualSameAsLegal: false,
+        actualAddressRaw: "г Москва, ул Тверская, 2",
+        actualAddress: { value: "г Москва, ул Тверская, 2", city: "Москва" },
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -205,19 +223,21 @@ describe("BillingProfilesService", () => {
         kind: "legal_entity",
         displayName: "Старое имя",
         confirmed: true,
+        actualSameAsLegal: true,
       },
       after: {
         revision: 3,
         kind: "legal_entity",
         displayName: "Маркиро",
         confirmed: true,
+        actualSameAsLegal: false,
       },
       requestId: null,
     });
     expect(result).toEqual(created);
   });
 
-  it("rejects an impossible non-legal-entity operator profile at the response boundary", async () => {
+  it("returns an individual operator profile at the response boundary", async () => {
     const service = {
       getOperator: vi.fn(async () => ({
         id: "00000000-0000-4000-8000-000000000613",
@@ -230,6 +250,9 @@ describe("BillingProfilesService", () => {
         ogrnip: null,
         legalAddressRaw: "г Москва",
         legalAddress: null,
+        actualSameAsLegal: true,
+        actualAddressRaw: null,
+        actualAddress: null,
         postalSameAsLegal: true,
         postalAddressRaw: null,
         postalAddress: null,
@@ -245,6 +268,11 @@ describe("BillingProfilesService", () => {
     } as unknown as BillingProfilesService;
     const controller = new BillingProfilesController(service);
 
-    await expect(controller.getOperator(jsonResponse())).rejects.toThrow();
+    await expect(controller.getOperator(jsonResponse())).resolves.toMatchObject({
+      kind: "individual",
+      actualSameAsLegal: true,
+      actualAddressRaw: null,
+      actualAddress: null,
+    });
   });
 });

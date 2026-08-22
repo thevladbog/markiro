@@ -12,7 +12,7 @@ type OperatorBillingProfileRecord = typeof schema.operatorBillingProfiles.$infer
 type TenantBillingProfileRecord = typeof schema.tenantBillingProfiles.$inferSelect;
 type ExistingBillingProfile = Pick<
   OperatorBillingProfileRecord,
-  "bankDetails" | "displayName" | "isConfirmed" | "kind" | "revision"
+  "actualSameAsLegal" | "bankDetails" | "displayName" | "isConfirmed" | "kind" | "revision"
 >;
 
 @Injectable()
@@ -149,6 +149,7 @@ function profileValues(
   actorPlatformUserId: string,
   current?: ExistingBillingProfile,
 ) {
+  const actual = input.actualAddress;
   const postal = input.postalAddress;
   const legalAddress = input.legalAddress ?? null;
   return {
@@ -161,6 +162,9 @@ function profileValues(
     ogrnip: "ogrnip" in input ? input.ogrnip : null,
     legalAddressRaw: input.legalAddressRaw,
     legalAddress,
+    actualSameAsLegal: actual.sameAsLegal,
+    actualAddressRaw: actual.sameAsLegal ? null : actual.raw,
+    actualAddress: actual.sameAsLegal ? null : (actual.normalized ?? null),
     postalSameAsLegal: postal.sameAsLegal,
     postalAddressRaw: postal.sameAsLegal ? null : postal.raw,
     postalAddress: postal.sameAsLegal ? null : (postal.normalized ?? null),
@@ -180,12 +184,14 @@ function auditProfileSummary(profile: {
   kind: string;
   displayName: string;
   isConfirmed: boolean;
+  actualSameAsLegal: boolean;
 }) {
   return {
     revision: profile.revision,
     kind: profile.kind,
     displayName: profile.displayName,
     confirmed: profile.isConfirmed,
+    actualSameAsLegal: profile.actualSameAsLegal,
   };
 }
 
