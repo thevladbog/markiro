@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, max } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type {
+  CommercialDocumentDownloadSource,
+  CommercialDocumentListItemServiceSource,
+  CommercialDocumentRenderServiceResultSource,
+  CommercialDocumentServiceSource,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import { BillingService } from "./billing.service";
@@ -19,7 +25,10 @@ export class BillingDocumentsService {
     private readonly storage: ObjectStorageService,
   ) {}
 
-  async renderInvoice(invoiceId: string, requestedRevision?: number) {
+  async renderInvoice(
+    invoiceId: string,
+    requestedRevision?: number,
+  ): Promise<CommercialDocumentRenderServiceResultSource> {
     const invoice = await this.billing.get(invoiceId);
     if (invoice.status === "draft") {
       throw new NotFoundException({ code: "invoice_not_issued" });
@@ -31,11 +40,11 @@ export class BillingDocumentsService {
     return { revision, documents: results };
   }
 
-  async renderAndStore(invoiceId: string) {
+  async renderAndStore(invoiceId: string): Promise<CommercialDocumentRenderServiceResultSource> {
     return this.renderInvoice(invoiceId);
   }
 
-  async list(invoiceId: string) {
+  async list(invoiceId: string): Promise<CommercialDocumentListItemServiceSource[]> {
     return this.db
       .select({
         id: schema.invoiceDocuments.id,
@@ -54,7 +63,7 @@ export class BillingDocumentsService {
       .orderBy(desc(schema.invoiceDocuments.revision), schema.invoiceDocuments.format);
   }
 
-  async url(invoiceId: string, documentId?: string) {
+  async url(invoiceId: string, documentId?: string): Promise<CommercialDocumentDownloadSource> {
     const [document] = await this.db
       .select()
       .from(schema.invoiceDocuments)
@@ -116,7 +125,7 @@ export class BillingDocumentsService {
   private async renderOne(
     document: typeof schema.invoiceDocuments.$inferSelect,
     model: Parameters<typeof renderPrintHtml>[0],
-  ) {
+  ): Promise<CommercialDocumentServiceSource> {
     if (document.status === "ready") return this.publicDocument(document);
     try {
       const format = document.format as Format;
@@ -157,7 +166,9 @@ export class BillingDocumentsService {
     }
   }
 
-  private publicDocument(document: typeof schema.invoiceDocuments.$inferSelect) {
+  private publicDocument(
+    document: typeof schema.invoiceDocuments.$inferSelect,
+  ): CommercialDocumentServiceSource {
     return {
       id: document.id,
       revision: document.revision,

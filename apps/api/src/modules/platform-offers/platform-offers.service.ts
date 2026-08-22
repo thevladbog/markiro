@@ -7,6 +7,11 @@ import {
 } from "@nestjs/common";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type {
+  OfferPaymentResultSource,
+  OfferServiceDetailSource,
+  OfferServiceRecordSource,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import type { EntitlementsExecutor } from "../../subscriptions/entitlements.types";
@@ -18,7 +23,7 @@ import type { CreateOfferDto, PaymentDto } from "./dto";
 export class PlatformOffersService {
   constructor(@Inject(DB) private readonly db: Db) {}
 
-  async create(actor: PlatformPrincipal, input: CreateOfferDto) {
+  async create(actor: PlatformPrincipal, input: CreateOfferDto): Promise<OfferServiceDetailSource> {
     let termsMarkdown: string | null;
     try {
       termsMarkdown = normalizeOfferTerms(input.termsMarkdown).markdown;
@@ -80,7 +85,7 @@ export class PlatformOffersService {
           revision: 1,
           status: "draft",
           total: total.total,
-          expiresAt: input.expiresAt ?? null,
+          expiresAt: input.expiresAt ? new Date(input.expiresAt) : null,
           termsMarkdown,
           createdByPlatformUserId: actor.userId,
         })
@@ -115,7 +120,7 @@ export class PlatformOffersService {
     });
   }
 
-  async list(actor: PlatformPrincipal, tenantId?: string) {
+  async list(actor: PlatformPrincipal, tenantId?: string): Promise<OfferServiceRecordSource[]> {
     const rows = await this.db
       .select()
       .from(schema.commercialOffers)
@@ -124,7 +129,7 @@ export class PlatformOffersService {
     return rows;
   }
 
-  async detail(actor: PlatformPrincipal, id: string) {
+  async detail(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
     const [offer] = await this.db
       .select()
       .from(schema.commercialOffers)
@@ -134,7 +139,7 @@ export class PlatformOffersService {
     return this.detailWith(this.db, offer.tenantId, id);
   }
 
-  async publish(actor: PlatformPrincipal, id: string) {
+  async publish(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
     return this.db.transaction(async (tx) => {
       const [draft] = await tx
         .select()
@@ -209,7 +214,7 @@ export class PlatformOffersService {
     });
   }
 
-  async cancel(actor: PlatformPrincipal, id: string) {
+  async cancel(actor: PlatformPrincipal, id: string): Promise<OfferServiceDetailSource> {
     const [offer] = await this.db
       .update(schema.commercialOffers)
       .set({ status: "cancelled", updatedAt: new Date() })
@@ -221,7 +226,12 @@ export class PlatformOffersService {
     return this.detail(actor, id);
   }
 
-  async pay(actor: PlatformPrincipal, id: string, key: string, input: PaymentDto) {
+  async pay(
+    actor: PlatformPrincipal,
+    id: string,
+    key: string,
+    input: PaymentDto,
+  ): Promise<OfferPaymentResultSource> {
     if (!key.trim()) throw new ConflictException({ code: "idempotency_key_required" });
     return this.db.transaction(async (tx) => {
       const [offer] = await tx
@@ -397,7 +407,11 @@ export class PlatformOffersService {
     });
   }
 
-  private async detailWith(executor: EntitlementsExecutor, tenantId: string, id: string) {
+  private async detailWith(
+    executor: EntitlementsExecutor,
+    tenantId: string,
+    id: string,
+  ): Promise<OfferServiceDetailSource> {
     const [offer] = await executor
       .select()
       .from(schema.commercialOffers)

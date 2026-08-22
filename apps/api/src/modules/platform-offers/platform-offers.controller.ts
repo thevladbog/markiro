@@ -1,6 +1,8 @@
 import { Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
+import { platformCommercialContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   createOfferSchema,
@@ -21,80 +23,106 @@ export class PlatformOffersController {
 
   @Get()
   @RequirePlatformCapabilities("billing.read")
-  list(@Req() req: RequestWithPlatformPrincipal, @Query("tenantId") tenantId?: string) {
-    return this.offers.list(req.platformPrincipal!, tenantId);
+  async list(@Req() req: RequestWithPlatformPrincipal, @Query("tenantId") tenantId?: string) {
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.list.response,
+      await this.offers.list(req.platformPrincipal!, tenantId),
+    );
   }
 
   @Get(":id")
   @RequirePlatformCapabilities("billing.read")
-  detail(
+  async detail(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
-    return this.offers.detail(req.platformPrincipal!, id);
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.detail.response,
+      await this.offers.detail(req.platformPrincipal!, id),
+    );
   }
 
   @Post()
   @RequirePlatformCapabilities("billing.write")
-  create(
+  async create(
     @Req() req: RequestWithPlatformPrincipal,
     @Body(new ZodValidationPipe(createOfferSchema)) body: CreateOfferDto,
   ) {
-    return this.offers.create(req.platformPrincipal!, body);
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.create.response,
+      await this.offers.create(req.platformPrincipal!, body),
+    );
   }
 
   @Post(":id/publish")
   @HttpCode(200)
   @RequirePlatformCapabilities("billing.write")
-  publish(
+  async publish(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
-    return this.offers.publish(req.platformPrincipal!, id).then(async (offer) => {
-      const documents = await this.documents.render(id);
-      return { ...offer, documents };
+    const offer = await this.offers.publish(req.platformPrincipal!, id);
+    const documents = await this.documents.render(id);
+    return parsePlatformResponse(platformCommercialContracts.offers.publish.response, {
+      ...offer,
+      documents,
     });
   }
 
   @Get(":id/documents")
   @RequirePlatformCapabilities("billing.read")
-  documentsList(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
-    return this.documents.list(id);
+  async documentsList(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.documents.list.response,
+      await this.documents.list(id),
+    );
   }
 
   @Post(":id/documents")
   @RequirePlatformCapabilities("billing.write")
-  documentsRender(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
-    return this.documents.render(id);
+  async documentsRender(@Param("id", new ZodValidationPipe(offerIdSchema)) id: string) {
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.documents.render.response,
+      await this.documents.render(id),
+    );
   }
 
   @Get(":id/documents/:documentId/download")
   @RequirePlatformCapabilities("billing.read")
-  documentsDownload(
+  async documentsDownload(
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
     @Param("documentId") documentId: string,
   ) {
-    return this.documents.url(id, documentId);
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.documents.download.response,
+      await this.documents.url(id, documentId),
+    );
   }
 
   @Post(":id/cancel")
   @HttpCode(200)
   @RequirePlatformCapabilities("billing.write")
-  cancel(
+  async cancel(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
   ) {
-    return this.offers.cancel(req.platformPrincipal!, id);
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.cancel.response,
+      await this.offers.cancel(req.platformPrincipal!, id),
+    );
   }
 
   @Post(":id/payment")
   @RequirePlatformCapabilities("billing.write")
-  pay(
+  async pay(
     @Req() req: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(offerIdSchema)) id: string,
     @Headers("idempotency-key") key: string | undefined,
     @Body(new ZodValidationPipe(paymentSchema)) body: PaymentDto,
   ) {
-    return this.offers.pay(req.platformPrincipal!, id, key ?? "", body);
+    return parsePlatformResponse(
+      platformCommercialContracts.offers.payment.response,
+      await this.offers.pay(req.platformPrincipal!, id, key ?? "", body),
+    );
   }
 }

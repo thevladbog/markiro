@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type {
+  CommercialDocumentDownloadSource,
+  CommercialDocumentListItemServiceSource,
+  CommercialDocumentRenderServiceResultSource,
+  CommercialDocumentServiceSource,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { ObjectStorageService } from "../storage/object-storage.service";
 import { renderPrintHtml } from "../billing/print-document-html";
@@ -15,7 +21,10 @@ export class OfferDocumentsService {
     private readonly storage: ObjectStorageService,
   ) {}
 
-  async render(offerId: string, revision = 1) {
+  async render(
+    offerId: string,
+    revision = 1,
+  ): Promise<CommercialDocumentRenderServiceResultSource> {
     const [snapshot] = await this.db
       .select()
       .from(schema.commercialOfferPrintSnapshots)
@@ -62,7 +71,7 @@ export class OfferDocumentsService {
     };
   }
 
-  async list(offerId: string) {
+  async list(offerId: string): Promise<CommercialDocumentListItemServiceSource[]> {
     return this.db
       .select({
         id: schema.commercialOfferDocuments.id,
@@ -84,7 +93,7 @@ export class OfferDocumentsService {
       );
   }
 
-  async url(offerId: string, documentId: string) {
+  async url(offerId: string, documentId: string): Promise<CommercialDocumentDownloadSource> {
     const [document] = await this.db
       .select()
       .from(schema.commercialOfferDocuments)
@@ -103,7 +112,7 @@ export class OfferDocumentsService {
   private async renderOne(
     document: typeof schema.commercialOfferDocuments.$inferSelect,
     model: Parameters<typeof renderPrintHtml>[0],
-  ) {
+  ): Promise<CommercialDocumentServiceSource> {
     if (document.status === "ready") return this.publicDocument(document);
     try {
       const format = document.format as "html" | "pdf";
@@ -143,7 +152,9 @@ export class OfferDocumentsService {
     }
   }
 
-  private publicDocument(document: typeof schema.commercialOfferDocuments.$inferSelect) {
+  private publicDocument(
+    document: typeof schema.commercialOfferDocuments.$inferSelect,
+  ): CommercialDocumentServiceSource {
     return {
       id: document.id,
       revision: document.revision,

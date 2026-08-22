@@ -3,6 +3,8 @@ import type { Db } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 
 import { createOfferSchema, type CreateOfferDto } from "../src/modules/platform-offers/dto";
+import type { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
+import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 
@@ -188,5 +190,26 @@ describe("PlatformOffersService catalog validation", () => {
         priceOverrideReason: "Annual commitment",
       }),
     ]);
+  });
+});
+
+describe("platform offer response boundary", () => {
+  it("rejects a malformed successful offer list returned by the service", async () => {
+    const service = {
+      list: async () => [
+        {
+          id: "41111111-1111-4111-8111-111111111111",
+          tenantId: input.tenantId,
+          status: "draft",
+          total: "120.00",
+        },
+      ],
+    } as unknown as PlatformOffersService;
+    const controller = new PlatformOffersController(service, {} as OfferDocumentsService);
+    const request = {
+      platformPrincipal: actor,
+    } as unknown as Parameters<PlatformOffersController["list"]>[0];
+
+    await expect(controller.list(request)).rejects.toThrow();
   });
 });

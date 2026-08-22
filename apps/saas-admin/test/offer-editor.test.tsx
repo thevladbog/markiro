@@ -18,6 +18,30 @@ const READ_ONLY_BILLING_ME = {
   ...ACCOUNTANT_ME,
   capabilities: ACCOUNTANT_ME.capabilities.filter((capability) => capability !== "billing.write"),
 };
+const OFFER_ID = "91111111-1111-4111-8111-111111111111";
+const OFFER_CREATED_AT = "2026-08-21T10:00:00.000Z";
+
+function offerRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: OFFER_ID,
+    tenantId: TENANT_ID,
+    familyId: "92111111-1111-4111-8111-111111111111",
+    revision: 1,
+    previousRevisionId: null,
+    number: null,
+    status: "draft",
+    total: "15000.00",
+    expiresAt: null,
+    termsMarkdown: null,
+    publishedAt: null,
+    publishedByPlatformUserId: null,
+    paidAt: null,
+    createdByPlatformUserId: "platform-accountant",
+    createdAt: OFFER_CREATED_AT,
+    updatedAt: OFFER_CREATED_AT,
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -93,18 +117,27 @@ function installOfferEditorApi({
         };
         calls.push({ method, path: url, body });
         if (createStatus === 409) return jsonResponse(409, { code: "offer_conflict" });
-        return jsonResponse(201, {
-          id: "91111111-1111-4111-8111-111111111111",
-          tenantId: TENANT_ID,
-          status: "draft",
-          total: "67500.00",
-          lines: body.lines.map((line, index) => ({
-            ...line,
-            id: `a1111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`,
-            vatRate: line.vatRateBps === null ? null : `${line.vatRateBps / 100}.00`,
-            lineTotal: line.agreedUnitPrice,
-          })),
-        });
+        return jsonResponse(
+          201,
+          offerRecord({
+            total: "67500.00",
+            lines: body.lines.map(({ vatRateBps, ...line }, index) => ({
+              ...line,
+              id: `a1111111-1111-4111-8111-${String(index + 1).padStart(12, "0")}`,
+              tenantId: TENANT_ID,
+              offerId: OFFER_ID,
+              position: index + 1,
+              descriptionRu: null,
+              descriptionEn: null,
+              catalogUnitPrice: line.agreedUnitPrice,
+              vatRate: vatRateBps === null ? null : `${vatRateBps / 100}.00`,
+              priceOverrideReason: null,
+              activationPolicy: line.kind === "plan" ? line.activationPolicy : null,
+              lineTotal: line.agreedUnitPrice,
+              createdAt: OFFER_CREATED_AT,
+            })),
+          }),
+        );
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
     }),
@@ -123,16 +156,27 @@ async function addPosition(
 }
 
 describe("offer editor route", () => {
-  it("keeps an expired offer visible in the register", async () => {
+  it("rejects a malformed offer success body at the browser boundary", async () => {
     installOfferEditorApi({
       offers: [
         {
           id: "91111111-1111-4111-8111-111111111111",
           tenantId: TENANT_ID,
-          status: "expired",
+          status: "draft",
           total: "15000.00",
         },
       ],
+    });
+
+    renderSaasApp({ initialEntry: "/offers" });
+
+    expect(await screen.findByText("Не удалось загрузить предложения")).toBeDefined();
+    expect(screen.queryByText(TENANT_ID)).toBeNull();
+  });
+
+  it("keeps an expired offer visible in the register", async () => {
+    installOfferEditorApi({
+      offers: [offerRecord({ status: "expired" })],
     });
 
     renderSaasApp({ initialEntry: "/offers" });

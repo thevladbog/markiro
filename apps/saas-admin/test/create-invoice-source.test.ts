@@ -42,6 +42,9 @@ describe("sourceOfferDraft", () => {
         lines: [
           {
             id: "41111111-1111-4111-8111-111111111111",
+            tenantId: "31111111-1111-4111-8111-111111111111",
+            offerId: "51111111-1111-4111-8111-111111111111",
+            position: 1,
             kind: "plan",
             catalogVersionId: catalogVersion.id,
             nameRu: "Согласованный тариф",
@@ -57,6 +60,7 @@ describe("sourceOfferDraft", () => {
             vatIncluded: false,
             activationPolicy: "immediately",
             lineTotal: "99.00",
+            createdAt: "2026-08-21T10:00:00.000Z",
           },
         ],
       },

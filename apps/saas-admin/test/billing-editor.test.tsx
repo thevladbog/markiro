@@ -15,10 +15,33 @@ import {
 } from "./render.js";
 
 const OFFER_ID = "81111111-1111-4111-8111-111111111111";
+const CREATED_AT = "2026-08-21T10:00:00.000Z";
 const READ_ONLY_BILLING_ME = {
   ...ACCOUNTANT_ME,
   capabilities: ACCOUNTANT_ME.capabilities.filter((capability) => capability !== "billing.write"),
 };
+
+function publishedOffer(overrides: Record<string, unknown> = {}) {
+  return {
+    id: OFFER_ID,
+    tenantId: TENANT_ID,
+    familyId: "82111111-1111-4111-8111-111111111111",
+    revision: 1,
+    previousRevisionId: null,
+    number: "KP-2026-000001",
+    status: "published",
+    total: "1.00",
+    expiresAt: null,
+    termsMarkdown: null,
+    publishedAt: CREATED_AT,
+    publishedByPlatformUserId: "platform-accountant",
+    paidAt: null,
+    createdByPlatformUserId: "platform-accountant",
+    createdAt: CREATED_AT,
+    updatedAt: CREATED_AT,
+    ...overrides,
+  };
+}
 
 afterEach(() => {
   cleanup();
@@ -47,19 +70,7 @@ function installInvoiceEditorApi({
         return jsonResponse(200, { items: [] });
       }
       if (url.endsWith("/api/platform/offers") && method === "GET") {
-        return jsonResponse(
-          200,
-          offer
-            ? [
-                {
-                  id: OFFER_ID,
-                  tenantId: TENANT_ID,
-                  status: "published",
-                  total: "1.00",
-                },
-              ]
-            : [],
-        );
+        return jsonResponse(200, offer ? [publishedOffer()] : []);
       }
       if (url.includes("/api/platform/tenants?") && method === "GET") {
         return jsonResponse(200, {
@@ -89,8 +100,23 @@ function installInvoiceEditorApi({
           number: "INV-000001",
           tenantId: TENANT_ID,
           status: "draft",
+          issueDate: null,
+          dueDate: body.dueDate ? `${body.dueDate}T00:00:00.000Z` : null,
+          currency: "RUB",
+          sellerSnapshot: null,
+          buyerSnapshot: null,
+          subtotal: "25000.00",
+          vatTotal: "5000.00",
           total: "30000.00",
+          applicationMode: body.applicationMode,
+          createdByPlatformUserId: "platform-accountant",
+          issuedByPlatformUserId: null,
+          issuedAt: null,
           paidAt: null,
+          cancelledAt: null,
+          createdAt: CREATED_AT,
+          updatedAt: CREATED_AT,
+          lines: body.lines.length,
         });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -218,14 +244,13 @@ describe("invoice editor route", () => {
   });
 
   it("preserves mismatched and legacy offer snapshots as literal custom invoice lines", async () => {
-    const offer = {
-      id: OFFER_ID,
-      tenantId: TENANT_ID,
-      status: "published",
-      total: "1.00",
+    const offer = publishedOffer({
       lines: [
         {
           id: "a1111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          position: 1,
           kind: "plan",
           catalogVersionId: PUBLISHED_PLAN.id,
           nameRu: "Индивидуальный тариф",
@@ -238,11 +263,16 @@ describe("invoice editor route", () => {
           agreedUnitPrice: "321.00",
           vatRate: "20.00",
           vatIncluded: true,
+          priceOverrideReason: "Индивидуальные условия",
           activationPolicy: "after_current",
           lineTotal: "963.00",
+          createdAt: CREATED_AT,
         },
         {
           id: "b1111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          position: 2,
           kind: "service",
           catalogVersionId: null,
           nameRu: "Архивная настройка",
@@ -255,11 +285,16 @@ describe("invoice editor route", () => {
           agreedUnitPrice: "10.00",
           vatRate: "1.13",
           vatIncluded: false,
+          priceOverrideReason: null,
           activationPolicy: null,
           lineTotal: "20.23",
+          createdAt: CREATED_AT,
         },
         {
           id: "c1111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          offerId: OFFER_ID,
+          position: 3,
           kind: "addon",
           catalogVersionId: ADDON.id,
           nameRu: "Архивное дополнение",
@@ -272,11 +307,13 @@ describe("invoice editor route", () => {
           agreedUnitPrice: "45.00",
           vatRate: null,
           vatIncluded: false,
-          activationPolicy: "immediately",
+          priceOverrideReason: null,
+          activationPolicy: null,
           lineTotal: "180.00",
+          createdAt: CREATED_AT,
         },
       ],
-    };
+    });
     const api = installInvoiceEditorApi({ offer });
     renderSaasApp({ initialEntry: "/offers" });
     const user = userEvent.setup();

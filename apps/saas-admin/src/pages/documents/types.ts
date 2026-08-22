@@ -1,4 +1,8 @@
-import type { CatalogVersion } from "@markiro/platform-contracts";
+import type {
+  CatalogVersion,
+  CreateInvoiceInput as SharedCreateInvoiceInput,
+  CreateOfferInput as SharedCreateOfferInput,
+} from "@markiro/platform-contracts";
 
 export type DocumentKind = "invoice" | "offer";
 export type ActivationPolicy = "immediate" | "after_current" | "manual";
@@ -42,48 +46,7 @@ export type DocumentDraftAction =
   | { type: "line.moved"; id: string; direction: -1 | 1 }
   | { type: "line.removed"; id: string };
 
-export interface CreateInvoiceLineInput {
-  kind: DocumentLineDraft["kind"];
-  catalogVersionId: string | null;
-  nameRu: string;
-  nameEn: string;
-  descriptionRu?: string | null;
-  descriptionEn?: string | null;
-  quantity: number;
-  unit: string;
-  catalogUnitPrice?: string | null;
-  agreedUnitPrice: string;
-  vatRateBps: number | null;
-  vatIncluded: boolean;
-  activationPolicy: ActivationPolicy | null;
-}
-
-export interface CreateInvoiceInput {
-  tenantId: string;
-  dueDate: string | null;
-  applicationMode: DocumentDraft["applicationMode"];
-  lines: CreateInvoiceLineInput[];
-}
-
-export interface CreateOfferLineInput {
-  kind: "plan" | "addon" | "service";
-  catalogVersionId: string | null;
-  nameRu: string;
-  nameEn: string;
-  descriptionRu?: string | null;
-  descriptionEn?: string | null;
-  quantity: number;
-  unit: string;
-  agreedUnitPrice: string;
-  priceOverrideReason: string | null;
-  vatRateBps: number | null;
-  vatIncluded: boolean;
-  activationPolicy: "immediately" | "after_current" | null;
-}
-
-export interface CreateOfferInput {
-  tenantId: string;
-  expiresAt: string | null;
-  termsMarkdown?: string | null;
-  lines: CreateOfferLineInput[];
-}
+export type CreateInvoiceInput = SharedCreateInvoiceInput;
+export type CreateInvoiceLineInput = CreateInvoiceInput["lines"][number];
+export type CreateOfferInput = SharedCreateOfferInput;
+export type CreateOfferLineInput = CreateOfferInput["lines"][number];

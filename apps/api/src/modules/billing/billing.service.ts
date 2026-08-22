@@ -7,6 +7,11 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type {
+  InvoiceCreateServiceResultSource,
+  InvoiceServiceDetailSource,
+  InvoiceServiceRecordSource,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -26,7 +31,10 @@ export class BillingService {
     private readonly audit: PlatformAuditService,
   ) {}
 
-  async create(principal: PlatformPrincipal, input: CreateInvoiceDto) {
+  async create(
+    principal: PlatformPrincipal,
+    input: CreateInvoiceDto,
+  ): Promise<InvoiceCreateServiceResultSource> {
     const [tenant] = await this.db
       .select()
       .from(schema.organization)
@@ -45,7 +53,7 @@ export class BillingService {
         .values({
           tenantId: input.tenantId,
           number: next,
-          dueDate: input.dueDate ?? null,
+          dueDate: input.dueDate ? new Date(input.dueDate) : null,
           applicationMode: input.applicationMode,
           createdByPlatformUserId: principal.userId,
           subtotal: "0.00",
@@ -130,18 +138,19 @@ export class BillingService {
         .set({ subtotal: money(subtotal), vatTotal: money(vatTotal), total: money(total) })
         .where(eq(schema.invoices.id, invoice.id))
         .returning();
+      if (!updated) throw new BadRequestException({ code: "invoice_create_failed" });
       return { ...updated, lines: input.lines.length };
     });
   }
 
-  async list(tenantId?: string) {
+  async list(tenantId?: string): Promise<{ items: InvoiceServiceRecordSource[] }> {
     const query = this.db.select().from(schema.invoices).orderBy(desc(schema.invoices.createdAt));
     return {
       items: tenantId ? await query.where(eq(schema.invoices.tenantId, tenantId)) : await query,
     };
   }
 
-  async get(id: string) {
+  async get(id: string): Promise<InvoiceServiceDetailSource> {
     const [invoice] = await this.db
       .select()
       .from(schema.invoices)
@@ -210,7 +219,7 @@ export class BillingService {
     };
   }
 
-  async issue(principal: PlatformPrincipal, id: string) {
+  async issue(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
     return this.db.transaction(async (tx) => {
       const [invoice] = await tx
         .select()
@@ -247,6 +256,7 @@ export class BillingService {
         })
         .where(eq(schema.invoices.id, id))
         .returning();
+      if (!updated) throw new ConflictException({ code: "invoice_not_draft" });
       await this.audit.record(tx, {
         actorPlatformUserId: principal.userId,
         actorRole: principal.role,
@@ -264,7 +274,7 @@ export class BillingService {
     });
   }
 
-  async cancel(principal: PlatformPrincipal, id: string) {
+  async cancel(principal: PlatformPrincipal, id: string): Promise<InvoiceServiceRecordSource> {
     const [invoice] = await this.db
       .select()
       .from(schema.invoices)
@@ -277,6 +287,7 @@ export class BillingService {
       .set({ status: "cancelled", cancelledAt: new Date() })
       .where(eq(schema.invoices.id, id))
       .returning();
+    if (!updated) throw new ConflictException({ code: "invoice_cancel_failed" });
     return updated;
   }
 }
