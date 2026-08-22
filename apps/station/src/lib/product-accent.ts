@@ -99,6 +99,27 @@ export async function extractAccentHue(blob: Blob): Promise<number | null> {
  */
 const accentByChecksum = new Map<string, number | null>();
 
+/**
+ * Pre-seeds the checksum cache. Production never needs this — the hook fills
+ * the cache itself — but tests exercising the hook's transition guarantees
+ * have no canvas to extract with, so this is their only way in.
+ */
+export function primeAccentHue(checksum: string, hue: number | null): void {
+  accentByChecksum.set(checksum, hue);
+}
+
+/**
+ * An extraction answer is only valid for the exact bytes it was sampled from,
+ * so the state carries the checksum and the render-time guard below refuses
+ * to apply it to any other image. Without the tag, switching products would
+ * paint the NEW product's hero with the OLD product's hue until the new
+ * read settled — a lie precisely when the colour matters most.
+ */
+interface ExtractedAccent {
+  checksum: string;
+  hue: number | null;
+}
+
 export interface ProductAccentSource {
   exec?: SqlExecutor | undefined;
   productId?: string | undefined;
@@ -120,8 +141,11 @@ export function useProductAccentHue({
   refreshKey,
 }: ProductAccentSource): number | null {
   const fallback = gtin ? hueFromGtin(gtin) : null;
-  const cached = image ? accentByChecksum.get(image.checksum) : undefined;
-  const [extracted, setExtracted] = useState<number | null>(cached ?? null);
+  const [extracted, setExtracted] = useState<ExtractedAccent | null>(() => {
+    if (!image) return null;
+    const known = accentByChecksum.get(image.checksum);
+    return known === undefined ? null : { checksum: image.checksum, hue: known };
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -129,9 +153,10 @@ export function useProductAccentHue({
       setExtracted(null);
       return;
     }
-    const known = accentByChecksum.get(image.checksum);
+    const checksum = image.checksum;
+    const known = accentByChecksum.get(checksum);
     if (known !== undefined) {
-      setExtracted(known);
+      setExtracted({ checksum, hue: known });
       return;
     }
     void (async () => {
@@ -140,8 +165,8 @@ export function useProductAccentHue({
       const hue = blob ? await extractAccentHue(blob) : null;
       // A missing blob is not cached: media sync may still be landing the
       // bytes, and the next refreshKey bump should get to try again.
-      if (blob) accentByChecksum.set(image.checksum, hue);
-      if (!cancelled) setExtracted(hue);
+      if (blob) accentByChecksum.set(checksum, hue);
+      if (!cancelled) setExtracted({ checksum, hue });
     })().catch(() => {
       if (!cancelled) setExtracted(null);
     });
@@ -150,5 +175,9 @@ export function useProductAccentHue({
     };
   }, [exec, productId, image, refreshKey]);
 
-  return extracted ?? fallback;
+  // The guard, not the effect, is what makes stale hues impossible: the
+  // effect only runs after the new image has already painted once.
+  const extractedHue =
+    extracted !== null && image && extracted.checksum === image.checksum ? extracted.hue : null;
+  return extractedHue ?? fallback;
 }

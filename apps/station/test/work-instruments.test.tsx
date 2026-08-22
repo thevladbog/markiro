@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { hueFromGtin } from "../src/lib/product-accent.js";
+import { hueFromGtin, primeAccentHue } from "../src/lib/product-accent.js";
+import type { SqlExecutor } from "../src/lib/mirror.js";
 import { BoxFillInstrument, buildBoxCells } from "../src/ui/work/BoxFillInstrument.js";
 import { RecentOperations } from "../src/ui/work/RecentOperations.js";
 import { ScanResultInstrument, productMonogram } from "../src/ui/work/ScanResultInstrument.js";
@@ -82,6 +83,51 @@ describe("work instruments", () => {
     const identity = container.querySelector<HTMLElement>(".work-scan-result__identity");
     expect(identity?.getAttribute("data-accent")).toBeNull();
     expect(container.querySelector(".work-scan-result__monogram")?.textContent).toBe("Я");
+  });
+
+  it("never reuses one image's extracted hue for another image or after the photo is gone", () => {
+    const exec: SqlExecutor = {
+      run: async () => undefined,
+      all: async () => [],
+    };
+    const imageOf = (checksum: string) => ({
+      checksum,
+      contentType: "image/webp" as const,
+      byteSize: 1,
+      width: 1,
+      height: 1,
+    });
+    primeAccentHue("accent-test-a", 200);
+
+    const props = {
+      productName: "Widget",
+      counterpartyName: null,
+      operation: null,
+      labels,
+      exec,
+      productId: "p1",
+      gtin: null,
+    };
+    const { container, rerender } = render(
+      <ScanResultInstrument {...props} image={imageOf("accent-test-a")} />,
+    );
+    const identity = () => container.querySelector<HTMLElement>(".work-scan-result__identity");
+    expect(identity()?.style.getPropertyValue("--product-hue")).toBe("200");
+
+    // A different image whose hue is not yet known must not inherit 200.
+    rerender(<ScanResultInstrument {...props} image={imageOf("accent-test-b")} />);
+    expect(identity()?.getAttribute("data-accent")).toBeNull();
+
+    // Losing the photo entirely must not resurrect it either.
+    rerender(<ScanResultInstrument {...props} image={null} />);
+    expect(identity()?.getAttribute("data-accent")).toBeNull();
+
+    // With a GTIN, both transitions land on the GTIN fallback instead.
+    const gtin = "04607000000042";
+    rerender(<ScanResultInstrument {...props} gtin={gtin} image={imageOf("accent-test-a")} />);
+    expect(identity()?.style.getPropertyValue("--product-hue")).toBe("200");
+    rerender(<ScanResultInstrument {...props} gtin={gtin} image={imageOf("accent-test-c")} />);
+    expect(identity()?.style.getPropertyValue("--product-hue")).toBe(String(hueFromGtin(gtin)));
   });
 
   it("derives a stable in-range hue from the GTIN and a first-letter monogram", () => {
