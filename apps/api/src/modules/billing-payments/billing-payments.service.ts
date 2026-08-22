@@ -8,6 +8,10 @@ import {
 } from "@nestjs/common";
 import { desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type {
+  BillingPaymentServiceSource,
+  PaymentImportServiceResultSource,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import { BillingApplicationService } from "../billing/billing-application.service";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -22,7 +26,7 @@ export class BillingPaymentsService {
     private readonly audit: PlatformAuditService,
   ) {}
 
-  async list(tenantId?: string) {
+  async list(tenantId?: string): Promise<{ items: BillingPaymentServiceSource[] }> {
     const query = this.db
       .select()
       .from(schema.billingPayments)
@@ -34,7 +38,11 @@ export class BillingPaymentsService {
     };
   }
 
-  async recordManual(principal: PlatformPrincipal, invoiceId: string, input: ManualPaymentDto) {
+  async recordManual(
+    principal: PlatformPrincipal,
+    invoiceId: string,
+    input: ManualPaymentDto,
+  ): Promise<BillingPaymentServiceSource> {
     return this.db.transaction(async (tx) => {
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended(${`billing-payment:${input.idempotencyKey}`}, 0))`,
@@ -142,7 +150,10 @@ export class BillingPaymentsService {
     });
   }
 
-  async importFile(principal: PlatformPrincipal, input: ImportBankFileDto) {
+  async importFile(
+    principal: PlatformPrincipal,
+    input: ImportBankFileDto,
+  ): Promise<PaymentImportServiceResultSource> {
     const checksum = createHash("sha256").update(input.content).digest("hex");
     const [existing] = await this.db
       .select()
@@ -204,6 +215,7 @@ export class BillingPaymentsService {
         .set({ status: "ready", rowCount: rows.length, errorCount: errors })
         .where(eq(schema.paymentImports.id, record.id))
         .returning();
+      if (!updated) throw new BadRequestException({ code: "payment_import_failed" });
       return updated;
     });
   }

@@ -68,6 +68,8 @@ const service = {
   nameRu: "Обучение",
   nameEn: "Training",
   unit: "час",
+  billingMode: "one_time",
+  billingPeriod: null,
   unitPrice: "0.10",
   vatRateBps: null,
   vatIncluded: false,

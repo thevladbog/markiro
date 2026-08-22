@@ -2,6 +2,7 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 import { Test } from "@nestjs/testing";
 import { DocumentBuilder, SwaggerModule, type OpenAPIObject } from "@nestjs/swagger";
+import { buildPlatformAuth, type Db } from "@markiro/db";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AuthorizationGuard } from "../src/authorization/authorization.guard";
@@ -18,6 +19,10 @@ import { ProductsController } from "../src/modules/products/products.controller"
 import { ProductsService } from "../src/modules/products/products.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { disableScalarDynamicCodeProbe, mountOpenApiDocs } from "../src/openapi-docs";
+import {
+  addPlatformSessionSecurity,
+  PLATFORM_SESSION_SECURITY,
+} from "../src/platform-http/platform-openapi";
 import { SubscriptionAccessGuard } from "../src/subscriptions/subscription-access.guard";
 import { TenantGuard } from "../src/tenancy/tenant.guard";
 import { StationOnlyGuard } from "../src/tenancy/station-only.guard";
@@ -114,6 +119,30 @@ function expectExactObjectFields(schema: TestSchema, fields: readonly string[]):
 
 describe("self-hosted OpenAPI documentation", () => {
   let server: Server;
+
+  it.each([
+    ["http://api.example.test", "markiro-platform.session_token"],
+    ["https://api.example.test", "__Secure-markiro-platform.session_token"],
+  ])("defines the initialized Better Auth cookie security scheme for %s", async (baseURL, name) => {
+    const auth = buildPlatformAuth({} as Db, {
+      secret: "0123456789abcdef0123456789abcdef",
+      baseURL,
+      trustedOrigins: ["https://saas.example.test"],
+    });
+    const cookieName = (await auth.$context).authCookies.sessionToken.name;
+    const configuration = addPlatformSessionSecurity(
+      new DocumentBuilder().setTitle("platform contract test").setVersion("test"),
+      cookieName,
+    ).build();
+
+    expect(configuration.components?.securitySchemes).toEqual({
+      [PLATFORM_SESSION_SECURITY]: {
+        type: "apiKey",
+        in: "cookie",
+        name,
+      },
+    });
+  });
 
   it("parses script end tags with valid whitespace before the closing bracket", () => {
     expect(scriptSources('<script src="/docs/scalar.js"></script   >')).toEqual([

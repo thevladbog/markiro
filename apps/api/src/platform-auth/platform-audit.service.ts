@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { schema, type Db, type PlatformRole } from "@markiro/db";
+import { currentPlatformRequestId } from "../platform-http/platform-request-context.middleware";
 
 export interface PlatformAuditEvent {
   actorPlatformUserId: string | null;
@@ -39,7 +40,7 @@ export class PlatformAuditService {
       reason: event.reason,
       before: sanitizeAuditMetadata(event.before),
       after: sanitizeAuditMetadata(event.after),
-      requestId: event.requestId,
+      requestId: event.requestId ?? currentPlatformRequestId(),
     });
   }
 }

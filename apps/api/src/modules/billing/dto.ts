@@ -1,53 +1,11 @@
-import { z } from "zod";
+import {
+  platformCommercialContracts,
+  type ApplyInvoiceDto,
+  type CreateInvoiceDto,
+} from "@markiro/platform-contracts";
 
-const money = z.string().regex(/^\d{1,12}\.\d{2}$/, "Expected a decimal amount");
-const lineSchema = z
-  .object({
-    kind: z.enum(["plan", "addon", "service", "custom"]),
-    catalogVersionId: z.uuid().nullable().optional(),
-    nameRu: z.string().trim().min(1).max(300).optional(),
-    nameEn: z.string().trim().min(1).max(300).optional(),
-    descriptionRu: z.string().max(10_000).nullable().optional(),
-    descriptionEn: z.string().max(10_000).nullable().optional(),
-    quantity: z.number().int().positive(),
-    unit: z.string().trim().min(1).max(100).optional(),
-    catalogUnitPrice: money.nullable().optional(),
-    agreedUnitPrice: money,
-    vatRateBps: z.number().int().min(0).max(10_000).nullable().optional(),
-    vatIncluded: z.boolean(),
-    activationPolicy: z.enum(["immediate", "after_current", "manual"]).nullable().optional(),
-  })
-  .strict();
+export const createInvoiceSchema = platformCommercialContracts.invoices.create.body;
+export const invoiceIdSchema = platformCommercialContracts.invoices.detail.params;
+export const applyInvoiceSchema = platformCommercialContracts.invoices.apply.body;
 
-export const createInvoiceSchema = z
-  .object({
-    tenantId: z.string().min(1),
-    dueDate: z.coerce.date().nullable().optional(),
-    applicationMode: z.enum(["manual", "automatic"]),
-    lines: z.array(lineSchema).min(1).max(100),
-  })
-  .strict();
-export type CreateInvoiceDto = z.infer<typeof createInvoiceSchema>;
-
-export const invoiceIdSchema = z.uuid();
-
-export const applyInvoiceSchema = z
-  .object({
-    reason: z.string().trim().min(1).max(1_000),
-    lines: z
-      .array(
-        z
-          .object({
-            lineId: z.uuid(),
-            activationPolicy: z.enum(["immediate", "after_current"]).optional(),
-          })
-          .strict(),
-      )
-      .min(1)
-      .max(100)
-      .refine((lines) => new Set(lines.map((line) => line.lineId)).size === lines.length, {
-        message: "Invoice application lines must be unique",
-      }),
-  })
-  .strict();
-export type ApplyInvoiceDto = z.infer<typeof applyInvoiceSchema>;
+export type { ApplyInvoiceDto, CreateInvoiceDto };

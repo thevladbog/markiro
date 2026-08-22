@@ -7,13 +7,16 @@ COPY apps/api/package.json ./apps/api/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
 COPY packages/email/package.json ./packages/email/package.json
+COPY packages/platform-contracts/package.json ./packages/platform-contracts/package.json
 COPY packages/legal-documents/package.json ./packages/legal-documents/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/api ./apps/api
 COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
 COPY packages/email ./packages/email
+COPY packages/platform-contracts ./packages/platform-contracts
 COPY packages/legal-documents ./packages/legal-documents
+RUN pnpm --filter @markiro/platform-contracts build
 RUN pnpm --filter @markiro/domain build
 RUN pnpm --filter @markiro/db build
 RUN pnpm --filter @markiro/email build

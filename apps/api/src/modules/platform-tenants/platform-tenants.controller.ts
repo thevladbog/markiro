@@ -1,6 +1,12 @@
 import { Body, Controller, Get, HttpCode, Param, Post, Query, Req } from "@nestjs/common";
+import { platformTenantContracts } from "@markiro/platform-contracts";
 import { RequirePlatformCapabilities } from "../../platform-auth/platform-access-policy";
 import type { RequestWithPlatformPrincipal } from "../../platform-auth/platform-auth.guard";
+import {
+  PlatformApiProtectedCreated,
+  PlatformApiProtectedOk,
+} from "../../platform-http/platform-openapi";
+import { parsePlatformResponse } from "../../platform-http/platform-response";
 import { ZodValidationPipe } from "../../zod.pipe";
 import {
   assignAddonSchema,
@@ -20,59 +26,92 @@ export class PlatformTenantsController {
   constructor(private readonly tenants: PlatformTenantsService) {}
 
   @Get()
+  @PlatformApiProtectedOk({ response: platformTenantContracts.list.response })
   @RequirePlatformCapabilities("tenants.read")
-  list(
+  async list(
     @Req() request: RequestWithPlatformPrincipal,
     @Query(new ZodValidationPipe(tenantListQuerySchema)) query: TenantListQueryDto,
   ) {
-    return this.tenants.list(request.platformPrincipal!, query);
+    return parsePlatformResponse(
+      platformTenantContracts.list.response,
+      await this.tenants.list(request.platformPrincipal!, query),
+    );
   }
 
   @Post()
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.create.body,
+    response: platformTenantContracts.create.response,
+  })
   @RequirePlatformCapabilities("tenants.write")
-  create(
+  async create(
     @Req() request: RequestWithPlatformPrincipal,
     @Body(new ZodValidationPipe(provisionTenantSchema)) body: ProvisionTenantDto,
   ) {
-    return this.tenants.create(request.platformPrincipal!, body);
+    return parsePlatformResponse(
+      platformTenantContracts.create.response,
+      await this.tenants.create(request.platformPrincipal!, body),
+    );
   }
 
   @Get(":id")
+  @PlatformApiProtectedOk({ response: platformTenantContracts.detail.response })
   @RequirePlatformCapabilities("tenants.read")
-  get(
+  async get(
     @Req() request: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
   ) {
-    return this.tenants.get(request.platformPrincipal!, id);
+    return parsePlatformResponse(
+      platformTenantContracts.detail.response,
+      await this.tenants.get(request.platformPrincipal!, id),
+    );
   }
 
   @Post(":id/owner-activation/renew")
   @HttpCode(200)
+  @PlatformApiProtectedOk({ response: platformTenantContracts.renewActivation.response })
   @RequirePlatformCapabilities("tenants.write")
-  renewActivation(
+  async renewActivation(
     @Req() request: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
   ) {
-    return this.tenants.renewActivation(request.platformPrincipal!, id);
+    return parsePlatformResponse(
+      platformTenantContracts.renewActivation.response,
+      await this.tenants.renewActivation(request.platformPrincipal!, id),
+    );
   }
 
   @Post(":id/subscription/plan")
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.assignPlan.body,
+    response: platformTenantContracts.assignPlan.response,
+  })
   @RequirePlatformCapabilities("tenants.write", "billing.write")
-  assignPlan(
+  async assignPlan(
     @Req() request: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
     @Body(new ZodValidationPipe(assignPlanSchema)) body: AssignPlanDto,
   ) {
-    return this.tenants.assignPlan(request.platformPrincipal!, id, body);
+    return parsePlatformResponse(
+      platformTenantContracts.assignPlan.response,
+      await this.tenants.assignPlan(request.platformPrincipal!, id, body),
+    );
   }
 
   @Post(":id/subscription/addons")
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.assignAddon.body,
+    response: platformTenantContracts.assignAddon.response,
+  })
   @RequirePlatformCapabilities("tenants.write", "billing.write")
-  assignAddon(
+  async assignAddon(
     @Req() request: RequestWithPlatformPrincipal,
     @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
     @Body(new ZodValidationPipe(assignAddonSchema)) body: AssignAddonDto,
   ) {
-    return this.tenants.assignAddon(request.platformPrincipal!, id, body);
+    return parsePlatformResponse(
+      platformTenantContracts.assignAddon.response,
+      await this.tenants.assignAddon(request.platformPrincipal!, id, body),
+    );
   }
 }

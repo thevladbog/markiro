@@ -3,10 +3,10 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useParams } from "react-router";
 
-import { Alert, Button, Card, ConfirmDialog, PageHeader, Spinner, StatusChip } from "@markiro/ui";
+import { Alert, Button, Card, ConfirmDialog, PageHeader, StatusChip } from "@markiro/ui";
 
-import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { PanelState } from "../../components/PanelState.js";
 import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
@@ -48,10 +48,9 @@ export function TenantPage() {
       await queryClient.invalidateQueries({ queryKey: ["platform", "tenants", tenantId] });
     },
     onError: (error) => {
-      const code = error instanceof ApiRequestError ? error.code : null;
       setRenewMessage({
         tone: "error",
-        key: tenantErrorMessageKey("renew", code),
+        key: tenantErrorMessageKey("renew", error),
       });
     },
   });
@@ -70,10 +69,9 @@ export function TenantPage() {
     return (
       <section className="tenant-detail-page">
         <PageHeader title={t("tenants.detail.loadingTitle")} />
-        <div className="tenant-list-state" role="status">
-          <Spinner label={t("tenants.detail.loading")} />
-          <span>{t("tenants.detail.loading")}</span>
-        </div>
+        <PanelState loading empty={false} error={null} loadingText={t("tenants.detail.loading")}>
+          {null}
+        </PanelState>
       </section>
     );
   }
@@ -82,7 +80,14 @@ export function TenantPage() {
     return (
       <section className="tenant-detail-page">
         <PageHeader title={t("tenants.detail.loadErrorTitle")} />
-        <Alert tone="error">{t("tenants.detail.loadError")}</Alert>
+        <PanelState
+          loading={false}
+          empty={false}
+          error={tenant.error ?? new Error("tenant_detail_unavailable")}
+          onRetry={() => void tenant.refetch()}
+        >
+          {null}
+        </PanelState>
       </section>
     );
   }

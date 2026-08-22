@@ -4,28 +4,18 @@ import { Navigate, Outlet, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Spinner } from "@markiro/ui";
+import { platformAuthContracts, type PlatformPrincipal } from "@markiro/platform-contracts";
 
 import { ApiRequestError, platformApiFetch } from "../api/client.js";
+import { PanelState } from "../components/PanelState.js";
 import { useAuthClient } from "./client.js";
 import { isPlatformChallengePending } from "./challenge.js";
 
-export type PlatformRole = "platform_admin" | "support" | "accountant";
-export type PlatformCapability =
-  | "tenants.read"
-  | "tenants.write"
-  | "catalog.read"
-  | "catalog.write"
-  | "billing.read"
-  | "billing.write"
-  | "platformTeam.write"
-  | "audit.read";
-
-export interface PlatformPrincipal {
-  userId: string;
-  role: PlatformRole;
-  capabilities: readonly PlatformCapability[];
-  twoFactorReady: boolean;
-}
+export type {
+  PlatformCapability,
+  PlatformPrincipal,
+  PlatformRole,
+} from "@markiro/platform-contracts";
 
 const PrincipalContext = createContext<PlatformPrincipal | null>(null);
 
@@ -50,7 +40,7 @@ export function PlatformAuthBoundary() {
   const location = useLocation();
   const principal = useQuery({
     queryKey: ["platform", "me", session.data?.user.id],
-    queryFn: () => platformApiFetch<PlatformPrincipal>("/me"),
+    queryFn: () => platformApiFetch("/me", { responseSchema: platformAuthContracts.me.response }),
     enabled: Boolean(session.data && session.data.user.twoFactorEnabled !== false),
     staleTime: 30_000,
   });
@@ -99,10 +89,14 @@ export function PlatformAuthBoundary() {
   }
 
   if (principal.error) {
-    if (principal.error instanceof ApiRequestError && principal.error.status === 401) {
+    const authorizationError =
+      principal.error instanceof ApiRequestError && principal.error.kind === "authorization"
+        ? principal.error
+        : null;
+    if (authorizationError?.status === 401) {
       return <Navigate to="/login" replace />;
     }
-    if (principal.error instanceof ApiRequestError && principal.error.status === 403) {
+    if (authorizationError?.status === 403) {
       return (
         <AuthStateFrame>
           <h1>{t("auth.boundary.forbiddenTitle")}</h1>
@@ -113,9 +107,14 @@ export function PlatformAuthBoundary() {
     }
     return (
       <AuthStateFrame>
-        <Alert title={t("auth.boundary.apiTitle")} tone="error">
-          {t("auth.boundary.apiBody")}
-        </Alert>
+        <PanelState
+          loading={false}
+          empty={false}
+          error={principal.error}
+          onRetry={() => void principal.refetch()}
+        >
+          {null}
+        </PanelState>
       </AuthStateFrame>
     );
   }

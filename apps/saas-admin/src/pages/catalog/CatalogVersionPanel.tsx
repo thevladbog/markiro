@@ -332,7 +332,7 @@ export function CatalogVersionPanel({
       setStatusMessage({
         tone: "error",
         text:
-          error instanceof ApiRequestError && error.status === 409
+          error instanceof ApiRequestError && error.kind === "domain" && error.status === 409
             ? t("catalog.saveConflict")
             : t("catalog.saveError"),
       });
@@ -370,7 +370,7 @@ export function CatalogVersionPanel({
       setStatusMessage({
         tone: "error",
         text:
-          error instanceof ApiRequestError && error.status === 409
+          error instanceof ApiRequestError && error.kind === "domain" && error.status === 409
             ? t("catalog.defaultConflict")
             : t("catalog.defaultError"),
       });

@@ -3,6 +3,8 @@ import type { Db } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 
 import { createOfferSchema, type CreateOfferDto } from "../src/modules/platform-offers/dto";
+import type { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
+import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
 import { PlatformOffersService } from "../src/modules/platform-offers/platform-offers.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 
@@ -188,5 +190,42 @@ describe("PlatformOffersService catalog validation", () => {
         priceOverrideReason: "Annual commitment",
       }),
     ]);
+  });
+});
+
+describe("platform offer response boundary", () => {
+  it("rejects a malformed successful offer list returned by the service", async () => {
+    const service = {
+      list: async () => [
+        {
+          id: "41111111-1111-4111-8111-111111111111",
+          tenantId: input.tenantId,
+          status: "draft",
+          total: "120.00",
+        },
+      ],
+    } as unknown as PlatformOffersService;
+    const controller = new PlatformOffersController(service, {} as OfferDocumentsService);
+    const request = {
+      platformPrincipal: actor,
+    } as unknown as Parameters<PlatformOffersController["list"]>[0];
+
+    await expect(controller.list(request)).rejects.toThrow();
+  });
+
+  it("rejects a malformed document id before the document service", async () => {
+    const documents = {
+      url: vi.fn(async () => ({
+        url: "https://objects.example.invalid/offers/offer.pdf?signature=redacted",
+      })),
+    } as unknown as OfferDocumentsService;
+    const controller = new PlatformOffersController({} as PlatformOffersService, documents);
+
+    const failure = await controller
+      .documentsDownload("41111111-1111-4111-8111-111111111111", "not-a-uuid")
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(documents.url).not.toHaveBeenCalled();
   });
 });

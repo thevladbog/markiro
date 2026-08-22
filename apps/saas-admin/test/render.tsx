@@ -120,10 +120,26 @@ export function renderSaasApp({
   };
 }
 
-export function jsonResponse(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), {
+export function jsonResponse(
+  status: number,
+  body: unknown,
+  headers: Record<string, string> = {},
+): Response {
+  const normalizedBody =
+    status >= 400 &&
+    body !== null &&
+    typeof body === "object" &&
+    "code" in body &&
+    typeof body.code === "string"
+      ? {
+          message: "Platform request failed",
+          requestId: "11111111-1111-4111-8111-111111111111",
+          ...body,
+        }
+      : body;
+  return new Response(JSON.stringify(normalizedBody), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
   });
 }
 
@@ -259,6 +275,20 @@ interface CatalogCreateCall {
   body: unknown;
 }
 
+interface CatalogFailureResponse {
+  status: number;
+  body: unknown;
+  headers?: Record<string, string>;
+}
+
+type CatalogResponse = number | CatalogFailureResponse;
+
+function catalogFailureResponse(response: CatalogResponse, code: string): Response {
+  return typeof response === "number"
+    ? jsonResponse(response, { code })
+    : jsonResponse(response.status, response.body, response.headers ?? {});
+}
+
 export function installCatalogApi({
   me = ACCOUNTANT_ME,
   items = [DRAFT_PLAN, PUBLISHED_PLAN, ADDON, SERVICE],
@@ -272,9 +302,9 @@ export function installCatalogApi({
   me?: PlatformPrincipal;
   items?: CatalogVersionDto[];
   defaultDemoId?: string | null;
-  saveStatuses?: number[];
-  defaultStatuses?: number[];
-  createResponses?: number[];
+  saveStatuses?: CatalogResponse[];
+  defaultStatuses?: CatalogResponse[];
+  createResponses?: CatalogResponse[];
   archiveStatuses?: number[];
   catalogStatus?: number;
 } = {}) {
@@ -302,9 +332,10 @@ export function installCatalogApi({
         return jsonResponse(200, { catalogVersionId: demoId });
       }
       if (url.endsWith("/api/platform/settings/demo-plan") && init.method === "PATCH") {
-        const status = defaultStatuses.shift() ?? 200;
+        const response = defaultStatuses.shift() ?? 200;
+        const status = typeof response === "number" ? response : response.status;
         if (status !== 200) {
-          return jsonResponse(status, { code: "catalog_version_conflict" });
+          return catalogFailureResponse(response, "catalog_version_conflict");
         }
         const body = JSON.parse(String(init.body)) as { catalogVersionId: string };
         demoId = body.catalogVersionId;
@@ -312,8 +343,9 @@ export function installCatalogApi({
       }
       const createMatch = url.match(/\/api\/platform\/catalog\/items\/([^/]+)\/versions$/);
       if (createMatch && init.method === "POST") {
-        const status = createResponses.shift() ?? 201;
-        if (status !== 201) return jsonResponse(status, { code: "catalog_item_conflict" });
+        const response = createResponses.shift() ?? 201;
+        const status = typeof response === "number" ? response : response.status;
+        if (status !== 201) return catalogFailureResponse(response, "catalog_item_conflict");
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         createCalls.push({ itemCode: createMatch[1]!, body: structuredClone(body) });
         const source = catalog.find((item) => item.catalogItemCode === createMatch[1]);
@@ -365,9 +397,10 @@ export function installCatalogApi({
       if (match && init.method === "PATCH") {
         const body = JSON.parse(String(init.body)) as Record<string, unknown>;
         patchCalls.push({ method: "PATCH", path: url, body });
-        const status = saveStatuses.shift() ?? 200;
+        const response = saveStatuses.shift() ?? 200;
+        const status = typeof response === "number" ? response : response.status;
         if (status !== 200) {
-          return jsonResponse(status, { code: "catalog_version_conflict" });
+          return catalogFailureResponse(response, "catalog_version_conflict");
         }
         catalog = catalog.map((item) => (item.id === match[2] ? { ...item, ...body } : item));
         return jsonResponse(
@@ -630,6 +663,7 @@ export function installTenantApi({
   renewResponses = [],
   assignmentResponses = [],
   detailResponses = [],
+  catalogResponse = { items: [PUBLISHED_PLAN, SCHEDULED_PLAN, ADDON] },
   renewHandler,
 }: {
   me?: PlatformPrincipal;
@@ -641,6 +675,7 @@ export function installTenantApi({
   renewResponses?: Array<{ status: number; code?: string }>;
   assignmentResponses?: Array<{ status: number; code?: string }>;
   detailResponses?: Array<Record<string, unknown>>;
+  catalogResponse?: unknown;
   renewHandler?: () => Promise<Response>;
 } = {}) {
   const mutationCalls: TenantMutationCall[] = [];
@@ -732,7 +767,10 @@ export function installTenantApi({
         });
       }
       if (url.endsWith("/api/platform/catalog/items") && method === "GET") {
-        return jsonResponse(200, { items: [PUBLISHED_PLAN, SCHEDULED_PLAN, ADDON] });
+        return jsonResponse(200, catalogResponse, {
+          "x-request-id": "11111111-1111-4111-8111-111111111111",
+          "x-markiro-release-sha": "test-release-sha",
+        });
       }
       if (url.endsWith("/api/platform/settings/demo-plan") && method === "GET") {
         return jsonResponse(200, { catalogVersionId: PUBLISHED_PLAN.id });

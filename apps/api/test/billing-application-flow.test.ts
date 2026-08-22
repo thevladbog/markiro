@@ -5,6 +5,7 @@ import { createDb, schema, type Db } from "@markiro/db";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { BillingPaymentsService } from "../src/modules/billing-payments/billing-payments.service";
+import { BillingPaymentsController } from "../src/modules/billing-payments/billing-payments.controller";
 import { BillingApplicationService } from "../src/modules/billing/billing-application.service";
 import { BillingService } from "../src/modules/billing/billing.service";
 import {
@@ -21,6 +22,17 @@ import {
 } from "./support/subscription-fixtures";
 
 const ready = Boolean(process.env.DATABASE_URL);
+
+describe("platform payment response boundary", () => {
+  it("rejects a malformed successful payment list returned by the service", async () => {
+    const service = {
+      list: async () => ({ items: [{ id: "61111111-1111-4111-8111-111111111111" }] }),
+    } as unknown as BillingPaymentsService;
+    const controller = new BillingPaymentsController(service);
+
+    await expect(controller.list()).rejects.toThrow();
+  });
+});
 
 describe.skipIf(!ready)("invoice payment application flow", () => {
   const databaseName = `markiro_billing_application_${randomUUID().replaceAll("-", "_")}`;

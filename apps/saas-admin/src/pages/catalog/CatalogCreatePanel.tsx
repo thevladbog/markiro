@@ -99,8 +99,6 @@ export function CatalogCreatePanel({
         descriptionRu: descriptionRu.trim() || null,
         descriptionEn: descriptionEn.trim() || null,
         unit: unit.trim(),
-        billingMode: kind === "service" ? ("one_time" as const) : ("recurring" as const),
-        billingPeriod: kind === "service" ? null : ("month" as const),
         unitPrice: price,
         vatRateBps,
         vatIncluded: vatRateBps !== null,
@@ -109,6 +107,8 @@ export function CatalogCreatePanel({
         kind === "plan"
           ? {
               ...base,
+              billingMode: "recurring",
+              billingPeriod: "month",
               plan: {
                 maxLines: lines ? Number(lines) : null,
                 maxStations: stations ? Number(stations) : null,
@@ -121,8 +121,13 @@ export function CatalogCreatePanel({
               },
             }
           : kind === "addon"
-            ? { ...base, addon: { effects: toAddonEffects(addonEffects) } }
-            : { ...base, service: {} };
+            ? {
+                ...base,
+                billingMode: "recurring",
+                billingPeriod: "month",
+                addon: { effects: toAddonEffects(addonEffects) },
+              }
+            : { ...base, billingMode: "one_time", billingPeriod: null, service: {} };
       return createCatalogVersion(code.trim(), input);
     },
     onSuccess: (created) => {
@@ -135,7 +140,7 @@ export function CatalogCreatePanel({
     },
     onError: (cause) =>
       setError(
-        cause instanceof ApiRequestError && cause.status === 409
+        cause instanceof ApiRequestError && cause.kind === "domain" && cause.status === 409
           ? t("catalog.createConflict")
           : t("catalog.createError"),
       ),

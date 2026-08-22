@@ -1,7 +1,11 @@
+import { BadRequestException } from "@nestjs/common";
 import type { Db } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 
 import { BillingService } from "../src/modules/billing/billing.service";
+import type { BillingApplicationService } from "../src/modules/billing/billing-application.service";
+import { BillingController } from "../src/modules/billing/billing.controller";
+import type { BillingDocumentsService } from "../src/modules/billing/billing-documents.service";
 import type { PlatformPrincipal } from "../src/platform-auth/platform-access-policy";
 import type { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 
@@ -98,5 +102,50 @@ describe("BillingService offer snapshots", () => {
       lineVat: "0.00",
       lineTotal: "99.00",
     });
+  });
+});
+
+describe("platform invoice response boundary", () => {
+  it("rejects a malformed successful invoice list returned by the service", async () => {
+    const billing = {
+      list: async () => ({
+        items: [
+          {
+            id: "31111111-1111-4111-8111-111111111111",
+            tenantId: "21111111-1111-4111-8111-111111111111",
+            number: "INV-000002",
+            status: "draft",
+            total: "99.00",
+          },
+        ],
+      }),
+    } as unknown as BillingService;
+    const controller = new BillingController(
+      billing,
+      {} as BillingDocumentsService,
+      {} as BillingApplicationService,
+    );
+
+    await expect(controller.list()).rejects.toThrow();
+  });
+
+  it("rejects a malformed document id before the document service", async () => {
+    const documents = {
+      url: vi.fn(async () => ({
+        url: "https://objects.example.invalid/invoices/invoice.pdf?signature=redacted",
+      })),
+    } as unknown as BillingDocumentsService;
+    const controller = new BillingController(
+      {} as BillingService,
+      documents,
+      {} as BillingApplicationService,
+    );
+
+    const failure = await controller
+      .documentDownload("31111111-1111-4111-8111-111111111111", "not-a-uuid")
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(BadRequestException);
+    expect(documents.url).not.toHaveBeenCalled();
   });
 });

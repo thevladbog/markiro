@@ -5,33 +5,57 @@ import { ACCOUNTANT_ME, TENANT_ID, jsonResponse, renderSaasApp } from "./render.
 
 const INVOICE_ID = "91111111-1111-4111-8111-111111111111";
 const LINE_ID = "92111111-1111-4111-8111-111111111111";
+const CREATED_AT = "2026-08-21T10:00:00.000Z";
 
-const issuedDetail = {
+const invoiceBase = {
   id: INVOICE_ID,
   number: "INV-000021",
   tenantId: TENANT_ID,
-  status: "issued",
   issueDate: "2026-08-21T10:00:00.000Z",
   dueDate: "2026-08-28T10:00:00.000Z",
-  total: "15000.00",
+  currency: "RUB",
+  sellerSnapshot: { displayName: "Markiro" },
+  buyerSnapshot: { displayName: "Factory" },
   subtotal: "12500.00",
   vatTotal: "2500.00",
-  currency: "RUB",
+  total: "15000.00",
   applicationMode: "automatic",
+  createdByPlatformUserId: "platform-accountant",
+  issuedByPlatformUserId: "platform-accountant",
+  issuedAt: "2026-08-21T10:00:00.000Z",
   paidAt: null,
+  cancelledAt: null,
+  createdAt: CREATED_AT,
+  updatedAt: CREATED_AT,
+} as const;
+
+const issuedDetail = {
+  ...invoiceBase,
+  status: "issued",
   lines: [
     {
       id: LINE_ID,
+      tenantId: TENANT_ID,
+      invoiceId: INVOICE_ID,
       position: 1,
       kind: "plan",
       catalogVersionId: "11111111-1111-4111-8111-111111111111",
+      catalogKind: "plan",
       nameRu: "Производство",
       nameEn: "Production",
+      descriptionRu: null,
+      descriptionEn: null,
       quantity: 1,
       unit: "месяц",
+      catalogUnitPrice: "15000.00",
       agreedUnitPrice: "15000.00",
+      vatRate: "20.00",
+      vatIncluded: true,
+      lineSubtotal: "12500.00",
+      lineVat: "2500.00",
       lineTotal: "15000.00",
       activationPolicy: "manual",
+      createdAt: CREATED_AT,
     },
   ],
   documents: [],
@@ -58,12 +82,8 @@ function installApi() {
         return jsonResponse(200, {
           items: [
             {
-              id: INVOICE_ID,
-              number: issuedDetail.number,
-              tenantId: TENANT_ID,
+              ...invoiceBase,
               status: "issued",
-              total: "15000.00",
-              paidAt: null,
             },
           ],
         });
@@ -78,23 +98,34 @@ function installApi() {
                 paidAt: "2026-08-21T12:00:00.000Z",
                 payment: {
                   id: "93111111-1111-4111-8111-111111111111",
+                  tenantId: TENANT_ID,
+                  invoiceId: INVOICE_ID,
+                  source: "manual",
                   paidAt: "2026-08-21T12:00:00.000Z",
                   amount: "15000.00",
                   currency: "RUB",
                   bankReference: "BANK-42",
+                  importRowId: null,
+                  platformUserId: "platform-accountant",
+                  idempotencyKey: "invoice-payment-42",
+                  createdAt: "2026-08-21T12:00:00.000Z",
                 },
                 application: {
                   status: "pending",
                   latestByLine: [
                     {
                       id: "94111111-1111-4111-8111-111111111111",
+                      tenantId: TENANT_ID,
+                      invoiceId: INVOICE_ID,
                       invoiceLineId: LINE_ID,
                       attempt: 1,
                       status: "pending",
                       kind: "plan",
                       source: "payment",
+                      beforeSnapshot: null,
                       afterSnapshot: null,
                       errorCode: null,
+                      actorPlatformUserId: "platform-accountant",
                       createdAt: "2026-08-21T12:00:00.000Z",
                     },
                   ],
@@ -112,10 +143,17 @@ function installApi() {
         paid = true;
         return jsonResponse(201, {
           id: "93111111-1111-4111-8111-111111111111",
+          tenantId: TENANT_ID,
+          invoiceId: INVOICE_ID,
+          source: "manual",
           paidAt: body.paidAt,
           amount: body.amount,
           currency: "RUB",
           bankReference: body.bankReference,
+          importRowId: null,
+          platformUserId: "platform-accountant",
+          idempotencyKey: body.idempotencyKey,
+          createdAt: "2026-08-21T12:00:00.000Z",
         });
       }
       if (path.endsWith(`/api/platform/invoices/${INVOICE_ID}/apply`) && method === "POST") {
@@ -143,6 +181,36 @@ function installApi() {
 }
 
 describe("invoice commercial lifecycle", () => {
+  it("rejects a malformed invoice success body at the browser boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const path = String(input);
+        if (path.endsWith("/api/platform/me")) return jsonResponse(200, ACCOUNTANT_ME);
+        if (path.endsWith("/api/platform/invoices")) {
+          return jsonResponse(200, {
+            items: [
+              {
+                id: INVOICE_ID,
+                number: issuedDetail.number,
+                tenantId: TENANT_ID,
+                status: "issued",
+                total: "15000.00",
+                paidAt: null,
+              },
+            ],
+          });
+        }
+        throw new Error(`Unexpected request: ${path}`);
+      }),
+    );
+
+    renderSaasApp({ initialEntry: "/billing" });
+
+    expect(await screen.findByText("Не удалось загрузить счета")).toBeDefined();
+    expect(screen.queryByRole("link", { name: issuedDetail.number })).toBeNull();
+  });
+
   it("opens a dedicated invoice route from the billing register", async () => {
     installApi();
     const user = userEvent.setup();

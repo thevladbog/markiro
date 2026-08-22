@@ -2,6 +2,32 @@
   "brand": {
     "logoAlt": "Markiro logo"
   },
+  "panelState": {
+    "loading": "Loading",
+    "empty": "No data to display",
+    "retry": "Retry",
+    "requestId": "Request ID: {{requestId}}",
+    "copyRequestId": "Copy request ID",
+    "contractEndpoint": "Endpoint: {{endpoint}}",
+    "errors": {
+      "network": {
+        "title": "Platform connection unavailable",
+        "body": "Check the connection and try again."
+      },
+      "authorization": {
+        "title": "Insufficient permissions",
+        "body": "Refresh the session or contact a platform administrator."
+      },
+      "domain": {
+        "title": "The operation could not be completed",
+        "body": "The state may have changed. Refresh the data and try again."
+      },
+      "contract": {
+        "title": "The platform response format changed",
+        "body": "This section is temporarily unavailable. Other data remains available."
+      }
+    }
+  },
   "auth": {
     "email": "Email",
     "password": "Password",

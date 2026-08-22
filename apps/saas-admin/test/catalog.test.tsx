@@ -2,7 +2,7 @@ import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { CatalogVersionDto } from "../src/pages/catalog/api.js";
+import { catalogVersionToCreateInput, type CatalogVersionDto } from "../src/pages/catalog/api.js";
 import {
   DRAFT_PLAN,
   ADDON,
@@ -11,6 +11,7 @@ import {
   SERVICE,
   SUPPORT_ME,
   installCatalogApi,
+  jsonResponse,
   renderSaasApp,
 } from "./render.js";
 
@@ -28,7 +29,39 @@ async function chooseOption(
   await user.click(await screen.findByRole("option", { name: option }));
 }
 
+async function submitMinimalCatalogCreate(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+  await user.type(screen.getByLabelText("Код позиции"), "plan-contract-check");
+  await user.type(screen.getByLabelText("Название на русском"), "Проверка контракта");
+  await user.type(screen.getByLabelText("Название на английском"), "Contract check");
+  await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+}
+
 describe("commercial catalog", () => {
+  it("rejects a malformed catalog success body at the browser boundary", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith("/api/platform/me")) return jsonResponse(200, PLATFORM_ADMIN_ME);
+        if (url.endsWith("/api/platform/settings/demo-plan")) {
+          return jsonResponse(200, { catalogVersionId: null });
+        }
+        if (url.endsWith("/api/platform/catalog/items")) {
+          return jsonResponse(200, {
+            items: [{ ...DRAFT_PLAN, status: "active" }],
+          });
+        }
+        throw new Error(`Unexpected request: ${url}`);
+      }),
+    );
+
+    renderSaasApp();
+
+    expect(await screen.findByText("Не удалось загрузить каталог.")).toBeDefined();
+    expect(screen.queryByRole("button", { name: "Открыть Базовый, версия 2" })).toBeNull();
+  });
+
   it("groups the platform catalog into plans, add-ons, and services", async () => {
     installCatalogApi();
     renderSaasApp();
@@ -42,8 +75,8 @@ describe("commercial catalog", () => {
   it("paginates large catalog groups instead of rendering every row", async () => {
     const plans = Array.from({ length: 55 }, (_, index) => ({
       ...structuredClone(PUBLISHED_PLAN),
-      id: `plan-version-${index + 1}`,
-      catalogItemId: `plan-item-${index + 1}`,
+      id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
+      catalogItemId: `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`,
       catalogItemCode: `plan-${index + 1}`,
       nameRu: `Тариф ${index + 1}`,
       nameEn: `Plan ${index + 1}`,
@@ -75,6 +108,35 @@ describe("commercial catalog", () => {
     expect(await screen.findByRole("region", { name: "Версия 1 · Профи" })).toBeDefined();
     expect(api.items()).toHaveLength(1);
   });
+
+  it.each([
+    [409, "Позиция с таким кодом уже существует или недоступна"],
+    [
+      {
+        status: 409,
+        body: { message: "raw-server-conflict-must-not-render", zod: "must-not-render" },
+        headers: { "x-request-id": "41111111-1111-4111-8111-111111111111" },
+      },
+      "Не удалось создать позицию.",
+    ],
+  ])(
+    "uses conflict copy only for a valid domain create failure %#",
+    async (response, expectedMessage) => {
+      installCatalogApi({
+        me: PLATFORM_ADMIN_ME,
+        items: [],
+        createResponses: [response],
+      });
+      renderSaasApp();
+      const user = userEvent.setup();
+
+      await submitMinimalCatalogCreate(user);
+
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain(expectedMessage);
+      expect(alert.textContent).not.toMatch(/raw-server-conflict|zod|must-not-render/i);
+    },
+  );
 
   it("submits a custom unit and included custom VAT for a service", async () => {
     const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
@@ -213,6 +275,16 @@ describe("commercial catalog", () => {
       plan: PUBLISHED_PLAN.plan,
     });
     expect(await screen.findByRole("region", { name: "Версия 2 · Базовый" })).toBeDefined();
+  });
+
+  it("refuses to invent missing financial terms while cloning", () => {
+    const partiallyRedactedPlan: CatalogVersionDto = structuredClone(PUBLISHED_PLAN);
+    delete partiallyRedactedPlan.vatRateBps;
+    delete partiallyRedactedPlan.vatIncluded;
+
+    expect(() => catalogVersionToCreateInput(partiallyRedactedPlan)).toThrow(
+      "catalog_version_financial_terms_missing",
+    );
   });
 
   it("clones add-on effects and one-time service terms", async () => {
@@ -543,6 +615,29 @@ describe("commercial catalog", () => {
     expect(within(liveStatus).queryByText("Черновик сохранён")).toBeNull();
   });
 
+  it("uses the safe generic save error for a malformed 409 envelope", async () => {
+    installCatalogApi({
+      items: [DRAFT_PLAN],
+      saveStatuses: [
+        {
+          status: 409,
+          body: { message: "raw-save-conflict-must-not-render", zod: "must-not-render" },
+          headers: { "x-request-id": "51111111-1111-4111-8111-111111111111" },
+        },
+      ],
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 2" }));
+    await user.click(screen.getByRole("button", { name: "Сохранить черновик" }));
+
+    const liveStatus = screen.getByRole("status", { name: "Статус операции с версией" });
+    expect(await within(liveStatus).findByText("Не удалось сохранить черновик.")).toBeDefined();
+    expect(liveStatus.textContent).not.toMatch(/raw-save-conflict|zod|must-not-render/i);
+    expect(within(liveStatus).queryByText("Версия уже изменилась. Обновите каталог.")).toBeNull();
+  });
+
   it("announces a localized default-demo conflict without changing the selected version", async () => {
     installCatalogApi({ items: [PUBLISHED_PLAN], defaultStatuses: [409] });
     renderSaasApp();
@@ -556,6 +651,29 @@ describe("commercial catalog", () => {
       await within(liveStatus).findByText("Демо-план уже изменён. Обновите каталог."),
     ).toBeDefined();
     expect(screen.queryByText("Демо по умолчанию")).toBeNull();
+  });
+
+  it("uses the safe generic demo-plan error for a malformed 409 envelope", async () => {
+    installCatalogApi({
+      items: [PUBLISHED_PLAN],
+      defaultStatuses: [
+        {
+          status: 409,
+          body: { message: "raw-demo-conflict-must-not-render", zod: "must-not-render" },
+          headers: { "x-request-id": "61111111-1111-4111-8111-111111111111" },
+        },
+      ],
+    });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: "Открыть Базовый, версия 1" }));
+    await user.click(screen.getByRole("button", { name: "Сделать версию 1 демо по умолчанию" }));
+
+    const liveStatus = screen.getByRole("status", { name: "Статус операции с версией" });
+    expect(await within(liveStatus).findByText("Не удалось назначить демо-план.")).toBeDefined();
+    expect(liveStatus.textContent).not.toMatch(/raw-demo-conflict|zod|must-not-render/i);
+    expect(within(liveStatus).queryByText("Демо-план уже изменён. Обновите каталог.")).toBeNull();
   });
 
   it("confirms the exact version before publishing and then makes the panel immutable", async () => {

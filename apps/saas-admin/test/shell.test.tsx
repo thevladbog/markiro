@@ -15,6 +15,8 @@ afterEach(() => {
 });
 
 describe("SaaS-admin shell", () => {
+  const requestId = "31111111-1111-4111-8111-111111111111";
+
   it("uses one h1, semantic landmarks, and a slim operational status rail", async () => {
     installCatalogApi();
     renderSaasApp();
@@ -45,7 +47,7 @@ describe("SaaS-admin shell", () => {
     expect(rail.textContent).not.toContain("API · доступен");
   });
 
-  it("distinguishes loading, network, unauthenticated, and forbidden states", async () => {
+  it("distinguishes loading, network, and unauthenticated states", async () => {
     const loading = renderSaasApp({ state: authState({ sessionPending: true }) });
     expect(screen.getByRole("status").textContent).toContain("Проверяем платформенный сеанс");
     loading.unmount();
@@ -56,13 +58,53 @@ describe("SaaS-admin shell", () => {
 
     renderSaasApp({ state: authState() });
     expect(await screen.findByRole("heading", { name: "Вход в платформу" })).toBeDefined();
-    cleanup();
-
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => jsonResponse(403, { message: "Forbidden" })),
-    );
-    renderSaasApp({ state: authState({ session: readySession(true) }) });
-    expect(await screen.findByRole("heading", { name: "Доступ ограничен" })).toBeDefined();
   });
+
+  it.each([
+    [401, "Вход в платформу"],
+    [403, "Доступ ограничен"],
+  ])(
+    "uses authorization semantics only for a valid %s platform envelope",
+    async (status, title) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(status, {
+            code: status === 401 ? "platform_unauthorized" : "platform_forbidden",
+          }),
+        ),
+      );
+
+      renderSaasApp({ state: authState({ session: readySession(true) }) });
+
+      expect(await screen.findByRole("heading", { name: title })).toBeDefined();
+      expect(screen.queryByText("Формат ответа платформы изменился")).toBeNull();
+    },
+  );
+
+  it.each([401, 403])(
+    "keeps a malformed %s platform envelope on the safe contract retry path",
+    async (status) => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () =>
+          jsonResponse(
+            status,
+            { message: "raw-server-diagnostic-must-not-render", zod: "must-not-render" },
+            { "x-request-id": requestId },
+          ),
+        ),
+      );
+
+      renderSaasApp({ state: authState({ session: readySession(true) }) });
+
+      const alert = await screen.findByRole("alert");
+      expect(alert.textContent).toContain("Формат ответа платформы изменился");
+      expect(alert.textContent).toContain(requestId);
+      expect(alert.textContent).not.toMatch(/raw-server-diagnostic|zod|must-not-render/i);
+      expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
+      expect(screen.queryByRole("heading", { name: "Доступ ограничен" })).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Вход в платформу" })).toBeNull();
+    },
+  );
 });

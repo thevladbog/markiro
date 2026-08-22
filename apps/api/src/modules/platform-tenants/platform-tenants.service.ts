@@ -1,15 +1,22 @@
 import { Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, count, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import {
+  platformTenantContracts,
+  type AddonAssignmentResult,
+  type CreateTenantResult,
+  type PlanAssignmentResult,
+  type RenewTenantActivationResult,
+  type TenantDetailResult,
+  type TenantListResult,
+  type TenantSubscriptionStatus,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { sanitizeSupportAuditMetadata } from "../../platform-auth/platform-audit.service";
 import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
 import type { AssignAddonDto, AssignPlanDto, ProvisionTenantDto, TenantListQueryDto } from "./dto";
-import {
-  TenantProvisioningService,
-  type TenantProvisioningResult,
-} from "./tenant-provisioning.service";
+import { TenantProvisioningService } from "./tenant-provisioning.service";
 
 type SubscriptionRow = typeof schema.tenantSubscriptions.$inferSelect;
 type CatalogVersionRow = typeof schema.catalogItemVersions.$inferSelect;
@@ -20,7 +27,7 @@ interface TenantListRow {
   slug: string;
   createdAt: Date | string;
   subscriptionId: string | null;
-  subscriptionStatus: string | null;
+  subscriptionStatus: Exclude<TenantSubscriptionStatus, "unmanaged"> | null;
   startsAt: Date | string | null;
   endsAt: Date | string | null;
   planVersionId: string | null;
@@ -60,11 +67,11 @@ export class PlatformTenantsService {
     private readonly subscriptions: SubscriptionLifecycleService,
   ) {}
 
-  create(actor: PlatformPrincipal, input: ProvisionTenantDto): Promise<TenantProvisioningResult> {
+  create(actor: PlatformPrincipal, input: ProvisionTenantDto): Promise<CreateTenantResult> {
     return this.provisioning.provision(input, { actor });
   }
 
-  async list(actor: PlatformPrincipal, query: TenantListQueryDto) {
+  async list(actor: PlatformPrincipal, query: TenantListQueryDto): Promise<TenantListResult> {
     const offset = (query.page - 1) * query.limit;
     const filter = query.status
       ? sql`coalesce(latest.status::text, 'unmanaged') = ${query.status}`
@@ -108,7 +115,7 @@ export class PlatformTenantsService {
       limit ${query.limit} offset ${offset}
     `);
     const includeFinancial = actor.role !== "support";
-    return {
+    return platformTenantContracts.list.response.parse({
       items: result.rows.map((row) => ({
         id: row.id,
         name: row.name,
@@ -136,10 +143,10 @@ export class PlatformTenantsService {
       page: query.page,
       limit: query.limit,
       total: result.rows[0]?.total ?? 0,
-    };
+    });
   }
 
-  async get(actor: PlatformPrincipal, tenantId: string) {
+  async get(actor: PlatformPrincipal, tenantId: string): Promise<TenantDetailResult> {
     const [tenant] = await this.db
       .select()
       .from(schema.organization)
@@ -298,7 +305,7 @@ export class PlatformTenantsService {
     );
     const scrub =
       actor.role === "support" ? sanitizeSupportAuditMetadata : (value: unknown) => value;
-    return {
+    return platformTenantContracts.detail.response.parse({
       tenant: {
         id: tenant.id,
         name: tenant.name,
@@ -341,13 +348,13 @@ export class PlatformTenantsService {
         after: scrub(event.after),
         createdAt: event.createdAt,
       })),
-    };
+    });
   }
 
   async renewActivation(
     actor: PlatformPrincipal,
     tenantId: string,
-  ): Promise<{ deliveryId: string }> {
+  ): Promise<RenewTenantActivationResult> {
     const [owner] = await this.db
       .select({
         tenantName: schema.organization.name,
@@ -374,12 +381,24 @@ export class PlatformTenantsService {
     return { deliveryId: result.deliveryId };
   }
 
-  assignPlan(actor: PlatformPrincipal, tenantId: string, input: AssignPlanDto) {
-    return this.subscriptions.assignPlan(actor, tenantId, input);
+  async assignPlan(
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: AssignPlanDto,
+  ): Promise<PlanAssignmentResult> {
+    return platformTenantContracts.assignPlan.response.parse(
+      await this.subscriptions.assignPlan(actor, tenantId, input),
+    );
   }
 
-  assignAddon(actor: PlatformPrincipal, tenantId: string, input: AssignAddonDto) {
-    return this.subscriptions.assignAddon(actor, tenantId, input);
+  async assignAddon(
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: AssignAddonDto,
+  ): Promise<AddonAssignmentResult> {
+    return platformTenantContracts.assignAddon.response.parse(
+      await this.subscriptions.assignAddon(actor, tenantId, input),
+    );
   }
 
   private async subscriptionDto(subscription: SubscriptionRow, includeFinancial: boolean) {

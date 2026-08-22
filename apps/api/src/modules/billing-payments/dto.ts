@@ -1,20 +1,11 @@
-import { z } from "zod";
+import {
+  platformCommercialContracts,
+  type ManualPaymentDto,
+  type PaymentImportDto,
+} from "@markiro/platform-contracts";
 
-const money = z.string().regex(/^\d{1,12}\.\d{2}$/);
-export const manualPaymentSchema = z
-  .object({
-    amount: money,
-    paidAt: z.coerce.date(),
-    bankReference: z.string().trim().min(1).max(200),
-    idempotencyKey: z.string().trim().min(8).max(200),
-  })
-  .strict();
-export type ManualPaymentDto = z.infer<typeof manualPaymentSchema>;
+export const manualPaymentSchema = platformCommercialContracts.payments.manual.body;
+export const importBankFileSchema = platformCommercialContracts.payments.import.body;
 
-export const importBankFileSchema = z
-  .object({
-    fileName: z.string().trim().min(1).max(255),
-    content: z.string().min(1).max(5_000_000),
-  })
-  .strict();
-export type ImportBankFileDto = z.infer<typeof importBankFileSchema>;
+export type { ManualPaymentDto };
+export type ImportBankFileDto = PaymentImportDto;

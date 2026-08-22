@@ -51,7 +51,7 @@ function installTeamApi({ status = TEAM_MEMBER.status }: { status?: "active" | "
         const body = JSON.parse(String(init.body));
         calls.push({ method, path: url, body });
         member = { ...member, role: body.role };
-        return jsonResponse(200, member);
+        return jsonResponse(200, { status: true });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
     }),

@@ -4,13 +4,14 @@ import { ConflictException, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { and, desc, eq } from "drizzle-orm";
 import { schema, type PlatformRole } from "@markiro/db";
+import type { CatalogVersionCreate } from "@markiro/platform-contracts";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../src/app.module";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
-import type { CreateCatalogVersionDto } from "../src/modules/platform-catalog/dto";
+import { PlatformCatalogController } from "../src/modules/platform-catalog/platform-catalog.controller";
 import { PlatformCatalogService } from "../src/modules/platform-catalog/platform-catalog.service";
 import {
   mountPlatformAuth,
@@ -19,6 +20,68 @@ import {
 } from "../src/platform-auth/platform-auth.setup";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { listenOnLoopback } from "./support/listen-loopback";
+
+describe("platform catalog response boundary", () => {
+  it("normalizes service timestamps and rejects mismatched effects at the controller boundary", async () => {
+    const serviceResult = {
+      items: [
+        {
+          id: "11111111-1111-4111-8111-111111111111",
+          catalogItemId: "21111111-1111-4111-8111-111111111111",
+          catalogItemCode: "plan-basic",
+          kind: "plan",
+          version: 1,
+          status: "published",
+          nameRu: "Базовый",
+          nameEn: "Basic",
+          descriptionRu: null,
+          descriptionEn: null,
+          unit: "month",
+          billingMode: "recurring",
+          billingPeriod: "month",
+          unitPrice: "15000.00",
+          vatRateBps: 2000,
+          vatIncluded: true,
+          publishedAt: new Date("2026-08-11T18:08:42.158Z"),
+          publishedByPlatformUserId: null,
+          plan: {
+            maxLines: 2,
+            maxStations: 3,
+            maxKiosks: 1,
+            maxCabinetUsers: 5,
+            labelEditorEnabled: true,
+            publicApiEnabled: false,
+            palletsEnabled: false,
+            demoDurationDays: 14,
+          },
+        },
+      ],
+    };
+    const service = {
+      list: async () => serviceResult,
+    } as unknown as PlatformCatalogService;
+    const controller = new PlatformCatalogController(service);
+    const requestWithPrincipal = {
+      platformPrincipal: {
+        userId: "platform-user",
+        role: "platform_admin",
+        capabilities: ["catalog.read"],
+        twoFactorReady: true,
+      },
+    } as unknown as Parameters<PlatformCatalogController["list"]>[0];
+
+    const parsed = await controller.list(requestWithPrincipal);
+    expect(parsed.items[0]?.publishedAt).toBe("2026-08-11T18:08:42.158Z");
+
+    serviceResult.items[0] = {
+      ...serviceResult.items[0]!,
+      kind: "plan",
+      plan: undefined,
+      addon: { effects: [{ key: "stations", quotaIncrement: 1 }] },
+    } as never;
+    await expect(controller.list(requestWithPrincipal)).rejects.toThrow();
+  });
+});
 
 const ready = Boolean(
   process.env.DATABASE_URL &&
@@ -108,7 +171,7 @@ describe.skipIf(!ready)("platform catalog", () => {
     return { agent: request.agent(app!.getHttpServer()).set("Cookie", cookie), userId };
   }
 
-  const basicPlan: CreateCatalogVersionDto = {
+  const basicPlan: CatalogVersionCreate = {
     nameRu: "Базовый",
     nameEn: "Basic",
     unit: "month",

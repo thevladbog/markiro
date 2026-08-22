@@ -15,7 +15,7 @@ import {
   type ComboboxOption,
 } from "@markiro/ui";
 
-import { ApiRequestError } from "../../api/client.js";
+import { PanelState } from "../../components/PanelState.js";
 import {
   assignTenantAddon,
   assignTenantPlan,
@@ -566,10 +566,9 @@ export function SubscriptionPanel({
       ]);
       setMutationMessage({ tone: "ok", key: "tenants.assignment.success" });
     } catch (error) {
-      const code = error instanceof ApiRequestError ? error.code : null;
       setMutationMessage({
         tone: "error",
-        key: tenantErrorMessageKey(confirmation.kind, code),
+        key: tenantErrorMessageKey(confirmation.kind, error),
       });
     }
   };
@@ -652,11 +651,13 @@ export function SubscriptionPanel({
 
       {canDirectAssign ? (
         <Card className="assignment-card" title={t("tenants.assignment.title")} titleAs="h2">
-          {catalog.isPending ? (
-            <p role="status">{t("tenants.assignment.loading")}</p>
-          ) : catalog.error ? (
-            <Alert tone="error">{t("tenants.assignment.catalogError")}</Alert>
-          ) : (
+          <PanelState
+            loading={catalog.isPending}
+            empty={false}
+            error={catalog.error}
+            onRetry={() => void catalog.refetch()}
+            loadingText={t("tenants.assignment.loading")}
+          >
             <form
               className="assignment-form"
               noValidate
@@ -758,7 +759,7 @@ export function SubscriptionPanel({
               </div>
               <Button type="submit">{t("tenants.assignment.review")}</Button>
             </form>
-          )}
+          </PanelState>
           <div className="tenant-operation-status" role="status" aria-live="polite">
             {mutationMessage ? (
               <span data-tone={mutationMessage.tone}>{t(mutationMessage.key)}</span>

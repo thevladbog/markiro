@@ -6,11 +6,11 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
+import { platformCatalogContracts, type CatalogVersion } from "@markiro/platform-contracts";
 
 import i18n from "../src/i18n/index.js";
 import { NavigationGuardProvider } from "../src/layout/NavigationGuard.js";
 import { DocumentComposer } from "../src/pages/documents/DocumentComposer.js";
-import type { CatalogVersionDto } from "../src/pages/catalog/api.js";
 import type { TenantListItem } from "../src/pages/tenants/api.js";
 
 const globalCss = readFileSync("src/global.css", "utf8");
@@ -57,10 +57,13 @@ const plan = {
     palletsEnabled: false,
     demoDurationDays: null,
   },
-} satisfies CatalogVersionDto;
+} satisfies CatalogVersion;
+
+const { plan: ignoredPlan, ...catalogBase } = plan;
+void ignoredPlan;
 
 const addon = {
-  ...plan,
+  ...catalogBase,
   id: "22222222-1111-4111-8111-111111111111",
   catalogItemId: "32222222-1111-4111-8111-111111111111",
   catalogItemCode: "addon-lines",
@@ -71,10 +74,10 @@ const addon = {
   unitPrice: "100.00",
   vatIncluded: false,
   addon: { effects: [{ key: "lines", quotaIncrement: 10 }] },
-} satisfies CatalogVersionDto;
+} satisfies CatalogVersion;
 
 const service = {
-  ...plan,
+  ...catalogBase,
   id: "23333333-1111-4111-8111-111111111111",
   catalogItemId: "33333333-1111-4111-8111-111111111111",
   catalogItemCode: "service-launch",
@@ -88,7 +91,7 @@ const service = {
   vatRateBps: null,
   vatIncluded: false,
   service: {},
-} satisfies CatalogVersionDto;
+} satisfies CatalogVersion;
 
 function renderComposer(overrides: Partial<React.ComponentProps<typeof DocumentComposer>> = {}) {
   const props = {
@@ -136,6 +139,22 @@ async function selectCombobox(
 }
 
 describe("DocumentComposer", () => {
+  it("uses the shared catalog parser without inventing omitted financial terms", () => {
+    const {
+      unitPrice: _unitPrice,
+      vatRateBps: _vatRateBps,
+      vatIncluded: _vatIncluded,
+      ...redacted
+    } = plan;
+    void _unitPrice;
+    void _vatRateBps;
+    void _vatIncluded;
+    const parsed = platformCatalogContracts.list.response.parse({ items: [redacted] });
+
+    expect(parsed.items[0]?.descriptionRu).toBeNull();
+    expect(parsed.items[0]).not.toHaveProperty("unitPrice");
+  });
+
   it("keeps a multi-line invoice editable and submits its visible order", async () => {
     await i18n.changeLanguage("ru");
     const user = userEvent.setup();

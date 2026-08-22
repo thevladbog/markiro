@@ -35,6 +35,31 @@ const PRODUCTION_PLAN = "Производственный · plan-production · 
 const STATION_ADDON = "Дополнительная станция · addon-station · версия 1";
 
 describe("tenant subscription detail", () => {
+  it("accepts a production-like legacy tenant detail with PostgreSQL timestamps", async () => {
+    const detail = {
+      ...structuredClone(TENANT_DETAIL),
+      tenant: {
+        ...structuredClone(TENANT_DETAIL.tenant),
+        id: "legacy_better_auth_org",
+        createdAt: "2026-08-11 18:08:42.158",
+      },
+      currentSubscription: {
+        ...structuredClone(TENANT_DETAIL.currentSubscription),
+        tenantId: "legacy_better_auth_org",
+        createdAt: "2026-08-11 18:08:42.158+00",
+        updatedAt: "2026-08-11 18:08:42.158",
+        startsAt: null,
+        endsAt: null,
+      },
+    };
+    installTenantApi({ detail });
+
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    expect(screen.queryByText("Не удалось загрузить данные тенанта.")).toBeNull();
+  });
+
   it("accepts subscriptions and add-ons created from a paid invoice line", async () => {
     const detail = structuredClone(TENANT_DETAIL);
     detail.currentSubscription.source = "paid_invoice_line";

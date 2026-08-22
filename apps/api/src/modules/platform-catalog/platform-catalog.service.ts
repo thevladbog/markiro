@@ -7,15 +7,21 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, or, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import {
+  platformCatalogContracts,
+  type AddonEffect,
+  type ArchiveCatalogItemResponse,
+  type CatalogVersion,
+  type CatalogVersionCreate,
+  type CatalogVersionListResponse,
+  type CatalogVersionPatch,
+  type DefaultDemoPlanResponse,
+  type PlanEntitlements,
+  type SetDefaultDemoPlan,
+} from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
-import type {
-  CatalogVersionDto,
-  CreateCatalogVersionDto,
-  SetDefaultDemoPlanDto,
-  UpdateCatalogVersionDto,
-} from "./dto";
 
 type CatalogItemRow = typeof schema.catalogItems.$inferSelect;
 type CatalogVersionRow = typeof schema.catalogItemVersions.$inferSelect;
@@ -31,7 +37,7 @@ export class PlatformCatalogService {
     private readonly audit: PlatformAuditService,
   ) {}
 
-  async list(principal: PlatformPrincipal): Promise<{ items: CatalogVersionDto[] }> {
+  async list(principal: PlatformPrincipal): Promise<CatalogVersionListResponse> {
     const rows = await this.db
       .select({ item: schema.catalogItems, version: schema.catalogItemVersions })
       .from(schema.catalogItems)
@@ -40,7 +46,7 @@ export class PlatformCatalogService {
         eq(schema.catalogItemVersions.catalogItemId, schema.catalogItems.id),
       )
       .orderBy(schema.catalogItems.code, desc(schema.catalogItemVersions.version));
-    const items: CatalogVersionDto[] = [];
+    const items: CatalogVersion[] = [];
     for (const row of rows) {
       if (!row.version) continue;
       items.push(await this.toDto(row.item, row.version, principal.role !== "support"));
@@ -51,7 +57,7 @@ export class PlatformCatalogService {
   async listVersions(
     principal: PlatformPrincipal,
     itemRef: string,
-  ): Promise<{ items: CatalogVersionDto[] }> {
+  ): Promise<CatalogVersionListResponse> {
     const item = await this.findItem(itemRef);
     if (!item) throw new NotFoundException({ code: "catalog_item_not_found" });
     const versions = await this.db
@@ -70,7 +76,7 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-  ): Promise<CatalogVersionDto> {
+  ): Promise<CatalogVersion> {
     const found = await this.findVersion(itemRef, versionId);
     if (!found) throw new NotFoundException({ code: "catalog_version_not_found" });
     return this.toDto(found.item, found.version, principal.role !== "support");
@@ -79,8 +85,8 @@ export class PlatformCatalogService {
   async createVersion(
     principal: PlatformPrincipal,
     itemRef: string,
-    input: CreateCatalogVersionDto,
-  ): Promise<CatalogVersionDto> {
+    input: CatalogVersionCreate,
+  ): Promise<CatalogVersion> {
     const kind = kindForInput(input);
     try {
       return await this.db.transaction(async (tx) => {
@@ -140,8 +146,8 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-    input: UpdateCatalogVersionDto,
-  ): Promise<CatalogVersionDto> {
+    input: CatalogVersionPatch,
+  ): Promise<CatalogVersion> {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, versionId);
@@ -184,7 +190,7 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-  ): Promise<CatalogVersionDto> {
+  ): Promise<CatalogVersion> {
     try {
       return await this.db.transaction(async (tx) => {
         const found = await this.findVersion(itemRef, versionId, tx);
@@ -235,7 +241,7 @@ export class PlatformCatalogService {
     principal: PlatformPrincipal,
     itemRef: string,
     versionId: string,
-  ): Promise<CatalogVersionDto> {
+  ): Promise<CatalogVersion> {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, versionId);
@@ -274,7 +280,10 @@ export class PlatformCatalogService {
     }
   }
 
-  async archive(principal: PlatformPrincipal, itemRef: string): Promise<{ status: "archived" }> {
+  async archive(
+    principal: PlatformPrincipal,
+    itemRef: string,
+  ): Promise<ArchiveCatalogItemResponse> {
     try {
       return await this.db.transaction(async (tx) => {
         const item = await this.findItem(itemRef, tx);
@@ -320,9 +329,7 @@ export class PlatformCatalogService {
     }
   }
 
-  async getDefaultDemo(
-    _principal: PlatformPrincipal,
-  ): Promise<{ catalogVersionId: string | null }> {
+  async getDefaultDemo(_principal: PlatformPrincipal): Promise<DefaultDemoPlanResponse> {
     const [setting] = await this.db
       .select({ catalogVersionId: schema.platformSettings.defaultDemoCatalogVersionId })
       .from(schema.platformSettings)
@@ -332,8 +339,8 @@ export class PlatformCatalogService {
 
   async setDefaultDemo(
     principal: PlatformPrincipal,
-    input: SetDefaultDemoPlanDto,
-  ): Promise<{ catalogVersionId: string }> {
+    input: SetDefaultDemoPlan,
+  ): Promise<SetDefaultDemoPlan> {
     try {
       return await this.db.transaction(async (tx) => {
         await this.lockVersion(tx, input.catalogVersionId);
@@ -458,7 +465,7 @@ export class PlatformCatalogService {
     tx: CatalogTransaction,
     versionId: string,
     kind: CatalogItemKind,
-    input: CreateCatalogVersionDto,
+    input: CatalogVersionCreate,
   ): Promise<void> {
     if (kind === "plan" && "plan" in input) {
       await tx
@@ -483,7 +490,7 @@ export class PlatformCatalogService {
     tx: CatalogTransaction,
     versionId: string,
     kind: CatalogItemKind,
-    input: UpdateCatalogVersionDto,
+    input: CatalogVersionPatch,
   ): Promise<void> {
     if (kind === "plan" && input.plan !== undefined) {
       await tx
@@ -495,10 +502,17 @@ export class PlatformCatalogService {
       await tx
         .delete(schema.addonEntitlements)
         .where(eq(schema.addonEntitlements.catalogVersionId, versionId));
-      await this.insertEffects(tx, versionId, kind, {
-        ...input,
-        addon: input.addon,
-      } as CreateCatalogVersionDto);
+      await tx.insert(schema.addonEntitlements).values(
+        input.addon.effects.map((effect) =>
+          "quotaIncrement" in effect
+            ? {
+                catalogVersionId: versionId,
+                entitlementKey: effect.key,
+                quotaIncrement: effect.quotaIncrement,
+              }
+            : { catalogVersionId: versionId, entitlementKey: effect.key, featureEnabled: true },
+        ),
+      );
     }
   }
 
@@ -527,12 +541,11 @@ export class PlatformCatalogService {
     version: CatalogVersionRow,
     includeFinancial: boolean,
     db: Pick<Db, "select"> = this.db,
-  ): Promise<CatalogVersionDto> {
-    const dto: CatalogVersionDto = {
+  ): Promise<CatalogVersion> {
+    const common = {
       id: version.id,
       catalogItemId: item.id,
       catalogItemCode: item.code,
-      kind: version.kind,
       version: version.version,
       status: version.status,
       nameRu: version.nameRu,
@@ -545,41 +558,58 @@ export class PlatformCatalogService {
       publishedAt: version.publishedAt,
       publishedByPlatformUserId: version.publishedByPlatformUserId,
     };
-    if (includeFinancial) {
-      dto.unitPrice = String(version.unitPrice);
-      dto.vatRateBps = version.vatRate === null ? null : Math.round(Number(version.vatRate) * 100);
-      dto.vatIncluded = version.vatIncluded;
-    }
+    const financial = includeFinancial
+      ? {
+          unitPrice: String(version.unitPrice),
+          vatRateBps: version.vatRate === null ? null : Math.round(Number(version.vatRate) * 100),
+          vatIncluded: version.vatIncluded,
+        }
+      : {};
     if (version.kind === "plan") {
       const [plan] = await db
         .select()
         .from(schema.planEntitlements)
         .where(eq(schema.planEntitlements.catalogVersionId, version.id));
-      if (plan)
-        dto.plan = {
-          maxLines: plan.maxLines,
-          maxStations: plan.maxStations,
-          maxKiosks: plan.maxKiosks,
-          maxCabinetUsers: plan.maxCabinetUsers,
-          labelEditorEnabled: plan.labelEditorEnabled,
-          publicApiEnabled: plan.publicApiEnabled,
-          palletsEnabled: plan.palletsEnabled,
-          demoDurationDays: plan.demoDurationDays,
-        };
-    } else if (version.kind === "addon") {
+      return platformCatalogContracts.getVersion.response.parse({
+        ...common,
+        ...financial,
+        kind: "plan",
+        plan: plan
+          ? {
+              maxLines: plan.maxLines,
+              maxStations: plan.maxStations,
+              maxKiosks: plan.maxKiosks,
+              maxCabinetUsers: plan.maxCabinetUsers,
+              labelEditorEnabled: plan.labelEditorEnabled,
+              publicApiEnabled: plan.publicApiEnabled,
+              palletsEnabled: plan.palletsEnabled,
+              demoDurationDays: plan.demoDurationDays,
+            }
+          : undefined,
+      });
+    }
+    if (version.kind === "addon") {
       const effects = await db
         .select()
         .from(schema.addonEntitlements)
         .where(eq(schema.addonEntitlements.catalogVersionId, version.id));
-      dto.addon = { effects: effects.map(toAddonEffect) };
-    } else {
-      dto.service = {};
+      return platformCatalogContracts.getVersion.response.parse({
+        ...common,
+        ...financial,
+        kind: "addon",
+        addon: { effects: effects.map(toAddonEffect) },
+      });
     }
-    return dto;
+    return platformCatalogContracts.getVersion.response.parse({
+      ...common,
+      ...financial,
+      kind: "service",
+      service: {},
+    });
   }
 }
 
-function kindForInput(input: CreateCatalogVersionDto): CatalogItemKind {
+function kindForInput(input: CatalogVersionCreate): CatalogItemKind {
   if ("plan" in input) return "plan";
   if ("addon" in input) return "addon";
   return "service";
@@ -589,7 +619,7 @@ function toVatRate(vatRateBps: number | null | undefined): string | null {
   return vatRateBps === null || vatRateBps === undefined ? null : (vatRateBps / 100).toFixed(2);
 }
 
-function toPlanValues(plan: NonNullable<UpdateCatalogVersionDto["plan"]>) {
+function toPlanValues(plan: PlanEntitlements) {
   return {
     maxLines: plan.maxLines,
     maxStations: plan.maxStations,
@@ -602,7 +632,7 @@ function toPlanValues(plan: NonNullable<UpdateCatalogVersionDto["plan"]>) {
   };
 }
 
-function validateEffectForKind(kind: CatalogItemKind, input: UpdateCatalogVersionDto): void {
+function validateEffectForKind(kind: CatalogItemKind, input: CatalogVersionPatch): void {
   if (
     (input.plan !== undefined && kind !== "plan") ||
     (input.addon !== undefined && kind !== "addon") ||
@@ -614,8 +644,8 @@ function validateEffectForKind(kind: CatalogItemKind, input: UpdateCatalogVersio
 
 function copyDefined(
   target: Record<string, unknown>,
-  source: UpdateCatalogVersionDto,
-  keys: readonly (keyof UpdateCatalogVersionDto)[],
+  source: CatalogVersionPatch,
+  keys: readonly (keyof CatalogVersionPatch)[],
 ): void {
   for (const key of keys) {
     const value = source[key];
@@ -623,9 +653,7 @@ function copyDefined(
   }
 }
 
-function toAddonEffect(
-  effect: typeof schema.addonEntitlements.$inferSelect,
-): NonNullable<CatalogVersionDto["addon"]>["effects"][number] {
+function toAddonEffect(effect: typeof schema.addonEntitlements.$inferSelect): AddonEffect {
   if (
     effect.entitlementKey === "lines" ||
     effect.entitlementKey === "stations" ||

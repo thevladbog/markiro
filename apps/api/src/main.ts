@@ -10,6 +10,7 @@ import { loadEnv } from "./env";
 import { excludeExchangeRoute } from "./modules/exchange/exchange.module";
 import { mountOpenApiDocs } from "./openapi-docs";
 import { mountPlatformAuth, setupPlatformAuth } from "./platform-auth/platform-auth.setup";
+import { addPlatformSessionSecurity } from "./platform-http/platform-openapi";
 
 const logger = new Logger("bootstrap");
 
@@ -83,7 +84,10 @@ async function bootstrap() {
 
   const doc = SwaggerModule.createDocument(
     app,
-    new DocumentBuilder().setTitle("Markiro API").setVersion("0.1").build(),
+    addPlatformSessionSecurity(
+      new DocumentBuilder().setTitle("Markiro API").setVersion("0.1"),
+      (await platformSetup.platformAuth.$context).authCookies.sessionToken.name,
+    ).build(),
   );
   app.use("/openapi.json", (_req: unknown, res: { json(b: unknown): void }) => res.json(doc));
   mountOpenApiDocs(server);

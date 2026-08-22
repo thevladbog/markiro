@@ -1,11 +1,15 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { platformTenantContracts } from "@markiro/platform-contracts";
 
+import { platformApiFetch } from "../src/api/client.js";
 import {
   ACCOUNTANT_ME,
   SUPPORT_ME,
+  TENANT_ID,
   TENANT_LIST_ITEM,
+  PUBLISHED_PLAN,
   installTenantApi,
   jsonResponse,
   renderSaasApp,
@@ -26,6 +30,35 @@ async function chooseOption(
 }
 
 describe("platform tenants", () => {
+  it("lets the platform client parse a supplied shared response schema", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse(200, {
+          items: [
+            {
+              ...structuredClone(TENANT_LIST_ITEM),
+              id: "legacy_better_auth_org",
+              createdAt: "2026-08-11 18:08:42.158",
+            },
+          ],
+          page: 1,
+          limit: 50,
+          total: 1,
+        }),
+      ),
+    );
+
+    const result = await platformApiFetch("/tenants?page=1&limit=50", {
+      responseSchema: platformTenantContracts.list.response,
+    });
+
+    expect(result.items[0]).toMatchObject({
+      id: "legacy_better_auth_org",
+      createdAt: "2026-08-11T18:08:42.158Z",
+    });
+  });
+
   it("accepts the PostgreSQL timestamp shape returned by the production tenant list", async () => {
     const productionTenant = {
       ...structuredClone(TENANT_LIST_ITEM),
@@ -167,6 +200,34 @@ describe("platform tenants", () => {
 
     expect(await screen.findByText("15 000,00 ₽")).toBeDefined();
     expect(screen.queryByRole("button", { name: "Создать тенанта" })).toBeNull();
+  });
+
+  it("keeps tenant identity visible when the independently loaded catalog contract fails", async () => {
+    const publishedPlanWithoutPlan = structuredClone(PUBLISHED_PLAN);
+    Reflect.deleteProperty(publishedPlanWithoutPlan, "plan");
+    installTenantApi({
+      catalogResponse: {
+        items: [
+          {
+            ...publishedPlanWithoutPlan,
+            descriptionRu: "password=must-not-render",
+          },
+        ],
+      },
+    });
+
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Обзор" })).toBeDefined();
+    const panelTitle = await screen.findByText("Формат ответа платформы изменился");
+    const panelError = panelTitle.closest('[role="alert"]');
+    expect(panelError).not.toBeNull();
+    if (!panelError) throw new Error("Contract alert is unavailable");
+    expect(panelError.textContent).toContain("Эндпоинт: /catalog/items");
+    expect(panelError.textContent).toContain("11111111-1111-4111-8111-111111111111");
+    expect(panelError.textContent).not.toMatch(/password|must-not-render|items\.0|\.plan|\[0\]/i);
+    expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
   });
 
   it("blocks invalid create input, then sends only name, slug, and owner email", async () => {

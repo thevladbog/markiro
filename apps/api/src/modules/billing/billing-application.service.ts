@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
+import type { InvoiceApplicationResultSource as InvoiceApplicationResult } from "@markiro/platform-contracts";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
@@ -21,19 +22,6 @@ type InvoiceLine = typeof schema.invoiceLines.$inferSelect;
 type BillingPayment = typeof schema.billingPayments.$inferSelect;
 type ActivationPolicy = "immediate" | "after_current";
 type ApplySelection = { lineId: string; activationPolicy?: ActivationPolicy };
-
-export interface InvoiceApplicationResult {
-  invoiceId: string;
-  status: "pending" | "applied" | "partial_failure";
-  results: Array<{
-    lineId: string;
-    attempt: number;
-    status: "pending" | "applied" | "failed" | "skipped";
-    kind: InvoiceLine["kind"];
-    result: unknown;
-    errorCode: string | null;
-  }>;
-}
 
 @Injectable()
 export class BillingApplicationService {

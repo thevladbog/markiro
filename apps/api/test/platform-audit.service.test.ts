@@ -1,6 +1,7 @@
 import { schema } from "@markiro/db";
 import { describe, expect, it, vi } from "vitest";
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
+import { runWithPlatformRequestContext } from "../src/platform-http/platform-request-context.middleware";
 
 describe("PlatformAuditService", () => {
   it("stores bounded metadata while removing secret-shaped keys recursively", async () => {
@@ -63,5 +64,45 @@ describe("PlatformAuditService", () => {
     expect(JSON.stringify(inserted.map((write) => write.values))).not.toContain(
       "must-not-be-stored",
     );
+  });
+
+  it("keeps CLI calls nullable and lets an explicit event request ID override request context", async () => {
+    const requestIds: Array<string | null> = [];
+    const tx = {
+      insert: vi.fn(() => ({
+        values: async (values: { requestId: string | null }) => {
+          requestIds.push(values.requestId);
+        },
+      })),
+    };
+    const service = new PlatformAuditService();
+    const event = {
+      actorPlatformUserId: null,
+      actorRole: null,
+      action: "platform.test",
+      outcome: "success",
+      tenantId: null,
+      targetType: "test",
+      targetId: null,
+      reason: null,
+      before: null,
+      after: null,
+      requestId: null,
+    } as const;
+
+    await service.record(tx as never, event);
+    await runWithPlatformRequestContext("11111111-1111-4111-8111-111111111111", async () => {
+      await service.record(tx as never, event);
+      await service.record(tx as never, {
+        ...event,
+        requestId: "21111111-1111-4111-8111-111111111111",
+      });
+    });
+
+    expect(requestIds).toEqual([
+      null,
+      "11111111-1111-4111-8111-111111111111",
+      "21111111-1111-4111-8111-111111111111",
+    ]);
   });
 });

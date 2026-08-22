@@ -7,7 +7,6 @@ import { Navigate, useNavigate } from "react-router";
 
 import { Alert, Button, Card, Input, PageHeader } from "@markiro/ui";
 
-import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { createTenant, createTenantInputSchema, type CreateTenantInput } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
@@ -47,8 +46,7 @@ export function CreateTenantPanel() {
         state: { tenantCreated: true },
       });
     } catch (error) {
-      const code = error instanceof ApiRequestError ? error.code : null;
-      setSubmitErrorKey(tenantErrorMessageKey("create", code));
+      setSubmitErrorKey(tenantErrorMessageKey("create", error));
     }
   });
 

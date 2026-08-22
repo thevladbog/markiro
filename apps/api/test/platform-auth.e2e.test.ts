@@ -3,6 +3,7 @@ import express from "express";
 import { Controller, Get, type INestApplication } from "@nestjs/common";
 import { Test } from "@nestjs/testing";
 import { schema } from "@markiro/db";
+import { platformErrorSchema } from "@markiro/platform-contracts";
 import { and, desc, eq, sql } from "drizzle-orm";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -16,6 +17,10 @@ import {
   type PlatformAuthSetup,
 } from "../src/platform-auth/platform-auth.setup";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { PlatformActivationController } from "../src/platform-auth/platform-activation.controller";
+import { PlatformAuditController } from "../src/platform-auth/platform-audit.controller";
+import { PlatformMeController } from "../src/platform-auth/platform-me.controller";
+import { PlatformTeamController } from "../src/platform-auth/platform-team.controller";
 
 @Controller("platform/unclassified-test")
 class UnclassifiedPlatformController {
@@ -33,6 +38,203 @@ const ready = Boolean(
   process.env.PLATFORM_AUTH_URL &&
   process.env.SAAS_ADMIN_ORIGIN,
 );
+
+describe("platform identity response boundaries", () => {
+  it("rejects a malformed principal before returning it", () => {
+    const controller = new PlatformMeController();
+
+    expect(() =>
+      controller.me({
+        platformPrincipal: {
+          userId: "platform-user-1",
+          role: "support",
+          capabilities: ["billing.write"],
+          twoFactorReady: true,
+        },
+      } as never),
+    ).toThrow();
+  });
+
+  it("normalizes the team list and parses every team mutation success", async () => {
+    const controller = new PlatformTeamController({
+      list: async () => [
+        {
+          id: "platform-user-2",
+          name: "Support Operator",
+          email: "support@example.invalid",
+          role: "support",
+          status: "invited",
+          twoFactorReady: false,
+          createdAt: new Date("2026-08-11T18:08:42.158Z"),
+        },
+      ],
+      invite: async () => ({
+        userId: "platform-user-2",
+        deliveryId: "11111111-1111-4111-8111-111111111111",
+      }),
+      changeRole: async () => undefined,
+      suspend: async () => undefined,
+      renewActivation: async () => ({
+        userId: "platform-user-2",
+        deliveryId: "21111111-1111-4111-8111-111111111111",
+      }),
+      recoverTwoFactor: async () => undefined,
+    } as never);
+    const request = {
+      platformPrincipal: {
+        userId: "platform-admin-1",
+        role: "platform_admin",
+        capabilities: [
+          "tenants.read",
+          "tenants.write",
+          "catalog.read",
+          "catalog.write",
+          "billing.read",
+          "billing.write",
+          "platformTeam.write",
+          "audit.read",
+        ],
+        twoFactorReady: true,
+      },
+    } as never;
+
+    await expect(controller.list()).resolves.toEqual([
+      expect.objectContaining({ createdAt: "2026-08-11T18:08:42.158Z" }),
+    ]);
+    await expect(
+      controller.invite(request, { email: "support@example.invalid", role: "support" }),
+    ).resolves.toMatchObject({ userId: "platform-user-2" });
+    await expect(
+      controller.changeRole(request, { id: "platform-user-2" }, { role: "accountant" }),
+    ).resolves.toEqual({ status: true });
+    await expect(controller.suspend(request, { id: "platform-user-2" })).resolves.toEqual({
+      status: true,
+    });
+    await expect(
+      controller.renewActivation(request, { id: "platform-user-2" }),
+    ).resolves.toMatchObject({
+      userId: "platform-user-2",
+    });
+    await expect(controller.recoverTwoFactor(request, { id: "platform-user-2" })).resolves.toEqual({
+      status: true,
+    });
+  });
+
+  it.each([
+    [
+      "invite",
+      { deliveryId: "11111111-1111-4111-8111-111111111111" },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.invite(platformRequest, {
+          email: "support@example.invalid",
+          role: "support",
+        }),
+    ],
+    [
+      "renew activation",
+      { userId: "platform-user-2" },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.renewActivation(platformRequest, { id: "platform-user-2" }),
+    ],
+    [
+      "change role acknowledgement",
+      { status: false },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.changeRole(platformRequest, { id: "platform-user-2" }, { role: "accountant" }),
+    ],
+    [
+      "suspend acknowledgement",
+      { status: "ok" },
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.suspend(platformRequest, { id: "platform-user-2" }),
+    ],
+    [
+      "recover 2FA acknowledgement",
+      {},
+      (controller: PlatformTeamController, platformRequest: never) =>
+        controller.recoverTwoFactor(platformRequest, { id: "platform-user-2" }),
+    ],
+  ] as const)("rejects a malformed %s service success", async (_name, malformed, invoke) => {
+    const controller = new PlatformTeamController({
+      list: async () => [],
+      invite: async () => malformed,
+      changeRole: async () => malformed,
+      suspend: async () => malformed,
+      renewActivation: async () => malformed,
+      recoverTwoFactor: async () => malformed,
+    } as never);
+    const platformRequest = {
+      platformPrincipal: {
+        userId: "platform-admin-1",
+        role: "platform_admin",
+        capabilities: [
+          "tenants.read",
+          "tenants.write",
+          "catalog.read",
+          "catalog.write",
+          "billing.read",
+          "billing.write",
+          "platformTeam.write",
+          "audit.read",
+        ],
+        twoFactorReady: true,
+      },
+    } as never;
+
+    await expect(invoke(controller, platformRequest)).rejects.toThrow();
+  });
+
+  it("normalizes audit timestamps and rejects a malformed activation success", async () => {
+    const rows = [
+      {
+        id: "31111111-1111-4111-8111-111111111111",
+        actorPlatformUserId: null,
+        actorRole: null,
+        action: "platform.activation.denied",
+        outcome: "denied",
+        tenantId: null,
+        targetType: "platform_user",
+        targetId: null,
+        reason: "activation_unavailable",
+        before: null,
+        after: null,
+        requestId: null,
+        createdAt: new Date("2026-08-11T18:08:42.158Z"),
+      },
+    ];
+    const query = {
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            orderBy: () => ({
+              limit: () => ({ offset: async () => rows }),
+            }),
+          }),
+        }),
+      }),
+    };
+    const audit = new PlatformAuditController(query as never);
+    const response = await audit.list(
+      {
+        platformPrincipal: {
+          role: "platform_admin",
+        },
+      } as never,
+      { limit: 50, offset: 0 } as never,
+    );
+    expect(response.items[0]?.createdAt).toBe("2026-08-11T18:08:42.158Z");
+
+    const activation = new PlatformActivationController({
+      completePublicRequest: async () => ({ twoFactorEnrollmentRequired: false }),
+    } as never);
+    await expect(
+      activation.complete({
+        token: "activation-token-with-enough-entropy",
+        password: "correct horse battery staple",
+      }),
+    ).rejects.toThrow();
+  });
+});
 
 function requiredSetCookie(response: request.Response, prefix: string): string {
   const values = response.headers["set-cookie"];
@@ -212,7 +414,12 @@ describe.skipIf(!ready)("platform authentication isolation", () => {
         .post("/platform/activation/complete")
         .send(attempt)
         .expect(404);
-      expect(response.body).toEqual({ code: "activation_unavailable" });
+      const error = platformErrorSchema.parse(response.body);
+      expect(error).toMatchObject({
+        code: "activation_unavailable",
+        message: "The requested platform resource was not found.",
+      });
+      expect(error.requestId).toBe(response.headers["x-request-id"]);
 
       const afterCountRows = await setup.db
         .select({ count: sql<number>`count(*)::int` })

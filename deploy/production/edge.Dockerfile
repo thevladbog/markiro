@@ -12,6 +12,7 @@ COPY apps/kiosk/package.json ./apps/kiosk/package.json
 COPY apps/landing/package.json ./apps/landing/package.json
 COPY packages/db/package.json ./packages/db/package.json
 COPY packages/domain/package.json ./packages/domain/package.json
+COPY packages/platform-contracts/package.json ./packages/platform-contracts/package.json
 COPY packages/legal-documents/package.json ./packages/legal-documents/package.json
 COPY packages/ui/package.json ./packages/ui/package.json
 RUN pnpm install --frozen-lockfile
@@ -21,6 +22,7 @@ COPY apps/kiosk ./apps/kiosk
 COPY apps/landing ./apps/landing
 COPY packages/db ./packages/db
 COPY packages/domain ./packages/domain
+COPY packages/platform-contracts ./packages/platform-contracts
 COPY packages/legal-documents ./packages/legal-documents
 COPY packages/ui ./packages/ui
 COPY deploy/production/cli-main.mjs ./deploy/production/cli-main.mjs

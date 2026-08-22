@@ -14,6 +14,7 @@ import {
   ROUTE_SUBSCRIPTION_ACCESS_POLICY,
   type SubscriptionAccessPolicy,
 } from "../src/subscriptions/subscription-access-policy";
+import { CURRENT_SAAS_ROUTE_KEYS } from "./platform-route-contracts";
 
 type RegisteredRoute = {
   controller: Type<unknown>;
@@ -479,6 +480,11 @@ function exemptionKey(route: RegisteredRoute): string {
   return `${route.controller.name}.${route.handlerName}`;
 }
 
+function platformRouteContractKey(route: RegisteredRoute): string {
+  const openApiPath = route.path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");
+  return `${requestMethodName(route.method)} ${openApiPath}`;
+}
+
 describe("registered subscription route inventory", () => {
   let ref: TestingModule;
   let routes: RegisteredRoute[];
@@ -639,5 +645,29 @@ describe("registered subscription route inventory", () => {
 
     expect(unclassified, "unclassified registered unsafe routes").toEqual([]);
     expect(encounteredExemptions.sort()).toEqual(Object.keys(EXEMPTIONS).sort());
+  });
+
+  it("keeps every platform route inside the isolated platform policy boundary", () => {
+    const reflector = new Reflector();
+    const unprotected = routes
+      .filter((route) => route.path === "/platform" || route.path.startsWith("/platform/"))
+      .filter(
+        (route) =>
+          reflector.getAllAndOverride(PLATFORM_ACCESS_POLICY, [route.handler, route.controller]) ===
+          undefined,
+      )
+      .map(routeKey);
+
+    expect(unprotected).toEqual([]);
+  });
+
+  it("matches the exact current SaaS route contracts against the production AppModule", () => {
+    const actual = routes
+      .filter((route) => route.path === "/platform" || route.path.startsWith("/platform/"))
+      .filter((route) => route.controller.name !== "BillingProfilesController")
+      .map(platformRouteContractKey)
+      .sort();
+
+    expect(actual).toEqual(CURRENT_SAAS_ROUTE_KEYS);
   });
 });
